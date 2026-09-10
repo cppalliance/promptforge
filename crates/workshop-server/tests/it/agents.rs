@@ -101,11 +101,12 @@ fn record_request(requests: &Mutex<Vec<serde_json::Value>>, body: &str) {
         .push(serde_json::from_str(body).expect("the request is JSON"));
 }
 
-/// Asserts one replacement request and its retained history boundary.
+/// Asserts one replacement request and its fresh-history boundary: the
+/// relaunched chat run starts a new message list, because history lives in
+/// the section's Lua state until the deferred persistence work lands.
 fn assert_replacement_request(
     requests: &Mutex<Vec<serde_json::Value>>,
     model: &str,
-    retained_input: &str,
     current_input: &str,
 ) {
     let requests = requests
@@ -114,19 +115,19 @@ fn assert_replacement_request(
     assert_eq!(requests.len(), 1, "one replacement run dispatches");
     assert_eq!(
         requests[0]["model"], model,
-        "the replacement request uses the selected catalog"
+        "the replacement request reads the live selection"
+    );
+    let messages = requests[0]["messages"]
+        .as_array()
+        .expect("the request carries a messages array");
+    assert_eq!(
+        messages.len(),
+        1,
+        "the relaunched run starts a fresh message list"
     );
     assert_eq!(
-        requests[0]["messages"][0]["content"], retained_input,
-        "the replacement run receives the accepted input from retained history"
-    );
-    assert_eq!(
-        requests[0]["messages"]
-            .as_array()
-            .and_then(|messages| messages.last())
-            .and_then(|message| message["content"].as_str()),
-        Some(current_input),
-        "the new turn follows the retained accepted input"
+        messages[0]["content"], current_input,
+        "the fresh list opens with the new turn's input"
     );
 }
 
@@ -541,7 +542,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
             .lock()
             .expect("the request capture lock is healthy")[0]["model"],
         "model-a",
-        "the accepted run keeps its frozen catalog while retirement is deferred"
+        "the accepted turn reads the still-selected model-a while retirement is deferred"
     );
 
     state.menu().reconcile_catalog_for_test();
@@ -569,12 +570,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
         .expect("Gateway replacement overrides the catalog settlement wait");
     answer(&mut socket, &fresh, "after replacement").await;
     let turn = collect_turn(&mut socket).await;
-    assert_replacement_request(
-        &replacement_requests,
-        "model-b",
-        "accepted across replacements",
-        "after replacement",
-    );
+    assert_replacement_request(&replacement_requests, "model-b", "after replacement");
     assert_eq!(
         delta_text(&turn),
         "echo:after replacement",
@@ -660,12 +656,7 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
     answer(&mut socket, &fresh, "after retained replay").await;
     let turn = collect_turn(&mut socket).await;
     assert_eq!(delta_text(&turn), "echo:after retained replay");
-    assert_replacement_request(
-        &replacement_requests,
-        "model-a",
-        "retained before replay",
-        "after retained replay",
-    );
+    assert_replacement_request(&replacement_requests, "model-a", "after retained replay");
     socket.close().await;
 }
 
@@ -761,12 +752,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     answer(&mut socket, &fresh, "after unavailable").await;
     let turn = collect_turn(&mut socket).await;
     assert_eq!(delta_text(&turn), "echo:after unavailable");
-    assert_replacement_request(
-        &replacement_requests,
-        "model-c",
-        "retained while unavailable",
-        "after unavailable",
-    );
+    assert_replacement_request(&replacement_requests, "model-c", "after unavailable");
     socket.close().await;
 }
 

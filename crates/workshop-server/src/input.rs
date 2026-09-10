@@ -17,6 +17,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use promptforge_core::input::{InputBroker, InputError, InputOutcome};
 use promptforge_core_support::observe::Observer;
 use promptforge_tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use tokio::sync::{broadcast, oneshot};
@@ -274,6 +275,26 @@ pub fn deliver_input_response(
     )
 }
 
+/// Completes the wait `response` names without recording anything.
+///
+/// The unified-runtime half of delivery: a session whose agent runs on the
+/// unified runtime records the operator's text consumer-side, when the
+/// suspended `user_input` call resumes, so the producer-side observation
+/// would double the event. The `before_completion` seam is the same one
+/// [`deliver_input_response_before_completion`] offers.
+///
+/// # Errors
+/// Returns [`WaitError::UnknownToken`] when no unresolved wait holds the
+/// response's token.
+pub(crate) fn complete_input_response(
+    registry: &WaitRegistry,
+    response: InputResponse,
+    before_completion: impl FnOnce(),
+) -> Result<(), WaitError> {
+    before_completion();
+    registry.complete(&response.token, response.text)
+}
+
 /// Delivers one response with a synchronous seam after the durable input
 /// observation and before the suspended tool call resumes.
 pub(crate) fn deliver_input_response_before_completion(
@@ -381,6 +402,102 @@ impl Drop for WaitGuard {
         let _ = self.frames.send(InputFrame::Cancelled {
             token: std::mem::take(&mut self.token),
         });
+    }
+}
+
+/// The session's wait registry behind the generic input-broker interface:
+/// the adapter the unified runtime's `user_input()` and model-visible
+/// input tool suspend on.
+///
+/// One broker per run: `user_input` opens a wait in the session's
+/// [`WaitRegistry`], announces it with the durable `input_required` frame,
+/// and suspends on the receiver until the session delivers the operator's
+/// answer or the wait dies. A dying wait is an outcome, never silence -
+/// the same drop-guard rule as the legacy tool: a future dropped by a
+/// turn-cancel removes the entry and pushes `input_cancelled`, so the SPA
+/// never pins its input box to a dead token.
+///
+/// # Examples
+/// ```
+/// use std::sync::Arc;
+///
+/// use workshop_server::{SessionInputBroker, WaitRegistry};
+///
+/// let (frames, _receiver) = tokio::sync::broadcast::channel(8);
+/// let broker = SessionInputBroker::new(Arc::new(WaitRegistry::new()), frames);
+/// # drop(broker);
+/// ```
+#[derive(Debug)]
+pub struct SessionInputBroker {
+    /// The session's wait registry, shared with the session loop that
+    /// completes and cancels waits.
+    registry: Arc<WaitRegistry>,
+    /// Where `input_required` and `input_cancelled` frames are pushed;
+    /// the session's socket loop forwards them to the SPA.
+    frames: broadcast::Sender<InputFrame>,
+}
+
+impl SessionInputBroker {
+    /// Builds the broker over the session's wait registry and frame sender.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use workshop_server::{SessionInputBroker, WaitRegistry};
+    ///
+    /// let registry = Arc::new(WaitRegistry::new());
+    /// let (frames, _receiver) = tokio::sync::broadcast::channel(8);
+    /// let _broker = SessionInputBroker::new(registry, frames);
+    /// ```
+    #[must_use]
+    pub fn new(registry: Arc<WaitRegistry>, frames: broadcast::Sender<InputFrame>) -> Self {
+        Self { registry, frames }
+    }
+}
+
+#[async_trait::async_trait]
+impl InputBroker for SessionInputBroker {
+    /// Opens a wait, announces it, and suspends until it resolves.
+    ///
+    /// On cancellation - the future dropped mid-await, or the wait
+    /// cancelled out of the registry - the drop guard removes the wait and
+    /// pushes `input_cancelled`, so no path leaks a wait or a stale
+    /// prompt. A wait cancelled out of the registry resolves here as the
+    /// broker's failure policy.
+    ///
+    /// # Errors
+    /// Returns an [`InputError`] when the wait dies before the operator
+    /// answers.
+    async fn user_input(
+        &self,
+        _execution: &str,
+        _section: &str,
+    ) -> Result<InputOutcome, InputError> {
+        let (token, receiver) = self.registry.create();
+        let mut guard = WaitGuard {
+            registry: Arc::clone(&self.registry),
+            frames: self.frames.clone(),
+            token,
+            armed: true,
+        };
+        // No receiver means no socket is attached right now. Not a
+        // failure: the registry retains the wait and the session resends
+        // it on reconnect, so the lost push is repaired.
+        let _ = self.frames.send(InputFrame::Required {
+            token: guard.token.clone(),
+        });
+        match receiver.await {
+            Ok(text) => {
+                guard.armed = false;
+                Ok(InputOutcome::Text(text))
+            }
+            // The sender died without a value: the wait was cancelled out
+            // of the registry. The still-armed guard pushes
+            // `input_cancelled` on scope exit, so this path clears the
+            // SPA prompt too.
+            Err(_) => Err(InputError::message("the user-input wait was cancelled")),
+        }
     }
 }
 
@@ -815,6 +932,94 @@ mod tests {
             observer.inputs().len(),
             2,
             "the event fires exactly once per response, even a stale one"
+        );
+    }
+
+    /// A fresh broker, registry, and channel with no subscribers.
+    fn broker_fixture() -> (
+        SessionInputBroker,
+        Arc<WaitRegistry>,
+        broadcast::Sender<InputFrame>,
+    ) {
+        let registry = Arc::new(WaitRegistry::new());
+        let (frames, _) = broadcast::channel(8);
+        let broker = SessionInputBroker::new(Arc::clone(&registry), frames.clone());
+        (broker, registry, frames)
+    }
+
+    #[tokio::test]
+    async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
+        let (broker, registry, frames) = broker_fixture();
+        let mut socket = frames.subscribe();
+        let call = tokio::spawn(async move { broker.user_input("run", "chat").await });
+        let token = required_token(&mut socket).await;
+        assert_eq!(
+            registry.unresolved(),
+            vec![token.clone()],
+            "the announced token names the retained wait"
+        );
+        registry
+            .complete(&token, GNARLY.to_owned())
+            .expect("the wait completes");
+        let outcome = call
+            .await
+            .expect("the task joins")
+            .expect("the broker answers");
+        assert_eq!(
+            outcome,
+            InputOutcome::Text(GNARLY.to_owned()),
+            "the operator's text rides back byte-exact"
+        );
+        assert!(
+            matches!(
+                socket.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ),
+            "a completed wait dies silently: no input_cancelled follows"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_broker_future_removes_the_wait_and_emits_input_cancelled() {
+        let (broker, registry, frames) = broker_fixture();
+        let mut socket = frames.subscribe();
+        let call = tokio::spawn(async move { broker.user_input("run", "chat").await });
+        let token = required_token(&mut socket).await;
+        call.abort();
+        let joined = call.await;
+        assert!(
+            joined.is_err_and(|error| error.is_cancelled()),
+            "abort drops the suspended call"
+        );
+        assert!(
+            registry.unresolved().is_empty(),
+            "a dropped future may not leak its wait"
+        );
+        let frame = socket.recv().await.expect("the cancellation frame arrives");
+        assert_eq!(
+            frame,
+            InputFrame::Cancelled { token },
+            "the SPA is told exactly which prompt died"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_registry_cancel_fails_the_broker_call_and_emits_input_cancelled() {
+        let (broker, registry, frames) = broker_fixture();
+        let mut socket = frames.subscribe();
+        let call = tokio::spawn(async move { broker.user_input("run", "chat").await });
+        let token = required_token(&mut socket).await;
+        registry.cancel(&token);
+        let error = call
+            .await
+            .expect("the task joins")
+            .expect_err("a cancelled wait fails the broker call");
+        assert_eq!(error.to_string(), "the user-input wait was cancelled");
+        let frame = socket.recv().await.expect("the cancellation frame arrives");
+        assert_eq!(
+            frame,
+            InputFrame::Cancelled { token },
+            "cancellation is an outcome on the wire, not silence"
         );
     }
 }

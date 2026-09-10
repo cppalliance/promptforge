@@ -68,6 +68,10 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
+    /// The run's host-state snapshot provider, when the host configured
+    /// one: its presence is the Agent-window context, so the section VM
+    /// gains the `ui()` global and the raw-id `models.get` fallback.
+    pub(crate) ui: Option<&'a Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
 }
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
@@ -98,6 +102,11 @@ pub(crate) fn setup_section_vm<L>(
 where
     L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
 {
+    // The raw-id fallback reads its flag during host injection, so the
+    // Agent-window opt-in lands first.
+    if setup.ui.is_some() {
+        vm.allow_raw_model_ids();
+    }
     vm.inject_host_with_var(
         setup.args,
         setup.sys,
@@ -106,6 +115,9 @@ where
         setup.write_scope,
     )?;
     vm.install_host_apis(setup.observer_arc, setup.section_name)?;
+    if let Some(provider) = setup.ui {
+        crate::lua::install_ui(vm.lua(), Arc::clone(provider))?;
+    }
     if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;
     }

@@ -62,6 +62,27 @@ fn a_picker_and_a_model_are_send_sync_static() {
 }
 
 #[test]
+fn an_empty_picker_skips_the_model_load_and_abstains() {
+    let picker = ToolPicker::empty(Config::default());
+    assert_eq!(picker.len(), 0);
+    assert!(picker.is_empty());
+    assert_eq!(picker.iter().count(), 0);
+    assert_eq!(picker.config(), &Config::default());
+    assert_eq!(picker.row(0), None);
+    let outcome = picker
+        .resolve("read a file")
+        .expect("resolving never fails");
+    assert!(
+        matches!(outcome, Outcome::Absent),
+        "an empty catalog has nothing to bind"
+    );
+    let shortlist = picker
+        .shortlist("read a file", 3)
+        .expect("shortlisting never fails");
+    assert!(shortlist.is_empty());
+}
+
+#[test]
 fn building_indexes_every_tool_as_a_unit_vector() {
     let catalog = tiny_catalog();
     let picker = picker(catalog.clone(), Config::default());

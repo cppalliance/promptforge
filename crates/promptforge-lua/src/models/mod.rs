@@ -3,12 +3,15 @@
 //! Kept beside the sandbox VM modules so the tool tables stay readable while
 //! model declaration recording mirrors their phase rules.
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table};
 
-use promptforge_model_client::model::{ModelBindOpts, ModelBinding, ModelResolver, ModelSet};
+use promptforge_model_client::model::{
+    ModelBindOpts, ModelBinding, ModelId, ModelInvocation, ModelResolver, ModelSet,
+};
 
 use crate::{Error, Result};
 
@@ -18,6 +21,35 @@ mod userdata;
 pub(crate) use userdata::{LuaModelHandle, ModelsInferHook};
 
 use decode::{parse_bind_args, parse_single_alias, validate_alias};
+
+/// The context window a raw gateway-id binding records: catalog metadata
+/// the hack never sees, so a conservative default keeps the compactor
+/// precheck safe rather than refusing the model. Mirrors the Workshop's
+/// own catalog fallback.
+const RAW_ID_CONTEXT: NonZeroU32 = match NonZeroU32::new(8192) {
+    Some(value) => value,
+    None => unreachable!(),
+};
+
+/// Builds the Agent-window hack's binding: an undeclared `models.get`
+/// alias resolved as a raw gateway catalog model id, with no invocation
+/// overrides and the fallback context window.
+fn raw_gateway_binding(alias: &str) -> mlua::Result<ModelBinding> {
+    let id = ModelId::gateway(alias).map_err(|error| {
+        mlua::Error::external(format!("models.get model id {alias:?} is invalid: {error}"))
+    })?;
+    Ok(ModelBinding::new(
+        alias,
+        alias,
+        id,
+        ModelInvocation {
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+        },
+        RAW_ID_CONTEXT,
+    ))
+}
 
 /// Dispatches a `models.infer(prompt)` call through the executor-installed
 /// [`ModelsInferHook`] app data.
@@ -265,11 +297,17 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
 
 /// Switches to H2: forbids `models.bind`, installs `models.use`,
 /// `models.get`, and `models.infer`.
+///
+/// `raw_ids` is the Agent-window model-picker hack: when set, `models.get`
+/// resolves an undeclared alias as a raw gateway catalog model id, so the
+/// Workshop chat prompt can run `models.get(ui().selected_model)` without
+/// declaring its model. Unset, an undeclared alias is the usual error.
 pub(crate) fn install_h2_models(
     lua: &Lua,
     globals: &Table,
     bindings: &ModelSet,
     runtime: &Arc<Mutex<ModelRuntime>>,
+    raw_ids: bool,
 ) -> Result<()> {
     let models = lua.create_table().map_err(Error::lua)?;
 
@@ -315,13 +353,22 @@ pub(crate) fn install_h2_models(
     let frozen = bindings.clone();
     let get_fn = lua
         .create_function(move |_, alias: String| -> mlua::Result<LuaModelHandle> {
+            if let Some(binding) = frozen.binding(&alias) {
+                return Ok(LuaModelHandle::from_binding(binding));
+            }
+            // The Agent-window hack: with the host's raw-id opt-in, an
+            // undeclared alias resolves as a raw gateway catalog model id
+            // under the fallback context window. The alias grammar does not
+            // apply - gateway ids carry `/`, `.`, and `:` - so the id's own
+            // validation is the only gate.
+            if raw_ids {
+                let binding = raw_gateway_binding(&alias)?;
+                return Ok(LuaModelHandle::from_binding(&binding));
+            }
             validate_alias(&alias).map_err(mlua::Error::external)?;
-            let binding = frozen.binding(&alias).cloned().ok_or_else(|| {
-                mlua::Error::external(format!(
-                    "models.get alias {alias:?} was not declared by models.bind"
-                ))
-            })?;
-            Ok(LuaModelHandle::from_binding(&binding))
+            Err(mlua::Error::external(format!(
+                "models.get alias {alias:?} was not declared by models.bind"
+            )))
         })
         .map_err(Error::lua)?;
     models.set("get", get_fn).map_err(Error::lua)?;

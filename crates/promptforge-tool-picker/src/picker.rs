@@ -8,7 +8,9 @@
 //! [`ToolPicker::build`] is the one-call path that loads a model and indexes a
 //! catalog. [`ToolPicker::build_with_model`] indexes several catalogs over one
 //! borrowed model, and [`ToolPicker::rebuild`] replaces a picker's catalog while
-//! preserving its model and policy. Building over an empty catalog succeeds.
+//! preserving its model and policy. Building over an empty catalog succeeds;
+//! [`ToolPicker::empty`] builds the capability-free picker without loading the
+//! model at all.
 
 use shared_progress::ProgressHandle;
 
@@ -70,6 +72,40 @@ impl ToolPicker {
     pub fn build(catalog: Catalog, config: Config) -> Result<Self, BuildError> {
         let model = Model::load()?;
         Ok(Self::build_with_model(&model, catalog, config, None)?)
+    }
+
+    /// Builds a picker over an empty catalog without loading the model.
+    ///
+    /// The capability-free path: with no tools to index there is nothing to
+    /// embed, so the costly model load is skipped entirely. Every need
+    /// resolves to [`Outcome::Absent`] and every shortlist is empty.
+    /// [`ToolPicker::rebuild`] preserves the picker's model, so a picker
+    /// rebuilt from this one keeps the unloaded handle; reach for
+    /// [`ToolPicker::build`] or [`ToolPicker::build_with_model`] when a real
+    /// catalog is coming.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_tool_picker::{Config, ToolPicker};
+    ///
+    /// let picker = ToolPicker::empty(Config::default());
+    /// assert!(picker.is_empty());
+    /// ```
+    #[must_use]
+    pub fn empty(config: Config) -> Self {
+        let catalog = Catalog::new(Vec::new());
+        let index = match Index::new(Vec::new(), EMBEDDING_DIMENSIONS, catalog.len()) {
+            Ok(index) => index,
+            Err(_error) => {
+                unreachable!("a zero-row index over a nonzero stride always validates")
+            }
+        };
+        Self {
+            catalog,
+            config,
+            model: Model::unloaded(),
+            index,
+        }
     }
 
     /// Indexes a whole catalog with a model that is already loaded.

@@ -73,6 +73,15 @@ impl Model {
         })
     }
 
+    /// A handle with no loaded encoder, for pickers that never embed.
+    ///
+    /// Embedding through it falls back to the deterministic hasher, which a
+    /// picker over an empty catalog never needs: with no indexed rows every
+    /// query abstains before the vector matters.
+    pub(crate) fn unloaded() -> Self {
+        Self { encoder: None }
+    }
+
     /// Creates an empty dummy model that performs no weight loading or inference.
     ///
     /// Suitable for test fixtures with empty catalogs or where semantic
@@ -80,7 +89,7 @@ impl Model {
     #[cfg(feature = "test-fixtures")]
     #[must_use]
     pub fn dummy() -> Self {
-        Self { encoder: None }
+        Self::unloaded()
     }
 
     /// Embeds one text with this model, for crate-internal indexing.

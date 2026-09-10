@@ -21,8 +21,12 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::AtomicU32;
 
+use promptforge_core_support::events::{CallMetrics, ToolCallEvent};
+
 use crate::cancel;
-use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
+use crate::client::{
+    Completion, CompletionResult, GatewayClient, Message, StreamDelta, ToolSchema,
+};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{
     MessageContent, MessageRecord, MessageRole, OverflowReason, ToolCallCounts, ToolCallRecord,
@@ -86,6 +90,22 @@ fn tool_result_record(id: &str, content: String) -> MessageRecord {
     }
 }
 
+/// Assembles one round's [`CallMetrics`] from everything the completion
+/// measured, or `None` when nothing was measured.
+fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
+    let metrics = CallMetrics {
+        usage: completion.usage().cloned(),
+        llama: completion.llama_timings().cloned(),
+        vllm: completion.vllm_metrics().cloned(),
+        client: completion.client_timing().cloned(),
+    };
+    let measured = metrics.usage.is_some()
+        || metrics.llama.is_some()
+        || metrics.vllm.is_some()
+        || metrics.client.is_some();
+    measured.then_some(metrics)
+}
+
 /// Loops model inference over `conversation` until the model produces
 /// terminal text, appending every assistant message and correlated tool
 /// result to the author's message list through `append`.
@@ -132,6 +152,7 @@ pub(crate) async fn run_models_loop(
     counts: Option<&ToolCallCounts>,
     global_aliases: Option<&BTreeMap<String, ToolId>>,
     local_dispatch: Option<&LocalDispatch<'_>>,
+    on_delta: Option<&(dyn Fn(StreamDelta) + Send + Sync)>,
 ) -> Result<()> {
     let tool_arg = if schemas.is_empty() {
         None
@@ -154,12 +175,16 @@ pub(crate) async fn run_models_loop(
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
             return Err(compactor(reason));
         }
-        // The section loop consumes only the accumulated completion; live
-        // deltas have no consumer here, so the callback is a no-op.
+        // The host's delta callback is the live consumer; without one the
+        // chunks drop at the leaf and the completed reply is the repair.
         let completion = tokio::select! {
             biased;
             () = cancel::wait_cancelled() => Err(Error::Interrupted),
-            result = client.complete(conversation, tool_arg, completion_options, |_| {}) => result.map_err(Error::from),
+            result = client.complete(conversation, tool_arg, completion_options, |delta| {
+                if let Some(hook) = on_delta {
+                    hook(delta);
+                }
+            }) => result.map_err(Error::from),
         };
         if let Err(Error::Interrupted) = &completion {
             return Err(Error::Interrupted);
@@ -201,6 +226,15 @@ pub(crate) async fn run_models_loop(
         // A round trip that produced a reply is a turn, whether the reply is
         // the section's final text or a batch of tool calls.
         let turn = advance_turn(turns);
+        // Extracted before the debug capture, which moves the request body
+        // out of the completion.
+        let metrics = call_metrics(&completion);
+        let model_name = completion.model().to_owned();
+        let thinking = completion
+            .reasoning_content()
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned);
+        let finish_reason = completion.finish_reason().map(str::to_owned);
         if let Some(capture) = debug {
             capture.on_event(
                 execution,
@@ -223,16 +257,52 @@ pub(crate) async fn run_models_loop(
         }
         observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
 
+        // The content reports every host transcript is built from: the
+        // thinking side channel first, then the reply or the tool-call
+        // batch, each with model and metrics - the agent driver's round
+        // reporting, on the unified loop.
+        if let Some(thinking) = &thinking {
+            observer.on_thinking(execution, section, 0, 0, turn, &model_name, thinking);
+        }
+
         match completion.result {
             CompletionResult::Text(text) => {
-                if completion.finish_reason.as_deref() == Some("length") {
+                if finish_reason.as_deref() == Some("length") {
                     observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
                 }
+                observer.on_assistant_reply(
+                    execution,
+                    section,
+                    0,
+                    0,
+                    turn,
+                    &text,
+                    finish_reason.as_deref(),
+                    &model_name,
+                    metrics.as_ref(),
+                );
                 // The terminal assistant text is the final record.
                 append(&terminal_record(text))?;
                 return Ok(());
             }
             CompletionResult::ToolCalls(calls) => {
+                let events: Vec<ToolCallEvent> = calls
+                    .iter()
+                    .map(|call| ToolCallEvent {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: call.arguments.clone(),
+                    })
+                    .collect();
+                observer.on_assistant_tool_calls(
+                    execution,
+                    section,
+                    0,
+                    0,
+                    turn,
+                    &model_name,
+                    &events,
+                );
                 // Dispatch each requested tool and collect the framed results
                 // as (call id, content) pairs, in call order.
                 let mut results: Vec<(String, String)> = Vec::with_capacity(calls.len());
@@ -277,7 +347,11 @@ pub(crate) async fn run_models_loop(
                             );
                             // The prompt author wrote the handler, so its output
                             // is trusted and appends verbatim.
-                            call_result?
+                            let text = call_result?;
+                            observer.on_tool_result(
+                                execution, section, 0, 0, turn, &call.id, &call.name, &text, true,
+                            );
+                            text
                         }
                         DispatchTarget::Bound(binding) => {
                             // The implementation was attached at bind time, so
@@ -286,9 +360,9 @@ pub(crate) async fn run_models_loop(
                             // increment, the untrusted wrap, and the observer
                             // events, so this loop and the scheduler's
                             // `tools.call` arm cannot drift. Model-initiated
-                            // calls pass no script report: their results ride
-                            // the conversation echo below.
-                            dispatch_tool(
+                            // calls pass no script report: the loop reports
+                            // the result under the model-issued call id.
+                            let outcome = dispatch_tool(
                                 binding,
                                 call.arguments.clone(),
                                 counts,
@@ -299,7 +373,19 @@ pub(crate) async fn run_models_loop(
                                 None,
                             )
                             .await
-                            .map_err(Error::from)?
+                            .map_err(Error::from)?;
+                            observer.on_tool_result(
+                                execution,
+                                section,
+                                0,
+                                0,
+                                turn,
+                                &call.id,
+                                &call.name,
+                                outcome.content(),
+                                outcome.trusted(),
+                            );
+                            outcome.into_content()
                         }
                     };
                     successful_tool_calls += 1;
@@ -422,6 +508,7 @@ pub(crate) async fn run_prose_inference(
         counts,
         global_aliases,
         local_dispatch,
+        None,
     )
     .await?;
     let Some(record) = terminal else {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::cancel::CancelHandle;
-use crate::client::GatewayClient;
+use crate::client::{GatewayClient, StreamDelta};
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
 use crate::observe::{NullObserver, Observer};
@@ -190,11 +190,14 @@ pub struct RunConfig {
     pub(crate) cancel: Option<CancelHandle>,
     pub(crate) limits: RunLimits,
     pub(crate) input: Option<Arc<dyn InputBroker>>,
+    pub(crate) ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
+    pub(crate) on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
 }
 
 impl RunConfig {
     /// Builds a config for `execution` with default observer, no client, no
-    /// capture, no cancellation, no input broker, and default [`RunLimits`].
+    /// capture, no cancellation, no input broker, no `ui` provider, no delta
+    /// callback, and default [`RunLimits`].
     #[must_use]
     pub fn new(execution: impl Into<String>) -> RunConfig {
         RunConfig {
@@ -205,6 +208,8 @@ impl RunConfig {
             cancel: None,
             limits: RunLimits::new(),
             input: None,
+            ui: None,
+            on_delta: None,
         }
     }
 
@@ -255,6 +260,28 @@ impl RunConfig {
         self
     }
 
+    /// Sets the run's host-state snapshot provider and, with it, the
+    /// Agent-window context: section VMs gain a `ui()` global serving a
+    /// fresh snapshot per call, and `models.get` resolves an undeclared
+    /// alias as a raw gateway catalog model id, so the Workshop Agent
+    /// window can run `models.loop(models.get(ui().selected_model), ...)`
+    /// without declaring its model. The default (`None`) installs no `ui`
+    /// global and keeps strict declared-alias resolution.
+    #[must_use]
+    pub fn ui(mut self, provider: Arc<dyn Fn() -> serde_json::Value + Send + Sync>) -> RunConfig {
+        self.ui = Some(provider);
+        self
+    }
+
+    /// Sets the live streaming-delta callback that `models.loop` rounds
+    /// forward their chunks to. The default (`None`) drops deltas at the
+    /// leaf.
+    #[must_use]
+    pub fn on_delta(mut self, hook: Arc<dyn Fn(StreamDelta) + Send + Sync>) -> RunConfig {
+        self.on_delta = Some(hook);
+        self
+    }
+
     /// Returns the execution identifier shared by every report.
     #[must_use]
     pub fn execution(&self) -> &str {
@@ -272,6 +299,8 @@ impl fmt::Debug for RunConfig {
             .field("cancel", &self.cancel.is_some())
             .field("limits", &self.limits)
             .field("input", &self.input.is_some())
+            .field("ui", &self.ui.is_some())
+            .field("on_delta", &self.on_delta.is_some())
             .finish()
     }
 }

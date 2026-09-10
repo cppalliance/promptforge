@@ -3,13 +3,18 @@
 use std::sync::Arc;
 
 use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
+use promptforge_core::execute::RunErrorKind;
+use promptforge_core::{Prompt, ResolutionContext, RunConfig};
 use promptforge_core_support::observe::Observer;
 use promptforge_model_client::client::{GatewayClient as ModelClient, StreamDelta};
+use promptforge_model_client::model::ModelCatalog;
 use promptforge_store::StoreRef;
+use promptforge_tool_picker::{Config, ToolPicker};
 use promptforge_tools::ToolCatalog;
 
 use crate::catalog::ChatCatalog;
 use crate::gateway_binding::GatewaySnapshot;
+use crate::input::SessionInputBroker;
 use crate::protocol::Activity;
 
 use super::events::{CollectedEvent, EventCollector, RunFuture};
@@ -18,7 +23,8 @@ use super::transition::{
     RunId, SupervisorEffect, SupervisorEvent,
 };
 use crate::session_agents::{
-    AgentSession, SessionHost, SessionObserver, build_model_catalog, delta_stamp, ui_provider,
+    AgentSession, AgentSource, SessionHost, SessionObserver, build_model_catalog, delta_stamp,
+    ui_provider,
 };
 
 /// The result of executing one reducer-selected effect.
@@ -36,6 +42,10 @@ struct RunFactory {
     observer: Arc<dyn Observer>,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
+    /// The tool picker the unified runtime's resolution context borrows;
+    /// a cheap empty picker that never loads the embedding model, only
+    /// for Markdown agents, which never bind tools through it today.
+    picker: Option<Arc<ToolPicker>>,
 }
 
 impl RunFactory {
@@ -49,6 +59,10 @@ impl RunFactory {
             errors: session.errors.clone(),
             lifecycle: Arc::clone(&session.lifecycle),
         });
+        let picker = match &session.source {
+            AgentSource::Markdown(_) => Some(Arc::new(ToolPicker::empty(Config::default()))),
+            AgentSource::Lua(_) => None,
+        };
         Self {
             on_delta: delta_stamp(&session, &host.push),
             ui: ui_provider(&host.menu, &host.workspace),
@@ -56,12 +70,26 @@ impl RunFactory {
             tools,
             store: StoreRef::memory(),
             observer,
+            picker,
         }
     }
 
     /// Builds one run over retained history and frozen bindings.
     fn launch(&self, run: RunId, models: Vec<serde_json::Value>, client: ModelClient) -> RunFuture {
-        let source = self.session.source.clone();
+        match self.session.source.clone() {
+            AgentSource::Lua(source) => self.launch_lua(run, source, models, client),
+            AgentSource::Markdown(source) => self.launch_markdown(run, source, client),
+        }
+    }
+
+    /// Builds one agent-runtime run of a standalone Lua program.
+    fn launch_lua(
+        &self,
+        run: RunId,
+        source: String,
+        models: Vec<serde_json::Value>,
+        client: ModelClient,
+    ) -> RunFuture {
         let tools = self.tools.clone();
         let models = build_model_catalog(Some(models));
         let store = self.store.clone();
@@ -81,6 +109,94 @@ impl RunFactory {
             (run, result)
         })
     }
+
+    /// Builds one unified-runtime run of a Markdown prompt document.
+    fn launch_markdown(&self, run: RunId, source: String, client: ModelClient) -> RunFuture {
+        let parts = MarkdownRunParts {
+            session: Arc::clone(&self.session),
+            observer: Arc::clone(&self.observer),
+            ui: Arc::clone(&self.ui),
+            on_delta: Arc::clone(&self.on_delta),
+            store: self.store.clone(),
+            picker: Arc::clone(
+                self.picker
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!("a Markdown agent session built its picker")),
+            ),
+        };
+        Box::pin(async move {
+            let result = run_markdown_agent(&source, parts, run, client).await;
+            (run, result)
+        })
+    }
+}
+
+/// The owned pieces one unified-runtime run needs beyond its source and
+/// client, cloned out of the factory per relaunch.
+struct MarkdownRunParts {
+    session: Arc<AgentSession>,
+    observer: Arc<dyn Observer>,
+    ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
+    on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
+    store: StoreRef,
+    picker: Arc<ToolPicker>,
+}
+
+/// Runs one Markdown agent prompt on the unified runtime: the session's
+/// wait registry behind the generic input broker, the menu selection
+/// behind `ui().selected_model`, deltas forwarded to the session's
+/// channel. The prompt declares no capabilities, so the resolution
+/// context carries an empty catalog pair and the session's picker.
+async fn run_markdown_agent(
+    source: &str,
+    parts: MarkdownRunParts,
+    run: RunId,
+    client: ModelClient,
+) -> Result<(), AgentError> {
+    let MarkdownRunParts {
+        session,
+        observer,
+        ui,
+        on_delta,
+        store,
+        picker,
+    } = parts;
+    let prompt = Prompt::parse(source, &session.id, observer.as_ref()).map_err(|error| {
+        AgentError::Program {
+            message: format!("the embedded Markdown agent failed to parse: {error}"),
+            source: Some(Box::new(error)),
+        }
+    })?;
+    let broker = Arc::new(SessionInputBroker::new(
+        Arc::clone(&session.waits),
+        session.input_frames.clone(),
+    ));
+    let models = ModelCatalog::empty();
+    let tools = ToolCatalog::new(&[])
+        .map_err(|_error| AgentError::Internal("an empty tool catalog is always valid"))?;
+    let config = RunConfig::new(session.id.clone())
+        .observer(observer)
+        .client(client)
+        .cancel(session.arm_cancel(run))
+        .input_broker(broker)
+        .ui(ui)
+        .on_delta(on_delta);
+    promptforge_core::run(
+        &prompt,
+        "",
+        ResolutionContext::new(picker.as_ref(), &models, &tools),
+        &store,
+        config,
+    )
+    .await
+    .map(|_output| ())
+    .map_err(|error| match error.kind() {
+        RunErrorKind::Cancelled => AgentError::Interrupted,
+        _ => AgentError::Program {
+            message: error.to_string(),
+            source: Some(Box::new(error)),
+        },
+    })
 }
 
 /// Mutable runtime bindings and the currently executing run.

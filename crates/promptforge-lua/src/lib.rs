@@ -94,6 +94,8 @@ mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
 mod host;
+#[doc(hidden)]
+pub use host::install_ui;
 pub(crate) use host::{install_log, install_store_table, install_untrusted};
 mod tools;
 pub(crate) use tools::{LuaToolHandle, install_h2_tools, install_tool_call_counts};
@@ -124,7 +126,7 @@ pub use coro::{
     install_section_user_input_shim, shim_live_h1_models,
 };
 #[doc(hidden)]
-pub use dispatch::{ScriptReport, dispatch_tool};
+pub use dispatch::{ScriptReport, ToolDispatch, dispatch_tool};
 #[doc(hidden)]
 pub use handles::{
     Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolResolver, ToolSet,

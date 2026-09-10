@@ -60,7 +60,9 @@ pub use gateway::{
     SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
 pub use gateway_binding::{GatewayPublicationError, GatewayUpdater};
-pub use input::{UserInputTool, WaitError, WaitRegistry, deliver_input_response};
+pub use input::{
+    SessionInputBroker, UserInputTool, WaitError, WaitRegistry, deliver_input_response,
+};
 pub use observer::WorkshopObserver;
 pub use protocol::{Activity, InputFrame, InputResponse};
 pub use push::Push;

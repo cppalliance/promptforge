@@ -18,9 +18,10 @@ use crate::{ToolBinding, ToolCallCounts};
 /// The run coordinates a script-initiated dispatch reports under.
 ///
 /// [`dispatch_tool`] fires [`Observer::on_tool_result`] with them; a model
-/// tool-loop dispatch passes `None` instead, because its results ride the
-/// conversation echo, not the content stream. A script call carries no
-/// model-issued call id, so the report's `tool_call_id` is empty.
+/// tool-loop dispatch passes `None` instead and reports the result itself,
+/// because it owns the model-issued call id the script path lacks. A script
+/// call carries no model-issued call id, so the report's `tool_call_id` is
+/// empty.
 #[derive(Debug, Clone, Copy)]
 pub struct ScriptReport {
     /// The chain the call fired in.
@@ -31,6 +32,38 @@ pub struct ScriptReport {
     pub turn: u32,
 }
 
+/// The resolved outcome of one dispatched tool call: the final content -
+/// nonce-wrapped when untrusted - beside its trust marking. A model
+/// tool-loop dispatch reports the pair through [`Observer::on_tool_result`]
+/// itself; a script-initiated dispatch reads only the content, its report
+/// already fired inside [`dispatch_tool`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDispatch {
+    content: String,
+    trusted: bool,
+}
+
+impl ToolDispatch {
+    /// The final content: trusted output verbatim, anything else
+    /// nonce-wrapped.
+    #[must_use]
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Whether the tool declared its output trusted.
+    #[must_use]
+    pub fn trusted(&self) -> bool {
+        self.trusted
+    }
+
+    /// Dissolves the outcome into its content.
+    #[must_use]
+    pub fn into_content(self) -> String {
+        self.content
+    }
+}
+
 /// Dispatches one bound tool call: the shared body the executors invoke.
 ///
 /// The sequence is fixed: the counts increment (dispatch attempted, even if
@@ -39,7 +72,8 @@ pub struct ScriptReport {
 /// passes verbatim, anything else is nonce-wrapped before it can reach a
 /// model turn or a calling script. A script-initiated call (`script` is
 /// `Some`) also fires [`Observer::on_tool_result`] with the final content;
-/// a model-loop call fires no content event here.
+/// a model-loop call fires no content event here: the loop reports the
+/// returned [`ToolDispatch`] under the model-issued call id.
 ///
 /// # Errors
 /// Returns [`Error::Interrupted`] when the run is cancelled mid-call,
@@ -59,7 +93,7 @@ pub async fn dispatch_tool(
     execution: &str,
     section: &str,
     script: Option<ScriptReport>,
-) -> Result<String> {
+) -> Result<ToolDispatch> {
     if let Some(counts) = counts {
         counts.increment(binding.alias())?;
     }
@@ -110,7 +144,7 @@ pub async fn dispatch_tool(
             trusted,
         );
     }
-    Ok(content)
+    Ok(ToolDispatch { content, trusted })
 }
 
 #[cfg(test)]
@@ -304,7 +338,7 @@ mod tests {
     async fn a_trusted_output_passes_verbatim_and_counts_increment() {
         let counts = ToolCallCounts::new(["echo".to_owned()]);
         let echo = binding("echo", Arc::new(EchoTool { trusted: true }));
-        let content = dispatch_tool(
+        let outcome = dispatch_tool(
             &echo,
             json!({ "value": "hi" }),
             Some(&counts),
@@ -316,7 +350,8 @@ mod tests {
         )
         .await
         .expect("the dispatch succeeds");
-        assert_eq!(content, "echoed: hi");
+        assert_eq!(outcome.content(), "echoed: hi");
+        assert!(outcome.trusted(), "a trusted output keeps its marking");
         assert_eq!(
             counts.get("echo").expect("the counts read"),
             Some(1),
@@ -327,7 +362,7 @@ mod tests {
     #[tokio::test]
     async fn an_untrusted_output_is_nonce_wrapped() {
         let echo = binding("echo", Arc::new(EchoTool { trusted: false }));
-        let content = dispatch_tool(
+        let outcome = dispatch_tool(
             &echo,
             json!({ "value": "hi" }),
             None,
@@ -339,6 +374,11 @@ mod tests {
         )
         .await
         .expect("the dispatch succeeds");
+        assert!(
+            !outcome.trusted(),
+            "an untrusted output reports its marking"
+        );
+        let content = outcome.content();
         assert!(
             content.contains("<untrusted_input_") && content.contains("</untrusted_input_"),
             "an untrusted output must be wrapped, got: {content}"

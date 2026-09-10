@@ -87,6 +87,12 @@ pub(crate) struct RunContext {
     /// The run's input broker, when the host configured one; `None` is the
     /// unavailable-fallback policy.
     input: Option<Arc<dyn InputBroker>>,
+    /// The run's host-state snapshot provider; its presence is the
+    /// Agent-window context (the `ui()` global plus raw-id `models.get`).
+    ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
+    /// The host's live streaming-delta callback, forwarded by every model
+    /// round; `None` drops deltas at the leaf.
+    on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
 }
 
 impl RunContext {
@@ -122,6 +128,8 @@ impl RunContext {
             model_set,
             when: Arc::from(""),
             input: config.input.clone(),
+            ui: config.ui.clone(),
+            on_delta: config.on_delta.clone(),
         }
     }
 
@@ -249,6 +257,13 @@ impl RunContext {
         self.input.as_ref()
     }
 
+    /// The host's live streaming-delta callback, when one was configured.
+    pub(crate) fn on_delta(
+        &self,
+    ) -> Option<&Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>> {
+        self.on_delta.as_ref()
+    }
+
     /// The H1-to-walk handoff: the walk's start timestamp, set on a cheap
     /// clone so the context H1 saw stays untouched. The tool and model sets
     /// need no delta: H1's binds already landed in the shared sets the views
@@ -309,6 +324,7 @@ impl RunContext {
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,
+            ui: self.ui.as_ref(),
         }
     }
 
@@ -352,6 +368,8 @@ impl fmt::Debug for RunContext {
             .field("model_set", &self.model_set)
             .field("when", &self.when)
             .field("input", &self.input.is_some())
+            .field("ui", &self.ui.is_some())
+            .field("on_delta", &self.on_delta.is_some())
             .finish()
     }
 }

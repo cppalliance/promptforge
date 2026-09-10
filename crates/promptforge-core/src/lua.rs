@@ -17,8 +17,8 @@ pub(crate) use promptforge_lua::{
     ToolCallCounts, ToolCallRecord, ToolResolver, ToolSet, ToolView, UserInputOutcome,
     append_message_record, current_tool_bindings, dispatch_tool, enrich_sys_model,
     install_live_h1_shim_base, install_section_loop_shim, install_section_user_input_shim,
-    invoke_selected, is_context_overflow, precheck, project_messages, resolve_model_binding,
-    shim_live_h1_models,
+    install_ui, invoke_selected, is_context_overflow, precheck, project_messages,
+    resolve_model_binding, shim_live_h1_models,
 };
 
 // The typed compactor policy is read only by the tool loop's test-only
@@ -27,7 +27,6 @@ pub(crate) use promptforge_lua::{
 #[cfg(test)]
 pub(crate) use promptforge_lua::Compactor;
 
-#[cfg(test)]
 pub(crate) use promptforge_lua::ToolOutputKind;
 
 #[cfg(test)]

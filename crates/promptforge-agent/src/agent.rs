@@ -26,7 +26,6 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use mlua::LuaSerdeExt as _;
 use promptforge_core_support::cancel;
 use promptforge_core_support::events::{CallMetrics, EventLog, ToolCallEvent};
 use promptforge_core_support::observe::{Observer, detail};
@@ -35,7 +34,8 @@ use promptforge_lua::{
     Answer, ChatResult, CoroStep, Error as LuaError, EventsSnapshot, LuaBlockResult, LuaProgram,
     MessageRecord, Request, ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome,
     ToolOutputKind, ToolSet, YieldParse, current_tool_bindings, dispatch_tool,
-    install_agent_chat_shim, install_runtime_events, project_messages, resolve_model_binding,
+    install_agent_chat_shim, install_runtime_events, install_ui, project_messages,
+    resolve_model_binding,
 };
 use promptforge_model_client::client::{
     Completion, CompletionResult, GatewayClient, Message, StreamDelta, ToolSchema,
@@ -362,15 +362,10 @@ fn setup_agent_vm(
     let events = install_runtime_events(vm.lua(), event_log)?;
     let globals = vm.lua().globals();
     if let Some(provider) = ui {
-        let install_failed = |error: mlua::Error| AgentError::Program {
+        install_ui(vm.lua(), provider).map_err(|error| AgentError::Program {
             message: "installing the `ui` host call in the agent VM failed".to_owned(),
             source: Some(Box::new(error)),
-        };
-        let snapshot = vm
-            .lua()
-            .create_function(move |lua, ()| lua.to_value_with(&provider(), UI_SNAPSHOT_OPTIONS))
-            .map_err(install_failed)?;
-        globals.raw_set("ui", snapshot).map_err(install_failed)?;
+        })?;
     }
     for global in ["call", "fanout"] {
         globals
@@ -382,13 +377,6 @@ fn setup_agent_vm(
     }
     Ok((counts, events))
 }
-
-/// `ui()` snapshot conversion: a JSON null field reads as nil in author
-/// code, never as the userdata NULL sentinel the serde bridge defaults
-/// to - an unset host field must simply be absent.
-const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
-    .serialize_none_to_null(false)
-    .serialize_unit_to_null(false);
 
 /// The borrowed run pieces every driver step reads.
 struct AgentRun<'a> {
@@ -875,7 +863,7 @@ async fn dispatch_tool_call(
         depth: 0,
         turn: run.turns.load(Ordering::Relaxed),
     };
-    let text = dispatch_tool(
+    let outcome = dispatch_tool(
         &binding,
         args,
         Some(&run.counts),
@@ -886,7 +874,7 @@ async fn dispatch_tool_call(
         Some(report),
     )
     .await?;
-    ToolCallOutcome::from_dispatch(binding.output_kind, binding.alias(), text)
+    ToolCallOutcome::from_dispatch(binding.output_kind, binding.alias(), outcome.into_content())
         .map_err(AgentError::from)
 }
 

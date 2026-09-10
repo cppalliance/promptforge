@@ -111,10 +111,12 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
 }
 
 /// GATE 9 - catalog replacement during a profile switch. The supervisor
-/// relaunches over retained history, while each individual run keeps its
-/// own immutable model bindings.
+/// relaunches on the new generation, and the relaunched run reads the new
+/// selection from its fresh `ui()` snapshot. The message list starts
+/// fresh: history lives in the section's Lua state until the deferred
+/// persistence work lands.
 #[tokio::test]
-async fn gate_profile_switch_relaunches_chat_with_history_and_the_new_catalog() {
+async fn gate_profile_switch_relaunches_chat_on_the_new_catalog() {
     let server = spawn_chat_server(&["model-a"]).await;
     server.state.menu().set_gateway_reachable(true);
     server.state.menu().set_profiles(
@@ -154,12 +156,9 @@ async fn gate_profile_switch_relaunches_chat_with_history_and_the_new_catalog() 
         assert_eq!(requests[1]["model"], "model-b");
         assert_eq!(
             role_content_pairs(&requests[1]),
-            vec![
-                pair("user", "before switch"),
-                pair("assistant", "echo:before switch"),
-                pair("user", "after switch"),
-            ],
-            "the catalog relaunch preserves the settled event history"
+            vec![pair("user", "after switch")],
+            "the relaunched run starts a fresh message list: history lives in the \
+             section's Lua state until the deferred persistence work lands"
         );
     }
     workbench.close().await;
@@ -167,8 +166,11 @@ async fn gate_profile_switch_relaunches_chat_with_history_and_the_new_catalog() 
 }
 
 /// GATE 10 - accepted-input replacement race. Catalog retirement waits
-/// until the frozen run surfaces its lost binding, then relaunches on the
-/// new generation without replaying or dropping the accepted input.
+/// until the in-flight turn settles, then relaunches on the new
+/// generation. On the unified runtime the raced turn reads its model from
+/// the fresh `ui()` snapshot - the raw-id `models.get` hack - so it
+/// dispatches once against the live selection and completes; the accepted
+/// input is recorded exactly once.
 #[tokio::test]
 async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_once() {
     let server = spawn_chat_server(&["model-a"]).await;
@@ -200,76 +202,68 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
         .expect("the launched session remains registered")
         .expect("the accepted input resumes its original run");
 
-    let mut errors = Vec::new();
+    // The raced turn dispatches against the live selection and completes;
+    // its settlement retires the run. Every wait the retiring run opens is
+    // answered harmlessly (its run is cancelled before the answer can
+    // dispatch) or cancelled outright; the relaunched run's wait runs the
+    // next turn.
     let mut accepted_events = 0;
-    let mut retired_wait = None;
-    let mut retired_wait_cancelled = false;
-    let fresh = tokio::time::timeout(Duration::from_secs(10), async {
+    let mut announced: Vec<String> = Vec::new();
+    let second = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let frame = socket.recv_json().await;
             match frame["type"].as_str() {
-                Some("error") => errors.push(frame),
+                Some("error") => panic!("the raced turn is not an error: {frame}"),
                 Some("agent_event")
-                    if frame["event"]["content"] == "accepted during replacement" =>
+                    if frame["event"]["kind"] == "user_message"
+                        && frame["event"]["content"] == "accepted during replacement" =>
                 {
                     accepted_events += 1;
                 }
-                Some("input_required") if retired_wait_cancelled => {
-                    break frame["token"]
-                        .as_str()
-                        .expect("the replacement wait carries its token")
-                        .to_owned();
-                }
                 Some("input_required") => {
-                    retired_wait = frame["token"].as_str().map(str::to_owned);
+                    let token = frame["token"]
+                        .as_str()
+                        .expect("the wait carries its token")
+                        .to_owned();
+                    announced.push(token.clone());
+                    answer(&mut socket, &token, "after replacement").await;
                 }
                 Some("input_cancelled") => {
-                    assert_eq!(
-                        frame["token"].as_str(),
-                        retired_wait.as_deref(),
-                        "catalog retirement cancels only the old run's wait"
+                    let token = frame["token"].as_str().expect("the cancel carries its token");
+                    assert!(
+                        announced.iter().any(|announced| announced == token),
+                        "only an announced wait is cancelled: {token}"
                     );
-                    retired_wait_cancelled = true;
+                }
+                Some("agent_event")
+                    if frame["event"]["kind"] == "agent_message"
+                        && frame["event"]["content"] == "echo:after replacement" =>
+                {
+                    break frame;
                 }
                 _ => {}
             }
         }
     })
     .await
-    .expect("the replacement relaunch returns to input");
-    assert_eq!(errors.len(), 1, "the raced turn surfaces one failure");
-    assert!(
-        errors[0]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("Model turn failed")),
-        "the failure names the model boundary: {}",
-        errors[0]
-    );
-    assert_eq!(accepted_events, 1, "accepted input is retained once");
-    assert_eq!(
-        server
-            .captured
-            .lock()
-            .expect("the capture lock is healthy")
-            .len(),
-        0,
-        "the retired binding cannot dispatch against either generation"
-    );
-
-    answer(&mut socket, &fresh, "after replacement").await;
-    let second = collect_turn(&mut socket).await;
-    assert_eq!(delta_text(&second), "echo:after replacement");
+    .expect("the replacement relaunch completes a turn");
+    assert_eq!(second["event"]["model"], "model-b");
+    assert_eq!(accepted_events, 1, "accepted input is recorded exactly once");
     {
         let requests = server.captured.lock().expect("the capture lock is healthy");
-        assert_eq!(requests.len(), 1, "the recovery dispatch runs exactly once");
-        assert_eq!(requests[0]["model"], "model-b");
+        assert_eq!(requests.len(), 2, "the raced turn and the recovery turn each dispatch once");
+        assert_eq!(
+            requests[0]["model"], "model-b",
+            "the raced turn reads the live selection through the raw-id hack"
+        );
         assert_eq!(
             role_content_pairs(&requests[0]),
-            vec![
-                pair("user", "accepted during replacement"),
-                pair("user", "after replacement"),
-            ],
-            "the replacement relaunch retains the failed input exactly once"
+            vec![pair("user", "accepted during replacement")],
+        );
+        assert_eq!(
+            role_content_pairs(&requests[1]),
+            vec![pair("user", "after replacement")],
+            "the relaunched run starts a fresh message list"
         );
     }
     socket.close().await;

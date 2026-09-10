@@ -315,3 +315,67 @@ fn model_runtime_starts_with_no_selection() {
     let runtime = ModelRuntime::new();
     assert!(runtime.used().is_none(), "fresh runtime has no selection");
 }
+
+/// Builds a section VM with the Agent-window raw-id opt-in as `raw_ids`,
+/// host values injected (which installs the H2 `models` table).
+fn h2_vm(raw_ids: bool) -> crate::SectionVm {
+    let observer = promptforge_core_support::observe::NullObserver::default();
+    let mut vm = crate::SectionVm::new(
+        &promptforge_core_support::untrusted::GuardNonce::fresh(),
+        "raw-id-test",
+        &observer,
+        "S",
+    )
+    .expect("the VM builds");
+    if raw_ids {
+        vm.allow_raw_model_ids();
+    }
+    vm.inject_host(
+        "",
+        &serde_json::json!({}),
+        &promptforge_store::StoreRef::memory(),
+    )
+    .expect("host injection installs the H2 models table");
+    vm
+}
+
+#[test]
+fn models_get_resolves_an_undeclared_alias_as_a_raw_gateway_id_only_when_permitted() {
+    let vm = h2_vm(true);
+    let resolved: String = vm
+        .lua()
+        .load("local h = models.get('qwen/qwen3-8b'); return h.name .. '|' .. h.model_id .. '|' .. h.context")
+        .eval()
+        .expect("the raw-id opt-in resolves the undeclared alias");
+    assert_eq!(
+        resolved, "qwen/qwen3-8b|qwen/qwen3-8b|8192",
+        "the handle freezes the raw gateway id under the fallback context window"
+    );
+
+    let vm = h2_vm(false);
+    let error = vm
+        .lua()
+        .load("models.get('ghost')")
+        .exec()
+        .expect_err("without the opt-in an undeclared alias is an error");
+    assert!(
+        error
+            .to_string()
+            .contains("was not declared by models.bind"),
+        "the strict path keeps its wording: {error}"
+    );
+}
+
+#[test]
+fn the_raw_id_fallback_still_validates_the_gateway_id() {
+    let vm = h2_vm(true);
+    let error = vm
+        .lua()
+        .load("models.get('bad\\nid')")
+        .exec()
+        .expect_err("a control character fails the id's own validation");
+    assert!(
+        error.to_string().contains("is invalid"),
+        "the raw path validates as a gateway id, not as an alias: {error}"
+    );
+}

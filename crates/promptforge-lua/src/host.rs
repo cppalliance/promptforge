@@ -1,6 +1,6 @@
 use super::{
-    Arc, AtomicU32, AtomicUsize, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua, MultiValue,
-    Observation, Observer, Ordering, Result, StoreRef, Value, WriteScope, detail,
+    Arc, AtomicU32, AtomicUsize, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua, LuaSerdeExt,
+    MultiValue, Observation, Observer, Ordering, Result, StoreRef, Value, WriteScope, detail,
 };
 
 /// Shared body of the persistent per-section `log(message)` host callback.
@@ -104,6 +104,33 @@ pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
     lua.globals()
         .raw_set("untrusted", untrusted)
         .map_err(Error::lua)
+}
+
+/// `ui()` snapshot conversion: a JSON null field reads as nil in author
+/// code, never as the userdata NULL sentinel the serde bridge defaults
+/// to - an unset host field must simply be absent.
+const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
+    .serialize_none_to_null(false)
+    .serialize_unit_to_null(false);
+
+/// Installs `ui()` as a persistent global valid for the section's whole
+/// lifecycle: each call invokes the host's provider afresh and converts
+/// the snapshot table, JSON nulls reading as nil. The closure captures an
+/// owned `Arc`, so no borrow crosses the install. The Workshop's
+/// Agent-window session is the provider's only consumer; a run without a
+/// provider never installs the global, so `ui` is absent - not stubbed -
+/// in every other context.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the function or the global cannot be created.
+pub fn install_ui(
+    lua: &Lua,
+    provider: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
+) -> Result<()> {
+    let snapshot = lua
+        .create_function(move |lua, ()| lua.to_value_with(&provider(), UI_SNAPSHOT_OPTIONS))
+        .map_err(Error::lua)?;
+    lua.globals().raw_set("ui", snapshot).map_err(Error::lua)
 }
 
 /// Owned observation context captured by the persistent `store` closures.

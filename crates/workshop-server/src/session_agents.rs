@@ -81,8 +81,24 @@ const BUILTIN_CHAT_NAME: &str = "chat";
 
 /// The committed built-in chat agent, embedded at compile time - the same
 /// shipped-asset pattern as the SPA `dist/` - so a fresh install has a
-/// working chat with no agents directory at all.
-const BUILTIN_CHAT_SOURCE: &str = include_str!("../agents/chat.lua");
+/// working chat with no agents directory at all. The built-in is a
+/// Markdown prompt on the unified runtime; the standalone `chat.lua`
+/// program is retired.
+const BUILTIN_CHAT_SOURCE: &str = include_str!("../agents/chat.md");
+
+/// One agent's program source and the runtime that executes it.
+///
+/// Directory agents are standalone Lua programs on the agent runtime; the
+/// embedded built-in chat is a Markdown prompt on the unified runtime.
+/// External Markdown-agent discovery stays deferred, so no directory file
+/// ever lands in the Markdown arm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AgentSource {
+    /// A standalone Lua agent program (the agent runtime).
+    Lua(String),
+    /// A Markdown prompt document (the unified runtime).
+    Markdown(String),
+}
 
 /// Capacity of a session's error broadcast. Session errors are rare
 /// one-off reports: a failed model round or a run that ended in error
@@ -349,8 +365,9 @@ pub(crate) struct AgentSession {
     /// The agent's name (its `.lua` file stem), every observer call's
     /// `section` label.
     pub(crate) agent: String,
-    /// The program source, retained so turn-cancel can relaunch it.
-    source: String,
+    /// The program source and its runtime, retained so turn-cancel can
+    /// relaunch it.
+    source: AgentSource,
     /// The persisting event log: `Observer` write side, `EventLog` read
     /// side, broadcast fan-out for socket wakeups.
     pub(crate) log: Arc<WorkshopObserver>,
@@ -395,20 +412,31 @@ impl AgentSession {
 
     /// Durably accepts one input and resumes its wait after publishing
     /// acceptance ahead of the observation-to-completion boundary.
+    ///
+    /// Recording is runtime-specific: a Lua agent's input is recorded
+    /// producer-side here (its relaunched program rebuilds history from
+    /// the event log), while a Markdown agent's unified runtime records
+    /// consumer-side when the suspended `user_input` resumes - recording
+    /// here too would double the event.
     pub(crate) fn accept_input(
         &self,
         response: InputResponse,
         after_acceptance: impl FnOnce(),
     ) -> Result<(), WaitError> {
         let accepted_run = self.lifecycle.accept_input();
-        let result = deliver_input_response_before_completion(
-            self.log.as_ref(),
-            &self.waits,
-            &self.id,
-            &self.agent,
-            response,
-            after_acceptance,
-        );
+        let result = match &self.source {
+            AgentSource::Lua(_) => deliver_input_response_before_completion(
+                self.log.as_ref(),
+                &self.waits,
+                &self.id,
+                &self.agent,
+                response,
+                after_acceptance,
+            ),
+            AgentSource::Markdown(_) => {
+                crate::input::complete_input_response(&self.waits, response, after_acceptance)
+            }
+        };
         if let (Err(_), Some(run)) = (&result, accepted_run) {
             self.lifecycle.settle_turn(run);
         }
@@ -675,11 +703,11 @@ fn discover_agents(dir: &Path) -> Vec<String> {
 /// filesystem race, surfaced as the error it is; so is an existing
 /// `chat.lua` that cannot be read, because silently serving the built-in
 /// would mask the operator's own file.
-fn agent_source(dir: &Path, name: &str) -> io::Result<String> {
+fn agent_source(dir: &Path, name: &str) -> io::Result<AgentSource> {
     match std::fs::read_to_string(dir.join(format!("{name}.lua"))) {
-        Ok(source) => Ok(source),
+        Ok(source) => Ok(AgentSource::Lua(source)),
         Err(error) if name == BUILTIN_CHAT_NAME && error.kind() == io::ErrorKind::NotFound => {
-            Ok(BUILTIN_CHAT_SOURCE.to_owned())
+            Ok(AgentSource::Markdown(BUILTIN_CHAT_SOURCE.to_owned()))
         }
         Err(error) => Err(error),
     }
@@ -806,7 +834,7 @@ mod tests {
         );
         assert_eq!(
             agent_source(dir.path(), "chat").expect("the built-in serves"),
-            BUILTIN_CHAT_SOURCE,
+            AgentSource::Markdown(BUILTIN_CHAT_SOURCE.to_owned()),
             "with no directory file, the embedded source is what launches"
         );
 
@@ -818,7 +846,7 @@ mod tests {
         );
         assert_eq!(
             agent_source(dir.path(), "chat").expect("the shadow reads"),
-            "-- shadowed",
+            AgentSource::Lua("-- shadowed".to_owned()),
             "a directory chat.lua shadows the embedded source"
         );
 
@@ -1021,5 +1049,76 @@ mod tests {
             "an empty key cannot authenticate: agents report it at launch"
         );
         assert!(model_client("not a url", "k").is_none());
+    }
+
+    /// Runs the embedded chat prompt on the unified runtime with the given
+    /// broker configuration, against a client no model call can survive.
+    async fn run_builtin_chat(
+        broker: Option<Arc<dyn promptforge_core::input::InputBroker>>,
+    ) -> Result<String, promptforge_core::execute::RunError> {
+        use promptforge_core::{Prompt, ResolutionContext, RunConfig};
+        let observer: Arc<dyn Observer> =
+            Arc::new(WorkshopObserver::new(None).expect("memory log"));
+        let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
+            .expect("the embedded chat prompt parses");
+        let picker = promptforge_tool_picker::ToolPicker::build(
+            promptforge_tool_picker::Catalog::new(Vec::new()),
+            promptforge_tool_picker::Config::default(),
+        )
+        .expect("the empty picker builds");
+        let models = ModelCatalog::empty();
+        let tools = promptforge_tools::ToolCatalog::new(&[]).expect("an empty catalog is valid");
+        let store = promptforge_store::StoreRef::memory();
+        let mut config = RunConfig::new("chat-unit").observer(observer);
+        if let Some(broker) = broker {
+            config = config.input_broker(broker);
+        }
+        promptforge_core::run(
+            &prompt,
+            "",
+            ResolutionContext::new(&picker, &models, &tools),
+            &store,
+            config,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn the_builtin_chat_returns_without_a_broker_beneath_it() {
+        // No broker is the unavailable-fallback policy: user_input()
+        // resumes unavailable, the prompt returns, and no model call is
+        // ever attempted (the run carries no client at all).
+        let result = run_builtin_chat(None).await;
+        assert!(
+            result.is_ok(),
+            "the unavailable fallback ends the run cleanly: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_broker_fails_the_builtin_chat_as_typed_input() {
+        struct FailingBroker;
+
+        #[async_trait::async_trait]
+        impl promptforge_core::input::InputBroker for FailingBroker {
+            async fn user_input(
+                &self,
+                _execution: &str,
+                _section: &str,
+            ) -> Result<promptforge_core::input::InputOutcome, promptforge_core::input::InputError>
+            {
+                Err(promptforge_core::input::InputError::message(
+                    "the input device is gone",
+                ))
+            }
+        }
+
+        let error = run_builtin_chat(Some(Arc::new(FailingBroker)))
+            .await
+            .expect_err("the broker failure fails the run");
+        assert!(
+            matches!(error.kind(), promptforge_core::execute::RunErrorKind::Input),
+            "a broker failure is the typed input failure: {error}"
+        );
     }
 }

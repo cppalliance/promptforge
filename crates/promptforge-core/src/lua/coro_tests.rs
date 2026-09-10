@@ -123,6 +123,7 @@ fn scheduler_vm_with_tools(
         observer_arc: &observer,
         section_name: "Test",
         shared: &shared,
+        ui: None,
     };
     let list_callback =
         |_: String| -> std::result::Result<Vec<String>, crate::Error> { Ok(Vec::new()) };

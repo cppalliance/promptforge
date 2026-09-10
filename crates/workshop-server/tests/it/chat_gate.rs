@@ -1,10 +1,11 @@
-//! THE PARITY GATE: seven in-process tests over the SSE mock gateway, each
+//! THE PARITY GATE: in-process tests over the SSE mock gateway, each
 //! pinned to a behavior the built-in `chat` agent must keep. The agent
 //! replaced the direct-to-gateway chat relay; these tests hold the parity
 //! the relay established.
 //!
-//! Every test launches the embedded `agents/chat.lua`: the fixture's
-//! agents directory does not exist, so what runs is exactly what ships.
+//! Every test launches the embedded `agents/chat.md`: the fixture's
+//! agents directory does not exist, so what runs is exactly what ships -
+//! a Markdown prompt on the unified runtime.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant
@@ -14,7 +15,6 @@
     reason = "test helpers fail by panicking with the invariant named"
 )]
 
-use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,24 +27,30 @@ use futures_util::StreamExt as _;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
+use promptforge_agent::AgentError;
+use promptforge_core::execute::RunErrorKind;
+use promptforge_core::{Prompt, ResolutionContext, RunConfig};
 use promptforge_core_support::cancel::CancelHandle;
 use promptforge_core_support::events::{EventLog as _, RuntimeEventKind};
 use promptforge_core_support::observe::Observer;
 use promptforge_model_client::client::{
     GatewayClient as ModelClient, GatewayEndpoint, SecretString,
 };
-use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_model_client::model::ModelCatalog;
 use promptforge_store::StoreRef;
-use promptforge_tools::{Tool, ToolCatalog};
+use promptforge_tool_picker::{Catalog as PickerCatalog, Config as PickerConfig, ToolPicker};
+use promptforge_tools::ToolCatalog;
 use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,
-    ServerConfig, UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
+    ServerConfig, SessionInputBroker, WaitRegistry, WorkshopObserver, router,
 };
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
 use crate::common::{JsonSocket, spawn_gateway};
+
+/// The embedded built-in chat prompt, exactly what a `chat` launch runs.
+const CHAT_MD: &str = include_str!("../../agents/chat.md");
 
 /// Every completion request body the gate mock received, in arrival
 /// order: the gate's proof of exactly what the model was shown.
@@ -235,6 +241,56 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
     }
 }
 
+/// Binds the workshop router over a mock gateway at `gateway_url`, with
+/// `models` in the retained catalog and the first of them selected in the
+/// menu. Returns the server's `ws://` base, the shared state handle, and
+/// the tempdir keeping the state alive.
+async fn serve_chat_over(
+    gateway_url: String,
+    models: &[&str],
+) -> (String, AppState, tempfile::TempDir) {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let config = Config {
+        gateway: GatewayConfig {
+            base_url: gateway_url,
+            api_key: "test-key".to_string(),
+        },
+        server: ServerConfig {
+            state_dir: dir.path().to_path_buf(),
+            ..ServerConfig::default()
+        },
+        agents: AgentsConfig {
+            path: dir.path().join("missing-agents"),
+        },
+    };
+    // Discovery is bypassed: a test never consults the real run directory.
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
+    state.catalog().publish(
+        models
+            .iter()
+            .map(|id| json!({ "id": id, "object": "model" }))
+            .collect(),
+    );
+    if let Some(selected) = models.first() {
+        state
+            .menu()
+            .set_selected(selected)
+            .expect("the selected model is in the retained catalog");
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind the gate test server");
+    let addr = listener.local_addr().expect("gate test server address");
+    let served = state.clone();
+    tokio::spawn(async move {
+        axum::serve(listener, router(served))
+            .await
+            .expect("gate test server serves");
+    });
+    (format!("ws://{addr}"), state, dir)
+}
+
 /// Connects to `/agents/ws`, asserting the connect-time list is exactly
 /// the built-in: end-to-end proof that a missing agents directory still
 /// offers `chat`.
@@ -314,9 +370,9 @@ struct RestoredChat {
 }
 
 /// The relaunch half of the restart gate: the supervisor's own pieces -
-/// the `user_input` tool over a fresh wait registry, the embedded chat
-/// source, and a client aimed at the mock gateway - spawned over the
-/// restored log.
+/// the session's wait registry behind the generic input broker, the
+/// embedded chat prompt, and a client aimed at the mock gateway - run on
+/// the unified runtime over the restored log.
 fn spawn_restored_chat(
     restored: &Arc<WorkshopObserver>,
     session: &str,
@@ -324,37 +380,51 @@ fn spawn_restored_chat(
 ) -> RestoredChat {
     let waits = Arc::new(WaitRegistry::new());
     let (frames_tx, frames) = broadcast::channel(8);
-    let tool: Arc<dyn Tool> = Arc::new(UserInputTool::new(Arc::clone(&waits), frames_tx));
-    let tools = ToolCatalog::new(&[tool]).expect("the relaunch tool catalog builds");
-    let context = NonZeroU32::new(8192).expect("8192 is non-zero");
-    let models = ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("test-model").expect("the test model name is valid"),
-        "the gate's mock model",
-        context,
-        ThinkingMode::Never,
-    )])
-    .expect("the relaunch model catalog builds");
+    let broker = Arc::new(SessionInputBroker::new(Arc::clone(&waits), frames_tx));
     let client = ModelClient::new(
         GatewayEndpoint::new(&format!("{gateway_url}/v1")).expect("the mock endpoint parses"),
         SecretString::new("test-key").expect("the test key is non-empty"),
     );
+    let picker = ToolPicker::build(PickerCatalog::new(Vec::new()), PickerConfig::default())
+        .expect("the empty picker builds");
     let cancel = CancelHandle::new();
-    let config = AgentConfig {
-        name: "chat".to_owned(),
-        execution: session.to_owned(),
-        observer: Arc::clone(restored) as Arc<dyn Observer>,
-        cancel: cancel.clone(),
-        event_log: Some(Arc::clone(restored) as _),
-        on_delta: None,
-        ui: Some(Arc::new(
+    let observer: Arc<dyn Observer> = restored.clone();
+    let config = RunConfig::new(session.to_owned())
+        .observer(Arc::clone(&observer))
+        .client(client)
+        .cancel(cancel.clone())
+        .input_broker(broker)
+        .ui(Arc::new(
             || json!({ "selected_model": "test-model", "workspace_root": serde_json::Value::Null }),
-        )),
-        limits: AgentLimits::default(),
-    };
-    let source = include_str!("../../agents/chat.lua");
+        ));
+    let execution = session.to_owned();
     let run = tokio::spawn(async move {
-        let store = StoreRef::memory();
-        run_agent_with_client(source, &tools, &models, &store, config, Some(client)).await
+        let result = async {
+            let prompt = Prompt::parse(CHAT_MD, &execution, observer.as_ref())
+                .expect("the embedded chat prompt parses");
+            let models = ModelCatalog::empty();
+            let tools = ToolCatalog::new(&[]).expect("an empty tool catalog is valid");
+            let store = StoreRef::memory();
+            promptforge_core::run(
+                &prompt,
+                "",
+                ResolutionContext::new(&picker, &models, &tools),
+                &store,
+                config,
+            )
+            .await
+        }
+        .await;
+        match result {
+            Ok(_output) => Ok(()),
+            Err(error) if matches!(error.kind(), RunErrorKind::Cancelled) => {
+                Err(AgentError::Interrupted)
+            }
+            Err(error) => Err(AgentError::Program {
+                message: error.to_string(),
+                source: Some(Box::new(error)),
+            }),
+        }
     });
     RestoredChat {
         frames,

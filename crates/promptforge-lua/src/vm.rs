@@ -89,6 +89,11 @@ pub struct SectionVm {
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
     instruction_budget: InstructionBudget,
+    /// The Agent-window model-picker hack: when set, `models.get` resolves
+    /// an undeclared alias as a raw gateway catalog model id. Set by
+    /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before host
+    /// injection; unset everywhere else.
+    raw_model_ids: bool,
 }
 
 /// Local tool registrations owned by a section VM.
@@ -264,6 +269,7 @@ impl SectionVm {
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
             instruction_budget: InstructionBudget::default(),
+            raw_model_ids: false,
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
@@ -300,6 +306,17 @@ impl SectionVm {
         vm.bound_tools = tools.clone();
         vm.bound_models = models.clone();
         Ok(vm)
+    }
+
+    /// Opts the VM into the Agent-window model-picker hack: `models.get`
+    /// resolves an undeclared alias as a raw gateway catalog model id.
+    ///
+    /// Must be called before [`inject_host_with_var`](Self::inject_host_with_var),
+    /// whose H2 `models` table install reads the flag. The Workshop's
+    /// Agent-window session is the only caller; every other context keeps
+    /// strict declared-alias resolution.
+    pub fn allow_raw_model_ids(&mut self) {
+        self.raw_model_ids = true;
     }
 
     /// Replays the shared library as the section's first chunk.
@@ -450,7 +467,13 @@ impl SectionVm {
             &self.tool_runtime,
             &self.local_tools,
         )?;
-        install_h2_models(&self.lua, &globals, &self.bound_models, &self.model_runtime)?;
+        install_h2_models(
+            &self.lua,
+            &globals,
+            &self.bound_models,
+            &self.model_runtime,
+            self.raw_model_ids,
+        )?;
         install_messages(&self.lua, &globals)?;
         install_compactors(&self.lua, &globals)?;
         self.store = Some(store.clone());

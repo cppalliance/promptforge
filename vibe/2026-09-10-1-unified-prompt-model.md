@@ -449,7 +449,7 @@ Generalize user input across `crates/promptforge-core` and `crates/promptforge-l
 
 <step-11>
 
-### Step 11: Agent window on the unified runtime
+### Step 11: Agent window on the unified runtime [completed]
 
 - Component: input-broker
 
