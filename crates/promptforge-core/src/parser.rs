@@ -4,14 +4,15 @@
 //! blocks and one optional `lua shared` library fence, then H2 sections.
 //! H1 and section content are alternating sequences of exact `lua` fences and
 //! prose ([`Block`]). Sections nest recursively (H3 under H2, H4 under H3, and
-//! so on through H6). The last prose block is marked loop-capable at parse time.
-//! Classic prologue/prose/epilog is exactly `[Lua, Prose, Lua]`.
+//! so on through H6). Classic prologue/prose/epilog is exactly `[Lua, Prose, Lua]`.
 //!
-//! A `---` thematic break carries two roles by position. As a section's first
-//! content (only whitespace before it) it marks the section off-walk: the walk
-//! skips it and it runs only when addressed. Anywhere else it is a comment
-//! boundary: everything below it (until the next heading) is reader-only - no
-//! Lua compiles, no prose reaches the model, no items parse from it.
+//! Prose capture follows the pending-Markdown model: Markdown accumulates
+//! after each heading or ordinary `lua` fence, and each prose block is the
+//! pending buffer the following `lua` fence consumes. A `---` thematic break
+//! resets the pending buffer without becoming part of the prose; it carries
+//! no control-flow meaning, so content below a break parses and runs
+//! normally. Markdown left after the final `lua` fence is inert trailing
+//! commentary, never an error.
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 //!

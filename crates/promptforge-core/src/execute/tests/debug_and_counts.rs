@@ -7,7 +7,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\nAsk the model.\n";
+## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let out = run(
         &bound_for_model(md),
         "",
@@ -125,10 +125,10 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_debug_events_reach_the_run_sink_through_the_proxy() {
-    // The arm's debug side channel: with a run debug sink installed, an arm's
-    // model-turn events travel the bounded ProxyDebugCapture channel and are
-    // forwarded to the run's sink under the worker's section name.
+async fn fanout_arm_debug_events_reach_the_run_sink() {
+    // The arm's debug side channel: the fanout's run-context fork carries
+    // the run's own debug sink, so an arm's model-turn events land on the
+    // run's sink under the worker's section name.
     let gateway = ScriptedGateway::start(vec![resp_text("arm reply")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
@@ -141,7 +141,8 @@ async fn fanout_arm_debug_events_reach_the_run_sink_through_the_proxy() {
         return r[1].text\n\
         ```\n\n\
         ### Worker\n\n\
-        Reply about {{ item }}.\n";
+        Reply about {{ item }}.\n\n\
+        ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
@@ -178,7 +179,7 @@ async fn debug_capture_none_changes_nothing() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\nAsk the model.\n";
+## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let out = run(
         &bound_for_model(md),
         "",
@@ -195,8 +196,6 @@ async fn debug_capture_none_changes_nothing() {
 
 #[tokio::test]
 async fn tool_calls_count_increments_on_successful_dispatch() {
-    let gateway = ScriptedGateway::start(aliased_tool_script("echo")).await;
-    let addr = gateway.addr();
     let tool = Arc::new(ScopedFixtureTool::new(
         "echo",
         "canonical_echo",
@@ -205,19 +204,21 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('echo', 'echo tool')\n\
-        tools.always('echo')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\nUse the tool.\n\n\
-        ```lua\nassert(tools.calls['echo'] == 1, \
+        ## Only\n\n\
+        ```lua\n\
+        tools.call('echo', { value = 'x' })\n\
+        assert(tools.calls['echo'] == 1, \
         'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
-        return 'ok'\n```\n";
+        return 'ok'\n\
+        ```\n";
     let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
         &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        gatewayed(addr),
+        silent(),
     )
     .await
     .unwrap();
@@ -284,23 +285,32 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
 
 #[tokio::test]
 async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
+    // The first script dispatch installs the counts seeded from the
+    // effective scope, so an added but uncalled alias reads as 0 and an
+    // author assert on it fails the run with its own message.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('search', 'search tool')\n\
+        tools.bind('other', 'other tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\n```lua\ntools.add('search')\n```\n\n\
+        ## Only\n\n```lua\n\
+        tools.add('search')\n\
+        local _ = tools.call('other', { value = 'x' })\n\
+        ```\n\n\
         ```lua\nassert(tools.calls['search'] > 0, 'search was never called')\n\
         return 'unreached'\n```\n";
-    let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let search = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
+    let other = ScopedFixtureTool::new("other", "canonical_other", "Other things.");
     let prompt = bound_with_tools(md, Vec::new());
     let error = run(
         &prompt,
         "",
-        &[Arc::new(tool) as Arc<dyn Tool>],
+        &[
+            Arc::new(search) as Arc<dyn Tool>,
+            Arc::new(other) as Arc<dyn Tool>,
+        ],
         &StoreRef::memory(),
-        gatewayed(addr),
+        silent(),
     )
     .await
     .expect_err("epilog assert on zero count must fail the run");
@@ -316,19 +326,20 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
         # Test prompt\n\n```lua shared\n\
         tools.bind('search', 'search tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\n```lua\ntools.add('search')\n```\n\n\
+        ## Only\n\n```lua\n\
+        tools.add('search')\n\
+        local _ = tools.call('search', { value = 'x' })\n\
+        ```\n\n\
         ```lua\nlocal _ = tools.calls['serach']\n\
         return 'unreached'\n```\n";
     let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
     let prompt = bound_with_tools(md, Vec::new());
     let error = run(
         &prompt,
         "",
         &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        gatewayed(addr),
+        silent(),
     )
     .await
     .expect_err("accessing a typo alias in tools.calls must hard error");
@@ -345,27 +356,65 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
 
 #[tokio::test]
 async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
-    let gateway = ScriptedGateway::start(aliased_tool_script("global_tool")).await;
-    let addr = gateway.addr();
-    let scoped = ScopedFixtureTool::new("scoped", "canonical_scoped", "A scoped tool.");
-    let global = ScopedFixtureTool::new("global_tool", "canonical_global", "A global tool.");
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        tools.bind('scoped', 'scoped tool')\n\
-        tools.bind('global_tool', 'global tool')\n\
-        tools.always('scoped')\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\nUse the tool.\n";
-    let prompt = bound_with_tools(md, Vec::new());
-    let error = run(
-        &prompt,
-        "",
-        &[
-            Arc::new(scoped) as Arc<dyn Tool>,
-            Arc::new(global) as Arc<dyn Tool>,
-        ],
-        &StoreRef::memory(),
-        gatewayed(addr),
+    // The loop's scope gate: a model call naming a declared-but-unscoped
+    // alias fails with OutOfScopeToolCall carrying the
+    // declared-but-unscoped hint. Driven at the loop directly; the
+    // prompt-level wiring returns with the `models.loop` step.
+    let gateway = ScriptedGateway::start(vec![resp_tool_call(
+        "call_1",
+        "global_tool",
+        "{\"value\":\"x\"}",
+    )])
+    .await;
+    let client = gateway_client(gateway.addr());
+    let scoped: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "scoped",
+        "canonical_scoped",
+        "A scoped tool.",
+    ));
+    let global: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "global_tool",
+        "canonical_global",
+        "A global tool.",
+    ));
+    let schemas = vec![
+        ToolSchema::new(
+            "scoped".to_string(),
+            "A scoped tool.".to_string(),
+            scoped.parameters_schema(),
+        )
+        .expect("the scoped schema is valid"),
+    ];
+    let mut dispatch = BTreeMap::new();
+    dispatch.insert(
+        "scoped".to_string(),
+        DispatchTarget::Bound(crate::lua::ToolBinding::for_test(
+            "scoped",
+            "A scoped tool.",
+            Arc::clone(&scoped),
+        )),
+    );
+    let mut global_aliases = BTreeMap::new();
+    global_aliases.insert("scoped".to_string(), scoped.id());
+    global_aliases.insert("global_tool".to_string(), global.id());
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let error = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "Use the tool.".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        None,
+        Some(&global_aliases),
+        None,
     )
     .await
     .expect_err("model calling a global-but-unscoped tool must fail");
@@ -397,22 +446,55 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
 
 #[tokio::test]
 async fn model_calling_pure_unknown_tool_is_a_hard_error() {
-    let gateway = ScriptedGateway::start(aliased_tool_script("nonexistent")).await;
-    let addr = gateway.addr();
-    let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        tools.bind('echo', 'echo tool')\n\
-        tools.always('echo')\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\nUse the tool.\n";
-    let prompt = bound_with_tools(md, Vec::new());
-    let error = run(
-        &prompt,
-        "",
-        &[Arc::new(tool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
-        gatewayed(addr),
+    let gateway = ScriptedGateway::start(vec![resp_tool_call(
+        "call_1",
+        "nonexistent",
+        "{\"value\":\"x\"}",
+    )])
+    .await;
+    let client = gateway_client(gateway.addr());
+    let echo: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "echo",
+        "canonical_echo",
+        "Echo a test value.",
+    ));
+    let schemas = vec![
+        ToolSchema::new(
+            "echo".to_string(),
+            "Echo a test value.".to_string(),
+            echo.parameters_schema(),
+        )
+        .expect("the echo schema is valid"),
+    ];
+    let mut dispatch = BTreeMap::new();
+    dispatch.insert(
+        "echo".to_string(),
+        DispatchTarget::Bound(crate::lua::ToolBinding::for_test(
+            "echo",
+            "Echo a test value.",
+            Arc::clone(&echo),
+        )),
+    );
+    let mut global_aliases = BTreeMap::new();
+    global_aliases.insert("echo".to_string(), echo.id());
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let error = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "Use the tool.".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        None,
+        Some(&global_aliases),
+        None,
     )
     .await
     .expect_err("model calling a pure unknown tool must fail");

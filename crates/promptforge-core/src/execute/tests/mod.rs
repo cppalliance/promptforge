@@ -11,8 +11,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use promptforge_tool_picker::{
-    Catalog, Config as PickerConfig, ToolAnnotations, ToolDescriptor, ToolId as PickerToolId,
-    ToolPicker,
+    Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
 use serde_json::Value;
 
@@ -1031,9 +1030,7 @@ async fn run_tool_loop(
         dispatch,
         &mut conversation,
         prose,
-        ProseMode::Loop {
-            max_tool_iterations,
-        },
+        max_tool_iterations,
         EXECUTION,
         observer,
         section,
@@ -1085,7 +1082,7 @@ fn tool_description_override_appears_in_model_schema() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
 
     // tools.add(alias) with no override keeps the bound tool's catalog text.
@@ -1159,7 +1156,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
 
     let add_plain = LuaProgram::compile(
@@ -1664,34 +1661,32 @@ async fn untrusted_nonce_is_stable_across_rounds() {
 #[tokio::test]
 async fn untrusted_nonce_differs_across_runs() {
     // The nonce is minted once per run: two runs of the same prompt wrap the
-    // same tool output under different nonces, so an envelope's tag stays
-    // unguessable from one run to the next.
+    // same untrusted tool result under different nonces, so an envelope's tag
+    // stays unguessable from one run to the next.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('echo', 'echo tool')\n\
-        tools.always('echo')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
-        ## Only\n\nUse the tool.\n";
+        ## Only\n\n\
+        ```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
     let mut run_nonces = Vec::new();
     for _ in 0..2 {
-        let gateway = ScriptedGateway::start(echo_then_text_script()).await;
         let out = run(
             &bound_with_tools(md, Vec::new()),
             "",
             &[Arc::new(UntrustedEchoTool) as Arc<dyn Tool>],
             &StoreRef::memory(),
-            gatewayed(gateway.addr()),
+            silent(),
         )
         .await
         .unwrap();
-        assert_eq!(out, "final answer");
-        let nonces = tool_turn_nonces(&gateway.requests());
-        assert_eq!(
-            nonces.len(),
-            1,
-            "each run wraps exactly one tool result, got: {nonces:?}"
-        );
-        run_nonces.push(nonces.into_iter().next().expect("one nonce"));
+        let marker = "<untrusted_input_";
+        let start = out.find(marker).expect("the result is guard-wrapped") + marker.len();
+        let end = out[start..]
+            .find('>')
+            .map(|end| start + end)
+            .expect("the guard tag closes");
+        run_nonces.push(out[start..end].to_string());
     }
     assert_ne!(
         run_nonces[0], run_nonces[1],
@@ -1757,20 +1752,6 @@ const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\
 ## First\n\n```lua\nstore.write('state.txt', 'first')\n```\n\n\
 ## Second\n\n```lua\nstore.append('state.txt', '\\nsecond')\nreturn \"second\"\n```\n";
 
-fn picker_descriptor(name: &str, description: &str) -> ToolDescriptor {
-    ToolDescriptor::new(
-        PickerToolId::new("tests", name),
-        description,
-        json!({"type": "object"}),
-    )
-    .with_annotations(
-        ToolAnnotations::new()
-            .with_read_only(true)
-            .with_destructive(false)
-            .with_idempotent(true),
-    )
-}
-
 /// The picker's calibrated enriched text for a descriptor.
 ///
 /// The engine's own derivation is crate-private, so this test mirror lets a
@@ -1829,6 +1810,7 @@ impl RecordingCapture {
 mod debug_and_counts;
 mod exec_flow;
 mod exit_rules;
+mod lazy_prose;
 mod live_infer;
 mod local_tools;
 mod model_and_reply;

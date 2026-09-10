@@ -1,6 +1,6 @@
 ---
 name: reply_substitution_nil
-description: Single section with reply substitution must fail because reply is nil
+description: Reading prose with a reply substitution fails because reply names no global
 promptforge: 1
 ---
 
@@ -9,3 +9,7 @@ promptforge: 1
 ## Only
 
 Previous reply was {{ reply }}.
+
+```lua
+return prose
+```

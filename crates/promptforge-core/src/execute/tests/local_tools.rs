@@ -1,5 +1,7 @@
-//! End-to-end tests for `tools.add_local` - Lua-backed tools dispatched on the
-//! section VM - plus the `tools.add`-between-prose-blocks regression.
+//! Tests for `tools.add_local`: the registration rules run end to end, and
+//! the model-tool loop's local-dispatch arm is driven directly through the
+//! test shim. Routing a local call back into the section VM returns with
+//! the `models.loop` step; the loop arm's behavior is pinned here.
 
 use super::super::*;
 use super::run;
@@ -29,20 +31,26 @@ fn resp_two_tool_calls(name: &str, first: (&str, &str), second: (&str, &str)) ->
     }))
 }
 
-/// Builds the standard one-section prompt around a local-tool declaration.
-fn add_local_md(declaration: &str, after_fence: &str) -> String {
-    format!(
-        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-         ## Only\n\n\
-         ```lua\n{declaration}\n```\n\n\
-         {after_fence}\n"
+/// The advertised schema for the `grab` local tool the loop tests share.
+fn local_grab_schema() -> ToolSchema {
+    ToolSchema::new(
+        "grab".to_string(),
+        "Grab a value".to_string(),
+        json!({
+            "type": "object",
+            "properties": { "value": { "type": "string" } },
+            "required": ["value"]
+        }),
     )
+    .expect("the local tool schema is valid")
 }
 
-/// Run `md` against a scripted gateway with no external tools, returning the
-/// run result. The fixture gets the standard `models.default` H1 binding.
-async fn run_local(test: &TestPrompt, addr: SocketAddr, store: &StoreRef) -> Result<String> {
-    run(test, "", &[], store, gatewayed(addr)).await
+/// The dispatch map marking `grab` as a local tool routed through the
+/// section's local dispatcher.
+fn local_grab_dispatch() -> BTreeMap<String, DispatchTarget> {
+    let mut dispatch = BTreeMap::new();
+    dispatch.insert("grab".to_string(), DispatchTarget::Local);
+    dispatch
 }
 
 #[tokio::test]
@@ -52,14 +60,36 @@ async fn local_tool_handler_result_returns_to_the_model() {
         resp_text("final answer"),
     ])
     .await;
-    let addr = gateway.addr();
-    let md = add_local_md(
-        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  return 'got ' .. args.value\nend)",
-        "Use the tool.",
-    );
-    let out = run_local(&bound_for_model(&md), addr, &StoreRef::memory())
-        .await
-        .unwrap();
+    let client = gateway_client(gateway.addr());
+    let schemas = vec![local_grab_schema()];
+    let dispatch = local_grab_dispatch();
+    let local = |_name: &str, args: serde_json::Value| -> Result<String> {
+        Ok(format!(
+            "got {}",
+            args["value"].as_str().expect("the value argument")
+        ))
+    };
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let (out, _) = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "Use the tool.".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        None,
+        None,
+        Some(&local),
+    )
+    .await
+    .unwrap();
     assert_eq!(out, "final answer");
 
     let bodies = gateway.requests();
@@ -79,26 +109,6 @@ async fn local_tool_handler_result_returns_to_the_model() {
 }
 
 #[tokio::test]
-async fn local_tool_handler_store_writes_persist() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("final answer"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let md = add_local_md(
-        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.write('tool-out.txt', args.value)\n  return 'stored'\nend)",
-        "Use the tool.",
-    );
-    let store = StoreRef::memory();
-    let out = run_local(&bound_for_model(&md), addr, &store)
-        .await
-        .unwrap();
-    assert_eq!(out, "final answer");
-    assert_eq!(store.read("tool-out.txt").unwrap(), "hi");
-}
-
-#[tokio::test]
 async fn local_tool_multiple_calls_in_one_response_all_run() {
     let gateway = ScriptedGateway::start(vec![
         resp_two_tool_calls(
@@ -109,17 +119,51 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
         resp_text("final answer"),
     ])
     .await;
-    let addr = gateway.addr();
-    let md = add_local_md(
-        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.append('calls.txt', args.value .. ';')\n  return 'ok ' .. args.value\nend)",
-        "Use the tool.",
-    );
-    let store = StoreRef::memory();
-    let out = run_local(&bound_for_model(&md), addr, &store)
-        .await
-        .unwrap();
+    let client = gateway_client(gateway.addr());
+    let schemas = vec![local_grab_schema()];
+    let dispatch = local_grab_dispatch();
+    let calls = Mutex::new(Vec::new());
+    let local = |_name: &str, args: serde_json::Value| -> Result<String> {
+        let value = args["value"]
+            .as_str()
+            .expect("the value argument")
+            .to_string();
+        calls
+            .lock()
+            .expect("the calls mutex must not be poisoned")
+            .push(value.clone());
+        Ok(format!("ok {value}"))
+    };
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let (out, _) = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "Use the tool.".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        None,
+        None,
+        Some(&local),
+    )
+    .await
+    .unwrap();
     assert_eq!(out, "final answer");
-    assert_eq!(store.read("calls.txt").unwrap(), "a;b;");
+    assert_eq!(
+        calls
+            .lock()
+            .expect("the calls mutex must not be poisoned")
+            .as_slice(),
+        ["a".to_string(), "b".to_string()],
+        "both calls in the one response must run"
+    );
 
     let bodies = gateway.requests();
     let tool_turns = bodies[1]["messages"]
@@ -141,23 +185,31 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
         resp_text("unreachable"),
     ])
     .await;
-    let addr = gateway.addr();
-    let md = add_local_md(
-        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  error('handler exploded')\nend)",
-        "Use the tool.",
-    );
+    let client = gateway_client(gateway.addr());
+    let schemas = vec![local_grab_schema()];
+    let dispatch = local_grab_dispatch();
+    let local = |_name: &str, _args: serde_json::Value| -> Result<String> {
+        Err(Error::Lua("handler exploded".to_string()))
+    };
     let recorder = Arc::new(Recorder::default());
-    let error = run(
-        &bound_for_model(&md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
-            debug: None,
-        },
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let error = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "Use the tool.".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        recorder.as_ref(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        None,
+        None,
+        Some(&local),
     )
     .await
     .expect_err("a handler Lua error must fail the tool call");
@@ -170,51 +222,6 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
             .events()
             .contains(&("Only".to_string(), detail::TOOL_CALL_FAILED.to_string())),
         "the failed handler must be observed as a tool-call failure"
-    );
-}
-
-#[tokio::test]
-async fn local_tool_handler_shares_section_globals_with_later_chunks() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_two_tool_calls(
-            "grab",
-            ("c1", "{\"value\":\"a\"}"),
-            ("c2", "{\"value\":\"b\"}"),
-        ),
-        resp_text("final answer"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    // The accumulator pattern: the handler appends to a section-global table
-    // and a later chunk reads it, proving handler and chunks share one VM.
-    let md = add_local_md(
-        "collected = {}\ntools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  table.insert(collected, args.value)\n  return 'noted ' .. args.value\nend)",
-        "Use the tool.\n\n```lua\nreturn 'sum:' .. table.concat(collected, ',')\n```",
-    );
-    let out = run_local(&bound_for_model(&md), addr, &StoreRef::memory())
-        .await
-        .unwrap();
-    assert_eq!(out, "sum:a,b");
-}
-
-#[tokio::test]
-async fn local_tool_handler_cannot_jump() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
-        resp_text("unreachable"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let md = add_local_md(
-        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  jump('## Nowhere')\n  return 'x'\nend)",
-        "Use the tool.\n\n## Nowhere\n\n```lua\nreturn 'jumped'\n```",
-    );
-    let error = run_local(&bound_for_model(&md), addr, &StoreRef::memory())
-        .await
-        .expect_err("jump is nil inside a local tool handler");
-    assert!(
-        error.to_string().contains("jump"),
-        "the nil-call error must name jump: {error}"
     );
 }
 
@@ -269,54 +276,5 @@ tools.add_local('grab', 'Second grab', {}, function() return 'second' end)\n\
     assert!(
         error.to_string().contains("is already registered"),
         "the error must identify the duplicate local alias: {error}"
-    );
-}
-
-#[tokio::test]
-async fn tools_add_between_prose_blocks_takes_effect_on_the_second_block() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_text("first"),
-        resp_tool_call("c1", "section_tool", "{\"value\":\"x\"}"),
-        resp_text("second"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let tool = Arc::new(ScopedFixtureTool::new(
-        "concrete",
-        "canonical_wire",
-        "Section concrete.",
-    ));
-    let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua shared\n\
-tools.bind('section_tool', 'capability')\n\
-models.default('writer', 'A general model for tests')\n```\n\n\
-## Only\n\n\
-First ask.\n\n\
-```lua\ntools.add('section_tool')\n```\n\n\
-Second ask.\n",
-        Vec::new(),
-    );
-
-    let out = run(
-        &prompt,
-        "",
-        &[Arc::clone(&tool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(out, "second");
-    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
-    let bodies = gateway.requests();
-    assert!(
-        bodies[0].get("tools").is_none(),
-        "the first prose block predates tools.add: {bodies:?}"
-    );
-    assert_eq!(
-        bodies[1]["tools"][0]["function"]["name"], "section_tool",
-        "the second prose block must see the added tool: {bodies:?}"
     );
 }

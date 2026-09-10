@@ -4,9 +4,9 @@ use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json, Lua, LuaBlockResult,
     LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelRuntime,
-    ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, StdLib,
-    StoreRef, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value,
-    WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
+    ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, ProseState,
+    Result, StdLib, StoreRef, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime,
+    ToolSet, Value, WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_messages, install_shim_prelude,
     install_store_table, install_tool_call_counts as install_tool_call_counts_impl,
     install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
@@ -37,8 +37,7 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// library as the section's first chunk
 /// ([`replay_shared`](Self::replay_shared)), install the captured tool/model
 /// alias globals, and only then walk the section's blocks with
-/// [`start_block_coro`](Self::start_block_coro). [`bind_reply`](Self::bind_reply) inserts
-/// the model reply into the same environment between chunks. A single
+/// [`start_block_coro`](Self::start_block_coro). A single
 /// instruction hook covers every program run by this VM, on the main state
 /// and on every block coroutine, so cancellation reaches any chunk.
 ///
@@ -66,9 +65,9 @@ pub struct SectionVm {
     lua: Lua,
     bound_tools: ToolSet,
     bound_models: ModelSet,
-    /// The section's tool-addition runtime, read by the executor's prose path.
+    /// The section's tool-addition runtime, read by the executor's scope path.
     pub tool_runtime: Arc<Mutex<ToolRuntime>>,
-    /// The section's model-selection runtime, read by the executor's prose path.
+    /// The section's model-selection runtime, read by the executor's scope path.
     pub model_runtime: Arc<Mutex<ModelRuntime>>,
     /// Set by Lua `jump` before it aborts the current chunk.
     jump_slot: Arc<Mutex<Option<String>>>,
@@ -306,7 +305,7 @@ impl SectionVm {
     /// Replays the shared library as the section's first chunk.
     ///
     /// The replay runs through the normal chunk path with the full host
-    /// environment already installed: `args`, `sys`, `var`, `reply`, `log`,
+    /// environment already installed: `args`, `sys`, `var`, `log`,
     /// `store`, the `tools`/`models` tables, and the control globals are all
     /// visible to shared top-level code. Only the captured tool/model alias
     /// globals are absent; they install afterward via
@@ -398,18 +397,12 @@ impl SectionVm {
     ///
     /// let nonce = GuardNonce::fresh();
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory(), None)?;
+    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory())?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub fn inject_host(
-        &mut self,
-        args: &str,
-        sys: &Json,
-        store: &StoreRef,
-        last_reply: Option<&str>,
-    ) -> Result<()> {
-        self.inject_host_with_var(args, sys, store, last_reply, None, None)
+    pub fn inject_host(&mut self, args: &str, sys: &Json, store: &StoreRef) -> Result<()> {
+        self.inject_host_with_var(args, sys, store, None, None)
     }
 
     /// Installs host values while seeding `var` from an earlier VM.
@@ -428,7 +421,6 @@ impl SectionVm {
         args: &str,
         sys: &Json,
         store: &StoreRef,
-        last_reply: Option<&str>,
         initial_var: Option<&Json>,
         write_scope: Option<WriteScope>,
     ) -> Result<()> {
@@ -460,11 +452,6 @@ impl SectionVm {
         )?;
         install_h2_models(&self.lua, &globals, &self.bound_models, &self.model_runtime)?;
         install_messages(&self.lua, &globals)?;
-        let reply_value = match last_reply {
-            Some(text) => Value::String(self.lua.create_string(text).map_err(Error::lua)?),
-            None => Value::Nil,
-        };
-        globals.raw_set("reply", reply_value).map_err(Error::lua)?;
         self.store = Some(store.clone());
         self.write_scope = write_scope;
         self.host_injected = true;
@@ -695,6 +682,24 @@ impl SectionVm {
         Ok(guard.clone().unwrap_or_else(|| fallback.clone()))
     }
 
+    /// Installs the pending Markdown buffer as this VM's fresh read-only
+    /// lazy `prose` global, replacing any previous pair's handler.
+    ///
+    /// The executor calls this before each Lua coroutine starts. `render`
+    /// runs at most once, on the first runtime read of `prose`, with the
+    /// section state snapshot ([`ProseState`]); its result is memoized for
+    /// later reads. Assigning to `prose` raises, and `{{ prose }}` inside
+    /// the template is rejected as recursive.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the guard metatable cannot be installed.
+    pub fn install_lazy_prose<F>(&self, render: F) -> Result<()>
+    where
+        F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    {
+        crate::prose::install(&self.lua, &self.sys_live, render)
+    }
+
     /// Executes a compiled Lua chunk in this VM's persistent environment.
     ///
     /// This is the legacy engine's path for running a section's Lua blocks;
@@ -739,72 +744,6 @@ impl SectionVm {
         result
     }
 
-    /// Binds the model reply for later chunks in the same environment.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or the
-    /// reply cannot be installed.
-    ///
-    /// # Examples
-    /// ```text
-    /// use promptforge_lua::SectionVm;
-    /// use promptforge_core_support::observe::NullObserver;
-    /// use promptforge_store::StoreRef;
-    /// use promptforge_core_support::untrusted::GuardNonce;
-    ///
-    /// let nonce = GuardNonce::fresh();
-    /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// vm.bind_reply("model answer", &NullObserver::default(), "Example")?;
-    /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_lua::Error>(())
-    /// ```
-    pub fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
-        observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_STARTED);
-        if !self.host_injected {
-            let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_FAILED);
-            return Err(error);
-        }
-        let result = self
-            .lua
-            .globals()
-            .raw_set("reply", reply)
-            .map_err(Error::lua);
-        observer.observe(
-            &self.execution,
-            section,
-            if result.is_ok() {
-                detail::LUA_REPLY_BINDING_SUCCEEDED
-            } else {
-                detail::LUA_REPLY_BINDING_FAILED
-            },
-        );
-        result
-    }
-
-    /// Reads the Lua `reply` global back into Rust: `None` when nil, the
-    /// string when set.
-    ///
-    /// The global is seeded at [`inject_host`](Self::inject_host) and rebound
-    /// after prose by [`bind_reply`](Self::bind_reply), so after a Lua chunk
-    /// it carries any author write: `reply = nil` clears the reply a jump
-    /// target or the next section sees, and a string assignment replaces it.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when `reply` is neither nil nor a string.
-    pub fn reply(&self) -> Result<Option<String>> {
-        let value: Value = self.lua.globals().get("reply").map_err(Error::lua)?;
-        match value {
-            Value::Nil => Ok(None),
-            Value::String(text) => Ok(Some(text.to_str().map_err(Error::lua)?.to_owned())),
-            other => Err(Error::Lua(format!(
-                "`reply` must be a string or nil, got {}",
-                other.type_name()
-            ))),
-        }
-    }
-
     /// Returns the current `var` table as JSON, read from the hidden data
     /// table behind the guarded proxy (not the proxy, which stays empty).
     ///
@@ -821,7 +760,7 @@ impl SectionVm {
     ///
     /// let nonce = GuardNonce::fresh();
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
+    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
@@ -852,16 +791,6 @@ impl SectionVm {
             ))),
             other => Ok(Some(self.lua.from_value(other).map_err(Error::lua)?)),
         }
-    }
-
-    /// Sets a string global in the VM, overwriting any existing value.
-    ///
-    /// Used by the H1 path to inject `reply` after host injection.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the global cannot be set.
-    pub fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
-        self.lua.globals().raw_set(name, value).map_err(Error::lua)
     }
 
     /// Sets a global in the VM to the Lua form of a JSON value, overwriting
@@ -1057,8 +986,8 @@ impl SectionVm {
     ///
     /// This is the scheduler's chunk-execution path: one coroutine per Lua
     /// block, created from the block's loaded function on this persistent
-    /// VM, so the VM's globals (`var`, `reply`, the conversation state)
-    /// roll forward across blocks exactly as on the legacy
+    /// VM, so the VM's globals (`var`, the bare globals, the captured
+    /// handles) roll forward across blocks exactly as on the legacy
     /// [`run_chunk`](Self::run_chunk) path. Instruction hooks are
     /// per-coroutine in PUC Lua, so the VM's budget/cancellation hook is
     /// installed on the fresh thread; the main-state hook from construction
@@ -1260,7 +1189,7 @@ pub(crate) fn run_chunk(
     section: &str,
 ) -> Result<LuaOutcome> {
     let mut vm = SectionVm::new(&GuardNonce::fresh(), execution, observer.as_ref(), section)?;
-    vm.inject_host(args, sys, store, None)?;
+    vm.inject_host(args, sys, store)?;
     vm.install_host_apis(observer, section)?;
     let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;
     let returned = scalar_return(returned)?;
@@ -1274,8 +1203,8 @@ pub(crate) fn run_chunk(
 /// additions, each resolved against the frozen bindings with any author
 /// description override applied.
 ///
-/// Rebuilt on every prose block so `tools.add` and `tools.add_local` calls
-/// between blocks reach the next model turn.
+/// Rebuilt at each model operation so `tools.add` and `tools.add_local`
+/// calls between blocks reach the next model turn.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the tool runtime's mutex is poisoned or an added

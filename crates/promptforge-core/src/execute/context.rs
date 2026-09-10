@@ -3,7 +3,7 @@
 //! [`RunContext`] is built once in [`run`](super::run) and travels through
 //! the execute subtree as parameter one (`ctx: &RunContext`). The
 //! invariant: a new run-scoped concern becomes a field here, never a new
-//! parameter. Per-call data (a section, a reply, a `var` snapshot) stays
+//! parameter. Per-call data (a section, a `var` snapshot) stays
 //! in parameters or on the per-section frame.
 
 use std::fmt;
@@ -171,6 +171,9 @@ impl RunContext {
     }
 
     /// The run's tool set, read-only.
+    ///
+    /// Unused until the `models.loop` step reads the call-time tool scope.
+    #[allow(dead_code)]
     pub(crate) fn tools(&self) -> &dyn ToolView {
         &*self.tools
     }
@@ -224,6 +227,9 @@ impl RunContext {
 
     /// The resolved per-section tool-loop cap: the frontmatter's
     /// `max_tool_iterations` over the limits default.
+    ///
+    /// Unused until the `models.loop` step rewires the tool loop.
+    #[allow(dead_code)]
     pub(crate) fn max_tool_iterations(&self) -> usize {
         self.prompt
             .frontmatter()
@@ -277,13 +283,12 @@ impl RunContext {
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
     /// run-wide slots (`args`, `store`, `observer`, `shared`) from this
-    /// context; the driver supplies only its own deltas: the `sys` JSON, the
-    /// incoming reply, the seed, the store-write scope (a fanout arm's
+    /// context; the driver supplies only its own deltas: the `sys` JSON,
+    /// the seed, the store-write scope (a fanout arm's
     /// identity; `None` on the walk), and the section name.
     pub(crate) fn vm_setup<'a>(
         &'a self,
         sys: &'a serde_json::Value,
-        last_reply: Option<&'a str>,
         seed: VmSeed<'a>,
         write_scope: Option<WriteScope>,
         section_name: &'a str,
@@ -292,7 +297,6 @@ impl RunContext {
             args: &self.args,
             sys,
             store: &self.store,
-            last_reply,
             seed,
             write_scope,
             observer_arc: &self.observer,

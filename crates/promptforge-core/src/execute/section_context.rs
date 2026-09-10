@@ -2,8 +2,8 @@
 //!
 //! [`SectionContext`] is born at a section entry and dies at its teardown.
 //! It owns the section VM plus the state the block walk reads and writes -
-//! the `sys` JSON, the seeded `var`, the rolling reply, the conversation,
-//! the tool-call counts, and the resolved completion options - and it
+//! the `sys` JSON, the seeded `var`, the fanout arm's item, and the
+//! tool-call counts - and it
 //! carries the frame's effective reporting handles (observer, debug sink,
 //! turn counter) seeded out of the run context; a fanout arm's context is
 //! the fanout's fork, so the handles reach the frame and the arm's nested
@@ -22,28 +22,24 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
-use crate::lua::{SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base};
-use crate::model::CompletionOptions;
+use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base};
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
 use crate::store::WriteScope;
-use crate::{Error, Result};
+use crate::{Error, Result, subst};
 
-use super::block_walk::{install_section_scope, run_live_h1_prose, run_section_prose};
 use super::context::RunContext;
 use super::engine::{list_items_from_visible, visible_sections};
 use super::section_vm::{VmSeed, setup_section_vm};
 use super::support::{next_id, now_rfc3339_checked, sys_json};
-use super::tool_loop::ProseMode;
 
 /// One section entry's owned frame within a run.
 ///
 /// The frame is born at a section entry and dies at its teardown. One
 /// section entry is one frame, regardless of arrival mode (fall-through,
 /// jump, call); a jump ends the current frame and the driver builds a
-/// fresh one for the target - only `reply` and `var` cross, as call data.
+/// fresh one for the target - only `var` crosses, as call data.
 /// No derives: the VM and the trait-object handles support neither `Clone`
 /// nor `Debug`.
 pub(crate) struct SectionContext {
@@ -63,7 +59,7 @@ pub(crate) struct SectionContext {
     /// return included) and never on an error.
     completed: bool,
     /// The section's `sys` JSON, enriched in place by the walk (the model
-    /// binding, each outcome's finish reason).
+    /// binding).
     sys: serde_json::Value,
     /// The walk's clipboard: seeded into the VM at construction, read back
     /// out of it before teardown so the walk rolls it forward.
@@ -71,21 +67,21 @@ pub(crate) struct SectionContext {
     /// The fanout arm's collection member for `{{ item }}` substitution;
     /// `None` outside an arm, so always `None` on the walk.
     item: Option<serde_json::Value>,
-    /// The reply visible to the walk's prose: seeded from the incoming
-    /// reply, rolled forward as prose produces text.
-    reply: Option<String>,
-    /// The section's conversation, accumulated across prose blocks.
-    conversation: Vec<Message>,
-    /// The per-section tool-call counts, installed at the first prose block.
+    /// The per-section tool-call counts, installed at the first
+    /// script-initiated `tools.call`.
     counts: Option<ToolCallCounts>,
-    /// The resolved model's per-call fields, set at the first prose block.
-    completion_options: Option<CompletionOptions>,
     /// The frame's effective observer handle: the run's own on the walk, a
     /// fanout arm's proxy in a fanout.
     observer: Arc<dyn Observer>,
     /// Opt-in raw request/response capture for each model turn.
+    ///
+    /// Read by the tool loop the `models.loop` step rewires.
+    #[allow(dead_code)]
     debug: Option<Arc<dyn DebugCapture>>,
     /// The model-turn counter this frame advances.
+    ///
+    /// Read by the tool loop the `models.loop` step rewires.
+    #[allow(dead_code)]
     turns: Arc<AtomicU32>,
 }
 
@@ -102,8 +98,7 @@ impl SectionContext {
     /// visible set (its siblings minus itself, plus its direct children) is
     /// built for the `list_from_section` callback. `section_id` is the
     /// section's `sys.id`: the next value from the run-global counter.
-    /// `incoming_reply` is the model reply visible to this section's first
-    /// prose. `var` is the walk's current clipboard, seeded into the
+    /// `var` is the walk's current clipboard, seeded into the
     /// section's VM.
     ///
     /// # Errors
@@ -116,7 +111,6 @@ impl SectionContext {
         section: &Section,
         siblings: &[Section],
         section_id: u64,
-        incoming_reply: Option<&str>,
         var: &serde_json::Value,
     ) -> Result<Self> {
         let sys = ctx.sys_json(section_id, section.name())?;
@@ -138,7 +132,6 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
-        let reply = incoming_reply.map(str::to_owned);
         // The `list_from_section` callback resolves over the section's
         // visible set; the suspending calls (`call`, `fanout`,
         // `models.infer`) are the yield shims the setup half installs.
@@ -150,7 +143,6 @@ impl SectionContext {
         // `sys` extras, and the callback's visible set are the walk's own.
         let setup = ctx.vm_setup(
             &sys,
-            reply.as_deref(),
             VmSeed {
                 var: Some(var),
                 item: None,
@@ -174,10 +166,7 @@ impl SectionContext {
             sys,
             var: var.clone(),
             item: None,
-            reply,
-            conversation: Vec::new(),
             counts: None,
-            completion_options: None,
             observer: Arc::clone(ctx.observer()),
             debug: ctx.debug().cloned(),
             turns: Arc::clone(ctx.turns()),
@@ -190,7 +179,7 @@ impl SectionContext {
     /// control-global stubs, and the live H1 shim base.
     ///
     /// H1 is the level-1 section: it runs first and is never re-entered, so
-    /// the frame seeds an empty `var`, no reply, no item, and no write
+    /// the frame seeds an empty `var`, no item, and no write
     /// scope. The scheduler answers the pass's `models.infer` yields (with
     /// or without a leading handle) through its driver, so the shim base
     /// keeps the control stubs,
@@ -235,10 +224,7 @@ impl SectionContext {
             sys,
             var: serde_json::json!({}),
             item: None,
-            reply: None,
-            conversation: Vec::new(),
             counts: None,
-            completion_options: None,
             observer: Arc::clone(ctx.observer()),
             debug: ctx.debug().cloned(),
             turns: Arc::clone(ctx.turns()),
@@ -254,7 +240,7 @@ impl SectionContext {
     ///
     /// The seed is the fanout's own: the collection `item`, the store-write
     /// scope (this fanout's token plus the arm's index, matching
-    /// `sys.index`), the caller's cloned `var`, and the caller's reply. The
+    /// `sys.index`), and the caller's cloned `var`. The
     /// effective reporting handles
     /// are the fanout's too: the run's own observer and debug sink with the
     /// fanout's fresh turn counter arrive through the context's fanout fork,
@@ -268,10 +254,6 @@ impl SectionContext {
     /// the chain owns the run phase's teardown boundary, so the
     /// construction phase keeps its own and every path tears down exactly
     /// once.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the arm's whole driver preamble: the fanout's run-context fork, the worker and its home slice, the arm's position, item, write token, and reply and var seeds stay explicit and linear"
-    )]
     pub(crate) fn new_fanout_arm(
         ctx: &RunContext,
         worker: &Section,
@@ -279,7 +261,6 @@ impl SectionContext {
         index: usize,
         item: serde_json::Value,
         write_token: u64,
-        incoming_reply: Option<&str>,
         var: &serde_json::Value,
     ) -> Result<Self> {
         let tool_set = ctx.tool_set_snapshot()?;
@@ -317,7 +298,6 @@ impl SectionContext {
                 return Err(error);
             }
         };
-        let reply = incoming_reply.map(str::to_owned);
         let item = Some(item);
         // The arm's store-write identity: this fanout's token plus the
         // arm's 1-based index, matching `sys.index`.
@@ -331,7 +311,6 @@ impl SectionContext {
         // extra, and the callback's visible set are the arm's own.
         let setup = ctx.vm_setup(
             &sys,
-            reply.as_deref(),
             VmSeed {
                 var: Some(var),
                 item: item.as_ref(),
@@ -353,10 +332,7 @@ impl SectionContext {
             sys,
             var: var.clone(),
             item,
-            reply,
-            conversation: Vec::new(),
             counts: None,
-            completion_options: None,
             observer: Arc::clone(ctx.observer()),
             debug: ctx.debug().cloned(),
             turns: Arc::clone(ctx.turns()),
@@ -401,11 +377,33 @@ impl SectionContext {
         ))
     }
 
-    /// The frame's current reply slot: seeded from the incoming reply,
-    /// rolled forward as prose produces text, and synced from the VM's
-    /// `reply` global after each of the scheduler's Lua blocks.
-    pub(crate) fn reply(&self) -> Option<String> {
-        self.reply.clone()
+    /// Installs the pending Markdown buffer as the VM's fresh read-only
+    /// lazy `prose` template before one Lua coroutine starts. The first
+    /// runtime read snapshots the section state, renders every `{{ }}`
+    /// substitution once, and memoizes the result; the buffer is the
+    /// scheduler's pending prose, empty when no Markdown accumulated.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the guard cannot be installed, or
+    /// [`Error::Internal`] if the VM is gone.
+    pub(crate) fn install_lazy_prose(&self, ctx: &RunContext, template: &str) -> Result<()> {
+        let template = template.to_owned();
+        let args = ctx.args().to_owned();
+        let item = self.item.clone();
+        self.vm()?
+            .install_lazy_prose(move |state: ProseState| -> mlua::Result<String> {
+                let globals = |name: &str| (state.globals)(name).map_err(Error::from);
+                subst::substitute(
+                    &template,
+                    &args,
+                    item.as_ref(),
+                    &state.var,
+                    &state.sys,
+                    &globals,
+                )
+                .map_err(mlua::Error::external)
+            })?;
+        Ok(())
     }
 
     /// The frame's tool-call counts for a script-initiated dispatch,
@@ -425,18 +423,14 @@ impl SectionContext {
         effective: &[ToolBinding],
     ) -> Result<ToolCallCounts> {
         let Self {
-            vm,
-            sys,
-            counts,
-            completion_options,
-            ..
+            vm, sys, counts, ..
         } = self;
         let Some(vm) = vm.as_ref() else {
             return Err(Error::Internal(
                 "the section frame's VM lives until the frame's own drop",
             ));
         };
-        install_section_scope(vm, ctx, sys, counts, completion_options, effective)?;
+        install_section_scope(vm, ctx, sys, counts, effective)?;
         let counts = counts
             .as_ref()
             .ok_or(Error::Internal("the scope install seeds the counts"))?;
@@ -445,136 +439,37 @@ impl SectionContext {
         }
         Ok(counts.clone())
     }
+}
 
-    /// Reads the VM's `reply` global back into the frame's slot and returns
-    /// it, so an author's `reply = nil` (or a custom string) steers what the
-    /// next prose substitutes and what the chain's finish reports.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) when `reply` is neither nil
-    /// nor a string, or [`Error::Internal`] if the VM is gone.
-    pub(crate) fn read_reply(&mut self) -> Result<Option<String>> {
-        let reply = self.vm()?.reply()?;
-        self.reply.clone_from(&reply);
-        Ok(reply)
+/// Installs the section's one-time tool-call counts and model resolution,
+/// gated on the counts slot: the first consumer - the section's first
+/// script-initiated `tools.call` - performs the install, and every later
+/// call is a no-op. The counts install backs the Lua `tools.calls` table;
+/// the model resolution freezes the section's binding and enriches
+/// `sys.model`.
+///
+/// # Errors
+/// Returns the [`Error`] of the counts install, the model resolution, or
+/// the `sys` re-seal.
+fn install_section_scope(
+    vm: &SectionVm,
+    ctx: &RunContext,
+    sys: &mut serde_json::Value,
+    counts: &mut Option<ToolCallCounts>,
+    effective_bindings: &[ToolBinding],
+) -> Result<()> {
+    if counts.is_some() {
+        return Ok(());
     }
-
-    /// Runs one prose block through the shared section prose path: the
-    /// per-block scope rebuild, substitution, the tool loop, and the
-    /// reply/`sys` roll-forward. The scheduler's driver calls this for a
-    /// walked section's prose block.
-    ///
-    /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed, as
-    /// documented on `run_section_prose`.
-    pub(crate) async fn run_prose_block(
-        &mut self,
-        ctx: &RunContext,
-        name: &str,
-        text: &str,
-        loop_capable: bool,
-        client: &mut Option<GatewayClient>,
-    ) -> Result<()> {
-        let Self {
-            vm,
-            sys,
-            reply,
-            conversation,
-            counts,
-            completion_options,
-            item,
-            observer,
-            debug,
-            turns,
-            ..
-        } = self;
-        let Some(vm) = vm.as_mut() else {
-            return Err(Error::Internal(
-                "the section frame's VM lives until the frame's own drop",
-            ));
-        };
-        let prose_mode = if loop_capable {
-            ProseMode::Loop {
-                max_tool_iterations: ctx.max_tool_iterations(),
-            }
-        } else {
-            ProseMode::SingleShot
-        };
-        run_section_prose(
-            vm,
-            ctx,
-            name,
-            text,
-            prose_mode,
-            sys,
-            reply,
-            conversation,
-            counts,
-            completion_options,
-            item.as_ref(),
-            observer.as_ref(),
-            debug.as_deref(),
-            turns.as_ref(),
-            client,
-        )
-        .await
+    *counts = Some(vm.install_tool_call_counts(effective_bindings)?);
+    let resolved_model = crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
+    if let Some(binding) = resolved_model.as_ref() {
+        let current = vm.current_sys(sys)?;
+        let enriched = crate::lua::enrich_sys_model(&current, binding);
+        vm.re_seal_sys(&enriched)?;
+        *sys = enriched;
     }
-
-    /// Runs one live H1 prose block through the shared live prose path:
-    /// substitution, the empty-prose skip, the default model and
-    /// always-scope read from the bindings-so-far, fresh per-block counts,
-    /// and the reply written as a plain global. The scheduler's driver
-    /// calls this for the live H1 pass's prose block.
-    ///
-    /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed, as
-    /// documented on `run_live_h1_prose`.
-    pub(crate) async fn run_live_h1_prose_block(
-        &mut self,
-        ctx: &RunContext,
-        name: &str,
-        text: &str,
-        loop_capable: bool,
-        client: &mut Option<GatewayClient>,
-    ) -> Result<()> {
-        let Self {
-            vm,
-            sys,
-            reply,
-            conversation,
-            observer,
-            debug,
-            turns,
-            ..
-        } = self;
-        let Some(vm) = vm.as_mut() else {
-            return Err(Error::Internal(
-                "the section frame's VM lives until the frame's own drop",
-            ));
-        };
-        let prose_mode = if loop_capable {
-            ProseMode::Loop {
-                max_tool_iterations: ctx.max_tool_iterations(),
-            }
-        } else {
-            ProseMode::SingleShot
-        };
-        run_live_h1_prose(
-            vm,
-            ctx,
-            name,
-            text,
-            prose_mode,
-            sys,
-            reply,
-            conversation,
-            observer.as_ref(),
-            debug.as_deref(),
-            turns.as_ref(),
-            client,
-        )
-        .await
-    }
+    Ok(())
 }
 
 /// The fallible setup half of the live H1 lifecycle: host injection, the
@@ -589,7 +484,7 @@ fn setup_live_h1(
     sys: &serde_json::Value,
     title: &str,
 ) -> Result<()> {
-    vm.inject_host(ctx.args(), sys, ctx.store(), None)?;
+    vm.inject_host(ctx.args(), sys, ctx.store())?;
     vm.install_host_apis(ctx.observer(), title)?;
     vm.install_h1_control_stubs().map_err(Error::from)
 }

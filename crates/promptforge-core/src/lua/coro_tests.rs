@@ -118,7 +118,6 @@ fn scheduler_vm_with_tools(
         args: "",
         sys: &sys,
         store: &store,
-        last_reply: None,
         seed: VmSeed { var, item: None },
         write_scope: None,
         observer_arc: &observer,

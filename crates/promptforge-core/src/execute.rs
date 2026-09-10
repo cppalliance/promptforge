@@ -3,13 +3,13 @@
 //! The run walks top-level sections in file order, creating one isolated
 //! section VM for each. The VM is fully equipped (host values, store, log,
 //! control globals) before the shared Lua library replays as the section's
-//! first chunk, then ordered section blocks use that same VM. Lua before the first prose is
-//! prologue-style; Lua after is epilog-style. Non-final prose is single-shot;
-//! final prose runs the full tool loop. A scalar early Lua return ends the
-//! section; a scalar late Lua return ends the run.
+//! first chunk, then ordered section blocks use that same VM. Prose never
+//! infers: each prose block stashes the pending Markdown buffer, and the
+//! next Lua block reads it as its fresh read-only lazy `prose` template.
+//! A scalar Lua return ends the chain it fires in.
 //!
-//! Running off the last section ends the run: the result is the last model
-//! reply, else a generic completion.
+//! Running off the last section ends the run: the result is the last
+//! scalar return, else a generic completion.
 //!
 //! The walk is level-independent and never descends on its own: a jump to a
 //! child heading starts a child-level walk over the jumper's children under
@@ -17,9 +17,9 @@
 //! level exhausts.
 //!
 //! One run-scoped [`StoreRef`] is created once by the caller and threaded through
-//! every section (both its Lua prologue and, later, the model's file tools), so
+//! every section, so
 //! bulk state persists across the context-clearing transitions even though a
-//! section's conversation never does.
+//! section's Lua state never does.
 //!
 //! A run reports itself as it goes: the [`RunConfig`] observer receives a
 //! `(execution, section, event)` record when the run starts and ends, at each
@@ -35,13 +35,12 @@
 //! implementation each binding carries.
 //!
 //! Lua `call()` starts a contained chain at a visible section (fresh VM,
-//! fresh conversation, recursion capped at 8): the chain runs from the target
-//! with every normal walk rule - fall-through, off-walk skips, jumps, child
+//! recursion capped at 8): the chain runs from the target
+//! with every normal walk rule - fall-through, jumps, child
 //! chains - and the outer walk never moves while it runs. When the chain
-//! ends (its level exhausts or a return fires), its final reply is the call's
+//! ends (its level exhausts or a return fires), its final text is the call's
 //! return value; a return ends only the chain it fires in.
-//! Lua `jump(target)` transfers control to a named section: the conversation
-//! is cleared and the current reply carries across the jump.
+//! Lua `jump(target)` transfers control to a named section.
 //!
 //! # Runtime
 //!
@@ -59,18 +58,20 @@
 //! focused private children: `error` (the public [`RunError`]), `config`
 //! (`RunConfig`/`RunLimits`), `context` (the ambient `RunContext` run
 //! state), `gateway` (client acquisition and [`ResolutionContext`]),
-//! `scope` (tool-scope validation and schema/dispatch preparation),
-//! `tools` (the nested-inference round), `tool_loop` (the model tool
-//! loop), `section_vm` (the section VM setup half shared by the walk and
+//! `tools` (the nested-inference round),
+//! `section_vm` (the section VM setup half shared by the walk and
 //! the fanout arm), `section_context` (the per-section `SectionContext`
 //! frame the scheduler's chains construct, run, and tear down),
-//! `block_walk` (the per-block prose paths), `engine` (the walk-target
+//! `engine` (the walk-target
 //! resolution helpers), `protocol` (the coroutine request/answer types
 //! for the yield/resume boundary), `scheduler` (the chain-stack scheduler
 //! driving the coroutine protocol: the live H1 pass, the walk, call
-//! chains, and fanout), and `support` (shared helpers).
+//! chains, and fanout), and `support` (shared helpers). `scope` (tool-scope
+//! validation and schema/dispatch preparation) and `tool_loop` (the model
+//! tool loop) lost their production caller with automatic prose inference;
+//! they stay compiled under the executor's tests until the `models.loop`
+//! step rewires them.
 
-mod block_walk;
 mod config;
 mod context;
 mod engine;
@@ -78,10 +79,15 @@ mod error;
 mod gateway;
 pub(crate) mod protocol;
 pub(crate) mod scheduler;
+// Test-only until the `models.loop` step rewires the tool loop into the
+// section-visible model operation: automatic prose inference was their
+// last production caller.
+#[cfg(test)]
 mod scope;
 mod section_context;
 pub(crate) mod section_vm;
 mod support;
+#[cfg(test)]
 mod tool_loop;
 mod tools;
 
@@ -123,7 +129,7 @@ pub(crate) use std::collections::BTreeMap;
 #[cfg(test)]
 pub(crate) use support::{advance_turn, now_rfc3339_checked};
 #[cfg(test)]
-pub(crate) use tool_loop::{LocalDispatch, ProseMode, run_prose_inference};
+pub(crate) use tool_loop::{LocalDispatch, run_prose_inference};
 
 use crate::Error;
 use crate::cancel;
@@ -140,7 +146,7 @@ pub(crate) use crate::model::ModelSet;
 ///
 /// H1 Lua and prose blocks run once in source order with full host access;
 /// capability calls resolve when executed. If H1 does not return, the H2 section
-/// walk runs and its accumulated text is returned.
+/// walk runs and its final text is returned.
 ///
 /// # Errors
 /// Returns a [`RunError`] whose [`kind`](RunError::kind) classifies the failure

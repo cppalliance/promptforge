@@ -14,8 +14,9 @@ macro_rules! flow_prompt {
     };
 }
 
-/// Alternating lua/prose blocks run in order; non-final prose is single-shot,
-/// final prose loops, and trailing lua sees the last reply.
+/// Alternating lua/prose blocks run in order; each Lua block that wants the
+/// model reads its own pending prose buffer into an explicit infer, and the
+/// run result is the final Lua return.
 #[tokio::test]
 async fn section_with_alternating_blocks_executes_in_order() {
     let gateway = ScriptedGateway::start(vec![resp_text("reply-1"), resp_text("reply-2")]).await;
@@ -25,9 +26,9 @@ async fn section_with_alternating_blocks_executes_in_order() {
 ## Only\n\n\
 ```lua\nstore.append('order.txt', 'lua1\\n')\n```\n\n\
 First ask.\n\n\
-```lua\nstore.append('order.txt', 'lua2\\n')\n```\n\n\
+```lua\nstore.append('order.txt', 'lua2:' .. models.infer(prose) .. '\\n')\n```\n\n\
 Final ask.\n\n\
-```lua\nstore.append('order.txt', 'lua3\\n')\nreturn reply\n```\n"
+```lua\nstore.append('order.txt', 'lua3\\n')\nreturn models.infer(prose)\n```\n"
     );
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
@@ -38,7 +39,7 @@ Final ask.\n\n\
     assert_eq!(gateway.call_count(), 2);
     assert_eq!(
         store.read("order.txt").expect("order log"),
-        "lua1\nlua2\nlua3\n"
+        "lua1\nlua2:reply-1\nlua3\n"
     );
 }
 
@@ -61,7 +62,11 @@ return by_name\n\
 ```\n\n\
 ## Research\n\n\
 Research {{ args }}.\n\n\
-```lua\nstore.write('evidence.md', reply)\n```\n"
+```lua\n\
+local answer = models.infer(prose)\n\
+store.write('evidence.md', answer)\n\
+return answer\n\
+```\n"
     );
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "topic", &[], &store, gatewayed(addr))
@@ -88,7 +93,8 @@ return r\n\
 ## Sub\n\n\
 ```lua\nreturn call('## Inner')\n```\n\n\
 ## Inner\n\n\
-Args: {{ args }}\n"
+Args: {{ args }}\n\n\
+```lua\nreturn models.infer(prose)\n```\n"
     );
     let store = StoreRef::memory();
     let out = run(
@@ -103,7 +109,7 @@ Args: {{ args }}\n"
     assert_eq!(out, "inner-reply");
     let body = gateway
         .last_request()
-        .expect("the inner section's prose must reach the gateway");
+        .expect("the inner section's infer must reach the gateway");
     let text = body.to_string();
     assert!(
         text.contains("chain-args"),
@@ -135,8 +141,9 @@ return 'ok'\n\
     assert_eq!(out, "ok");
 }
 
+/// A jump transfers control and the jumper's remaining blocks never run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks() {
+async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
     let md = flow_prompt!(
         "\
 ## Check\n\n\
@@ -149,7 +156,6 @@ store.write('seen.txt', 'should-not-run')\n\
 ```lua\nreturn 'accepted'\n```\n\n\
 ## Help\n\n\
 ```lua\n\
-assert(reply == nil, 'no prior reply because no prose ran before the jump')\n\
 return 'helped:' .. store.read('seen.txt')\n\
 ```\n"
     );
@@ -159,135 +165,6 @@ return 'helped:' .. store.read('seen.txt')\n\
         .expect("jump must transfer control");
     assert_eq!(out, "helped:check");
     assert_eq!(store.read("seen.txt").expect("seen"), "check");
-}
-
-/// A jump carries the prior section's reply across the transfer: the target
-/// sees the model reply the jumper's prose produced.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_preserves_reply_from_prior_section() {
-    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
-    let addr = gateway.addr();
-    let md = flow_prompt!(
-        "\
-## Source\n\n\
-Ask something.\n\n\
-```lua\njump('## Target')\n```\n\n\
-## Target\n\n\
-```lua\n\
-assert(reply ~= nil, 'jump must preserve the prior reply')\n\
-return reply\n\
-```\n"
-    );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("jump must preserve the reply from the prior section");
-    assert_eq!(out, "model-said-this");
-}
-
-/// Note 17's escape: `reply = nil` before a jump clears the reply the jump
-/// target sees - the walk reads the Lua `reply` global back at section end.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_nil_before_jump_clears_reply_for_target() {
-    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
-    let addr = gateway.addr();
-    let md = flow_prompt!(
-        "\
-## Source\n\n\
-Ask something.\n\n\
-```lua\n\
-reply = nil\n\
-jump('## Target')\n\
-```\n\n\
-## Target\n\n\
-```lua\n\
-assert(reply == nil, 'reply = nil before the jump must clear what the target sees')\n\
-return 'cleared'\n\
-```\n"
-    );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("reply = nil before a jump must clear the reply the target sees");
-    assert_eq!(out, "cleared");
-}
-
-/// The same escape at fall-through: `reply = nil` as a section's last word
-/// clears the reply the next section on the walk sees.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_nil_before_fall_through_clears_reply_for_next_section() {
-    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
-    let addr = gateway.addr();
-    let md = flow_prompt!(
-        "\
-## Source\n\n\
-Ask something.\n\n\
-```lua\nreply = nil\n```\n\n\
-## Next\n\n\
-```lua\n\
-assert(reply == nil, 'reply = nil at fall-through must clear what the next section sees')\n\
-return 'cleared'\n\
-```\n"
-    );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("reply = nil at fall-through must clear the reply the next section sees");
-    assert_eq!(out, "cleared");
-}
-
-/// The global IS the reply: an author's `reply = "custom"` assignment in Lua
-/// carries to the next section exactly like a prose-produced reply.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_assignment_in_lua_carries_to_next_section() {
-    let md = flow_prompt!(
-        "\
-## Source\n\n\
-```lua\nreply = 'custom'\n```\n\n\
-## Next\n\n\
-```lua\n\
-assert(reply == 'custom', 'a Lua reply assignment must carry to the next section')\n\
-return reply\n\
-```\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("a Lua reply assignment must carry to the next section");
-    assert_eq!(out, "custom");
-}
-
-/// The read-back validates the global: a non-string, non-nil `reply`
-/// assignment is a Lua error at section end.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reply_assigned_a_non_string_errors() {
-    let md = flow_prompt!(
-        "\
-## Source\n\n\
-```lua\nreply = 42\n```\n"
-    );
-    let error = run_offline(md)
-        .await
-        .expect_err("a non-string reply assignment must error");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("`reply` must be a string or nil"),
-        "the error must name the reply contract: {rendered}"
-    );
 }
 
 /// A jump inside `call()` is contained by the chain: followed, not
@@ -322,21 +199,19 @@ return 'peer-ran'\n\
     assert_eq!(out, "main:peer-ran");
 }
 
-/// The canonical contained chain (decision 14): A executes Sub; Sub jumps to
-/// its child S1, starting a child-level chain that falls through to S2; when
-/// S2 finishes, the chain's final reply returns to A and the outer walk
+/// The canonical contained chain (decision 14): A calls Sub; Sub jumps to
+/// its child S1, starting a child-level chain that falls through to S2; S2's
+/// return is the chain's final text back to A, and the outer walk
 /// continues at B, never having moved.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_chain_jumps_to_a_child_and_returns_the_chain_reply() {
-    let gateway = ScriptedGateway::start(vec![resp_text("reply-s1"), resp_text("reply-s2")]).await;
-    let addr = gateway.addr();
+async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
     let md = flow_prompt!(
         "\
 ## A\n\n\
 ```lua\n\
 store.append('order.txt', 'A1\\n')\n\
 local r = call('## Sub')\n\
-assert(r == 'reply-s2', 'the chain final reply returns to A')\n\
+assert(r == 's2-result', 'the chain final text returns to A')\n\
 store.append('order.txt', 'A2\\n')\n\
 ```\n\n\
 ## B\n\n\
@@ -350,24 +225,19 @@ store.append('order.txt', 'Sub\\n')\n\
 jump('### S1')\n\
 ```\n\n\
 ### S1\n\n\
-Ask S1.\n\n\
 ```lua\n\
-assert(reply == 'reply-s1', 'the chain rolls the reply forward')\n\
 store.append('order.txt', 'S1\\n')\n\
 ```\n\n\
 ### S2\n\n\
 ```lua\n\
-assert(reply == 'reply-s1', 'fall-through inside the chain carries the reply')\n\
-```\n\n\
-Ask S2.\n\n\
-```lua\n\
 store.append('order.txt', 'S2\\n')\n\
+return 's2-result'\n\
 ```\n"
     );
     let store = StoreRef::memory();
-    let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
+    let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("the call chain must jump, fall through, and return its reply");
+        .expect("the call chain must jump, fall through, and return its final text");
     assert_eq!(out, "A1\nSub\nS1\nS2\nA2\nB\n");
 }
 
@@ -778,53 +648,6 @@ return store.read('order.txt')\n\
         .await
         .expect("a jump to a child must start the child-level walk");
     assert_eq!(out, "A\nX\nY\nB\n");
-}
-
-/// The reply thread follows the detour: the jumper's reply reaches the
-/// sub-walk's first section, each section of the sub-walk rolls it forward,
-/// and the sub-walk's last reply resumes the parent chain.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn child_walk_reply_thread_follows_the_detour() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_text("reply-a"),
-        resp_text("reply-x"),
-        resp_text("reply-y"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-Ask A.\n\n\
-```lua\n\
-jump('### X')\n\
-```\n\n\
-### X\n\n\
-```lua\n\
-assert(reply == 'reply-a', 'the jumper reply reaches the first child')\n\
-```\n\n\
-Ask X.\n\n\
-### Y\n\n\
-```lua\n\
-assert(reply == 'reply-x', 'the child walk rolls the reply forward')\n\
-```\n\n\
-Ask Y.\n\n\
-## B\n\n\
-```lua\n\
-assert(reply == 'reply-y', 'the sub-walk last reply resumes the parent chain')\n\
-return reply\n\
-```\n"
-    );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("the reply thread must follow the detour");
-    assert_eq!(out, "reply-y");
 }
 
 /// The child-level rule recurses: a jump from an H3 child to an H4 grandchild
@@ -1657,126 +1480,6 @@ return 'c-reply'\n\
     );
 }
 
-/// A multi-prose worker runs the shared block walk: every prose block reaches
-/// the model, the conversation rolls forward across blocks, and `{{ reply }}`
-/// substitutes the previous block's model text. `{{ item }}` resolves against
-/// the arm's collection member.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_runs_every_prose_block_with_the_reply_rolling_forward() {
-    let gateway =
-        ScriptedGateway::start(vec![resp_text("first answer"), resp_text("second answer")]).await;
-    let addr = gateway.addr();
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
-First ask about {{ item }}.\n\n\
-```lua\nvar.mid = 1\n```\n\n\
-The first answer was: {{ reply }}.\n",
-    ]
-    .concat();
-    let out = run(
-        &bound_for_model(&md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("a multi-prose worker must run every prose block");
-    assert_eq!(out, "second answer", "the arm's text is the final reply");
-
-    let bodies = gateway.requests();
-    assert_eq!(
-        bodies.len(),
-        2,
-        "one model turn per prose block: {bodies:?}"
-    );
-    let first = bodies[0]["messages"].as_array().expect("messages array");
-    let first_content = first.last().expect("a user turn")["content"]
-        .as_str()
-        .expect("content string");
-    assert!(
-        first_content.contains("First ask about alpha."),
-        "the first prose must substitute the arm's item: {first_content}"
-    );
-    // The conversation rolls forward: the second block's request still carries
-    // the first block's user turn, and `{{ reply }}` substituted the first
-    // block's model text (the engine binds text replies to `reply` rather
-    // than appending them as assistant turns).
-    let second = bodies[1]["messages"].as_array().expect("messages array");
-    let user_turns: Vec<&str> = second
-        .iter()
-        .filter(|m| m["role"] == "user")
-        .filter_map(|m| m["content"].as_str())
-        .collect();
-    assert_eq!(
-        user_turns,
-        vec![
-            "First ask about alpha.",
-            "The first answer was: first answer."
-        ],
-        "the second turn must carry the rolled-forward conversation and reply: {bodies:?}"
-    );
-}
-
-/// `tools.add` between a worker's prose blocks rebuilds the effective scope,
-/// so the added tool reaches the next model turn inside the arm.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_tools_add_between_prose_blocks_reaches_the_next_model_turn() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_text("first"),
-        resp_tool_call("c1", "section_tool", "{\"value\":\"x\"}"),
-        resp_text("second"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let tool = Arc::new(ScopedFixtureTool::new(
-        "concrete",
-        "canonical_wire",
-        "Section concrete.",
-    ));
-    // `tools.bind`/`models.default` are H1-only declarations, so the
-    // declarations block is spliced into the shared scaffold ahead of
-    // `## Parent`.
-    let mut md = ARM_FANOUT_PARENT.replacen(
-        "## Parent",
-        "# Test prompt\n\n```lua shared\n\
-tools.bind('section_tool', 'capability')\n\
-models.default('writer', 'A general model for tests')\n```\n\n\
-## Parent",
-        1,
-    );
-    md.push_str(
-        "### Worker\n\n\
-First ask.\n\n\
-```lua\ntools.add('section_tool')\n```\n\n\
-Second ask.\n",
-    );
-    let prompt = bound_with_tools(&md, Vec::new());
-
-    let out = run(
-        &prompt,
-        "",
-        &[Arc::clone(&tool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("tools.add inside an arm must reach the next model turn");
-
-    assert_eq!(out, "second");
-    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
-    let bodies = gateway.requests();
-    assert!(
-        bodies[0].get("tools").is_none(),
-        "the first prose block predates tools.add: {bodies:?}"
-    );
-    assert_eq!(
-        bodies[1]["tools"][0]["function"]["name"], "section_tool",
-        "the second prose block must see the added tool: {bodies:?}"
-    );
-}
-
 /// `models.infer(handle, ...)` works inside an arm: the arm installs the infer hook, so a
 /// worker's Lua can call the model directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1816,40 +1519,12 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
     );
 }
 
-/// An arm handed no client creates one lazily when its prose needs it: the
-/// creation reads the gateway environment, so with the variables unset the run
-/// fails with the missing-variable error instead of silently skipping the
-/// prose.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_without_a_client_creates_one_lazily_when_prose_needs_it() {
-    // The missing-variable error only fires on an unconfigured host; with a
-    // gateway exported, the lazy creation would succeed and make a real call.
-    if !gateway_env_is_unset() {
-        return;
-    }
-    let md = [ARM_FANOUT_PARENT, "### Worker\n\nAsk about {{ item }}.\n"].concat();
-    let error = run(
-        &bound_for_model(&md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        silent(),
-    )
-    .await
-    .expect_err("an arm with no client must attempt lazy creation, not skip its prose");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
-        "the arm must surface the lazy client construction error: {rendered}"
-    );
-}
-
 /// `models.infer(handle, ...)` inside an arm handed no client surfaces the lazy-creation
-/// error through the infer hook - a different code path than the prose walk's
-/// lazy creation.
+/// error through the infer hook.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_without_a_client_surfaces_the_lazy_error() {
-    // Same host dependence as the prose variant above: skip on a configured host.
+    // The missing-variable error only fires on an unconfigured host; with a
+    // gateway exported, the lazy creation would succeed and make a real call.
     if !gateway_env_is_unset() {
         return;
     }
@@ -1951,14 +1626,16 @@ return 'ok'\n\
     assert_eq!(out, "ok");
 }
 
-/// `{{ item }}` in walked (non-arm) prose is a substitution error: the walk
-/// pins `item: None`, so only a fanout arm's prose may reference it.
+/// `{{ item }}` in walked (non-arm) prose is a substitution error at the
+/// read site: the walk pins `item: None`, so only a fanout arm's prose may
+/// reference it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn item_in_walked_prose_is_a_substitution_error() {
     let md = flow_prompt!(
         "\
 ## Only\n\n\
-Ask about {{ item }}.\n"
+Ask about {{ item }}.\n\n\
+```lua\nreturn prose\n```\n"
     );
     let error = run_offline(md)
         .await
@@ -2004,41 +1681,7 @@ return 'sub3-reply'\n\
     assert_eq!(store.read("order.txt").expect("order log"), "Sub2\nSub3\n");
 }
 
-/// A worker that neither returns from Lua nor produces prose text falls
-/// through with its arm text seeded from the reply incoming to the parent
-/// (the engine's pass-through semantic), not an empty string.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_without_output_inherits_the_incoming_reply() {
-    let gateway = ScriptedGateway::start(vec![resp_text("prior-reply")]).await;
-    let addr = gateway.addr();
-    let md = flow_prompt!(
-        "\
-## First\n\n\
-Ask for something.\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
-```lua\n\
-assert(item == 'alpha')\n\
-```\n"
-    );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("a no-output arm must inherit the incoming reply");
-    assert_eq!(out, "prior-reply");
-}
-
-/// The other half of the fall-through rule (note 67): with no reply incoming
-/// to the parent, a worker that produces no output yields an honest empty
+/// A worker that produces no output yields an honest empty
 /// text - "done" would be a lie - and the arm still reports ok.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_without_output_and_no_incoming_reply_yields_empty_text() {
@@ -2179,12 +1822,11 @@ var.f = function() end\n\
     );
 }
 
-/// A bare global (`x = 42` without `local`) resolves in prose, with dotted
-/// paths indexing into a table global and a whole table rendering as JSON.
+/// A bare global (`x = 42` without `local`) resolves in prose read through
+/// the lazy `prose` value, with dotted paths indexing into a table global
+/// and a whole table rendering as JSON.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bare_global_resolves_in_prose() {
-    let gateway = ScriptedGateway::start(vec![resp_text("done")]).await;
-    let addr = gateway.addr();
     let md = flow_prompt!(
         "\
 ## Only\n\n\
@@ -2192,40 +1834,24 @@ async fn bare_global_resolves_in_prose() {
 answer = 42\n\
 data = { score = 9 }\n\
 ```\n\n\
-The answer is {{ answer }}; score {{ data.score }}; raw {{ data }}.\n"
+The answer is {{ answer }}; score {{ data.score }}; raw {{ data }}.\n\n\
+```lua\nreturn prose\n```\n"
     );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("a bare global must resolve in prose");
-    assert_eq!(out, "done");
-    let bodies = gateway.requests();
-    let content = bodies[0]["messages"]
-        .as_array()
-        .expect("messages array")
-        .last()
-        .expect("a user turn")["content"]
-        .as_str()
-        .expect("content string");
-    assert!(
-        content.contains("The answer is 42; score 9; raw {\"score\":9}."),
-        "prose must substitute the bare globals: {content}"
-    );
+    let out = run_offline(md)
+        .await
+        .expect("a bare global must resolve in prose");
+    assert_eq!(out, "The answer is 42; score 9; raw {\"score\":9}.");
 }
 
 /// A `{{ }}` path whose first segment names no known namespace and no bare
-/// global is a hard substitution error.
+/// global is a hard substitution error at the read site.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn missing_bare_global_in_prose_errors() {
     let md = flow_prompt!(
         "\
 ## Only\n\n\
-{{ ghost }} here.\n"
+{{ ghost }} here.\n\n\
+```lua\nreturn prose\n```\n"
     );
     let error = run_offline(md)
         .await
@@ -2317,67 +1943,6 @@ list_from_section('## Nope')\n\
     assert!(
         rendered.contains("only available in sections"),
         "the stub error must name the cause: {rendered}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_exhausted_arm_exposes_failure_metadata() {
-    let gateway =
-        ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
-    let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
-# Test prompt\n\n```lua shared\n\
-tools.bind('echo', 'echo tool')\n\
-models.default('writer', 'A general model for tests')\n```\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', list_from_section('### Items'))\n\
-assert(r[1].ok == false)\n\
-assert(r[1].exhausted == true)\n\
-assert(r[1].item == 'alpha')\n\
-assert(r[1].text:find('tool loop exhausted', 1, true))\n\
-assert(tostring(r[1]) == r[1].text)\n\
-return 'ok'\n\
-```\n\n\
-### Worker\n\n\
-```lua\ntools.add('echo')\n```\n\n\
-Loop forever on {{ item }}.\n\n\
-### Items\n\n\
-- alpha\n";
-    let prompt = bound_with_tools(md, Vec::new());
-    let recorder = Arc::new(Recorder::default());
-    let out = run(
-        &prompt,
-        "",
-        &[Arc::new(EchoTool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
-        RunOptions {
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            ..gatewayed(addr)
-        },
-    )
-    .await
-    .expect("soft-degraded fanout must still return structured results");
-    assert_eq!(out, "ok");
-
-    // FANOUT-004: the exhausted arm emits exactly one FANOUT_ARM_EXHAUSTED
-    // terminal event through the observation channel, and never a succeeded.
-    let records = recorder.records();
-    let exhausted = detail::FANOUT_ARM_EXHAUSTED.to_string();
-    assert_eq!(
-        records
-            .iter()
-            .filter(|(_, section, event)| section == "Worker" && *event == exhausted)
-            .count(),
-        1,
-        "exactly one exhausted terminal event per exhausted arm: {records:?}"
-    );
-    let succeeded = detail::FANOUT_ARM_SUCCEEDED.to_string();
-    assert!(
-        !records
-            .iter()
-            .any(|(_, section, event)| section == "Worker" && *event == succeeded),
-        "an exhausted arm never emits succeeded: {records:?}"
     );
 }
 
@@ -2673,8 +2238,6 @@ fanout('### Items', {'x'})\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sys_exposes_section_metadata() {
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("alpha-answer", "stop")]).await;
-    let addr = gateway.addr();
     let md = flow_prompt!(
         "\
 ## Alpha\n\n\
@@ -2682,13 +2245,6 @@ async fn sys_exposes_section_metadata() {
 assert(sys.section_name == 'Alpha')\n\
 assert(sys.execution == 'execute-test')\n\
 assert(sys.section_count == 2)\n\
-local ok = pcall(function() return sys.reply_finish_reason end)\n\
-assert(not ok, 'reply_finish_reason must be absent before prose')\n\
-```\n\n\
-Write one fact.\n\n\
-```lua\n\
-assert(sys.reply_finish_reason == 'stop')\n\
-assert(reply == 'alpha-answer')\n\
 ```\n\n\
 ## Beta\n\n\
 ```lua\n\
@@ -2698,15 +2254,9 @@ assert(sys.execution == 'execute-test')\n\
 return 'done'\n\
 ```\n"
     );
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .expect("sys must expose section metadata");
+    let out = run_offline(md)
+        .await
+        .expect("sys must expose section metadata");
     assert_eq!(out, "done");
 }
 

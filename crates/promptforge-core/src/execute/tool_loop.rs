@@ -1,4 +1,10 @@
-//! The per-section model tool loop and single prose-inference round driver.
+//! The per-section model tool loop driver.
+//!
+//! Test-only until the `models.loop` step rewires this machinery into the
+//! section-visible model operation: automatic prose inference was its last
+//! production caller. The single-shot mode went with it - the unified model
+//! rejects implicit prose tool loops, so the loop always runs to terminal
+//! text or exhaustion.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU32;
@@ -25,37 +31,27 @@ use super::support::advance_turn;
 pub(crate) type LocalDispatch<'a> =
     dyn Fn(&str, serde_json::Value) -> Result<String> + Send + Sync + 'a;
 
-/// How many model rounds a prose block may take.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ProseMode {
-    /// One model round; tool calls for that round are dispatched, then control
-    /// returns even without a final text reply.
-    SingleShot,
-    /// Keep calling until text or `max_tool_iterations` is exhausted.
-    Loop { max_tool_iterations: usize },
-}
-
-/// Text and finish reason from one prose or tool-loop inference.
+/// Text and finish reason from one tool-loop inference.
 #[derive(Debug, Clone)]
 pub(crate) struct ProseInferenceResult {
-    /// Model text when the round produced a reply; `None` for single-shot tool rounds.
+    /// Model text when the loop produced a reply.
     pub text: Option<String>,
     /// Backend `finish_reason` from the last completed model round, when present.
     pub finish_reason: Option<String>,
 }
 
-/// Append `prose` to `conversation` and run model inference under `mode`.
+/// Append `prose` to `conversation` and loop model inference until text or
+/// the iteration cap.
 ///
-/// Returns text when the model produces it. For [`ProseMode::SingleShot`],
-/// text may be `None` after one round that only issued tool calls. In the
-/// loop mode, an empty reply with `finish_reason == "stop"` after at least
-/// one successful tool dispatch is accepted as a clean exit with empty text.
-/// Conversation history accumulates for later prose blocks.
+/// Returns text when the model produces it. An empty reply with
+/// `finish_reason == "stop"` after at least one successful tool dispatch is
+/// accepted as a clean exit with empty text.
+/// Conversation history accumulates across rounds.
 ///
 /// # Errors
 /// Returns an out-of-scope tool error if the model calls an alias absent from
-/// `dispatch`, [`Error::ToolLoopExhausted`] in loop mode if the cap is hit
-/// without a text reply (single-shot never reports it), [`Error::Interrupted`]
+/// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit
+/// without a text reply, [`Error::Interrupted`]
 /// when the run is cancelled, or any transport/backend error from a model call
 /// or a tool's own failure. Returns [`Error::Internal`] if a local tool call
 /// reaches dispatch without the required local dispatcher.
@@ -70,7 +66,7 @@ pub(crate) async fn run_prose_inference(
     dispatch: &BTreeMap<String, DispatchTarget>,
     conversation: &mut Vec<Message>,
     prose: String,
-    mode: ProseMode,
+    max_tool_iterations: usize,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
@@ -87,13 +83,6 @@ pub(crate) async fn run_prose_inference(
         None
     } else {
         Some(schemas)
-    };
-
-    let max_tool_iterations = match mode {
-        ProseMode::SingleShot => 1,
-        ProseMode::Loop {
-            max_tool_iterations,
-        } => max_tool_iterations,
     };
 
     // Completed dispatches only: a tool handler failure aborts the loop, so
@@ -115,9 +104,7 @@ pub(crate) async fn run_prose_inference(
         // when it stopped deliberately (`finish_reason == "stop"`) after doing
         // its work through tool calls; the section reply is then "". Every
         // other empty turn (no prior tool calls, or a missing/non-"stop"
-        // finish reason) stays an `EmptyModelReply` failure. SingleShot needs
-        // no clause: its sole round is the first turn, where the dispatch
-        // count is always zero, so the conditions can never hold there.
+        // finish reason) stays an `EmptyModelReply` failure.
         if let Err(Error::EmptyModelReply { finish_reason, .. }) = &completion
             && finish_reason.as_deref() == Some("stop")
             && successful_tool_calls > 0
@@ -175,7 +162,6 @@ pub(crate) async fn run_prose_inference(
                 });
             }
             CompletionResult::ToolCalls(calls) => {
-                let finish_reason = completion.finish_reason.clone();
                 // Dispatch each requested tool and collect the framed results
                 // as (call id, content) pairs, in call order.
                 let mut results: Vec<(String, String)> = Vec::with_capacity(calls.len());
@@ -274,12 +260,6 @@ pub(crate) async fn run_prose_inference(
                 for (id, content) in results {
                     conversation.push(Message::tool(id, content));
                 }
-                if matches!(mode, ProseMode::SingleShot) {
-                    return Ok(ProseInferenceResult {
-                        text: None,
-                        finish_reason,
-                    });
-                }
             }
             // `CompletionResult` is `#[non_exhaustive]` across the crate
             // boundary: an outcome this build does not recognize can be neither
@@ -288,11 +268,5 @@ pub(crate) async fn run_prose_inference(
         }
     }
 
-    match mode {
-        ProseMode::SingleShot => Ok(ProseInferenceResult {
-            text: None,
-            finish_reason: None,
-        }),
-        ProseMode::Loop { .. } => Err(Error::ToolLoopExhausted),
-    }
+    Err(Error::ToolLoopExhausted)
 }

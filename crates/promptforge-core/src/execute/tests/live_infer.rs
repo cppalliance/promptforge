@@ -32,22 +32,29 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn live_h1_substitutes_and_skips_empty_prose_before_requiring_a_model() {
-    let empty = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
+async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
+    // H1 prose no longer drives inference: an unread buffer - even one
+    // whose substitution would fail or stay empty - discards at the pass's
+    // end without requiring a model. Only an explicit `models.infer` of the
+    // prose requires a binding.
+    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
         # Empty H1\n\n\
         ```lua\nvar.omit = ''\n```\n\n\
         {{ var.omit }}\n\n\
         ## Result\n\n\
         ```lua\nreturn 'ok'\n```\n";
-    let out = super::run(&fixture(empty), "", &[], &StoreRef::memory(), silent())
+    let out = super::run(&fixture(unread), "", &[], &StoreRef::memory(), silent())
         .await
-        .expect("H1 prose that substitutes to empty must not require a model");
+        .expect("unread H1 prose must not require a model");
     assert_eq!(out, "ok");
 
-    let nonempty = empty.replace("var.omit = ''", "var.omit = 'ask'");
-    let error = super::run(&fixture(&nonempty), "", &[], &StoreRef::memory(), silent())
+    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 1\n---\n\n\
+        # Read H1\n\n\
+        ask\n\n\
+        ```lua\nreturn models.infer(prose)\n```\n";
+    let error = super::run(&fixture(reading), "", &[], &StoreRef::memory(), silent())
         .await
-        .expect_err("non-empty substituted H1 prose must still require a model");
+        .expect_err("an explicit infer of H1 prose with no binding must fail");
     assert!(
         matches!(error, Error::ModelRequired { .. }),
         "expected ModelRequired, got {error}"
@@ -389,64 +396,47 @@ async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
+    // The live H1 pass reads its pending buffer only through an explicit
+    // infer, and `var` writes accumulate across the pass into the walk.
+    let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
-    let echo = Arc::new(EchoTool);
-    let descriptor = ToolDescriptor::new(
-        PickerToolId::new("tests", "echo"),
-        echo.description(),
-        echo.parameters_schema(),
-    );
-    let capability =
-        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
-    let source = format!(
-        "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
-         # Live H1 Prose\n\n\
-         ```lua\n\
-         tools.bind('echo', {capability})\n\
-         tools.always('echo')\n\
-         models.default('writer', 'A general model for tests')\n\
-         var.executions = (var.executions or 0) + 1\n\
-         ```\n\n\
-         Ask for one tool call.\n\n\
-         ```lua\n\
-         var.non_final_had_text = reply ~= nil\n\
-         var.executions = var.executions + 1\n\
-         ```\n\n\
-         Finish now.\n\n\
-         ```lua\n\
-         var.final_reply = reply\n\
-         var.executions = var.executions + 1\n\
-         ```\n\n\
-         ## Result\n\n\
-         ```lua\n\
-         return tostring(var.non_final_had_text) .. ':' .. var.final_reply .. ':' .. var.executions\n\
-         ```\n"
-    );
-    let prompt = parse(&source);
-    let picker = build_test_picker(Catalog::new(vec![descriptor]), PickerConfig::default());
+    let source = "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
+        # Live H1 Prose\n\n\
+        ```lua\n\
+        models.default('writer', 'A general model for tests')\n\
+        var.executions = (var.executions or 0) + 1\n\
+        ```\n\n\
+        Ask for one round.\n\n\
+        ```lua\n\
+        var.first = models.infer(prose)\n\
+        var.executions = var.executions + 1\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\n\
+        return var.first .. ':' .. var.executions\n\
+        ```\n";
+    let prompt = parse(source);
+    let picker = empty_test_picker();
     let models = test_model_catalog();
-    let tools: [Arc<dyn Tool>; 1] = [echo];
-    let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
-
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models, &catalog),
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(gatewayed(addr)),
     )
     .await
-    .expect("live H1 prose must preserve block semantics");
+    .expect("live H1 prose infers explicitly");
 
-    assert_eq!(out, "false:final answer:3");
+    assert_eq!(out, "final answer:2");
+    assert_eq!(gateway.call_count(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
-    // One block loop serves both drivers: the live H1 prose and the H2
-    // section prose each reach the gateway exactly once, in source order.
+async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
+    // The live H1 pass and the H2 section each read their own pending
+    // buffer into an explicit infer: two completions, in source order.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
     let source = "---\nname: shared-loop\ndescription: d\npromptforge: 1\n---\n\n\
         # Shared Loop\n\n\
@@ -454,10 +444,13 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
         models.default('writer', 'A general model for tests')\n\
         ```\n\n\
         h1 prose turn\n\n\
+        ```lua\n\
+        var.h1 = models.infer(prose)\n\
+        ```\n\n\
         ## Section Two\n\n\
         h2 prose turn\n\n\
         ```lua\n\
-        return reply\n\
+        return models.infer(prose)\n\
         ```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
@@ -470,7 +463,7 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
         to_config(gatewayed(gateway.addr())),
     )
     .await
-    .expect("H1 prose and H2 prose both run through the shared block loop");
+    .expect("H1 prose and H2 prose each infer explicitly");
 
     assert_eq!(out, "h2 reply");
     assert_eq!(

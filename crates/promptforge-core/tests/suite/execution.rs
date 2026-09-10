@@ -36,18 +36,21 @@ struct ExecutionErrorFixture {
 }
 
 const EXECUTION_ERROR_FIXTURES: &[ExecutionErrorFixture] = &[
+    // Both fixtures fail at the lazy-`prose` read site inside the section's
+    // Lua, so the run-level kind is Lua: the substitution error is an
+    // ordinary, pcall-able Lua error there, not a run-phase failure.
     ExecutionErrorFixture {
         name: "invalid/reply-substitution-nil.md",
         source: REPLY_SUBSTITUTION_NIL,
         execution: REPLY_SUBST_NIL_EXECUTION,
-        kind: RunErrorKind::Substitution,
-        message_fragment: "nil",
+        kind: RunErrorKind::Lua,
+        message_fragment: "reply",
     },
     ExecutionErrorFixture {
         name: "invalid/item-outside-fanout.md",
         source: ITEM_OUTSIDE_FANOUT,
         execution: ITEM_OUTSIDE_EXECUTION,
-        kind: RunErrorKind::Substitution,
+        kind: RunErrorKind::Lua,
         message_fragment: "nil",
     },
 ];

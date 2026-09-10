@@ -355,7 +355,7 @@ fn setup_agent_vm(
     event_log: Option<Arc<dyn EventLog>>,
     ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
 ) -> Result<(ToolCallCounts, Option<EventsSnapshot>), AgentError> {
-    vm.inject_host_with_var("", &serde_json::json!({}), store, None, None, None)?;
+    vm.inject_host_with_var("", &serde_json::json!({}), store, None, None)?;
     vm.install_host_apis(observer, name)?;
     vm.install_coro_shims()?;
     install_agent_chat_shim(vm.lua())?;

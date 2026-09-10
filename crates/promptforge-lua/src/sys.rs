@@ -130,16 +130,6 @@ pub fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
     enrich_sys_field(sys, "model", Json::String(binding.id().name().to_owned()))
 }
 
-/// Returns a copy of `sys` with `reply_finish_reason` set from the last inference.
-#[must_use]
-pub fn enrich_sys_reply_finish_reason(sys: &Json, reason: Option<&str>) -> Json {
-    let value = match reason {
-        Some(value) => Json::String(value.to_owned()),
-        None => Json::Null,
-    };
-    enrich_sys_field(sys, "reply_finish_reason", value)
-}
-
 /// Builds a sealed Lua `sys` table from runtime metadata.
 ///
 /// The proxy is empty; reads go through `__index` against the JSON object and

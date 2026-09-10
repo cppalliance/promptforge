@@ -55,8 +55,6 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) sys: &'a serde_json::Value,
     /// The run-scoped store backing the Lua `store` table.
     pub(crate) store: &'a StoreRef,
-    /// The model reply visible to this section's first prose.
-    pub(crate) last_reply: Option<&'a str>,
     /// The driver-specific seed: the walk's `var`, plus the collection
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
@@ -104,7 +102,6 @@ where
         setup.args,
         setup.sys,
         setup.store,
-        setup.last_reply,
         setup.seed.var,
         setup.write_scope,
     )?;

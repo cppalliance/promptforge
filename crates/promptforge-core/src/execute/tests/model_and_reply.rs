@@ -22,7 +22,8 @@ models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64
 ```\n\n\
 ## Only\n\n\
 ```lua\nmodels.use('analyst')\n```\n\n\
-Ask the model.\n";
+Ask the model.\n\n\
+```lua\nreturn models.infer(prose)\n```\n";
     let prompt =
         Prompt::parse(md, EXECUTION, &NullObserver::default()).expect("fixture must parse");
     let prompt = TestPrompt {
@@ -53,7 +54,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\nSay something.\n";
+## Only\n\nSay something.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let recorder = Arc::new(Recorder::default());
     let out = run(
         &bound_for_model(md),
@@ -100,23 +101,9 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
                 "Only".to_string(),
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
             ),
-            (
-                "Only".to_string(),
-                detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
-            ),
-            (
-                "Only".to_string(),
-                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_string(),
-            ),
+            ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string(),),
-            (
-                "Only".to_string(),
-                detail::LUA_REPLY_BINDING_STARTED.to_string(),
-            ),
-            (
-                "Only".to_string(),
-                detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
-            ),
+            ("Only".to_string(), detail::LUA_CHUNK_SUCCEEDED.to_string()),
             ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (
                 "Only".to_string(),
@@ -129,11 +116,16 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 }
 
 #[tokio::test]
-async fn epilog_runs_after_reply_and_can_return() {
+async fn epilog_runs_after_prose_and_can_return() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
+## Only\n\nSay something.\n\n```lua\n\
+local text = models.infer(prose)\n\
+assert(text == 'hello from the mock')\n\
+store.write('epilog-ran.txt', 'yes')\n\
+return 'epilog result'\n\
+```\n";
     let prompt = bound_for_model(md);
     let entry = prompt.prompt().entry().expect("fixture has sections");
     assert!(entry.prologue().is_none());
@@ -187,27 +179,11 @@ async fn epilog_runs_after_reply_and_can_return() {
                 "Only".to_string(),
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
             ),
-            (
-                "Only".to_string(),
-                detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
-            ),
-            (
-                "Only".to_string(),
-                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_string(),
-            ),
+            ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string()),
             (
                 "Only".to_string(),
-                detail::LUA_REPLY_BINDING_STARTED.to_string(),
-            ),
-            (
-                "Only".to_string(),
-                detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
-            ),
-            ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::STORE_WRITE_SUCCEEDED.to_string(),
+                detail::STORE_WRITE_SUCCEEDED.to_string()
             ),
             ("Only".to_string(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
@@ -275,10 +251,10 @@ async fn shared_helper_survives_prologue_model_and_epilog() {
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-```lua\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
+```lua shared\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
 ## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
 Ask using {{ var.question }}.\n\n\
-```lua\nreturn decorate(reply)\n```\n";
+```lua\nreturn decorate(models.infer(prose))\n```\n";
     let recorder = Arc::new(Recorder::default());
     let out = run(
         &bound_for_model(md),
@@ -327,24 +303,8 @@ Ask using {{ var.question }}.\n\n\
             ),
             ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_owned(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
-            (
-                "Only".to_owned(),
-                detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
-            ),
-            (
-                "Only".to_owned(),
-                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_string(),
-            ),
-            ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_string(),),
-            (
-                "Only".to_owned(),
-                detail::LUA_REPLY_BINDING_STARTED.to_string(),
-            ),
-            (
-                "Only".to_owned(),
-                detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
-            ),
             ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
+            ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_string(),),
             ("Only".to_owned(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             ("Only".to_owned(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (
@@ -387,12 +347,14 @@ async fn whitespace_only_prose_skips_model_without_binding() {
 }
 
 #[tokio::test]
-async fn model_required_when_non_empty_prose_has_no_binding() {
+async fn model_required_when_infer_has_no_binding() {
+    // Prose itself never requires a model; only an explicit `models.infer`
+    // of it does.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\nAsk the model.\n";
+## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let error = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
         .await
-        .expect_err("non-empty prose without a model binding must fail");
+        .expect_err("an explicit infer without a model binding must fail");
     assert!(
         matches!(error, Error::ModelRequired { .. }),
         "expected ModelRequired, got {error}"
@@ -436,69 +398,69 @@ async fn prologue_sys_model_unknown_before_scope_close() {
 
 #[tokio::test]
 async fn prose_substitution_sees_sys_model_catalog_id() {
+    // The first script dispatch runs the one-time scope install, which
+    // enriches `sys.model` with the bound catalog id; a prose read after it
+    // substitutes the catalog id, not the alias.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\n-- prologue\n```\n\nModel id is {{ sys.model }}.\n\n\
-```lua\nreturn 'done'\n```\n";
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+# Test prompt\n\n```lua shared\n\
+tools.bind('echo', 'echo tool')\n\
+models.default('writer', 'A general model for tests')\n```\n\n\
+## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\nModel id is {{ sys.model }}.\n\n\
+```lua\nreturn prose\n```\n";
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
-        &bound_for_model(md),
+        &prompt,
         "",
-        &[],
+        &[Arc::new(EchoTool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        gatewayed(addr),
+        silent(),
     )
     .await
     .unwrap();
-    assert_eq!(out, "done");
-
-    let body = gateway
-        .last_request()
-        .expect("complete must reach the gateway");
-    let user_content = body["messages"]
-        .as_array()
-        .and_then(|messages| messages.first())
-        .and_then(|message| message["content"].as_str())
-        .expect("first message must carry substituted prose");
-    assert!(
-        user_content.contains("Model id is claude-sonnet-4-6."),
-        "substituted prose must carry catalog id, got: {user_content}"
-    );
+    assert_eq!(out, "Model id is claude-sonnet-4-6.");
 }
 
 #[tokio::test]
-async fn empty_prose_epilog_sees_model_catalog_id_not_alias() {
+async fn epilog_sees_model_catalog_id_not_alias_after_the_scope_install() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\n-- prologue\n```\n\n```lua\nreturn sys.model\n```\n\n";
-    assert_eq!(
-        run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
-            .await
-            .unwrap(),
-        "claude-sonnet-4-6"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n\
-## Parent\n\n```lua\nlocal r = fanout('### Worker', list_from_section('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
-### Worker\n\n```lua\n-- prologue\n```\n\nAsk about {{ item }}.\n\n\
-```lua\nreturn sys.model .. ':' .. tostring(sys.reply_finish_reason) .. ':' .. item\n```\n\n\
-### Items\n\n- a\n";
-    let gateway =
-        ScriptedGateway::start(vec![resp_text_finish("hello from the mock", "stop")]).await;
-    let addr = gateway.addr();
+# Test prompt\n\n```lua shared\n\
+tools.bind('echo', 'echo tool')\n\
+models.default('writer', 'A general model for tests')\n```\n\n\
+## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\n```lua\nreturn sys.model\n```\n";
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
-        &bound_for_model(md),
+        &prompt,
         "",
-        &[],
+        &[Arc::new(EchoTool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        gatewayed(addr),
+        silent(),
     )
     .await
     .unwrap();
-    assert_eq!(out, "claude-sonnet-4-6:stop:a");
+    assert_eq!(out, "claude-sonnet-4-6");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua shared\n\
+tools.bind('echo', 'echo tool')\n\
+models.default('writer', 'A general model for tests')\n```\n\n\
+## Parent\n\n```lua\nlocal r = fanout('### Worker', list_from_section('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
+### Worker\n\n```lua\ntools.call('echo', { value = item })\n```\n\n\
+```lua\nreturn sys.model .. ':' .. item\n```\n\n\
+### Items\n\n- a\n";
+    let prompt = bound_with_tools(md, Vec::new());
+    let out = run(
+        &prompt,
+        "",
+        &[Arc::new(EchoTool) as Arc<dyn Tool>],
+        &StoreRef::memory(),
+        silent(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "claude-sonnet-4-6:a");
 }
 
 /// `{{ item }}` renders a non-string member per its type: here a table
@@ -508,7 +470,7 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', {{7, 'x'}})\nreturn r[1].text\n```\n\n\
-### Worker\n\n```lua\n-- prologue\n```\n\nItem: {{ item }}.\n";
+### Worker\n\n```lua\n-- prologue\n```\n\nItem: {{ item }}.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
     let out = run(
@@ -536,55 +498,7 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
     );
 }
 
-// --- Reply forwarding across sections ---
-
-#[tokio::test]
-async fn reply_carries_forward_to_next_section_prologue() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## First\n\nAsk the model.\n\n\
-## Second\n\n```lua\nreturn reply\n```\n";
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(out, "hello from the mock");
-}
-
-#[tokio::test]
-async fn reply_substitution_in_prose_uses_previous_section_reply() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## First\n\nAsk the model.\n\n\
-## Second\n\nThe previous reply was: {{ reply }}\n\n\
-```lua\nreturn reply\n```\n";
-    run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        gatewayed(addr),
-    )
-    .await
-    .unwrap();
-
-    let body = gateway.last_request().expect("must have captured");
-    let messages = body["messages"].as_array().expect("messages array");
-    let user_msg = messages.last().expect("last message");
-    let content = user_msg["content"].as_str().expect("content string");
-    assert!(
-        content.contains("The previous reply was: hello from the mock"),
-        "{{ reply }} must substitute the previous section's model text, got: {content}"
-    );
-}
+// --- Reply removal ---
 
 #[tokio::test]
 async fn reply_is_nil_in_first_section() {
@@ -595,12 +509,14 @@ async fn reply_is_nil_in_first_section() {
 }
 
 #[tokio::test]
-async fn reply_substitution_nil_is_a_hard_error() {
+async fn reply_substitution_is_an_unknown_global_error() {
+    // The reply register is gone: `{{ reply }}` names no namespace and no
+    // bare global, so reading the prose fails at the read site.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n{{ reply }}\n";
+## Only\n\n{{ reply }}\n\n```lua\nreturn prose\n```\n";
     let err = run_offline(md)
         .await
-        .expect_err("{{ reply }} when nil must error");
+        .expect_err("{{ reply }} names no global and must error");
     assert!(
         err.to_string().contains("reply"),
         "error must mention reply, got: {err}"
@@ -657,7 +573,8 @@ models.bind('analyst', 'A careful analysis model')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nstore.write('handle.txt', models.get('analyst').name)\n```\n\n\
-Ask the model.\n";
+Ask the model.\n\n\
+```lua\nreturn models.infer(prose)\n```\n";
     let prompt = TestPrompt {
         prompt: parse(md),
         models: writer_and_analyst_catalog(),

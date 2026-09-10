@@ -189,7 +189,7 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
     let observer = NullObserver::default();
     let mut vm = SectionVm::new(&nonce, "test-run", &observer, "Test")
         .expect("section VM construction cannot fail");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host injection cannot fail");
     vm.install_coro_shims().expect("the shim prelude installs");
     let (call_is_function, bare_is_nil): (bool, bool) = vm

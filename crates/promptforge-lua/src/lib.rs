@@ -103,6 +103,7 @@ mod handles;
 mod live;
 mod messages;
 mod program;
+mod prose;
 mod scope;
 pub(crate) use handles::resolve_section_target;
 mod models;
@@ -126,6 +127,8 @@ pub use live::LiveBindingProducer;
 #[doc(hidden)]
 pub use models::ModelRuntime;
 #[doc(hidden)]
+pub use prose::ProseState;
+#[doc(hidden)]
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request,
     ToolCallOutcome, ToolCallRecord, YieldParse,
@@ -135,7 +138,7 @@ pub use runtime_events::{EventsSnapshot, install_runtime_events};
 #[doc(hidden)]
 pub use scope::{ToolCallCounts, ToolRuntime};
 #[doc(hidden)]
-pub use sys::{enrich_sys_model, enrich_sys_reply_finish_reason};
+pub use sys::enrich_sys_model;
 #[doc(hidden)]
 pub use vm::{CoroStep, SectionVm, current_tool_bindings, resolve_model_binding};
 

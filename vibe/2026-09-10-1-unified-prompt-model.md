@@ -399,7 +399,7 @@ In `crates/promptforge-parser/src/build.rs` and `crates/promptforge-parser/src/f
 
 <step-6>
 
-### Step 6: lazy `prose` and `reply` removal
+### Step 6: lazy `prose` and `reply` removal [completed]
 
 - Component: prose
 

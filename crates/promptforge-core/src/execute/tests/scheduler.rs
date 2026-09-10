@@ -1,16 +1,16 @@
 //! Scheduler-side tests: the decision-gate scenario (nested call plus
 //! inference end-to-end on a current-thread runtime), cancellation while
 //! suspended on an infer, the per-chain call-depth cap, and the walk
-//! rules mirrored from the legacy suite (fall-through order, off-walk
-//! skips, reply roll-forward, `var` discipline, the run-global id
+//! rules mirrored from the legacy suite (fall-through order, explicit
+//! `var` and return-value handoffs, the run-global id
 //! counter), plus the control-transfer rules: jump targets (sibling moves
 //! and child descents with the parent resuming after the jumper), the
 //! scalar return's chain scoping, and the section-boundary observations.
 //! The fanout coverage mirrors the legacy engine's mechanics (ordering,
 //! the concurrency window, interleaving) and its failure semantics (the
 //! store write-write race as a hard error, unordered-legal appends, the
-//! fatal-arm sibling abort, the `ToolLoopExhausted` soft-degrade, the
-//! pre-scheduling guards, and cancellation while suspended in an arm).
+//! fatal-arm sibling abort, the pre-scheduling guards, and cancellation
+//! while suspended in an arm).
 
 use std::num::NonZeroUsize;
 
@@ -185,29 +185,26 @@ async fn call_depth_cap_reads_the_chain_field() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_prose_block_uses_the_run_configured_client_and_binds_the_reply() {
+async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     // The chain's client slot is seeded from the run's configured client, so
-    // a prose block before any infer reaches that gateway rather than
-    // falling back to an environment client; the prose output binds the
-    // reply that becomes the run's result.
+    // a section's explicit `models.infer(prose)` reaches that gateway rather
+    // than falling back to an environment client; the returned text becomes
+    // the run's result.
     let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
     let md = "---\nname: prose\ndescription: d\npromptforge: 1\n---\n\n\
         # Prose\n\n\
         ## Only\n\n\
-        Say something.\n";
+        Say something.\n\n\
+        ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("a prose block runs through the scheduler");
+        .expect("an explicit infer of the prose runs through the scheduler");
 
     assert_eq!(out, "prose answer");
-    assert_eq!(
-        gateway.call_count(),
-        1,
-        "the prose block drives one completion"
-    );
+    assert_eq!(gateway.call_count(), 1, "the infer drives one completion");
     let requests = gateway.requests();
     let content = requests[0]["messages"][0]["content"]
         .as_str()
@@ -216,25 +213,6 @@ async fn a_prose_block_uses_the_run_configured_client_and_binds_the_reply() {
         content.contains("Say something."),
         "the prose text reaches the gateway: {requests:?}"
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_lua_blocks_reply_read_back_steers_the_chain_result() {
-    // A Lua block that sets `reply` without returning falls through; the
-    // read-back after the block is what the chain's finish reports. Without
-    // the read-back the run would end with the generic completion.
-    let md = "---\nname: reply\ndescription: d\npromptforge: 1\n---\n\n\
-        # Reply\n\n\
-        ## Only\n\n\
-        ```lua\nreply = 'from lua'\n```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("a reply-setting block runs through the scheduler");
-
-    assert_eq!(out, "from lua");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -368,77 +346,6 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
         .expect("the chain must run the addressed off-walk target and fall through");
 
     assert_eq!(out, "S1\nS2\nA:s2-reply\nB\n");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn reply_carries_forward_to_next_section() {
-    // Mirror of the legacy `reply_carries_forward_to_next_section_prologue`:
-    // one section's prose-produced reply seeds the next section's VM.
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Reply\n\n\
-        ## First\n\n\
-        Ask the model.\n\n\
-        ## Second\n\n\
-        ```lua\nreturn reply\n```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("the reply must carry forward across the section boundary");
-
-    assert_eq!(out, "hello from the mock");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn reply_assignment_in_lua_carries_to_next_section() {
-    // Mirror of the legacy case of the same name: the global IS the reply,
-    // so an author's `reply = "custom"` carries to the next section exactly
-    // like a prose-produced reply.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Assign\n\n\
-        ## Source\n\n\
-        ```lua\nreply = 'custom'\n```\n\n\
-        ## Next\n\n\
-        ```lua\n\
-        assert(reply == 'custom', 'a Lua reply assignment must carry to the next section')\n\
-        return reply\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("a Lua reply assignment must carry to the next section");
-
-    assert_eq!(out, "custom");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn reply_nil_before_fall_through_clears_reply_for_next_section() {
-    // Mirror of the legacy case of the same name: `reply = nil` as a
-    // section's last word clears the reply the next section on the walk
-    // sees.
-    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Clear\n\n\
-        ## Source\n\n\
-        Ask something.\n\n\
-        ```lua\nreply = nil\n```\n\n\
-        ## Next\n\n\
-        ```lua\n\
-        assert(reply == nil, 'reply = nil at fall-through must clear what the next section sees')\n\
-        return 'cleared'\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("reply = nil at fall-through must clear the reply the next section sees");
-
-    assert_eq!(out, "cleared");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -604,10 +511,11 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
 // exercising the legacy engine untouched; these prove the scheduler.
 
 #[tokio::test(flavor = "current_thread")]
-async fn jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks() {
-    // Mirror of the legacy case of the same name: the jump transfers
-    // control, the jumper's remaining blocks never run, and the target
-    // sees no prior reply because no prose ran before the jump.
+async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
+    // Mirror of the legacy
+    // `jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks`:
+    // the jump transfers control and the jumper's remaining blocks never
+    // run.
     let store = StoreRef::memory();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Jump\n\n\
@@ -621,7 +529,6 @@ async fn jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks() {
         ```lua\nreturn 'accepted'\n```\n\n\
         ## Help\n\n\
         ```lua\n\
-        assert(reply == nil, 'no prior reply because no prose ran before the jump')\n\
         return 'helped:' .. store.read('seen.txt')\n\
         ```\n";
     let prompt = parse(md);
@@ -633,60 +540,6 @@ async fn jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks() {
 
     assert_eq!(out, "helped:check");
     assert_eq!(store.read("seen.txt").expect("seen"), "check");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn jump_preserves_reply_from_prior_section() {
-    // Mirror of the legacy case of the same name: a jump carries the prior
-    // section's reply across the transfer.
-    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Carry\n\n\
-        ## Source\n\n\
-        Ask something.\n\n\
-        ```lua\njump('## Target')\n```\n\n\
-        ## Target\n\n\
-        ```lua\n\
-        assert(reply ~= nil, 'jump must preserve the prior reply')\n\
-        return reply\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("jump must preserve the reply from the prior section");
-
-    assert_eq!(out, "model-said-this");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn reply_nil_before_jump_clears_reply_for_target() {
-    // Mirror of the legacy case of the same name: `reply = nil` before a
-    // jump clears the reply the jump target sees - the walk reads the Lua
-    // `reply` global back at the transfer.
-    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Clear\n\n\
-        ## Source\n\n\
-        Ask something.\n\n\
-        ```lua\n\
-        reply = nil\n\
-        jump('## Target')\n\
-        ```\n\n\
-        ## Target\n\n\
-        ```lua\n\
-        assert(reply == nil, 'reply = nil before the jump must clear what the target sees')\n\
-        return 'cleared'\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("reply = nil before a jump must clear the reply the target sees");
-
-    assert_eq!(out, "cleared");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -869,44 +722,6 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
         .expect("a jump to a child must start the child-level walk");
 
     assert_eq!(out, "A\nX\nY\nB\n");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn child_walk_reply_thread_follows_the_detour() {
-    // Mirror of the legacy case of the same name: the jumper's reply
-    // reaches the sub-walk's first section, each section of the sub-walk
-    // rolls it forward, and the sub-walk's last reply resumes the parent
-    // chain.
-    let gateway = ScriptedGateway::start(vec![
-        resp_text("reply-a"),
-        resp_text("reply-x"),
-        resp_text("reply-y"),
-    ])
-    .await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Detour\n\n\
-        ## A\n\n\
-        Ask A.\n\n\
-        ```lua\njump('### X')\n```\n\n\
-        ### X\n\n\
-        ```lua\nassert(reply == 'reply-a', 'the jumper reply reaches the first child')\n```\n\n\
-        Ask X.\n\n\
-        ### Y\n\n\
-        ```lua\nassert(reply == 'reply-x', 'the child walk rolls the reply forward')\n```\n\n\
-        Ask Y.\n\n\
-        ## B\n\n\
-        ```lua\n\
-        assert(reply == 'reply-y', 'the sub-walk last reply resumes the parent chain')\n\
-        return reply\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("the reply thread must follow the detour");
-
-    assert_eq!(out, "reply-y");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1182,13 +997,13 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn call_chain_jumps_to_a_child_and_returns_the_chain_reply() {
-    // Mirror of the legacy case of the same name (the canonical contained
-    // chain): A executes Sub; Sub jumps to its child S1, starting a
-    // child-level walk that falls through to S2; when S2 finishes, the
-    // chain's final reply returns to A and the outer walk continues at B,
+async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
+    // Mirror of the legacy
+    // `call_chain_jumps_to_a_child_and_returns_the_chain_reply` (the
+    // canonical contained chain): A calls Sub; Sub jumps to its child S1,
+    // starting a child-level walk that falls through to S2; S2's return is
+    // the chain's final text back to A, and the outer walk continues at B,
     // never having moved.
-    let gateway = ScriptedGateway::start(vec![resp_text("reply-s1"), resp_text("reply-s2")]).await;
     let store = StoreRef::memory();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Chain\n\n\
@@ -1196,7 +1011,7 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_reply() {
         ```lua\n\
         store.append('order.txt', 'A1\\n')\n\
         local r = call('## Sub')\n\
-        assert(r == 'reply-s2', 'the chain final reply returns to A')\n\
+        assert(r == 's2-result', 'the chain final text returns to A')\n\
         store.append('order.txt', 'A2\\n')\n\
         ```\n\n\
         ## B\n\n\
@@ -1210,21 +1025,18 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_reply() {
         jump('### S1')\n\
         ```\n\n\
         ### S1\n\n\
-        Ask S1.\n\n\
-        ```lua\n\
-        assert(reply == 'reply-s1', 'the chain rolls the reply forward')\n\
-        store.append('order.txt', 'S1\\n')\n\
-        ```\n\n\
+        ```lua\nstore.append('order.txt', 'S1\\n')\n```\n\n\
         ### S2\n\n\
-        ```lua\nassert(reply == 'reply-s1', 'fall-through inside the chain carries the reply')\n```\n\n\
-        Ask S2.\n\n\
-        ```lua\nstore.append('order.txt', 'S2\\n')\n```\n";
+        ```lua\n\
+        store.append('order.txt', 'S2\\n')\n\
+        return 's2-result'\n\
+        ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("the call chain must jump, fall through, and return its reply");
+        .expect("the call chain must jump, fall through, and return its final text");
 
     assert_eq!(out, "A1\nSub\nS1\nS2\nA2\nB\n");
 }
@@ -1837,46 +1649,19 @@ async fn h1_scalar_return_short_circuits_the_walk() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn h1_only_prose_reply_is_the_run_result() {
-    // The reply half of the empty-sections rule: an H1-only prompt whose
-    // prose produces a reply ends the run with that reply, not the generic
-    // completion.
+async fn h1_prose_inferred_explicitly_is_the_run_result() {
+    // An H1-only prompt whose Lua reads its pending buffer into an explicit
+    // infer ends the run with the inferred text: the scalar return
+    // short-circuits the (empty) walk.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply")]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Only Prose\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
         ```\n\n\
-        say something\n";
-    let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::models_only();
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .with_live_h1(resolution.context())
-        .drive()
-        .await
-        .expect("the H1 prose reply ends the run");
-
-    assert_eq!(out, "h1 reply");
-    assert_eq!(gateway.call_count(), 1);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
-    // Mirror of the legacy case of the same name: the live H1 prose and
-    // the H2 section prose each reach the gateway exactly once, in source
-    // order.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
-    let md = "---\nname: shared-loop\ndescription: d\npromptforge: 1\n---\n\n\
-        # Shared Loop\n\n\
+        say something\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
-        ```\n\n\
-        h1 prose turn\n\n\
-        ## Section Two\n\n\
-        h2 prose turn\n\n\
-        ```lua\n\
-        return reply\n\
+        return models.infer(prose)\n\
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
@@ -1885,7 +1670,41 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
         .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect("H1 prose and H2 prose both run through the shared block loop");
+        .expect("the H1 infer of its prose ends the run");
+
+    assert_eq!(out, "h1 reply");
+    assert_eq!(gateway.call_count(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
+    // Mirror of the legacy
+    // `h1_and_h2_prose_both_run_through_the_shared_block_loop`: the live H1
+    // pass and the H2 section each read their own pending buffer into an
+    // explicit infer - two completions, in source order.
+    let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
+    let md = "---\nname: shared-loop\ndescription: d\npromptforge: 1\n---\n\n\
+        # Shared Loop\n\n\
+        ```lua\n\
+        models.default('writer', 'A general model for tests')\n\
+        ```\n\n\
+        h1 prose turn\n\n\
+        ```lua\n\
+        var.h1 = models.infer(prose)\n\
+        ```\n\n\
+        ## Section Two\n\n\
+        h2 prose turn\n\n\
+        ```lua\n\
+        return models.infer(prose)\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let resolution = H1Resolution::models_only();
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .with_live_h1(resolution.context())
+        .drive()
+        .await
+        .expect("H1 prose and H2 prose each infer explicitly");
 
     assert_eq!(out, "h2 reply");
     assert_eq!(
@@ -1911,35 +1730,41 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn live_h1_substitutes_and_skips_empty_prose_before_requiring_a_model() {
-    // Mirror of the legacy case of the same name: H1 prose that
-    // substitutes to empty never reaches inference, so it never requires a
-    // model; non-empty substituted prose still does.
-    let empty = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
+async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
+    // Mirror of the legacy
+    // `live_h1_substitutes_and_skips_empty_prose_before_requiring_a_model`:
+    // H1 prose no longer drives inference, so an unread buffer - even one
+    // whose substitution would fail or stay empty - discards at the pass's
+    // end without requiring a model. Only an explicit `models.infer` of the
+    // prose requires a binding.
+    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
         # Empty H1\n\n\
         ```lua\nvar.omit = ''\n```\n\n\
         {{ var.omit }}\n\n\
         ## Result\n\n\
         ```lua\nreturn 'ok'\n```\n";
-    let prompt = parse(empty);
+    let prompt = parse(unread);
     let ctx = h1_context(&prompt);
     let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
         .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect("H1 prose that substitutes to empty must not require a model");
+        .expect("unread H1 prose must not require a model");
     assert_eq!(out, "ok");
 
-    let nonempty = empty.replace("var.omit = ''", "var.omit = 'ask'");
-    let prompt = parse(&nonempty);
+    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 1\n---\n\n\
+        # Read H1\n\n\
+        ask\n\n\
+        ```lua\nreturn models.infer(prose)\n```\n";
+    let prompt = parse(reading);
     let ctx = h1_context(&prompt);
     let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
         .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect_err("non-empty substituted H1 prose must still require a model");
+        .expect_err("an explicit infer of H1 prose with no binding must fail");
     assert!(
         matches!(error, Error::ModelRequired { .. }),
         "expected ModelRequired, got {error}"
@@ -1947,59 +1772,37 @@ async fn live_h1_substitutes_and_skips_empty_prose_before_requiring_a_model() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var() {
-    // Mirror of the legacy case of the same name: the live H1 prose runs
-    // the always-scope tool loop, a non-final prose block leaves `reply`
-    // unset for the following Lua block, the final prose's reply is
-    // visible, and `var` writes accumulate across the pass into the walk.
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let echo = Arc::new(EchoTool);
-    let descriptor = ToolDescriptor::new(
-        PickerToolId::new("tests", "echo"),
-        echo.description(),
-        echo.parameters_schema(),
-    );
-    let capability =
-        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
-    let md = format!(
-        "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
-         # Live H1 Prose\n\n\
-         ```lua\n\
-         tools.bind('echo', {capability})\n\
-         tools.always('echo')\n\
-         models.default('writer', 'A general model for tests')\n\
-         var.executions = (var.executions or 0) + 1\n\
-         ```\n\n\
-         Ask for one tool call.\n\n\
-         ```lua\n\
-         var.non_final_had_text = reply ~= nil\n\
-         var.executions = var.executions + 1\n\
-         ```\n\n\
-         Finish now.\n\n\
-         ```lua\n\
-         var.final_reply = reply\n\
-         var.executions = var.executions + 1\n\
-         ```\n\n\
-         ## Result\n\n\
-         ```lua\n\
-         return tostring(var.non_final_had_text) .. ':' .. var.final_reply .. ':' .. var.executions\n\
-         ```\n"
-    );
-    let prompt = parse(&md);
+async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
+    // Mirror of the var half of the legacy
+    // `live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var`:
+    // the pass reads its pending buffer only through an explicit infer, and
+    // `var` writes accumulate across the pass into the walk.
+    let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
+    let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
+        # Live H1 Prose\n\n\
+        ```lua\n\
+        models.default('writer', 'A general model for tests')\n\
+        var.executions = (var.executions or 0) + 1\n\
+        ```\n\n\
+        Ask for one round.\n\n\
+        ```lua\n\
+        var.first = models.infer(prose)\n\
+        var.executions = var.executions + 1\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\n\
+        return var.first .. ':' .. var.executions\n\
+        ```\n";
+    let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let tools: [Arc<dyn Tool>; 1] = [echo];
-    let resolution = H1Resolution {
-        picker: build_test_picker(Catalog::new(vec![descriptor]), PickerConfig::default()),
-        models: test_model_catalog(),
-        tools: ToolCatalog::new(&tools).expect("the fixture tool is unique"),
-    };
+    let resolution = H1Resolution::models_only();
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect("live H1 prose must preserve block semantics");
+        .expect("live H1 prose infers explicitly");
 
-    assert_eq!(out, "false:final answer:3");
+    assert_eq!(out, "final answer:2");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2309,12 +2112,12 @@ async fn pre_cancelled_fanout_returns_interrupted() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn model_required_when_arm_prose_has_no_binding() {
+async fn model_required_when_arm_infer_has_no_binding() {
     // Mirror of the legacy `model_required_when_arm_prose_has_no_binding`:
-    // an arm whose prose needs a model the run never bound fails the fanout
-    // with Error::ModelRequired naming the worker section. The context is
-    // built directly so the model set stays empty - the shared test context
-    // pre-fills a default binding.
+    // an arm whose explicit infer of its prose has no model binding fails
+    // the fanout with Error::ModelRequired naming the worker section. The
+    // context is built directly so the model set stays empty - the shared
+    // test context pre-fills a default binding.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2322,7 +2125,8 @@ async fn model_required_when_arm_prose_has_no_binding() {
         fanout('### Worker', {'alpha'})\n\
         ```\n\n\
         ### Worker\n\n\
-        Ask the model about {{ item }}.\n";
+        Ask the model about {{ item }}.\n\n\
+        ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = RunContext::new(
@@ -2335,7 +2139,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
     let error = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect_err("non-empty arm prose without a model binding must fail");
+        .expect_err("an arm infer without a model binding must fail");
     assert!(
         matches!(error, Error::ModelRequired { .. }),
         "expected ModelRequired, got {error}"
@@ -2926,69 +2730,6 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn tool_loop_exhausted_arm_soft_degrades() {
-    // Mirror of the legacy `fanout_exhausted_arm_exposes_failure_metadata`:
-    // `Error::ToolLoopExhausted` soft-degrades the arm to the incomplete
-    // stub (`.ok = false`, `.exhausted = true`, the "section incomplete:
-    // tool loop exhausted" text) so one stuck arm cannot kill sibling
-    // evidence, and the arm emits exactly one EXHAUSTED terminal event,
-    // never a succeeded.
-    let gateway =
-        ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
-    let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
-        # Fanout\n\n\
-        ## Parent\n\n\
-        ```lua\n\
-        local r = fanout('### Worker', {'alpha'})\n\
-        assert(r[1].ok == false)\n\
-        assert(r[1].exhausted == true)\n\
-        assert(r[1].item == 'alpha')\n\
-        assert(r[1].text:find('tool loop exhausted', 1, true))\n\
-        assert(tostring(r[1]) == r[1].text)\n\
-        return 'ok'\n\
-        ```\n\n\
-        ### Worker\n\n\
-        ```lua\ntools.add('echo')\n```\n\n\
-        Loop forever on {{ item }}.\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = crate::lua::ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
-        Vec::new(),
-    );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("a soft-degraded fanout still returns structured results");
-
-    assert_eq!(out, "ok");
-    let events = recorder.events();
-    let exhausted = detail::FANOUT_ARM_EXHAUSTED.to_string();
-    assert_eq!(
-        events
-            .iter()
-            .filter(|(section, event)| section == "Worker" && event == &exhausted)
-            .count(),
-        1,
-        "exactly one exhausted terminal event per exhausted arm: {events:?}"
-    );
-    let succeeded = detail::FANOUT_ARM_SUCCEEDED.to_string();
-    assert!(
-        !events
-            .iter()
-            .any(|(section, event)| section == "Worker" && event == &succeeded),
-        "an exhausted arm never emits succeeded: {events:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // Cancellation while suspended in an arm: both arms are parked on slow
     // infers when the cancel lands, so the driver aborts the in-flight I/O
@@ -3308,50 +3049,6 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
     assert_eq!(out, "echoed: hi|1");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_outside_the_scope_never_widens_the_advertised_set() {
-    // The widened script resolution must not leak into the model's offer:
-    // after a script dispatch of a bound-but-unscoped tool, the same
-    // section's prose round still advertises exactly the effective scope.
-    // (`declared_tools_are_not_injected_without_always_or_add` in
-    // tool_scoping.rs pins the same rule for a section with no script
-    // dispatch at all.)
-    let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\ntools.call('hidden', { value = 'x' })\n```\n\n\
-        Say something.\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set_scoped(
-        &ctx,
-        vec![
-            crate::lua::ToolBinding::for_test("seen", "seen tool", Arc::new(EchoTool)),
-            crate::lua::ToolBinding::for_test("hidden", "hidden tool", Arc::new(EchoTool)),
-        ],
-        vec!["seen".to_owned()],
-    );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("the prose round after the script dispatch succeeds");
-    assert_eq!(out, "prose answer");
-    let bodies = gateway.requests();
-    let advertised: Vec<String> = bodies[0]["tools"]
-        .as_array()
-        .expect("the prose round advertises the scoped set")
-        .iter()
-        .filter_map(|tool| tool["function"]["name"].as_str())
-        .map(str::to_owned)
-        .collect();
-    assert_eq!(
-        advertised,
-        vec!["seen".to_owned()],
-        "the model-advertised set stays section-scoped"
-    );
-}
-
 /// A tool that signals its start and then sleeps far past every deadline,
 /// so the cancellation test fires only once the dispatch is in flight.
 struct SignallingSlowTool {
@@ -3576,16 +3273,17 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_before_prose_keeps_the_model_install() {
-    // The one-time section scope install is shared between the first prose
-    // block and the first script dispatch: a script `tools.call` that runs
-    // first must not swallow the prose path's model resolution.
+async fn a_script_tools_call_before_infer_keeps_the_model_install() {
+    // The one-time section scope install is shared between the first script
+    // dispatch and the model resolution: a script `tools.call` that runs
+    // first must not swallow the install a later `models.infer` relies on.
     let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\ntools.call('echo', { value = 'x' })\n```\n\n\
-        Say something.\n";
+        Say something.\n\n\
+        ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
@@ -3599,7 +3297,7 @@ async fn a_script_tools_call_before_prose_keeps_the_model_install() {
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("prose after a script dispatch still resolves the model");
+        .expect("infer after a script dispatch still resolves the model");
     assert_eq!(out, "prose answer");
 }
 

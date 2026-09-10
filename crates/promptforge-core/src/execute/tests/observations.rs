@@ -276,7 +276,7 @@ async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
 
 #[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
-    let gateway = ScriptedGateway::start(aliased_tool_script("echo")).await;
+    let gateway = ScriptedGateway::start(vec![resp_text("aliased final")]).await;
     let addr = gateway.addr();
     let tool = Arc::new(ScopedFixtureTool::new(
         "echo",
@@ -298,7 +298,12 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
          models.default('writer', 'A general model for tests')\n```\n\n\
          ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\
          Use the echo tool.\n\n\
-         ```lua\nstore.append('state.txt', '\\nafter')\nreturn reply\n```\n"
+         ```lua\n\
+         local text = models.infer(prose)\n\
+         local _ = tools.call('echo', {{ value = 'hi' }})\n\
+         store.append('state.txt', '\\nafter')\n\
+         return text\n\
+         ```\n"
     );
     let recorder = Arc::new(Recorder::default());
     let prompt = Prompt::parse(&source, EXECUTION, recorder.as_ref())

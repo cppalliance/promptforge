@@ -107,8 +107,7 @@ fn models_always_installs_exactly() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     vm.teardown(&NullObserver::default(), "Section");
@@ -129,8 +128,7 @@ fn models_always_provides_completion_options_without_use() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let model = resolve_section_model(&vm).unwrap();
     let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions::new("small")
@@ -152,8 +150,7 @@ fn models_always_from_h2_prologue_fails() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let prologue = crate::lua::LuaProgram::compile(
         r#"models.default("writer")"#,
         "prologue",
@@ -204,8 +201,7 @@ fn models_always_multi_arg_provides_completion_options() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let model = resolve_section_model(&vm).unwrap();
     let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions::new("small")
@@ -229,8 +225,7 @@ fn models_always_multi_arg_installs_exactly() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     vm.teardown(&NullObserver::default(), "Section");

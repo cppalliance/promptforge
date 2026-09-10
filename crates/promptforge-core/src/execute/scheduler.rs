@@ -26,9 +26,8 @@
 //! layer.
 //!
 //! This module carries the scheduler core plus the walk rules: sections run
-//! in fall-through order, a section marked off-walk is skipped unless the
-//! arrival is addressed (a jump or call target runs anyway), the reply
-//! and `var` roll forward across sections and jumps, every section entry
+//! in fall-through order, `var` rolls
+//! forward across sections and jumps, every section entry
 //! takes the next run-global id, and a jump transfers control - a sibling
 //! move within the chain's slice, or a descent into the jumper's child
 //! slice with the parent position suspended on the chain's own position
@@ -152,8 +151,6 @@ struct ArmTemplate<'a> {
     /// write registry can tell two arms of this fanout (a write-write race)
     /// from a later fanout's write (legal).
     write_token: u64,
-    /// The caller's reply seed for every arm's roll-forward.
-    reply: Option<String>,
     /// The caller's `var` snapshot; each arm seeds from its own clone and
     /// its writes never reach the caller.
     var: serde_json::Value,
@@ -278,8 +275,9 @@ fn resolve_arm_target<'a>(
 ///
 /// The chain owns its per-section frame and adds the chain position (the
 /// sibling slice being walked plus the current index), the coroutine handle
-/// for the in-flight Lua block, and the walk-scoped slots: the reply rolled
-/// forward across sections and the `var` clipboard. One section entry is
+/// for the in-flight Lua block, and the walk-scoped slots: the pending
+/// Markdown buffer the next Lua fence consumes and the `var` clipboard.
+/// One section entry is
 /// one frame; the fall-through advance tears the old frame down and the
 /// next entry constructs the next.
 struct Chain<'a> {
@@ -302,10 +300,6 @@ struct Chain<'a> {
     /// child pushes the current position and descends; when the child
     /// level exhausts, the pop resumes the parent after the jumper.
     positions: Vec<(&'a [Section], usize)>,
-    /// Set when the next entry is an addressed arrival (a call target):
-    /// an addressed section runs even when marked off-walk. One entry
-    /// consumes the flag; fall-through arrival is never addressed.
-    addressed: bool,
     /// The section's in-flight or next Lua/prose block: while `coroutine`
     /// is `Some` this is the suspended block's index, otherwise the next
     /// block to start.
@@ -315,10 +309,11 @@ struct Chain<'a> {
     coroutine: Option<Thread>,
     /// The answer delivered for a suspended coroutine, consumed at resume.
     incoming: Option<Answer<Error>>,
-    /// The walk-scoped reply slot: seeds each section's frame at entry and
-    /// is replaced by the section's final reply at its end, so the reply
-    /// crosses section boundaries.
-    reply: Option<String>,
+    /// The pending Markdown buffer: the prose block the next Lua fence
+    /// consumes, installed as that block's lazy `prose` template when the
+    /// coroutine starts. Cleared at every section entry; an unconsumed
+    /// buffer drops with the section, never evaluated.
+    pending_prose: Option<String>,
     /// The walk's clipboard: seeds each section's VM at entry; the
     /// section's final `var` is read back before teardown and replaces the
     /// slot. A call chain's slot seeds from the caller's snapshot and
@@ -499,7 +494,7 @@ impl<'a> Scheduler<'a> {
     ///
     /// # Errors
     /// Returns the [`Error`] of whichever step failed: frame construction,
-    /// a Lua block, prose inference, or a dispatched request's answer.
+    /// a Lua block, or a dispatched request's answer.
     /// Returns [`Error::Interrupted`] when the run's cancellation handle is
     /// signaled while chains are running or suspended.
     pub(crate) async fn drive(&mut self) -> Result<String> {
@@ -590,9 +585,7 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Creates one chain over `slice` from `index` and returns its id. The
-    /// chain enters its first section on its first step; `addressed` marks
-    /// an addressed arrival (a call target or a fanout arm's worker),
-    /// which runs even when the section is marked off-walk. The chain's
+    /// chain enters its first section on its first step. The chain's
     /// `var` slot seeds from `var` (a call chain's or arm's caller
     /// snapshot, discarded with the chain). `arm` carries the fanout-arm
     /// state for an arm chain.
@@ -601,14 +594,13 @@ impl<'a> Scheduler<'a> {
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the chain keeps its context fork, position, entry mode, parent, var seed, depth, and arm state explicit and linear"
+        reason = "the chain keeps its context fork, position, parent, var seed, depth, and arm state explicit and linear"
     )]
     fn start_chain(
         &mut self,
         ctx: RunContext,
         slice: &'a [Section],
         index: usize,
-        addressed: bool,
         parent: Option<ChainId>,
         var: &serde_json::Value,
         call_depth: usize,
@@ -627,11 +619,10 @@ impl<'a> Scheduler<'a> {
             slice,
             index,
             positions: Vec::new(),
-            addressed,
             block: 0,
             coroutine: None,
             incoming: None,
-            reply: None,
+            pending_prose: None,
             var: var.clone(),
             call_depth,
             client: None,
@@ -649,7 +640,7 @@ impl<'a> Scheduler<'a> {
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     fn start_root_walk(&mut self, sections: &'a [Section], var: &serde_json::Value) -> Result<()> {
-        let root = self.start_chain(self.ctx.clone(), sections, 0, false, None, var, 0, None)?;
+        let root = self.start_chain(self.ctx.clone(), sections, 0, None, var, 0, None)?;
         // Seed the root chain's client slot from the run's configured
         // client, as the legacy walk's slot is seeded from run()'s client:
         // a prose block before any infer must use it rather than fall back
@@ -679,11 +670,10 @@ impl<'a> Scheduler<'a> {
             slice: &[],
             index: 0,
             positions: Vec::new(),
-            addressed: false,
             block: 0,
             coroutine: None,
             incoming: None,
-            reply: None,
+            pending_prose: None,
             var: serde_json::json!({}),
             call_depth: 0,
             client,
@@ -694,12 +684,12 @@ impl<'a> Scheduler<'a> {
         Ok(id)
     }
 
-    /// Ends the live H1 pass at its fall-through: the final `var` and reply
-    /// read back while the VM is live, then the frame drops unarmed - the
+    /// Ends the live H1 pass at its fall-through: the final `var` read back
+    /// while the VM is live, then the frame drops unarmed - the
     /// pass never arms completion, so `SECTION_FINISHED` never fires for
     /// it. The root walk then starts from the `var` hand-off under the
     /// walk's own context fork; with no sections the run's result is the
-    /// pass's reply, else the shared generic completion.
+    /// shared generic completion.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the final `var` read-back fails,
@@ -711,28 +701,27 @@ impl<'a> Scheduler<'a> {
             return Err(Error::Internal("the live H1 pass ends with a live frame"));
         };
         let var = frame.read_var()?;
-        let reply = frame.reply();
         drop(frame);
         let sections = self.ctx.prompt().sections();
         if sections.is_empty() {
-            *root_result = Some(Ok(reply.unwrap_or_else(|| GENERIC_COMPLETION.to_owned())));
+            *root_result = Some(Ok(GENERIC_COMPLETION.to_owned()));
             return Ok(());
         }
         // The H1-to-walk handoff: the walk's context takes its live `when`;
         // H1's binds already landed in the shared sets the views read.
         let when = now_rfc3339_checked()?;
         let walk_ctx = self.ctx.with_walk_state(&when);
-        let root = self.start_chain(walk_ctx, sections, 0, false, None, &var, 0, None)?;
+        let root = self.start_chain(walk_ctx, sections, 0, None, &var, 0, None)?;
         self.chains[root.index()].client = self.client.ready().cloned();
         self.ready.push_back(root);
         Ok(())
     }
 
     /// Enters the chain's next section and reports whether one was entered:
-    /// skips off-walk sections on fall-through arrival (an addressed
-    /// arrival runs its target anyway, and one entry consumes the flag),
-    /// then constructs the frame with the next run-global id, seeded from
-    /// the chain's reply, `var`, and client slots. `Ok(false)` means the
+    /// constructs the frame with the next run-global id, seeded from
+    /// the chain's `var` and client slots. The pending Markdown buffer
+    /// resets: a previous section's unconsumed prose never crosses the
+    /// boundary. `Ok(false)` means the
     /// slice is exhausted and the chain ends.
     ///
     /// # Errors
@@ -740,6 +729,7 @@ impl<'a> Scheduler<'a> {
     /// [`SectionContext::new`].
     fn enter_section(&mut self, id: ChainId) -> Result<bool> {
         let chain = &mut self.chains[id.index()];
+        chain.pending_prose = None;
         if chain.h1.is_some() {
             // The live H1 pass enters its frame exactly once: id 0 under
             // the prompt's title, the control-stub surface, the shim base,
@@ -771,7 +761,6 @@ impl<'a> Scheduler<'a> {
                 item_index,
                 item,
                 write_token,
-                chain.reply.as_deref(),
                 &chain.var,
             )?;
             chain.frame = Some(frame);
@@ -779,7 +768,6 @@ impl<'a> Scheduler<'a> {
             return Ok(true);
         }
         let index = chain.index;
-        chain.addressed = false;
         if index >= chain.slice.len() {
             return Ok(false);
         }
@@ -791,7 +779,6 @@ impl<'a> Scheduler<'a> {
             &slice[index],
             slice,
             next_id(chain.ctx.ids()),
-            chain.reply.as_deref(),
             &chain.var,
         )?;
         chain.frame = Some(frame);
@@ -809,20 +796,17 @@ impl<'a> Scheduler<'a> {
             .arm
             .as_ref()
             .and_then(|arm| arm.cancel.clone());
-        // Boxed so the driver future carries a pointer, not the step body.
-        cancel::maybe_scope(cancel, Box::pin(self.step_inner(id, root_result))).await
+        // The step body is synchronous, so the scoped future carries only
+        // the call, not a suspended step frame.
+        cancel::maybe_scope(cancel, async move { self.step_inner(id, root_result) }).await
     }
 
     /// Runs one ready chain to its next suspension point: resume a
     /// suspended coroutine with its delivered answer, or advance the walk -
     /// entering the next section, starting the next Lua block's coroutine,
-    /// running one prose block inline, or falling through at a section's
-    /// end.
-    async fn step_inner(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
+    /// stashing one prose block as the pending Markdown buffer, or falling
+    /// through at a section's end.
+    fn step_inner(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
@@ -833,8 +817,9 @@ impl<'a> Scheduler<'a> {
             EnterSection,
             /// Start the current Lua block as a fresh coroutine.
             StartLua,
-            /// Run the current prose block inline.
-            RunProse,
+            /// Stash the current prose block as the pending Markdown buffer
+            /// the next Lua fence consumes.
+            StashProse,
             /// The section's blocks are exhausted: fall through.
             SectionEnd,
         }
@@ -858,7 +843,7 @@ impl<'a> Scheduler<'a> {
             } else {
                 match &chain.blocks()[chain.block] {
                     Block::Lua(_) => Advance::StartLua,
-                    Block::Prose { .. } => Advance::RunProse,
+                    Block::Prose { .. } => Advance::StashProse,
                     // `Block` is `#[non_exhaustive]` across the crate seam; a
                     // future variant has no advance rule yet.
                     _ => {
@@ -871,7 +856,24 @@ impl<'a> Scheduler<'a> {
             Advance::EnterSection => self.advance_entry(id, root_result),
             Advance::Resume(thread, answer) => self.resume_block(id, &thread, answer, root_result),
             Advance::StartLua => self.start_lua(id, root_result),
-            Advance::RunProse => self.run_prose(id).await,
+            Advance::StashProse => {
+                let chain = &mut self.chains[id.index()];
+                let text = match &chain.blocks()[chain.block] {
+                    Block::Prose { text, .. } => text.clone(),
+                    _ => {
+                        return Err(Error::Internal("the advance matched the block kind"));
+                    }
+                };
+                // The parser emits one prose block per inter-fence gap,
+                // already accumulated and reset at thematic breaks, so the
+                // block IS the pending buffer the next Lua fence consumes.
+                // Prose never infers: the buffer waits for the following
+                // block's lazy `prose` install, unevaluated until read.
+                chain.pending_prose = Some(text);
+                chain.block += 1;
+                self.ready.push_back(id);
+                Ok(())
+            }
             Advance::SectionEnd => {
                 if self.chains[id.index()].h1.is_some() {
                     self.end_live_h1(id, root_result)?;
@@ -915,17 +917,28 @@ impl<'a> Scheduler<'a> {
         self.handle_coro_result(id, result, root_result)
     }
 
-    /// Starts the chain's current Lua block as a fresh coroutine: the live
-    /// H1 pass starts it inside a fresh resolver scope, a walked section
-    /// starts it directly. The driver owns the chunk observation
+    /// Starts the chain's current Lua block as a fresh coroutine: the
+    /// pending Markdown buffer installs as the block's fresh read-only
+    /// lazy `prose` template first, then the live H1 pass starts inside a
+    /// fresh resolver scope while a walked section starts directly. The
+    /// driver owns the chunk observation
     /// boundaries: STARTED at the block's start, SUCCEEDED or FAILED when
     /// its coroutine finally returns or fails - a suspension is neither.
     fn start_lua(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+        let pending = self.chains[id.index()].pending_prose.take();
         let chain = &self.chains[id.index()];
         let observer = Arc::clone(chain.ctx.observer());
         let execution = chain.ctx.execution().to_owned();
         let name = chain.section_name().to_owned();
         observer.observe(&execution, &name, detail::LUA_CHUNK_STARTED);
+        let frame = chain
+            .frame
+            .as_ref()
+            .ok_or(Error::Internal("a live chain holds its frame"))?;
+        if let Err(error) = frame.install_lazy_prose(&chain.ctx, pending.as_deref().unwrap_or("")) {
+            observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
+            return Err(error);
+        }
         if chain.h1.is_some() {
             let (result, callback_error) = self.h1_scoped_step(id, |vm, program| {
                 vm.start_block_coro(program).map_err(Error::from)
@@ -944,43 +957,6 @@ impl<'a> Scheduler<'a> {
         self.handle_coro_result(id, result, root_result)
     }
 
-    /// Runs the chain's current prose block inline: the live H1 prose path
-    /// for the pass, the shared section prose path on the walk.
-    async fn run_prose(&mut self, id: ChainId) -> Result<()> {
-        let chain = &mut self.chains[id.index()];
-        let text = match &chain.blocks()[chain.block] {
-            Block::Prose { text, .. } => text.clone(),
-            _ => {
-                return Err(Error::Internal("the advance matched the block kind"));
-            }
-        };
-        // The parser no longer marks prose loop-capable; until the lazy
-        // `prose` template replaces automatic prose advancement, preserve
-        // the legacy semantics here: the section's last prose block runs
-        // the full tool loop, earlier prose is single-shot.
-        let loop_capable = !chain.blocks()[chain.block + 1..]
-            .iter()
-            .any(|block| matches!(block, Block::Prose { .. }));
-        let name = chain.section_name().to_owned();
-        let is_h1 = chain.h1.is_some();
-        let frame = chain
-            .frame
-            .as_mut()
-            .ok_or(Error::Internal("a live chain holds its frame"))?;
-        if is_h1 {
-            frame
-                .run_live_h1_prose_block(&chain.ctx, &name, &text, loop_capable, &mut chain.client)
-                .await?;
-        } else {
-            frame
-                .run_prose_block(&chain.ctx, &name, &text, loop_capable, &mut chain.client)
-                .await?;
-        }
-        chain.block += 1;
-        self.ready.push_back(id);
-        Ok(())
-    }
-
     /// Enters the chain's next section and requeues it, or finishes the
     /// chain when its slice is exhausted.
     ///
@@ -996,12 +972,10 @@ impl<'a> Scheduler<'a> {
             self.ready.push_back(id);
         } else if self.pop_position(id) {
             // A jump-started child level exhausted: the parent walk resumes
-            // after the jumper with the child walk's last reply (already
-            // the chain's reply slot, shared across the descent).
+            // after the jumper.
             self.ready.push_back(id);
         } else {
-            // The walk ran off the slice's last section: the chain ends,
-            // carrying its reply slot.
+            // The walk ran off the slice's last section: the chain ends.
             self.finish(id, Ok(None), root_result);
         }
         Ok(())
@@ -1010,8 +984,8 @@ impl<'a> Scheduler<'a> {
     /// Resumes a jump-suspended parent position when a child level
     /// exhausts, returning `false` when the chain holds no suspended
     /// position - meaning its own root slice exhausted and the chain ends.
-    /// The reply and `var` slots need no handling: the child walk shared
-    /// them, so they already carry the child level's last values.
+    /// The `var` slot needs no handling: the child walk shared
+    /// it, so it already carries the child level's last value.
     fn pop_position(&mut self, id: ChainId) -> bool {
         let chain = &mut self.chains[id.index()];
         let Some((slice, jumper)) = chain.positions.pop() else {
@@ -1019,13 +993,12 @@ impl<'a> Scheduler<'a> {
         };
         chain.slice = slice;
         chain.index = jumper + 1;
-        chain.addressed = false;
         true
     }
 
-    /// Falls the chain through at its section's end: the reply crosses the
-    /// section boundary and the section's final `var` replaces the chain's
-    /// clipboard, both read back while the VM is live; the frame's drop is
+    /// Falls the chain through at its section's end: the section's final
+    /// `var` replaces the chain's clipboard, read back while the VM is
+    /// live; the frame's drop is
     /// the teardown boundary, firing `SECTION_FINISHED` for this completed
     /// section; then the walk advances to the next section.
     ///
@@ -1038,7 +1011,6 @@ impl<'a> Scheduler<'a> {
         let Some(mut frame) = chain.frame.take() else {
             return Err(Error::Internal("a section end implies a live frame"));
         };
-        chain.reply = frame.reply();
         chain.var = frame.read_var()?;
         frame.mark_completed();
         drop(frame);
@@ -1052,17 +1024,16 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Applies a jump's control transfer: closes the jumper's frame as
-    /// completed (the reply read back from the jumper's VM, so an author's
-    /// `reply = nil` or custom string steers the target; the final `var`
+    /// completed (the final `var`
     /// rolled forward; the armed drop firing `SECTION_FINISHED`, a jump
     /// being a completion), resolves the heading against the jumper's
     /// visible set, and moves the walk. A sibling target sets the index
-    /// within the target's slice, addressed; a child target pushes the
+    /// within the target's slice; a child target pushes the
     /// current position onto the chain's position stack and descends into
-    /// the jumper's child slice from the target, addressed.
+    /// the jumper's child slice from the target.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when the reply or `var` read-back fails (the
+    /// Returns [`Error::Lua`] when the `var` read-back fails (the
     /// frame drops unarmed, as on the legacy path) or when the heading
     /// matches no visible section or more than one - the jumper's frame has
     /// already closed as completed, exactly as the legacy walk resolves
@@ -1073,8 +1044,6 @@ impl<'a> Scheduler<'a> {
             let Some(mut frame) = chain.frame.take() else {
                 return Err(Error::Internal("a jump implies a live frame"));
             };
-            frame.read_reply()?;
-            chain.reply = frame.reply();
             chain.var = frame.read_var()?;
             frame.mark_completed();
             drop(frame);
@@ -1092,7 +1061,6 @@ impl<'a> Scheduler<'a> {
         }
         chain.slice = target.slice;
         chain.index = target.index;
-        chain.addressed = true;
         Ok(())
     }
 
@@ -1246,16 +1214,7 @@ impl<'a> Scheduler<'a> {
                     self.finish(id, Ok(Some(value)), root_result);
                     return Ok(());
                 }
-                // The `reply` global is the author-writable shadow of the
-                // walk's reply: read it back after each chunk so an
-                // author's `reply = nil` (or a custom string) steers the
-                // next prose and the chain's finish.
                 let chain = &mut self.chains[id.index()];
-                let frame = chain
-                    .frame
-                    .as_mut()
-                    .ok_or(Error::Internal("a live chain holds its frame"))?;
-                frame.read_reply()?;
                 chain.block += 1;
                 self.ready.push_back(id);
                 Ok(())
@@ -1633,7 +1592,6 @@ impl<'a> Scheduler<'a> {
             child_ctx,
             target_section.slice,
             target_section.index,
-            true,
             Some(id),
             var,
             depth,
@@ -1711,7 +1669,6 @@ impl<'a> Scheduler<'a> {
             _ => (chain.slice, chain.index),
         };
         let ctx = chain.ctx.clone();
-        let reply = chain.reply.clone();
         let client = chain.client.clone();
         // `chain`'s arena borrow ends here; the resolution borrows the
         // prompt tree, so the worker's slice outlives it.
@@ -1751,7 +1708,6 @@ impl<'a> Scheduler<'a> {
                         Arc::new(AtomicU32::new(0)),
                     ),
                     write_token: ctx.store().next_write_token(),
-                    reply,
                     var: var.clone(),
                     call_depth: depth,
                     client,
@@ -1779,8 +1735,8 @@ impl<'a> Scheduler<'a> {
 
     /// Starts arm chains for one fanout while a window slot is free and
     /// items remain, enqueuing each on the ready queue. Each arm is a chain
-    /// over the worker alone (a singleton slice), addressed so an off-walk
-    /// worker runs; a jump out of the worker retargets the arm's walk.
+    /// over the worker alone (a singleton slice); a jump out of the worker
+    /// retargets the arm's walk.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the join is not live or the run's
@@ -1831,15 +1787,14 @@ impl<'a> Scheduler<'a> {
                 template.ctx.clone(),
                 std::slice::from_ref(worker),
                 0,
-                true,
                 None,
                 &template.var,
                 template.call_depth,
                 Some(arm),
             )?;
-            // The arm inherits the caller's reply seed and client slot, as
-            // the legacy arm's payload carries them.
-            self.chains[chain.index()].reply.clone_from(&template.reply);
+            // The arm inherits the caller's client slot: an
+            // already-resolved client is shared, an unresolved one stays
+            // lazy.
             self.chains[chain.index()]
                 .client
                 .clone_from(&template.client);
@@ -1925,7 +1880,10 @@ impl<'a> Scheduler<'a> {
                     .enumerate()
                     .map(|(index, slot)| {
                         slot.ok_or_else(|| {
-                            Error::Lua(format!("fanout arm {} finished without a reply", index + 1))
+                            Error::Lua(format!(
+                                "fanout arm {} finished without a result",
+                                index + 1
+                            ))
                         })
                     })
                     .collect();
@@ -2035,8 +1993,7 @@ impl<'a> Scheduler<'a> {
     /// slot's result for a fanout arm.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
-    /// walk that ran off its slice's last section (the chain's reply slot
-    /// is the text), or the chain's failure.
+    /// walk that ran off its slice's last section, or the chain's failure.
     fn finish(
         &mut self,
         id: ChainId,
@@ -2049,7 +2006,6 @@ impl<'a> Scheduler<'a> {
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
         let mut frame = chain.frame.take();
-        let reply = chain.reply.clone();
         // The live H1 pass never arms completion: SECTION_FINISHED is a
         // walked section's boundary, not the setup pass's. Its completion
         // paths (fall-through, scalar return) handle the frame themselves;
@@ -2071,14 +2027,12 @@ impl<'a> Scheduler<'a> {
             }
             let text = match returned {
                 Some(value) => value,
-                None => match reply {
-                    Some(reply) => reply,
-                    // The legacy mapping: the top-level chain falls back to
-                    // the shared generic completion; a call chain or a
-                    // fanout arm to the empty string.
-                    None if parent.is_none() && arm.is_none() => GENERIC_COMPLETION.to_owned(),
-                    None => String::new(),
-                },
+                // A walk that ran off its slice produced no scalar result:
+                // the top-level chain falls back to the shared generic
+                // completion; a call chain or a fanout arm to the empty
+                // string.
+                None if parent.is_none() && arm.is_none() => GENERIC_COMPLETION.to_owned(),
+                None => String::new(),
             };
             Ok(text)
         });

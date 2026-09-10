@@ -262,7 +262,7 @@ fn section_vm_with_shared(
     section: &str,
 ) -> Result<SectionVm> {
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, observer.as_ref(), section)?;
-    vm.inject_host(args, &json!({}), store, None)?;
+    vm.inject_host(args, &json!({}), store)?;
     vm.install_host_apis(observer, section)?;
     vm.replay_shared(shared, observer.as_ref(), section)?;
     Ok(vm)
@@ -321,7 +321,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("section VM must not expose direct output");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     run_scalar(
         &vm,
@@ -361,7 +361,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
     );
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, recorder.as_ref(), "Gather")
         .expect("section VM must install captured bindings");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
     vm.install_host_apis(&observer, "Gather")
@@ -564,7 +564,7 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
         .expect("VM builds");
     vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 4)
         .expect("limits apply");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host injects");
     let recorder = Arc::new(Recorder::default());
     let observer: Arc<dyn Observer> = recorder.clone();
@@ -657,7 +657,7 @@ fn installed_log_persists_across_chunks() {
         "Section",
     )
     .expect("VM must construct");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     vm.install_host_apis(&observer, "Section")
         .expect("host APIs must install");
@@ -773,7 +773,7 @@ fn tool_handles_are_frozen() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     let error = run_scalar(
         &vm,
@@ -927,7 +927,7 @@ fn captured_bindings_do_not_execute_h1_source() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install without executing H1");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     run_scalar(
         &vm,
@@ -949,7 +949,7 @@ fn h2_recording_closes_to_always_then_added_scope() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("H2 additions must record");
@@ -1005,7 +1005,7 @@ fn h2_add_accepts_tool_objects_and_arrays() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("tools.add must accept Tool objects, strings, and arrays");
@@ -1034,7 +1034,7 @@ fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("caught failed add must not poison recording");
@@ -1069,7 +1069,7 @@ fn add_rejects_misshapen_override_arguments() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("rejected override forms must not poison recording");
@@ -1095,7 +1095,7 @@ fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
 
     let error = run_scalar(
@@ -1118,7 +1118,7 @@ fn unknown_h2_alias_fails_before_scope_closure() {
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     let error = run_scalar(
         &vm,
@@ -1143,7 +1143,7 @@ fn captured_bindings_are_installed_without_payload_reports() {
     let recorder = Recorder::default();
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &recorder, "Section")
         .expect("captured binding installation must succeed");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host must inject");
     let trace = format!("{:?}", recorder.observations());
     assert!(!trace.contains("private_alias"));
@@ -1171,15 +1171,17 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         "var.from_shared = decorate(args)\n\
              store.write('phase.txt', var.from_shared)",
     );
-    let epilog =
-        program("return decorate(reply) .. ':' .. shared_saw_args .. ':' .. shared_saw_store");
+    let between = program("phase_marker = 'model answer'");
+    let epilog = program(
+        "return decorate(phase_marker) .. ':' .. shared_saw_args .. ':' .. shared_saw_store",
+    );
     let store = StoreRef::memory();
     store
         .write("seed.txt", "seeded")
         .expect("the memory store can seed a file");
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("input", &json!({ "id": 7 }), &store, None)
+    vm.inject_host("input", &json!({ "id": 7 }), &store)
         .expect("host values must inject");
     let null_observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
     vm.install_host_apis(&null_observer, "Test")
@@ -1203,8 +1205,8 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         "<input>"
     );
 
-    vm.bind_reply("model answer", &NullObserver::default(), "Test")
-        .expect("reply must bind into the same environment");
+    run_scalar(&vm, &between, &NullObserver::default(), "Test")
+        .expect("the between chunk must run");
     assert_eq!(
         run_scalar(&vm, &epilog, &NullObserver::default(), "Test")
             .expect("epilog must run")
@@ -1224,10 +1226,10 @@ fn section_vm_requires_delayed_single_host_injection() {
         .expect_err("programs cannot run before host injection");
     assert!(error.to_string().contains("not been injected"));
 
-    vm.inject_host("first", &json!({}), &store, None)
+    vm.inject_host("first", &json!({}), &store)
         .expect("first injection must succeed");
     let error = vm
-        .inject_host("second", &json!({}), &store, None)
+        .inject_host("second", &json!({}), &store)
         .expect_err("host values cannot be replaced");
     assert!(error.to_string().contains("already injected"));
 }
@@ -1261,7 +1263,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
         "Test",
     )
     .expect("VM must build");
-    vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("private input", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Test")
@@ -1286,15 +1288,13 @@ fn section_vm_reports_store_operations_in_each_chunk() {
     let recorder = Arc::new(Recorder::default());
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Gather")
         .expect("VM must build");
-    vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("private input", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
     vm.install_host_apis(&observer, "Gather")
         .expect("host APIs must install");
 
     run_scalar(&vm, &write, recorder.as_ref(), "Gather").expect("first chunk write must run");
-    vm.bind_reply("private reply", recorder.as_ref(), "Gather")
-        .expect("reply must bind");
     run_scalar(&vm, &read, recorder.as_ref(), "Gather").expect("second chunk read must run");
     vm.teardown(recorder.as_ref(), "Gather");
 
@@ -1304,14 +1304,6 @@ fn section_vm_reports_store_operations_in_each_chunk() {
             ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
             ("Gather".to_owned(), detail::STORE_WRITE_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
-            (
-                "Gather".to_owned(),
-                detail::LUA_REPLY_BINDING_STARTED.clone(),
-            ),
-            (
-                "Gather".to_owned(),
-                detail::LUA_REPLY_BINDING_SUCCEEDED.clone(),
-            ),
             ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
             ("Gather".to_owned(), detail::STORE_READ_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
@@ -1321,7 +1313,6 @@ fn section_vm_reports_store_operations_in_each_chunk() {
     );
     let trace = format!("{:?}", recorder.observations());
     assert!(!trace.contains("private input"));
-    assert!(!trace.contains("private reply"));
     assert!(!trace.contains("state.txt"));
 }
 
@@ -1337,7 +1328,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
     ] {
         let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
             .expect("VM must build");
-        vm.inject_host("", &json!({}), &store, None)
+        vm.inject_host("", &json!({}), &store)
             .expect("host values must inject");
         assert_eq!(
             run_scalar(&vm, &program(source), &NullObserver::default(), "Test")
@@ -1349,7 +1340,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
 
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &store, None)
+    vm.inject_host("", &json!({}), &store)
         .expect("host values must inject");
     let error = run_scalar(&vm, &program("return {}"), &NullObserver::default(), "Test")
         .expect_err("table returns must be refused");
@@ -1408,7 +1399,7 @@ fn shared_replay_consumes_the_configured_log_budget() {
         .expect("VM builds");
     vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 1)
         .expect("limits apply");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host injects");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Budget")
@@ -1440,7 +1431,7 @@ fn the_memory_budget_error_stays_reachable() {
         .expect("VM builds");
     vm.apply_lua_limits(4 * 1024 * 1024, DEFAULT_LUA_LOG_EVENTS)
         .expect("limits apply");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host injects");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Budget")
@@ -1468,7 +1459,7 @@ fn jump_during_shared_replay_is_a_hard_error() {
     let shared = program("jump('## Anywhere')");
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Test")
@@ -1502,7 +1493,7 @@ fn call_with_a_non_string_target_errors() {
     // heading, and the error says so.
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Test")
@@ -1559,7 +1550,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
         "Test",
     )
     .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Test")
@@ -1617,7 +1608,7 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
         "Test",
     )
     .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer = null_observer();
     vm.install_host_apis(&observer, "Test")
@@ -1653,7 +1644,7 @@ fn absent_shared_library_replays_an_empty_chunk_on_the_same_path() {
     let recorder = Arc::new(Recorder::default());
     let mut vm =
         SectionVm::new(&test_nonce(), EXECUTION, recorder.as_ref(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
     vm.install_host_apis(&observer, "Test")
@@ -1688,11 +1679,11 @@ fn absent_shared_library_replays_an_empty_chunk_on_the_same_path() {
 fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let shared = program("private_global = 'shared secret'");
     let prologue = program("var.value = args");
-    let epilog = program("return reply");
+    let epilog = program("return 'epilog done'");
     let recorder = Arc::new(Recorder::default());
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, recorder.as_ref(), "Gather")
         .expect("VM must build");
-    vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("private input", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
     vm.install_host_apis(&observer, "Gather")
@@ -1700,8 +1691,6 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     vm.replay_shared(&shared, recorder.as_ref(), "Gather")
         .expect("shared program must run");
     run_scalar(&vm, &prologue, recorder.as_ref(), "Gather").expect("prologue must run");
-    vm.bind_reply("private reply", recorder.as_ref(), "Gather")
-        .expect("reply must bind");
     run_scalar(&vm, &epilog, recorder.as_ref(), "Gather").expect("epilog must run");
     vm.teardown(recorder.as_ref(), "Gather");
 
@@ -1713,8 +1702,6 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
             detail::LUA_SHARED_LOAD_SUCCEEDED,
             detail::LUA_CHUNK_STARTED,
             detail::LUA_CHUNK_SUCCEEDED,
-            detail::LUA_REPLY_BINDING_STARTED,
-            detail::LUA_REPLY_BINDING_SUCCEEDED,
             detail::LUA_CHUNK_STARTED,
             detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_TEARDOWN_STARTED,
@@ -1727,7 +1714,6 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let trace = format!("{observations:?}");
     assert!(!trace.contains("shared secret"));
     assert!(!trace.contains("private input"));
-    assert!(!trace.contains("private reply"));
 }
 
 #[test]
@@ -1736,7 +1722,7 @@ fn section_lifecycle_failures_report_their_phase() {
     let failing_shared = program("error('private shared failure')");
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, recorder.as_ref(), "Shared")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
     vm.install_host_apis(&observer, "Shared")
@@ -2302,7 +2288,7 @@ async fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
         tokio::task::block_in_place(|| {
             let mut vm =
                 SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Loop")?;
-            vm.inject_host("", &json!({}), &StoreRef::memory(), None)?;
+            vm.inject_host("", &json!({}), &StoreRef::memory())?;
             let observer = null_observer();
             vm.install_host_apis(&observer, "Loop")?;
             let result = run_scalar(
@@ -2344,7 +2330,7 @@ fn add_without_declarations_fails_as_undeclared_in_a_chunk() {
 fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let error = run_scalar(
         &vm,
@@ -2377,7 +2363,7 @@ fn add_with_empty_frozen_bindings_fails_as_undeclared() {
     assert!(bindings.bindings().is_empty());
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Test")
         .expect("empty captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let error = run_scalar(
         &vm,
@@ -2398,7 +2384,7 @@ fn add_with_an_override_argument_records_the_model_description() {
     let bindings = fixture_bindings("tools.bind('search', 'search the web')");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Test")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     run_scalar(
         &vm,
@@ -2421,7 +2407,7 @@ fn add_with_an_override_argument_records_the_model_description() {
 fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host values must inject");
     let (bindings, runtime) = vm.tool_bag_handles();
     let scope = current_tool_bindings(&bindings, &runtime).expect("an empty scope must snapshot");
@@ -2724,7 +2710,7 @@ fn installed_store_read_honors_line_bounds() {
         .expect("the memory store can prepare a file");
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &store, None)
+    vm.inject_host("", &json!({}), &store)
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
     vm.install_host_apis(&observer, "Test")
@@ -2760,7 +2746,7 @@ fn installed_store_read_numbered_honors_line_bounds() {
         .expect("the memory store can prepare a file");
     let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Test")
         .expect("VM must build");
-    vm.inject_host("", &json!({}), &store, None)
+    vm.inject_host("", &json!({}), &store)
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
     vm.install_host_apis(&observer, "Test")

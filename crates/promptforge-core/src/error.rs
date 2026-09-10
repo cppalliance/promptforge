@@ -240,8 +240,12 @@ pub(crate) enum Error {
     /// Building a model-facing tool schema for a bound alias failed, retaining
     /// the schema validation error as the private `#[source]` cause (F5) rather
     /// than flattening it into `detail`.
+    ///
+    /// Constructed only by the tool-scope preparation, which is test-only
+    /// until the `models.loop` step rewires it.
     #[error("model-facing schema build failure for tool alias {alias:?}")]
     #[non_exhaustive]
+    #[allow(dead_code)]
     BindSchema {
         /// The prompt-local alias whose schema could not be built.
         alias: String,
@@ -348,6 +352,7 @@ pub(crate) enum Error {
         similarity = diagnostic.similarity,
     )]
     #[non_exhaustive]
+    #[allow(dead_code)] // constructed by the scope validation, test-only until `models.loop`
     NearDuplicateTools {
         /// The complete pair diagnostic, boxed to keep every crate error small.
         /// The diagnostic vocabulary lives in tool-scope validation (F10).
@@ -424,6 +429,7 @@ pub(crate) enum Error {
 
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
+    #[allow(dead_code)] // constructed by the tool loop, test-only until `models.loop`
     ToolLoopExhausted,
 
     /// The model referenced a tool outside the section's advertised scope.
@@ -433,6 +439,7 @@ pub(crate) enum Error {
     /// [`Error::UnboundToolCall`] instead.
     #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.bind but not added to this section's scope)" } else { "" })]
     #[non_exhaustive]
+    #[allow(dead_code)] // constructed by the tool loop, test-only until `models.loop`
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
         name: String,

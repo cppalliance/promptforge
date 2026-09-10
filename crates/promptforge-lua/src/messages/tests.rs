@@ -198,7 +198,7 @@ fn the_builders_run_under_the_hardened_section_sandbox() {
     let observer = NullObserver::default();
     let mut vm = SectionVm::new(&nonce, "test-run", &observer, "Test")
         .expect("section VM construction cannot fail");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+    vm.inject_host("", &json!({}), &StoreRef::memory())
         .expect("host injection cannot fail");
     let json: serde_json::Value = vm
         .lua()

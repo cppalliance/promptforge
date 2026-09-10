@@ -43,8 +43,7 @@ fn models_bind_resolves_and_use_selects_section_binding() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let prologue = crate::lua::LuaProgram::compile(
         r#"models.use("analyst")"#,
         "prologue",
@@ -72,8 +71,7 @@ fn no_models_use_or_always_leaves_section_unbound() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert!(model.is_none());
     vm.teardown(&NullObserver::default(), "Section");
@@ -98,8 +96,7 @@ fn undeclared_models_use_fails_loudly() {
         "Section",
     )
     .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
+    vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
     let prologue = crate::lua::LuaProgram::compile(
         r#"models.use("missing")"#,
         "prologue",

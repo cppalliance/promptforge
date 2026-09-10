@@ -88,6 +88,10 @@ pub mod tools;
 pub(crate) mod untrusted;
 
 pub(crate) use crate::error::{Error, Result};
+// Test-only until the `models.loop` step rewires the tool loop: the scope
+// validation that produces this diagnostic lost its production caller with
+// automatic prose inference.
+#[cfg(test)]
 pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
 pub use promptforge_core_support::cancel::CancelHandle;
