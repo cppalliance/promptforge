@@ -91,6 +91,22 @@ vram_gb = 24
 # default_effort = "medium"
 # adaptive_thinking = false
 
+# Optional remote speech synthesis model, backed by its own endpoint.
+# [[endpoint]]
+# id = "together"
+# protocol = "openai"
+# base_url = "https://api.together.xyz/v1"
+# api_key = "${TOGETHER_API_KEY}"
+#
+# [[model]]
+# name = "orpheus"
+# kind = "speech"
+# description = "Orpheus 3B conversational speech synthesis"
+# upstream = "canopylabs/orpheus-3b-0.1-ft"
+# endpoints = ["together"]
+# context = 8192
+# voices = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
+
 # Local chat model served by a managed llama-server child.
 [[local_model]]
 name = "qwen-local"
