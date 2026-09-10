@@ -38,7 +38,7 @@ The gateway restricts the cache root to your own account at startup and refuses 
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether a complete generation is ready, whether its backend reports GPU acceleration, and the active generation number. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so boot provisioning, applies, and switches are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 

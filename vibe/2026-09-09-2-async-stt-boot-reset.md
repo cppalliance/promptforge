@@ -303,7 +303,7 @@ isProject: false
 
 <step-6>
 
-### Step 6: Reconcile documentation and qualify
+### Step 6: Reconcile documentation and qualify [completed]
 
 - Component: Documentation and release
 - Change: Document bind-first serving, one queued boot STT load, restart-only later STT changes, queue progress, the authoritative unbounded command deque, and `GatewayDiscoveryFile` writing unchanged `gateway.json`. Keep eager `Gateway::from_config` limited to tests and embedders. Regenerate current guide outputs. Do not edit `vibe/archdoc.md`, historical plans, or historical acceptance records. If the Step 4 commit grows beyond a reviewable size, split it into two commits: first rewire boot loading and strip switch/Apply speech participation, then delete the dormant replacement machinery; both must pass the Step 4 tests.

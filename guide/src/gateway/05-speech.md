@@ -44,9 +44,9 @@ Two response shapes are offered. The `json` shape returns text only. The `verbos
 
 ## The runtime
 
-Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. Model artifacts and the runtime are downloaded and verified into the configured cache directory at startup, with progress reporting. Each model file is prewarmed and then loaded, with progress per model.
+Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. The gateway serves first and loads speech second: after the listener is bound, the queued boot command downloads and verifies the model artifacts and the runtime into the configured cache directory, with progress on the status and progress endpoints. Each model file is prewarmed and then loaded, with progress per model. Speech routes answer as unavailable until the load completes, and the model catalog advertises speech models only once the engine is ready.
 
-STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs.
+STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery.
 
 ## How a take is transcribed
 
@@ -68,5 +68,5 @@ The 30-second limit is retained ownership, not recording duration. It includes r
 
 The desktop Workshop exposes the same `/v1/realtime` path on its own origin. Its server authenticates the fixed upstream target and relays payloads without parsing them, so the webview never receives the gateway credential.
 
-Switching the active profile provisions and loads the selected speech models. Switching away unloads the engine and releases the model memory.
+Speech loads exactly once per process, from the profile active at boot. Switching the active profile or applying a new configuration persists a changed speech selection but never loads, reloads, or unloads the running engine; the new selection takes effect on the next start. The configuration UI raises a restart toast when an apply changes the speech tuning, the speech model catalog, or the active profile's speech membership.
 

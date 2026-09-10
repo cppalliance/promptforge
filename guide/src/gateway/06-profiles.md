@@ -16,7 +16,7 @@ name = "travel"
 models = ["gpt-5"]
 ````
 
-Membership alone decides which models route, spawn, or load. Profiles carry no per-field overrides. A profile selects a subset of the catalog across remote, local, and STT models, and every name it lists must exist exactly once. Duplicate profile names and duplicate members fail validation.
+Membership alone decides which models route, spawn, or load. Profiles carry no per-field overrides. A profile selects a subset of the catalog across remote, local, and STT models, and every name it lists must exist exactly once. Duplicate profile names and duplicate members fail validation. Speech membership is the one exception to live switching: the speech engine loads once at boot, so changing a profile's STT members takes effect on the next gateway start, not at the switch.
 
 Profile names must be a single safe path component: no surrounding whitespace, not empty, not `.` or `..`, and no path separators. One spelling works in URLs, state files, and labels.
 
@@ -47,7 +47,7 @@ curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" \
 
 The switch streams its stages as a live SSE event stream: `loading-profile`, `stopping-models`, `starting-models`, and one terminal event. The choice persists to the state file, and the switch runs to completion even if the client disconnects. Switching uses the in-memory catalog; the config file is never re-read from disk.
 
-Activating a profile narrows the served remote, local, and STT catalogs to that profile's member list. Selecting an undefined profile fails with the list of defined profiles.
+Activating a profile narrows the served remote and local catalogs to that profile's member list. The speech selection it names is recorded for the next boot instead: the running speech engine never reloads, so speech keeps serving the boot profile's models until the gateway restarts. Selecting an undefined profile fails with the list of defined profiles.
 
 In-flight inference requests get a bounded drain of up to 30 seconds during a switch. Stragglers are then cancelled, and a caller cancelled this way receives a dedicated error. Switching tears down the old profile's children deterministically, and their VRAM is freed before the replacement profile starts. When a switch starts only some local models, the terminal event names which models loaded and which failed.
 

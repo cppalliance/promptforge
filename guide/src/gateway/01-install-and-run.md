@@ -26,6 +26,8 @@ promptforge-gateway --config gateway.toml --profile main
 
 The `--config` flag gives the path to the config file. The `--profile` flag names the profile to activate. The gateway always starts from one config file and one active profile.
 
+Startup is bind-first. The gateway opens its listener and answers health, status, progress, configuration, and every ready route immediately, then provisions models afterward as one queued boot command. Downloads, local model spawns, and the speech engine load all run inside that command while the gateway is already serving, and you can watch it on the status and progress endpoints. A configured model that is still loading answers 503 with the code `model_loading` until its provisioning finishes.
+
 You can supply both values through environment variables instead of command-line arguments. The config path comes from `--config` or from `PROMPTFORGE_GATEWAY_CONFIG`; the flag wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
 
 You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key and `trust_loopback = true` so callers on the same machine need no key - and boots from it. The generated file notes the caveat beside that line: on a shared machine any other OS account can then use the gateway, and `trust_loopback = false` requires the key from everyone. The generated config selects a profile named `default`, so a bare first boot needs no flags.

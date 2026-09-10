@@ -30,6 +30,8 @@ promptforge-gateway --config gateway.toml --profile main
 
 The `--config` flag gives the path to the config file. The `--profile` flag names the profile to activate. The gateway always starts from one config file and one active profile.
 
+Startup is bind-first. The gateway opens its listener and answers health, status, progress, configuration, and every ready route immediately, then provisions models afterward as one queued boot command. Downloads, local model spawns, and the speech engine load all run inside that command while the gateway is already serving, and you can watch it on the status and progress endpoints. A configured model that is still loading answers 503 with the code `model_loading` until its provisioning finishes.
+
 You can supply both values through environment variables instead of command-line arguments. The config path comes from `--config` or from `PROMPTFORGE_GATEWAY_CONFIG`; the flag wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
 
 You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key and `trust_loopback = true` so callers on the same machine need no key - and boots from it. The generated file notes the caveat beside that line: on a shared machine any other OS account can then use the gateway, and `trust_loopback = false` requires the key from everyone. The generated config selects a profile named `default`, so a bare first boot needs no flags.
@@ -432,9 +434,9 @@ Two response shapes are offered. The `json` shape returns text only. The `verbos
 
 ## The runtime
 
-Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. Model artifacts and the runtime are downloaded and verified into the configured cache directory at startup, with progress reporting. Each model file is prewarmed and then loaded, with progress per model.
+Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. The gateway serves first and loads speech second: after the listener is bound, the queued boot command downloads and verifies the model artifacts and the runtime into the configured cache directory, with progress on the status and progress endpoints. Each model file is prewarmed and then loaded, with progress per model. Speech routes answer as unavailable until the load completes, and the model catalog advertises speech models only once the engine is ready.
 
-STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs.
+STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery.
 
 ## How a take is transcribed
 
@@ -456,7 +458,7 @@ The 30-second limit is retained ownership, not recording duration. It includes r
 
 The desktop Workshop exposes the same `/v1/realtime` path on its own origin. Its server authenticates the fixed upstream target and relays payloads without parsing them, so the webview never receives the gateway credential.
 
-Switching the active profile provisions and loads the selected speech models. Switching away unloads the engine and releases the model memory.
+Speech loads exactly once per process, from the profile active at boot. Switching the active profile or applying a new configuration persists a changed speech selection but never loads, reloads, or unloads the running engine; the new selection takes effect on the next start. The configuration UI raises a restart toast when an apply changes the speech tuning, the speech model catalog, or the active profile's speech membership.
 
 ---
 
@@ -478,7 +480,7 @@ name = "travel"
 models = ["gpt-5"]
 ````
 
-Membership alone decides which models route, spawn, or load. Profiles carry no per-field overrides. A profile selects a subset of the catalog across remote, local, and STT models, and every name it lists must exist exactly once. Duplicate profile names and duplicate members fail validation.
+Membership alone decides which models route, spawn, or load. Profiles carry no per-field overrides. A profile selects a subset of the catalog across remote, local, and STT models, and every name it lists must exist exactly once. Duplicate profile names and duplicate members fail validation. Speech membership is the one exception to live switching: the speech engine loads once at boot, so changing a profile's STT members takes effect on the next gateway start, not at the switch.
 
 Profile names must be a single safe path component: no surrounding whitespace, not empty, not `.` or `..`, and no path separators. One spelling works in URLs, state files, and labels.
 
@@ -509,7 +511,7 @@ curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" \
 
 The switch streams its stages as a live SSE event stream: `loading-profile`, `stopping-models`, `starting-models`, and one terminal event. The choice persists to the state file, and the switch runs to completion even if the client disconnects. Switching uses the in-memory catalog; the config file is never re-read from disk.
 
-Activating a profile narrows the served remote, local, and STT catalogs to that profile's member list. Selecting an undefined profile fails with the list of defined profiles.
+Activating a profile narrows the served remote and local catalogs to that profile's member list. The speech selection it names is recorded for the next boot instead: the running speech engine never reloads, so speech keeps serving the boot profile's models until the gateway restarts. Selecting an undefined profile fails with the list of defined profiles.
 
 In-flight inference requests get a bounded drain of up to 30 seconds during a switch. Stragglers are then cancelled, and a caller cancelled this way receives a dedicated error. Switching tears down the old profile's children deterministically, and their VRAM is freed before the replacement profile starts. When a switch starts only some local models, the terminal event names which models loaded and which failed.
 
@@ -622,7 +624,7 @@ curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin
 
 The real file is replaced atomically. On platforms where rename cannot overwrite, a backup-and-restore fallback preserves the old file. The reply carries `applied`, `reloaded`, and `restart_required`. The reply tells you when an edit needs a process restart to take effect: an env shadow or a change to `[server]` or `[workshop]` requires a restart. The apply's reload stages stream on the live progress stream; the apply response carries only the outcome.
 
-An apply that changes the config or the state runs as a command on the gateway's command queue, the same queue that runs profile switches and boot provisioning. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and the config UI's Apply overlay follows its stages and carries a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply supersedes any profile switch in flight, including the boot load, because the applied configuration is the one you want running; a profile switch requested during an apply waits behind it. An apply that touches only the env file, or only a process-owned section, needs no reload and runs inline without a command.
+An apply that changes the config or the state runs as a command on the gateway's command queue, the same queue that runs profile switches and boot provisioning. The queue is one serialized pending deque with no fixed capacity: debounce and supersession decide what stays pending, and a single worker runs the surviving commands in order. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and the config UI's Apply overlay follows its stages and carries a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply supersedes any profile switch in flight, including the boot load, because the applied configuration is the one you want running; a profile switch requested during an apply waits behind it. An apply that touches only the env file, or only a process-owned section, needs no reload and runs inline without a command. An apply that changes speech settings or the speech model selection stores them for the next boot and leaves the running speech engine untouched.
 
 Promotion happens at the end. The shadow files are read into memory when the apply is requested, the new configuration is downloaded and started, and only then are the captured bytes written to the real files and the shadows removed. A cancelled or failed apply therefore promotes nothing: every shadow stays on disk, the pending count stays where it was, and the next Apply runs the whole thing again. A save that lands while an apply is in flight is kept as the next pending change, never silently lost and never half-applied.
 
@@ -674,7 +676,7 @@ A connection dot in the tab bar shows whether the gateway is reachable. The tab 
 
 Edits move through three states: unsaved edits held in the browser, saved pending shadows on the gateway, and the applied running configuration. When pending changes exist, the tab bar shows an Apply button labeled with the pending file count beside a Revert All button. When a previous session left unapplied changes, a banner offers Review, Apply, and Revert All.
 
-Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation.
+Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation. When a successful apply changes speech-to-text - the `[stt]` tuning, the speech model catalog, or the active profile's speech membership - one info toast reads "Restart the Gateway to apply speech-to-text changes.", because the gateway loads speech once at boot. The toast coexists with the banner when one apply changes both.
 
 Open the Review dialog to list every pending configuration change as a table of path, running value, and pending value. Secret values are never displayed.
 
@@ -776,7 +778,7 @@ The gateway restricts the cache root to your own account at startup and refuses 
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether a complete generation is ready, whether its backend reports GPU acceleration, and the active generation number. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so boot provisioning, applies, and switches are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 
