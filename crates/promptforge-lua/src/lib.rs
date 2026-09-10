@@ -103,6 +103,7 @@ mod handles;
 mod live;
 mod messages;
 mod program;
+mod projection;
 mod prose;
 mod scope;
 pub(crate) use handles::resolve_section_target;
@@ -126,6 +127,8 @@ pub use handles::{
 pub use live::LiveBindingProducer;
 #[doc(hidden)]
 pub use models::ModelRuntime;
+#[doc(hidden)]
+pub use projection::project_messages;
 #[doc(hidden)]
 pub use prose::ProseState;
 #[doc(hidden)]

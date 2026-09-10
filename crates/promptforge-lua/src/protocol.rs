@@ -511,7 +511,7 @@ fn parse_chat(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, Fi
 /// carries (`role`, `content`, `tool_call_id`, `tool_calls`) are accepted
 /// and dropped. Cross-record checks - unique call IDs, complete
 /// call-result pairing, provider-required alternation - belong to the
-/// per-dispatch projection, not this parse.
+/// per-dispatch projection ([`crate::projection`]), not this parse.
 fn parse_messages(
     messages: &serde_json::Value,
 ) -> std::result::Result<Vec<MessageRecord>, FieldFailure> {

@@ -841,6 +841,55 @@ store.write('err.txt', err)
 }
 
 #[tokio::test]
+async fn a_failed_chat_projection_reports_one_failed_turn_before_lua_pcall_resumes() {
+    let recorder = Arc::new(ContentRecorder::default());
+    let run = run_over_fixture(
+        r#"
+models.use('test-model')
+local ok, err = pcall(function()
+    return models.chat({
+        { role = "user", content = "hi" },
+        { role = "system", content = "late" },
+    })
+end)
+store.write('ok.txt', tostring(ok))
+store.write('err.txt', err)
+"#,
+        vec![text_body("fixture-model", "never fetched", "stop")],
+        no_tools(),
+        config_with(Arc::clone(&recorder) as Arc<dyn Observer>),
+    )
+    .await;
+    run.result
+        .as_ref()
+        .expect("the program catches the projection failure");
+    assert_eq!(run.read("ok.txt"), "false");
+    assert!(
+        run.read("err.txt")
+            .contains("system message outside the leading system block"),
+        "the call-site error names the projection violation: {}",
+        run.read("err.txt")
+    );
+    assert_eq!(
+        run.gateway.call_count(),
+        0,
+        "a projection failure fails before any live model request"
+    );
+    let observations = recorder
+        .observations
+        .lock()
+        .expect("the observation log is intact");
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|event| matches!(event, Observation::ModelTurnFailed))
+            .count(),
+        1,
+        "the failed boundary is observed exactly once before pcall recovers"
+    );
+}
+
+#[tokio::test]
 async fn opts_tools_control_the_advertised_set_and_default_to_none() {
     let (echo, _) = fixture_tool("echo");
     let (search, _) = fixture_tool("search");
@@ -1131,6 +1180,74 @@ models.chat({
             ] },
         ]),
         "system role and content parts must reach the wire exactly as validated"
+    );
+}
+
+#[tokio::test]
+async fn chat_projects_multiple_leading_systems_without_mutating_the_programs_list() {
+    let run = run_over_fixture(
+        r#"
+models.use('test-model')
+local messages = {
+    { role = "system", content = "be terse" },
+    { role = "system", content = "answer in English" },
+    { role = "user", content = "hi" },
+}
+models.chat(messages)
+store.write('len.txt', tostring(#messages))
+store.write('first.txt', messages[1].content)
+"#,
+        vec![text_body("fixture-model", "ok", "stop")],
+        no_tools(),
+        config(),
+    )
+    .await;
+    run.result.as_ref().expect("the chat round completes");
+    assert_eq!(
+        run.gateway.requests()[0]["messages"],
+        json!([
+            { "role": "system", "content": "be terse\n\nanswer in English" },
+            { "role": "user", "content": "hi" },
+        ]),
+        "the provider's single-system shape is composed at dispatch"
+    );
+    assert_eq!(
+        run.read("len.txt"),
+        "3",
+        "the source array is never mutated"
+    );
+    assert_eq!(run.read("first.txt"), "be terse");
+}
+
+#[tokio::test]
+async fn a_projection_failure_is_the_calls_error_and_no_request_leaves() {
+    let run = run_over_fixture(
+        r#"
+models.use('test-model')
+local ok, err = pcall(models.chat, {
+    { role = "user", content = "hi" },
+    { role = "tool", content = "loose", tool_call_id = "call_9" },
+})
+store.write('ok.txt', tostring(ok))
+store.write('err.txt', tostring(err))
+"#,
+        vec![text_body("fixture-model", "unreachable", "stop")],
+        no_tools(),
+        config(),
+    )
+    .await;
+    run.result
+        .as_ref()
+        .expect("the run completes: the program pcall'd the failure");
+    assert_eq!(run.read("ok.txt"), "false");
+    assert!(
+        run.read("err.txt").contains("is an orphan tool record"),
+        "the projection error rides back as the call's answer: {}",
+        run.read("err.txt")
+    );
+    assert!(
+        run.gateway.requests().is_empty(),
+        "projection runs immediately before dispatch: an invalid list never reaches the gateway"
     );
 }
 

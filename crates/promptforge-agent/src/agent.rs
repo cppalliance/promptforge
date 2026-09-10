@@ -32,10 +32,10 @@ use promptforge_core_support::events::{CallMetrics, EventLog, ToolCallEvent};
 use promptforge_core_support::observe::{Observer, detail};
 use promptforge_core_support::untrusted::GuardNonce;
 use promptforge_lua::{
-    Answer, ChatResult, ContentPart, CoroStep, Error as LuaError, EventsSnapshot, LuaBlockResult,
-    LuaProgram, MessageContent, MessageRecord, Request, ScriptReport, SectionVm, ToolBinding,
-    ToolCallCounts, ToolCallOutcome, ToolOutputKind, ToolSet, YieldParse, current_tool_bindings,
-    dispatch_tool, install_agent_chat_shim, install_runtime_events, resolve_model_binding,
+    Answer, ChatResult, CoroStep, Error as LuaError, EventsSnapshot, LuaBlockResult, LuaProgram,
+    MessageRecord, Request, ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome,
+    ToolOutputKind, ToolSet, YieldParse, current_tool_bindings, dispatch_tool,
+    install_agent_chat_shim, install_runtime_events, project_messages, resolve_model_binding,
 };
 use promptforge_model_client::client::{
     Completion, CompletionResult, GatewayClient, Message, StreamDelta, ToolSchema,
@@ -45,7 +45,6 @@ use promptforge_model_client::model::{
 };
 use promptforge_store::StoreRef;
 use promptforge_tools::ToolCatalog;
-use serde_json::Value;
 
 use crate::config::AgentConfig;
 
@@ -628,9 +627,10 @@ async fn dispatch_infer(
 /// never on `finish_reason`. The model client fails the batch when
 /// `length` or `content_filter` truncates a tool-call round, and that
 /// failure rides back as this call's answer.
-/// A binding that is absent when dispatch begins reports a failed turn
-/// before its call-site error resumes into Lua, so a surrounding `pcall`
-/// cannot hide the operator-visible boundary failure.
+/// A binding that is absent when dispatch begins, or a message list that
+/// fails projection, reports a failed turn before its call-site error
+/// resumes into Lua, so a surrounding `pcall` cannot hide the
+/// operator-visible boundary failure.
 async fn dispatch_chat(
     run: &AgentRun<'_>,
     messages: &[MessageRecord],
@@ -665,7 +665,16 @@ async fn dispatch_chat(
         }
     };
     let schemas = advertised_schemas(run, tools)?;
-    let conversation = wire_messages(messages);
+    // The per-dispatch projection: cross-record validation and provider
+    // shaping run here, immediately before the call, over the list as the
+    // program holds it now. A projection failure reports a failed turn
+    // before its call-site error resumes into Lua, exactly like the
+    // missing-binding path above.
+    let conversation = project_messages(messages).map_err(|error| {
+        run.observer
+            .observe(run.execution, run.name, detail::MODEL_TURN_FAILED);
+        AgentError::from(error)
+    })?;
     let client = run.client()?;
     let options = binding.completion_options();
     let tool_arg = if schemas.is_empty() {
@@ -812,61 +821,6 @@ fn advertised_schemas(run: &AgentRun<'_>, tools: &[String]) -> Result<Vec<ToolSc
         schemas.push(schema);
     }
     Ok(schemas)
-}
-
-/// Converts the protocol-validated message records into the client's wire
-/// messages. The protocol parse validated every field once, so this
-/// conversion is total - no second validator exists to drift. Each record
-/// contributes exactly the four fields the wire message carries (`role`,
-/// `content`, `tool_call_id`, `tool_calls`); a record with no tool calls
-/// omits the field, and each normalized call renders as the
-/// provider-neutral `{id, name, arguments}` object.
-fn wire_messages(messages: &[MessageRecord]) -> Vec<Message> {
-    messages
-        .iter()
-        .map(|message| {
-            let content = match &message.content {
-                MessageContent::Text(text) => Value::String(text.clone()),
-                MessageContent::Parts(parts) => parts
-                    .iter()
-                    .map(|part| match part {
-                        ContentPart::Text(text) => {
-                            serde_json::json!({ "type": "text", "text": text })
-                        }
-                        ContentPart::ImageUrl(url) => {
-                            serde_json::json!({
-                                "type": "image_url",
-                                "image_url": { "url": url },
-                            })
-                        }
-                    })
-                    .collect(),
-            };
-            let tool_calls = if message.tool_calls.is_empty() {
-                None
-            } else {
-                Some(
-                    message
-                        .tool_calls
-                        .iter()
-                        .map(|call| {
-                            serde_json::json!({
-                                "id": call.id,
-                                "name": call.name,
-                                "arguments": call.arguments,
-                            })
-                        })
-                        .collect(),
-                )
-            };
-            Message::from_validated_parts(
-                message.role.as_str(),
-                content,
-                message.tool_call_id.clone(),
-                tool_calls,
-            )
-        })
-        .collect()
 }
 
 /// Assembles the round's [`CallMetrics`] from everything the completion

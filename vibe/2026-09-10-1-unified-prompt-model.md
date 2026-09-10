@@ -409,7 +409,7 @@ In `crates/promptforge-core/src/execute/scheduler.rs`, substitution, and VM setu
 
 <step-7>
 
-### Step 7: provider-neutral projection and per-dispatch validation
+### Step 7: provider-neutral projection and per-dispatch validation [completed]
 
 - Component: projection
 
