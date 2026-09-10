@@ -237,7 +237,7 @@ Every remote model must list at least one endpoint, and every endpoint it names 
 
 ## Kinds and thinking modes
 
-Every model carries a `kind`: `chat`, `embedding`, or `classifier`. The kind scopes which fields are meaningful. Chat-only fields such as `thinking` and `default_max_tokens` are rejected for non-chat kinds at load time.
+Every model carries a `kind`: `chat`, `embedding`, `classifier`, or `speech`. The kind scopes which fields are meaningful. Chat-only fields such as `thinking` and `default_max_tokens` are rejected for non-chat kinds at load time.
 
 Record each chat model's thinking behavior as `never`, `always`, or `switchable`. Switchable means the client may toggle thinking per request.
 
@@ -268,7 +268,7 @@ adaptive_thinking = true
 
 The capability fields are `max_output`, `default_temperature`, `images`, `parallel_tool_calls`, `effort_levels`, `default_effort`, and `adaptive_thinking`. They obey cross-field rules at load time. A `default_effort` without `effort_levels` fails. A `default_effort` not listed in `effort_levels` fails. Effort fields fail when thinking is `never`. A `max_output` larger than `context` fails; an exact fit passes.
 
-Enumerated fields accept a fixed spelling vocabulary. Use the spellings verbatim: protocol `openai`; thinking `never`, `always`, or `switchable`; tool_dialect `openai` or `gemma3_tool_code`; model kind `chat`, `embedding`, or `classifier`.
+Enumerated fields accept a fixed spelling vocabulary. Use the spellings verbatim: protocol `openai`; thinking `never`, `always`, or `switchable`; tool_dialect `openai` or `gemma3_tool_code`; model kind `chat`, `embedding`, `classifier`, or `speech`.
 
 ## What the caller sees
 
@@ -327,7 +327,7 @@ Local inference runs on a pinned llama-server build, b10082. The gateway prefers
 
 The gateway runs one managed llama-server child per configured `[[local_model]]`. Children get supervised respawn and deterministic teardown. Staged CUDA bundle directories are prepended to the child process's PATH only; the gateway's own environment is never mutated. Local models appear to clients as ordinary routed models under their configured names.
 
-A local model's `kind` selects the child's serving mode: embedding models serve embeddings, and classifier models serve reranking. The `parallel` key sets both the child's concurrency and its admission limit. The thinking setting changes the child's sampling preset: thinking models sample at temperature 1.0 and top-p 0.95, while non-thinking models run with reasoning switched off and sample at 0.7 and 0.8.
+A local model's `kind` selects the child's serving mode: embedding models serve embeddings, and classifier models serve reranking. A `speech` kind has no local serving mode and is refused at launch: local speech models are not yet supported. The `parallel` key sets both the child's concurrency and its admission limit. The thinking setting changes the child's sampling preset: thinking models sample at temperature 1.0 and top-p 0.95, while non-thinking models run with reasoning switched off and sample at 0.7 and 0.8.
 
 ## Chat templates
 
@@ -459,6 +459,66 @@ The 30-second limit is retained ownership, not recording duration. It includes r
 The desktop Workshop exposes the same `/v1/realtime` path on its own origin. Its server authenticates the fixed upstream target and relays payloads without parsing them, so the webview never receives the gateway credential.
 
 Speech loads exactly once per process, from the profile active at boot. Switching the active profile or applying a new configuration persists a changed speech selection but never loads, reloads, or unloads the running engine; the new selection takes effect on the next start. The configuration UI raises a restart toast when an apply changes the speech tuning, the speech model catalog, or the active profile's speech membership.
+
+---
+
+# Speech Synthesis
+
+This chapter teaches you the gateway's speech synthesis surface: how to declare a speech model, how to call the synthesis route, and how to enumerate voices. Synthesis builds on remote models, because the gateway routes speech to remote providers only; a `[[local_model]]` with `kind = "speech"` is refused at launch.
+
+## Declare a speech model
+
+A speech synthesis model is an ordinary `[[model]]` entry with `kind = "speech"`, backed by an ordinary `[[endpoint]]`:
+
+````
+[[endpoint]]
+id = "together"
+protocol = "openai"
+base_url = "https://api.together.xyz/v1"
+api_key = "${TOGETHER_API_KEY}"
+
+[[model]]
+name = "orpheus"
+kind = "speech"
+description = "Orpheus 3B conversational speech synthesis"
+upstream = "canopylabs/orpheus-3b-0.1-ft"
+endpoints = ["together"]
+context = 8192
+voices = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
+````
+
+The entry carries the usual remote-model fields, and the kind scopes which of them are meaningful. Chat-only fields such as `thinking`, the effort knobs, `default_max_tokens`, and `tool_dialect` are rejected on a speech model at load time. The speech-only `voices` list declares the voices the model offers: setting it on any other kind fails at load, entries must be non-empty and unique, and an empty or omitted list means the model exposes no fixed voice list, so the route accepts any voice name. The catalog advertises the kind and the voice list verbatim on GET /v1/models, so clients can shape requests before sending them.
+
+## Synthesize speech
+
+The gateway serves OpenAI-shaped speech synthesis at POST /v1/audio/speech:
+
+````
+curl -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "orpheus", "input": "The quick brown fox.", "voice": "tara"}' \
+  -o speech.mp3
+````
+
+The request carries `model` and `input` (both required; the input is non-empty and capped at 4096 characters), `voice` (required; a plain name or the OpenAI object form `{"id": "tara"}`), and four optional fields: `response_format` from the closed set `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`; `speed` between 0.25 and 4.0; `instructions`, the gpt-4o-mini-tts dialect's style-control string; and `stream_format`, `sse` or `audio`. An omitted `response_format` resolves to `mp3` before the request leaves the gateway: OpenAI defaults to mp3 while Together defaults to wav, so the pin lives in the wire type and every forwarded body carries it. Fields the gateway does not name pass through to the provider verbatim, so provider extras such as Together's `sample_rate` ride the same request, and angle-bracket emotion tags such as `<laugh>` in the input reach the provider untouched.
+
+Authentication runs before the body is parsed, so a bad key earns 401 even for a malformed body. Shape failures earn 400: an empty or over-cap `input` or an out-of-range `speed` as `malformed_request`, a non-speech model as `kind_mismatch`, and a voice outside the model's declared list as `invalid_voice` naming the valid voices, judged before queue admission so the rejection never burns a queue slot. A full queue earns 503 with code `queue_full`. An upstream 429 comes back as 429 with code `upstream_rate_limited` and an upstream 503 as 503 with code `upstream_unavailable`, so an OpenAI client sees a retryable rate-limit or server error rather than a generic failure.
+
+The response is the provider's audio bytes streamed through unread: the gateway forwards the upstream `Content-Type` (when missing or invalid, the framing selector first, so an SSE stream is labeled `text/event-stream` and never an audio type, then the requested format's MIME type), never sets `Content-Length`, and emits `Transfer-Encoding: chunked`. No JSON error can follow 200 plus audio bytes, so a mid-stream upstream failure surfaces as a truncated body and the client's read fails.
+
+## List voices
+
+GET /v1/audio/voices answers the union of the active profile's speech voices, deduplicated and sorted:
+
+````
+{"voices": [{"id": "dan", "name": "dan"}, {"id": "jess", "name": "jess"}, {"id": "leah", "name": "leah"}]}
+````
+
+Each entry is an object with `id` first and `name` mirroring it, because the catalog configures voices as bare strings with no separate display name. OpenAI has no voice-list route; the OpenAI-compatible ecosystem converged on this one, and clients such as Open WebUI read the `id` key, so the entry shape is a compatibility surface. Tolerant clients also accept the plain-string form some servers answer with. A profile with no speech models returns an empty list, and non-speech models contribute nothing.
+
+## The stream_format caveat
+
+`stream_format = "sse"` is OpenAI's selector for event-stream framing, and the gateway forwards it verbatim like any other field. Provider dialects differ: Together spells its streaming mode `stream=true`, and only with `response_format = "raw"`, which the wire enum rejects, so Together SSE cannot be requested in phase 1 and Together speech is non-streaming. The forwarding is forward-looking, aimed at SSE-capable OpenAI-compatible providers, and the gateway does no reframing or decoding: whatever framing the provider answers with passes through untouched, so a client that receives an event stream owns decoding it itself.
 
 ---
 
