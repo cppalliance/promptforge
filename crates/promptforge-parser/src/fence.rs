@@ -6,7 +6,6 @@
 //! optional `lua shared` H1 library, and splits content into [`RawBlock`]s that
 //! the facade compiles into [`Block`]s.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
@@ -43,10 +42,6 @@ pub(super) fn split_h1(
     execution: &str,
     observer: &dyn Observer,
 ) -> Result<(Option<LuaProgram>, Vec<Block>, String)> {
-    // The H1 takes only the marker's comment role: everything below the first
-    // `---` rule is reader-only, so a `lua shared` fence there is inert and
-    // the description text comes from above the rule.
-    let content = truncate_at_first_rule(content);
     let leading = trim_leading_blank_lines(content);
     if leading.lines().next() == Some("```lua prompt") {
         return Err(Error::parse(
@@ -89,17 +84,10 @@ pub(super) fn split_h1(
         )
     })?;
     let raw_blocks = split_section_blocks(&h1_content, title)?;
-    let last_prose = raw_blocks
-        .iter()
-        .rposition(|block| matches!(block, RawBlock::Prose(_)));
-    let total = raw_blocks.len();
-    let mut blocks = Vec::with_capacity(total);
-    for (index, raw) in raw_blocks.into_iter().enumerate() {
+    let mut blocks = Vec::with_capacity(raw_blocks.len());
+    for raw in raw_blocks {
         match raw {
-            RawBlock::Prose(text) => blocks.push(Block::Prose {
-                text,
-                loop_capable: Some(index) == last_prose,
-            }),
+            RawBlock::Prose(text) => blocks.push(Block::Prose { text }),
             RawBlock::Lua {
                 source,
                 line_offset,
@@ -118,10 +106,7 @@ pub(super) fn split_h1(
     }
     if matches!(
         blocks.as_slice(),
-        [Block::Prose {
-            text,
-            loop_capable: _
-        }] if text.is_empty()
+        [Block::Prose { text }] if text.is_empty()
     ) {
         blocks.clear();
     }
@@ -243,42 +228,17 @@ fn rule_ranges(content: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
-/// Truncates a content region at its first `---` rule, making everything
-/// below the rule reader-only.
-pub(super) fn truncate_at_first_rule(content: &str) -> &str {
-    match rule_ranges(content).first() {
-        Some(range) => &content[..range.start],
-        None => content,
-    }
-}
-
-/// Applies the `---` marker's two roles to one section's content.
-///
-/// A rule that precedes any executable content (only whitespace before it)
-/// marks the section off-walk: the marker is blanked out and the content
-/// below parses normally. Any later rule is then the comment boundary where
-/// the section's executable content ends. With no leading rule, the first
-/// rule is the comment boundary. The marker is blanked rather than removed so
-/// Lua source-line numbers still map back to the original file.
-///
-/// # Errors
-/// Returns a structure-classified parse error when the masked content fails
-/// UTF-8 validation, which the ASCII-only masking makes unreachable.
-pub(super) fn split_rule_roles(content: &str) -> Result<(bool, Cow<'_, str>)> {
-    let ranges = rule_ranges(content);
-    let Some(first) = ranges.first() else {
-        return Ok((false, Cow::Borrowed(content)));
-    };
-    if !content[..first.start].trim().is_empty() {
-        return Ok((false, Cow::Borrowed(&content[..first.start])));
-    }
-    let mut masked = content.as_bytes().to_vec();
-    blank_preserving_newlines(&mut masked[first.clone()]);
-    let end = ranges.get(1).map_or(content.len(), |range| range.start);
-    masked.truncate(end);
-    let masked = String::from_utf8(masked)
-        .map_err(|_| Error::parse(ParseErrorKind::Structure, "internal rule masking failed"))?;
-    Ok((true, Cow::Owned(masked)))
+/// Returns the pending Markdown of one prose segment: everything after the
+/// segment's last thematic break. The break itself is never included, and
+/// commentary above it is excluded.
+fn pending_prose<'a>(content: &'a str, segment: Range<usize>, rules: &[Range<usize>]) -> &'a str {
+    let start = rules
+        .iter()
+        .filter(|rule| rule.start >= segment.start && rule.end <= segment.end)
+        .map(|rule| rule.end)
+        .max()
+        .unwrap_or(segment.start);
+    &content[start..segment.end]
 }
 
 /// Splits a section into alternating exact `lua` fences and prose segments.
@@ -287,15 +247,19 @@ pub(super) fn split_rule_roles(content: &str) -> Result<(bool, Cow<'_, str>)> {
 /// becomes prose (including an empty segment between consecutive fences, so
 /// classic prologue/epilog with empty prose stays `[Lua, Prose, Lua]`). Leading
 /// blank lines before a leading fence are discarded. Near-miss fence forms stay
-/// inside prose.
+/// inside prose. Each prose segment is the pending Markdown buffer for the
+/// fence that follows it: a thematic break resets the buffer, so only the
+/// Markdown below the segment's last break is captured.
 ///
 /// # Errors
 /// Returns a fence-classified parse error when an exact `lua` fence is not
 /// closed.
 pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<RawBlock>> {
     let openings = exact_lua_openings(content);
+    let rules = rule_ranges(content);
     if openings.is_empty() {
-        return Ok(vec![RawBlock::Prose(content.trim().to_string())]);
+        let pending = pending_prose(content, 0..content.len(), &rules);
+        return Ok(vec![RawBlock::Prose(pending.trim().to_string())]);
     }
 
     let leading_start = leading_content_start(content);
@@ -327,7 +291,8 @@ pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<R
         let fence_end = content.len() - rest.len();
 
         if !(pos == 0 && opening == leading_start) {
-            blocks.push(RawBlock::Prose(content[pos..opening].trim().to_string()));
+            let pending = pending_prose(content, pos..opening, &rules);
+            blocks.push(RawBlock::Prose(pending.trim().to_string()));
         }
 
         let line_offset = line_add(newlines_before(content, opening)?, 1)?;
@@ -338,7 +303,7 @@ pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<R
         pos = fence_end;
     }
 
-    let trailing = content[pos..].trim();
+    let trailing = pending_prose(content, pos..content.len(), &rules).trim();
     if !trailing.is_empty() {
         blocks.push(RawBlock::Prose(trailing.to_string()));
     }

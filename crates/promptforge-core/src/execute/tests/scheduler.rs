@@ -334,104 +334,6 @@ async fn sys_id_increments_per_section() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn off_walk_section_is_never_visited_by_the_walk() {
-    // Mirror of the legacy case of the same name: an off-walk section is
-    // skipped without a frame - no execution, no observation - while
-    // `sys.section_count` still counts it.
-    let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Skip\n\n\
-        ## Hidden\n\n\
-        ---\n\n\
-        ```lua\nerror('hidden must not run')\n```\n\n\
-        ## Main\n\n\
-        ```lua\n\
-        assert(sys.section_count == 2)\n\
-        return 'main-ran'\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("the walk must skip the off-walk section");
-
-    assert_eq!(out, "main-ran");
-    let records = recorder.records();
-    assert!(
-        records.iter().all(|(_, section, _)| section != "Hidden"),
-        "an off-walk section must produce no observations: {records:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn off_walk_sections_run_only_when_addressed() {
-    // Mirror of the legacy case of the same name: A executes B and C (both
-    // off-walk), D unmarked - the walk visits A then D, and the off-walk
-    // sections run when addressed.
-    let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Addressed\n\n\
-        ## A\n\n\
-        ```lua\n\
-        local rb = call('## B')\n\
-        local rc = call('## C')\n\
-        store.write('order.txt', rb .. ',' .. rc)\n\
-        ```\n\n\
-        ## B\n\n\
-        ---\n\n\
-        ```lua\nreturn 'b-ran'\n```\n\n\
-        ## C\n\n\
-        ---\n\n\
-        ```lua\nreturn 'c-ran'\n```\n\n\
-        ## D\n\n\
-        ```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("off-walk sections must run when addressed");
-
-    // A walked B or C would end the run early with its own scalar return.
-    assert_eq!(out, "d-ran:b-ran,c-ran");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
-    // Mirror of the legacy case of the same name: a contained chain skips
-    // off-walk sections in fall-through like any walk - only addressing
-    // runs a marked section.
-    let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Contained\n\n\
-        ## A\n\n\
-        ```lua\n\
-        local r = call('## Sub')\n\
-        return r\n\
-        ```\n\n\
-        ## Sub\n\n\
-        ```lua\nstore.append('order.txt', 'Sub\\n')\n```\n\n\
-        ## Hidden\n\n\
-        ---\n\n\
-        ```lua\nstore.append('order.txt', 'Hidden\\n')\n```\n\n\
-        ## Tail\n\n\
-        ```lua\n\
-        store.append('order.txt', 'Tail\\n')\n\
-        return 'tail-reply'\n\
-        ```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("the chain must skip the off-walk section in fall-through");
-
-    assert_eq!(out, "tail-reply");
-    assert_eq!(store.read("order.txt").expect("order log"), "Sub\nTail\n");
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
     // Mirror of the legacy case of the same name: A executes the off-walk
     // S1, which runs because it is addressed; the chain falls through to
@@ -834,33 +736,6 @@ async fn jump_to_off_walk_section_runs_it() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
-    // Mirror of the legacy case of the same name: a jump runs its off-walk
-    // target, but the fall-through that follows is an ordinary walk step -
-    // the next off-walk sibling is skipped again.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Once\n\n\
-        ## A\n\n\
-        ```lua\njump('## B')\n```\n\n\
-        ## B\n\n\
-        ---\n\n\
-        ```lua\nlocal b = 1\n```\n\n\
-        ## C\n\n\
-        ---\n\n\
-        ```lua\nreturn 'c-ran'\n```\n\n\
-        ## D\n\n\
-        ```lua\nreturn 'd-ran'\n```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("fall-through after an addressed off-walk section must resume skipping");
-
-    assert_eq!(out, "d-ran");
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn var_persists_across_a_jump() {
     // The jump half of the legacy
     // `var_persists_across_sections_fallthrough_and_jump` (its H1-seed half
@@ -1072,35 +947,6 @@ async fn child_walk_recurses_to_h4() {
         .expect("the child-level rule must recurse to H4");
 
     assert_eq!(out, "A\nX\nP\nQ\nY\nB\n");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn off_walk_child_is_skipped_by_the_child_walk() {
-    // Mirror of the legacy case of the same name: the off-walk flag applies
-    // at every walked level - an off-walk H3 is skipped by the child-level
-    // walk's fall-through.
-    let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Skip\n\n\
-        ## A\n\n\
-        ```lua\njump('### X')\n```\n\n\
-        ### X\n\n\
-        ```lua\nstore.append('order.txt', 'X\\n')\n```\n\n\
-        ### Off\n\n\
-        ---\n\n\
-        ```lua\nstore.append('order.txt', 'Off\\n')\n```\n\n\
-        ### Y\n\n\
-        ```lua\nstore.append('order.txt', 'Y\\n')\n```\n\n\
-        ## B\n\n\
-        ```lua\nreturn store.read('order.txt')\n```\n";
-    let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
-        .drive()
-        .await
-        .expect("the child walk must skip the off-walk child");
-
-    assert_eq!(out, "X\nY\n");
 }
 
 #[tokio::test(flavor = "current_thread")]

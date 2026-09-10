@@ -473,40 +473,6 @@ return 'p'\n\
     assert_eq!(out, "Peer\nA-done\nB\n");
 }
 
-/// A contained chain skips off-walk sections in fall-through like any walk:
-/// only addressing runs a marked section.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\n\
-local r = call('## Sub')\n\
-return r\n\
-```\n\n\
-## Sub\n\n\
-```lua\n\
-store.append('order.txt', 'Sub\\n')\n\
-```\n\n\
-## Hidden\n\n\
----\n\n\
-```lua\n\
-store.append('order.txt', 'Hidden\\n')\n\
-```\n\n\
-## Tail\n\n\
-```lua\n\
-store.append('order.txt', 'Tail\\n')\n\
-return 'tail-reply'\n\
-```\n"
-    );
-    let store = StoreRef::memory();
-    let out = run(&fixture(md), "", &[], &store, silent())
-        .await
-        .expect("the chain must skip the off-walk section in fall-through");
-    assert_eq!(out, "tail-reply");
-    assert_eq!(store.read("order.txt").expect("order log"), "Sub\nTail\n");
-}
-
 /// A return inside a contained chain ends the chain, not the run: the
 /// returned value is the call's return, the chain's remaining sections do
 /// not run, and the outer walk continues.
@@ -761,62 +727,6 @@ Do work.\n\n\
     assert_eq!(out, "ok");
 }
 
-/// An off-walk section is never visited by the walk: no observation, no
-/// execution. It stays in the section tree, so `sys.section_count` counts it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn off_walk_section_is_never_visited_by_the_walk() {
-    let md = flow_prompt!(
-        "\
-## Hidden\n\n\
----\n\n\
-```lua\nerror('hidden must not run')\n```\n\n\
-## Main\n\n\
-```lua\n\
-assert(sys.section_count == 2)\n\
-return 'main-ran'\n\
-```\n"
-    );
-    let (result, records) = run_recorded(md).await;
-    assert_eq!(
-        result.expect("the walk must skip the off-walk section"),
-        "main-ran"
-    );
-    assert!(
-        records.iter().all(|(_, section, _)| section != "Hidden"),
-        "an off-walk section must produce no observations: {records:?}"
-    );
-}
-
-/// The canonical shape: A executes B and C (both off-walk), D unmarked - the
-/// walk visits A then D, and the off-walk sections' content below the marker
-/// runs when addressed.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn off_walk_sections_run_only_when_addressed() {
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\n\
-local rb = call('## B')\n\
-local rc = call('## C')\n\
-store.write('order.txt', rb .. ',' .. rc)\n\
-```\n\n\
-## B\n\n\
----\n\n\
-```lua\nreturn 'b-ran'\n```\n\n\
-## C\n\n\
----\n\n\
-```lua\nreturn 'c-ran'\n```\n\n\
-## D\n\n\
-```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n"
-    );
-    let store = StoreRef::memory();
-    let out = run(&fixture(md), "", &[], &store, silent())
-        .await
-        .expect("off-walk sections must run when addressed");
-    // A walked B or C would end the run early with its own scalar return.
-    assert_eq!(out, "d-ran:b-ran,c-ran");
-}
-
 /// A jump addresses an off-walk section directly, so it runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_to_off_walk_section_runs_it() {
@@ -834,29 +744,6 @@ async fn jump_to_off_walk_section_runs_it() {
         .await
         .expect("a jump to an off-walk section must run it");
     assert_eq!(out, "b-ran");
-}
-
-/// A jump runs its off-walk target, but the fall-through that follows is an
-/// ordinary walk step: the next off-walk sibling is skipped again.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\njump('## B')\n```\n\n\
-## B\n\n\
----\n\n\
-```lua\nlocal b = 1\n```\n\n\
-## C\n\n\
----\n\n\
-```lua\nreturn 'c-ran'\n```\n\n\
-## D\n\n\
-```lua\nreturn 'd-ran'\n```\n"
-    );
-    let out = run_offline(md)
-        .await
-        .expect("fall-through after an addressed off-walk section must resume skipping");
-    assert_eq!(out, "d-ran");
 }
 
 /// A jump to an H3 child starts a child-level walk at the target: it falls
@@ -980,41 +867,6 @@ return store.read('order.txt')\n\
         .await
         .expect("the child-level rule must recurse to H4");
     assert_eq!(out, "A\nX\nP\nQ\nY\nB\n");
-}
-
-/// The off-walk flag applies at every walked level: an off-walk H3 is skipped
-/// by the child-level walk's fall-through.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn off_walk_child_is_skipped_by_the_child_walk() {
-    let md = flow_prompt!(
-        "\
-## A\n\n\
-```lua\n\
-jump('### X')\n\
-```\n\n\
-### X\n\n\
-```lua\n\
-store.append('order.txt', 'X\\n')\n\
-```\n\n\
-### Off\n\n\
----\n\n\
-```lua\n\
-store.append('order.txt', 'Off\\n')\n\
-```\n\n\
-### Y\n\n\
-```lua\n\
-store.append('order.txt', 'Y\\n')\n\
-```\n\n\
-## B\n\n\
-```lua\n\
-return store.read('order.txt')\n\
-```\n"
-    );
-    let store = StoreRef::memory();
-    let out = run(&fixture(md), "", &[], &store, silent())
-        .await
-        .expect("the child walk must skip the off-walk child");
-    assert_eq!(out, "X\nY\n");
 }
 
 /// An off-walk child stays addressable: a jump to it runs it (and the
@@ -2465,34 +2317,6 @@ list_from_section('## Nope')\n\
     assert!(
         rendered.contains("only available in sections"),
         "the stub error must name the cause: {rendered}"
-    );
-}
-
-/// The flagship composition: a sibling list section marked off-walk returns
-/// its items through `list_from_section` and is never visited by the walk.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn off_walk_list_section_feeds_list_from_section_without_walking() {
-    let md = flow_prompt!(
-        "\
-## List\n\n\
----\n\n\
-- alpha\n\
-- beta\n\n\
-## Main\n\n\
-```lua\n\
-local items = list_from_section('## List')\n\
-assert(#items == 2 and items[1] == 'alpha' and items[2] == 'beta')\n\
-return table.concat(items, ',')\n\
-```\n"
-    );
-    let (result, records) = run_recorded(md).await;
-    assert_eq!(
-        result.expect("an off-walk list section must feed list_from_section"),
-        "alpha,beta"
-    );
-    assert!(
-        records.iter().all(|(_, section, _)| section != "List"),
-        "an off-walk list section must never walk: {records:?}"
     );
 }
 

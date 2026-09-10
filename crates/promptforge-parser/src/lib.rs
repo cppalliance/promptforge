@@ -4,14 +4,15 @@
 //! blocks and one optional `lua shared` library fence, then H2 sections.
 //! H1 and section content are alternating sequences of exact `lua` fences and
 //! prose ([`Block`]). Sections nest recursively (H3 under H2, H4 under H3, and
-//! so on through H6). The last prose block is marked loop-capable at parse time.
-//! Classic prologue/prose/epilog is exactly `[Lua, Prose, Lua]`.
+//! so on through H6). Classic prologue/prose/epilog is exactly `[Lua, Prose, Lua]`.
 //!
-//! A `---` thematic break carries two roles by position. As a section's first
-//! content (only whitespace before it) it marks the section off-walk: the walk
-//! skips it and it runs only when addressed. Anywhere else it is a comment
-//! boundary: everything below it (until the next heading) is reader-only - no
-//! Lua compiles, no prose reaches the model, no items parse from it.
+//! Prose capture follows the pending-Markdown model: Markdown accumulates
+//! after each heading or ordinary `lua` fence, and each prose block is the
+//! pending buffer the following `lua` fence consumes. A `---` thematic break
+//! resets the pending buffer without becoming part of the prose; it carries
+//! no control-flow meaning, so content below a break parses and runs
+//! normally. Markdown left after the final `lua` fence is inert trailing
+//! commentary, never an error.
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 
@@ -196,14 +197,13 @@ impl From<Error> for ParseError {
 pub enum Block {
     /// An exact `lua` fence compiled at parse time.
     Lua(LuaProgram),
-    /// Author prose for the model. `loop_capable` is true only for the last
-    /// prose block in the section (full tool loop); earlier prose is single-shot.
+    /// Author prose: the pending Markdown accumulated since the nearest
+    /// preceding heading, `lua` fence, or thematic break. The executor
+    /// installs it as the following Lua block's lazy `prose` template.
     #[non_exhaustive]
     Prose {
-        /// Substituted and sent to the model when non-empty.
+        /// Captured Markdown, trimmed of surrounding blank lines.
         text: String,
-        /// Whether this prose runs the full tool loop (`true`) or one round.
-        loop_capable: bool,
     },
 }
 
@@ -222,8 +222,6 @@ pub struct Section {
     /// Pre-parsed bullet items for list-only sections (no lua blocks).
     /// Empty for non-list sections.
     pub(crate) items: Vec<String>,
-    /// True when a leading `---` rule marked this section off-walk.
-    pub(crate) off_walk: bool,
 }
 
 impl Section {
@@ -257,16 +255,6 @@ impl Section {
         &self.items
     }
 
-    /// Returns true when a leading `---` rule marked this section off-walk.
-    ///
-    /// An off-walk section stays in the section tree and remains addressable
-    /// by `execute`/`jump`/`fanout`, but the section walk skips it in
-    /// fall-through order. Content below the marker parses and runs normally.
-    #[must_use]
-    pub fn is_off_walk(&self) -> bool {
-        self.off_walk
-    }
-
     /// Classic leading Lua fence when the first block is Lua.
     #[must_use]
     pub fn prologue(&self) -> Option<&LuaProgram> {
@@ -276,17 +264,14 @@ impl Section {
         }
     }
 
-    /// Text of the final (loop-capable) prose block, or `""` when absent.
+    /// Text of the last prose block, or `""` when the section has none.
     #[must_use]
     pub fn prose(&self) -> &str {
         self.blocks
             .iter()
             .rev()
             .find_map(|block| match block {
-                Block::Prose {
-                    text,
-                    loop_capable: true,
-                } => Some(text.as_str()),
+                Block::Prose { text } => Some(text.as_str()),
                 _ => None,
             })
             .unwrap_or("")

@@ -389,7 +389,7 @@ Rename the bare `tool_call` global to `tools.call(alias_or_tool, arguments)` and
 
 <step-5>
 
-### Step 5: parser pending Markdown capture
+### Step 5: parser pending Markdown capture [completed]
 
 - Component: prose
 

@@ -31,10 +31,7 @@ fn sibling(name: &str, level: u8) -> Section {
     crate::test_support::synthetic_section(
         name,
         level,
-        vec![promptforge_parser::test_support::prose_block(
-            String::new(),
-            true,
-        )],
+        vec![promptforge_parser::test_support::prose_block(String::new())],
         Vec::new(),
     )
 }

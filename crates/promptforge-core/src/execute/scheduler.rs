@@ -778,11 +778,7 @@ impl<'a> Scheduler<'a> {
             chain.block = 0;
             return Ok(true);
         }
-        let mut index = chain.index;
-        while index < chain.slice.len() && !chain.addressed && chain.slice[index].is_off_walk() {
-            index += 1;
-        }
-        chain.index = index;
+        let index = chain.index;
         chain.addressed = false;
         if index >= chain.slice.len() {
             return Ok(false);
@@ -952,14 +948,19 @@ impl<'a> Scheduler<'a> {
     /// for the pass, the shared section prose path on the walk.
     async fn run_prose(&mut self, id: ChainId) -> Result<()> {
         let chain = &mut self.chains[id.index()];
-        let (text, loop_capable) = match &chain.blocks()[chain.block] {
-            Block::Prose {
-                text, loop_capable, ..
-            } => (text.clone(), *loop_capable),
+        let text = match &chain.blocks()[chain.block] {
+            Block::Prose { text, .. } => text.clone(),
             _ => {
                 return Err(Error::Internal("the advance matched the block kind"));
             }
         };
+        // The parser no longer marks prose loop-capable; until the lazy
+        // `prose` template replaces automatic prose advancement, preserve
+        // the legacy semantics here: the section's last prose block runs
+        // the full tool loop, earlier prose is single-shot.
+        let loop_capable = !chain.blocks()[chain.block + 1..]
+            .iter()
+            .any(|block| matches!(block, Block::Prose { .. }));
         let name = chain.section_name().to_owned();
         let is_h1 = chain.h1.is_some();
         let frame = chain

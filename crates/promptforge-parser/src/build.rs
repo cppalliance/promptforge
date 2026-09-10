@@ -11,7 +11,7 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use promptforge_core_support::observe::Observer;
 
-use super::fence::{RawBlock, lua_block_location, split_rule_roles, split_section_blocks};
+use super::fence::{RawBlock, lua_block_location, split_section_blocks};
 use super::list::{is_all_list_markers, parse_bullet_items};
 use super::{Block, LuaProgram, ParseErrorKind, Section};
 use crate::{Error, Result};
@@ -377,27 +377,17 @@ fn build_heading_blocks(
     frontmatter_lines: u32,
     execution: &str,
     observer: &dyn Observer,
-) -> Result<(Vec<Block>, bool)> {
+) -> Result<Vec<Block>> {
     let content_abs_line = line_add(frontmatter_lines, heading.content_start_line)?;
-    // The `---` marker seam: a leading rule takes the section off the
-    // walk, and the first non-leading rule ends its executable content.
-    // Blocks and list items parse only from what survives.
-    let (off_walk, content) = split_rule_roles(&heading.content)?;
-    let raw_blocks = split_section_blocks(content.as_ref(), name)?;
+    let raw_blocks = split_section_blocks(&heading.content, name)?;
     let has_prose = raw_blocks
         .iter()
         .any(|block| matches!(block, RawBlock::Prose(_)));
-    let last_prose = raw_blocks
-        .iter()
-        .rposition(|block| matches!(block, RawBlock::Prose(_)));
     let total = raw_blocks.len();
     let mut blocks = Vec::with_capacity(total);
     for (index, raw) in raw_blocks.into_iter().enumerate() {
         match raw {
-            RawBlock::Prose(text) => {
-                let loop_capable = Some(index) == last_prose;
-                blocks.push(Block::Prose { text, loop_capable });
-            }
+            RawBlock::Prose(text) => blocks.push(Block::Prose { text }),
             RawBlock::Lua {
                 source,
                 line_offset,
@@ -416,7 +406,7 @@ fn build_heading_blocks(
             }
         }
     }
-    Ok((blocks, off_walk))
+    Ok(blocks)
 }
 
 /// Builds a section tree from a flat, document-ordered list of headings.
@@ -475,8 +465,7 @@ pub(crate) fn build_sections(
         }
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
         let heading_span = h.span.clone();
-        let (blocks, off_walk) =
-            build_heading_blocks(h, &name, frontmatter_lines, execution, observer)?;
+        let blocks = build_heading_blocks(h, &name, frontmatter_lines, execution, observer)?;
         *pos += 1;
         let children =
             build_sections(headings, pos, level, frontmatter_lines, execution, observer)?;
@@ -521,7 +510,6 @@ pub(crate) fn build_sections(
             blocks,
             children,
             items,
-            off_walk,
         });
     }
     Ok(result)

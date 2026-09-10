@@ -18,13 +18,12 @@ pub fn synthetic_section(name: &str, level: u8, blocks: Vec<Block>, items: Vec<S
         blocks,
         children: Vec::new(),
         items,
-        off_walk: false,
     }
 }
 
-/// Builds a prose block with an explicit loop capability, the one `Block`
-/// variant the executor's test fixtures need to construct directly.
+/// Builds a prose block, the one `Block` variant the executor's test
+/// fixtures need to construct directly.
 #[must_use]
-pub fn prose_block(text: String, loop_capable: bool) -> Block {
-    Block::Prose { text, loop_capable }
+pub fn prose_block(text: String) -> Block {
+    Block::Prose { text }
 }
