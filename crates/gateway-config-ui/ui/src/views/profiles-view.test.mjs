@@ -72,6 +72,56 @@ test("Set Active stages the pointer and switches only when Apply runs", async ()
   );
 });
 
+test("dropping the STT model from the active profile and applying shows the restart toast", async () => {
+  const { root } = await openProfiles();
+  selectOption(root, "chosen", "whisper-base-en");
+  root.querySelector(".shuttle-unchoose").click();
+  await settle();
+
+  root.querySelector(".apply-button").click();
+  await settle();
+
+  const toasts = [...root.querySelectorAll(".toast")].map((toast) => toast.textContent);
+  assert.ok(
+    toasts.includes("Restart the Gateway to apply speech-to-text changes."),
+    "removing the active profile's speech model asks for a restart",
+  );
+});
+
+test("staging a pointer to an STT-free profile and applying shows the restart toast", async () => {
+  const { root } = await openProfiles();
+  [...root.querySelectorAll(".profile-select")]
+    .find((button) => button.textContent.includes("travel"))
+    .click();
+  root.querySelector(".set-active").click();
+  await settle();
+
+  root.querySelector(".apply-button").click();
+  await settle();
+
+  const toasts = [...root.querySelectorAll(".toast")].map((toast) => toast.textContent);
+  assert.ok(
+    toasts.includes("Restart the Gateway to apply speech-to-text changes."),
+    "the pointer change alters the boot speech selection",
+  );
+});
+
+test("a chat-only membership change applies without the speech restart toast", async () => {
+  const { root } = await openProfiles();
+  selectOption(root, "available", "llama-leaf");
+  root.querySelector(".shuttle-choose").click();
+  await settle();
+
+  root.querySelector(".apply-button").click();
+  await settle();
+
+  const toasts = [...root.querySelectorAll(".toast")].map((toast) => toast.textContent);
+  assert.ok(
+    !toasts.includes("Restart the Gateway to apply speech-to-text changes."),
+    "choosing a chat model changes no speech state",
+  );
+});
+
 test("the shuttle exposes APG listboxes, roving focus, typeahead, counts, and search", async () => {
   const { dom, root } = await openProfiles();
   const list = root.querySelector(".shuttle-chosen [role='listbox']");

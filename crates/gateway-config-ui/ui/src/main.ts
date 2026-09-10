@@ -38,10 +38,17 @@ import { createSecretsView } from "./views/secrets-view";
 import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY, GatewayApi, GatewayHttpError } from "./services/gateway-api";
+export { pendingSttChange } from "./services/config-store";
 export { matchRoute } from "./router";
 
 /** The toast for an apply the user (or a revert) cancelled before its commit. */
 const APPLY_CANCELLED_MESSAGE = "Apply cancelled - your pending changes are still staged";
+
+/**
+ * The toast for a successful apply whose staged changes touch speech:
+ * the gateway loads STT once at boot, so only a restart picks them up.
+ */
+const STT_RESTART_MESSAGE = "Restart the Gateway to apply speech-to-text changes.";
 
 /** The window surface boot needs; tests hand in a jsdom window. */
 export interface BootWindow {
@@ -255,6 +262,10 @@ function mountLiveShell(
       return;
     }
     applying = true;
+    // Snapshot the speech predicate before the apply: the store's
+    // post-apply refresh makes pending identical to running, erasing
+    // the difference the predicate reads.
+    const sttChange = store.hasPendingSttChange();
     overlay.open("Applying configuration");
     try {
       const outcome = await store.apply();
@@ -269,6 +280,12 @@ function mountLiveShell(
           : "Configuration applied",
         "success",
       );
+      if (sttChange) {
+        // One toast per qualifying apply. When the same apply also
+        // changed a process-owned section, the restart banner above
+        // already shows; the two messages coexist.
+        toasts.show(STT_RESTART_MESSAGE, "info");
+      }
       bridge?.notifyAction("apply");
     } catch (error) {
       const message =

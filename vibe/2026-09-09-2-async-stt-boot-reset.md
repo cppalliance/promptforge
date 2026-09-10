@@ -292,7 +292,7 @@ isProject: false
 
 <step-5>
 
-### Step 5: Notify the browser when STT needs restart
+### Step 5: Notify the browser when STT needs restart [completed]
 
 - Component: Config UI
 - Change: Add one pure pending-STT predicate over settings, models, effective profile membership, and active-profile pointer. Capture it before Apply refresh and show exactly one restart toast only after qualifying success. When one Apply changes both a process-owned section and STT, the existing backend `restart_required` banner already communicates restart; the STT toast still shows once, and the two messages coexist without suppression or duplication.

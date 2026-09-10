@@ -99,6 +99,75 @@ function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+/** A config document's `active_profile` pointer, when it carries one. */
+function profilePointer(config: EntryData): string | null {
+  const pointer = config["active_profile"];
+  return typeof pointer === "string" ? pointer : null;
+}
+
+/** The document's `[[stt_model]]` entries keyed by name. */
+function sttCatalogByName(config: EntryData): Map<string, EntryData> {
+  const catalog = new Map<string, EntryData>();
+  const entries = config["stt_model"];
+  if (!Array.isArray(entries)) {
+    return catalog;
+  }
+  for (const entry of entries) {
+    if (entry !== null && typeof entry === "object") {
+      catalog.set(String((entry as EntryData)["name"] ?? ""), entry as EntryData);
+    }
+  }
+  return catalog;
+}
+
+/** The STT catalog names the named profile selects. */
+function sttMembership(
+  config: EntryData,
+  active: string | null,
+  catalog: Map<string, EntryData>,
+): Set<string> {
+  const profiles = config["profile"];
+  if (!Array.isArray(profiles)) {
+    return new Set();
+  }
+  const profile = profiles.find(
+    (entry): entry is EntryData =>
+      entry !== null && typeof entry === "object" && (entry as EntryData)["name"] === active,
+  );
+  const models = profile?.["models"];
+  if (!Array.isArray(models)) {
+    return new Set();
+  }
+  return new Set(models.map(String).filter((name) => catalog.has(name)));
+}
+
+/**
+ * Whether applying the pending view changes the speech-to-text
+ * configuration the next gateway boot would load: the `[stt]` tuning
+ * section, the `[[stt_model]]` catalog, or the STT membership of the
+ * effective active profile (which the active-profile pointer selects).
+ * Pure over the two documents so the Apply path can snapshot the answer
+ * before the post-apply refresh makes the views identical.
+ */
+export function pendingSttChange(running: EntryData, pending: EntryData): boolean {
+  if (!sameValue(running["stt"], pending["stt"])) {
+    return true;
+  }
+  const runningCatalog = sttCatalogByName(running);
+  const pendingCatalog = sttCatalogByName(pending);
+  for (const name of new Set([...runningCatalog.keys(), ...pendingCatalog.keys()])) {
+    if (!sameValue(runningCatalog.get(name), pendingCatalog.get(name))) {
+      return true;
+    }
+  }
+  const runningActive = profilePointer(running);
+  const pendingActive = profilePointer(pending) ?? runningActive;
+  return !sameValue(
+    [...sttMembership(running, runningActive, runningCatalog)].sort(),
+    [...sttMembership(pending, pendingActive, pendingCatalog)].sort(),
+  );
+}
+
 /** One changed path in the pending-vs-running Review diff. */
 export interface DiffRow {
   /** The dotted path, keyed-array entries by identity (`endpoint[openai].base_url`). */
@@ -690,6 +759,16 @@ export class ConfigStore {
     await this.refreshAll();
     this.notify();
     return outcome;
+  }
+
+  /**
+   * Whether the staged changes alter the speech-to-text configuration
+   * the next gateway boot would load. Snapshot this before Apply: the
+   * post-apply refresh makes the pending view identical to the running
+   * one, erasing the difference the predicate reads.
+   */
+  hasPendingSttChange(): boolean {
+    return pendingSttChange(this.running, this.pending);
   }
 
   /**

@@ -1,7 +1,7 @@
 // Pins the Settings view's editable panels: the Gateway card's
 // single-config save (untouched secrets ride through as "***", a typed
 // key leaves the DOM after the save, the restart and new-key notes),
-// the Workshop Enable flow with hot-applied STT tuning, dominion cards
+// the Workshop Enable flow with restart-bound STT tuning, dominion cards
 // (kind-dependent vram_gb, used-by chips, dependent-naming delete, the
 // focused draft), endpoint cards (Change-reveal secret, remote-only
 // dominion options), the Storage save, the Tools Enable flow, the
@@ -230,12 +230,16 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
   await settle();
   assert.ok(
     stub.calls.some((call) => call.url.endsWith("/admin/config-apply")),
-    "Apply sends the staged STT configuration through the live reload path",
+    "Apply persists the staged STT configuration",
   );
   assert.ok(
     root.querySelector(".banner-restart").hidden,
-    "a reloaded STT apply does not ask the operator to restart",
+    "the backend reports no process-owned restart",
   );
+  const sttToasts = [...root.querySelectorAll(".toast")].filter(
+    (toast) => toast.textContent === "Restart the Gateway to apply speech-to-text changes.",
+  );
+  assert.equal(sttToasts.length, 1, "the staged speech tuning asks for a restart once");
 });
 
 test("a canonical STT payload round-trips through the Workshop editor", async () => {

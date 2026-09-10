@@ -191,3 +191,45 @@ test("canceling profiled model deletion leaves configuration untouched", async (
     ),
   );
 });
+
+test("editing an STT model and applying shows the speech restart toast", async () => {
+  const { dom, root } = await open();
+  navigate(dom, "#/local/whisper-base-en");
+  await settle();
+  const source = root.querySelector(".field-row[data-key='source'] input");
+  source.value = "models/ggml-large-v3.bin";
+  source.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  root.querySelector(".apply-button").click();
+  await settle();
+
+  const toasts = [...root.querySelectorAll(".toast")].map((toast) => toast.textContent);
+  assert.ok(
+    toasts.includes("Restart the Gateway to apply speech-to-text changes."),
+    "an applied STT catalog edit asks for a restart",
+  );
+});
+
+test("editing a chat model and applying shows no speech restart toast", async () => {
+  const { dom, root } = await open();
+  navigate(dom, "#/local/llama-leaf");
+  await settle();
+  const description = root.querySelector(".field-row[data-key='description'] textarea");
+  description.value = "a chat-only edit";
+  description.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  root.querySelector(".apply-button").click();
+  await settle();
+
+  const toasts = [...root.querySelectorAll(".toast")].map((toast) => toast.textContent);
+  assert.ok(
+    !toasts.includes("Restart the Gateway to apply speech-to-text changes."),
+    "a chat-only edit needs no speech restart",
+  );
+});
