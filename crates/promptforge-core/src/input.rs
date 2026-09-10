@@ -237,18 +237,13 @@ impl Tool for InputTool {
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
-        "Ask the operator a question and wait for their typed answer."
+        "Give the user the opportunity to add a prompt and wait for their typed input."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": "What to ask the operator"
-                }
-            }
+            "properties": {}
         })
     }
 
@@ -257,7 +252,7 @@ impl Tool for InputTool {
     /// The wait is recorded through the observer before the broker is
     /// called, and an operator answer is recorded byte-exact through
     /// `on_user_input`. Arguments are accepted but unused in the active
-    /// contract: the broker owns how the question reaches the operator.
+    /// contract: the broker owns how the wait reaches the operator.
     ///
     /// # Errors
     /// Returns a [`ToolError`] carrying the broker's message and cause
@@ -371,7 +366,7 @@ mod tests {
             recorder.clone() as Arc<dyn Observer>,
         );
         let output = tool
-            .call(serde_json::json!({ "question": "ready?" }))
+            .call(serde_json::json!({}))
             .await
             .expect("the broker answers");
         assert_eq!(
@@ -411,6 +406,27 @@ mod tests {
             .await
             .expect("an unavailable answer is not a failure");
         assert_eq!(output.text(), INPUT_UNAVAILABLE_FALLBACK);
+    }
+
+    #[test]
+    fn the_advertised_schema_has_no_question_and_the_description_promises_no_question_channel() {
+        let tool = tool(
+            Arc::new(UnavailableBroker),
+            Arc::new(NullObserver::default()) as Arc<dyn Observer>,
+        );
+        let schema = tool.parameters_schema();
+        let properties = schema["properties"]
+            .as_object()
+            .expect("the schema advertises a properties object");
+        assert!(
+            properties.is_empty(),
+            "the tool takes no arguments: the broker owns how input is gathered, got {properties:?}"
+        );
+        let description = tool.description().to_lowercase();
+        assert!(
+            !description.contains("question") && !description.contains("ask"),
+            "the description must not promise an ask-a-question channel, got: {description}"
+        );
     }
 
     #[tokio::test]

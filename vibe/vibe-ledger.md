@@ -67,3 +67,8 @@
   - Decision: added criterion as the bench harness (dev-only, not in CI) | Falsifier: removing two `[[bench]]` targets and the workspace entry reverts it.
   - Decision: lifted the once-per-section `models.use` restriction per the plan's decision record (review finding close): `ModelRuntime::select` records the latest selection unconditionally and re-selection steers the next round, pinned by an end-to-end test | Falsifier: a section needs selection locked after first use.
   - Decision: made the build-workshop interruption test tolerate a pre-staged sidecar (move-aside and restore) instead of asserting absence, resolving the pre-existing local conflict between workshop clippy (needs the sidecar) and the test | Falsifier: the test must prove staging from a truly absent state rather than a moved-aside one.
+
+## 2026-09-10-2-debt-fixes
+
+- Step 1: Narrow the input tool contract (DEBT-UPM-02) - `cargo test -p promptforge-core input` (14 passed) and `cargo test -p workshop-server --test it chat_gate` (12 passed), nextest fallback per the survey.
+  - Decision: used the survey's `cargo test` fallback in place of the prescribed nextest command | Falsifier: host has no cargo-nextest binary, and the survey explicitly authorizes the fallback.
