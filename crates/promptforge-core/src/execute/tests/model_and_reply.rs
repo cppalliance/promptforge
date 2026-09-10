@@ -15,7 +15,7 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
         ThinkingMode::Switchable,
     )])
     .expect("the test catalog has a single unique model");
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # T\n\n\
 ```lua\n\
 models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
@@ -53,7 +53,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     // gateway and reports its model turn.
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let recorder = Arc::new(Recorder::default());
     let out = run(
@@ -119,7 +119,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 async fn epilog_runs_after_prose_and_can_return() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\n\
 local text = models.infer(prose)\n\
 assert(text == 'hello from the mock')\n\
@@ -201,7 +201,7 @@ return 'epilog result'\n\
 async fn add_without_h1_bindings_fails_the_run_loudly() {
     // Input with no shared library goes through the same validated VM with
     // empty frozen bindings, so the alias is rejected.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
     let prompt = fixture(md);
@@ -218,7 +218,7 @@ async fn add_without_h1_bindings_fails_the_run_loudly() {
 async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
     // A prompt whose shared library declares nothing closes over empty frozen
     // bindings, so tools.add in a prologue is rejected the same way.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
@@ -233,7 +233,7 @@ async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
 
 #[tokio::test]
 async fn prologue_return_skips_model_and_epilog() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\nreturn 'early'\n```\n\n\
 This prose must not reach a model.\n\n\
@@ -249,7 +249,7 @@ This prose must not reach a model.\n\n\
 async fn shared_helper_survives_prologue_model_and_epilog() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ```lua shared\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
 ## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
@@ -319,7 +319,7 @@ Ask using {{ var.question }}.\n\n\
 
 #[tokio::test]
 async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\nvar.phase = 'prologue'\n```\n\n\
 ```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
@@ -334,7 +334,7 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 
 #[tokio::test]
 async fn whitespace_only_prose_skips_model_without_binding() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\n-- prologue\n```\n\n   \n\t\n\n\
 ```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n";
@@ -350,7 +350,7 @@ async fn whitespace_only_prose_skips_model_without_binding() {
 async fn model_required_when_infer_has_no_binding() {
     // Prose itself never requires a model; only an explicit `models.infer`
     // of it does.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let error = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
         .await
@@ -369,7 +369,7 @@ async fn model_required_when_infer_has_no_binding() {
 
 #[tokio::test]
 async fn shared_function_sees_sys_model_unknown_before_scope_close() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ```lua\nmodels.default('writer', 'A general model for tests')\n```\n\n\
 ```lua shared\nfunction read_sys_model()\n  return sys.model\nend\n```\n\n\
@@ -385,7 +385,7 @@ async fn shared_function_sees_sys_model_unknown_before_scope_close() {
 
 #[tokio::test]
 async fn prologue_sys_model_unknown_before_scope_close() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn sys.model\n```\n\nprose\n";
     let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
         .await
@@ -401,7 +401,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
     // The first script dispatch runs the one-time scope install, which
     // enriches `sys.model` with the bound catalog id; a prose read after it
     // substitutes the catalog id, not the alias.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 tools.bind('echo', 'echo tool')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
@@ -422,7 +422,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 
 #[tokio::test]
 async fn epilog_sees_model_catalog_id_not_alias_after_the_scope_install() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 tools.bind('echo', 'echo tool')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
@@ -442,7 +442,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 tools.bind('echo', 'echo tool')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
@@ -467,7 +467,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 /// member reaches the model as compact JSON.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', {{7, 'x'}})\nreturn r[1].text\n```\n\n\
 ### Worker\n\n```lua\n-- prologue\n```\n\nItem: {{ item }}.\n\n```lua\nreturn models.infer(prose)\n```\n";
@@ -502,7 +502,7 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
 
 #[tokio::test]
 async fn reply_is_nil_in_first_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn tostring(reply)\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "nil");
@@ -512,7 +512,7 @@ async fn reply_is_nil_in_first_section() {
 async fn reply_substitution_is_an_unknown_global_error() {
     // The reply register is gone: `{{ reply }}` names no namespace and no
     // bare global, so reading the prose fails at the read site.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n{{ reply }}\n\n```lua\nreturn prose\n```\n";
     let err = run_offline(md)
         .await
@@ -565,7 +565,7 @@ async fn run_with_gateway(test: &TestPrompt, addr: SocketAddr, store: &StoreRef)
 async fn models_get_returns_a_handle_without_changing_the_section_model() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # T\n\n\
 ```lua\n\
 models.default('writer', 'A general model for tests')\n\
@@ -602,7 +602,7 @@ Ask the model.\n\n\
 async fn models_infer_uses_the_section_model_without_touching_reply() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n\
 ```lua\nvar.r = models.infer('ping')\n```\n\n\
 ```lua\nreturn var.r .. ':' .. tostring(reply)\n```\n";
@@ -633,7 +633,7 @@ async fn models_infer_uses_the_section_model_without_touching_reply() {
 async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # T\n\n\
 ```lua\n\
 models.default('writer', 'A general model for tests')\n\
@@ -663,7 +663,7 @@ models.bind('analyst', 'A careful analysis model')\n\
 async fn models_use_reselection_steers_the_next_round() {
     let gateway = ScriptedGateway::start(vec![resp_text("first"), resp_text("second")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # T\n\n\
 ```lua\n\
 models.default('writer', 'A general model for tests')\n\
@@ -703,7 +703,7 @@ return models.infer('ping')\n\
 
 #[tokio::test]
 async fn models_infer_without_use_or_default_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # T\n\n\
 ```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\
@@ -728,7 +728,7 @@ async fn models_infer_without_use_or_default_errors() {
 async fn models_get_infer_works_without_any_section_model() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # T\n\n\
 ```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\

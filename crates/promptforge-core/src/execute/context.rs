@@ -381,7 +381,7 @@ mod tests {
 
     fn test_prompt() -> Prompt {
         let source = concat!(
-            "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
+            "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
             "# Title\n\n## Only\n\ndone\n",
         );
         Prompt::parse(source, "run-context-test", &NullObserver::default())

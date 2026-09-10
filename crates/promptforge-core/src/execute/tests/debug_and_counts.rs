@@ -6,7 +6,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let out = run(
         &bound_for_model(md),
@@ -85,7 +85,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         writer = models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
@@ -132,7 +132,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
     let gateway = ScriptedGateway::start(vec![resp_text("arm reply")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Parent\n\n\
@@ -178,7 +178,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
 async fn debug_capture_none_changes_nothing() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let out = run(
         &bound_for_model(md),
@@ -201,7 +201,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         "canonical_echo",
         "Echo a test value.",
     ));
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('echo', 'echo tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
@@ -288,7 +288,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     // The first script dispatch installs the counts seeded from the
     // effective scope, so an added but uncalled alias reads as 0 and an
     // author assert on it fails the run with its own message.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('search', 'search tool')\n\
         tools.bind('other', 'other tool')\n\
@@ -322,7 +322,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 
 #[tokio::test]
 async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('search', 'search tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
@@ -529,7 +529,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     // sets `reply` or `sys.reply_finish_reason`.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         writer = models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\

@@ -216,7 +216,7 @@ fn missing_frontmatter_delimiter_errors() {
 
 #[test]
 fn h1_only_prompt_parses_with_empty_sections() {
-    let src = "---\nname: x\ndescription: d\npromptforge: 1\n---\n\n# Only a title\n\nText.\n";
+    let src = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n# Only a title\n\nText.\n";
     let prompt =
         Prompt::parse(src, "test", &NullObserver::default()).expect("H1-only prompt must parse");
     assert!(prompt.sections.is_empty());
@@ -874,8 +874,8 @@ fn first_h2_is_entry_regardless_of_name() {
 
 #[test]
 fn detection_reads_promptforge_major() {
-    let src = "---\nname: x\ndescription: d\npromptforge: 1\n---\n\n## S\n\np\n";
-    assert_eq!(promptforge_version(src), Some(1));
+    let src = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n## S\n\np\n";
+    assert_eq!(promptforge_version(src), Some(0));
 }
 
 #[test]
@@ -900,19 +900,19 @@ fn detection_no_frontmatter_is_none() {
 #[test]
 fn detection_malformed_frontmatter_is_none() {
     // Opening delimiter but never closed.
-    let unclosed = "---\npromptforge: 1\nname: x\n\n## S\n\np\n";
+    let unclosed = "---\npromptforge: 0\nname: x\n\n## S\n\np\n";
     assert_eq!(promptforge_version(unclosed), None);
 
     // Closed, but not valid YAML.
-    let bad_yaml = "---\npromptforge: 1\n  : : oops\n---\n\n## S\n\np\n";
+    let bad_yaml = "---\npromptforge: 0\n  : : oops\n---\n\n## S\n\np\n";
     assert_eq!(promptforge_version(bad_yaml), None);
 }
 
 #[test]
 fn frontmatter_exposes_promptforge_field() {
-    let with = "---\nname: x\ndescription: d\npromptforge: 1\n---\n\n# T\n\n## S\n\np\n";
+    let with = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(with, "test", &NullObserver::default()).unwrap();
-    assert_eq!(p.frontmatter.promptforge, Some(1));
+    assert_eq!(p.frontmatter.promptforge, Some(0));
 
     let without = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(without, "test", &NullObserver::default()).unwrap();
@@ -1115,7 +1115,7 @@ fn frontmatter_parses_input_and_output() {
         "---\n",
         "name: test\n",
         "description: d\n",
-        "promptforge: 1\n",
+        "promptforge: 0\n",
         "input:\n",
         "  path: paper.md\n",
         "  description: The input paper\n",
@@ -1141,7 +1141,7 @@ fn frontmatter_without_input_output_still_parses() {
         "---\n",
         "name: simple\n",
         "description: no files\n",
-        "promptforge: 1\n",
+        "promptforge: 0\n",
         "---\n\n",
         "# Title\n\n## Only\n\ndone\n",
     );

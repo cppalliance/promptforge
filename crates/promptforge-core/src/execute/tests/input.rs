@@ -53,7 +53,7 @@ fn input_context(prompt: &Prompt, tools: ToolSet, config: &RunConfig) -> RunCont
 /// The one-section prompt shell every input test drives.
 fn input_prompt(lua: &str) -> String {
     format!(
-        "---\nname: input\ndescription: d\npromptforge: 1\n---\n\n# Input\n\n## Only\n\n```lua\n{lua}\n```\n"
+        "---\nname: input\ndescription: d\npromptforge: 0\n---\n\n# Input\n\n## Only\n\n```lua\n{lua}\n```\n"
     )
 }
 

@@ -474,7 +474,7 @@ pub(crate) enum Error {
 
     /// The prompt declares a `promptforge:` major this build does not support,
     /// so it is refused rather than run under mismatched rules.
-    #[error("unsupported promptforge version: {0} (this build supports major 1)")]
+    #[error("unsupported promptforge version: {0} (this build supports major 0)")]
     UnsupportedVersion(u32),
 
     /// A dispatched [`crate::tools::Tool`] returned a model-safe failure.

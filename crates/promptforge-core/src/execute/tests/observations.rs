@@ -2,10 +2,10 @@ use super::super::*;
 use super::run;
 use super::*;
 
-const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
 
-const SECOND_SECTION_ERRORS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+const SECOND_SECTION_ERRORS: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nerror('expected failure')\n```\n";
 
@@ -245,7 +245,7 @@ async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
     // mlua accepts the one-byte ceiling itself, then the first host allocation
     // fails. Host injection is inside the H1 teardown boundary, unlike the
     // preceding bare apply_lua_limits call.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());
     let sink = Arc::clone(&recorder) as Arc<dyn Observer>;
@@ -291,7 +291,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let capability =
         serde_json::to_string(&capability_for(&descriptor)).expect("serialize fixture capability");
     let source = format!(
-        "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
+        "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\n---\n\n\
          # Lifecycle\n\n```lua\n\
          tools.bind('echo', {capability})\n\
          tools.always('echo')\n\

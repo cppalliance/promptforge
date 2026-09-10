@@ -72,3 +72,6 @@
 
 - Step 1: Narrow the input tool contract (DEBT-UPM-02) - `cargo test -p promptforge-core input` (14 passed) and `cargo test -p workshop-server --test it chat_gate` (12 passed), nextest fallback per the survey.
   - Decision: used the survey's `cargo test` fallback in place of the prescribed nextest command | Falsifier: host has no cargo-nextest binary, and the survey explicitly authorizes the fallback.
+- Step 2: Flip the version gate to 0-only and migrate prompts (DEBT-UPM-04) - FULL verify: build, fmt, clippy, workspace suite, workshop crates, doctests all passed (nextest fallback).
+  - Decision: removed `SUPPORTED_MAJOR` outright rather than repurposing it, since the literal `Some(0)` arm left no uses | Falsifier: a future arm or message that needs a named supported-major constant.
+  - Decision: updated the `UnsupportedVersion` display text to "supports major 0" though not explicitly listed in the step, since the gate flip made "major 1" false | Falsifier: a reviewer who wants the message wording owned by a separate change.

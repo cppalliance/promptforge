@@ -233,7 +233,7 @@ async fn local_tool_alias_cannot_shadow_a_declared_tool() {
         "Concrete description.",
     ));
     let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n```lua\n\
 tools.bind('grab', 'capability')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
@@ -263,7 +263,7 @@ tools.add_local('grab', 'Local grab', {}, function() return 'local' end)\n\
 
 #[tokio::test]
 async fn local_tool_alias_cannot_be_registered_twice() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n\
 ```lua\n\

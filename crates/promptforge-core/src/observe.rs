@@ -76,7 +76,7 @@ mod tests {
         // The success lifecycle pairs Started with Succeeded instead.
         let recorder = Recorder::default();
         let source =
-            "---\nname: greeter\ndescription: d\npromptforge: 1\n---\n\n# T\n\n## S\n\nhi\n";
+            "---\nname: greeter\ndescription: d\npromptforge: 0\n---\n\n# T\n\n## S\n\nhi\n";
         Prompt::parse(source, execution, &recorder).expect("a well-formed source must parse");
         let events: Vec<Observation> = recorder
             .records()

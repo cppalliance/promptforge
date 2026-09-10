@@ -3,7 +3,7 @@ use super::*;
 
 #[tokio::test]
 async fn falls_through_to_next_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
     let out = run_offline(md).await.unwrap();
@@ -12,7 +12,7 @@ async fn falls_through_to_next_section() {
 
 #[tokio::test]
 async fn explicit_return_stops_fall_through() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## First\n\n```lua\nreturn \"first\"\n```\n\n\
 ## Second\n\n```lua\nreturn \"unreached\"\n```\n";
     let out = run_offline(md).await.unwrap();
@@ -21,7 +21,7 @@ async fn explicit_return_stops_fall_through() {
 
 #[tokio::test]
 async fn generic_result_when_nothing_produced() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "done");
@@ -30,7 +30,7 @@ async fn generic_result_when_nothing_produced() {
 #[tokio::test]
 async fn sys_id_increments_per_section() {
     // First section files nothing and falls through; second returns its id.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
     let out = run_offline(md).await.unwrap();
@@ -41,7 +41,7 @@ async fn sys_id_increments_per_section() {
 
 #[tokio::test]
 async fn h1_only_lua_return() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Title\n\n```lua\nreturn \"hello\"\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "hello");
@@ -49,7 +49,7 @@ async fn h1_only_lua_return() {
 
 #[tokio::test]
 async fn h1_only_lua_no_return() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Title\n\n```lua\nlocal x = 1\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "done");
@@ -58,17 +58,29 @@ async fn h1_only_lua_no_return() {
 // --- Version gate at the top of `run` ---
 
 #[tokio::test]
-async fn supported_major_one_proceeds() {
-    // A `promptforge: 1` prompt clears the gate and runs to completion.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+async fn supported_major_zero_proceeds() {
+    // A `promptforge: 0` prompt clears the gate and runs to completion.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "ran");
 }
 
 #[tokio::test]
+async fn unsupported_major_one_is_refused() {
+    // Major 1 is no longer implemented: the gate refuses it and names the
+    // declared version rather than silently degrading to major 0.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\nreturn \"ran\"\n```\n";
+    let err = run_offline(md)
+        .await
+        .expect_err("major 1 must be refused after the 0-only gate flip");
+    assert!(matches!(err, Error::UnsupportedVersion(1)));
+}
+
+#[tokio::test]
 async fn unsupported_major_is_refused() {
-    // A future major is refused, never silently degraded to major 1.
+    // A future major is refused, never silently degraded to major 0.
     let md = "---\nname: t\ndescription: d\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let err = run_offline(md)
@@ -106,7 +118,7 @@ async fn store_persists_across_sections() {
     // first section's Lua writes a file; the second, in a fresh context,
     // reads it back - proving the store outlives the context-clearing
     // transition. The read lands in `var`, so it round-trips the value.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
     let store = StoreRef::memory();

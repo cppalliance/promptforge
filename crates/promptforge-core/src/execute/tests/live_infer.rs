@@ -6,7 +6,7 @@ async fn live_h1_infer_runs_once() {
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
     let addr = gateway.addr();
 
-    let source = "---\nname: live-h1\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: live-h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
         local writer = models.default('writer', 'A general model for tests')\n\
@@ -37,7 +37,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
     // whose substitution would fail or stay empty - discards at the pass's
     // end without requiring a model. Only an explicit `models.infer` of the
     // prose requires a binding.
-    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
+    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Empty H1\n\n\
         ```lua\nvar.omit = ''\n```\n\n\
         {{ var.omit }}\n\n\
@@ -48,7 +48,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         .expect("unread H1 prose must not require a model");
     assert_eq!(out, "ok");
 
-    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 1\n---\n\n\
+    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Read H1\n\n\
         ask\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
@@ -63,7 +63,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn caught_h1_callback_error_stops_before_a_later_block() {
-    let source = "---\nname: callback-drain\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
         # Callback Drain\n\n\
         ```lua\n\
         local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
@@ -88,7 +88,7 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn shared_function_resolves_host_globals_when_called() {
-    let source = "---\nname: shared-host\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: shared-host\ndescription: d\npromptforge: 0\n---\n\n\
         # Shared Host\n\n\
         ```lua shared\n\
         function read_args() return args end\n\
@@ -119,7 +119,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     let picker = empty_test_picker();
     let models = test_model_catalog();
     let store = StoreRef::memory();
-    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\n---\n\n\
         # Shared Host Load\n\n\
         ```lua shared\n\
         store.write('loaded.txt', args)\n\
@@ -158,7 +158,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let capability =
         serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
     let source = format!(
-        "---\nname: captured-bindings\ndescription: d\npromptforge: 1\n---\n\n\
+        "---\nname: captured-bindings\ndescription: d\npromptforge: 0\n---\n\n\
          # Captured Bindings\n\n\
          ```lua\n\
          echo = tools.bind('echo', {capability})\n\
@@ -209,7 +209,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     // producer's bindings-so-far and runs the one infer shape: a single
     // tool-free round on a fresh conversation that leaves `sys` untouched.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let source = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -258,7 +258,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     // reaches the nested inference path.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 0\n---\n\n\
         # Nested Infer Observations\n\n\
         ```lua\n\
         local writer = models.default('writer', 'A general model for tests')\n\
@@ -313,7 +313,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         std::time::Duration::from_secs(30),
     )])
     .await;
-    let source = "---\nname: cancelled-infer\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: cancelled-infer\ndescription: d\npromptforge: 0\n---\n\n\
         # Cancelled Infer\n\n\
         ```lua\n\
         local writer = models.default('writer', 'A general model for tests')\n\
@@ -369,7 +369,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
     let gateway = ScriptedGateway::start(vec![resp_tool_call("call_1", "ghost", "{}")]).await;
-    let source = "---\nname: infer-tool-call\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: infer-tool-call\ndescription: d\npromptforge: 0\n---\n\n\
         # Infer Tool Call\n\n\
         ```lua\n\
         local writer = models.default('writer', 'A general model for tests')\n\
@@ -401,7 +401,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // infer, and `var` writes accumulate across the pass into the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
-    let source = "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -438,7 +438,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // The live H1 pass and the H2 section each read their own pending
     // buffer into an explicit infer: two completions, in source order.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
-    let source = "---\nname: shared-loop\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: shared-loop\ndescription: d\npromptforge: 0\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -492,7 +492,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
 async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
     // The H1 driver holds id 0 off the run-global counter, so the first
     // walked section takes id 1.
-    let source = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 1\n---\n\n\
+    let source = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
         assert(sys.id == 0, 'the live H1 chunk keeps sys.id 0')\n\

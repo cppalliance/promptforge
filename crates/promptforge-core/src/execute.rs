@@ -130,7 +130,6 @@ use crate::cancel;
 use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::StoreRef;
-use support::SUPPORTED_MAJOR;
 
 // Re-exported for the executor test glob.
 #[cfg(test)]
@@ -223,10 +222,7 @@ pub async fn run(
     config: RunConfig,
 ) -> std::result::Result<String, RunError> {
     match prompt.frontmatter().promptforge() {
-        // Temporary dual-read transition: the `promptforge: 0` migration
-        // moves shipped prompts and fixtures as one controlled step, but
-        // the embedded Workshop chat prompt already declares 0.
-        Some(SUPPORTED_MAJOR | 0) => {}
+        Some(0) => {}
         Some(other) => return Err(RunError::from(Error::UnsupportedVersion(other))),
         None => {
             return Err(RunError::from(Error::parse(

@@ -72,7 +72,7 @@ fn echo_tools() -> ToolSet {
 /// The one-section prompt shell every loop test drives.
 fn loop_prompt(lua: &str) -> String {
     format!(
-        "---\nname: loop\ndescription: d\npromptforge: 1\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
+        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
     )
 }
 

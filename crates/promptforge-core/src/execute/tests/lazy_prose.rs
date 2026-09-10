@@ -12,7 +12,7 @@ use super::*;
 macro_rules! prose_prompt {
     ($body:literal) => {
         concat!(
-            "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
+            "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
             $body
         )
     };

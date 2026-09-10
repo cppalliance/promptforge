@@ -1345,7 +1345,7 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
     // through `RunConfig::cancel` is installed around the whole run body, so
     // the section's Lua instruction hook observes it and the run maps the
     // interruption to `RunErrorKind::Cancelled`.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
     let handle = CancelHandle::new();
     handle.cancel();
@@ -1667,7 +1667,7 @@ async fn untrusted_nonce_differs_across_runs() {
     // The nonce is minted once per run: two runs of the same prompt wrap the
     // same untrusted tool result under different nonces, so an envelope's tag
     // stays unguessable from one run to the next.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('echo', 'echo tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
@@ -1746,12 +1746,12 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 
 /// The two-section fixture the fall-through test uses: the first section
 /// falls through, the second returns from Lua.
-const TWO_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+const TWO_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
 
-const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ## First\n\n```lua\nstore.write('state.txt', 'first')\n```\n\n\
 ## Second\n\n```lua\nstore.append('state.txt', '\\nsecond')\nreturn \"second\"\n```\n";

@@ -76,7 +76,7 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
     // the nested call and both infers complete on the one thread.
     let gateway =
         ScriptedGateway::start(vec![resp_text("inner answer"), resp_text("outer answer")]).await;
-    let md = "---\nname: gate\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: gate\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
         ## Outer\n\n\
         ```lua\n\
@@ -122,7 +122,7 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         std::time::Duration::from_secs(30),
     )])
     .await;
-    let md = "---\nname: cancel\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: cancel\ndescription: d\npromptforge: 0\n---\n\n\
         # Cancel\n\n\
         ## Only\n\n\
         ```lua\nreturn models.infer('hang')\n```\n";
@@ -165,7 +165,7 @@ async fn call_depth_cap_reads_the_chain_field() {
     // cap must fire from the requesting chain's call-depth field. The
     // typed error then round-trips through every parent's answer envelope
     // without flattening.
-    let md = "---\nname: depth\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: depth\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
         ```lua\nreturn call('## Beta')\n```\n\n\
@@ -191,7 +191,7 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
     // than falling back to an environment client; the returned text becomes
     // the run's result.
     let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
-    let md = "---\nname: prose\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: prose\ndescription: d\npromptforge: 0\n---\n\n\
         # Prose\n\n\
         ## Only\n\n\
         Say something.\n\n\
@@ -221,7 +221,7 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
     // answer resumed through the error envelope, so an author `pcall`
     // catches it exactly as on the legacy callback path; a driver that
     // failed the chain instead would error the run.
-    let md = "---\nname: catch\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: catch\ndescription: d\npromptforge: 0\n---\n\n\
         # Catch\n\n\
         ## Only\n\n\
         ```lua\n\
@@ -256,7 +256,7 @@ async fn sections_run_in_fall_through_order() {
     // with an order log: a section without a return falls through to the
     // next section in document order.
     let store = StoreRef::memory();
-    let md = "---\nname: walk\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: walk\ndescription: d\npromptforge: 0\n---\n\n\
         # Walk\n\n\
         ## First\n\n\
         ```lua\nstore.append('order.txt', 'First\\n')\n```\n\n\
@@ -277,7 +277,7 @@ async fn generic_result_when_nothing_produced() {
     // Mirror of the legacy `generic_result_when_nothing_produced`: a walk
     // that exhausts its slice with no reply yields the shared generic
     // completion.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Generic\n\n\
         ## Only\n\n\
         ```lua\nlocal x = 1\n```\n";
@@ -295,7 +295,7 @@ async fn generic_result_when_nothing_produced() {
 async fn sys_id_increments_per_section() {
     // Mirror of the legacy `sys_id_increments_per_section`: every section
     // entry takes the next run-global id.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
         ## First\n\n\
         ```lua\nlocal x = 1\n```\n\n\
@@ -318,7 +318,7 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
     // S2, and S2's reply returns to A. The main walk ends at B and never
     // runs S1 or S2.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Siblings\n\n\
         ## A\n\n\
         ```lua\n\
@@ -354,7 +354,7 @@ async fn var_persists_across_sections_in_fall_through() {
     // `var_persists_across_sections_fallthrough_and_jump` (its jump half
     // lands with the jump translation): one section's `var` writes reach
     // the next across fall-through.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Var\n\n\
         ## A\n\n\
         ```lua\nvar.from_a = 'a'\n```\n\n\
@@ -380,7 +380,7 @@ async fn call_clones_var_in_and_discards_child_writes() {
     // Mirror of the legacy case of the same name: `call` clones the
     // caller's `var` in; the contained chain reads the clone, and its
     // writes are discarded when the chain ends.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Clone\n\n\
         ## Main\n\n\
         ```lua\n\
@@ -411,7 +411,7 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
     // entries take the next run-global ids, and the outer walk resumes the
     // same sequence when the chain ends.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sequence\n\n\
         ## Main\n\n\
         ```lua\n\
@@ -447,7 +447,7 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
 async fn entering_the_same_section_twice_takes_two_ids() {
     // Mirror of the legacy case of the same name: entering the same
     // section twice hands out two run-global `sys.id` values.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Twice\n\n\
         ## Main\n\n\
         ```lua\n\
@@ -474,7 +474,7 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
     // entered section's armed frame drop fires SECTION_FINISHED at the
     // fall-through, before the next section's SECTION_STARTED.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Boundaries\n\n\
         ## One\n\n\
         ```lua\nlocal x = 1\n```\n\n\
@@ -517,7 +517,7 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
     // the jump transfers control and the jumper's remaining blocks never
     // run.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Jump\n\n\
         ## Check\n\n\
         ```lua\n\
@@ -547,7 +547,7 @@ async fn section_cannot_jump_to_itself() {
     // Mirror of the legacy case of the same name: the caller is outside its
     // own visible set, so naming its own heading to `jump` resolves as
     // not-found.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Self\n\n\
         ## Self\n\n\
         ```lua\njump('## Self')\n```\n";
@@ -569,7 +569,7 @@ async fn section_cannot_jump_to_itself() {
 async fn jump_to_off_walk_section_runs_it() {
     // Mirror of the legacy case of the same name: a jump addresses an
     // off-walk section directly, so it runs.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Addressed\n\n\
         ## A\n\n\
         ```lua\njump('## B')\n```\n\n\
@@ -595,7 +595,7 @@ async fn var_persists_across_a_jump() {
     // has no scheduler counterpart - the scheduler's drive starts at the
     // walk): the jumper's `var` writes cross the transfer, and the target's
     // writes roll forward into the fall-through that follows.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Var\n\n\
         ## A\n\n\
         ```lua\n\
@@ -631,7 +631,7 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
     // above): a jump is a completion, so the jumper's armed frame drop
     // fires SECTION_FINISHED before the target's SECTION_STARTED.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Boundaries\n\n\
         ## A\n\n\
         ```lua\njump('## B')\n```\n\n\
@@ -669,7 +669,7 @@ async fn an_erroring_section_reports_started_but_not_finished() {
     // mid-walk emits SECTION_STARTED and never SECTION_FINISHED - the
     // frame's drop stays unarmed on the error path.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fail\n\n\
         ## Only\n\n\
         ```lua\nerror('expected failure')\n```\n";
@@ -698,7 +698,7 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
     // target's following siblings; when the level exhausts, the parent walk
     // resumes after the jumper.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Descend\n\n\
         ## A\n\n\
         ```lua\n\
@@ -731,7 +731,7 @@ async fn child_walk_recurses_to_h4() {
     // H4-level walk, and each level's exhaustion resumes its parent after
     // the jumper.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Recurse\n\n\
         ## A\n\n\
         ```lua\n\
@@ -770,7 +770,7 @@ async fn jump_to_an_off_walk_child_runs_it() {
     // addressable - a jump to it runs it, and the fall-through that follows
     // skips nothing addressed.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # OffChild\n\n\
         ## A\n\n\
         ```lua\njump('### Off')\n```\n\n\
@@ -799,7 +799,7 @@ async fn running_child_addresses_its_own_siblings_and_children() {
     // set is its own siblings plus its own children - it can execute a
     // child and jump to a sibling.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Visible\n\n\
         ## A\n\n\
         ```lua\njump('### X')\n```\n\n\
@@ -830,7 +830,7 @@ async fn running_child_cannot_address_a_top_level_section() {
     // Mirror of the legacy case of the same name: a running child cannot
     // address a top-level section - the parent level is not in its visible
     // set, so the jump resolves as not-found.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Escape\n\n\
         ## A\n\n\
         ```lua\njump('### X')\n```\n\n\
@@ -857,7 +857,7 @@ async fn jump_to_a_niece_errors() {
     // Mirror of the legacy case of the same name: a sibling's child (a
     // niece or nephew) is not in the visible set, so the jump resolves as
     // not-found.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Niece\n\n\
         ## A\n\n\
         ```lua\njump('### Niece')\n```\n\n\
@@ -884,7 +884,7 @@ async fn sys_id_counts_sections_entered_run_wide() {
     // sections the walk has entered run-wide - the detour into a child
     // level continues the count rather than restarting it.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
         ## A\n\n\
         ```lua\n\
@@ -915,7 +915,7 @@ async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
     // The rule-5 clause the legacy cases imply but none isolates: a scalar
     // return inside a jump-started child-level walk ends the whole chain,
     // not just the child level - the parent walk never resumes.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Return\n\n\
         ## A\n\n\
         ```lua\njump('### X')\n```\n\n\
@@ -939,7 +939,7 @@ async fn jump_inside_call_is_contained_in_the_chain() {
     // is contained by the chain - followed, not rejected. The chain's index
     // moves to the target, the sections between the jumper and the target
     // do not run, and the target's reply returns to the caller.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Contained\n\n\
         ## Main\n\n\
         ```lua\n\
@@ -969,7 +969,7 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
     // walk continues from the jump target under the normal rules, and the
     // chain's final reply is the call's return value.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Move\n\n\
         ## A\n\n\
         ```lua\n\
@@ -1005,7 +1005,7 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
     // the chain's final text back to A, and the outer walk continues at B,
     // never having moved.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Chain\n\n\
         ## A\n\n\
         ```lua\n\
@@ -1047,7 +1047,7 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
     // moves while a contained chain runs - wherever the chain ends, the
     // outer walk resumes at the section after the caller.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Outer\n\n\
         ## A\n\n\
         ```lua\n\
@@ -1083,7 +1083,7 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
     // the call's return, the chain's remaining sections do not run, and
     // the outer walk continues.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Scoped\n\n\
         ## A\n\n\
         ```lua\n\
@@ -1116,7 +1116,7 @@ async fn call_to_a_child_starts_a_contained_chain() {
     // the target's following siblings under the same rules as any walk, and
     // the chain's final reply is the call's return value.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ChildExecute\n\n\
         ## Main\n\n\
         ```lua\n\
@@ -1151,7 +1151,7 @@ async fn a_jump_descent_does_not_consume_call_depth() {
     // section entries - a descent that wrongly consumed depth would trip
     // the cap one entry earlier.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Main\n\n\
         ```lua\njump('### X')\n```\n\n\
@@ -1190,7 +1190,7 @@ async fn walk_never_descends_into_children() {
     // negative half of the child-descent rule: a fall-through that
     // descended would run the child and trip its error.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # NoDescent\n\n\
         ## A\n\n\
         ```lua\nstore.append('order.txt', 'A\\n')\n```\n\n\
@@ -1218,7 +1218,7 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
     // resolves after the jumper's teardown), so SECTION_FINISHED fires for
     // the jumper even when the target does not resolve.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Unresolved\n\n\
         ## A\n\n\
         ```lua\njump('## Missing')\n```\n";
@@ -1303,7 +1303,7 @@ async fn live_h1_infer_runs_once() {
     // default model, a handle's `infer` yields through the shim, and the
     // H1 `var` hand-off seeds the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let md = "---\nname: live-h1\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: live-h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
         local writer = models.default('writer', 'A general model for tests')\n\
@@ -1331,7 +1331,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     // bindings-so-far and runs the one infer shape - a single tool-free
     // round on a fresh conversation that leaves `sys` untouched.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let md = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -1373,7 +1373,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
 async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
     // Mirror of the legacy case of the same name: the H1 pass holds id 0
     // off the run-global counter, so the first walked section takes id 1.
-    let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
         assert(sys.id == 0, 'the live H1 chunk keeps sys.id 0')\n\
@@ -1400,7 +1400,7 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
     // Mirror of the legacy case of the same name: a pcall'd resolver
     // failure is caught by the chunk but recorded by the callback, and the
     // recorded typed error fails the run before the next H1 block runs.
-    let md = "---\nname: callback-drain\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
         # Callback Drain\n\n\
         ```lua\n\
         local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
@@ -1437,7 +1437,7 @@ async fn a_caught_h1_callback_error_reports_the_chunk_succeeded() {
     // only afterward - the legacy `run_live_h1_block` mapping, where the
     // callback check follows the chunk's own boundary.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: callback-drain\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
         # Callback Drain\n\n\
         ```lua\n\
         local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
@@ -1476,7 +1476,7 @@ async fn an_h1_scalar_return_still_reads_var_back() {
     // The read-back half of the H1 return rule: the legacy pass reads the
     // final `var` back on every exit, so a reassigned `var` global fails
     // the run even when the block's scalar return would short-circuit it.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Reassigned Var\n\n\
         ```lua\n\
         var = 5\n\
@@ -1503,7 +1503,7 @@ async fn call_is_a_clear_error_on_the_h1() {
     // globals are stubs - H1 runs before sections exist, so calling one
     // fails the run with a message naming the cause. On the scheduler the
     // stub must survive the shim base install.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\ncall('## Nope')\n```\n";
     let prompt = parse(md);
@@ -1526,7 +1526,7 @@ async fn jump_is_a_clear_error_on_the_h1() {
     // Mirror of the legacy case of the same name: `jump` from the H1 hits
     // the stub - the run fails with the clear message, never a recorded
     // jump.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\njump('## Nope')\n```\n";
     let prompt = parse(md);
@@ -1548,7 +1548,7 @@ async fn jump_is_a_clear_error_on_the_h1() {
 async fn fanout_is_a_clear_error_on_the_h1() {
     // Mirror of the legacy case of the same name: `fanout` from the H1
     // hits the same stub.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\nfanout('## Nope', {'a'})\n```\n";
     let prompt = parse(md);
@@ -1570,7 +1570,7 @@ async fn fanout_is_a_clear_error_on_the_h1() {
 async fn list_from_section_is_a_clear_error_on_the_h1() {
     // Mirror of the legacy case of the same name: `list_from_section` from
     // the H1 hits the same stub.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\nlist_from_section('## Nope')\n```\n";
     let prompt = parse(md);
@@ -1592,7 +1592,7 @@ async fn list_from_section_is_a_clear_error_on_the_h1() {
 async fn h1_only_lua_return() {
     // Mirror of the legacy case of the same name: an H1-only prompt's
     // scalar return is the run's result.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Title\n\n\
         ```lua\nreturn \"hello\"\n```\n";
     let prompt = parse(md);
@@ -1611,7 +1611,7 @@ async fn h1_only_lua_return() {
 async fn h1_only_lua_no_return() {
     // Mirror of the legacy case of the same name: an H1-only prompt that
     // produces nothing ends in the shared generic completion.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Title\n\n\
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
@@ -1631,7 +1631,7 @@ async fn h1_scalar_return_short_circuits_the_walk() {
     // The short-circuit half of the H1 return rule: a scalar return from
     // the live H1 pass ends the whole run, so no section ever runs - the
     // walk's erroring section is the tripwire.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Short Circuit\n\n\
         ```lua\nreturn 'early'\n```\n\n\
         ## Never\n\n\
@@ -1654,7 +1654,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
     // infer ends the run with the inferred text: the scalar return
     // short-circuits the (empty) walk.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Only Prose\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -1683,7 +1683,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // pass and the H2 section each read their own pending buffer into an
     // explicit infer - two completions, in source order.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
-    let md = "---\nname: shared-loop\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: shared-loop\ndescription: d\npromptforge: 0\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -1737,7 +1737,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
     // whose substitution would fail or stay empty - discards at the pass's
     // end without requiring a model. Only an explicit `models.infer` of the
     // prose requires a binding.
-    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
+    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Empty H1\n\n\
         ```lua\nvar.omit = ''\n```\n\n\
         {{ var.omit }}\n\n\
@@ -1753,7 +1753,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         .expect("unread H1 prose must not require a model");
     assert_eq!(out, "ok");
 
-    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 1\n---\n\n\
+    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Read H1\n\n\
         ask\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
@@ -1778,7 +1778,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // the pass reads its pending buffer only through an explicit infer, and
     // `var` writes accumulate across the pass into the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
-    let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\
         models.default('writer', 'A general model for tests')\n\
@@ -1812,7 +1812,7 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
     // its teardown pair but neither SECTION_STARTED nor SECTION_FINISHED;
     // the first walked section reports both.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Boundaries\n\n\
         ```lua\nvar.x = 1\n```\n\n\
         ## Only\n\n\
@@ -1897,7 +1897,7 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
     // join that keyed results by completion order would return "r2|r1:r3".
     let gateway =
         ScriptedGateway::start(vec![resp_text("r1"), resp_text("r2"), resp_text("r3")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -1941,7 +1941,7 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
         resp_text("r4"),
     ])
     .await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -1986,7 +1986,7 @@ async fn fanout_concurrency_window_limits_active_arms() {
         resp_text("r6"),
     ])
     .await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2025,7 +2025,7 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
     // 1-based per-fanout position, and the packed sequence carries `.ok`
     // and `.item` with `__tostring` driving `table.concat`.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2061,7 +2061,7 @@ async fn fanout_over_a_large_collection_refills_the_window() {
     // a 1025-member collection runs to completion past the 8-wide default
     // window - a refill that lost track of the next index would stall the
     // driver or drop results.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2091,7 +2091,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     // Error::Interrupted instead of running the arms.
     use crate::cancel::{self, CancelHandle};
 
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2118,7 +2118,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
     // the fanout with Error::ModelRequired naming the worker section. The
     // context is built directly so the model set stays empty - the shared
     // test context pre-fills a default binding.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2160,7 +2160,7 @@ async fn the_shared_replay_sees_the_arm_item() {
     // would capture nil in the arm and fail this test. The context carries
     // the prompt's real compiled shared library, not the empty stand-in the
     // other scheduler tests use.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ```lua shared\n\
         captured_by_shared = item\n\
@@ -2207,7 +2207,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
     // `resolve_arm_target` that resolved over the wrong set would error
     // the jump not-found; one that started the walk elsewhere would break
     // the order log.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2253,7 +2253,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
     // takes the next run-global id with no `item` seed (the transfer clears
     // the arm's at-worker state, so the child walk runs as plain sections),
     // and the walk falls through to the target's child siblings.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2316,7 +2316,7 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
     // worker's store tripwire never fires.
     let store = StoreRef::memory();
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\nfanout('### Worker', {})\n```\n\n\
@@ -2349,7 +2349,7 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
 async fn fanout_worker_that_is_a_list_section_errors() {
     // Pin of the worker-template guard, mirroring the legacy case of the
     // same name: a resolved list section is not a worker template.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\nfanout('### Items', {'x'})\n```\n\n\
@@ -2378,7 +2378,7 @@ async fn fanout_depth_cap_reads_the_chain_field() {
     // fanout - each arm would run one level deeper, so the cap fires from
     // the requesting chain's call-depth field with the fanout message,
     // not the call one.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
         ```lua\n\
@@ -2414,7 +2414,7 @@ async fn two_arms_writing_one_path_fail_with_a_write_race() {
     // (one thread runs everything, so no locks are involved), and the race
     // is fatal to the arm and fails the fanout.
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2456,7 +2456,7 @@ async fn two_arms_appending_one_path_succeed() {
     // concurrent appends to one path are legal; only the relative order is
     // unspecified.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2487,7 +2487,7 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
     // (fanout token, arm index), so the same arm writing the same path
     // again is a rewrite, not a race.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2517,7 +2517,7 @@ async fn sequential_fanouts_may_write_one_path() {
     // fresh write token, so its write overwrites the earlier fanout's
     // registry record instead of racing against it.
     let store = StoreRef::memory();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2550,7 +2550,7 @@ async fn fatal_arm_aborts_queued_siblings() {
     // observations: one FAILED, nothing else.
     let store = StoreRef::memory();
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\nfanout('### Worker', {'boom', 'beta', 'gamma'})\n```\n\n\
@@ -2623,7 +2623,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     ])
     .await;
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\nfanout('### Worker', {'boom', 'slow'})\n```\n\n\
@@ -2699,7 +2699,7 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         resp_text("after-answer"),
     ])
     .await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2746,7 +2746,7 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     )])
     .await;
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2821,7 +2821,7 @@ async fn a_mid_refill_arm_start_failure_tears_down_the_join() {
     // CANCELLED), and the first arm aborts with the torn-down join.
     let gateway = ScriptedGateway::start(vec![resp_text("after-answer")]).await;
     let recorder = Arc::new(Recorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
         ```lua\n\
@@ -2877,7 +2877,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be
     // discarded.
     let gateway = ScriptedGateway::start(vec![resp_text("real-answer")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Infer\n\n\
         ## Only\n\n\
         ```lua\nreturn models.infer('ask')\n```\n";
@@ -2932,7 +2932,7 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
     // dispatches the bound tool, the plain binding resumes as a Lua
     // string, and the counts land in the same `tools.calls` table the
     // prose loop feeds.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
@@ -2961,7 +2961,7 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
     // The handle form: the captured alias global is an inspectable Tool
     // object, and passing it as the leading argument dispatches the binding
     // it names, identically to the bare alias string.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
@@ -2990,7 +2990,7 @@ async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
     // Script-initiated resolution runs against the run's full bound
     // catalog, so the unknown-alias error names that whole set, not the
     // section's effective scope.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('missing', {})\n```\n";
@@ -3024,7 +3024,7 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
     // the scope shapes what the model is offered, and the author's own
     // code is not the model. The count lands in the same shared map
     // `tools.calls` reads.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
@@ -3095,7 +3095,7 @@ impl Tool for SignallingSlowTool {
 async fn cancellation_interrupts_a_slow_script_tools_call() {
     use crate::cancel::{self, CancelHandle};
 
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('slow', {})\n```\n";
@@ -3146,7 +3146,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('fetch', { value = 'hi' })\n```\n";
@@ -3176,7 +3176,7 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_structured_binding_resumes_as_a_lua_table() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
@@ -3204,7 +3204,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('form', {})\n```\n";
@@ -3241,7 +3241,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
     // untrusted binding's valid JSON still fails the call: this ordering is
     // what restricts structured output to trusted tools. If classification
     // ever ran on the raw output, this test would resume a table and fail.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('form', {})\n```\n";
@@ -3278,7 +3278,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
     // dispatch and the model resolution: a script `tools.call` that runs
     // first must not swallow the install a later `models.infer` relies on.
     let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\ntools.call('echo', { value = 'x' })\n```\n\n\
@@ -3305,7 +3305,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
 async fn a_document_prompt_without_tools_call_is_unaffected() {
     // Bindings installed, shim present, `tools.call` never called: the
     // section runs exactly as before the dispatch arm existed.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\nreturn 'plain'\n```\n";
@@ -3332,7 +3332,7 @@ async fn models_chat_is_nil_in_a_section_vm() {
     // stubbed, simply absent - so a document prompt calling it fails with
     // Lua's own undefined-value error, the mirror of an agent calling the
     // absent `call`. No typed error exists for the absence.
-    let md = "---\nname: chat\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = "---\nname: chat\ndescription: d\npromptforge: 0\n---\n\n\
         # Chat\n\n\
         ## Only\n\n\
         ```lua\nreturn models.chat({})\n```\n";
