@@ -41,6 +41,12 @@ const INFER_REGISTRY: &str = "promptforge.impl_coro.infer";
 /// ever reads this stash there.
 const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 
+/// The registry key for the shim's `user_input`, stashed by the prelude
+/// install so a section VM's host can install it as the `user_input`
+/// global. The registry is host-side only: an agent VM's `user_input`
+/// stays nil because nothing ever reads this stash there.
+const USER_INPUT_REGISTRY: &str = "promptforge.impl_coro.user_input";
+
 /// The shim program, compiled once and loaded per VM. Compilation of the
 /// bundled source fails only on a crate bug, so the payload is the error's
 /// display string (the crate `Error` is not `Clone`).
@@ -91,6 +97,9 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
     let models_loop: Function = shims.raw_get("loop").map_err(Error::lua)?;
     lua.set_named_registry_value(LOOP_REGISTRY, models_loop)
         .map_err(Error::lua)?;
+    let user_input: Function = shims.raw_get("user_input").map_err(Error::lua)?;
+    lua.set_named_registry_value(USER_INPUT_REGISTRY, user_input)
+        .map_err(Error::lua)?;
     globals
         .raw_set("coroutine", Value::Nil)
         .map_err(Error::lua)?;
@@ -115,6 +124,27 @@ pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
     models.raw_set("loop", models_loop).map_err(Error::lua)
+}
+
+/// Installs the section-only `user_input` yield shim as a global on a VM
+/// whose shim prelude already ran (`install_shim_prelude` stashed the shim
+/// in the registry).
+///
+/// The executor's section setup is the only caller: `user_input` never
+/// exists in an agent VM - not stubbed, simply absent - so an agent
+/// program calling it fails as an undefined global, the mirror of the
+/// agent-only `models.chat`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude was never installed on this
+/// VM or the install fails.
+pub fn install_section_user_input_shim(lua: &Lua) -> Result<()> {
+    let user_input: Function = lua
+        .named_registry_value(USER_INPUT_REGISTRY)
+        .map_err(Error::lua)?;
+    lua.globals()
+        .raw_set("user_input", user_input)
+        .map_err(Error::lua)
 }
 
 /// Installs the agent-only `models.chat` yield shim on a VM whose shim

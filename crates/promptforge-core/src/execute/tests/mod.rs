@@ -1814,6 +1814,7 @@ impl RecordingCapture {
 mod debug_and_counts;
 mod exec_flow;
 mod exit_rules;
+mod input;
 mod lazy_prose;
 mod live_infer;
 mod local_tools;

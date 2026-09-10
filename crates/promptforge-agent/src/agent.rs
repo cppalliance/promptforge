@@ -525,15 +525,18 @@ async fn dispatch(run: &AgentRun<'_>, request: Request) -> Result<Answer<AgentEr
             outcome => Ok(Answer::Chat(outcome.map(Box::new))),
         },
         // Unreachable: the call/fanout shims are removed from the agent
-        // VM before author code runs, the models.loop shim is never
-        // installed on one, no shim produces an mcp request, and
-        // stripped coroutines make a hand-rolled yield fail validation
-        // before dispatch.
+        // VM before author code runs, the models.loop and user_input
+        // shims are never installed on one, no shim produces an mcp
+        // request, and stripped coroutines make a hand-rolled yield fail
+        // validation before dispatch.
         Request::Call { .. } => Err(AgentError::Internal(
             "an agent VM cannot yield a call request: the shim is never installed",
         )),
         Request::Loop { .. } => Err(AgentError::Internal(
             "an agent VM cannot yield a loop request: the models.loop shim is never installed",
+        )),
+        Request::UserInput => Err(AgentError::Internal(
+            "an agent VM cannot yield a user_input request: the shim is never installed",
         )),
         Request::Fanout { .. } => Err(AgentError::Internal(
             "an agent VM cannot yield a fanout request: the shim is never installed",

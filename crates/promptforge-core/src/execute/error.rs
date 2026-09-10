@@ -31,6 +31,8 @@ pub enum RunErrorKind {
     Quota,
     /// The selected compactor exhausted the model's context window.
     ContextExhausted,
+    /// The host's input broker failed a `user_input` request.
+    Input,
     /// A `{{ }}` prose substitution failed.
     Substitution,
     /// The host cancelled the run.
@@ -60,6 +62,7 @@ impl RunError {
             Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => RunErrorKind::Parse,
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::ContextExhausted { .. } => RunErrorKind::ContextExhausted,
+            Error::Input { .. } => RunErrorKind::Input,
             Error::LuaCompile { .. } | Error::Lua(_) | Error::LuaRuntime { .. } => {
                 RunErrorKind::Lua
             }

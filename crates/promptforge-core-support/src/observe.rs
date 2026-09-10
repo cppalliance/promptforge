@@ -204,6 +204,9 @@ pub enum Observation {
     /// Terminal: a fanout arm was cancelled or aborted (Ctrl-C or a sibling's
     /// hard error) before it could finalize.
     FanoutArmCancelled,
+    /// A section began waiting on operator input through the run's input
+    /// broker.
+    UserInputWaitStarted,
     /// The one author-controlled checkpoint: a validated Lua `log(message)`.
     ///
     /// Prompt authors must never place arguments, replies, tool data,
@@ -275,6 +278,7 @@ impl Observation {
             Observation::FanoutArmExhausted => "Fanout arm exhausted",
             Observation::FanoutArmFailed => "Fanout arm failed",
             Observation::FanoutArmCancelled => "Fanout arm cancelled",
+            Observation::UserInputWaitStarted => "User input wait started",
             Observation::Lua(_) | Observation::Other(_) => return None,
         };
         Some(label)
@@ -359,6 +363,7 @@ pub mod detail {
     pub const FANOUT_ARM_EXHAUSTED: Observation = Observation::FanoutArmExhausted;
     pub const FANOUT_ARM_FAILED: Observation = Observation::FanoutArmFailed;
     pub const FANOUT_ARM_CANCELLED: Observation = Observation::FanoutArmCancelled;
+    pub const USER_INPUT_WAIT_STARTED: Observation = Observation::UserInputWaitStarted;
 }
 
 /// A report-only sink for operational observations.

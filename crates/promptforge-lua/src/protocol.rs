@@ -2,8 +2,8 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer(handle?, prompt)`, `call`,
-//! `fanout`, `tools.call`, the section-only `models.loop`, the agent-only
-//! `models.chat`) is a Lua-side shim
+//! `fanout`, `tools.call`, the section-only `models.loop` and
+//! `user_input()`, the agent-only `models.chat`) is a Lua-side shim
 //! that yields a request table; the driver validates the yield into a
 //! [`Request`], dispatches it, and resumes the coroutine with the
 //! `(ok, result)` envelope rendered from an [`Answer`]. The two enums are
@@ -208,6 +208,12 @@ pub enum Request {
         /// else `None` (the omitted-compactor default, `compactors.fail`).
         compactor: Option<mlua::RegistryKey>,
     },
+    /// `user_input()`: a direct operator-input request to the run's input
+    /// broker. Section VMs alone install the shim; the agent driver
+    /// carries an unreachable internal-invariant guard for the arm its
+    /// exhaustive match forces. The request carries no arguments: the
+    /// broker and its host policy own the whole interaction.
+    UserInput,
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     // The fields are read only by this module's own tests; production parses
     // them for strict validation and never reads them until the variant
@@ -258,6 +264,9 @@ impl Request {
             }),
             "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
             "loop" => classify(parse_loop(lua, table), |error| Answer::Loop(Err(error))),
+            // No author arguments exist to fail validation: a well-formed
+            // `user_input` yield is always the unit request.
+            "user_input" => YieldParse::Request(Request::UserInput),
             "mcp" => match parse_mcp(lua, table) {
                 Ok(request) => YieldParse::Request(request),
                 Err(_) => YieldParse::Malformed(direct_yield_error()),
@@ -1087,6 +1096,23 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
     Ok(table)
 }
 
+/// The successful answer to a `user_input` request: the resumed text and
+/// its availability flag.
+///
+/// `available` is `true` when `text` is the operator's own input and
+/// `false` when the host had no input to give and `text` is the broker's
+/// fixed fallback sentence. The flag rides beside the text - never encoded
+/// into it - so a human typing exactly the fallback sentence cannot spoof
+/// the unavailable state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserInputOutcome {
+    /// The operator's text, or the fixed fallback sentence when
+    /// `available` is `false`.
+    pub text: String,
+    /// Whether `text` is real operator input.
+    pub available: bool,
+}
+
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
 /// at resume time.
 ///
@@ -1120,6 +1146,9 @@ pub enum Answer<E> {
     Loop(std::result::Result<(), E>),
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
+    /// The outcome of a `user_input` request: the resumed text and its
+    /// availability flag.
+    UserInput(std::result::Result<UserInputOutcome, E>),
 }
 
 impl<E> Answer<E> {
@@ -1132,6 +1161,7 @@ impl<E> Answer<E> {
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
             Answer::Loop(result) => Answer::Loop(result.map_err(map)),
+            Answer::UserInput(result) => Answer::UserInput(result.map_err(map)),
         }
     }
 }
@@ -1194,12 +1224,27 @@ impl<E: std::fmt::Display> Answer<E> {
                 MultiValue::from_vec(vec![Value::Boolean(true), Value::Nil]),
                 None,
             )),
+            // The availability flag rides beside the text as a third resume
+            // value, so the shim returns both and the broker's fixed
+            // fallback sentence stays unspoofable by identical human text.
+            Answer::UserInput(Ok(outcome)) => {
+                let text = lua.create_string(&outcome.text)?;
+                Ok((
+                    MultiValue::from_vec(vec![
+                        Value::Boolean(true),
+                        Value::String(text),
+                        Value::Boolean(outcome.available),
+                    ]),
+                    None,
+                ))
+            }
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
             | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
-            | Answer::Loop(Err(error)) => {
+            | Answer::Loop(Err(error))
+            | Answer::UserInput(Err(error)) => {
                 let message = lua.create_string(error.to_string())?;
                 Ok((
                     MultiValue::from_vec(vec![Value::Boolean(false), Value::String(message)]),
@@ -2587,5 +2632,79 @@ mod tests {
         assert!(!second_ok);
         assert!(second_exhausted);
         assert_eq!(rendered, "text-a");
+    }
+
+    #[test]
+    fn a_user_input_yield_parses_to_the_request() {
+        let lua = Lua::new();
+        let table = request_table(&lua, "user_input");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        assert!(
+            matches!(request, Request::UserInput),
+            "a user_input yield is the unit request, got {request:?}"
+        );
+    }
+
+    #[test]
+    fn an_ok_user_input_answer_round_trips_text_and_availability() {
+        let lua = Lua::new();
+        let outcome = UserInputOutcome {
+            text: "the operator's answer".to_owned(),
+            available: true,
+        };
+        let (envelope, retained) = Answer::<Error>::UserInput(Ok(outcome))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, text, available): (bool, String, bool) = lua
+            .load("local ok, text, available = ...; return ok, text, available")
+            .call(envelope)
+            .expect("the three resume values read back through Lua");
+        assert!(ok);
+        assert_eq!(text, "the operator's answer");
+        assert!(available, "operator text resumes as available");
+    }
+
+    #[test]
+    fn an_unavailable_user_input_answer_resumes_the_fallback_as_unavailable() {
+        let lua = Lua::new();
+        let outcome = UserInputOutcome {
+            text: "User input is unavailable in this host; continue without it.".to_owned(),
+            available: false,
+        };
+        let (envelope, retained) = Answer::<Error>::UserInput(Ok(outcome))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, available): (bool, bool) = lua
+            .load("local ok, text, available = ...; return ok, available")
+            .call(envelope)
+            .expect("the resume values read back through Lua");
+        assert!(ok);
+        assert!(
+            !available,
+            "the fallback sentence resumes with available false, so identical human text cannot spoof it"
+        );
+    }
+
+    #[test]
+    fn an_err_user_input_answer_round_trips_and_retains_the_typed_error() {
+        let lua = Lua::new();
+        let (envelope, retained) = Answer::UserInput(Err(Error::Lua("broker down".to_owned())))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        match retained {
+            Some(Error::Lua(message)) => assert_eq!(message, "broker down"),
+            other => panic!("expected the retained Lua error, got {other:?}"),
+        }
+        let (ok, result) = echo_through_lua(&lua, envelope);
+        assert!(!ok);
+        let Value::String(message) = result else {
+            panic!("expected a string message, got {result:?}");
+        };
+        assert_eq!(
+            message.to_str().expect("the message is UTF-8"),
+            "broker down"
+        );
     }
 }

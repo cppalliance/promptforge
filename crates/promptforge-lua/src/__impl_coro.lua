@@ -107,6 +107,21 @@ local function models_loop(...)
   return result
 end
 
+-- user_input(): direct operator input through the run's input broker. The
+-- host installs this as a global in section VMs only; an agent VM never
+-- sees it. The resume is (ok, text, available): on success the call
+-- returns the text plus the availability flag, so the broker's fixed
+-- fallback sentence cannot be spoofed by identical human text; on failure
+-- the call raises the host's message at the call site.
+local function user_input(...)
+  if select('#', ...) > 0 then
+    error("user_input takes no arguments", 0)
+  end
+  local ok, text, available = yield({ op = "user_input" })
+  if not ok then error(text, 0) end
+  return text, available
+end
+
 -- The section install passes the section's namespace tables; the live H1
 -- base install passes nil for both (H1's live models table exists only per
 -- block, given the shim by the host's per-step wrap) and takes `infer` from
@@ -124,4 +139,5 @@ return {
   chat = chat,
   infer = infer,
   loop = models_loop,
+  user_input = user_input,
 }

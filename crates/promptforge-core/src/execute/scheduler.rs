@@ -62,10 +62,11 @@ use tokio::task::AbortHandle;
 use crate::client::GatewayClient;
 use crate::fanout;
 use crate::fanout::ArmFinalizer;
+use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
 use crate::lua::{
     CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageRecord, OverflowReason,
-    ScriptReport, SectionVm, append_message_record, current_tool_bindings, dispatch_tool,
-    invoke_selected, project_messages, resolve_model_binding, shim_live_h1_models,
+    ScriptReport, SectionVm, UserInputOutcome, append_message_record, current_tool_bindings,
+    dispatch_tool, invoke_selected, project_messages, resolve_model_binding, shim_live_h1_models,
 };
 use crate::model::ModelBinding;
 use crate::observe::detail;
@@ -1363,6 +1364,10 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_loop(id, binding, messages, messages_key, compactor)
                     .await
             }
+            Request::UserInput => {
+                self.dispatch_user_input(id);
+                Ok(())
+            }
             // Unreachable: no section VM installs the models.chat shim, and
             // stripped coroutines make a hand-rolled yield fail validation
             // before dispatch - the mirror of the agent driver's guards for
@@ -1561,6 +1566,55 @@ impl<'a> Scheduler<'a> {
             let _ = tx.send((request_id, Answer::ToolCallResult(result)));
         });
         Ok((request_id, task))
+    }
+
+    /// Dispatches a `user_input` request: the run's input broker answers on
+    /// a spawned task exactly as a leaf I/O round does, so a blocking wait
+    /// parks its chain - the section's VM and message history intact -
+    /// without blocking the driver, and cancellation aborts it through the
+    /// shared in-flight abort path. With no broker configured the
+    /// unavailable-fallback policy answers immediately: the fixed fallback
+    /// sentence with `available` false. The wait and a delivered response
+    /// are recorded through the run's observer; an unavailable answer opens
+    /// no wait and records no input.
+    fn dispatch_user_input(&mut self, id: ChainId) {
+        let chain = &self.chains[id.index()];
+        let Some(broker) = chain.ctx.input_broker().cloned() else {
+            self.chains[id.index()].incoming = Some(Answer::UserInput(Ok(UserInputOutcome {
+                text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
+                available: false,
+            })));
+            self.ready.push_back(id);
+            return;
+        };
+        let observer = Arc::clone(chain.ctx.observer());
+        let execution = chain.ctx.execution().to_owned();
+        let section = chain.section_name().to_owned();
+        observer.observe(&execution, &section, detail::USER_INPUT_WAIT_STARTED);
+        let request_id = RequestId(self.next_request);
+        self.next_request += 1;
+        let tx = self.answer_tx.clone();
+        let task = tokio::spawn(async move {
+            let answer = match broker.user_input(&execution, &section).await {
+                Ok(InputOutcome::Text(text)) => {
+                    observer.on_user_input(&execution, &section, &text);
+                    Answer::UserInput(Ok(UserInputOutcome {
+                        text,
+                        available: true,
+                    }))
+                }
+                Ok(InputOutcome::Unavailable) => Answer::UserInput(Ok(UserInputOutcome {
+                    text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
+                    available: false,
+                })),
+                Err(error) => Answer::UserInput(Err(Error::from(error))),
+            };
+            // A send fails only when the driver is gone (a cancelled run);
+            // the answer is then moot.
+            let _ = tx.send((request_id, answer));
+        });
+        self.io_tasks.insert(request_id, task.abort_handle());
+        self.pending.insert(request_id, id);
     }
 
     /// Dispatches a `loop` request: runs the Rust-backed model-tool loop on

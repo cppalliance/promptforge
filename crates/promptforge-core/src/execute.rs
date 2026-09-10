@@ -161,6 +161,8 @@ pub(crate) use crate::model::ModelSet;
 ///   or instructions) was exhausted.
 /// - [`RunErrorKind::ContextExhausted`] - the selected compactor exhausted the
 ///   model's context window.
+/// - [`RunErrorKind::Input`] - the host's input broker failed a `user_input`
+///   request.
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
 /// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
 /// - [`RunErrorKind::Cancelled`] - the host cancelled the run.

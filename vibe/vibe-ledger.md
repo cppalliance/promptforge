@@ -49,3 +49,8 @@
   - Decision: tool-call exchanges append atomically after the whole batch dispatches | Falsifier: an author workflow needing partial-round history after a caught tool failure.
   - Decision: a compactor callback that returns instead of raising is rejected as the deferred replacement shape | Falsifier: the deferred framework defining a meaning for plain returns.
   - Decision: `run`'s body future and `run_loop`'s future are `Box::pin`'d to stay under the workspace large-futures lint | Falsifier: measured allocation cost mattering at run/step granularity.
+- Step 10: generic input broker - `cargo test -p promptforge-lua user_input` (4 passed) and `cargo test -p promptforge-core input` (11 passed); clippy and fmt clean.
+  - Decision: broker trait and InputTool live in `promptforge_core::input`, injected via `RunConfig::input_broker`; `None` is the unavailable-fallback policy | Falsifier: step 11 cannot adapt Workshop's WaitRegistry to the trait without core changes.
+  - Decision: waits recorded as `UserInputWaitStarted`, responses via existing `on_user_input`, on both direct and tool paths | Falsifier: step 11 shows double recording against the workshop's producer-side `on_user_input`.
+  - Decision: InputTool takes execution/section/observer at construction, per session like today's UserInputTool | Falsifier: a host needs one InputTool shared across sections with correct per-section coordinates.
+  - Decision: `user_input` is a section-only global; agent VMs get the unreachable guard | Falsifier: an agent program needs direct `user_input` before step 11's chat.md migration.

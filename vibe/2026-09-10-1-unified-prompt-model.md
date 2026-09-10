@@ -439,7 +439,7 @@ Generalize the agent-only chat request and Rust tool loop in `crates/promptforge
 
 <step-10>
 
-### Step 10: generic input broker
+### Step 10: generic input broker [completed]
 
 - Component: input-broker
 

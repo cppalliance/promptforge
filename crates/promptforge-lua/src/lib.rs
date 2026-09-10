@@ -121,7 +121,7 @@ pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_over
 #[doc(hidden)]
 pub use coro::{
     install_agent_chat_shim, install_live_h1_shim_base, install_section_loop_shim,
-    shim_live_h1_models,
+    install_section_user_input_shim, shim_live_h1_models,
 };
 #[doc(hidden)]
 pub use dispatch::{ScriptReport, dispatch_tool};
@@ -141,7 +141,7 @@ pub use prose::ProseState;
 #[doc(hidden)]
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request,
-    ToolCallOutcome, ToolCallRecord, YieldParse, append_message_record,
+    ToolCallOutcome, ToolCallRecord, UserInputOutcome, YieldParse, append_message_record,
 };
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};

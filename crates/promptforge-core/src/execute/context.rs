@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::Result;
 use crate::debug::DebugCapture;
+use crate::input::InputBroker;
 use crate::lua::{LuaProgram, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::observe::Observer;
@@ -83,6 +84,9 @@ pub(crate) struct RunContext {
     /// The walk's start timestamp, stamped into every section's `sys.when`;
     /// empty until the walk starts (H1 stamps its own `now`).
     when: Arc<str>,
+    /// The run's input broker, when the host configured one; `None` is the
+    /// unavailable-fallback policy.
+    input: Option<Arc<dyn InputBroker>>,
 }
 
 impl RunContext {
@@ -117,6 +121,7 @@ impl RunContext {
             models: model_set.clone(),
             model_set,
             when: Arc::from(""),
+            input: config.input.clone(),
         }
     }
 
@@ -239,6 +244,11 @@ impl RunContext {
         self.prompt.sections().len()
     }
 
+    /// The run's input broker, when the host configured one.
+    pub(crate) fn input_broker(&self) -> Option<&Arc<dyn InputBroker>> {
+        self.input.as_ref()
+    }
+
     /// The H1-to-walk handoff: the walk's start timestamp, set on a cheap
     /// clone so the context H1 saw stays untouched. The tool and model sets
     /// need no delta: H1's binds already landed in the shared sets the views
@@ -341,6 +351,7 @@ impl fmt::Debug for RunContext {
             .field("models", &"<dyn ModelView>")
             .field("model_set", &self.model_set)
             .field("when", &self.when)
+            .field("input", &self.input.is_some())
             .finish()
     }
 }

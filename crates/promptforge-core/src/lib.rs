@@ -75,6 +75,7 @@ pub mod debug;
 mod error;
 pub mod execute;
 pub(crate) mod fanout;
+pub mod input;
 pub(crate) mod lua;
 pub mod model;
 pub mod observe;

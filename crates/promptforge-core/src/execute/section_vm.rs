@@ -112,6 +112,7 @@ where
     vm.install_scheduler_control_globals(list_callback)?;
     vm.install_coro_shims()?;
     crate::lua::install_section_loop_shim(vm.lua())?;
+    crate::lua::install_section_user_input_shim(vm.lua())?;
     vm.replay_shared(
         setup.shared,
         setup.observer_arc.as_ref(),

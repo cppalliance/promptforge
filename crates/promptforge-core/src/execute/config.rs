@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::cancel::CancelHandle;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
+use crate::input::InputBroker;
 use crate::observe::{NullObserver, Observer};
 
 /// Generates one `nz_*` constructor per `NonZero*` type: a `const fn`
@@ -188,11 +189,12 @@ pub struct RunConfig {
     pub(crate) client: Option<GatewayClient>,
     pub(crate) cancel: Option<CancelHandle>,
     pub(crate) limits: RunLimits,
+    pub(crate) input: Option<Arc<dyn InputBroker>>,
 }
 
 impl RunConfig {
     /// Builds a config for `execution` with default observer, no client, no
-    /// capture, no cancellation, and default [`RunLimits`].
+    /// capture, no cancellation, no input broker, and default [`RunLimits`].
     #[must_use]
     pub fn new(execution: impl Into<String>) -> RunConfig {
         RunConfig {
@@ -202,6 +204,7 @@ impl RunConfig {
             client: None,
             cancel: None,
             limits: RunLimits::new(),
+            input: None,
         }
     }
 
@@ -241,6 +244,17 @@ impl RunConfig {
         self
     }
 
+    /// Sets the run's input broker, the host policy behind `user_input()`
+    /// and the model-visible input tool. The default (`None`) is the
+    /// unavailable-fallback policy: every input request resolves to
+    /// [`INPUT_UNAVAILABLE_FALLBACK`](crate::input::INPUT_UNAVAILABLE_FALLBACK)
+    /// with `available` false.
+    #[must_use]
+    pub fn input_broker(mut self, broker: Arc<dyn InputBroker>) -> RunConfig {
+        self.input = Some(broker);
+        self
+    }
+
     /// Returns the execution identifier shared by every report.
     #[must_use]
     pub fn execution(&self) -> &str {
@@ -257,6 +271,7 @@ impl fmt::Debug for RunConfig {
             .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
             .field("cancel", &self.cancel.is_some())
             .field("limits", &self.limits)
+            .field("input", &self.input.is_some())
             .finish()
     }
 }

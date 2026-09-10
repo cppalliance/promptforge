@@ -519,6 +519,18 @@ pub(crate) enum Error {
         reason: crate::lua::OverflowReason,
     },
 
+    /// The host's input broker failed a `user_input` request: the wait
+    /// ended in failure rather than an answer or the unavailable fallback,
+    /// so the call raises this typed error at its Lua call site.
+    #[error("user input failed: {message}")]
+    Input {
+        /// The broker's host-authored, model-safe failure message.
+        message: String,
+        /// The broker's own cause, retained when it supplied one.
+        #[source]
+        source: Option<BoxedSource>,
+    },
+
     /// Rendering the current time as an RFC 3339 string failed.
     ///
     /// Retains the [`time::error::Format`] failure as the private `#[source]`
@@ -552,6 +564,13 @@ impl Error {
 impl From<crate::subst::SubstitutionError> for Error {
     fn from(error: crate::subst::SubstitutionError) -> Error {
         Error::Substitution(Box::new(error))
+    }
+}
+
+impl From<crate::input::InputError> for Error {
+    fn from(error: crate::input::InputError) -> Error {
+        let (message, source) = error.into_parts();
+        Error::Input { message, source }
     }
 }
 
