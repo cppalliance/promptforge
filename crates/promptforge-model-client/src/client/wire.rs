@@ -134,6 +134,27 @@ impl Message {
     pub fn content(&self) -> &str {
         self.content.as_str().unwrap_or("")
     }
+
+    /// Returns the raw content value (a string or a content-parts array).
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's pre-dispatch
+    /// size estimate, which needs the parts a plain [`Message::content`]
+    /// read flattens away; not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn content_value(&self) -> &Value {
+        &self.content
+    }
+
+    /// Returns the raw `tool_calls` array an assistant turn carries.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's pre-dispatch
+    /// size estimate; not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn raw_tool_calls(&self) -> Option<&[Value]> {
+        self.tool_calls.as_deref()
+    }
 }
 
 /// A tool advertised to the model, in the `OpenAI` function-calling shape.

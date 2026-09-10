@@ -510,6 +510,17 @@ pub(crate) enum Error {
         resource: &'static str,
     },
 
+    /// The selected compactor exhausted the model's context window: the
+    /// request overflowed on the pre-dispatch precheck or at the provider,
+    /// and the policy (`compactors.fail`, the only shipped one) does not
+    /// compact.
+    #[error("context exhausted: {reason}")]
+    #[non_exhaustive]
+    ContextExhausted {
+        /// Which overflow check fired.
+        reason: crate::lua::OverflowReason,
+    },
+
     /// Rendering the current time as an RFC 3339 string failed.
     ///
     /// Retains the [`time::error::Format`] failure as the private `#[source]`
@@ -658,6 +669,7 @@ impl From<LuaError> for Error {
                 source,
             },
             LuaError::LuaQuota { resource } => Error::LuaQuota { resource },
+            LuaError::ContextExhausted { reason } => Error::ContextExhausted { reason },
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
             LuaError::Internal(message) => Error::Internal(message),
@@ -731,6 +743,36 @@ mod tests {
         assert!(
             std::error::Error::source(&crate::RunError::from(error)).is_some(),
             "the public RunError wrapper must keep the source reachable"
+        );
+    }
+
+    #[test]
+    fn context_exhaustion_maps_from_lua_and_classifies() {
+        // The compactor's typed exhaustion crosses the crate seam
+        // variant-for-variant and classifies as its own run-error kind, so a
+        // host can distinguish context exhaustion from a transport failure.
+        let lua_error = LuaError::ContextExhausted {
+            reason: promptforge_lua::OverflowReason::Provider,
+        };
+        let error = Error::from(lua_error);
+        assert!(
+            matches!(
+                error,
+                Error::ContextExhausted {
+                    reason: crate::lua::OverflowReason::Provider
+                }
+            ),
+            "the mapping preserves the reason, got {error:?}"
+        );
+        assert!(
+            error.to_string().starts_with("context exhausted: "),
+            "the diagnostic names the exhaustion: {error}"
+        );
+        let run_error = crate::RunError::from(error);
+        assert_eq!(run_error.kind(), crate::RunErrorKind::ContextExhausted);
+        assert!(
+            !run_error.is_retryable(),
+            "retrying an over-window request cannot succeed"
         );
     }
 

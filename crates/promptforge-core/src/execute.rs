@@ -165,6 +165,8 @@ pub(crate) use crate::model::ModelSet;
 ///   usable value.
 /// - [`RunErrorKind::Quota`] - a Lua host resource quota (log events, log bytes,
 ///   or instructions) was exhausted.
+/// - [`RunErrorKind::ContextExhausted`] - the selected compactor exhausted the
+///   model's context window.
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
 /// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
 /// - [`RunErrorKind::Cancelled`] - the host cancelled the run.

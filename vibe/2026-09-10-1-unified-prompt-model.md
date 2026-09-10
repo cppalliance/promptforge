@@ -419,7 +419,7 @@ Add context projection across `crates/promptforge-core` execution and the `crate
 
 <step-8>
 
-### Step 8: minimum compactor surface with `compactors.fail`
+### Step 8: minimum compactor surface with `compactors.fail` [completed]
 
 - Component: compactor
 

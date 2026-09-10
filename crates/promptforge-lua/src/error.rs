@@ -120,6 +120,18 @@ pub enum Error {
         resource: &'static str,
     },
 
+    /// The selected compactor exhausted the model's context: a request
+    /// overflowed the context window (the pre-dispatch precheck or a
+    /// provider rejection) and the policy - `compactors.fail`, the only
+    /// shipped one - does not compact. A stable typed error rather than a
+    /// bare [`Error::Lua`] so hosts and `pcall` sites can distinguish
+    /// context exhaustion from an authoring error.
+    #[error("context exhausted: {reason}")]
+    ContextExhausted {
+        /// Which overflow check fired.
+        reason: crate::compactors::OverflowReason,
+    },
+
     /// The host cancelled the run (for example Ctrl-C during fanout).
     #[error("interrupted by Ctrl-C")]
     Interrupted,

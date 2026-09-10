@@ -1,5 +1,6 @@
 use super::super::*;
 use super::*;
+use crate::lua::{Compactor, OverflowReason};
 
 /// Runs the standard echo fixture with the requested loop cap.
 async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String> {
@@ -27,6 +28,151 @@ async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String
     )
     .await
     .map(|(text, _)| text)
+}
+
+#[tokio::test]
+async fn precheck_overflow_invokes_the_default_compactor_before_any_request() {
+    // A 16-token window against a prose payload far past it: the precheck
+    // fires, the omitted compactor defaults to `compactors.fail`, and no
+    // request ever leaves.
+    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let client = gateway_client(gateway.addr());
+    let recorder = Arc::new(Recorder::default());
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let mut conversation = Vec::new();
+    let err = run_prose_inference(
+        &client,
+        &[],
+        &BTreeMap::new(),
+        &mut conversation,
+        "x".repeat(4096),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        NonZeroU32::new(16).expect("16 is non-zero"),
+        None,
+        EXECUTION,
+        recorder.as_ref(),
+        "Only",
+        &turns,
+        None,
+        &options,
+        &nonce,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("an over-window request must exhaust the context");
+    assert!(
+        matches!(
+            err,
+            Error::ContextExhausted {
+                reason: OverflowReason::Precheck
+            }
+        ),
+        "the default compactor raises typed precheck exhaustion, got {err:?}"
+    );
+    assert_eq!(
+        gateway.call_count(),
+        0,
+        "the precheck fires before any request leaves"
+    );
+    assert_eq!(
+        recorder.events(),
+        vec![("Only".to_string(), detail::MODEL_TURN_FAILED.to_string())],
+        "the refused dispatch is an operator-visible failed turn"
+    );
+}
+
+#[tokio::test]
+async fn provider_overflow_invokes_the_compactor_with_the_provider_reason() {
+    let gateway = ScriptedGateway::start(vec![resp_status(
+        400,
+        "This model's maximum context length is 4096 tokens.",
+    )])
+    .await;
+    let client = gateway_client(gateway.addr());
+    let recorder = Arc::new(Recorder::default());
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let mut conversation = Vec::new();
+    let err = run_prose_inference(
+        &client,
+        &[],
+        &BTreeMap::new(),
+        &mut conversation,
+        "ask the model".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        NonZeroU32::new(131_072).expect("non-zero"),
+        Some(Compactor::Fail),
+        EXECUTION,
+        recorder.as_ref(),
+        "Only",
+        &turns,
+        None,
+        &options,
+        &nonce,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("a provider context rejection must exhaust the context");
+    assert!(
+        matches!(
+            err,
+            Error::ContextExhausted {
+                reason: OverflowReason::Provider
+            }
+        ),
+        "the compactor raises typed provider exhaustion, got {err:?}"
+    );
+    assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
+    assert_eq!(
+        recorder.events(),
+        vec![("Only".to_string(), detail::MODEL_TURN_FAILED.to_string())]
+    );
+}
+
+#[tokio::test]
+async fn a_client_rejection_without_overflow_signatures_stays_a_backend_error() {
+    // Same status class, unrelated body: not context overflow, so the bare
+    // backend failure propagates and no compactor is invoked.
+    let gateway =
+        ScriptedGateway::start(vec![resp_status(400, "invalid request: unknown field")]).await;
+    let client = gateway_client(gateway.addr());
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let mut conversation = Vec::new();
+    let err = run_prose_inference(
+        &client,
+        &[],
+        &BTreeMap::new(),
+        &mut conversation,
+        "ask the model".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        NonZeroU32::new(131_072).expect("non-zero"),
+        None,
+        EXECUTION,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        None,
+        &options,
+        &nonce,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("an ordinary backend rejection must propagate unchanged");
+    assert!(
+        matches!(err, Error::Backend { status: 400, .. }),
+        "a non-overflow 400 stays a backend error, got {err:?}"
+    );
 }
 
 #[tokio::test]

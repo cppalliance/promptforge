@@ -6,11 +6,11 @@ use super::{
     LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelRuntime,
     ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, ProseState,
     Result, StdLib, StoreRef, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime,
-    ToolSet, Value, WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
-    install_instruction_budget, install_log, install_messages, install_shim_prelude,
-    install_store_table, install_tool_call_counts as install_tool_call_counts_impl,
-    install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
-    var_to_json,
+    ToolSet, Value, WriteScope, detail, guarded_var, harden, install_compactors, install_h2_models,
+    install_h2_tools, install_instruction_budget, install_log, install_messages,
+    install_shim_prelude, install_store_table,
+    install_tool_call_counts as install_tool_call_counts_impl, install_untrusted, log_byte_budget,
+    resolve_section_target, scalar_return, seal_sys, var_to_json,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -452,6 +452,7 @@ impl SectionVm {
         )?;
         install_h2_models(&self.lua, &globals, &self.bound_models, &self.model_runtime)?;
         install_messages(&self.lua, &globals)?;
+        install_compactors(&self.lua, &globals)?;
         self.store = Some(store.clone());
         self.write_scope = write_scope;
         self.host_injected = true;

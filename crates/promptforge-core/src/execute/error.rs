@@ -29,6 +29,8 @@ pub enum RunErrorKind {
     /// A Lua host resource quota (log events, log bytes, or instructions) was
     /// exhausted.
     Quota,
+    /// The selected compactor exhausted the model's context window.
+    ContextExhausted,
     /// A `{{ }}` prose substitution failed.
     Substitution,
     /// The host cancelled the run.
@@ -57,6 +59,7 @@ impl RunError {
         match &self.inner {
             Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => RunErrorKind::Parse,
             Error::LuaQuota { .. } => RunErrorKind::Quota,
+            Error::ContextExhausted { .. } => RunErrorKind::ContextExhausted,
             Error::LuaCompile { .. } | Error::Lua(_) | Error::LuaRuntime { .. } => {
                 RunErrorKind::Lua
             }

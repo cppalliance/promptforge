@@ -49,6 +49,7 @@ pub(crate) use promptforge_model_client::model::{
 pub(crate) use promptforge_store::{StoreRef, WriteScope};
 pub(crate) use promptforge_tools::{Tool, ToolCatalog, ToolId};
 
+pub(crate) use crate::compactors::install_compactors;
 pub(crate) use crate::error::Result;
 pub(crate) use crate::messages::install_messages;
 pub(crate) use crate::models::{LuaModelHandle, ModelsInferHook};
@@ -83,6 +84,7 @@ pub(crate) fn log_byte_budget(log_events: u32) -> usize {
 }
 
 mod collection;
+mod compactors;
 mod error;
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
@@ -114,6 +116,8 @@ mod runtime_events;
 // The executor-facing surface: every item `promptforge-core` names crosses
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
 // `LuaProgram` is the documented exception.
+#[doc(hidden)]
+pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
 #[doc(hidden)]
 pub use coro::{install_agent_chat_shim, install_live_h1_shim_base, shim_live_h1_models};
 #[doc(hidden)]

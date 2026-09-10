@@ -7,12 +7,15 @@
 //! text or exhaustion.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::atomic::AtomicU32;
 
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
-use crate::lua::{ToolCallCounts, dispatch_tool};
+use crate::lua::{
+    Compactor, OverflowReason, ToolCallCounts, dispatch_tool, is_context_overflow, precheck,
+};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::tools::ToolId;
@@ -53,7 +56,10 @@ pub(crate) struct ProseInferenceResult {
 /// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit
 /// without a text reply, [`Error::Interrupted`]
 /// when the run is cancelled, or any transport/backend error from a model call
-/// or a tool's own failure. Returns [`Error::Internal`] if a local tool call
+/// or a tool's own failure. Returns [`Error::ContextExhausted`] when the
+/// pre-dispatch precheck or the provider reports a context-window overflow
+/// and the selected compactor (`compactor`, defaulting to `compactors.fail`)
+/// raises it. Returns [`Error::Internal`] if a local tool call
 /// reaches dispatch without the required local dispatcher.
 #[expect(
     clippy::too_many_arguments,
@@ -67,6 +73,8 @@ pub(crate) async fn run_prose_inference(
     conversation: &mut Vec<Message>,
     prose: String,
     max_tool_iterations: usize,
+    context: NonZeroU32,
+    compactor: Option<Compactor>,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
@@ -90,6 +98,16 @@ pub(crate) async fn run_prose_inference(
     let mut successful_tool_calls: usize = 0;
 
     for _ in 0..max_tool_iterations {
+        // The pre-dispatch precheck: estimate the request against the
+        // model's context window before anything leaves. Overflow invokes
+        // the selected compactor - the omitted-compactor default,
+        // `compactors.fail`, always raises typed context exhaustion - and
+        // the refused dispatch is observed as a failed turn, matching the
+        // projection-failure precedent.
+        if let Err(reason) = precheck(conversation, context) {
+            observer.observe(execution, section, detail::MODEL_TURN_FAILED);
+            return Err(compactor.unwrap_or_default().invoke(reason).into());
+        }
         // The document-prompt loop consumes only the accumulated completion;
         // live deltas have no consumer here, so the callback is a no-op.
         let completion = tokio::select! {
@@ -99,6 +117,19 @@ pub(crate) async fn run_prose_inference(
         };
         if let Err(Error::Interrupted) = &completion {
             return Err(Error::Interrupted);
+        }
+        // Provider overflow: the backend rejected the request as too large
+        // for the model's context window. The selected compactor answers
+        // with typed context exhaustion rather than propagating the bare
+        // backend failure.
+        if let Err(Error::Backend { status, body }) = &completion
+            && is_context_overflow(*status, body)
+        {
+            observer.observe(execution, section, detail::MODEL_TURN_FAILED);
+            return Err(compactor
+                .unwrap_or_default()
+                .invoke(OverflowReason::Provider)
+                .into());
         }
         // A turn whose reply is empty is the model's clean exit from the loop
         // when it stopped deliberately (`finish_reason == "stop"`) after doing

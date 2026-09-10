@@ -1031,6 +1031,10 @@ async fn run_tool_loop(
         &mut conversation,
         prose,
         max_tool_iterations,
+        // The shim's loop never approaches a window: the test catalog's
+        // context size, with the omitted-compactor default.
+        NonZeroU32::new(131_072).expect("131072 is non-zero"),
+        None,
         EXECUTION,
         observer,
         section,
