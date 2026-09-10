@@ -14,9 +14,9 @@
 //! until the host delivers (the section's VM and message history stay
 //! intact), an unavailable answer (or no configured broker at all) is the
 //! unavailable-fallback policy, and a broker error is the failure policy,
-//! raising typed [`Error::Input`](crate::Error::Input) at the Lua call
-//! site. Waits and responses are recorded through the run's
-//! [`Observer`](crate::observe::Observer) - a wait-opened observation and
+//! raising a typed [`RunErrorKind::Input`](crate::RunErrorKind::Input)
+//! failure at the Lua call site. Waits and responses are recorded through
+//! the run's [`Observer`] - a wait-opened observation and
 //! a byte-exact `on_user_input` report - without any replay machinery.
 
 use std::fmt;
