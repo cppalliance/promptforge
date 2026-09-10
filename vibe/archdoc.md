@@ -24,3 +24,4 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A6. The executor neutralizes chat-template control delimiters in untrusted tool and Lua text, but never rewrites assistant replay or tool-call wire payloads.
 - A7. The Workshop shell grants each Tauri capability to one named window and the in-process server's exact bound origin, never a wildcard port.
 - A8. The Lua VM boundary accepts scheduler state changes only from typed `Request` variants yielded by the installed shim; direct or malformed yields fail without changing scheduler state.
+- A9. The Lua VM boundary exposes host capabilities as namespace functions over plain values (`models.*`, `tools.*`, `store.*`); handles are frozen, inspectable, and methodless, with an optional leading handle argument selecting an explicit binding. The chainable `messages.new()` builders are the sole deliberate exception.
