@@ -1,7 +1,7 @@
 ---
 name: research_person
 description: Research a person from the open web and return a concise, factual summary.
-promptforge: 1
+promptforge: 0
 max_tool_iterations: 20
 ---
 
@@ -33,3 +33,10 @@ Do this:
 4. Once you can write a factual summary of roughly 500 to 600 tokens, stop calling tools and output only that summary as your final message. No preamble, no tool log, no commentary about your process, just the summary.
 
 Cover, when known: who the person is and why they are notable, their background, their major work or contributions, and any widely reported recent developments. State plainly when something is uncertain or could not be verified.
+
+```lua
+local msgs = messages.new()
+msgs:user(prose)
+models.loop(msgs)
+return msgs[#msgs].content
+```

@@ -43,7 +43,7 @@ Every field of `workshop.toml`:
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
 | `server.state_dir` | the config file's directory | Directory holding the server's persistent state: agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written here |
-| `agents.path` | `agents/` beside the config file | Directory whose `.lua` files are the launchable agent programs; a missing directory offers no agents |
+| `agents.path` | `agents/` beside the config file | Directory whose `.lua` files are launchable agent programs alongside the embedded built-in `chat` agent; a directory `chat.lua` shadows the embedded source, and a missing directory offers exactly the built-in |
 
 ## Routes
 
@@ -139,7 +139,7 @@ The variables:
 
 ## Agent sessions
 
-`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.lua` agent programs from `agents.path`, launches each as a session running `promptforge_agent::run_agent` with the Workshop's `user_input` tool, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
+`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.lua` agent programs from `agents.path` and always offers the embedded built-in `chat` agent, a Markdown prompt running on the unified `promptforge_core` runtime (a directory `chat.lua` shadows it). A directory agent launches as a session running `promptforge_agent::run_agent`; the built-in launches as a `promptforge_core::run` prompt execution. Every session carries the Workshop's input broker behind `user_input`, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
 
 ## Minimum Rust Version
 

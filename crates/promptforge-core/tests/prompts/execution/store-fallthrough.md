@@ -1,7 +1,7 @@
 ---
 name: store_fallthrough
 description: Carry explicit store state across isolated fall-through sections
-promptforge: 1
+promptforge: 0
 ---
 
 # Store Fall-through

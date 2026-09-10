@@ -25,7 +25,7 @@ Write your program as if each host call were an ordinary synchronous call. There
 
 ## The two round calls
 
-Two calls carry almost every agent. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tool_call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
+Two calls carry almost every agent. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tools.call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
 
 Both calls follow the loop rule: one request in flight, resumed with the answer. Everything else about them is detail on top of that rule.
 

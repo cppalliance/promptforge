@@ -1,7 +1,7 @@
 ---
 name: fanout_basic
 description: Two-item fanout with prologue-return arms
-promptforge: 1
+promptforge: 0
 ---
 
 # Fanout Basic

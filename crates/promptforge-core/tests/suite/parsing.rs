@@ -100,7 +100,7 @@ fn invalid_prompt_files_report_public_error_contracts() {
 fn verify_minimal(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter().name(), "test");
     assert_eq!(prompt.frontmatter().description(), "minimum valid");
-    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(prompt.title(), "Test");
     assert!(prompt.replay().is_none());
     assert!(prompt.h1_blocks().is_empty());
@@ -119,7 +119,7 @@ fn verify_shared_library(prompt: &Prompt) {
         prompt.frontmatter().description(),
         "Exercise an H1 shared library and nested author prose"
     );
-    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(prompt.title(), "Shared Library");
     assert_eq!(
         prompt.replay().map(LuaProgram::source),
@@ -153,7 +153,7 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
         prompt.frontmatter().description(),
         "Exercise an author-shaped prologue, prose, and epilog"
     );
-    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(
         prompt.frontmatter().max_tool_iterations(),
         MaxToolIterations::Limit(NonZeroU32::new(3).expect("3 is non-zero"))
@@ -171,7 +171,7 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     assert_eq!(transform.prose(), "Write about {{ var.subject }}.");
     assert_eq!(
         transform.epilog().map(LuaProgram::source),
-        Some("return reply")
+        Some("return models.infer(prose)")
     );
     assert!(transform.children().is_empty());
 

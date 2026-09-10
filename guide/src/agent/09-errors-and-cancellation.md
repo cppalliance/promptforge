@@ -15,7 +15,7 @@ Wrap host calls in `pcall` to catch argument-validation and dispatch failures. T
 
 ## Errors that name things
 
-The error messages are built to be read. A `tool_call` or an `opts.tools` entry that names an unregistered alias fails, and the error names the in-scope aliases. An `opts.model` outside the agent's catalog fails, and the error names the model. A bad chat message fails with the 1-based index of the offending entry in your own list, as in `messages[2] role "wizard" is unknown`.
+The error messages are built to be read. A `tools.call` or an `opts.tools` entry that names an unregistered alias fails, and the error names the in-scope aliases. An `opts.model` outside the agent's catalog fails, and the error names the model. A bad chat message fails with the 1-based index of the offending entry in your own list, as in `messages[2] role "wizard" is unknown`.
 
 A `models.chat` tool-call round fails when the model truncates it. Your program never resumes with a partial batch of tool calls. You get the failure instead.
 

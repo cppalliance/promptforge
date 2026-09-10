@@ -1,6 +1,6 @@
 # Lua Globals and the Store
 
-Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args`, `sys`, `var`, `reply`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
+Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args`, `sys`, `var`, `prose`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
 
 ## args: the run's input
 
@@ -20,7 +20,7 @@ The `sys.id` value is a run-global counter. The H1 pass keeps id 0, and every se
 
 One field is conditional. `sys.index` exists only when the section runs as one arm of a fanout, a concurrent walk over a collection. Reading it in an ordinary walked section raises an unknown-field error. Arms of a nested fanout restart `sys.index` numbering at 1.
 
-After a section's prose block finishes, the model's finish reason is recorded into `sys.reply_finish_reason`, so the prompt can inspect why generation stopped.
+Once the section has dispatched its first model or tool call, `sys.model` reads the catalog id of the model the section resolved. Reading it before that first dispatch raises an unknown-field error.
 
 ## log: checkpoints
 
@@ -36,9 +36,13 @@ var.topic = 'governance'
 
 Two rules keep the clipboard safe. Reassigning the `var` global itself fails the run; you mutate its fields, never replace it. And assigning a non-JSON value to a field fails, naming the field and the type: `var.f = function() end` errors because a function is not JSON data.
 
-## reply: the rolling result
+## prose: the pending Markdown
 
-Each section entry is seeded with the previous section's final reply, and the section's own final reply replaces it for the next. You can assign `reply` directly, but the value must be nil or a string; anything else fails with a Lua error.
+The prose written since the section's heading or last Lua block is available to the next Lua block as the `prose` global. It is lazy: the `{{ }}` placeholders in it are substituted on the first read, not at block entry, so a block that never reads `prose` never evaluates it. The value is read-only and memoized - assigning to it fails, and every read after the first returns the same substituted text. Each prose buffer is fresh: a second prose block in the same section evaluates independently for the Lua block that follows it.
+
+````lua
+local answer = models.infer(prose)
+````
 
 ## store: virtual files
 

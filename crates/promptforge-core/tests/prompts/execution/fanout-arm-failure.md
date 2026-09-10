@@ -1,7 +1,7 @@
 ---
 name: fanout_arm_failure
 description: Arm error propagates to invoker
-promptforge: 1
+promptforge: 0
 ---
 
 # Fanout Arm Failure

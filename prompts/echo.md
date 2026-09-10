@@ -1,7 +1,7 @@
 ---
 name: echo
 description: Return the input argument unchanged
-promptforge: 1
+promptforge: 0
 ---
 
 # Echo

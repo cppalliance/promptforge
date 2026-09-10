@@ -66,8 +66,8 @@ Log calls are capped by a per-run event budget and a cumulative byte budget. The
 ## Ask the operator
 
 ````lua
-tool_call('user_input', {})
+tools.call('user_input', {})
 ````
 
-Request the operator's next message by invoking the `user_input` tool through `tool_call`. The operator's answer arrives in the event log as a `user_message` event, where your context building can read it.
+Request the operator's next message by invoking the `user_input` tool through `tools.call`. The operator's answer arrives in the event log as a `user_message` event, where your context building can read it.
 

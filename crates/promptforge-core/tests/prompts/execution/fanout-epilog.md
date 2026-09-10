@@ -1,7 +1,7 @@
 ---
 name: fanout_epilog
 description: Fanout invoked from the epilog with empty prose
-promptforge: 1
+promptforge: 0
 ---
 
 # Fanout Epilog

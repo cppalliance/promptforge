@@ -333,7 +333,7 @@ Only focused tests and migrations required by those active changes belong to thi
 - Build command: `cargo build` (default member is `gateway`; the desktop app is explicit: `cargo build -p workshop`). UI bundles build through crate build scripts after `npm ci --prefix crates/workshop-server/ui` and `npm ci --prefix crates/gateway-config-ui/ui`.
 - Focused test command pattern: `cargo test -p <crate> <name-filter>` (e.g. `cargo test -p gateway-stt --test it architecture`); nextest equivalent `cargo nextest run -p <crate> <filter>`.
 - Component test command pattern: `cargo nextest run -p <crate>` (or `cargo test -p <crate>`); gateway process-ownership races run as named `cargo test --locked -p gateway --no-default-features --features test-fixtures --test it <name>` invocations.
-- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features`, then doctests via `cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc`; Workshop crates run separately on Windows: `cargo nextest run --locked -p workshop -p workshop-server`.
+- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features`, then doctests via `cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc`; Workshop crates run separately on Windows: `cargo nextest run --locked -p workshop -p workshop-server`. On hosts without cargo-nextest, the fallback is `cargo test --locked --workspace --exclude workshop --exclude workshop-server --all-features` and `cargo test --locked -p workshop -p workshop-server`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings` (Workshop: `cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings`).
 - Formatter check command: `cargo fmt --all --check`.
 - Test placement and naming conventions: unit tests live in `src` modules behind `#[cfg(test)]`; integration tests live in `tests/` as a `main.rs` harness pulling in per-area module files (gateway uses `tests/it/`, promptforge-core uses `tests/suite/` with `execution.rs`, `fanout.rs`, etc.); UI tests run with `npm test` inside `crates/workshop-server/ui` and `crates/gateway-config-ui/ui`. Nextest profiles in `.config/nextest.toml`; tensor/FFI-heavy crates (promptforge-tool-picker, gateway-stt, gateway-stt-backend-whisper) are pinned to a `heavy` test group.
@@ -459,7 +459,7 @@ Move Workshop's wait registry behind the generic input-broker interface. Rewrite
 
 <step-12>
 
-### Step 12: migrate affected prompts, fixtures, and guides
+### Step 12: migrate affected prompts, fixtures, and guides [completed]
 
 - Component: migration
 

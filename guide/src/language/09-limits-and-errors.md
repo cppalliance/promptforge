@@ -4,7 +4,7 @@ Every run operates inside budgets, and every failure arrives in a stable shape. 
 
 ## Capping the tool loop
 
-The frontmatter key `max_tool_iterations` caps a section's tool-call loop:
+The frontmatter key `max_tool_iterations` caps the round trips of a section's `models.loop`:
 
 ````yaml
 max_tool_iterations: 5
@@ -27,7 +27,7 @@ A Lua block that exhausts a host resource quota fails with a typed quota error n
 
 ## The error kinds
 
-A run failure is classified into one stable kind: parse, version, binding, completion, tool, store, lua, quota, substitution, cancelled, or internal. The kind tells you which layer rejected the run before you read the message.
+A run failure is classified into one stable kind: parse, version, binding, completion, tool, store, lua, quota, context_exhausted, input, substitution, cancelled, or internal. The kind tells you which layer rejected the run before you read the message.
 
 Parse failures carry a stable classification kind and, when known, the location of the offending region. Lua compile errors name the prompt region and map back to the original source line numbers, so the error points at your file, not at generated code.
 

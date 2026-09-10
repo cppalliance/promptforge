@@ -68,7 +68,7 @@ fn call_models_infer_hook(lua: &Lua, prompt: &str) -> mlua::Result<String> {
     hook(lua, prompt)
 }
 
-/// H2 model-recording state: wraps the at-most-once `models.use` selection.
+/// H2 model-recording state: wraps the current `models.use` selection.
 #[derive(Debug)]
 pub struct ModelRuntime {
     used: Option<String>,
@@ -84,25 +84,12 @@ impl ModelRuntime {
         self.used.as_deref()
     }
 
-    /// Records a `models.use` selection.
-    ///
-    /// # Errors
-    /// Returns [`SelectError::AlreadyUsed`] if a selection was already recorded.
-    pub(crate) fn select(&mut self, alias: String) -> std::result::Result<(), SelectError> {
-        if self.used.is_some() {
-            Err(SelectError::AlreadyUsed)
-        } else {
-            self.used = Some(alias);
-            Ok(())
-        }
+    /// Records a `models.use` selection, replacing any prior one: the
+    /// selection is read at call time, so the latest call steers the next
+    /// model round.
+    pub(crate) fn select(&mut self, alias: String) {
+        self.used = Some(alias);
     }
-}
-
-/// Why a `models.use` selection was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SelectError {
-    /// A `models.use` selection was already recorded this section.
-    AlreadyUsed,
 }
 
 /// Records the first concrete callback error, preserving its typed cause.
@@ -342,9 +329,7 @@ pub(crate) fn install_h2_models(
                     "models.use alias {alias:?} was not declared by models.bind"
                 ))
             })?;
-            state.select(alias).map_err(|_| {
-                mlua::Error::external("models.use may be called at most once per section")
-            })?;
+            state.select(alias);
             Ok(LuaModelHandle::from_binding(&binding))
         })
         .map_err(Error::lua)?;

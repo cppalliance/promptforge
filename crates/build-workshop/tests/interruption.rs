@@ -27,11 +27,15 @@ const SIDECAR_NAME: &str = "promptforge-gateway-x86_64-unknown-linux-gnu";
 
 struct StagingGuard {
     path: PathBuf,
+    preserved: Option<PathBuf>,
 }
 
 impl Drop for StagingGuard {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
+        if let Some(preserved) = &self.preserved {
+            let _ = fs::rename(preserved, &self.path);
+        }
     }
 }
 
@@ -47,16 +51,21 @@ fn platform_interrupt_after_staging_kills_child_cleans_and_fails() {
         .join("workshop")
         .join("binaries")
         .join(SIDECAR_NAME);
-    assert!(
-        !staged.exists(),
-        "the interruption test requires absent staging: {}",
-        staged.display()
-    );
+    let temp = tempfile::tempdir().expect("temporary test root");
+    // A pre-staged sidecar (a local `cargo build -p workshop`) must not
+    // fail this test: move it aside so the orchestrator's staging and
+    // cleanup are still exercised, and let the guard restore it after.
+    let preserved = if staged.exists() {
+        let backup = temp.path().join("preexisting-sidecar");
+        fs::rename(&staged, &backup).expect("move the pre-staged sidecar aside");
+        Some(backup)
+    } else {
+        None
+    };
     let _staging_guard = StagingGuard {
         path: staged.clone(),
+        preserved,
     };
-
-    let temp = tempfile::tempdir().expect("temporary test root");
     let fake_cargo = write_fake_cargo(&temp);
     let target_root = temp.path().join("target");
     let blocked_marker = temp.path().join("workshop-blocked");

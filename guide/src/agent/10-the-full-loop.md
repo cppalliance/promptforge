@@ -1,16 +1,16 @@
 # The full loop
 
-This chapter assembles the complete agent. The workshop's default chat is itself an agent program written in Lua, and your own `.lua` agent can take that role. Walk through that program turn by turn, because everything you have learned so far shows up in it, working together.
+This chapter assembles the complete agent: a chat surface written as one `.lua` program. The workshop's built-in chat is an embedded Markdown prompt on the unified document runtime, but a program saved as `chat.lua` in the agents directory shadows it, so the chat you already use is a role your own agent can take. Walk through that program turn by turn, because everything you have learned so far shows up in it, working together.
 
-## The built-in chat agent
+## A chat agent
 
-The built-in chat agent is a transparent pass-through. It advertises no tools and sets no system prompt. It relays between the operator and the selected model, and nothing else. That restraint is the design: the program adds no behavior the operator did not ask for.
+A chat agent is a transparent pass-through. It advertises no tools and sets no system prompt. It relays between the operator and the selected model, and nothing else. That restraint is the design: the program adds no behavior the operator did not ask for.
 
 ## One turn
 
 The agent is an infinite loop. Each turn does the same five things, in order.
 
-1. Request the operator's next message by invoking the `user_input` tool through `tool_call`.
+1. Request the operator's next message by invoking the `user_input` tool through `tools.call`.
 2. Read the event log with `runtime.events()`.
 3. Build the model's message list from the log: map each `user_message` event to `role = 'user'` and each `agent_message` event to `role = 'assistant'`, reading the text from `event.content`.
 4. Read the operator's selected model from the `ui()` snapshot's `selected_model` field.
@@ -20,7 +20,7 @@ The agent is an infinite loop. Each turn does the same five things, in order.
 
 ````lua
 while true do
-  tool_call('user_input', {})
+  tools.call('user_input', {})
   local events = runtime.events()
   local messages = {}
   for i = 1, #events do
@@ -50,4 +50,3 @@ The loop runs `models.chat` under `pcall` because the current chat survives tran
 ## Grow from here
 
 Start from this program and add one capability at a time. Advertise a tool with `opts.tools` and answer the requested calls. Save notes with `store.write`. Keep a counter in `var`. The loop does not change. The turns just do more.
-

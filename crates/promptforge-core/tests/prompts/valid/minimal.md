@@ -1,7 +1,7 @@
 ---
 name: test
 description: minimum valid
-promptforge: 1
+promptforge: 0
 ---
 
 # Test

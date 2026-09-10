@@ -90,16 +90,18 @@ fn default_multi_arg_rolls_back_when_already_selected() {
 }
 
 #[test]
-fn model_runtime_select_enforces_at_most_once() {
+fn model_runtime_select_allows_reselection() {
+    // Selections are read at call time, so a later `models.use` replaces the
+    // earlier one and steers the next model round.
     let mut runtime = ModelRuntime::new();
     assert!(runtime.used().is_none());
-    runtime
-        .select("writer".to_owned())
-        .expect("first select ok");
+    runtime.select("writer".to_owned());
     assert_eq!(runtime.used(), Some("writer"));
-    assert!(
-        runtime.select("other".to_owned()).is_err(),
-        "a second select must be rejected"
+    runtime.select("other".to_owned());
+    assert_eq!(
+        runtime.used(),
+        Some("other"),
+        "a second select must replace the first"
     );
 }
 

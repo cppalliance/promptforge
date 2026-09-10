@@ -33,9 +33,14 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
 axum.workspace = true
+criterion.workspace = true
 promptforge-parser = { workspace = true, features = ["test-support"] }
 promptforge-tool-picker = { workspace = true, features = ["test-fixtures"] }
 tokio.workspace = true
+
+[[bench]]
+name = "models_loop"
+harness = false
 
 [lints]
 workspace = true

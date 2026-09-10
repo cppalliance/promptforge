@@ -660,20 +660,44 @@ models.bind('analyst', 'A careful analysis model')\n\
 }
 
 #[tokio::test]
-async fn models_use_after_prose_errors() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
+async fn models_use_reselection_steers_the_next_round() {
+    let gateway = ScriptedGateway::start(vec![resp_text("first"), resp_text("second")]).await;
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# T\n\n\
+```lua\n\
+models.default('writer', 'A general model for tests')\n\
+models.bind('analyst', 'A careful analysis model')\n\
+```\n\n\
 ## Only\n\n\
-```lua\nmodels.use('writer')\n```\n\n\
-Ask the model.\n\n\
-```lua\nmodels.use('writer')\n```\n";
-    let error = run_with_gateway(&bound_for_model(md), addr, &StoreRef::memory())
+```lua\n\
+models.use('writer')\n\
+models.infer('ping')\n\
+models.use('analyst')\n\
+return models.infer('ping')\n\
+```\n";
+    let prompt = TestPrompt {
+        prompt: parse(md),
+        models: writer_and_analyst_catalog(),
+        picker_catalog: None,
+    };
+    let out = run_with_gateway(&prompt, addr, &StoreRef::memory())
         .await
-        .expect_err("a second models.use after prose must fail");
-    assert!(
-        error.to_string().contains("at most once per section"),
-        "the error must report the at-most-once rule: {error}"
+        .expect("re-selection within a section must succeed");
+    assert_eq!(out, "second");
+    let requests = gateway.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "both infer rounds must reach the gateway"
+    );
+    assert_eq!(
+        requests[0]["model"], "writer-model",
+        "the first round uses the initial selection"
+    );
+    assert_eq!(
+        requests[1]["model"], "analyst-model",
+        "the second round uses the re-selected model"
     );
 }
 

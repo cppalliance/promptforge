@@ -1,7 +1,7 @@
 ---
 name: log_checkpoints
 description: Record deterministic checkpoints across shared, prologue, and epilog phases
-promptforge: 1
+promptforge: 0
 ---
 
 # Log Checkpoints

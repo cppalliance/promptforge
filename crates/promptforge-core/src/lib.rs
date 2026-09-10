@@ -25,10 +25,10 @@
 //! use promptforge_core::{Prompt, promptforge_version};
 //! use promptforge_core::observe::NullObserver;
 //!
-//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 1\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
+//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
 //!
 //! // Version detection gates whether the runtime will accept the source.
-//! assert_eq!(promptforge_version(source), Some(1));
+//! assert_eq!(promptforge_version(source), Some(0));
 //! assert_eq!(promptforge_version("plain text, no frontmatter"), None);
 //!
 //! let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
@@ -50,7 +50,7 @@
 //! use promptforge_core::tools::ToolCatalog;
 //! use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 //!
-//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 1\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
+//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
 //! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
 //!
 //! let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;

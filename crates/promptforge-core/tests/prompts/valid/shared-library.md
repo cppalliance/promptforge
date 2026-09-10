@@ -1,7 +1,7 @@
 ---
 name: shared_library
 description: Exercise an H1 shared library and nested author prose
-promptforge: 1
+promptforge: 0
 ---
 
 # Shared Library

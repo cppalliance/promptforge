@@ -1,7 +1,7 @@
 ---
 name: greet
 description: Greet the named input using a Lua-computed value
-promptforge: 1
+promptforge: 0
 ---
 
 # Greet
@@ -20,3 +20,7 @@ var.greeting = "Hello, " .. args .. "!"
 ```
 
 Repeat exactly, with no extra words: {{ var.greeting }}
+
+```lua
+return models.infer(prose)
+```

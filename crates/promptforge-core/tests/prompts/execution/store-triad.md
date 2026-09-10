@@ -1,7 +1,7 @@
 ---
 name: store_triad
 description: Exercise read_numbered (numbered) vs read (verbatim) vs untrusted-wrapped reads
-promptforge: 1
+promptforge: 0
 ---
 
 # Store Triad

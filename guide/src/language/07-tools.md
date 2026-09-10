@@ -1,6 +1,6 @@
 # Tools
 
-Models reach the outside world through tools, and a prompt controls exactly which tools the model can see. This chapter teaches the declaration and scoping calls, `tools.bind`, `tools.always`, and `tools.add`, plus local tools written in Lua, direct dispatch with `tool_call`, and the failure modes you will meet. Tool scoping is the prompt's main safety surface, so we build it up one call at a time.
+Models reach the outside world through tools, and a prompt controls exactly which tools the model can see. This chapter teaches the declaration and scoping calls, `tools.bind`, `tools.always`, and `tools.add`, plus local tools written in Lua, direct dispatch with `tools.call`, and the failure modes you will meet. Tool scoping is the prompt's main safety surface, so we build it up one call at a time.
 
 ## Declaring a tool
 
@@ -28,9 +28,9 @@ The calls `tools.bind` and `tools.always` return a frozen Tool object with `name
 
 ## The tool loop
 
-When a section's prose asks the model to use tools, the runtime loops: each tool call is dispatched and its result sent back as a tool message until the model replies with final text. Only the section's last prose block runs the full loop; earlier prose blocks run a single round. A `tools.add` called in a Lua block between prose blocks takes effect starting with the next prose block, not the one before it.
+The tool loop lives inside `models.loop`. When the model answers a loop request with structured tool calls, the runtime dispatches each call to a tool in the section's scope, appends the correlated results to the message list, and asks again, until the model replies with terminal text. The scope is read at call time, so a `tools.add` earlier in the same Lua block applies to the `models.loop` call that follows it.
 
-Calling `tools.add` with an alias that no `tools.bind` declared fails the run loudly, and the section prose never reaches a model. A model that calls a tool outside the section's advertised scope fails with an error listing the in-scope aliases, and the error notes when the alias was declared by `tools.bind` but not added to this section's scope.
+Calling `tools.add` with an alias that no `tools.bind` declared fails the run loudly. A model that calls a tool outside the section's advertised scope fails with an error listing the in-scope aliases, and the error notes when the alias was declared by `tools.bind` but not added to this section's scope.
 
 ## Local tools
 
@@ -46,7 +46,7 @@ The handler runs as a Lua function in the section's own state. The parameter tab
 
 ## Direct dispatch and call counts
 
-The call `tool_call(alias, args)` invokes any tool bound in the document directly from a Lua block, even one not scoped into the section, without widening the set advertised to the model. A `tool_call` with an alias that has no binding fails with an error listing every bound alias.
+The call `tools.call(alias, args)` invokes any tool bound in the document directly from a Lua block, even one not scoped into the section, without widening the set advertised to the model. A `tools.call` with an alias that has no binding fails with an error listing every bound alias. A Tool object works in place of the alias, so `tools.call(tool, args)` dispatches a held object directly.
 
 The counter `tools.calls[alias]` reads how many times the model has called a tool in the section. Reading it with an alias that was never bound is a hard error naming the bad key and listing the seeded aliases. The counter records a call even when the tool errors.
 
@@ -58,5 +58,4 @@ Output from a tool that marks its result untrusted is wrapped in a preface and n
 
 Two semantic near-duplicate tools in one model-visible scope fail validation, with an error naming both aliases, both identities, and the similarity score. If you genuinely need both, isolate them in separate sections with per-section `tools.add`.
 
-An empty final reply from the model fails the section unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. And a tool handler failure aborts the tool loop and fails the run with the tool's own error, preserving the underlying cause in the error chain.
-
+An empty final reply from the model fails the loop unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. And a tool handler failure aborts the tool loop and fails the run with the tool's own error, preserving the underlying cause in the error chain.

@@ -30,13 +30,13 @@ Every event your agent emits carries the agent's name as its section label. The 
 
 ## The host surface
 
-Your program reaches the host through a shared set of calls. `models.infer` runs one model completion. `tool_call` dispatches a tool. `store` reads and writes files. `var` holds per-run state. `log` records a message in the event stream. Cooperative cancellation lets the host stop the run.
+Your program reaches the host through a shared set of calls. `models.infer` runs one model completion. `tools.call` dispatches a tool. `store` reads and writes files. `var` holds per-run state. `log` records a message in the event stream. Cooperative cancellation lets the host stop the run.
 
-Three calls do not exist in an agent: `execute`, `fanout`, and `jump`. They are absent, not stubbed. An agent that calls one fails on an undefined global.
+Three calls do not exist in an agent: `call`, `fanout`, and `jump`. They are absent, not stubbed. An agent that calls one fails on an undefined global.
 
 ## The moving parts
 
-Two Rust crates carry the agent surface. `promptforge-agent` is the agent executor that runs your program. `promptforge-lua` is the Lua host runtime your program calls into. Example agent programs live in `crates/workshop-server/agents/`. One of them, `chat.lua`, is the workshop's default chat surface: the chat you already use is an agent program, and your own program can take that role.
+Two Rust crates carry the agent surface. `promptforge-agent` is the agent executor that runs your program. `promptforge-lua` is the Lua host runtime your program calls into. The workshop's built-in chat is no longer an agent program: it is an embedded Markdown prompt on the unified document runtime. Save your own program as `chat.lua` in the agents directory and it shadows the built-in, so your agent can take over the chat role.
 
 ---
 
@@ -67,7 +67,7 @@ Write your program as if each host call were an ordinary synchronous call. There
 
 ## The two round calls
 
-Two calls carry almost every agent. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tool_call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
+Two calls carry almost every agent. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tools.call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
 
 Both calls follow the loop rule: one request in flight, resumed with the answer. Everything else about them is detail on top of that rule.
 
@@ -147,10 +147,10 @@ Every model in the catalog is addressable by its catalog name, through `models.u
 local handle = models.get('writer')
 log(handle.name)
 log(handle.model_id)
-local text = handle:infer('Write a haiku about rain.')
+local text = models.infer(handle, 'Write a haiku about rain.')
 ````
 
-`models.get` addresses a catalog model by name and gives you a bound handle. `handle:infer(prompt)` runs the same kind of round as `models.infer`: one direct, tool-free completion on a fresh conversation, using the handle's frozen binding. Pass no second argument. `handle:infer(prompt)` takes none, and passing one is an explicit error.
+`models.get` addresses a catalog model by name and gives you a bound handle. `models.infer(handle, prompt)` runs the same kind of round as `models.infer(prompt)`: one direct, tool-free completion on a fresh conversation, using the handle's frozen binding. Handles are plain inspectable values with no methods; every operation that accepts one takes it as the leading argument.
 
 The handle's fields are read-only. `name` is the prompt-local alias. `model_id` is the caller-facing catalog model id. `description` is the capability description given at bind time. `context` is the catalog context window size in tokens. `thinking`, `temperature`, and `max_tokens` expose the frozen invocation settings, and they read nil when the bind declared none.
 
@@ -205,10 +205,10 @@ Read each requested call from the 1-based entries of `result.tool_calls`. Each e
 ## Dispatch a call
 
 ````lua
-local output = tool_call('echo')
+local output = tools.call('echo')
 ````
 
-`tool_call(alias, args)` dispatches any tool in your agent's catalog by its wire name. Every tool in the catalog is in scope under its alias. Omit `args`, or pass nil, to call a tool without arguments; the tool receives the empty argument object.
+`tools.call(alias, args)` dispatches any tool in your agent's catalog by its wire name. Every tool in the catalog is in scope under its alias. Omit `args`, or pass nil, to call a tool without arguments; the tool receives the empty argument object.
 
 The call resumes with the tool's result. A tool that declares structured output returns its result as a Lua table. Every other tool returns plain text. A structured tool that returns invalid JSON fails the call, and the error names the alias.
 
@@ -218,7 +218,7 @@ The call resumes with the tool's result. A tool that declares structured output 
 local result = models.chat(messages, { tools = { 'echo' } })
 if result.tool_calls then
   local call = result.tool_calls[1]
-  local output = tool_call(call.name, call.arguments)
+  local output = tools.call(call.name, call.arguments)
   messages[#messages + 1] = { role = 'assistant', content = '', tool_calls = { { id = call.id } } }
   messages[#messages + 1] = { role = 'tool', tool_call_id = call.id, content = output }
   result = models.chat(messages, { tools = { 'echo' } })
@@ -230,8 +230,8 @@ The model asked for the call, so the next round must report what happened. Appen
 ## Count the dispatches
 
 ````lua
-tool_call('echo')
-tool_call('echo')
+tools.call('echo')
+tools.call('echo')
 if tools.calls['echo'] == 2 then
   log('echo ran twice')
 end
@@ -296,7 +296,7 @@ A fetched entry is a fresh table. Mutate it freely: add fields, reorder them, ha
 
 Each entry carries fields such as `kind` and `content`. The `kind` reads as a pinned label, such as "agent_message", and `content` holds the entry's text. Entries also carry metadata you use to reconstruct context: `section`, `chain_id`, `depth`, `turn`, `model`, `tool_call_id`, `finish_reason`, and `metrics`.
 
-Tool activity leaves a clear trail. Every dispatched tool call emits a tool-call-succeeded or tool-call-failed event. Each `tool_call` also emits a tool-result event that carries the chain id, the execute depth, the completed model-turn count, the tool alias, the final content, and the trust flag.
+Tool activity leaves a clear trail. Every dispatched tool call emits a tool-call-succeeded or tool-call-failed event. Each `tools.call` also emits a tool-result event that carries the chain id, the execute depth, the completed model-turn count, the tool alias, the final content, and the trust flag.
 
 ## History across runs
 
@@ -399,10 +399,10 @@ Log calls are capped by a per-run event budget and a cumulative byte budget. The
 ## Ask the operator
 
 ````lua
-tool_call('user_input', {})
+tools.call('user_input', {})
 ````
 
-Request the operator's next message by invoking the `user_input` tool through `tool_call`. The operator's answer arrives in the event log as a `user_message` event, where your context building can read it.
+Request the operator's next message by invoking the `user_input` tool through `tools.call`. The operator's answer arrives in the event log as a `user_message` event, where your context building can read it.
 
 ---
 
@@ -455,7 +455,7 @@ Wrap host calls in `pcall` to catch argument-validation and dispatch failures. T
 
 ## Errors that name things
 
-The error messages are built to be read. A `tool_call` or an `opts.tools` entry that names an unregistered alias fails, and the error names the in-scope aliases. An `opts.model` outside the agent's catalog fails, and the error names the model. A bad chat message fails with the 1-based index of the offending entry in your own list, as in `messages[2] role "wizard" is unknown`.
+The error messages are built to be read. A `tools.call` or an `opts.tools` entry that names an unregistered alias fails, and the error names the in-scope aliases. An `opts.model` outside the agent's catalog fails, and the error names the model. A bad chat message fails with the 1-based index of the offending entry in your own list, as in `messages[2] role "wizard" is unknown`.
 
 A `models.chat` tool-call round fails when the model truncates it. Your program never resumes with a partial batch of tool calls. You get the failure instead.
 
@@ -473,17 +473,17 @@ Every tool call is raced against the cancel signal. On cancel, the tool future i
 
 # The full loop
 
-This chapter assembles the complete agent. The workshop's default chat is itself an agent program written in Lua, and your own `.lua` agent can take that role. Walk through that program turn by turn, because everything you have learned so far shows up in it, working together.
+This chapter assembles the complete agent: a chat surface written as one `.lua` program. The workshop's built-in chat is an embedded Markdown prompt on the unified document runtime, but a program saved as `chat.lua` in the agents directory shadows it, so the chat you already use is a role your own agent can take. Walk through that program turn by turn, because everything you have learned so far shows up in it, working together.
 
-## The built-in chat agent
+## A chat agent
 
-The built-in chat agent is a transparent pass-through. It advertises no tools and sets no system prompt. It relays between the operator and the selected model, and nothing else. That restraint is the design: the program adds no behavior the operator did not ask for.
+A chat agent is a transparent pass-through. It advertises no tools and sets no system prompt. It relays between the operator and the selected model, and nothing else. That restraint is the design: the program adds no behavior the operator did not ask for.
 
 ## One turn
 
 The agent is an infinite loop. Each turn does the same five things, in order.
 
-1. Request the operator's next message by invoking the `user_input` tool through `tool_call`.
+1. Request the operator's next message by invoking the `user_input` tool through `tools.call`.
 2. Read the event log with `runtime.events()`.
 3. Build the model's message list from the log: map each `user_message` event to `role = 'user'` and each `agent_message` event to `role = 'assistant'`, reading the text from `event.content`.
 4. Read the operator's selected model from the `ui()` snapshot's `selected_model` field.
@@ -493,7 +493,7 @@ The agent is an infinite loop. Each turn does the same five things, in order.
 
 ````lua
 while true do
-  tool_call('user_input', {})
+  tools.call('user_input', {})
   local events = runtime.events()
   local messages = {}
   for i = 1, #events do

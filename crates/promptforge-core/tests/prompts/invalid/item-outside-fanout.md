@@ -1,7 +1,7 @@
 ---
 name: item_outside_fanout
 description: Reading prose with an item substitution outside a fanout arm is an error
-promptforge: 1
+promptforge: 0
 ---
 
 # Item Outside Fanout

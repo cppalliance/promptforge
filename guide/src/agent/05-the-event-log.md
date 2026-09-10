@@ -39,7 +39,7 @@ A fetched entry is a fresh table. Mutate it freely: add fields, reorder them, ha
 
 Each entry carries fields such as `kind` and `content`. The `kind` reads as a pinned label, such as "agent_message", and `content` holds the entry's text. Entries also carry metadata you use to reconstruct context: `section`, `chain_id`, `depth`, `turn`, `model`, `tool_call_id`, `finish_reason`, and `metrics`.
 
-Tool activity leaves a clear trail. Every dispatched tool call emits a tool-call-succeeded or tool-call-failed event. Each `tool_call` also emits a tool-result event that carries the chain id, the execute depth, the completed model-turn count, the tool alias, the final content, and the trust flag.
+Tool activity leaves a clear trail. Every dispatched tool call emits a tool-call-succeeded or tool-call-failed event. Each `tools.call` also emits a tool-result event that carries the chain id, the execute depth, the completed model-turn count, the tool alias, the final content, and the trust flag.
 
 ## History across runs
 

@@ -1,7 +1,7 @@
 ---
 name: malformed_epilog
 description: Invalid because the trailing epilog is malformed Lua
-promptforge: 1
+promptforge: 0
 ---
 
 # Malformed Epilog

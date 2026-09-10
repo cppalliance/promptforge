@@ -182,7 +182,7 @@ pub(crate) use crate::model::ModelSet;
 /// use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 ///
 /// let source = concat!(
-///     "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
+///     "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
 ///     "# Title\n\n",
 ///     "## Calls\n\n",
 ///     "```lua\nreturn call('## Answers')\n```\n\n",

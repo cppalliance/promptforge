@@ -1,7 +1,7 @@
 ---
 name: fanout_store_writes
 description: Arms write to store with sys.index
-promptforge: 1
+promptforge: 0
 ---
 
 # Fanout Store Writes

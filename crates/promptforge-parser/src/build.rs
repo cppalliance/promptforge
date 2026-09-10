@@ -269,7 +269,7 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
 /// ```
 /// use promptforge_parser::promptforge_version;
 ///
-/// assert_eq!(promptforge_version("---\npromptforge: 1\n---\n\n## S\n\np\n"), Some(1));
+/// assert_eq!(promptforge_version("---\npromptforge: 0\n---\n\n## S\n\np\n"), Some(0));
 /// assert_eq!(promptforge_version("just prose, no frontmatter"), None);
 /// ```
 #[must_use]

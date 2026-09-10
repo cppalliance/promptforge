@@ -26,11 +26,11 @@ Every event your agent emits carries the agent's name as its section label. The 
 
 ## The host surface
 
-Your program reaches the host through a shared set of calls. `models.infer` runs one model completion. `tool_call` dispatches a tool. `store` reads and writes files. `var` holds per-run state. `log` records a message in the event stream. Cooperative cancellation lets the host stop the run.
+Your program reaches the host through a shared set of calls. `models.infer` runs one model completion. `tools.call` dispatches a tool. `store` reads and writes files. `var` holds per-run state. `log` records a message in the event stream. Cooperative cancellation lets the host stop the run.
 
-Three calls do not exist in an agent: `execute`, `fanout`, and `jump`. They are absent, not stubbed. An agent that calls one fails on an undefined global.
+Three calls do not exist in an agent: `call`, `fanout`, and `jump`. They are absent, not stubbed. An agent that calls one fails on an undefined global.
 
 ## The moving parts
 
-Two Rust crates carry the agent surface. `promptforge-agent` is the agent executor that runs your program. `promptforge-lua` is the Lua host runtime your program calls into. Example agent programs live in `crates/workshop-server/agents/`. One of them, `chat.lua`, is the workshop's default chat surface: the chat you already use is an agent program, and your own program can take that role.
+Two Rust crates carry the agent surface. `promptforge-agent` is the agent executor that runs your program. `promptforge-lua` is the Lua host runtime your program calls into. The workshop's built-in chat is no longer an agent program: it is an embedded Markdown prompt on the unified document runtime. Save your own program as `chat.lua` in the agents directory and it shadows the built-in, so your agent can take over the chat role.
 

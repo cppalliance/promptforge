@@ -1,7 +1,7 @@
 ---
 name: reply_nil_section_one
-description: First section sees nil reply, returns a value
-promptforge: 1
+description: The removed reply register names no global, even in the first section
+promptforge: 0
 ---
 
 # Reply Nil Section One
@@ -10,7 +10,7 @@ promptforge: 1
 
 ```lua
 if reply ~= nil then
-    error("reply must be nil in section 1")
+    error("the removed reply register must name no global")
 end
 return "section one done"
 ```

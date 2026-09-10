@@ -24,7 +24,7 @@ Each concurrent run of the worker is an arm. Inside an arm, the current collecti
 
 Fanout results arrive in collection order, never finish order. Each result is a structured object with four fields: `.ok`, `.text`, `.item`, and `.exhausted`. Calling tostring on a result yields its text, so `table.concat(results, ',')` joins the texts directly.
 
-An arm that produces no output inherits the reply incoming to the parent as its text. With no incoming reply it yields empty text and still reports ok.
+An arm that produces no output yields empty text and still reports ok.
 
 ## Isolation
 
@@ -32,7 +32,7 @@ Concurrency comes from interleaving chains at I/O points, not from worker thread
 
 Each arm seeds `var` from a fresh clone of the caller's snapshot, so arm writes never cross arm boundaries or reach the caller. The store is shared, with one guard: two arms of one fanout writing the same store path fail with a write-write race error, while `store.append` to one path stays legal with unspecified order.
 
-Arms can still rendezvous through the store. They write marker files and poll with `store.glob`, and each poll iteration yields through `execute` on a no-op section so sibling arms get scheduled.
+Arms can still rendezvous through the store. They write marker files and poll with `store.glob`, and each poll iteration yields through `call` on a no-op section so sibling arms get scheduled.
 
 ## Failure semantics
 
@@ -42,9 +42,9 @@ A fatal arm error fails the fanout and aborts the sibling arms; the caller can c
 
 A fanout arm can jump. The arm's visible set is the fanout caller's visible set minus the worker, plus the worker's children. A child walk started from an arm runs with no item seed.
 
-Recursion depth accumulates across a fanout boundary: an arm runs one execute level deeper than its caller, so an execute or fanout near the cap of 8 trips it.
+Recursion depth accumulates across a fanout boundary: an arm runs one call level deeper than its caller, so a `call` or fanout near the cap of 8 trips it.
 
-## Workers on the shelf
+## Choosing a worker
 
-An off-walk section still counts in `sys.section_count`, and it can serve as a fanout worker shared by multiple sibling callers. This is the natural home for a worker: written once, skipped by fall-through, and called by whoever needs it.
+Any section in the caller's visible set can serve as a fanout worker, and one worker can be shared by multiple sibling callers. The walk never descends into child sections on its own, so a worker written as a child section (an H3 under its caller's H2) runs only when addressed. A worker still counts in `sys.section_count`.
 

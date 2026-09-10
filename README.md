@@ -37,7 +37,7 @@ The prompt language is the programming surface. A prompt is a markdown document:
 ---
 name: greet
 description: Greet the named input using a Lua-computed value
-promptforge: 1
+promptforge: 0
 ---
 
 # Greet
@@ -53,9 +53,13 @@ var.greeting = "Hello, " .. args .. "!"
 ```
 
 Repeat exactly, with no extra words: {{ var.greeting }}
+
+```lua
+return models.infer(prose)
+```
 ````
 
-Prose goes to the model. Lua sets up the turn. The response is the run's result.
+Lua sets up the turn. The prose before a Lua block is that block's lazy `prose` value, and the block passes it to the model explicitly. The response is the run's result.
 
 ![Holographic code](images/banner-03.png)
 
@@ -84,7 +88,7 @@ The first build downloads the tool picker's embedding model (~130MB from Hugging
 
 ## How it works
 
-Parse a promptforge markdown file, bind the tools and models it needs, then execute each H2 section in order. Section Lua prepares state; prose becomes a model turn (with a tool loop when tools are in scope); results land in the store or become the run output.
+Parse a promptforge markdown file, bind the tools and models it needs, then execute each H2 section in order. Section Lua prepares state; the section's prose is available to its Lua as the lazy `prose` value, which the author passes to `models.infer` or a `models.loop` message list (with tool dispatch when tools are in scope); results land in the store or become the run output.
 
 ```mermaid
 flowchart LR

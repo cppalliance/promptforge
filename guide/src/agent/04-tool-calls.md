@@ -29,10 +29,10 @@ Read each requested call from the 1-based entries of `result.tool_calls`. Each e
 ## Dispatch a call
 
 ````lua
-local output = tool_call('echo')
+local output = tools.call('echo')
 ````
 
-`tool_call(alias, args)` dispatches any tool in your agent's catalog by its wire name. Every tool in the catalog is in scope under its alias. Omit `args`, or pass nil, to call a tool without arguments; the tool receives the empty argument object.
+`tools.call(alias, args)` dispatches any tool in your agent's catalog by its wire name. Every tool in the catalog is in scope under its alias. Omit `args`, or pass nil, to call a tool without arguments; the tool receives the empty argument object.
 
 The call resumes with the tool's result. A tool that declares structured output returns its result as a Lua table. Every other tool returns plain text. A structured tool that returns invalid JSON fails the call, and the error names the alias.
 
@@ -42,7 +42,7 @@ The call resumes with the tool's result. A tool that declares structured output 
 local result = models.chat(messages, { tools = { 'echo' } })
 if result.tool_calls then
   local call = result.tool_calls[1]
-  local output = tool_call(call.name, call.arguments)
+  local output = tools.call(call.name, call.arguments)
   messages[#messages + 1] = { role = 'assistant', content = '', tool_calls = { { id = call.id } } }
   messages[#messages + 1] = { role = 'tool', tool_call_id = call.id, content = output }
   result = models.chat(messages, { tools = { 'echo' } })
@@ -54,8 +54,8 @@ The model asked for the call, so the next round must report what happened. Appen
 ## Count the dispatches
 
 ````lua
-tool_call('echo')
-tool_call('echo')
+tools.call('echo')
+tools.call('echo')
 if tools.calls['echo'] == 2 then
   log('echo ran twice')
 end

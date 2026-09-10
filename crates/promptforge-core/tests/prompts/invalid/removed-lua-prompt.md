@@ -1,7 +1,7 @@
 ---
 name: removed_lua_prompt
 description: Invalid because the H1 opens with the removed `lua prompt` fence form
-promptforge: 1
+promptforge: 0
 ---
 
 # Removed Lua Prompt

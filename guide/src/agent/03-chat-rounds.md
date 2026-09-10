@@ -68,10 +68,10 @@ Every model in the catalog is addressable by its catalog name, through `models.u
 local handle = models.get('writer')
 log(handle.name)
 log(handle.model_id)
-local text = handle:infer('Write a haiku about rain.')
+local text = models.infer(handle, 'Write a haiku about rain.')
 ````
 
-`models.get` addresses a catalog model by name and gives you a bound handle. `handle:infer(prompt)` runs the same kind of round as `models.infer`: one direct, tool-free completion on a fresh conversation, using the handle's frozen binding. Pass no second argument. `handle:infer(prompt)` takes none, and passing one is an explicit error.
+`models.get` addresses a catalog model by name and gives you a bound handle. `models.infer(handle, prompt)` runs the same kind of round as `models.infer(prompt)`: one direct, tool-free completion on a fresh conversation, using the handle's frozen binding. Handles are plain inspectable values with no methods; every operation that accepts one takes it as the leading argument.
 
 The handle's fields are read-only. `name` is the prompt-local alias. `model_id` is the caller-facing catalog model id. `description` is the capability description given at bind time. `context` is the catalog context window size in tokens. `thinking`, `temperature`, and `max_tokens` expose the frozen invocation settings, and they read nil when the bind declared none.
 

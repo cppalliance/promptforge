@@ -1,7 +1,7 @@
 ---
 name: analyst_example
 description: Demonstrate models.bind and models.use for careful model resolution.
-promptforge: 1
+promptforge: 0
 ---
 
 # Analyst Example
@@ -23,3 +23,7 @@ models.use("analyst")
 Analyze the following input carefully and return a short factual summary with no preamble:
 
 {{ args }}
+
+```lua
+return models.infer(prose)
+```

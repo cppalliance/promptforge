@@ -10,7 +10,7 @@ Here is a complete working prompt:
 ---
 name: greeter
 description: says hi
-promptforge: 1
+promptforge: 0
 ---
 
 # Greeter
@@ -26,7 +26,7 @@ Every prompt has this skeleton. A frontmatter block opens the file, a level-1 he
 
 The file must begin with a `---` delimiter line, and a second `---` line closes the frontmatter. Between the delimiters you write YAML with three keys: `name` for the prompt's name, `description` for a short summary, and `promptforge` for the format version.
 
-The `promptforge` key is what makes the file a promptforge prompt at all. A file without the key is not one, and the runtime refuses an unsupported major version before anything runs. This build supports major version 1, so write `promptforge: 1`.
+The `promptforge` key is what makes the file a promptforge prompt at all. A file without the key is not one, and the runtime refuses an unsupported major version before anything runs. This build supports major version 0, so write `promptforge: 0`.
 
 The parser is strict here. A leading UTF-8 byte-order mark is dropped. Malformed YAML fails the parse and preserves the underlying cause. Unknown or misspelled keys are rejected at parse time rather than silently ignored, so a typo such as `desciption:` fails loudly instead of being skipped.
 

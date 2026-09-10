@@ -121,7 +121,7 @@ Template: the Cookbook. Group chapters by operator goal.
 <lens-language>
 Audience: the prompt author.
 Targets: `crates/promptforge-parser/`, `crates/promptforge-core/`, `prompts/`, `README.md`.
-Extract: the .md prompt syntax. Frontmatter. Sections. Prose blocks. Lua blocks. Tool and model binding. The store. var. fanout. execute. jump.
+Extract: the .md prompt syntax. Frontmatter. Sections. Lazy prose. Lua blocks. Tool and model binding. models.infer and models.loop. Message builders. The store. var. call. fanout. jump.
 Noise: the Rust API, gateway operation.
 Output: `guide/src/language/`.
 Template: the Tour. Frontmatter first, fanout last.
@@ -130,7 +130,7 @@ Template: the Tour. Frontmatter first, fanout last.
 <lens-agent>
 Audience: the agent program author.
 Targets: `crates/promptforge-agent/`, `crates/promptforge-lua/`, `crates/workshop-server/agents/`.
-Extract: the .lua host surface. models.chat. tool_call. runtime.events. ui(). user_input. The agent loop. Context building from the event log.
+Extract: the .lua host surface. models.chat. tools.call. runtime.events. ui(). user_input. The agent loop. Context building from the event log.
 Noise: document-prompt syntax, the Rust API.
 Output: `guide/src/agent/`.
 Template: the Tour. The smallest agent first, the full loop last.
