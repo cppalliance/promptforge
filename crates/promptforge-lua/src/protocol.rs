@@ -170,13 +170,13 @@ pub enum Request {
     /// shim; core's scheduler carries an unreachable internal-invariant
     /// guard for the arm its exhaustive match forces.
     Chat {
-        /// The validated message array. Each entry carries a known role
-        /// (`system`, `user`, `assistant`, `tool`) and a `content` that is
-        /// a string or a non-empty content-parts array (known part types:
-        /// `text`, `image_url`); tool entries carry a string
-        /// `tool_call_id`. Validation lives here, in the protocol parse,
-        /// once - the driver converts without re-checking.
-        messages: serde_json::Value,
+        /// The validated message records. Each carries a known role
+        /// ([`MessageRole`]), visible text or a non-empty content-parts
+        /// array ([`MessageContent`]), the normalized tool calls an
+        /// assistant record requested, and the call ID a tool result
+        /// answers. Validation lives here, in the protocol parse, once -
+        /// the driver converts without re-checking.
+        messages: Vec<MessageRecord>,
         /// `opts.model`: the catalog model to use for this round, or
         /// `None` for the program's current `models.use` selection.
         model: Option<String>,
@@ -356,6 +356,93 @@ const CHAT_ROLES: [&str; 4] = ["system", "user", "assistant", "tool"];
 /// contract: text parts and data-URI image parts).
 const CHAT_PART_TYPES: [&str; 2] = ["text", "image_url"];
 
+/// The role of one validated message record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageRole {
+    /// System framing for the conversation.
+    System,
+    /// User input.
+    User,
+    /// Assistant output, with or without requested tool calls.
+    Assistant,
+    /// A tool result answering one assistant tool call.
+    Tool,
+}
+
+impl MessageRole {
+    /// Parses an author-facing role string; `None` for anything outside the
+    /// four accepted roles.
+    fn parse(role: &str) -> Option<MessageRole> {
+        match role {
+            "system" => Some(MessageRole::System),
+            "user" => Some(MessageRole::User),
+            "assistant" => Some(MessageRole::Assistant),
+            "tool" => Some(MessageRole::Tool),
+            _ => None,
+        }
+    }
+
+    /// The wire role string.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MessageRole::System => "system",
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::Tool => "tool",
+        }
+    }
+}
+
+/// One content part of a multimodal message: visible text or a data-URI
+/// image reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentPart {
+    /// Visible text.
+    Text(String),
+    /// A data-URI image reference.
+    ImageUrl(String),
+}
+
+/// A message record's content: plain visible text, or a non-empty
+/// content-parts array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageContent {
+    /// Plain visible text.
+    Text(String),
+    /// A non-empty multimodal content-parts array.
+    Parts(Vec<ContentPart>),
+}
+
+/// One normalized tool call an assistant message carries: the
+/// provider-neutral `{id, name, arguments}` record every later component
+/// consumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCallRecord {
+    /// The call identifier tool results correlate against.
+    pub id: String,
+    /// The wire name of the tool the model asked for.
+    pub name: String,
+    /// The call arguments; always an object, normalized to `{}` when the
+    /// record carried none.
+    pub arguments: serde_json::Value,
+}
+
+/// One validated message record: the plain-message contract every later
+/// component (projection, `models.loop`, the message builders) consumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageRecord {
+    /// The message role.
+    pub role: MessageRole,
+    /// The visible content.
+    pub content: MessageContent,
+    /// The normalized tool calls the record carries; empty unless an
+    /// assistant turn requested tools.
+    pub tool_calls: Vec<ToolCallRecord>,
+    /// The call ID a tool result answers; required on `tool` records.
+    pub tool_call_id: Option<String>,
+}
+
 /// Frames one chat author-argument failure as the call's error.
 fn chat_error(message: impl Into<String>) -> FieldFailure {
     FieldFailure::Call(Error::Lua(message.into()))
@@ -365,9 +452,9 @@ fn chat_error(message: impl Into<String>) -> FieldFailure {
 /// optional `opts` table carrying `model` and `tools`.
 ///
 /// The whole messages/opts validation lives here, once - the driver
-/// converts the validated array without re-checking. Every author-argument
-/// failure is the call's error, raised at the `models.chat` call site so a
-/// program `pcall` catches it.
+/// converts the validated records without re-checking. Every
+/// author-argument failure is the call's error, raised at the `models.chat`
+/// call site so a program `pcall` catches it.
 fn parse_chat(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let messages = match table.raw_get::<Value>("messages") {
         Ok(value @ Value::Table(_)) => lua
@@ -381,7 +468,7 @@ fn parse_chat(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, Fi
         }
         Err(_) => return Err(FieldFailure::Malformed),
     };
-    validate_messages(&messages)?;
+    let messages = parse_messages(&messages)?;
     let (model, tools) = parse_chat_opts(table)?;
     Ok(Request::Chat {
         messages,
@@ -390,17 +477,20 @@ fn parse_chat(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, Fi
     })
 }
 
-/// Validates the converted message array once, at the protocol boundary:
-/// known roles; `content` a string or a non-empty content-parts array with
-/// known part types; tool entries carry a string `tool_call_id`; a present
-/// `tool_calls` is an array. The empty list is rejected, and every error
-/// names the offending 1-based index (the list is Lua-authored). The
-/// validation is deliberately shallow: `content` and `tool_calls`
-/// internals pass to the wire unread, while entry fields beyond the four
-/// the wire message carries (`role`, `content`, `tool_call_id`,
-/// `tool_calls`) are accepted here and dropped at the driver's wire
-/// conversion.
-fn validate_messages(messages: &serde_json::Value) -> std::result::Result<(), FieldFailure> {
+/// Parses the converted message array into validated records, once, at the
+/// protocol boundary: known roles; `content` a string or a non-empty
+/// content-parts array with known part types and payloads; a present
+/// `tool_call_id` is a string, required on tool entries; a present
+/// `tool_calls` is an array of normalized `{id, name, arguments}` records.
+/// The empty list is rejected, and every error names the offending 1-based
+/// index (the list is Lua-authored). Entry fields beyond the four a record
+/// carries (`role`, `content`, `tool_call_id`, `tool_calls`) are accepted
+/// and dropped. Cross-record checks - unique call IDs, complete
+/// call-result pairing, provider-required alternation - belong to the
+/// per-dispatch projection, not this parse.
+fn parse_messages(
+    messages: &serde_json::Value,
+) -> std::result::Result<Vec<MessageRecord>, FieldFailure> {
     let entries = match messages {
         serde_json::Value::Array(entries) => entries,
         // An empty Lua table converts ambiguously (array or object); both
@@ -413,95 +503,194 @@ fn validate_messages(messages: &serde_json::Value) -> std::result::Result<(), Fi
     if entries.is_empty() {
         return Err(chat_error("messages must not be empty"));
     }
-    for (position, entry) in entries.iter().enumerate() {
-        // The list is Lua-authored, so errors name Lua's 1-based index.
-        let index = position + 1;
-        let serde_json::Value::Object(entry) = entry else {
-            return Err(chat_error(format!(
-                "messages[{index}] must be a message table"
-            )));
-        };
-        let role = match entry.get("role") {
-            Some(serde_json::Value::String(role)) => role.as_str(),
-            _ => {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(position, entry)| parse_message(position + 1, entry))
+        .collect()
+}
+
+/// Parses one message entry into its validated record.
+fn parse_message(
+    index: usize,
+    entry: &serde_json::Value,
+) -> std::result::Result<MessageRecord, FieldFailure> {
+    let serde_json::Value::Object(entry) = entry else {
+        return Err(chat_error(format!(
+            "messages[{index}] must be a message table"
+        )));
+    };
+    let role = match entry.get("role") {
+        Some(serde_json::Value::String(role)) => match MessageRole::parse(role) {
+            Some(role) => role,
+            None => {
                 return Err(chat_error(format!(
-                    "messages[{index}] role must be a string, one of: {}",
+                    "messages[{index}] role {role:?} is unknown; known roles: {}",
                     CHAT_ROLES.join(", ")
                 )));
             }
-        };
-        if !CHAT_ROLES.contains(&role) {
+        },
+        _ => {
             return Err(chat_error(format!(
-                "messages[{index}] role {role:?} is unknown; known roles: {}",
+                "messages[{index}] role must be a string, one of: {}",
                 CHAT_ROLES.join(", ")
             )));
         }
-        match entry.get("content") {
-            Some(serde_json::Value::String(_)) => {}
-            Some(serde_json::Value::Array(parts)) if !parts.is_empty() => {
-                validate_content_parts(index, parts)?;
-            }
-            _ => {
-                return Err(chat_error(format!(
-                    "messages[{index}] content must be a string or a non-empty \
-                     array of content parts"
-                )));
-            }
+    };
+    let content = match entry.get("content") {
+        Some(serde_json::Value::String(text)) => MessageContent::Text(text.clone()),
+        Some(serde_json::Value::Array(parts)) if !parts.is_empty() => {
+            MessageContent::Parts(parse_content_parts(index, parts)?)
         }
-        if role == "tool"
-            && !matches!(
-                entry.get("tool_call_id"),
-                Some(serde_json::Value::String(_))
-            )
-        {
+        _ => {
             return Err(chat_error(format!(
-                "messages[{index}] is a tool message and must carry a string tool_call_id"
+                "messages[{index}] content must be a string or a non-empty \
+                 array of content parts"
             )));
         }
-        if let Some(calls) = entry.get("tool_calls")
-            && !calls.is_array()
-        {
+    };
+    let tool_call_id = match entry.get("tool_call_id") {
+        None => None,
+        Some(serde_json::Value::String(id)) => Some(id.clone()),
+        Some(_) => {
+            return Err(chat_error(format!(
+                "messages[{index}] tool_call_id must be a string"
+            )));
+        }
+    };
+    if role == MessageRole::Tool && tool_call_id.is_none() {
+        return Err(chat_error(format!(
+            "messages[{index}] is a tool message and must carry a string tool_call_id"
+        )));
+    }
+    let tool_calls = match entry.get("tool_calls") {
+        None => Vec::new(),
+        Some(serde_json::Value::Array(calls)) => calls
+            .iter()
+            .enumerate()
+            .map(|(position, call)| parse_tool_call_record(index, position + 1, call))
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        Some(_) => {
             return Err(chat_error(format!(
                 "messages[{index}] tool_calls must be an array"
             )));
         }
-    }
-    Ok(())
+    };
+    Ok(MessageRecord {
+        role,
+        content,
+        tool_calls,
+        tool_call_id,
+    })
 }
 
-/// Shallow-validates one message's content-parts array: each part is a
-/// table whose `type` names a known part kind. Part internals pass through
-/// to the wire unread.
-fn validate_content_parts(
+/// Parses one message's content-parts array: each part is a table whose
+/// `type` names a known part kind, carrying that kind's required payload.
+fn parse_content_parts(
     index: usize,
     parts: &[serde_json::Value],
-) -> std::result::Result<(), FieldFailure> {
-    for (part_position, part) in parts.iter().enumerate() {
-        let part_index = part_position + 1;
-        let serde_json::Value::Object(part) = part else {
-            return Err(chat_error(format!(
-                "messages[{index}] content part {part_index} must be a table \
-                 with a string type field"
-            )));
-        };
-        match part.get("type") {
-            Some(serde_json::Value::String(kind)) if CHAT_PART_TYPES.contains(&kind.as_str()) => {}
-            Some(serde_json::Value::String(kind)) => {
-                return Err(chat_error(format!(
-                    "messages[{index}] content part {part_index} has unknown type \
-                     {kind:?}; known types: {}",
-                    CHAT_PART_TYPES.join(", ")
-                )));
-            }
-            _ => {
-                return Err(chat_error(format!(
-                    "messages[{index}] content part {part_index} must be a table \
-                     with a string type field"
-                )));
+) -> std::result::Result<Vec<ContentPart>, FieldFailure> {
+    parts
+        .iter()
+        .enumerate()
+        .map(|(position, part)| parse_content_part(index, position + 1, part))
+        .collect()
+}
+
+/// Parses one content part into its typed variant: a `text` part carries a
+/// string `text` field; an `image_url` part carries an `image_url` table
+/// with a string `url` field.
+fn parse_content_part(
+    index: usize,
+    part_index: usize,
+    part: &serde_json::Value,
+) -> std::result::Result<ContentPart, FieldFailure> {
+    let malformed = || {
+        chat_error(format!(
+            "messages[{index}] content part {part_index} must be a table \
+             with a string type field"
+        ))
+    };
+    let serde_json::Value::Object(part) = part else {
+        return Err(malformed());
+    };
+    let kind = match part.get("type") {
+        Some(serde_json::Value::String(kind)) => kind.as_str(),
+        _ => return Err(malformed()),
+    };
+    match kind {
+        "text" => match part.get("text") {
+            Some(serde_json::Value::String(text)) => Ok(ContentPart::Text(text.clone())),
+            _ => Err(chat_error(format!(
+                "messages[{index}] content part {part_index} is a text part \
+                 and must carry a string text field"
+            ))),
+        },
+        "image_url" => {
+            let url = part
+                .get("image_url")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|image| image.get("url"))
+                .and_then(serde_json::Value::as_str);
+            match url {
+                Some(url) => Ok(ContentPart::ImageUrl(url.to_owned())),
+                None => Err(chat_error(format!(
+                    "messages[{index}] content part {part_index} is an image_url \
+                     part and must carry an image_url table with a string url field"
+                ))),
             }
         }
+        unknown => Err(chat_error(format!(
+            "messages[{index}] content part {part_index} has unknown type \
+             {unknown:?}; known types: {}",
+            CHAT_PART_TYPES.join(", ")
+        ))),
     }
-    Ok(())
+}
+
+/// Parses one tool call into its normalized record: a string `id`, a
+/// string `name`, and an `arguments` object that normalizes to `{}` when
+/// absent.
+fn parse_tool_call_record(
+    index: usize,
+    call_index: usize,
+    call: &serde_json::Value,
+) -> std::result::Result<ToolCallRecord, FieldFailure> {
+    let serde_json::Value::Object(call) = call else {
+        return Err(chat_error(format!(
+            "messages[{index}] tool_calls[{call_index}] must be a table"
+        )));
+    };
+    let id = match call.get("id") {
+        Some(serde_json::Value::String(id)) => id.clone(),
+        _ => {
+            return Err(chat_error(format!(
+                "messages[{index}] tool_calls[{call_index}] must carry a string id"
+            )));
+        }
+    };
+    let name = match call.get("name") {
+        Some(serde_json::Value::String(name)) => name.clone(),
+        _ => {
+            return Err(chat_error(format!(
+                "messages[{index}] tool_calls[{call_index}] must carry a string name"
+            )));
+        }
+    };
+    let arguments = match call.get("arguments") {
+        None | Some(serde_json::Value::Null) => serde_json::Value::Object(serde_json::Map::new()),
+        Some(arguments @ serde_json::Value::Object(_)) => arguments.clone(),
+        Some(_) => {
+            return Err(chat_error(format!(
+                "messages[{index}] tool_calls[{call_index}] arguments must be a table"
+            )));
+        }
+    };
+    Ok(ToolCallRecord {
+        id,
+        name,
+        arguments,
+    })
 }
 
 /// Parses the optional `opts` table: `model` (an optional catalog model
@@ -1171,7 +1360,7 @@ mod tests {
                     { type = "image_url", image_url = { url = "data:image/png;base64,AA" } },
                 } },
                 { role = "assistant", content = "", tool_calls = {
-                    { id = "call_1" },
+                    { id = "call_1", name = "echo", arguments = { value = "hi" } },
                 } },
                 { role = "tool", content = "result", tool_call_id = "call_1" },
             }"#,
@@ -1186,18 +1375,170 @@ mod tests {
             } => {
                 assert_eq!(model.as_deref(), Some("fast"));
                 assert_eq!(tools, vec!["echo".to_owned(), "search".to_owned()]);
-                let entries = messages.as_array().expect("messages parse as an array");
-                assert_eq!(entries.len(), 4);
-                assert_eq!(entries[0]["role"], json!("system"));
+                assert_eq!(messages.len(), 4);
+                assert_eq!(messages[0].role, MessageRole::System);
                 assert_eq!(
-                    entries[1]["content"][0],
-                    json!({ "type": "text", "text": "look" }),
-                    "content parts must survive the conversion verbatim"
+                    messages[0].content,
+                    MessageContent::Text("be terse".to_owned())
                 );
-                assert_eq!(entries[3]["tool_call_id"], json!("call_1"));
+                assert_eq!(
+                    messages[1].content,
+                    MessageContent::Parts(vec![
+                        ContentPart::Text("look".to_owned()),
+                        ContentPart::ImageUrl("data:image/png;base64,AA".to_owned()),
+                    ]),
+                    "content parts must survive the parse as typed variants"
+                );
+                assert_eq!(messages[2].role, MessageRole::Assistant);
+                assert_eq!(
+                    messages[2].tool_calls,
+                    vec![ToolCallRecord {
+                        id: "call_1".to_owned(),
+                        name: "echo".to_owned(),
+                        arguments: json!({ "value": "hi" }),
+                    }]
+                );
+                assert_eq!(messages[3].role, MessageRole::Tool);
+                assert_eq!(messages[3].tool_call_id.as_deref(), Some("call_1"));
             }
             other => panic!("expected a chat request, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn an_assistant_message_carries_visible_text_plus_multiple_normalized_tool_calls() {
+        let lua = Lua::new();
+        let table = chat_request(
+            &lua,
+            r#"{
+                { role = "assistant", content = "working on it", tool_calls = {
+                    { id = "call_1", name = "echo", arguments = { value = "hi" } },
+                    { id = "call_2", name = "search" },
+                } },
+            }"#,
+            None,
+        );
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Chat { messages, .. } => {
+                assert_eq!(
+                    messages[0].content,
+                    MessageContent::Text("working on it".to_owned()),
+                    "visible text rides alongside the calls"
+                );
+                assert_eq!(
+                    messages[0].tool_calls,
+                    vec![
+                        ToolCallRecord {
+                            id: "call_1".to_owned(),
+                            name: "echo".to_owned(),
+                            arguments: json!({ "value": "hi" }),
+                        },
+                        ToolCallRecord {
+                            id: "call_2".to_owned(),
+                            name: "search".to_owned(),
+                            arguments: json!({}),
+                        },
+                    ],
+                    "an absent arguments normalizes to the empty object"
+                );
+            }
+            other => panic!("expected a chat request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn correlated_tool_results_carry_the_matching_call_ids() {
+        let lua = Lua::new();
+        let table = chat_request(
+            &lua,
+            r#"{
+                { role = "assistant", content = "", tool_calls = {
+                    { id = "call_1", name = "echo" },
+                    { id = "call_2", name = "search" },
+                } },
+                { role = "tool", content = "echoed", tool_call_id = "call_1" },
+                { role = "tool", content = "found", tool_call_id = "call_2" },
+            }"#,
+            None,
+        );
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Chat { messages, .. } => {
+                assert_eq!(messages[1].role, MessageRole::Tool);
+                assert_eq!(messages[1].tool_call_id.as_deref(), Some("call_1"));
+                assert_eq!(messages[2].role, MessageRole::Tool);
+                assert_eq!(messages[2].tool_call_id.as_deref(), Some("call_2"));
+            }
+            other => panic!("expected a chat request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_tool_calls_are_typed_call_errors_naming_the_index() {
+        let lua = Lua::new();
+        let cases: [(&str, &str); 4] = [
+            (
+                r#"{ { role = "assistant", content = "", tool_calls = { "raw" } } }"#,
+                "messages[1] tool_calls[1] must be a table",
+            ),
+            (
+                r#"{ { role = "assistant", content = "", tool_calls = { { name = "echo" } } } }"#,
+                "messages[1] tool_calls[1] must carry a string id",
+            ),
+            (
+                r#"{ { role = "assistant", content = "", tool_calls = { { id = "call_1" } } } }"#,
+                "messages[1] tool_calls[1] must carry a string name",
+            ),
+            (
+                r#"{ { role = "assistant", content = "", tool_calls = { { id = "call_1", name = "echo", arguments = "raw" } } } }"#,
+                "messages[1] tool_calls[1] arguments must be a table",
+            ),
+        ];
+        for (messages, expected) in cases {
+            let table = chat_request(&lua, messages, None);
+            expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), expected);
+        }
+    }
+
+    #[test]
+    fn content_parts_validate_each_variants_payload() {
+        let lua = Lua::new();
+        let cases: [(&str, &str); 3] = [
+            (
+                r#"{ { role = "user", content = { { type = "text" } } } }"#,
+                "messages[1] content part 1 is a text part and must carry a string \
+                 text field",
+            ),
+            (
+                r#"{ { role = "user", content = { { type = "image_url" } } } }"#,
+                "messages[1] content part 1 is an image_url part and must carry an \
+                 image_url table with a string url field",
+            ),
+            (
+                r#"{ { role = "user", content = { { type = "image_url", image_url = { detail = "high" } } } } }"#,
+                "messages[1] content part 1 is an image_url part and must carry an \
+                 image_url table with a string url field",
+            ),
+        ];
+        for (messages, expected) in cases {
+            let table = chat_request(&lua, messages, None);
+            expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), expected);
+        }
+    }
+
+    #[test]
+    fn a_non_string_tool_call_id_is_a_typed_call_error() {
+        let lua = Lua::new();
+        let table = chat_request(
+            &lua,
+            r#"{ { role = "user", content = "ok", tool_call_id = 7 } }"#,
+            None,
+        );
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(table)),
+            "messages[1] tool_call_id must be a string",
+        );
     }
 
     #[test]

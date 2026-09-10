@@ -126,7 +126,10 @@ pub use live::LiveBindingProducer;
 #[doc(hidden)]
 pub use models::ModelRuntime;
 #[doc(hidden)]
-pub use protocol::{Answer, ChatResult, Request, ToolCallOutcome, YieldParse};
+pub use protocol::{
+    Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request,
+    ToolCallOutcome, ToolCallRecord, YieldParse,
+};
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};
 #[doc(hidden)]

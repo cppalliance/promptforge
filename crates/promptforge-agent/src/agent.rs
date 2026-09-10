@@ -32,10 +32,10 @@ use promptforge_core_support::events::{CallMetrics, EventLog, ToolCallEvent};
 use promptforge_core_support::observe::{Observer, detail};
 use promptforge_core_support::untrusted::GuardNonce;
 use promptforge_lua::{
-    Answer, ChatResult, CoroStep, Error as LuaError, EventsSnapshot, LuaBlockResult, LuaProgram,
-    Request, ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome, ToolOutputKind,
-    ToolSet, YieldParse, current_tool_bindings, dispatch_tool, install_agent_chat_shim,
-    install_runtime_events, resolve_model_binding,
+    Answer, ChatResult, ContentPart, CoroStep, Error as LuaError, EventsSnapshot, LuaBlockResult,
+    LuaProgram, MessageContent, MessageRecord, Request, ScriptReport, SectionVm, ToolBinding,
+    ToolCallCounts, ToolCallOutcome, ToolOutputKind, ToolSet, YieldParse, current_tool_bindings,
+    dispatch_tool, install_agent_chat_shim, install_runtime_events, resolve_model_binding,
 };
 use promptforge_model_client::client::{
     Completion, CompletionResult, GatewayClient, Message, StreamDelta, ToolSchema,
@@ -45,6 +45,7 @@ use promptforge_model_client::model::{
 };
 use promptforge_store::StoreRef;
 use promptforge_tools::ToolCatalog;
+use serde_json::Value;
 
 use crate::config::AgentConfig;
 
@@ -632,7 +633,7 @@ async fn dispatch_infer(
 /// cannot hide the operator-visible boundary failure.
 async fn dispatch_chat(
     run: &AgentRun<'_>,
-    messages: &serde_json::Value,
+    messages: &[MessageRecord],
     model: Option<String>,
     tools: &[String],
 ) -> Result<ChatResult, AgentError> {
@@ -664,7 +665,7 @@ async fn dispatch_chat(
         }
     };
     let schemas = advertised_schemas(run, tools)?;
-    let conversation = wire_messages(messages)?;
+    let conversation = wire_messages(messages);
     let client = run.client()?;
     let options = binding.completion_options();
     let tool_arg = if schemas.is_empty() {
@@ -813,41 +814,57 @@ fn advertised_schemas(run: &AgentRun<'_>, tools: &[String]) -> Result<Vec<ToolSc
     Ok(schemas)
 }
 
-/// Converts the protocol-validated message array into the client's wire
-/// messages. The protocol parse validated the shape once - roles, content,
-/// tool ids - so a violation here is a driver invariant failure, never an
-/// author-facing error, and no second validator exists to drift. Each
-/// entry contributes exactly the four fields the wire message carries
-/// (`role`, `content`, `tool_call_id`, `tool_calls`); other entry fields
-/// are dropped.
-fn wire_messages(messages: &serde_json::Value) -> Result<Vec<Message>, AgentError> {
-    const VALIDATED: &str = "a chat request reaching dispatch carries protocol-validated messages";
-    let entries = messages.as_array().ok_or(AgentError::Internal(VALIDATED))?;
-    entries
+/// Converts the protocol-validated message records into the client's wire
+/// messages. The protocol parse validated every field once, so this
+/// conversion is total - no second validator exists to drift. Each record
+/// contributes exactly the four fields the wire message carries (`role`,
+/// `content`, `tool_call_id`, `tool_calls`); a record with no tool calls
+/// omits the field, and each normalized call renders as the
+/// provider-neutral `{id, name, arguments}` object.
+fn wire_messages(messages: &[MessageRecord]) -> Vec<Message> {
+    messages
         .iter()
-        .map(|entry| {
-            let role = entry
-                .get("role")
-                .and_then(serde_json::Value::as_str)
-                .ok_or(AgentError::Internal(VALIDATED))?;
-            let content = entry
-                .get("content")
-                .cloned()
-                .ok_or(AgentError::Internal(VALIDATED))?;
-            let tool_call_id = entry
-                .get("tool_call_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-            let tool_calls = entry
-                .get("tool_calls")
-                .and_then(serde_json::Value::as_array)
-                .cloned();
-            Ok(Message::from_validated_parts(
-                role,
+        .map(|message| {
+            let content = match &message.content {
+                MessageContent::Text(text) => Value::String(text.clone()),
+                MessageContent::Parts(parts) => parts
+                    .iter()
+                    .map(|part| match part {
+                        ContentPart::Text(text) => {
+                            serde_json::json!({ "type": "text", "text": text })
+                        }
+                        ContentPart::ImageUrl(url) => {
+                            serde_json::json!({
+                                "type": "image_url",
+                                "image_url": { "url": url },
+                            })
+                        }
+                    })
+                    .collect(),
+            };
+            let tool_calls = if message.tool_calls.is_empty() {
+                None
+            } else {
+                Some(
+                    message
+                        .tool_calls
+                        .iter()
+                        .map(|call| {
+                            serde_json::json!({
+                                "id": call.id,
+                                "name": call.name,
+                                "arguments": call.arguments,
+                            })
+                        })
+                        .collect(),
+                )
+            };
+            Message::from_validated_parts(
+                message.role.as_str(),
                 content,
-                tool_call_id,
+                message.tool_call_id.clone(),
                 tool_calls,
-            ))
+            )
         })
         .collect()
 }
