@@ -17,7 +17,7 @@
 //! executor's `models.loop` next) depend on it, and the agent cannot depend
 //! on the executor.
 
-use mlua::{Function, Table};
+use mlua::{Function, RegistryKey, Table};
 use serde_json::Value;
 
 use super::{Error, Lua, NonZeroU32, Result};
@@ -46,6 +46,14 @@ impl OverflowReason {
             "precheck" => Some(OverflowReason::Precheck),
             "provider" => Some(OverflowReason::Provider),
             _ => None,
+        }
+    }
+
+    /// The invocation tag the compactor callback receives.
+    fn tag(self) -> &'static str {
+        match self {
+            OverflowReason::Precheck => "precheck",
+            OverflowReason::Provider => "provider",
         }
     }
 }
@@ -174,6 +182,60 @@ pub fn is_context_overflow(status: u16, body: &str) -> bool {
     OVERFLOW_SIGNATURES
         .iter()
         .any(|signature| body.contains(signature))
+}
+
+/// Invokes the selected compactor on one overflow and returns the error the
+/// loop raises.
+///
+/// The omitted compactor (`None`) defaults to `compactors.fail`, invoked
+/// directly: the only shipped policy always raises typed context exhaustion,
+/// so the default needs no Lua round trip. An author-selected callback
+/// (`Some`, stashed by the loop request's parse) is invoked with the reason
+/// tag; `compactors.fail` raises [`Error::ContextExhausted`] across the Lua
+/// boundary as a downcastable external error (LUA-012), recovered here as
+/// the typed value. A callback that returns instead of raising is the
+/// deferred replacement-compactor shape, which the active surface rejects.
+///
+/// `#[doc(hidden)]`: a cross-crate seam for the executor's `models.loop`
+/// driver, not host API.
+#[doc(hidden)]
+#[must_use]
+pub fn invoke_selected(
+    lua: &Lua,
+    compactor: Option<&RegistryKey>,
+    reason: OverflowReason,
+) -> Error {
+    let Some(key) = compactor else {
+        return Compactor::Fail.invoke(reason);
+    };
+    let function: Function = match lua.registry_value(key) {
+        Ok(function) => function,
+        Err(error) => return Error::lua(error),
+    };
+    match function.call::<()>(reason.tag()) {
+        Ok(()) => Error::Lua(
+            "the selected compactor returned without raising: replacement compactors are \
+             deferred; compactors.fail is the only shipped policy"
+                .to_owned(),
+        ),
+        Err(error) => {
+            // mlua wraps a callback's error in CallbackError for the
+            // traceback; the compactor's typed raise rides as its cause.
+            let cause = match &error {
+                mlua::Error::CallbackError { cause, .. } => cause.as_ref(),
+                other => other,
+            };
+            match cause {
+                mlua::Error::ExternalError(cause) => match cause.downcast_ref::<Error>() {
+                    Some(Error::ContextExhausted { reason }) => {
+                        Error::ContextExhausted { reason: *reason }
+                    }
+                    _ => Error::lua(error),
+                },
+                _ => Error::lua(error),
+            }
+        }
+    }
 }
 
 /// Installs the `compactors` global carrying the shipped policies.

@@ -66,11 +66,10 @@
 //! resolution helpers), `protocol` (the coroutine request/answer types
 //! for the yield/resume boundary), `scheduler` (the chain-stack scheduler
 //! driving the coroutine protocol: the live H1 pass, the walk, call
-//! chains, and fanout), and `support` (shared helpers). `scope` (tool-scope
-//! validation and schema/dispatch preparation) and `tool_loop` (the model
-//! tool loop) lost their production caller with automatic prose inference;
-//! they stay compiled under the executor's tests until the `models.loop`
-//! step rewires them.
+//! chains, and fanout), `scope` (tool-scope
+//! validation and schema/dispatch preparation), `tool_loop` (the
+//! Rust-backed model-tool loop behind the section-visible `models.loop`),
+//! and `support` (shared helpers).
 
 mod config;
 mod context;
@@ -79,15 +78,10 @@ mod error;
 mod gateway;
 pub(crate) mod protocol;
 pub(crate) mod scheduler;
-// Test-only until the `models.loop` step rewires the tool loop into the
-// section-visible model operation: automatic prose inference was their
-// last production caller.
-#[cfg(test)]
 mod scope;
 mod section_context;
 pub(crate) mod section_vm;
 mod support;
-#[cfg(test)]
 mod tool_loop;
 mod tools;
 
@@ -260,12 +254,15 @@ pub async fn run(
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
     observer.observe(&execution, prompt.title(), detail::RUN_STARTED);
 
-    let run_body = async {
+    // Boxed: the driver future carries the whole scheduler step machinery,
+    // and `run`'s own future must stay small for its callers (the
+    // workspace's large-futures lint gates every one of them).
+    let run_body = Box::pin(async {
         Scheduler::new(&ctx, client)
             .with_live_h1(resolution)
             .drive()
             .await
-    };
+    });
 
     // Explicit cancellation: when the caller supplies a handle it is installed
     // for the run so cooperative cancel checks observe it; without one the run

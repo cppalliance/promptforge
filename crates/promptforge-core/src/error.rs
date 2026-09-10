@@ -429,7 +429,6 @@ pub(crate) enum Error {
 
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
-    #[allow(dead_code)] // constructed by the tool loop, test-only until `models.loop`
     ToolLoopExhausted,
 
     /// The model referenced a tool outside the section's advertised scope.
@@ -439,7 +438,6 @@ pub(crate) enum Error {
     /// [`Error::UnboundToolCall`] instead.
     #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.bind but not added to this section's scope)" } else { "" })]
     #[non_exhaustive]
-    #[allow(dead_code)] // constructed by the tool loop, test-only until `models.loop`
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
         name: String,

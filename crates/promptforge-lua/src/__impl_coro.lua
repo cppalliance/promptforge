@@ -76,6 +76,37 @@ local function chat(messages, opts)
   return result
 end
 
+-- models.loop(handle?, messages, compactor?): the Rust-backed model-tool
+-- loop over an author-owned message list. The host installs this as
+-- models.loop in section VMs only; an agent VM never sees it. The leading
+-- handle is optional: a userdata first argument selects the handle's frozen
+-- binding, anything else is the messages argument (a wrong handle type is
+-- the protocol parse's call error, exactly as for models.infer). The loop
+-- appends every assistant message and correlated tool result to the list
+-- and returns nil.
+local function models_loop(...)
+  local handle, messages, compactor
+  if type((...)) == 'userdata' then
+    if select('#', ...) > 3 then
+      error("models.loop takes (handle?, messages, compactor?)", 0)
+    end
+    handle, messages, compactor = ...
+  else
+    if select('#', ...) > 2 then
+      error("models.loop takes (handle?, messages, compactor?)", 0)
+    end
+    messages, compactor = ...
+  end
+  local ok, result = yield({
+    op = "loop",
+    handle = handle,
+    messages = messages,
+    compactor = compactor,
+  })
+  if not ok then error(result, 0) end
+  return result
+end
+
 -- The section install passes the section's namespace tables; the live H1
 -- base install passes nil for both (H1's live models table exists only per
 -- block, given the shim by the host's per-step wrap) and takes `infer` from
@@ -92,4 +123,5 @@ return {
   fanout = fanout_collection,
   chat = chat,
   infer = infer,
+  loop = models_loop,
 }

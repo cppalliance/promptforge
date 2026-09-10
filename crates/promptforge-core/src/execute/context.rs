@@ -227,9 +227,6 @@ impl RunContext {
 
     /// The resolved per-section tool-loop cap: the frontmatter's
     /// `max_tool_iterations` over the limits default.
-    ///
-    /// Unused until the `models.loop` step rewires the tool loop.
-    #[allow(dead_code)]
     pub(crate) fn max_tool_iterations(&self) -> usize {
         self.prompt
             .frontmatter()

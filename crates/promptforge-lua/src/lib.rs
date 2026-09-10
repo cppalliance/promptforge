@@ -117,9 +117,12 @@ mod runtime_events;
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
 // `LuaProgram` is the documented exception.
 #[doc(hidden)]
-pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
+pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_overflow, precheck};
 #[doc(hidden)]
-pub use coro::{install_agent_chat_shim, install_live_h1_shim_base, shim_live_h1_models};
+pub use coro::{
+    install_agent_chat_shim, install_live_h1_shim_base, install_section_loop_shim,
+    shim_live_h1_models,
+};
 #[doc(hidden)]
 pub use dispatch::{ScriptReport, dispatch_tool};
 #[doc(hidden)]
@@ -138,7 +141,7 @@ pub use prose::ProseState;
 #[doc(hidden)]
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request,
-    ToolCallOutcome, ToolCallRecord, YieldParse,
+    ToolCallOutcome, ToolCallRecord, YieldParse, append_message_record,
 };
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};

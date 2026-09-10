@@ -51,11 +51,11 @@
 //! `append` stays legal with unspecified order. A received `mcp` request
 //! is the protocol's typed reserved error.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use mlua::Thread;
+use mlua::{RegistryKey, Thread};
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 
@@ -63,13 +63,15 @@ use crate::client::GatewayClient;
 use crate::fanout;
 use crate::fanout::ArmFinalizer;
 use crate::lua::{
-    CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, ScriptReport, SectionVm,
-    current_tool_bindings, dispatch_tool, resolve_model_binding, shim_live_h1_models,
+    CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageRecord, OverflowReason,
+    ScriptReport, SectionVm, append_message_record, current_tool_bindings, dispatch_tool,
+    invoke_selected, project_messages, resolve_model_binding, shim_live_h1_models,
 };
 use crate::model::ModelBinding;
 use crate::observe::detail;
 use crate::parser::{Block, Section};
 use crate::resolve::RuntimeResolution;
+use crate::tools::ToolId;
 use crate::{Error, Result, cancel, subst};
 
 use super::context::RunContext;
@@ -78,8 +80,10 @@ use super::engine::{
 };
 use super::gateway::{GatewaySource, ResolutionContext};
 use super::protocol::{Answer, Request, ToolCallOutcome, YieldParse};
+use super::scope::prepare_effective_scope;
 use super::section_context::SectionContext;
 use super::support::{GENERIC_COMPLETION, MAX_CALL_DEPTH, next_id, now_rfc3339_checked};
+use super::tool_loop::run_models_loop;
 use super::tools::infer_round;
 
 /// Arena index of a chain: ids, not references, so no chain ever holds a
@@ -796,9 +800,13 @@ impl<'a> Scheduler<'a> {
             .arm
             .as_ref()
             .and_then(|arm| arm.cancel.clone());
-        // The step body is synchronous, so the scoped future carries only
-        // the call, not a suspended step frame.
-        cancel::maybe_scope(cancel, async move { self.step_inner(id, root_result) }).await
+        // The step body awaits only inside a `models.loop` dispatch, so the
+        // scoped future carries the call, not a suspended step frame.
+        cancel::maybe_scope(
+            cancel,
+            async move { self.step_inner(id, root_result).await },
+        )
+        .await
     }
 
     /// Runs one ready chain to its next suspension point: resume a
@@ -806,7 +814,11 @@ impl<'a> Scheduler<'a> {
     /// entering the next section, starting the next Lua block's coroutine,
     /// stashing one prose block as the pending Markdown buffer, or falling
     /// through at a section's end.
-    fn step_inner(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+    async fn step_inner(
+        &mut self,
+        id: ChainId,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
@@ -854,8 +866,10 @@ impl<'a> Scheduler<'a> {
         };
         match advance {
             Advance::EnterSection => self.advance_entry(id, root_result),
-            Advance::Resume(thread, answer) => self.resume_block(id, &thread, answer, root_result),
-            Advance::StartLua => self.start_lua(id, root_result),
+            Advance::Resume(thread, answer) => {
+                self.resume_block(id, &thread, answer, root_result).await
+            }
+            Advance::StartLua => self.start_lua(id, root_result).await,
             Advance::StashProse => {
                 let chain = &mut self.chains[id.index()];
                 let text = match &chain.blocks()[chain.block] {
@@ -889,7 +903,7 @@ impl<'a> Scheduler<'a> {
     /// Resumes a chain's suspended coroutine with its delivered answer: the
     /// live H1 pass resumes inside a fresh resolver scope, a walked section
     /// resumes directly.
-    fn resume_block(
+    async fn resume_block(
         &mut self,
         id: ChainId,
         thread: &Thread,
@@ -901,7 +915,9 @@ impl<'a> Scheduler<'a> {
             let (result, callback_error) = self.h1_scoped_step(id, |vm, program| {
                 vm.resume_block_coro_answer(program, thread, answer)
             })?;
-            return self.finish_h1_step(id, result, callback_error, root_result);
+            return self
+                .finish_h1_step(id, result, callback_error, root_result)
+                .await;
         }
         let slice = chain.slice;
         let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
@@ -914,7 +930,7 @@ impl<'a> Scheduler<'a> {
         let result = frame
             .vm()?
             .resume_block_coro_answer(program, thread, answer);
-        self.handle_coro_result(id, result, root_result)
+        self.handle_coro_result(id, result, root_result).await
     }
 
     /// Starts the chain's current Lua block as a fresh coroutine: the
@@ -924,7 +940,11 @@ impl<'a> Scheduler<'a> {
     /// driver owns the chunk observation
     /// boundaries: STARTED at the block's start, SUCCEEDED or FAILED when
     /// its coroutine finally returns or fails - a suspension is neither.
-    fn start_lua(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+    async fn start_lua(
+        &mut self,
+        id: ChainId,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
         let pending = self.chains[id.index()].pending_prose.take();
         let chain = &self.chains[id.index()];
         let observer = Arc::clone(chain.ctx.observer());
@@ -943,7 +963,9 @@ impl<'a> Scheduler<'a> {
             let (result, callback_error) = self.h1_scoped_step(id, |vm, program| {
                 vm.start_block_coro(program).map_err(Error::from)
             })?;
-            return self.finish_h1_step(id, result, callback_error, root_result);
+            return self
+                .finish_h1_step(id, result, callback_error, root_result)
+                .await;
         }
         let slice = chain.slice;
         let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
@@ -954,7 +976,7 @@ impl<'a> Scheduler<'a> {
             .as_ref()
             .ok_or(Error::Internal("a live chain holds its frame"))?;
         let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
-        self.handle_coro_result(id, result, root_result)
+        self.handle_coro_result(id, result, root_result).await
     }
 
     /// Enters the chain's next section and requeues it, or finishes the
@@ -1114,7 +1136,7 @@ impl<'a> Scheduler<'a> {
     /// Applies one Lua block coroutine's outcome: parks a yielded chain on
     /// its request's dispatch, advances or finishes a completed block, and
     /// reports the chunk's closing observation boundary.
-    fn handle_coro_result(
+    async fn handle_coro_result(
         &mut self,
         id: ChainId,
         result: Result<CoroStep>,
@@ -1145,7 +1167,7 @@ impl<'a> Scheduler<'a> {
                 match frame.vm()?.request_from_yield(&values) {
                     YieldParse::Request(request) => {
                         chain.coroutine = Some(thread);
-                        self.dispatch(id, request)
+                        self.dispatch(id, request).await
                     }
                     YieldParse::Call(answer) => {
                         // An argument-validation failure is the call's
@@ -1294,14 +1316,14 @@ impl<'a> Scheduler<'a> {
     /// afterward, taking precedence over the outcome - the legacy
     /// `run_live_h1_block` mapping, where the callback check follows the
     /// chunk's own boundary.
-    fn finish_h1_step(
+    async fn finish_h1_step(
         &mut self,
         id: ChainId,
         result: Result<CoroStep>,
         callback_error: Option<Error>,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
-        let outcome = self.handle_coro_result(id, result, root_result);
+        let outcome = self.handle_coro_result(id, result, root_result).await;
         match callback_error {
             Some(error) => Err(error),
             None => outcome,
@@ -1312,8 +1334,9 @@ impl<'a> Scheduler<'a> {
     ///
     /// # Errors
     /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces yet.
-    fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
+    /// no call surface produces yet, or a `models.loop` cancellation, which
+    /// fails the run rather than resuming into the caller.
+    async fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
         match request {
             Request::Infer { prompt, binding } => {
                 self.dispatch_infer(id, prompt, binding);
@@ -1330,6 +1353,15 @@ impl<'a> Scheduler<'a> {
             Request::ToolCall { alias, args } => {
                 self.dispatch_tool_call(id, &alias, args);
                 Ok(())
+            }
+            Request::Loop {
+                messages,
+                messages_key,
+                binding,
+                compactor,
+            } => {
+                self.dispatch_loop(id, binding, messages, messages_key, compactor)
+                    .await
             }
             // Unreachable: no section VM installs the models.chat shim, and
             // stripped coroutines make a hand-rolled yield fail validation
@@ -1529,6 +1561,220 @@ impl<'a> Scheduler<'a> {
             let _ = tx.send((request_id, Answer::ToolCallResult(result)));
         });
         Ok((request_id, task))
+    }
+
+    /// Dispatches a `loop` request: runs the Rust-backed model-tool loop on
+    /// the driver thread, then resumes the chain with the nil answer. The
+    /// loop holds the section VM through its append sink and local-tool
+    /// dispatcher, so it cannot cross a spawned-task boundary; while it
+    /// runs, other chains wait (a fanout arm's loop serializes its sibling
+    /// arms' steps behind its rounds). Every loop failure but cancellation
+    /// is the call's answer, resumed into the caller so an author `pcall`
+    /// catches it exactly as on the other dispatch paths; cancellation
+    /// fails the run, exactly as the agent driver treats it.
+    async fn dispatch_loop(
+        &mut self,
+        id: ChainId,
+        binding: Option<ModelBinding>,
+        messages: Vec<MessageRecord>,
+        messages_key: RegistryKey,
+        compactor: Option<RegistryKey>,
+    ) -> Result<()> {
+        // Boxed: the loop's future carries the whole dissolved frame
+        // context, and the driver future must stay small (the workspace's
+        // large-futures lint gates `run`).
+        let outcome =
+            Box::pin(self.run_loop(id, binding, &messages, &messages_key, compactor)).await;
+        match outcome {
+            Ok(()) => {
+                self.chains[id.index()].incoming = Some(Answer::Loop(Ok(())));
+                self.ready.push_back(id);
+                Ok(())
+            }
+            Err(Error::Interrupted) => Err(Error::Interrupted),
+            Err(error) => {
+                self.chains[id.index()].incoming = Some(Answer::Loop(Err(error)));
+                self.ready.push_back(id);
+                Ok(())
+            }
+        }
+    }
+
+    /// The fallible half of loop dispatch: the binding resolution (the
+    /// handle's frozen binding, else the section's current model), the lazy
+    /// client resolution, the call-time tool scope (the effective bindings
+    /// plus the section's local tools, near-duplicate checked), the
+    /// one-time counts install, the per-dispatch projection, and the loop
+    /// itself, run with the section VM behind the append sink, the
+    /// compactor invocation, and the local-tool dispatcher.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the preparation lifts every loop input out of the chain borrow in one linear sequence before the VM-borrowed loop phase"
+    )]
+    async fn run_loop(
+        &mut self,
+        id: ChainId,
+        binding: Option<ModelBinding>,
+        messages: &[MessageRecord],
+        messages_key: &RegistryKey,
+        compactor: Option<RegistryKey>,
+    ) -> Result<()> {
+        let (
+            client,
+            binding,
+            schemas,
+            dispatch,
+            global_aliases,
+            counts,
+            mut conversation,
+            execution,
+            section,
+            observer,
+            debug,
+            turns,
+            nonce,
+            max_iterations,
+        ) = {
+            let chain = &mut self.chains[id.index()];
+            if chain.h1.is_some() {
+                // Unreachable: section VMs alone install the models.loop
+                // shim, the H1 VM never does, and stripped coroutines make a
+                // hand-rolled yield impossible.
+                return Err(Error::Internal(
+                    "the live H1 pass cannot dispatch a loop request",
+                ));
+            }
+            let execution = chain.ctx.execution().to_owned();
+            let section = chain.section_name().to_owned();
+            let binding = if let Some(binding) = binding {
+                binding
+            } else {
+                let frame = chain
+                    .frame
+                    .as_ref()
+                    .ok_or(Error::Internal("a live chain holds its frame"))?;
+                resolve_model_binding(chain.ctx.models(), &frame.vm()?.model_runtime)?.ok_or_else(
+                    || Error::ModelRequired {
+                        section: section.clone(),
+                    },
+                )?
+            };
+            if chain.client.is_none() {
+                chain.client = Some(self.client.resolve()?);
+            }
+            let client = chain
+                .client
+                .as_ref()
+                .ok_or(Error::Internal("the client slot was just resolved"))?
+                .clone();
+            let tool_set = chain.ctx.tool_set_snapshot()?;
+            let max_iterations = chain.ctx.max_tool_iterations();
+            let nonce = chain.ctx.nonce().clone();
+            let frame = chain
+                .frame
+                .as_mut()
+                .ok_or(Error::Internal("a live chain holds its frame"))?;
+            // The scope is read at call time: `tools.add` and
+            // `tools.add_local` calls since the last model operation shape
+            // this call's advertised set.
+            let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
+            let counts = frame.script_call_counts(&chain.ctx, &effective)?;
+            let local_schemas = frame.vm()?.local_tool_schemas()?;
+            // The shared dispatch body's increment errors on an unseeded
+            // alias, so the local aliases seed alongside the bound scope.
+            for schema in &local_schemas {
+                counts.ensure(&schema.name)?;
+            }
+            let handles = frame.reporting_handles();
+            let observer = handles.observer;
+            let debug = handles.debug;
+            let turns = handles.turns;
+            let (schemas, dispatch) = prepare_effective_scope(
+                &effective,
+                &local_schemas,
+                &execution,
+                observer.as_ref(),
+                &section,
+            )?;
+            let global_aliases: BTreeMap<String, ToolId> = tool_set
+                .bindings()
+                .iter()
+                .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
+                .collect();
+            // The per-dispatch projection, over the list as the author
+            // holds it now. A projection failure reports a failed turn
+            // before its call-site error resumes into Lua, the agent
+            // driver's precedent.
+            let conversation = match project_messages(messages) {
+                Ok(conversation) => conversation,
+                Err(error) => {
+                    observer.observe(&execution, &section, detail::MODEL_TURN_FAILED);
+                    return Err(Error::from(error));
+                }
+            };
+            (
+                client,
+                binding,
+                schemas,
+                dispatch,
+                global_aliases,
+                counts,
+                conversation,
+                execution,
+                section,
+                observer,
+                debug,
+                turns,
+                nonce,
+                max_iterations,
+            )
+        };
+        let completion_options = binding.completion_options();
+        let context = binding.context();
+        let chain = &self.chains[id.index()];
+        let frame = chain
+            .frame
+            .as_ref()
+            .ok_or(Error::Internal("a live chain holds its frame"))?;
+        let vm = frame.vm()?;
+        // The append sink: every assistant message and correlated tool
+        // result lands in the author's own message list as its round
+        // completes.
+        let mut append = |record: &MessageRecord| -> Result<()> {
+            append_message_record(vm.lua(), messages_key, record).map_err(Error::from)
+        };
+        // The selected compactor, invoked with the overflow reason: the
+        // omitted default is `compactors.fail`; an explicit callback runs
+        // on this VM and its typed raise crosses back downcastable.
+        let invoke = |reason: OverflowReason| -> Error {
+            invoke_selected(vm.lua(), compactor.as_ref(), reason).into()
+        };
+        // Local tools are Lua functions on this section VM; route their
+        // calls back into it rather than the bound dispatch body.
+        let local = |alias: &str, args: serde_json::Value| -> Result<String> {
+            vm.call_local_tool(alias, &args).map_err(Error::from)
+        };
+        run_models_loop(
+            &client,
+            &schemas,
+            &dispatch,
+            &mut conversation,
+            &mut append,
+            max_iterations,
+            context,
+            &invoke,
+            &execution,
+            observer.as_ref(),
+            &section,
+            &turns,
+            debug.as_deref(),
+            &completion_options,
+            &nonce,
+            Some(&counts),
+            Some(&global_aliases),
+            Some(&local),
+        )
+        .await
     }
 
     /// Dispatches a `call` request: constructs the child chain, pushes

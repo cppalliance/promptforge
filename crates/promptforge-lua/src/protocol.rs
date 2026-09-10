@@ -2,7 +2,8 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer(handle?, prompt)`, `call`,
-//! `fanout`, `tools.call`, the agent-only `models.chat`) is a Lua-side shim
+//! `fanout`, `tools.call`, the section-only `models.loop`, the agent-only
+//! `models.chat`) is a Lua-side shim
 //! that yields a request table; the driver validates the yield into a
 //! [`Request`], dispatches it, and resumes the coroutine with the
 //! `(ok, result)` envelope rendered from an [`Answer`]. The two enums are
@@ -186,6 +187,27 @@ pub enum Request {
         /// round. Defaults to none; the driver never adds to it.
         tools: Vec<String>,
     },
+    /// `models.loop(handle?, messages, compactor?)`: the Rust-backed
+    /// model-tool loop over an author-owned message list. Section VMs alone
+    /// install the shim; the agent driver carries an unreachable
+    /// internal-invariant guard for the arm its exhaustive match forces.
+    Loop {
+        /// The validated message records, parsed once here exactly as for
+        /// [`Request::Chat`]. The driver projects them per dispatch and
+        /// appends every assistant message and correlated tool result to
+        /// the author's list behind `messages_key`.
+        messages: Vec<MessageRecord>,
+        /// The registry key for the author's message list, stashed while
+        /// the VM handle is live so the driver can append the loop's
+        /// records to the very table the author passed.
+        messages_key: mlua::RegistryKey,
+        /// The leading handle's frozen binding, else `None` (the driver
+        /// resolves the section's current model at call time).
+        binding: Option<ModelBinding>,
+        /// The registry key for the author-selected compactor callback,
+        /// else `None` (the omitted-compactor default, `compactors.fail`).
+        compactor: Option<mlua::RegistryKey>,
+    },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     // The fields are read only by this module's own tests; production parses
     // them for strict validation and never reads them until the variant
@@ -235,6 +257,7 @@ impl Request {
                 Answer::ToolCallResult(Err(error))
             }),
             "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
+            "loop" => classify(parse_loop(lua, table), |error| Answer::Loop(Err(error))),
             "mcp" => match parse_mcp(lua, table) {
                 Ok(request) => YieldParse::Request(request),
                 Err(_) => YieldParse::Malformed(direct_yield_error()),
@@ -787,6 +810,169 @@ fn parse_chat_opts(
     Ok((model, tools))
 }
 
+/// Frames one loop author-argument failure as the call's error.
+fn loop_error(message: impl Into<String>) -> FieldFailure {
+    FieldFailure::Call(Error::Lua(message.into()))
+}
+
+/// Parses a `loop` request: the optional leading handle's userdata (whose
+/// frozen [`ModelBinding`] is cloned out of its borrow while the VM handle
+/// is live), the author-supplied `messages` list (validated once here
+/// through the same [`parse_messages`] the chat parse runs, and stashed in
+/// the registry so the driver appends the loop's records to the author's
+/// own table), and the optional `compactor` callback (stashed for the
+/// driver's overflow invocations).
+///
+/// Every author-argument failure is the call's error, raised at the
+/// `models.loop` call site so an author `pcall` catches it.
+fn parse_loop(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let binding = match table.raw_get::<Value>("handle") {
+        Ok(Value::Nil) => None,
+        Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
+            Ok(handle) => Some(handle.binding().clone()),
+            Err(_) => {
+                return Err(loop_error("models.loop handle must be a model handle"));
+            }
+        },
+        Ok(other) => {
+            return Err(loop_error(format!(
+                "models.loop handle must be a model handle, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let messages_table = match table.raw_get::<Value>("messages") {
+        Ok(value @ Value::Table(_)) => value,
+        Ok(other) => {
+            return Err(loop_error(format!(
+                "messages must be a table of message tables, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let messages = match lua.from_value::<serde_json::Value>(messages_table.clone()) {
+        Ok(messages) => parse_messages(&messages)?,
+        Err(_) => {
+            return Err(loop_error("messages must be a JSON-representable table"));
+        }
+    };
+    // Stash the author's table only after validation succeeds, so a
+    // rejected call leaves nothing in the registry.
+    let messages_key = lua
+        .create_registry_value(messages_table)
+        .map_err(|_| FieldFailure::Malformed)?;
+    let compactor = match table.raw_get::<Value>("compactor") {
+        Ok(Value::Nil) => None,
+        Ok(Value::Function(function)) => Some(
+            lua.create_registry_value(function)
+                .map_err(|_| FieldFailure::Malformed)?,
+        ),
+        Ok(other) => {
+            return Err(loop_error(format!(
+                "compactor must be a function, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    Ok(Request::Loop {
+        messages,
+        messages_key,
+        binding,
+        compactor,
+    })
+}
+
+/// Appends one record to an author's message list - the table behind
+/// `key`, stashed by the loop request's parse - rendered as the plain
+/// record shape the protocol parse consumes: `role`, `content` (a string
+/// or a content-parts array), `tool_calls` when the record carries calls,
+/// and `tool_call_id` when it answers one. The append is raw, so a
+/// `messages.new()` list's builder metatable never intercepts it.
+///
+/// The driver calls this as the loop's append sink: every assistant
+/// message and correlated tool result lands in the author's own table, in
+/// order, as its round completes.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the registry read, a table creation, or a raw
+/// set fails.
+pub fn append_message_record(
+    lua: &Lua,
+    key: &mlua::RegistryKey,
+    record: &MessageRecord,
+) -> Result<()> {
+    let list: mlua::Table = lua.registry_value(key).map_err(Error::lua)?;
+    let entry = lua.create_table().map_err(Error::lua)?;
+    entry
+        .raw_set("role", record.role.as_str())
+        .map_err(Error::lua)?;
+    match &record.content {
+        MessageContent::Text(text) => entry
+            .raw_set("content", text.as_str())
+            .map_err(Error::lua)?,
+        MessageContent::Parts(parts) => {
+            let sequence = lua
+                .create_table_with_capacity(parts.len(), 0)
+                .map_err(Error::lua)?;
+            for (position, part) in parts.iter().enumerate() {
+                let rendered = lua.create_table().map_err(Error::lua)?;
+                match part {
+                    ContentPart::Text(text) => {
+                        rendered.raw_set("type", "text").map_err(Error::lua)?;
+                        rendered
+                            .raw_set("text", text.as_str())
+                            .map_err(Error::lua)?;
+                    }
+                    ContentPart::ImageUrl(url) => {
+                        rendered.raw_set("type", "image_url").map_err(Error::lua)?;
+                        let image = lua.create_table().map_err(Error::lua)?;
+                        image.raw_set("url", url.as_str()).map_err(Error::lua)?;
+                        rendered.raw_set("image_url", image).map_err(Error::lua)?;
+                    }
+                }
+                sequence
+                    .raw_set(position + 1, rendered)
+                    .map_err(Error::lua)?;
+            }
+            entry.raw_set("content", sequence).map_err(Error::lua)?;
+        }
+    }
+    if !record.tool_calls.is_empty() {
+        let sequence = lua
+            .create_table_with_capacity(record.tool_calls.len(), 0)
+            .map_err(Error::lua)?;
+        for (position, call) in record.tool_calls.iter().enumerate() {
+            let rendered = lua.create_table().map_err(Error::lua)?;
+            rendered
+                .raw_set("id", call.id.as_str())
+                .map_err(Error::lua)?;
+            rendered
+                .raw_set("name", call.name.as_str())
+                .map_err(Error::lua)?;
+            rendered
+                .raw_set(
+                    "arguments",
+                    lua.to_value(&call.arguments).map_err(Error::lua)?,
+                )
+                .map_err(Error::lua)?;
+            sequence
+                .raw_set(position + 1, rendered)
+                .map_err(Error::lua)?;
+        }
+        entry.raw_set("tool_calls", sequence).map_err(Error::lua)?;
+    }
+    if let Some(id) = &record.tool_call_id {
+        entry
+            .raw_set("tool_call_id", id.as_str())
+            .map_err(Error::lua)?;
+    }
+    let length = list.raw_len();
+    list.raw_set(length + 1, entry).map_err(Error::lua)
+}
+
 /// How one yielded value parsed at the resume boundary.
 #[derive(Debug)]
 pub enum YieldParse {
@@ -929,6 +1115,9 @@ pub enum Answer<E> {
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
     /// [`ChatResult`] does not size every answer the non-chat paths move.
     Chat(std::result::Result<Box<ChatResult>, E>),
+    /// The outcome of a `loop` request: the loop appends the history itself
+    /// and returns nil, so success carries no value.
+    Loop(std::result::Result<(), E>),
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
 }
@@ -942,6 +1131,7 @@ impl<E> Answer<E> {
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
+            Answer::Loop(result) => Answer::Loop(result.map_err(map)),
         }
     }
 }
@@ -998,11 +1188,18 @@ impl<E: std::fmt::Display> Answer<E> {
                     None,
                 ))
             }
+            // The loop appended the history itself; success resumes as
+            // `(true, nil)` so the shim returns nil.
+            Answer::Loop(Ok(())) => Ok((
+                MultiValue::from_vec(vec![Value::Boolean(true), Value::Nil]),
+                None,
+            )),
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
             | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
-            | Answer::Chat(Err(error)) => {
+            | Answer::Chat(Err(error))
+            | Answer::Loop(Err(error)) => {
                 let message = lua.create_string(error.to_string())?;
                 Ok((
                     MultiValue::from_vec(vec![Value::Boolean(false), Value::String(message)]),
@@ -1833,6 +2030,288 @@ mod tests {
         assert_eq!(
             message.to_str().expect("the message is UTF-8"),
             "interrupted by Ctrl-C"
+        );
+    }
+
+    fn loop_request(lua: &Lua, messages: &str, compactor: Option<&str>) -> mlua::Table {
+        let table = request_table(lua, "loop");
+        table
+            .raw_set("messages", lua_table(lua, messages))
+            .expect("raw_set");
+        if let Some(compactor) = compactor {
+            let function: Function = lua
+                .load(compactor)
+                .eval()
+                .expect("compactor source evaluates");
+            table.raw_set("compactor", function).expect("raw_set");
+        }
+        table
+    }
+
+    fn expect_loop_call_error(parse: YieldParse, expected: &str) {
+        match parse {
+            YieldParse::Call(Answer::Loop(Err(Error::Lua(message)))) => {
+                assert_eq!(message, expected);
+            }
+            other => panic!("expected the loop call error {expected:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn loop_parses_messages_without_a_handle_or_compactor() {
+        let lua = Lua::new();
+        let table = loop_request(
+            &lua,
+            r#"{
+                { role = "user", content = "hi" },
+                { role = "assistant", content = "", tool_calls = {
+                    { id = "call_1", name = "echo" },
+                } },
+                { role = "tool", content = "done", tool_call_id = "call_1" },
+            }"#,
+            None,
+        );
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Loop {
+                messages,
+                binding,
+                compactor,
+                ..
+            } => {
+                assert_eq!(messages.len(), 3);
+                assert_eq!(messages[1].tool_calls.len(), 1);
+                assert_eq!(binding, None);
+                assert!(compactor.is_none(), "an omitted compactor is the default");
+            }
+            other => panic!("expected a loop request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn loop_with_a_handle_clones_its_frozen_binding() {
+        let lua = Lua::new();
+        let table = loop_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
+        table
+            .raw_set("handle", handle_userdata(&lua))
+            .expect("raw_set");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Loop {
+                binding: Some(binding),
+                ..
+            } => {
+                assert_eq!(binding.alias(), "fast");
+                assert_eq!(binding.id().name(), "test-model");
+            }
+            other => panic!("expected a loop request with a binding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn loop_stashes_the_author_table_and_compactor_for_the_driver() {
+        let lua = Lua::new();
+        let messages = lua_table(&lua, r#"{ { role = "user", content = "hi" } }"#);
+        let table = request_table(&lua, "loop");
+        table
+            .raw_set("messages", messages.clone())
+            .expect("raw_set");
+        let compactor: Function = lua
+            .load("function(reason) error('stop:' .. reason, 0) end")
+            .eval()
+            .expect("compactor source evaluates");
+        table.raw_set("compactor", compactor).expect("raw_set");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Loop {
+                messages_key,
+                compactor: Some(compactor_key),
+                ..
+            } => {
+                // The stashed table is the author's own: an append through
+                // the key grows the table the author still holds.
+                let record = MessageRecord {
+                    role: MessageRole::Assistant,
+                    content: MessageContent::Text("reply".to_owned()),
+                    tool_calls: Vec::new(),
+                    tool_call_id: None,
+                };
+                append_message_record(&lua, &messages_key, &record).expect("the append lands");
+                let (length, role, content): (i64, String, String) = lua
+                    .load("local m = ...; return #m, m[2].role, m[2].content")
+                    .call(messages)
+                    .expect("the author's table reads back");
+                assert_eq!(length, 2);
+                assert_eq!(role, "assistant");
+                assert_eq!(content, "reply");
+                // The stashed compactor is the author's function.
+                let stashed: Function = lua
+                    .registry_value(&compactor_key)
+                    .expect("the compactor key reads back");
+                let error = stashed
+                    .call::<()>("precheck")
+                    .expect_err("the stashed compactor runs");
+                assert!(
+                    error.to_string().contains("stop:precheck"),
+                    "the stashed callback is the author's own: {error}"
+                );
+            }
+            other => panic!("expected a loop request with a compactor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_loop_with_a_wrong_handle_type_is_the_calls_error() {
+        let lua = Lua::new();
+        let as_string = loop_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
+        as_string
+            .raw_set("handle", "not a handle")
+            .expect("raw_set");
+        expect_loop_call_error(
+            Request::from_yield(&lua, &Value::Table(as_string)),
+            "models.loop handle must be a model handle, got string",
+        );
+        let as_other_userdata =
+            loop_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
+        let wrong = lua
+            .create_userdata(LuaFanoutResult::success(json!(1), "x"))
+            .expect("userdata creation cannot fail on a fresh VM");
+        as_other_userdata.raw_set("handle", wrong).expect("raw_set");
+        expect_loop_call_error(
+            Request::from_yield(&lua, &Value::Table(as_other_userdata)),
+            "models.loop handle must be a model handle",
+        );
+    }
+
+    #[test]
+    fn a_loop_with_a_non_function_compactor_is_the_calls_error() {
+        let lua = Lua::new();
+        let table = loop_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
+        table.raw_set("compactor", 42).expect("raw_set");
+        expect_loop_call_error(
+            Request::from_yield(&lua, &Value::Table(table)),
+            "compactor must be a function, got integer",
+        );
+    }
+
+    #[test]
+    fn loop_message_validation_is_the_calls_error() {
+        let lua = Lua::new();
+        // A non-table messages argument, absent included, is the call's error.
+        let missing = request_table(&lua, "loop");
+        expect_loop_call_error(
+            Request::from_yield(&lua, &Value::Table(missing)),
+            "messages must be a table of message tables, got nil",
+        );
+        // A malformed record names its 1-based index, as the chat parse does.
+        let table = loop_request(&lua, r#"{ { role = "wizard", content = "x" } }"#, None);
+        expect_loop_call_error(
+            Request::from_yield(&lua, &Value::Table(table)),
+            "messages[1] role \"wizard\" is unknown; known roles: system, user, assistant, tool",
+        );
+    }
+
+    #[test]
+    fn append_message_record_renders_every_record_shape() {
+        let lua = Lua::new();
+        let list = lua_table(&lua, r#"{ { role = "user", content = "hi" } }"#);
+        let key = lua.create_registry_value(list.clone()).expect("stash");
+        let calls = MessageRecord {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text(String::new()),
+            tool_calls: vec![ToolCallRecord {
+                id: "call_1".to_owned(),
+                name: "echo".to_owned(),
+                arguments: json!({ "value": "hi" }),
+            }],
+            tool_call_id: None,
+        };
+        append_message_record(&lua, &key, &calls).expect("the assistant record appends");
+        let result = MessageRecord {
+            role: MessageRole::Tool,
+            content: MessageContent::Text("echoed: hi".to_owned()),
+            tool_calls: Vec::new(),
+            tool_call_id: Some("call_1".to_owned()),
+        };
+        append_message_record(&lua, &key, &result).expect("the tool record appends");
+        let parts = MessageRecord {
+            role: MessageRole::User,
+            content: MessageContent::Parts(vec![
+                ContentPart::Text("look".to_owned()),
+                ContentPart::ImageUrl("data:image/png;base64,AA".to_owned()),
+            ]),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        };
+        append_message_record(&lua, &key, &parts).expect("the parts record appends");
+        let (length, call_id, call_name, call_arg, answer_id, answer, part_type, part_url): (
+            i64,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        ) = lua
+            .load(
+                "local m = ...; return #m, \
+                 m[2].tool_calls[1].id, m[2].tool_calls[1].name, m[2].tool_calls[1].arguments.value, \
+                 m[3].tool_call_id, m[3].content, \
+                 m[4].content[1].type, m[4].content[2].image_url.url",
+            )
+            .call(list)
+            .expect("the appended records read back through Lua");
+        assert_eq!(length, 4);
+        assert_eq!(call_id, "call_1");
+        assert_eq!(call_name, "echo");
+        assert_eq!(call_arg, "hi");
+        assert_eq!(answer_id, "call_1");
+        assert_eq!(answer, "echoed: hi");
+        assert_eq!(part_type, "text");
+        assert_eq!(part_url, "data:image/png;base64,AA");
+    }
+
+    #[test]
+    fn an_ok_loop_answer_resumes_nil() {
+        let lua = Lua::new();
+        let (envelope, retained) = Answer::<Error>::Loop(Ok(()))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, result): (bool, Value) = lua
+            .load("local ok, result = ...; return ok, result")
+            .call(envelope)
+            .expect("the envelope round-trips through Lua");
+        assert!(ok);
+        assert_eq!(result, Value::Nil, "a successful loop returns nil");
+    }
+
+    #[test]
+    fn an_err_loop_answer_round_trips_and_retains_the_typed_error() {
+        let lua = Lua::new();
+        let (envelope, retained) = Answer::Loop(Err(Error::ContextExhausted {
+            reason: crate::OverflowReason::Precheck,
+        }))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+        match retained {
+            Some(Error::ContextExhausted {
+                reason: crate::OverflowReason::Precheck,
+            }) => {}
+            other => panic!("expected the retained ContextExhausted error, got {other:?}"),
+        }
+        let (ok, result) = echo_through_lua(&lua, envelope);
+        assert!(!ok);
+        let Value::String(message) = result else {
+            panic!("expected a string message, got {result:?}");
+        };
+        assert!(
+            message
+                .to_str()
+                .expect("the message is UTF-8")
+                .starts_with("context exhausted: "),
+            "the envelope carries the typed exhaustion's message"
         );
     }
 

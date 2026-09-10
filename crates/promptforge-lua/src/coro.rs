@@ -35,6 +35,12 @@ const CHAT_REGISTRY: &str = "promptforge.impl_coro.chat";
 /// install so each H1 block's fresh live models table can receive it.
 const INFER_REGISTRY: &str = "promptforge.impl_coro.infer";
 
+/// The registry key for the shim's `loop`, stashed by the prelude install so
+/// a section VM's host can install it as `models.loop`. The registry is
+/// host-side only: an agent VM's `models.loop` stays nil because nothing
+/// ever reads this stash there.
+const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
+
 /// The shim program, compiled once and loaded per VM. Compilation of the
 /// bundled source fails only on a crate bug, so the payload is the error's
 /// display string (the crate `Error` is not `Clone`).
@@ -51,7 +57,9 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = LazyLoc
 /// validation. The `models` and `tools` tables are passed to the shim chunk
 /// as arguments, so the chunk never reads a global; the chunk shims
 /// `models.infer` and installs `tools.call`, and the `call`/`fanout` shims
-/// come back for the host to install.
+/// come back for the host to install. The `models.loop` shim is stashed in
+/// the registry for [`install_section_loop_shim`], so agent VMs - which run
+/// this prelude too - never receive it.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -80,10 +88,33 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
     let chat: Function = shims.raw_get("chat").map_err(Error::lua)?;
     lua.set_named_registry_value(CHAT_REGISTRY, chat)
         .map_err(Error::lua)?;
+    let models_loop: Function = shims.raw_get("loop").map_err(Error::lua)?;
+    lua.set_named_registry_value(LOOP_REGISTRY, models_loop)
+        .map_err(Error::lua)?;
     globals
         .raw_set("coroutine", Value::Nil)
         .map_err(Error::lua)?;
     Ok(())
+}
+
+/// Installs the section-only `models.loop` yield shim on a VM whose shim
+/// prelude already ran (`install_shim_prelude` stashed the shim in the
+/// registry).
+///
+/// The executor's section setup is the only caller: `models.loop` never
+/// exists in an agent VM - not stubbed, simply absent - so an agent program
+/// calling it fails as an undefined global, the mirror of the agent-only
+/// `models.chat`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude was never installed on this
+/// VM, the `models` table is absent, or the install fails.
+pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
+    let models_loop: Function = lua
+        .named_registry_value(LOOP_REGISTRY)
+        .map_err(Error::lua)?;
+    let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
+    models.raw_set("loop", models_loop).map_err(Error::lua)
 }
 
 /// Installs the agent-only `models.chat` yield shim on a VM whose shim

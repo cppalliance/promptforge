@@ -429,7 +429,7 @@ Add request precheck, provider-overflow detection, and compactor callback invoca
 
 <step-9>
 
-### Step 9: Rust-backed `models.loop`
+### Step 9: Rust-backed `models.loop` [completed]
 
 - Component: models-loop
 

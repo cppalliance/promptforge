@@ -1,10 +1,21 @@
-//! The per-section model tool loop driver.
+//! The Rust-backed model tool loop behind the section-visible
+//! `models.loop(handle?, messages, compactor?)`.
 //!
-//! Test-only until the `models.loop` step rewires this machinery into the
-//! section-visible model operation: automatic prose inference was its last
-//! production caller. The single-shot mode went with it - the unified model
-//! rejects implicit prose tool loops, so the loop always runs to terminal
-//! text or exhaustion.
+//! The scheduler drives [`run_models_loop`] on the driver thread: the loop
+//! holds the section VM through its append sink and local-tool dispatcher,
+//! so it cannot cross a spawned-task boundary. Each round prechecks the
+//! projected conversation against the model's context window, runs one
+//! streaming gateway completion under cancellation, and either appends the
+//! terminal assistant text and returns, or dispatches the requested
+//! tool-call batch and appends the exchange - the assistant record and its
+//! correlated tool results together, only after every dispatch in the batch
+//! succeeded - before looping. Overflow on the precheck or at the provider
+//! invokes the selected compactor (the omitted-compactor default is
+//! `compactors.fail`, which always raises typed context exhaustion).
+//!
+//! [`run_prose_inference`] is the test-only wrapper the legacy loop tests
+//! keep their call shape through: it pushes one user prose message and
+//! captures the terminal record the loop appends.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -14,7 +25,8 @@ use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{
-    Compactor, OverflowReason, ToolCallCounts, dispatch_tool, is_context_overflow, precheck,
+    MessageContent, MessageRecord, MessageRole, OverflowReason, ToolCallCounts, ToolCallRecord,
+    dispatch_tool, is_context_overflow, precheck,
 };
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
@@ -34,47 +46,82 @@ use super::support::advance_turn;
 pub(crate) type LocalDispatch<'a> =
     dyn Fn(&str, serde_json::Value) -> Result<String> + Send + Sync + 'a;
 
-/// Text and finish reason from one tool-loop inference.
-#[derive(Debug, Clone)]
-pub(crate) struct ProseInferenceResult {
-    /// Model text when the loop produced a reply.
-    pub text: Option<String>,
-    /// Backend `finish_reason` from the last completed model round, when present.
-    pub finish_reason: Option<String>,
+/// The terminal assistant record for one completed loop: plain text, no
+/// calls, no answered ID.
+fn terminal_record(text: String) -> MessageRecord {
+    MessageRecord {
+        role: MessageRole::Assistant,
+        content: MessageContent::Text(text),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
 }
 
-/// Append `prose` to `conversation` and loop model inference until text or
-/// the iteration cap.
+/// The assistant record for one tool-call round: empty visible text (the
+/// client's tool-call outcome carries none) plus the normalized
+/// `{id, name, arguments}` calls.
+fn assistant_calls_record(calls: &[crate::client::ToolCall]) -> MessageRecord {
+    MessageRecord {
+        role: MessageRole::Assistant,
+        content: MessageContent::Text(String::new()),
+        tool_calls: calls
+            .iter()
+            .map(|call| ToolCallRecord {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+            })
+            .collect(),
+        tool_call_id: None,
+    }
+}
+
+/// The tool record answering one dispatched call.
+fn tool_result_record(id: &str, content: String) -> MessageRecord {
+    MessageRecord {
+        role: MessageRole::Tool,
+        content: MessageContent::Text(content),
+        tool_calls: Vec::new(),
+        tool_call_id: Some(id.to_owned()),
+    }
+}
+
+/// Loops model inference over `conversation` until the model produces
+/// terminal text, appending every assistant message and correlated tool
+/// result to the author's message list through `append`.
 ///
-/// Returns text when the model produces it. An empty reply with
-/// `finish_reason == "stop"` after at least one successful tool dispatch is
-/// accepted as a clean exit with empty text.
-/// Conversation history accumulates across rounds.
+/// The conversation arrives projected from the author's validated records;
+/// the loop appends its own wire messages as rounds complete. Each append
+/// to the author's list lands as its round completes: a tool-call exchange
+/// appends atomically once every dispatch in the batch succeeded, and the
+/// terminal assistant text is the final record. Returns `()` on success -
+/// the Lua shim resumes nil.
 ///
 /// # Errors
 /// Returns an out-of-scope tool error if the model calls an alias absent from
 /// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit
 /// without a text reply, [`Error::Interrupted`]
-/// when the run is cancelled, or any transport/backend error from a model call
-/// or a tool's own failure. Returns [`Error::ContextExhausted`] when the
-/// pre-dispatch precheck or the provider reports a context-window overflow
-/// and the selected compactor (`compactor`, defaulting to `compactors.fail`)
-/// raises it. Returns [`Error::Internal`] if a local tool call
-/// reaches dispatch without the required local dispatcher.
+/// when the run is cancelled, any transport/backend error from a model call
+/// or a tool's own failure, or the append sink's own error. Returns the
+/// selected compactor's error - typed [`Error::ContextExhausted`] from the
+/// `compactors.fail` default - when the pre-dispatch precheck or the
+/// provider reports a context-window overflow. Returns [`Error::Internal`]
+/// if a local tool call reaches dispatch without the required local
+/// dispatcher.
 #[expect(
     clippy::too_many_arguments,
     clippy::too_many_lines,
     reason = "the reporting pieces arrive dissolved from the driver's frame - observer, debug, turns, and completion options are the frame's effective handles; counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
 )]
-pub(crate) async fn run_prose_inference(
+pub(crate) async fn run_models_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
     dispatch: &BTreeMap<String, DispatchTarget>,
     conversation: &mut Vec<Message>,
-    prose: String,
+    append: &mut (dyn FnMut(&MessageRecord) -> Result<()> + Send + Sync),
     max_tool_iterations: usize,
     context: NonZeroU32,
-    compactor: Option<Compactor>,
+    compactor: &(dyn Fn(OverflowReason) -> Error + Send + Sync),
     execution: &str,
     observer: &dyn Observer,
     section: &str,
@@ -85,8 +132,7 @@ pub(crate) async fn run_prose_inference(
     counts: Option<&ToolCallCounts>,
     global_aliases: Option<&BTreeMap<String, ToolId>>,
     local_dispatch: Option<&LocalDispatch<'_>>,
-) -> Result<ProseInferenceResult> {
-    conversation.push(Message::user(prose));
+) -> Result<()> {
     let tool_arg = if schemas.is_empty() {
         None
     } else {
@@ -106,10 +152,10 @@ pub(crate) async fn run_prose_inference(
         // projection-failure precedent.
         if let Err(reason) = precheck(conversation, context) {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
-            return Err(compactor.unwrap_or_default().invoke(reason).into());
+            return Err(compactor(reason));
         }
-        // The document-prompt loop consumes only the accumulated completion;
-        // live deltas have no consumer here, so the callback is a no-op.
+        // The section loop consumes only the accumulated completion; live
+        // deltas have no consumer here, so the callback is a no-op.
         let completion = tokio::select! {
             biased;
             () = cancel::wait_cancelled() => Err(Error::Interrupted),
@@ -126,31 +172,26 @@ pub(crate) async fn run_prose_inference(
             && is_context_overflow(*status, body)
         {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
-            return Err(compactor
-                .unwrap_or_default()
-                .invoke(OverflowReason::Provider)
-                .into());
+            return Err(compactor(OverflowReason::Provider));
         }
         // A turn whose reply is empty is the model's clean exit from the loop
         // when it stopped deliberately (`finish_reason == "stop"`) after doing
-        // its work through tool calls; the section reply is then "". Every
-        // other empty turn (no prior tool calls, or a missing/non-"stop"
-        // finish reason) stays an `EmptyModelReply` failure.
+        // its work through tool calls; the terminal record is then an empty
+        // assistant text. Every other empty turn (no prior tool calls, or a
+        // missing/non-"stop" finish reason) stays an `EmptyModelReply`
+        // failure.
         if let Err(Error::EmptyModelReply { finish_reason, .. }) = &completion
             && finish_reason.as_deref() == Some("stop")
             && successful_tool_calls > 0
         {
-            let finish_reason = finish_reason.clone();
             // The accepted exit is still a completed turn: count it and report
             // it so observers and turn totals match a text-reply exit. No
             // debug capture fires here because the failed completion carries
             // no request/response bodies to record.
             advance_turn(turns);
             observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
-            return Ok(ProseInferenceResult {
-                text: Some(String::new()),
-                finish_reason,
-            });
+            append(&terminal_record(String::new()))?;
+            return Ok(());
         }
         if completion.is_err() {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
@@ -187,10 +228,9 @@ pub(crate) async fn run_prose_inference(
                 if completion.finish_reason.as_deref() == Some("length") {
                     observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
                 }
-                return Ok(ProseInferenceResult {
-                    text: Some(text),
-                    finish_reason: completion.finish_reason,
-                });
+                // The terminal assistant text is the final record.
+                append(&terminal_record(text))?;
+                return Ok(());
             }
             CompletionResult::ToolCalls(calls) => {
                 // Dispatch each requested tool and collect the framed results
@@ -266,6 +306,10 @@ pub(crate) async fn run_prose_inference(
                     results.push((call.id.clone(), result));
                 }
 
+                // The exchange appends atomically: reaching here means every
+                // dispatch in the batch succeeded, so the author's list never
+                // holds an assistant call its results did not answer.
+                //
                 // Echo in the OpenAI wire shape: the assistant's tool-call turn
                 // followed by one `role=tool` message per result. The assistant
                 // turn is a canonical, deliberately lossy reconstruction of each
@@ -288,8 +332,10 @@ pub(crate) async fn run_prose_inference(
                     })
                     .collect();
                 conversation.push(Message::assistant_tool_calls(raw_calls));
+                append(&assistant_calls_record(&calls))?;
                 for (id, content) in results {
-                    conversation.push(Message::tool(id, content));
+                    conversation.push(Message::tool(id.clone(), content.clone()));
+                    append(&tool_result_record(&id, content))?;
                 }
             }
             // `CompletionResult` is `#[non_exhaustive]` across the crate
@@ -300,4 +346,94 @@ pub(crate) async fn run_prose_inference(
     }
 
     Err(Error::ToolLoopExhausted)
+}
+
+/// Text and finish reason from one tool-loop inference.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) struct ProseInferenceResult {
+    /// Model text when the loop produced a reply.
+    pub text: Option<String>,
+    /// Backend `finish_reason` from the last completed model round, when present.
+    pub finish_reason: Option<String>,
+}
+
+/// The test-only wrapper the legacy loop tests keep their call shape
+/// through: push `prose` as one user message, run [`run_models_loop`] with
+/// a sink that captures the terminal record, and render the captured text.
+/// The compactor arrives as the optional typed policy; the omitted default
+/// is `compactors.fail`.
+///
+/// # Errors
+/// Exactly [`run_models_loop`]'s, plus [`Error::Internal`] if the loop
+/// completed without appending a terminal record.
+#[cfg(test)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the wrapper keeps the deleted production function's borrowed loop context so the loop tests keep their call shape"
+)]
+pub(crate) async fn run_prose_inference(
+    client: &GatewayClient,
+    schemas: &[ToolSchema],
+    dispatch: &BTreeMap<String, DispatchTarget>,
+    conversation: &mut Vec<Message>,
+    prose: String,
+    max_tool_iterations: usize,
+    context: NonZeroU32,
+    compactor: Option<crate::lua::Compactor>,
+    execution: &str,
+    observer: &dyn Observer,
+    section: &str,
+    turns: &AtomicU32,
+    debug: Option<&dyn DebugCapture>,
+    completion_options: &CompletionOptions,
+    nonce: &GuardNonce,
+    counts: Option<&ToolCallCounts>,
+    global_aliases: Option<&BTreeMap<String, ToolId>>,
+    local_dispatch: Option<&LocalDispatch<'_>>,
+) -> Result<ProseInferenceResult> {
+    conversation.push(Message::user(prose));
+    // The loop's last append is the terminal assistant record; capture it
+    // through the sink rather than a second return channel.
+    let mut terminal: Option<MessageRecord> = None;
+    let mut append = |record: &MessageRecord| -> Result<()> {
+        terminal = Some(record.clone());
+        Ok(())
+    };
+    let invoke = move |reason: OverflowReason| -> Error {
+        compactor.unwrap_or_default().invoke(reason).into()
+    };
+    run_models_loop(
+        client,
+        schemas,
+        dispatch,
+        conversation,
+        &mut append,
+        max_tool_iterations,
+        context,
+        &invoke,
+        execution,
+        observer,
+        section,
+        turns,
+        debug,
+        completion_options,
+        nonce,
+        counts,
+        global_aliases,
+        local_dispatch,
+    )
+    .await?;
+    let Some(record) = terminal else {
+        return Err(Error::Internal(
+            "a completed loop appended no terminal record",
+        ));
+    };
+    let MessageContent::Text(text) = record.content else {
+        return Err(Error::Internal("the terminal record is always plain text"));
+    };
+    Ok(ProseInferenceResult {
+        text: Some(text),
+        finish_reason: None,
+    })
 }

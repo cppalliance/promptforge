@@ -74,15 +74,20 @@ pub(crate) struct SectionContext {
     /// fanout arm's proxy in a fanout.
     observer: Arc<dyn Observer>,
     /// Opt-in raw request/response capture for each model turn.
-    ///
-    /// Read by the tool loop the `models.loop` step rewires.
-    #[allow(dead_code)]
     debug: Option<Arc<dyn DebugCapture>>,
     /// The model-turn counter this frame advances.
-    ///
-    /// Read by the tool loop the `models.loop` step rewires.
-    #[allow(dead_code)]
     turns: Arc<AtomicU32>,
+}
+
+/// The frame's effective reporting handles for the model tool loop: the
+/// observer, the opt-in debug capture sink, and the model-turn counter.
+pub(crate) struct ReportingHandles {
+    /// The frame's effective observer handle.
+    pub(crate) observer: Arc<dyn Observer>,
+    /// The frame's opt-in raw request/response capture sink.
+    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
+    /// The model-turn counter the frame advances.
+    pub(crate) turns: Arc<AtomicU32>,
 }
 
 impl SectionContext {
@@ -404,6 +409,17 @@ impl SectionContext {
                 .map_err(mlua::Error::external)
             })?;
         Ok(())
+    }
+
+    /// The frame's effective reporting handles for the model tool loop a
+    /// `models.loop` dispatch runs, each seeded out of the run context (a
+    /// fanout arm's fork) at construction.
+    pub(crate) fn reporting_handles(&self) -> ReportingHandles {
+        ReportingHandles {
+            observer: Arc::clone(&self.observer),
+            debug: self.debug.clone(),
+            turns: Arc::clone(&self.turns),
+        }
     }
 
     /// The frame's tool-call counts for a script-initiated dispatch,

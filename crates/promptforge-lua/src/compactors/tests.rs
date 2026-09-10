@@ -2,7 +2,9 @@ use mlua::Lua;
 use promptforge_model_client::client::Message;
 use serde_json::{Value, json};
 
-use super::{Compactor, OverflowReason, install_compactors, is_context_overflow, precheck};
+use super::{
+    Compactor, OverflowReason, install_compactors, invoke_selected, is_context_overflow, precheck,
+};
 use crate::Error;
 
 fn lua_with_compactors() -> Lua {
@@ -124,6 +126,80 @@ fn compactors_fail_rejects_an_unknown_reason() {
         ),
         "a bad tag is an authoring error, never context exhaustion"
     );
+}
+
+#[test]
+fn invoke_selected_defaults_to_fail_without_a_callback() {
+    let lua = lua_with_compactors();
+    for reason in [OverflowReason::Precheck, OverflowReason::Provider] {
+        match invoke_selected(&lua, None, reason) {
+            Error::ContextExhausted { reason: carried } => {
+                assert_eq!(carried, reason, "the default carries the invoking reason");
+            }
+            other => panic!("expected ContextExhausted, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn invoke_selected_invokes_the_callback_with_the_reason_tag() {
+    let lua = lua_with_compactors();
+    let fail: mlua::Function = lua
+        .load("compactors.fail")
+        .eval()
+        .expect("compactors.fail evaluates");
+    let key = lua
+        .create_registry_value(fail)
+        .expect("the stash cannot fail");
+    for reason in [OverflowReason::Precheck, OverflowReason::Provider] {
+        match invoke_selected(&lua, Some(&key), reason) {
+            Error::ContextExhausted { reason: carried } => {
+                assert_eq!(
+                    carried, reason,
+                    "the callback's typed raise crosses back with the invoking reason"
+                );
+            }
+            other => panic!("expected ContextExhausted, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn invoke_selected_rejects_a_compactor_that_returns() {
+    let lua = lua_with_compactors();
+    let returns: mlua::Function = lua
+        .load("function(reason) return { role = 'user', content = 'summary' } end")
+        .eval()
+        .expect("the returning compactor evaluates");
+    let key = lua
+        .create_registry_value(returns)
+        .expect("the stash cannot fail");
+    match invoke_selected(&lua, Some(&key), OverflowReason::Precheck) {
+        Error::Lua(message) => assert!(
+            message.contains("deferred") && message.contains("compactors.fail"),
+            "a returned replacement names the deferred framework, got: {message}"
+        ),
+        other => panic!("expected the deferred-replacement Lua error, got {other:?}"),
+    }
+}
+
+#[test]
+fn invoke_selected_flattens_a_compactors_own_untyped_raise() {
+    let lua = lua_with_compactors();
+    let raises: mlua::Function = lua
+        .load("function(reason) error('custom failure: ' .. reason, 0) end")
+        .eval()
+        .expect("the raising compactor evaluates");
+    let key = lua
+        .create_registry_value(raises)
+        .expect("the stash cannot fail");
+    match invoke_selected(&lua, Some(&key), OverflowReason::Provider) {
+        Error::LuaRuntime { message, .. } => assert!(
+            message.contains("custom failure: provider"),
+            "the compactor's own error survives with the reason tag, got: {message}"
+        ),
+        other => panic!("expected the compactor's own runtime error, got {other:?}"),
+    }
 }
 
 #[test]

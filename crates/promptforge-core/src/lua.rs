@@ -12,16 +12,19 @@
 //! here unchanged, so existing `promptforge_core::lua::*` paths keep working.
 
 pub(crate) use promptforge_lua::{
-    CoroStep, LiveBindingProducer, LuaBlockResult, LuaFanoutResult, LuaProgram, OverflowReason,
-    ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolResolver, ToolSet,
-    ToolView, current_tool_bindings, dispatch_tool, enrich_sys_model, install_live_h1_shim_base,
+    CoroStep, LiveBindingProducer, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageContent,
+    MessageRecord, MessageRole, OverflowReason, ProseState, ScriptReport, SectionVm, ToolBinding,
+    ToolCallCounts, ToolCallRecord, ToolResolver, ToolSet, ToolView, append_message_record,
+    current_tool_bindings, dispatch_tool, enrich_sys_model, install_live_h1_shim_base,
+    install_section_loop_shim, invoke_selected, is_context_overflow, precheck, project_messages,
     resolve_model_binding, shim_live_h1_models,
 };
 
-// The compactor policy and its invocation helpers are read by the tool
-// loop, which is test-only until the `models.loop` step rewires it.
+// The typed compactor policy is read only by the tool loop's test-only
+// prose wrapper; the production loop invokes compactor callbacks through
+// `invoke_selected`.
 #[cfg(test)]
-pub(crate) use promptforge_lua::{Compactor, is_context_overflow, precheck};
+pub(crate) use promptforge_lua::Compactor;
 
 #[cfg(test)]
 pub(crate) use promptforge_lua::ToolOutputKind;
