@@ -33,6 +33,7 @@ pub(super) enum CollectedEvent {
 /// External event sources owned by one supervisor.
 pub(super) struct EventCollector {
     lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
+    cancellations: mpsc::Receiver<SupervisorEvent>,
     catalog: CatalogBus,
     catalog_generation: watch::Receiver<u64>,
     gateway: GatewayBinding,
@@ -44,6 +45,7 @@ impl EventCollector {
     /// disappear between those operations.
     pub(super) fn new(
         lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
+        cancellations: mpsc::Receiver<SupervisorEvent>,
         catalog: CatalogBus,
         gateway: GatewayBinding,
     ) -> (Self, CatalogEvent, Arc<GatewaySnapshot>) {
@@ -54,6 +56,7 @@ impl EventCollector {
         (
             Self {
                 lifecycle,
+                cancellations,
                 catalog,
                 catalog_generation,
                 gateway,
@@ -74,7 +77,10 @@ impl EventCollector {
         if let Some(run) = active_run {
             tokio::select! {
                 biased;
-                event = next_lifecycle_event(&mut self.lifecycle) => {
+                event = next_lifecycle_event(
+                    &mut self.lifecycle,
+                    &mut self.cancellations,
+                ) => {
                     CollectedEvent::Supervisor(event)
                 }
                 catalog = next_catalog_event(
@@ -94,7 +100,10 @@ impl EventCollector {
         } else {
             tokio::select! {
                 biased;
-                event = next_lifecycle_event(&mut self.lifecycle) => {
+                event = next_lifecycle_event(
+                    &mut self.lifecycle,
+                    &mut self.cancellations,
+                ) => {
                     CollectedEvent::Supervisor(event)
                 }
                 catalog = next_catalog_event(
@@ -126,12 +135,62 @@ async fn next_gateway_event(
     }
 }
 
-/// Waits for the next synchronous lifecycle event.
+/// Waits for the next synchronous lifecycle event, polling the guaranteed
+/// queue before the bounded cancellation queue. Cross-channel ordering is
+/// not load-bearing: a cancellation is valid in any reducer phase, and a
+/// close or settlement processed late lands on a phase that ignores it.
 async fn next_lifecycle_event(
     lifecycle: &mut mpsc::UnboundedReceiver<SupervisorEvent>,
+    cancellations: &mut mpsc::Receiver<SupervisorEvent>,
 ) -> SupervisorEvent {
-    match lifecycle.recv().await {
-        Some(event) => event,
-        None => std::future::pending().await,
+    tokio::select! {
+        biased;
+        event = lifecycle.recv() => match event {
+            Some(event) => event,
+            None => std::future::pending().await,
+        },
+        event = cancellations.recv() => match event {
+            Some(event) => event,
+            None => std::future::pending().await,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_collector_drains_the_guaranteed_and_bounded_lifecycle_queues() {
+        let (events, guaranteed) = mpsc::unbounded_channel();
+        let (cancellations, bounded) = mpsc::channel(1);
+        let (mut collector, _initial_catalog, _initial_gateway) = EventCollector::new(
+            guaranteed,
+            bounded,
+            CatalogBus::default(),
+            GatewayBinding::new("http://127.0.0.1:1", "").expect("the test binding builds"),
+        );
+
+        events
+            .send(SupervisorEvent::Close)
+            .expect("guaranteed send");
+        cancellations
+            .try_send(SupervisorEvent::OperatorCancellation)
+            .expect("bounded send");
+
+        assert!(
+            matches!(
+                collector.next(None, None).await,
+                CollectedEvent::Supervisor(SupervisorEvent::Close)
+            ),
+            "the guaranteed queue is polled first"
+        );
+        assert!(
+            matches!(
+                collector.next(None, None).await,
+                CollectedEvent::Supervisor(SupervisorEvent::OperatorCancellation)
+            ),
+            "the bounded cancellation queue drains through the same collector"
+        );
     }
 }

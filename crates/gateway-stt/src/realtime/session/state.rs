@@ -5,6 +5,7 @@ use crate::realtime::item::CommittedItem;
 use crate::realtime::registry::SessionRegistration;
 use crate::realtime::result_mailbox::{MailboxError, ResultMailbox};
 use crate::realtime::wire::{EffectiveSession, IdGenerator};
+use gateway_stt_engine::TranscribeError;
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
 pub(super) const SESSION_CANCEL_JOIN_CAPACITY: usize = 8;
@@ -22,10 +23,10 @@ pub(super) enum InterimTaskOutput {
         segment_start: u64,
         audio_start: u64,
         audio_end: u64,
-        transcript: Result<String, String>,
+        transcript: Result<String, TranscribeError>,
     },
 }
-#[derive(Debug, Eq, PartialEq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum SessionError {
     #[error(transparent)]
     Audio(#[from] AudioError),
@@ -42,7 +43,8 @@ pub(crate) enum SessionError {
     #[error("speech generation is unavailable")]
     GenerationUnavailable,
     #[error("transcription failed")]
-    Inference,
+    #[non_exhaustive]
+    Inference(#[source] TranscribeError),
     #[error("the realtime session result capacity is reached")]
     InterimAtCapacity,
     #[error("{0}")]

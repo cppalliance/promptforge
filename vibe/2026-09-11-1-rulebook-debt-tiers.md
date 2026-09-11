@@ -203,7 +203,7 @@ Verification: the workflow lints clean, `gateway-stt` builds and its tests pass 
 
 <step-2>
 
-### Step 2: Non-blocking destructors, restored error causes, bounded supervisor channel
+### Step 2: Non-blocking destructors, restored error causes, bounded supervisor channel [completed]
 
 - Component: runtime-hazard-repairs
 

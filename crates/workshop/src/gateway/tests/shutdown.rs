@@ -74,9 +74,9 @@ fn a_spurious_completion_wake_cannot_trigger_a_blocking_join() {
 }
 
 #[test]
-fn dropping_a_supervisor_uses_the_same_bounded_detach_path() {
+fn dropping_a_supervisor_signals_and_detaches_without_waiting() {
     let (release, blocked) = mpsc::channel();
-    let supervisor = GatewaySupervisor::spawn_with_budget(Duration::from_millis(50), move |_| {
+    let supervisor = GatewaySupervisor::spawn_with_budget(Duration::from_secs(1), move |_| {
         let _ = blocked.recv();
     })
     .expect("spawn test supervisor");
@@ -86,7 +86,7 @@ fn dropping_a_supervisor_uses_the_same_bounded_detach_path() {
 
     assert!(
         started.elapsed() < Duration::from_millis(250),
-        "Drop cannot wait beyond the supervisor shutdown budget"
+        "Drop signals and detaches instead of waiting out the shutdown budget"
     );
     release.send(()).expect("release the detached test worker");
 }

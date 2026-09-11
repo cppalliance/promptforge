@@ -26,6 +26,7 @@ pub(super) fn spawn(
     host: SessionHost,
     gateway: GatewayBinding,
     lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
+    cancellations: mpsc::Receiver<SupervisorEvent>,
 ) {
     tokio::spawn(async move {
         let tool: Arc<dyn Tool> = Arc::new(UserInputTool::new(
@@ -41,7 +42,7 @@ pub(super) fn spawn(
             }
         };
         let (mut collector, initial_catalog, initial_gateway) =
-            EventCollector::new(lifecycle, host.catalog.clone(), gateway);
+            EventCollector::new(lifecycle, cancellations, host.catalog.clone(), gateway);
         let mut executor = EffectExecutor::new(
             Arc::clone(&session),
             host,

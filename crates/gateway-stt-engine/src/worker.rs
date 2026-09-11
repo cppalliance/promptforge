@@ -92,6 +92,10 @@ impl Transcriber {
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
     }
 
+    /// Closes the job queue and joins the worker thread.
+    ///
+    /// This is the blocking, error-reporting path; `Drop` only signals
+    /// and detaches through [`Transcriber::signal_and_detach`].
     pub(super) fn shutdown(&self) -> Result<(), TranscribeError> {
         self.stopping.store(true, Ordering::Release);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -107,12 +111,21 @@ impl Transcriber {
     }
 
     pub(super) fn abandon_startup(&self) {
-        self.stopping.store(true, Ordering::Release);
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        drop(state.job_tx.take());
         // Construction is non-preemptible. Dropping this handle explicitly
         // abandons only a timed-out startup worker so the host can classify
         // the fatal outcome without claiming the thread was stopped.
+        self.signal_and_detach();
+    }
+
+    /// Signals the worker and detaches its thread without joining.
+    ///
+    /// The worker captures only owned or `Arc` state (the factory, the job
+    /// receiver, the stop flag) and borrows nothing from this handle, so a
+    /// detached thread finishes any running decode on its own.
+    pub(super) fn signal_and_detach(&self) {
+        self.stopping.store(true, Ordering::Release);
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(state.job_tx.take());
         drop(state.worker.take());
     }
 
@@ -137,7 +150,9 @@ impl Transcriber {
 
 impl Drop for Transcriber {
     fn drop(&mut self) {
-        drop(self.shutdown());
+        // `shutdown` is the blocking, error-reporting path; Drop can
+        // neither wait nor report, so it signals and detaches.
+        self.signal_and_detach();
     }
 }
 
@@ -414,6 +429,44 @@ mod tests {
         );
         worker.shutdown().expect("worker joins");
         assert_eq!(control.calls(), 2);
+    }
+
+    #[test]
+    fn drop_signals_and_detaches_instead_of_joining_a_running_decode() {
+        let (worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        let reply = worker
+            .submit(request(DecodeMode::Interim))
+            .expect("running job is admitted");
+        control.wait_for(
+            |state| state.phase == ParkPhase::Entered,
+            "job enters the decoder",
+        );
+        // The delayed releaser turns a blocking join into a failed timing
+        // assertion instead of a deadlocked test.
+        let releaser = std::thread::spawn({
+            let control = control.clone();
+            move || {
+                std::thread::sleep(Duration::from_millis(500));
+                control.release();
+            }
+        });
+
+        let started = std::time::Instant::now();
+        drop(worker);
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "drop signals and detaches instead of joining the running decode"
+        );
+
+        releaser.join().expect("the releaser thread joins");
+        control.wait_for(
+            |state| state.dropped,
+            "the detached worker finishes the decode and drops the decoder",
+        );
+        assert!(
+            reply.blocking_recv().is_err(),
+            "a stopped worker discards the in-flight reply"
+        );
     }
 
     #[test]

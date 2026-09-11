@@ -15,7 +15,8 @@ pub(super) const MIN_COMMIT_SAMPLES: usize =
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub(super) enum AudioError {
     #[error("audio must be canonical padded Base64")]
-    InvalidBase64,
+    #[non_exhaustive]
+    InvalidBase64(#[source] base64::DecodeError),
     #[error("decoded audio exceeds the {max_bytes} byte append limit")]
     AppendTooLarge { max_bytes: usize },
     #[error("PCM16 audio ended with an incomplete sample")]
@@ -170,7 +171,7 @@ pub(super) fn decode_base64(payload: &str) -> Result<Vec<u8>, AudioError> {
     }
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(payload)
-        .map_err(|_| AudioError::InvalidBase64)?;
+        .map_err(AudioError::InvalidBase64)?;
     if decoded.len() > MAX_APPEND_AUDIO_BYTES {
         return Err(AudioError::AppendTooLarge {
             max_bytes: MAX_APPEND_AUDIO_BYTES,
@@ -262,15 +263,20 @@ mod tests {
 
     #[test]
     fn base64_rejects_invalid_and_noncanonical_encodings_and_decoded_oversize() {
-        assert_eq!(decode_base64("%%%"), Err(AudioError::InvalidBase64));
-        assert_eq!(decode_base64("YQ"), Err(AudioError::InvalidBase64));
+        assert!(matches!(
+            decode_base64("%%%"),
+            Err(AudioError::InvalidBase64(_))
+        ));
+        assert!(matches!(
+            decode_base64("YQ"),
+            Err(AudioError::InvalidBase64(_))
+        ));
         for alias in [
             "YR==", "YS==", "YT==", "YU==", "YV==", "YW==", "YX==", "YY==", "YZ==", "Ya==", "Yb==",
             "Yc==", "Yd==", "Ye==", "Yf==", "YWJ=", "YWK=", "YWL=", "YQ===", "YWI==", "YWJj=",
         ] {
-            assert_eq!(
-                decode_base64(alias),
-                Err(AudioError::InvalidBase64),
+            assert!(
+                matches!(decode_base64(alias), Err(AudioError::InvalidBase64(_))),
                 "{alias}"
             );
         }
@@ -287,6 +293,23 @@ mod tests {
             Err(AudioError::AppendTooLarge {
                 max_bytes: MAX_APPEND_AUDIO_BYTES,
             })
+        );
+    }
+
+    #[test]
+    fn invalid_base64_carries_the_decode_failure_as_its_source() {
+        use std::error::Error as _;
+
+        let error = decode_base64("%%%").expect_err("invalid Base64 is rejected");
+        let AudioError::InvalidBase64(source) = &error else {
+            panic!("invalid Base64 names its cause: {error}");
+        };
+        assert_eq!(*source, base64::DecodeError::InvalidByte(0, b'%'));
+        assert!(
+            error
+                .source()
+                .is_some_and(<(dyn std::error::Error + 'static)>::is::<base64::DecodeError>),
+            "the error chain carries the decoder failure"
         );
     }
 

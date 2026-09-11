@@ -1,6 +1,8 @@
 //! Continuous supervision, recovery, and joined-shutdown coverage.
 
 use std::cell::{Cell, RefCell};
+use std::io::{Read as _, Write as _};
+use std::net::TcpListener;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -203,6 +205,108 @@ fn an_exact_spawned_pid_authenticates_late_child_cleanup() {
     assert!(
         gateway.received_shutdown(Duration::from_secs(1)),
         "an unpublished owned child receives authenticated shutdown"
+    );
+}
+
+#[test]
+fn explicit_candidate_shutdown_delivers_and_disarms_the_drop_signal() {
+    let mut gateway = validated_gateway("owned-key");
+    let validated = gateway.validate("owned-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let RecoveryOwnership::Owned(candidate) =
+        RecoveryCandidate::authenticate(validated.pid(), validated)
+    else {
+        panic!("the validated file names the spawned child");
+    };
+
+    candidate
+        .shutdown()
+        .expect("the fixture accepts the authenticated shutdown");
+
+    assert!(
+        gateway.received_shutdown(Duration::from_secs(1)),
+        "the explicit path signals the unpublished child"
+    );
+    assert!(
+        !gateway.received_shutdown(Duration::from_millis(100)),
+        "the disarmed drop sends no second signal"
+    );
+}
+
+#[test]
+fn explicit_candidate_shutdown_reports_a_delivery_failure() {
+    let validated = {
+        let gateway = validated_gateway("owned-key");
+        gateway.validate("owned-key", 1_778_000_001, "2026-09-08T18:00:01Z")
+    };
+    let RecoveryOwnership::Owned(candidate) =
+        RecoveryCandidate::authenticate(validated.pid(), validated)
+    else {
+        panic!("the validated file names the spawned child");
+    };
+
+    let error = candidate
+        .shutdown()
+        .expect_err("a dead child cannot accept the shutdown");
+    assert!(
+        matches!(error, shared_sidecar::ShutdownError::Io { .. }),
+        "the explicit path reports the delivery failure: {error}"
+    );
+}
+
+#[test]
+fn dropping_a_candidate_signals_without_waiting_for_an_unresponsive_child() {
+    // The fixture child lends its validatable pid; the hanging listener
+    // answers the validation probe, then parks the shutdown connection.
+    let gateway = validated_gateway("hanging-key");
+    let reference = gateway.validate("hanging-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let hang = Arc::new(AtomicBool::new(false));
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind the hanging fixture");
+    let port = listener.local_addr().expect("the fixture address").port();
+    std::thread::spawn({
+        let hang = Arc::clone(&hang);
+        move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0_u8; 1024];
+                if hang.load(Ordering::SeqCst) {
+                    let _ = stream.read(&mut buffer);
+                    std::thread::sleep(Duration::from_secs(5));
+                    continue;
+                }
+                while let Ok(read) = stream.read(&mut buffer) {
+                    if read == 0 {
+                        break;
+                    }
+                    if stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let file = GatewayDiscoveryFile {
+        port,
+        api_key: "hanging-key".to_owned(),
+        pid: reference.pid(),
+        epoch: 1_778_000_001,
+        version: "test".to_owned(),
+        started_at: "2026-09-08T18:00:01Z".to_owned(),
+    };
+    let validated = ValidatedConnection::validate(file).expect("the hanging endpoint validates");
+    hang.store(true, Ordering::SeqCst);
+    let RecoveryOwnership::Owned(candidate) =
+        RecoveryCandidate::authenticate(validated.pid(), validated)
+    else {
+        panic!("the validated file names the spawned child");
+    };
+
+    let started = Instant::now();
+    drop(candidate);
+    assert!(
+        started.elapsed() < Duration::from_millis(250),
+        "drop signals on a detached thread instead of waiting out the late-child budget"
     );
 }
 

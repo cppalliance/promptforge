@@ -300,7 +300,7 @@ fn event_id(event: &ClientEvent) -> Option<String> {
 }
 fn session_error(error: &SessionError, client_event_id: Option<String>) -> ClientError {
     match error {
-        SessionError::Audio(AudioError::InvalidBase64) => ClientError::request(
+        SessionError::Audio(AudioError::InvalidBase64(_)) => ClientError::request(
             "invalid_base64_audio",
             "Audio must be valid Base64",
             Some("audio"),
@@ -367,7 +367,7 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
         SessionError::EpochExhausted
         | SessionError::CanceledTaskFailed
         | SessionError::GenerationUnavailable
-        | SessionError::Inference
+        | SessionError::Inference(_)
         | SessionError::Finalization(_)
         | SessionError::Mailbox(MailboxError::TerminalAlreadySet | MailboxError::UnknownItem) => {
             ClientError::server(

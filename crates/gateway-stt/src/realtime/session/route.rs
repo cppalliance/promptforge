@@ -59,10 +59,7 @@ impl Session {
         self.interim_task = Some(tokio::spawn(async move {
             let request = DecodeRequest::new(DecodeMode::Interim, samples, guidance, finalized)
                 .with_lifetime_guard(samples_owner);
-            let transcript = engine
-                .decode(request)
-                .await
-                .map_err(|error| error.to_string());
+            let transcript = engine.decode(request).await;
             InterimTaskOutput::Decode {
                 epoch,
                 item_id,
@@ -106,7 +103,7 @@ impl Session {
         if input.item_id() != item_id {
             return Ok(None);
         }
-        let transcript = transcript.map_err(|_| SessionError::Inference)?;
+        let transcript = transcript.map_err(SessionError::Inference)?;
         if transcript.is_empty() {
             return Ok(None);
         }

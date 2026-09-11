@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use shared_sidecar::{
-    CancellationToken, GatewayDiscoveryFile, LaunchDecision, Resolution, SidecarError,
-    ValidatedConnection,
+    CancellationToken, GatewayDiscoveryFile, LaunchDecision, Resolution, ShutdownError,
+    SidecarError, ValidatedConnection,
 };
 
 use super::boot;
@@ -50,6 +50,14 @@ pub(super) trait SupervisedGatewayIdentity {
 
     /// Disarms cleanup after this identity becomes authoritative.
     fn publication_succeeded(&mut self) {}
+
+    /// Shuts down an unpublished owned child through the explicit,
+    /// error-reporting path. Identities that own no child do nothing.
+    fn shutdown_unpublished(self)
+    where
+        Self: Sized,
+    {
+    }
 }
 
 /// A validated recovery process whose pid proves it is the child we spawned.
@@ -88,6 +96,23 @@ impl RecoveryCandidate {
     pub(super) fn published(&mut self) {
         self.published = true;
     }
+
+    /// Shuts down the unpublished recovered child within the late-child
+    /// budget.
+    ///
+    /// This is the blocking, error-reporting path; `Drop` only signals on
+    /// a detached thread. The drop signal is disarmed either way: the
+    /// caller receives the outcome, so a failed delivery is reported here
+    /// rather than retried silently.
+    pub(super) fn shutdown(mut self) -> Result<(), ShutdownError> {
+        if self.published {
+            return Ok(());
+        }
+        debug_assert_eq!(self.child_pid, self.validated.pid());
+        self.published = true;
+        let deadline = Instant::now() + LATE_CHILD_SHUTDOWN_BUDGET;
+        shared_sidecar::request_shutdown_before(&self.validated, deadline)
+    }
 }
 
 impl Drop for RecoveryCandidate {
@@ -96,12 +121,23 @@ impl Drop for RecoveryCandidate {
             return;
         }
         debug_assert_eq!(self.child_pid, self.validated.pid());
-        let deadline = Instant::now() + LATE_CHILD_SHUTDOWN_BUDGET;
-        if let Err(error) = shared_sidecar::request_shutdown_before(&self.validated, deadline) {
-            // Drop has no error return channel. The bounded authenticated
-            // request is best effort, so diagnostics are the only place this
-            // cleanup failure can be surfaced without aborting teardown.
-            eprintln!("could not shut down an unpublished recovered gateway: {error}");
+        // Drop can neither block nor report: the bounded authenticated
+        // request runs on a detached thread, so a missed explicit
+        // `shutdown()` still signals the unpublished gateway process.
+        let validated = self.validated.clone();
+        let signalled = std::thread::Builder::new()
+            .name("gateway-late-child-shutdown".to_owned())
+            .spawn(move || {
+                let deadline = Instant::now() + LATE_CHILD_SHUTDOWN_BUDGET;
+                if let Err(error) = shared_sidecar::request_shutdown_before(&validated, deadline) {
+                    // The detached signal has no error return channel, so
+                    // diagnostics are the only place this cleanup failure
+                    // can surface.
+                    eprintln!("could not shut down an unpublished recovered gateway: {error}");
+                }
+            });
+        if let Err(error) = signalled {
+            eprintln!("could not signal an unpublished recovered gateway: {error}");
         }
     }
 }
@@ -135,6 +171,14 @@ impl SupervisedGatewayIdentity for RecoveryIdentity {
     fn publication_succeeded(&mut self) {
         if let Self::Candidate(candidate) = self {
             candidate.published();
+        }
+    }
+
+    fn shutdown_unpublished(self) {
+        if let Self::Candidate(candidate) = self
+            && let Err(error) = candidate.shutdown()
+        {
+            eprintln!("could not shut down an unpublished recovered gateway: {error}");
         }
     }
 }
@@ -344,6 +388,9 @@ impl GatewaySupervisor {
     }
 
     /// Revokes publication, requests stop, and waits at most one deadline.
+    ///
+    /// This is the blocking, outcome-reporting path; `Drop` only signals
+    /// and detaches.
     pub(crate) fn shutdown(mut self) -> SupervisorShutdown {
         self.stop_and_join()
     }
@@ -380,7 +427,16 @@ impl GatewaySupervisor {
 
 impl Drop for GatewaySupervisor {
     fn drop(&mut self) {
-        let _ = self.stop_and_join();
+        // `shutdown()` is the bounded, outcome-reporting path. Drop can
+        // neither wait nor report, so it revokes publication, signals the
+        // stop, and detaches both threads; the worker captures only owned
+        // state, so a detached thread finishes on its own.
+        if let Some(publication) = self.publication.as_ref() {
+            publication.close_publication();
+        }
+        self.stop.signal();
+        drop(self.thread.take());
+        drop(self.stop_bridge.take());
     }
 }
 
@@ -536,6 +592,10 @@ pub(super) fn run_supervision<Identity, Probe, Recover, Publish, Wait, Error>(
                     }
                     Err(error) => {
                         eprintln!("could not publish a replacement local gateway: {error}");
+                        // A recovered child this process launched stays
+                        // unpublished, so it is shut down through the
+                        // explicit, error-reporting path.
+                        identity.shutdown_unpublished();
                     }
                 },
                 Err(error) => {

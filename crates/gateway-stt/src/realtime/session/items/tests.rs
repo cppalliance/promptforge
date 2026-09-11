@@ -113,22 +113,25 @@ async fn blocked_interim_keeps_exact_budget_until_worker_retirement_and_commit_r
             |session| async {
                 assert_eq!(probe.retained_samples(), 16_002);
                 cancel_generation_epoch(&service, session);
-                assert!(matches!(
-                    session.finish_interim().await,
-                    Err(SessionError::Inference)
-                ));
+                let Err(SessionError::Inference(source)) = session.finish_interim().await else {
+                    panic!("a cancelled generation fails the interim with its engine cause");
+                };
+                assert!(
+                    !source.to_string().is_empty(),
+                    "the restored chain carries the engine failure"
+                );
                 assert_eq!(
                     probe.retained_samples(),
                     16_002,
                     "epoch cancellation cannot release worker-owned PCM"
                 );
 
-                assert_eq!(
+                assert!(matches!(
                     session.commit(),
                     Err(SessionError::Audio(AudioError::BufferTooLong {
                         maximum_seconds: 30,
                     }))
-                );
+                ));
                 assert_eq!(session.results.reserved_items(), 0);
                 assert_eq!(session.committed.len(), 0);
                 assert_eq!(

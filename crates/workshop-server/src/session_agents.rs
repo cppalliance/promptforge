@@ -249,7 +249,8 @@ impl AgentSessions {
                 .map_err(|source| LaunchRefusal::SessionState { source })?,
         );
         let (supervisor_events, events) = mpsc::unbounded_channel();
-        let lifecycle = Arc::new(RunLifecycle::new(supervisor_events));
+        let (cancellations, cancellation_events) = mpsc::channel(lifecycle::CANCELLATION_CAPACITY);
+        let lifecycle = Arc::new(RunLifecycle::new(supervisor_events, cancellations));
         let waits = Arc::new(WaitRegistry::new());
         let (input_frames, _) = broadcast::channel(INPUT_CAPACITY);
         let (deltas, _) = broadcast::channel(DELTA_CAPACITY);
@@ -273,6 +274,7 @@ impl AgentSessions {
             self.inner.host.clone(),
             self.inner.gateway.clone(),
             events,
+            cancellation_events,
         );
         Ok(session)
     }
@@ -1011,13 +1013,14 @@ mod tests {
         let menu = MenuBus::new(catalog.clone(), None);
         let (errors, mut errors_rx) = broadcast::channel(ERROR_CAPACITY);
         let (supervisor_events, _events) = mpsc::unbounded_channel();
+        let (cancellations, _cancellation_events) = mpsc::channel(lifecycle::CANCELLATION_CAPACITY);
         let observer = SessionObserver {
             log: Arc::new(WorkshopObserver::new(None).expect("a memory log")),
             rounds: Arc::new(AtomicU64::new(0)),
             push: Push::new(status, catalog, menu),
             backoff: ReconnectBackoff::new(),
             errors,
-            lifecycle: Arc::new(RunLifecycle::new(supervisor_events)),
+            lifecycle: Arc::new(RunLifecycle::new(supervisor_events, cancellations)),
         };
 
         observer.observe("run", "chat", Observation::ModelTurnFailed);

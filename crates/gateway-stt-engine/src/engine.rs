@@ -158,7 +158,8 @@ impl SttEngine {
     ///
     /// Calling this method more than once has no additional effect. Native
     /// decoding is non-preemptible, so shutdown waits for a running decode
-    /// rather than detaching its worker.
+    /// rather than detaching its worker. This is the blocking,
+    /// error-reporting path; `Drop` only signals and detaches.
     /// # Errors
     /// Returns [`TranscribeError::ShutdownPanicked`] for one panicked worker or
     /// [`TranscribeError::ShutdownFailures`] for multiple panicked workers.
@@ -186,14 +187,20 @@ impl SttEngine {
 
 impl Drop for SttEngine {
     fn drop(&mut self) {
-        // Explicit shutdown surfaces join panics. Drop cannot return one.
-        drop(self.shutdown());
+        // `shutdown` is the blocking, error-reporting path; Drop signals
+        // both workers and detaches their threads without joining.
+        self.transcriber.signal_and_detach();
+        if let Some(final_pass) = &self.final_pass {
+            final_pass.signal_and_detach();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Barrier};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Barrier, Condvar, Mutex, PoisonError};
+    use std::time::Duration;
 
     use crate::Decoder;
 
@@ -247,5 +254,134 @@ mod tests {
             TranscribeError::SpawnWorker(source)
                 if source.to_string() == "final spawn sentinel"
         ));
+    }
+
+    /// Shared observation of one decoder parked inside `decode`.
+    #[derive(Clone, Debug, Default)]
+    struct ParkControl {
+        state: Arc<ParkState>,
+    }
+
+    #[derive(Debug, Default)]
+    struct ParkState {
+        phase: Mutex<ParkPhase>,
+        changed: Condvar,
+        dropped: AtomicBool,
+    }
+
+    #[derive(Debug, Default, Eq, PartialEq)]
+    enum ParkPhase {
+        #[default]
+        Armed,
+        Entered,
+        Released,
+    }
+
+    impl ParkControl {
+        fn wait_until_entered(&self) {
+            let phase = self
+                .state
+                .phase
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let (_phase, timeout) = self
+                .state
+                .changed
+                .wait_timeout_while(phase, Duration::from_secs(1), |phase| {
+                    *phase != ParkPhase::Entered
+                })
+                .unwrap_or_else(PoisonError::into_inner);
+            assert!(!timeout.timed_out(), "the job parks inside the decoder");
+        }
+
+        fn release(&self) {
+            let mut phase = self
+                .state
+                .phase
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            *phase = ParkPhase::Released;
+            self.state.changed.notify_all();
+        }
+
+        fn wait_until_dropped(&self) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !self.state.dropped.load(Ordering::Acquire) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the detached worker drops the decoder after the release"
+                );
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct ParkFactory(ParkControl);
+
+    impl ModelFactory for ParkFactory {
+        fn create(&self, _mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+            Ok(Some(Box::new(ParkDecoder(Arc::clone(&self.0.state)))))
+        }
+    }
+
+    struct ParkDecoder(Arc<ParkState>);
+
+    impl Decoder for ParkDecoder {
+        fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
+            let mut phase = self.0.phase.lock().unwrap_or_else(PoisonError::into_inner);
+            *phase = ParkPhase::Entered;
+            self.0.changed.notify_all();
+            drop(
+                self.0
+                    .changed
+                    .wait_while(phase, |phase| *phase != ParkPhase::Released)
+                    .unwrap_or_else(PoisonError::into_inner),
+            );
+            Ok("parked".to_owned())
+        }
+    }
+
+    impl Drop for ParkDecoder {
+        fn drop(&mut self) {
+            self.0.dropped.store(true, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn drop_signals_and_detaches_instead_of_joining_a_running_decode() {
+        let control = ParkControl::default();
+        let engine =
+            SttEngine::new(ParkFactory(control.clone()), policy()).expect("the engine builds");
+        let request =
+            DecodeRequest::new(DecodeMode::Interim, Vec::new(), Vec::new(), String::new());
+        let mut decode = Box::pin(engine.decode(request));
+        let waker = std::task::Waker::noop();
+        let mut context = std::task::Context::from_waker(waker);
+        assert!(
+            decode.as_mut().poll(&mut context).is_pending(),
+            "the submitted decode pends on the parked worker"
+        );
+        control.wait_until_entered();
+        drop(decode);
+        // The delayed releaser turns a blocking join into a failed timing
+        // assertion instead of a deadlocked test.
+        let releaser = std::thread::spawn({
+            let control = control.clone();
+            move || {
+                std::thread::sleep(Duration::from_millis(500));
+                control.release();
+            }
+        });
+
+        let started = std::time::Instant::now();
+        drop(engine);
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "drop signals and detaches instead of joining the running decode"
+        );
+
+        releaser.join().expect("the releaser thread joins");
+        control.wait_until_dropped();
     }
 }

@@ -411,10 +411,10 @@ mod tests {
             .expect("retry input exists")
             .item_id()
             .to_owned();
-        assert_eq!(
+        assert!(matches!(
             session.commit(),
             Err(SessionError::CommittedItemsAtCapacity)
-        );
+        ));
         assert_eq!(session.input().expect("input remains").item_id(), retry_id);
 
         session
@@ -445,7 +445,10 @@ mod tests {
         session
             .spawn_interim(pending())
             .expect("capacity-plus-one task starts");
-        assert_eq!(session.clear(), Err(SessionError::CancelJoinAtCapacity));
+        assert!(matches!(
+            session.clear(),
+            Err(SessionError::CancelJoinAtCapacity)
+        ));
         assert!(
             session.input().is_some(),
             "recoverable error preserves input"
