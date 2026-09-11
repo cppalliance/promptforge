@@ -71,7 +71,7 @@ async fn canceled_decode_scenario_releases_and_permits_a_follow_up() {
     engine.shutdown().expect("worker joins");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn decode_rendezvous_timeout_releases_a_late_arrival_and_permits_a_follow_up() {
     let decoder = ScriptedDecoder::new();
     decoder.push_text("late arrival");
@@ -79,33 +79,26 @@ async fn decode_rendezvous_timeout_releases_a_late_arrival_and_permits_a_follow_
         SttEngine::new(ScriptedModelFactory::new(decoder.clone()), policy())
             .expect("scripted worker starts"),
     );
-    let delayed_engine = Arc::clone(&engine);
-    let (decode_tx, decode_rx) = tokio::sync::oneshot::channel();
+    // The rendezvous timeout is a real-time condvar wait while the paused
+    // clock auto-advances when the runtime idles, so a timer-based late
+    // arrival would race the rendezvous. Arriving only after the timeout
+    // keeps the lateness deterministic.
     let result = decoder
-        .with_next_decode_blocked(
-            Duration::from_millis(10),
-            || async move {
-                let decode = tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    start_decode(delayed_engine)
-                        .await
-                        .expect("nested decode task joins")
-                });
-                drop(decode_tx.send(decode));
-            },
-            |()| async {},
-        )
+        .with_next_decode_blocked(Duration::from_millis(10), || async {}, |()| async {})
         .await;
     assert!(result.is_none(), "the rendezvous must time out");
+    let delayed_engine = Arc::clone(&engine);
+    let decode = tokio::spawn(async move {
+        start_decode(delayed_engine)
+            .await
+            .expect("nested decode task joins")
+    });
     assert_eq!(
-        tokio::time::timeout(
-            WAIT,
-            decode_rx.await.expect("late decode handle is published")
-        )
-        .await
-        .expect("late decode is not stranded")
-        .expect("late decode task joins")
-        .expect("late decode succeeds"),
+        tokio::time::timeout(WAIT, decode)
+            .await
+            .expect("late decode is not stranded")
+            .expect("late decode task joins")
+            .expect("late decode succeeds"),
         "late arrival"
     );
     run_blocked_decode(&decoder, &engine, "follow-up after timeout").await;

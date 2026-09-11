@@ -389,7 +389,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn cancellation_interrupts_the_dispatch() {
         let recorder = Recorder::default();
         let slow = binding("slow", Arc::new(SlowTool));

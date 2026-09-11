@@ -300,7 +300,7 @@ async fn an_uncaught_broker_failure_fails_the_run_typed() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn cancellation_interrupts_a_pending_input_wait() {
     use crate::cancel::{self, CancelHandle};
     use std::time::{Duration, Instant};

@@ -3091,7 +3091,7 @@ impl Tool for SignallingSlowTool {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn cancellation_interrupts_a_slow_script_tools_call() {
     use crate::cancel::{self, CancelHandle};
 

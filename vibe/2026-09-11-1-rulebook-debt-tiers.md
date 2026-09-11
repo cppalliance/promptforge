@@ -231,7 +231,7 @@ This is a mechanical change: the existing suite unmodified plus the component-sc
 
 <step-4>
 
-### Step 4: Paused-time conversion for in-process async tests
+### Step 4: Paused-time conversion for in-process async tests [completed]
 
 - Component: paused-time-tests
 
