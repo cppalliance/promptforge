@@ -477,6 +477,40 @@ test("picking the speech kind reveals the voices chips and Save PUTs them", asyn
   assert.deepEqual(model.voices, ["nova"], "the added chip carries into the payload");
 });
 
+test("switching back from speech hides the voices chips and Save drops them", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/remote/gpt-remote");
+  await settle();
+
+  dropdownValues(root, "kind");
+  root.querySelector(".field-row[data-key='kind'] [data-value='speech']").click();
+  await settle();
+  const chips = root.querySelector(".field-row[data-key='voices'] .chip-input input");
+  chips.value = "nova";
+  chips.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter" }));
+  await settle();
+
+  root.querySelector(".field-row[data-key='kind'] [data-value='chat']").click();
+  await settle();
+  assert.equal(
+    root.querySelector(".field-row[data-key='voices']"),
+    null,
+    "switching back to chat hides the voices field",
+  );
+
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  assert.ok(put, "Save PUTs /admin/config");
+  const model = JSON.parse(put.init.body).model.find((entry) => entry.name === "gpt-remote");
+  assert.equal(model.kind, "chat", "the reverted kind carries into the payload");
+  assert.equal("voices" in model, false, "the hidden voices stay out of the payload");
+});
+
 test("deleting a model confirms, PUTs the config without it, and returns to the list", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
