@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use super::{FinalRangeOutcome, ForcedBoundary, TakeState};
+use crate::take::TakeFailure;
 
 fn completion(
     first_range: std::ops::Range<u64>,
@@ -6,7 +9,7 @@ fn completion(
     new_audio: std::ops::Range<u64>,
     previous: &str,
     current: &str,
-) -> Result<String, String> {
+) -> Result<String, Arc<TakeFailure>> {
     let state = TakeState::default();
     state.record_final_outcome(
         FinalRangeOutcome::forced(ForcedBoundary::first(first_range), previous.to_owned()),
@@ -22,7 +25,7 @@ fn completion(
     state.completion(&[], new_audio.end)
 }
 
-fn assert_estimated(result: Result<String, String>, expected: &str) {
+fn assert_estimated(result: Result<String, Arc<TakeFailure>>, expected: &str) {
     assert_eq!(
         result.expect("weak overlap uses bounded projection"),
         expected
@@ -93,10 +96,12 @@ fn an_over_limit_final_transcript_fails_before_it_can_become_pending() {
         &[],
     );
 
+    let failure = state
+        .completion(&[], 160_000)
+        .expect_err("over-limit transcript fails");
+    assert!(matches!(&*failure, TakeFailure::TranscriptLimit));
     assert_eq!(
-        state
-            .completion(&[], 160_000)
-            .expect_err("over-limit transcript fails"),
+        failure.to_string(),
         "final transcript exceeds the 16 KiB window limit"
     );
 }

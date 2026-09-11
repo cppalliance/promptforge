@@ -1,6 +1,5 @@
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-#[cfg(test)]
 use gateway_stt_engine::TranscribeError;
 
 use super::agreement::{
@@ -18,10 +17,45 @@ use crate::segment::{ForcedBoundary, Segmenter};
 #[derive(Debug, Default)]
 struct FinalizedState {
     text: String,
-    failure: Option<String>,
+    failure: Option<Arc<TakeFailure>>,
     samples: u64,
     outcomes: Vec<FinalRangeOutcome>,
     pending_forced: Option<PendingForced>,
+}
+
+/// One typed take failure retained for commit gating and finalization.
+///
+/// The failure is shared between the take's slot and the session's precommit
+/// gating, so it is reference-counted at the boundary.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum TakeFailure {
+    #[error("final transcript exceeds the 16 KiB window limit")]
+    TranscriptLimit,
+    #[error("forced final window was not decoded")]
+    ForcedWindowNotDecoded,
+    #[error("forced final window was not decodable")]
+    ForcedWindowNotDecodable,
+    #[error("forced final overlap metadata is inconsistent")]
+    ForcedOverlapInconsistent,
+    #[error("final outcome capacity is reached")]
+    OutcomeCapacity,
+    #[error("final segment capacity is reached")]
+    SegmentCapacity,
+    #[error("final transcription pipeline exited")]
+    PipelineExited,
+    #[error("accepted hypothesis capacity is reached")]
+    HypothesisCapacity,
+    #[error("forced final PCM retirement failed")]
+    RetirementFailed,
+    #[error("forced final PCM ownership became inconsistent")]
+    OwnershipInconsistent,
+    #[error("final transcription worker is unavailable")]
+    WorkerUnavailable,
+    #[error(transparent)]
+    Transcribe(#[from] TranscribeError),
+    #[cfg(any(test, feature = "test-fixtures"))]
+    #[error("{0}")]
+    Recorded(String),
 }
 
 #[derive(Debug)]
@@ -103,7 +137,9 @@ impl TakeState {
                     state.samples = samples;
                 }
             }
-            Err(error) if state.failure.is_none() => state.failure = Some(error.to_string()),
+            Err(error) if state.failure.is_none() => {
+                state.failure = Some(Arc::new(TakeFailure::from(error)));
+            }
             Ok(_) | Err(_) => {}
         }
     }
@@ -121,14 +157,14 @@ impl TakeState {
             &outcome.result,
             FinalRangeResult::Decoded(text) if !final_transcript_within_limit(text)
         ) {
-            state.failure = Some("final transcript exceeds the 16 KiB window limit".to_owned());
+            state.failure = Some(Arc::new(TakeFailure::TranscriptLimit));
             return;
         }
         match outcome.boundary.clone() {
             FinalBoundary::Natural => record_natural_outcome(&mut state, outcome, accepted),
             FinalBoundary::Forced(boundary) => {
                 let FinalRangeResult::Decoded(text) = outcome.result else {
-                    state.failure = Some("forced final window was not decoded".to_owned());
+                    state.failure = Some(Arc::new(TakeFailure::ForcedWindowNotDecoded));
                     return;
                 };
                 record_forced_outcome(&mut state, boundary, text, accepted);
@@ -136,10 +172,10 @@ impl TakeState {
         }
     }
 
-    pub(super) fn record_failure(&self, failure: String) {
+    pub(super) fn record_failure(&self, failure: TakeFailure) {
         let mut state = Self::lock(&self.finalized);
         if state.failure.is_none() {
-            state.failure = Some(failure);
+            state.failure = Some(Arc::new(failure));
         }
     }
 
@@ -147,7 +183,7 @@ impl TakeState {
         Self::lock(&self.finalized).failure.is_some()
     }
 
-    pub(super) fn pending_failure(&self) -> Option<String> {
+    pub(super) fn pending_failure(&self) -> Option<Arc<TakeFailure>> {
         Self::lock(&self.finalized).failure.clone()
     }
 
@@ -165,7 +201,7 @@ impl TakeState {
     }
 
     #[cfg(test)]
-    pub(super) fn take_failure(&self) -> Option<String> {
+    pub(super) fn take_failure(&self) -> Option<Arc<TakeFailure>> {
         Self::lock(&self.finalized).failure.take()
     }
 
@@ -173,10 +209,10 @@ impl TakeState {
         &self,
         accepted: &[AcceptedHypothesis],
         committed_samples: u64,
-    ) -> Result<String, String> {
+    ) -> Result<String, Arc<TakeFailure>> {
         let mut state = Self::lock(&self.finalized);
         if state.failure.is_none() && !flush_pending_forced(&mut state, accepted) {
-            state.failure = Some("final outcome capacity is reached".to_owned());
+            state.failure = Some(Arc::new(TakeFailure::OutcomeCapacity));
         }
         settle_skipped(&mut state, accepted, false);
         match state.failure.take() {
@@ -230,21 +266,21 @@ fn record_forced_outcome(
 ) {
     let Some(overlap) = boundary.overlap() else {
         if state.pending_forced.is_some() {
-            state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+            state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
             return;
         }
         state.pending_forced = Some(PendingForced { boundary, text });
         return;
     };
     let Some(previous) = state.pending_forced.take() else {
-        state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+        state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
         return;
     };
     if previous.boundary.decode_range().end != overlap.end
         || boundary.new_audio().start != overlap.end
     {
         state.pending_forced = Some(previous);
-        state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+        state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
         return;
     }
     let previous_range = previous.boundary.decode_range();
@@ -262,7 +298,7 @@ fn record_forced_outcome(
             projected_prefix_end(&previous.text, previous_range.clone(), overlap.start)
         else {
             state.pending_forced = Some(previous);
-            state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+            state.failure = Some(Arc::new(TakeFailure::ForcedOverlapInconsistent));
             return;
         };
         tracing::warn!(

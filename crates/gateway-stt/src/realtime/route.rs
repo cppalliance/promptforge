@@ -21,6 +21,7 @@ use super::session::SessionError;
 use super::wire::{ClientError, ClientEvent, ServerEvent, parse_client_event};
 use crate::audio::AudioError;
 use crate::generation::{GenerationLease, GenerationState};
+use crate::take::TakeFailure;
 
 const SEND_DEADLINE: Duration = Duration::from_millis(500);
 
@@ -70,14 +71,12 @@ impl RoutePolicy {
         self.forced_precommit_failure = Some(failure);
     }
 
-    fn precommit_failure(&self) -> Option<&'static str> {
+    fn precommit_failure(&self) -> Option<TakeFailure> {
         #[cfg(feature = "test-fixtures")]
         if let Some(failure) = self.forced_precommit_failure {
             return Some(match failure {
-                ForcedPrecommitFailure::FinalSegmentOverload => "final segment capacity is reached",
-                ForcedPrecommitFailure::Transcription => {
-                    "final transcription worker is unavailable"
-                }
+                ForcedPrecommitFailure::FinalSegmentOverload => TakeFailure::SegmentCapacity,
+                ForcedPrecommitFailure::Transcription => TakeFailure::WorkerUnavailable,
             });
         }
         None
@@ -270,7 +269,7 @@ fn append_events(
     session.ensure_interim_capacity()?;
     session.append_base64(audio)?;
     if let Some(failure) = policy.precommit_failure() {
-        session.record_pending_failure(failure.to_owned())?;
+        session.record_pending_failure(failure)?;
     }
     Ok(Vec::new())
 }

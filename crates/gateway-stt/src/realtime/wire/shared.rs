@@ -123,6 +123,14 @@ impl ClientError {
     }
 }
 
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ClientError {}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum RequiredNullable<T> {
     Null,

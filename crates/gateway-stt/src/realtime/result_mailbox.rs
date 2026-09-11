@@ -1,5 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
+use crate::take::TakeFailure;
+
 pub(crate) const SESSION_RESULT_CAPACITY: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -10,11 +12,11 @@ pub(crate) enum ItemFailure {
 }
 
 impl ItemFailure {
-    pub(crate) fn from_precommit(message: &str) -> Self {
-        if message == "final segment capacity is reached" {
-            Self::FinalSegmentOverload(message.to_owned())
+    pub(crate) fn from_precommit(failure: &TakeFailure) -> Self {
+        if matches!(failure, TakeFailure::SegmentCapacity) {
+            Self::FinalSegmentOverload(failure.to_string())
         } else {
-            Self::PrecommitTranscriptionFailed(message.to_owned())
+            Self::PrecommitTranscriptionFailed(failure.to_string())
         }
     }
 

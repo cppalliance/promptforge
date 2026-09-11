@@ -3,6 +3,7 @@ use super::item::CommittedItem;
 use super::registry::SessionRegistration;
 use super::wire::{ClientError, EffectiveSession, IdGenerator, ServerEvent};
 use crate::generation::GenerationLease;
+use crate::take::TakeFailure;
 #[cfg(any(test, feature = "test-fixtures"))]
 use std::future::Future;
 mod items;
@@ -150,7 +151,10 @@ impl Session {
         self.canceled_tasks.len()
     }
 
-    pub(crate) fn record_pending_failure(&mut self, failure: String) -> Result<(), SessionError> {
+    pub(crate) fn record_pending_failure(
+        &mut self,
+        failure: TakeFailure,
+    ) -> Result<(), SessionError> {
         let input = self.input.as_mut().ok_or(SessionError::NoInput)?;
         input.record_pending_failure(failure);
         Ok(())
@@ -161,6 +165,7 @@ impl Session {
         self.input
             .as_ref()
             .and_then(UncommittedInput::pending_failure)
+            .map(|failure| failure.to_string())
     }
 
     #[cfg(feature = "test-fixtures")]

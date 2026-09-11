@@ -1,11 +1,15 @@
 #[cfg(feature = "test-fixtures")]
 use std::future::Future;
+#[cfg(feature = "test-fixtures")]
+use std::sync::Arc;
 
 use super::state::{
     MAX_COMMITTED_ITEMS_PER_SESSION, SESSION_CANCEL_JOIN_CAPACITY, Session, SessionError,
 };
 use crate::realtime::item::{CommitReceipt, CommittedItem};
 use crate::realtime::result_mailbox::{ItemFailure, ItemResult, MailboxError};
+#[cfg(feature = "test-fixtures")]
+use crate::take::TakeFailure;
 
 impl Session {
     pub(crate) fn commit(&mut self) -> Result<CommitReceipt, SessionError> {
@@ -72,7 +76,7 @@ impl Session {
         task: F,
     ) -> Result<(), SessionError>
     where
-        F: Future<Output = Result<String, String>> + Send + 'static,
+        F: Future<Output = Result<String, Arc<TakeFailure>>> + Send + 'static,
     {
         let item = self
             .committed
@@ -151,9 +155,7 @@ impl Session {
                 .committed
                 .get_mut(item_id)
                 .ok_or(MailboxError::UnknownItem)?;
-            item.finish_finalization()
-                .await
-                .map_err(SessionError::Finalization)?
+            item.finish_finalization().await?
         };
         self.results.set_terminal(item_id, terminal)?;
         Ok(())

@@ -2,9 +2,13 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use gateway_stt::test_fixtures::{
-    HourSimulationProbe, RealtimeSessionFixture, RealtimeSessionRegistryFixture, ScriptedDecoder,
-    ScriptedModelFactory, hour_marker_input,
+    FixtureError, HourSimulationProbe, RealtimeSessionFixture, RealtimeSessionRegistryFixture,
+    ScriptedDecoder, ScriptedModelFactory, hour_marker_input,
 };
+
+fn source_message(error: &FixtureError) -> Option<String> {
+    std::error::Error::source(error).map(ToString::to_string)
+}
 
 const WAIT: Duration = Duration::from_secs(2);
 const INPUT_SAMPLES_PER_STRIDE: usize = 24_000 * 10;
@@ -86,7 +90,11 @@ async fn append_after_retirement(session: &mut RealtimeSessionFixture, payload: 
     loop {
         match session.append_base64(payload) {
             Ok(()) => return,
-            Err(error) if error.contains("audio buffer exceeds") && Instant::now() < deadline => {
+            Err(error)
+                if source_message(&error)
+                    .is_some_and(|message| message.contains("audio buffer exceeds"))
+                    && Instant::now() < deadline =>
+            {
                 tokio::task::yield_now().await;
             }
             Err(error) => panic!("continuous append must succeed after retirement: {error}"),
@@ -469,11 +477,13 @@ async fn blocked_forced_decode_enforces_the_thirty_second_aggregate_budget() {
                     provisional
                 );
                 assert_eq!(session.pending_final_segments(), Some(2));
+                let error = session
+                    .append_base64(&encoded_speech())
+                    .expect_err("capture faster than decoding reaches retained ownership");
+                assert_eq!(error.to_string(), "append fixture audio");
                 assert_eq!(
-                    session
-                        .append_base64(&encoded_speech())
-                        .expect_err("capture faster than decoding reaches retained ownership"),
-                    "audio buffer exceeds 30 seconds"
+                    source_message(&error).as_deref(),
+                    Some("audio buffer exceeds 30 seconds")
                 );
                 assert_eq!(
                     session

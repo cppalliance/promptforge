@@ -243,7 +243,7 @@ Prove the conversions deterministic by running the affected tests repeatedly; th
 
 <step-5>
 
-### Step 5: `FixtureError` and typed sources in the take/finalization pipeline
+### Step 5: `FixtureError` and typed sources in the take/finalization pipeline [completed]
 
 - Component: stringly-error-elimination
 

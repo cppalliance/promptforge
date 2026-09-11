@@ -9,7 +9,7 @@ use crate::segment::{FORCED_OVERLAP_SAMPLES, ForcedBoundary};
 
 use super::final_outcome::{FinalRangeOutcome, SkipReason};
 use super::pcm::RetainedPcm;
-use super::state::TakeState;
+use super::state::{TakeFailure, TakeState};
 use super::window::WholeWindowState;
 
 pub(super) async fn process_samples<D, F>(
@@ -36,7 +36,7 @@ pub(super) async fn process_samples<D, F>(
     };
     if let Some(reason) = skipped {
         if forced.is_some() {
-            state.record_failure("forced final window was not decodable".to_owned());
+            state.record_failure(TakeFailure::ForcedWindowNotDecodable);
         } else {
             super::finalization::record_outcome(
                 state,
@@ -106,11 +106,11 @@ async fn process_forced<D, F>(
         });
     let outcome = decode(request).await;
     let Ok(restored) = receiver.await else {
-        state.record_failure("forced final PCM retirement failed".to_owned());
+        state.record_failure(TakeFailure::RetirementFailed);
         return;
     };
     if !restored {
-        state.record_failure("forced final PCM ownership became inconsistent".to_owned());
+        state.record_failure(TakeFailure::OwnershipInconsistent);
         return;
     }
     record_decode(state, whole_window, outcome, |text| {
@@ -147,7 +147,7 @@ fn record_decode(
         Some(Ok(text)) => {
             super::finalization::record_outcome(state, whole_window, completed(text));
         }
-        Some(Err(error)) => state.record_failure(error.to_string()),
-        None => state.record_failure("final transcription worker is unavailable".to_owned()),
+        Some(Err(error)) => state.record_failure(TakeFailure::Transcribe(error)),
+        None => state.record_failure(TakeFailure::WorkerUnavailable),
     }
 }

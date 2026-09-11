@@ -1,12 +1,14 @@
 use crate::audio::AudioError;
 use crate::generation::GenerationLease;
 use crate::realtime::input::UncommittedInput;
-use crate::realtime::item::CommittedItem;
+use crate::realtime::item::{CommittedItem, FinalizationError};
 use crate::realtime::registry::SessionRegistration;
 use crate::realtime::result_mailbox::{MailboxError, ResultMailbox};
 use crate::realtime::wire::{EffectiveSession, IdGenerator};
+use crate::take::TakeFailure;
 use gateway_stt_engine::TranscribeError;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 pub(super) const SESSION_CANCEL_JOIN_CAPACITY: usize = 8;
 pub(super) const MAX_COMMITTED_ITEMS_PER_SESSION: usize = 4;
@@ -48,9 +50,9 @@ pub(crate) enum SessionError {
     #[error("the realtime session result capacity is reached")]
     InterimAtCapacity,
     #[error("{0}")]
-    PendingPrecommitFailure(String),
-    #[error("{0}")]
-    Finalization(String),
+    PendingPrecommitFailure(Arc<TakeFailure>),
+    #[error(transparent)]
+    Finalization(#[from] FinalizationError),
     #[error(transparent)]
     Mailbox(MailboxError),
 }

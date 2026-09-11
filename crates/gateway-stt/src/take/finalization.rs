@@ -12,10 +12,11 @@ use crate::segment::{ForcedBoundary, SegmentOutcome};
 
 use super::final_decode::process_samples;
 use super::final_outcome::{FinalRangeOutcome, SkipReason};
-use super::state::TakeState;
+use super::state::{TakeFailure, TakeState};
 use super::window::{AcceptedHypothesis, WholeWindowState};
 
-pub(super) type TakeFinalization = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+pub(super) type TakeFinalization =
+    Pin<Box<dyn Future<Output = Result<String, Arc<TakeFailure>>> + Send>>;
 pub(super) const FINAL_SEGMENT_CAPACITY: usize = 4;
 
 #[derive(Debug)]
@@ -35,7 +36,7 @@ pub(super) enum FinalCommand {
     Complete {
         committed_samples: u64,
         accepted: Vec<AcceptedHypothesis>,
-        reply: oneshot::Sender<Result<String, String>>,
+        reply: oneshot::Sender<Result<String, Arc<TakeFailure>>>,
     },
 }
 
@@ -63,7 +64,7 @@ impl FinalPipeline {
                     break;
                 };
                 let Some(owner) = FinalSegmentOwner::reserve(&self.pending_segments) else {
-                    state.record_failure("final segment capacity is reached".to_owned());
+                    state.record_failure(TakeFailure::SegmentCapacity);
                     break;
                 };
                 let range = match &outcome {
@@ -96,11 +97,11 @@ impl FinalPipeline {
             match self.commands.try_send(command) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    state.record_failure("final segment capacity is reached".to_owned());
+                    state.record_failure(TakeFailure::SegmentCapacity);
                     break;
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
-                    state.record_failure("final transcription pipeline exited".to_owned());
+                    state.record_failure(TakeFailure::PipelineExited);
                     break;
                 }
             }
@@ -129,11 +130,11 @@ impl FinalPipeline {
                 .await
                 .is_err()
             {
-                return Err("final transcription pipeline exited".to_owned());
+                return Err(Arc::new(TakeFailure::PipelineExited));
             }
             reply_rx
                 .await
-                .unwrap_or_else(|_| Err("final transcription pipeline exited".to_owned()))
+                .unwrap_or_else(|_| Err(Arc::new(TakeFailure::PipelineExited)))
         })
     }
 }
@@ -309,9 +310,9 @@ mod tests {
     use tokio::sync::{mpsc, oneshot};
 
     use super::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalPipeline, run_final_pipeline};
-    use crate::take::Take;
     use crate::take::state::TakeState;
     use crate::take::window::AcceptedHypothesis;
+    use crate::take::{Take, TakeFailure};
 
     fn accepted_from_snapshot(
         take: &Take,
@@ -375,10 +376,27 @@ mod tests {
 
         assert!(receiver.try_recv().is_err());
         assert_eq!(TakeState::lock(&state.buffer).origin(), 0);
-        assert_eq!(
+        assert!(matches!(
             state.pending_failure().as_deref(),
-            Some("final segment capacity is reached")
-        );
+            Some(TakeFailure::SegmentCapacity)
+        ));
+    }
+
+    #[tokio::test]
+    async fn finalization_reports_a_typed_failure_after_the_pipeline_exits() {
+        let (commands, receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
+        drop(receiver);
+        let pipeline = FinalPipeline {
+            commands,
+            task: tokio::spawn(std::future::pending()),
+            pending_segments: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let failure = pipeline
+            .finalization(0, Vec::new())
+            .await
+            .expect_err("an exited pipeline fails the finalization");
+        assert!(matches!(&*failure, TakeFailure::PipelineExited));
     }
 
     #[tokio::test]
@@ -412,8 +430,11 @@ mod tests {
             .expect("completion queues");
 
         assert_eq!(
-            completion.await.expect("completion replies"),
-            Ok("last word".to_owned())
+            completion
+                .await
+                .expect("completion replies")
+                .expect("completion succeeds"),
+            "last word"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         task.await.expect("pipeline exits");
@@ -451,8 +472,11 @@ mod tests {
             .expect("completion queues");
 
         assert_eq!(
-            completion.await.expect("completion replies"),
-            Ok(String::new())
+            completion
+                .await
+                .expect("completion replies")
+                .expect("completion succeeds"),
+            String::new()
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         task.await.expect("pipeline exits");

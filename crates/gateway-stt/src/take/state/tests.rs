@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use gateway_stt_engine::TranscribeError;
+use gateway_stt_engine::{EnginePolicy, TranscribeError};
 
-use super::TakeState;
+use super::{TakeFailure, TakeState};
 use crate::segment::ForcedBoundary;
 use crate::take::final_outcome::{FinalRangeOutcome, SkipReason};
 use crate::take::window::AcceptedHypothesis;
@@ -44,6 +44,21 @@ fn finalized_snapshot_cannot_mix_text_and_sample_ownership() {
 
     assert_eq!(snapshot, ("old".to_owned(), 100));
     assert_eq!(state.finalized_snapshot(), ("old new".to_owned(), 200));
+}
+
+#[test]
+fn a_recorded_decode_failure_keeps_its_typed_source() {
+    let state = TakeState::default();
+    let source = EnginePolicy::new(0, 500, false).expect_err("a zero window is rejected");
+    let expected = source.to_string();
+    state.record_finalized(Err(source), None);
+
+    let failure = state.take_failure().expect("the take owns its failure");
+    assert!(
+        matches!(&*failure, TakeFailure::Transcribe(_)),
+        "the decode failure stays typed"
+    );
+    assert_eq!(failure.to_string(), expected);
 }
 
 #[test]

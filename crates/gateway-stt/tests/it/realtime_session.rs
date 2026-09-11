@@ -8,7 +8,8 @@ use std::time::Duration;
 use base64::Engine as _;
 use futures_util::FutureExt as _;
 use gateway_stt::test_fixtures::{
-    RealtimeSessionFixture, RealtimeSessionRegistryFixture, ScriptedDecoder, ScriptedModelFactory,
+    FixtureError, RealtimeSessionFixture, RealtimeSessionRegistryFixture, ScriptedDecoder,
+    ScriptedModelFactory,
 };
 
 const SESSION_CAPACITY: usize = 8;
@@ -47,7 +48,7 @@ fn update(prompt: &str, include: bool) -> String {
     .to_string()
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "a fixture registry has no prior session that could consume capacity"
 )]
@@ -55,6 +56,10 @@ fn session() -> RealtimeSessionFixture {
     RealtimeSessionRegistryFixture::default()
         .register()
         .expect("session registers")
+}
+
+fn source_message(error: &FixtureError) -> Option<String> {
+    std::error::Error::source(error).map(ToString::to_string)
 }
 
 struct BlockingPoll {
@@ -126,9 +131,11 @@ fn session_registration_has_no_wait_queue_at_capacity() {
         .map(|_| registry.register().expect("session is admitted"))
         .collect::<Vec<_>>();
 
+    let error = registry.register().expect_err("ninth session is rejected");
+    assert_eq!(error.to_string(), "register fixture session");
     assert_eq!(
-        registry.register().expect_err("ninth session is rejected"),
-        "the realtime transcription session limit is reached"
+        source_message(&error).as_deref(),
+        Some("the realtime transcription session limit is reached")
     );
     drop(sessions);
     assert!(
@@ -195,7 +202,7 @@ fn failed_first_append_does_not_capture_configuration() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
+#[expect(
     clippy::await_holding_lock,
     reason = "the process-wide test lock serializes deliberately blocked runtime workers"
 )]
@@ -234,9 +241,11 @@ async fn dropping_session_retains_admission_until_interim_cleanup_joins() {
         SESSION_CAPACITY,
         "retiring work keeps admission owned"
     );
+    let error = registry.register().expect_err("capacity remains occupied");
+    assert_eq!(error.to_string(), "register fixture session");
     assert_eq!(
-        registry.register().expect_err("capacity remains occupied"),
-        "the realtime transcription session limit is reached"
+        source_message(&error).as_deref(),
+        Some("the realtime transcription session limit is reached")
     );
 
     release.store(true, Ordering::Release);
@@ -257,7 +266,7 @@ async fn dropping_session_retains_admission_until_interim_cleanup_joins() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
+#[expect(
     clippy::await_holding_lock,
     reason = "the process-wide test lock serializes deliberately blocked runtime workers"
 )]
@@ -306,9 +315,11 @@ async fn dropping_session_retains_admission_until_finalization_cleanup_joins() {
         SESSION_CAPACITY,
         "retiring finalization keeps admission owned"
     );
+    let error = registry.register().expect_err("capacity remains occupied");
+    assert_eq!(error.to_string(), "register fixture session");
     assert_eq!(
-        registry.register().expect_err("capacity remains occupied"),
-        "the realtime transcription session limit is reached"
+        source_message(&error).as_deref(),
+        Some("the realtime transcription session limit is reached")
     );
 
     release.store(true, Ordering::Release);
@@ -402,7 +413,7 @@ async fn canceling_finish_keeps_current_task_owned_for_retry() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
+#[expect(
     clippy::await_holding_lock,
     reason = "the process-wide test lock serializes deliberately blocked runtime workers"
 )]
@@ -455,9 +466,11 @@ async fn canceled_join_capacity_is_exact_and_recoverable() {
     session
         .spawn_interim(pending())
         .expect("current task starts");
+    let error = session.clear().expect_err("next retirement is rejected");
+    assert_eq!(error.to_string(), "clear fixture input");
     assert_eq!(
-        session.clear().expect_err("next retirement is rejected"),
-        "the canceled interim task join capacity is reached"
+        source_message(&error).as_deref(),
+        Some("the canceled interim task join capacity is reached")
     );
     assert!(session.input_snapshot().is_some());
     session.join_canceled().await.expect("retired tasks join");
@@ -485,7 +498,7 @@ fn stale_interim_is_rejected_before_event_id_allocation() {
     );
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the helper establishes valid canonical fixture audio and input"
 )]
@@ -500,7 +513,7 @@ fn append_committable(session: &mut RealtimeSessionFixture) -> String {
         .to_owned()
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the helper establishes valid decodable fixture audio"
 )]
@@ -538,9 +551,11 @@ fn committed_capacity_is_reserved_before_input_detach_and_retryable() {
     assert_eq!(session.committed_count(), COMMITTED_ITEM_CAPACITY);
 
     let retry_id = append_committable(&mut session);
+    let error = session.commit().expect_err("fifth item is rejected");
+    assert_eq!(error.to_string(), "commit fixture input");
     assert_eq!(
-        session.commit().expect_err("fifth item is rejected"),
-        "the committed realtime item limit is reached"
+        source_message(&error).as_deref(),
+        Some("the committed realtime item limit is reached")
     );
     assert_eq!(
         session
@@ -684,11 +699,13 @@ fn result_capacity_hypothesis_replacement_and_terminal_reservation_are_independe
             .push_delta(item.item_id(), &format!("delta-{index}"))
             .expect("result enters bounded capacity");
     }
+    let error = session
+        .push_delta(item.item_id(), "overflow")
+        .expect_err("capacity-plus-one is rejected");
+    assert_eq!(error.to_string(), "push fixture delta");
     assert_eq!(
-        session
-            .push_delta(item.item_id(), "overflow")
-            .expect_err("capacity-plus-one is rejected"),
-        "the realtime session result capacity is reached"
+        source_message(&error).as_deref(),
+        Some("the realtime session result capacity is reached")
     );
 
     session
@@ -731,22 +748,26 @@ fn pending_precommit_failure_blocks_append_but_commits_one_item_failure() {
     session
         .fail_precommit("accurate segment failed")
         .expect("failure is retained by the input");
+    let error = session
+        .append_base64(&encoded(&[0, 0]))
+        .expect_err("failed input rejects later audio");
+    assert_eq!(error.to_string(), "append fixture audio");
     assert_eq!(
-        session
-            .append_base64(&encoded(&[0, 0]))
-            .expect_err("failed input rejects later audio"),
-        "accurate segment failed"
+        source_message(&error).as_deref(),
+        Some("accurate segment failed")
     );
 
     let committed = session
         .commit()
         .expect("failed input still establishes item");
     assert_eq!(committed.item_id(), item_id);
+    let error = session
+        .finalize_failed(committed.item_id(), "duplicate")
+        .expect_err("a second terminal is rejected");
+    assert_eq!(error.to_string(), "finalize fixture item failed");
     assert_eq!(
-        session
-            .finalize_failed(committed.item_id(), "duplicate")
-            .expect_err("a second terminal is rejected"),
-        "the committed item already reached a terminal outcome"
+        source_message(&error).as_deref(),
+        Some("the committed item already reached a terminal outcome")
     );
     let results = session.drain_results();
     assert_eq!(results.len(), 1);
@@ -764,6 +785,32 @@ fn clear_discards_pending_precommit_failure_without_creating_an_item() {
     session.clear().expect("failed uncommitted input clears");
     assert_eq!(session.committed_count(), 0);
     assert!(session.drain_results().is_empty());
+}
+
+#[tokio::test]
+async fn fixture_finalization_errors_carry_their_operation_and_source() {
+    let mut session = session();
+    let error = session
+        .finish_finalization("missing")
+        .await
+        .expect_err("an unknown item is rejected");
+    assert_eq!(error.to_string(), "finish fixture finalization");
+    assert_eq!(
+        source_message(&error).as_deref(),
+        Some("the committed item is not active")
+    );
+
+    let item_id = append_committable(&mut session);
+    session.commit().expect("item commits");
+    let error = session
+        .finish_finalization(&item_id)
+        .await
+        .expect_err("an item without finalization work is rejected");
+    assert_eq!(error.to_string(), "finish fixture finalization");
+    assert_eq!(
+        source_message(&error).as_deref(),
+        Some("the committed item has no active finalization")
+    );
 }
 
 #[tokio::test]
@@ -795,12 +842,11 @@ async fn asynchronous_final_failure_is_observed_before_the_next_append_and_at_co
         .pending_failure()
         .expect("the take owns the asynchronous failure");
 
-    assert_eq!(
-        session
-            .append_base64(&encoded(&[1, 2]))
-            .expect_err("the next append is rejected before mutating audio"),
-        failure
-    );
+    let error = session
+        .append_base64(&encoded(&[1, 2]))
+        .expect_err("the next append is rejected before mutating audio");
+    assert_eq!(error.to_string(), "append fixture audio");
+    assert_eq!(source_message(&error).as_deref(), Some(failure.as_str()));
     let item = session
         .commit()
         .expect("commit still establishes the failed item");
@@ -882,11 +928,13 @@ async fn commit_reserves_interim_join_capacity_before_detaching_input() {
     session
         .spawn_interim(pending())
         .expect("current interim starts");
+    let error = session
+        .commit()
+        .expect_err("commit cannot detach an unowned task");
+    assert_eq!(error.to_string(), "commit fixture input");
     assert_eq!(
-        session
-            .commit()
-            .expect_err("commit cannot detach an unowned task"),
-        "the canceled interim task join capacity is reached"
+        source_message(&error).as_deref(),
+        Some("the canceled interim task join capacity is reached")
     );
     assert_eq!(
         session

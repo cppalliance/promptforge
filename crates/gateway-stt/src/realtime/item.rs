@@ -6,9 +6,20 @@ use tokio::task::JoinHandle;
 use super::input::InputSnapshot;
 use super::input::SealedInput;
 use super::result_mailbox::{ItemFailure, ItemResult};
-use crate::take::Take;
+use crate::take::{Take, TakeFailure};
 
-type FinalizationTask = JoinHandle<Result<String, String>>;
+type FinalizationTask = JoinHandle<Result<String, Arc<TakeFailure>>>;
+
+/// A committed item's finalization join failure.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FinalizationError {
+    #[error("the committed item has no active finalization")]
+    NotFinalizing,
+    #[error("committed item finalization task failed")]
+    Task(#[source] tokio::task::JoinError),
+    #[error("the committed item already reached a terminal outcome")]
+    TerminalAlreadySet,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CommitReceipt {
@@ -41,7 +52,7 @@ pub(crate) struct CommittedItem {
     snapshot: InputSnapshot,
     #[cfg_attr(
         not(any(test, feature = "test-fixtures")),
-        allow(dead_code, reason = "retains take ownership until item retirement")
+        expect(dead_code, reason = "retains take ownership until item retirement")
     )]
     take: Arc<Take>,
     duration_seconds: f64,
@@ -53,7 +64,7 @@ impl CommittedItem {
     pub(crate) fn from_sealed(
         sealed: SealedInput,
         previous_item_id: Option<String>,
-    ) -> (Self, Option<String>) {
+    ) -> (Self, Option<Arc<TakeFailure>>) {
         let pending_failure = sealed.take.pending_failure();
         let take = Arc::new(sealed.take);
         let finalization = if pending_failure.is_none() {
@@ -105,21 +116,19 @@ impl CommittedItem {
             .is_some_and(tokio::task::JoinHandle::is_finished)
     }
 
-    pub(crate) async fn finish_finalization(&mut self) -> Result<ItemResult, String> {
+    pub(crate) async fn finish_finalization(&mut self) -> Result<ItemResult, FinalizationError> {
         let Some(task) = self.finalization.as_mut() else {
-            return Err("the committed item has no active finalization".to_owned());
+            return Err(FinalizationError::NotFinalizing);
         };
-        let outcome = task
-            .await
-            .map_err(|error| format!("committed item finalization task failed: {error}"))?;
+        let outcome = task.await.map_err(FinalizationError::Task)?;
         self.finalization = None;
         match outcome {
             Ok(transcript) => self
                 .completed(transcript)
-                .ok_or_else(|| "the committed item already reached a terminal outcome".to_owned()),
-            Err(message) => self
-                .failed(ItemFailure::TranscriptionFailed(message))
-                .ok_or_else(|| "the committed item already reached a terminal outcome".to_owned()),
+                .ok_or(FinalizationError::TerminalAlreadySet),
+            Err(failure) => self
+                .failed(ItemFailure::TranscriptionFailed(failure.to_string()))
+                .ok_or(FinalizationError::TerminalAlreadySet),
         }
     }
 

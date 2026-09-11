@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use crate::audio::{AudioBuffer, AudioError};
 use crate::generation::GenerationLease;
-use crate::take::Take;
+use crate::take::{Take, TakeFailure};
 const INPUT_FORMAT: &str = "audio/pcm";
 const INPUT_RATE: u32 = 24_000;
 const INPUT_MODEL: &str = "realtime-transcribe";
@@ -168,11 +170,11 @@ impl UncommittedInput {
         self.audio.buffered_duration_seconds()
     }
 
-    pub(crate) fn pending_failure(&self) -> Option<String> {
+    pub(crate) fn pending_failure(&self) -> Option<Arc<TakeFailure>> {
         self.take.pending_failure()
     }
 
-    pub(crate) fn record_pending_failure(&mut self, failure: String) {
+    pub(crate) fn record_pending_failure(&mut self, failure: TakeFailure) {
         self.take.record_failure(failure);
     }
 

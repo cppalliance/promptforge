@@ -27,6 +27,7 @@ pub(crate) use interim::InterimSnapshot;
 #[cfg(test)]
 use pcm::PcmBudgetProbe;
 use pcm::RetainedPcm;
+pub(crate) use state::TakeFailure;
 use state::TakeState;
 use window::WholeWindowState;
 
@@ -166,8 +167,7 @@ impl Take {
         if let Ok(snapshot) = update {
             snapshot
         } else {
-            self.state
-                .record_failure("accepted hypothesis capacity is reached".to_owned());
+            self.state.record_failure(TakeFailure::HypothesisCapacity);
             None
         }
     }
@@ -177,11 +177,11 @@ impl Take {
         self.state.record_finalized(result, None);
     }
 
-    pub(crate) fn record_failure(&self, failure: impl Into<String>) {
-        self.state.record_failure(failure.into());
+    pub(crate) fn record_failure(&self, failure: TakeFailure) {
+        self.state.record_failure(failure);
     }
 
-    pub(crate) fn pending_failure(&self) -> Option<String> {
+    pub(crate) fn pending_failure(&self) -> Option<Arc<TakeFailure>> {
         self.state.pending_failure()
     }
 
@@ -213,7 +213,7 @@ impl Take {
     }
 
     #[cfg(test)]
-    fn take_failure(&self) -> Option<String> {
+    fn take_failure(&self) -> Option<Arc<TakeFailure>> {
         self.state.take_failure()
     }
 
@@ -233,7 +233,7 @@ mod tests {
 
     use tokio::sync::{mpsc, oneshot};
 
-    use super::{FinalCommand, FinalSegmentOwner, Take, run_final_pipeline};
+    use super::{FinalCommand, FinalSegmentOwner, Take, TakeFailure, run_final_pipeline};
 
     #[test]
     fn miri_final_segment_reservation_is_exact() {
@@ -278,10 +278,10 @@ mod tests {
     #[test]
     fn a_take_retains_its_first_final_failure() {
         let take = Take::without_final(Vec::new());
-        take.record_failure("first");
-        take.record_failure("second");
+        take.record_failure(TakeFailure::Recorded("first".to_owned()));
+        take.record_failure(TakeFailure::Recorded("second".to_owned()));
         let failure = take.take_failure().expect("the take owns its failure");
-        assert_eq!(failure, "first");
+        assert_eq!(failure.to_string(), "first");
     }
 
     #[tokio::test]
@@ -316,8 +316,11 @@ mod tests {
             .expect("completion queues");
 
         assert_eq!(
-            completion.await.expect("the completion pipeline replies"),
-            Ok(String::new())
+            completion
+                .await
+                .expect("the completion pipeline replies")
+                .expect("completion succeeds"),
+            String::new()
         );
         tokio::time::timeout(Duration::from_secs(1), task)
             .await

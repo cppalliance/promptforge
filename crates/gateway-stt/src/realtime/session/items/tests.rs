@@ -5,6 +5,7 @@ use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 
 use crate::audio::AudioError;
 use crate::realtime::input::{InputSnapshot, UncommittedInput};
+use crate::realtime::item::FinalizationError;
 use crate::realtime::registry::SessionRegistry;
 use crate::realtime::session::{Session, SessionError};
 use crate::test_fixtures::scripted_service;
@@ -83,6 +84,31 @@ async fn wait_for_decode_retirement(decoder: ScriptedDecoder, service: &crate::S
     })
     .await
     .expect("the detached generation job retires");
+}
+
+#[tokio::test]
+async fn finalization_without_active_work_surfaces_a_typed_session_source() {
+    let registration = SessionRegistry::default()
+        .register()
+        .expect("session registers");
+    let mut session = Session::new(registration, None);
+    session
+        .append_base64(&encoded(&vec![0; 2_400]))
+        .expect("input appends");
+    let item_id = session.commit().expect("item commits").item_id().to_owned();
+
+    let error = session
+        .finish_finalization(&item_id)
+        .await
+        .expect_err("an item without finalization work is rejected");
+    let SessionError::Finalization(source) = &error else {
+        panic!("the item failure surfaces as a finalization error");
+    };
+    assert!(matches!(source, FinalizationError::NotFinalizing));
+    assert_eq!(
+        error.to_string(),
+        "the committed item has no active finalization"
+    );
 }
 
 #[tokio::test]
