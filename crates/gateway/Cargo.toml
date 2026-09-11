@@ -23,7 +23,13 @@ path = "src/main.rs"
 [target.'cfg(windows)'.build-dependencies]
 embed-resource.workspace = true
 
+[build-dependencies]
+anyhow.workspace = true
+
 [dependencies]
+# Optional: anyhow error payloads for the test-fixture rendezvous in
+# src/main.rs, enabled only by the `test-fixtures` feature.
+anyhow = { workspace = true, optional = true }
 axum.workspace = true
 dotenvy.workspace = true
 futures-util.workspace = true
@@ -132,9 +138,10 @@ config-ui = ["dep:gateway-config-ui"]
 # build stubs the route and refuses a configuration declaring [[stt_model]].
 stt = ["dep:gateway-stt"]
 # Deterministic local-runtime bindings for cross-crate behavior tests.
-test-fixtures = ["local", "gateway-local/test-fixtures"]
+test-fixtures = ["local", "gateway-local/test-fixtures", "dep:anyhow"]
 
 [dev-dependencies]
+anyhow.workspace = true
 base64.workspace = true
 hound.workspace = true
 # Encodes the generated test image for the live CUDA projector proof.

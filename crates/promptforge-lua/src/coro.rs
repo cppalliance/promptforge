@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 
 use mlua::{Function, Table, Value};
 
-use super::{Error, Lua, LuaProgram, Result, StdLib, var_snapshot_table};
+use super::{Error, Lua, LuaProgram, Result, SharedSource, StdLib, var_snapshot_table};
 
 /// The shim chunk's name: `@`-prefixed so PUC renders it verbatim as a file
 /// path, making unexpected shim errors clickable `file:line:` references.
@@ -48,11 +48,13 @@ const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 const USER_INPUT_REGISTRY: &str = "promptforge.impl_coro.user_input";
 
 /// The shim program, compiled once and loaded per VM. Compilation of the
-/// bundled source fails only on a crate bug, so the payload is the error's
-/// display string (the crate `Error` is not `Clone`).
-static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = LazyLock::new(|| {
-    LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME).map_err(|error| error.to_string())
-});
+/// bundled source fails only on a crate bug, so the payload is a shareable
+/// [`SharedSource`] cause (the crate `Error` is not `Clone`), re-wrapped as
+/// a typed error at each install.
+static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME).map_err(SharedSource::new)
+    });
 
 /// Installs the yield shims on a VM whose host tables already exist.
 ///
@@ -80,9 +82,7 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = globals.raw_get("models").map_err(Error::lua)?;
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
-    let program = SHIM_PROGRAM
-        .as_ref()
-        .map_err(|message| Error::Lua(message.clone()))?;
+    let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
         .call((yield_fn, var_snapshot, models, tools))
@@ -188,9 +188,7 @@ pub fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
     let var_snapshot = lua
         .create_function(|lua, ()| var_snapshot_table(lua).map_err(mlua::Error::external))
         .map_err(Error::lua)?;
-    let program = SHIM_PROGRAM
-        .as_ref()
-        .map_err(|message| Error::Lua(message.clone()))?;
+    let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
         .call((yield_fn, var_snapshot, Value::Nil, Value::Nil))

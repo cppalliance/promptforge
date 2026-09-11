@@ -89,7 +89,7 @@ impl Future for BlockingPoll {
 struct BlockingFinalization(BlockingPoll);
 
 impl Future for BlockingFinalization {
-    type Output = Result<String, String>;
+    type Output = anyhow::Result<String>;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.0).poll(context).map(Ok)

@@ -8,7 +8,9 @@ use axum::extract::ws::WebSocket;
 use futures_util::StreamExt;
 
 use crate::app::AppState;
-use crate::gateway::{GatewayClient, GatewayResponse, SwitchEvent, SwitchResponse, switch_events};
+use crate::gateway::{
+    GatewayClient, GatewayError, GatewayResponse, SwitchEvent, SwitchResponse, switch_events,
+};
 use crate::heartbeat::{refresh_catalog, refresh_profiles};
 use crate::menu::SwitchOutcome;
 use crate::protocol::Activity;
@@ -97,11 +99,37 @@ async fn run_switch(client: &GatewayClient, push: &Push, name: &str) {
             push.menu().finish_switch(SwitchOutcome::Completed);
             push.push_idle();
         }
-        Err(message) => {
+        Err(failure) => {
             push.menu().finish_switch(SwitchOutcome::Failed);
-            push.push_failure("Profile switch failed", message, Activity::General);
+            push.push_failure(
+                "Profile switch failed",
+                failure.to_string(),
+                Activity::General,
+            );
         }
     }
+}
+
+/// Why one profile switch did not complete. The display text is the
+/// user-facing description pushed with the failure status, so each
+/// variant renders exactly the message the stringly channel carried.
+#[derive(Debug, thiserror::Error)]
+enum SwitchFailure {
+    /// The switch request or its stage stream failed in transit; the
+    /// client's typed error is retained as the cause.
+    #[error(transparent)]
+    Transport(GatewayError),
+    /// The gateway refused the switch before starting it; the payload is
+    /// the gateway's own refusal message, relayed verbatim.
+    #[error("{0}")]
+    Refused(String),
+    /// The gateway reported a terminal failure mid-switch; the payload is
+    /// the gateway's own error message, relayed verbatim.
+    #[error("{0}")]
+    Failed(String),
+    /// The stage stream ended with no terminal `ready` or `error` event.
+    #[error("the switch stream ended without a terminal event")]
+    StreamEnded,
 }
 
 /// Posts the switch and consumes its stage stream, pushing each stage
@@ -109,22 +137,28 @@ async fn run_switch(client: &GatewayClient, push: &Push, name: &str) {
 /// `ready`, the failure's description on everything else - a terminal
 /// `error`, a buffered refusal, a transport failure, or a stream that
 /// ends without a terminal event.
-async fn drive_switch(client: &GatewayClient, push: &Push, name: &str) -> Result<(), String> {
+async fn drive_switch(
+    client: &GatewayClient,
+    push: &Push,
+    name: &str,
+) -> Result<(), SwitchFailure> {
     let payloads = match client.switch_profile(name).await {
         Ok(SwitchResponse::Switching { payloads, .. }) => payloads,
-        Ok(SwitchResponse::Buffered(refusal)) => return Err(switch_refusal(&refusal)),
-        Err(error) => return Err(error.to_string()),
+        Ok(SwitchResponse::Buffered(refusal)) => {
+            return Err(SwitchFailure::Refused(switch_refusal(&refusal)));
+        }
+        Err(error) => return Err(SwitchFailure::Transport(error)),
     };
     let mut events = switch_events(payloads);
     while let Some(item) = events.next().await {
         match item {
             Ok(SwitchEvent::Stage { stage }) => push_stage(push, name, &stage),
             Ok(SwitchEvent::Ready { .. }) => return Ok(()),
-            Ok(SwitchEvent::Error { message }) => return Err(message),
-            Err(error) => return Err(error.to_string()),
+            Ok(SwitchEvent::Error { message }) => return Err(SwitchFailure::Failed(message)),
+            Err(error) => return Err(SwitchFailure::Transport(error)),
         }
     }
-    Err("the switch stream ended without a terminal event".to_string())
+    Err(SwitchFailure::StreamEnded)
 }
 
 /// Pushes one stage marker as determinate status-bar progress - stage

@@ -158,18 +158,22 @@ impl InterruptController {
     }
 }
 
-static PROCESS_INTERRUPT: OnceLock<Result<InterruptController, String>> = OnceLock::new();
+static PROCESS_INTERRUPT: OnceLock<Result<InterruptController, Arc<anyhow::Error>>> =
+    OnceLock::new();
 
-fn install_interrupt_handler() -> Result<InterruptController, String> {
+fn install_interrupt_handler() -> Result<InterruptController, Arc<anyhow::Error>> {
     match PROCESS_INTERRUPT.get_or_init(|| {
         let interrupt = InterruptController::isolated();
         let handler_interrupt = interrupt.clone();
-        ctrlc::set_handler(move || handler_interrupt.request())
-            .map_err(|error| format!("cannot install the interrupt handler: {error}"))?;
+        ctrlc::set_handler(move || handler_interrupt.request()).map_err(|error| {
+            Arc::new(anyhow::anyhow!(
+                "cannot install the interrupt handler: {error}"
+            ))
+        })?;
         Ok(interrupt)
     }) {
         Ok(interrupt) => Ok(interrupt.clone()),
-        Err(error) => Err(error.clone()),
+        Err(error) => Err(Arc::clone(error)),
     }
 }
 
@@ -289,13 +293,13 @@ struct BuildEnvironment {
 }
 
 impl BuildEnvironment {
-    fn discover() -> Result<Self, String> {
+    fn discover() -> Result<Self, anyhow::Error> {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let workspace_root = manifest_dir
             .parent()
             .and_then(|crates| crates.parent())
             .ok_or_else(|| {
-                format!(
+                anyhow::anyhow!(
                     "cannot derive the workspace root from {}",
                     manifest_dir.display()
                 )
@@ -303,7 +307,7 @@ impl BuildEnvironment {
             .to_path_buf();
         let target_root = match std::env::var_os("CARGO_TARGET_DIR") {
             Some(value) if value.is_empty() => {
-                return Err("CARGO_TARGET_DIR must not be empty".to_owned());
+                return Err(anyhow::anyhow!("CARGO_TARGET_DIR must not be empty"));
             }
             Some(value) => {
                 let path = PathBuf::from(value);
@@ -311,7 +315,9 @@ impl BuildEnvironment {
                     path
                 } else {
                     std::env::current_dir()
-                        .map_err(|error| format!("cannot read the current directory: {error}"))?
+                        .map_err(|error| {
+                            anyhow::anyhow!("cannot read the current directory: {error}")
+                        })?
                         .join(path)
                 }
             }
@@ -321,7 +327,7 @@ impl BuildEnvironment {
             .or_else(|| option_env!("CARGO").map(OsString::from))
             .map(PathBuf::from)
             .ok_or_else(|| {
-                "Cargo did not provide the executable used for this command".to_owned()
+                anyhow::anyhow!("Cargo did not provide the executable used for this command")
             })?;
         Ok(Self {
             workspace_root,
@@ -355,7 +361,7 @@ impl fmt::Display for BuildError {
     }
 }
 
-fn parse_arguments(args: &[String]) -> Result<BuildRequest, String> {
+fn parse_arguments(args: &[String]) -> Result<BuildRequest, anyhow::Error> {
     let mut profile = Profile::Debug;
     let mut release_seen = false;
     let mut target = None;
@@ -363,7 +369,7 @@ fn parse_arguments(args: &[String]) -> Result<BuildRequest, String> {
     while index < args.len() {
         match args[index].as_str() {
             "--release" if release_seen => {
-                return Err(format!("duplicate argument `--release`\n\n{USAGE}"));
+                return Err(anyhow::anyhow!("duplicate argument `--release`\n\n{USAGE}"));
             }
             "--release" => {
                 profile = Profile::Release;
@@ -371,14 +377,14 @@ fn parse_arguments(args: &[String]) -> Result<BuildRequest, String> {
                 index += 1;
             }
             "--target" if target.is_some() => {
-                return Err(format!("duplicate argument `--target`\n\n{USAGE}"));
+                return Err(anyhow::anyhow!("duplicate argument `--target`\n\n{USAGE}"));
             }
             "--target" => {
                 let value = args.get(index + 1).ok_or_else(|| {
-                    format!("argument `--target` needs a target triple\n\n{USAGE}")
+                    anyhow::anyhow!("argument `--target` needs a target triple\n\n{USAGE}")
                 })?;
                 if value.starts_with('-') || !valid_target_triple(value) {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(
                         "argument `--target` needs a valid target triple, got `{value}`\n\n{USAGE}"
                     ));
                 }
@@ -386,7 +392,9 @@ fn parse_arguments(args: &[String]) -> Result<BuildRequest, String> {
                 index += 2;
             }
             argument => {
-                return Err(format!("unsupported argument `{argument}`\n\n{USAGE}"));
+                return Err(anyhow::anyhow!(
+                    "unsupported argument `{argument}`\n\n{USAGE}"
+                ));
             }
         }
     }
@@ -837,7 +845,9 @@ mod tests {
             vec!["--profile".to_owned(), "dist".to_owned()],
             vec!["gateway".to_owned()],
         ] {
-            let error = parse_arguments(&args).expect_err("unsupported argument");
+            let error = parse_arguments(&args)
+                .expect_err("unsupported argument")
+                .to_string();
             assert!(error.contains("unsupported argument"), "{error}");
             assert!(error.contains(USAGE), "{error}");
         }

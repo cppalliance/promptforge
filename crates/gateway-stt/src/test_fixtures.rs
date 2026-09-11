@@ -443,12 +443,12 @@ impl RealtimeSessionFixture {
     /// Returns an error when the committed item does not exist.
     pub fn replace_finalization<F>(&mut self, item_id: &str, task: F) -> Result<(), FixtureError>
     where
-        F: Future<Output = Result<String, String>> + Send + 'static,
+        F: Future<Output = anyhow::Result<String>> + Send + 'static,
     {
         self.session
             .replace_finalization(item_id, async move {
                 task.await
-                    .map_err(|message| Arc::new(TakeFailure::Recorded(message)))
+                    .map_err(|error| Arc::new(TakeFailure::Recorded(error.to_string())))
             })
             .map_err(|error| FixtureError::ReplaceFinalization(boxed(error)))
     }

@@ -321,6 +321,17 @@ impl Error {
         }
     }
 
+    /// Re-produces a typed [`Error`] from a [`SharedSource`] a cache or
+    /// static captured once and replays on every lookup (the compiled-program
+    /// statics), cloning the `Arc` rather than flattening the cause to a
+    /// string.
+    pub(crate) fn shared(source: &SharedSource) -> Error {
+        Error::LuaRuntime {
+            message: source.to_string(),
+            source: Box::new(source.clone()),
+        }
+    }
+
     /// Wrap a tool failure as [`Error::Tool`], preserving the tool's own
     /// error as the `#[source]` cause rather than discarding it.
     pub(crate) fn tool(source: promptforge_tools::ToolError) -> Error {

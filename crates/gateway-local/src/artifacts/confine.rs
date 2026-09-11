@@ -106,29 +106,34 @@ fn current_windows_sid(root: &Path) -> Result<String> {
         path: root.to_owned(),
         source,
     })?;
-    parse_whoami_user_sid(output.status.success(), &output.stdout, &output.stderr).map_err(
-        |reason| LocalError::CacheNotPrivate {
-            path: root.to_owned(),
-            reason,
-        },
+    parse_whoami_user_sid(
+        root,
+        output.status.success(),
+        &output.stdout,
+        &output.stderr,
     )
 }
 
 /// Parses one `whoami /user /fo csv /nh` record into its canonical SID.
 #[cfg(any(windows, test))]
 pub(super) fn parse_whoami_user_sid(
+    root: &Path,
     command_succeeded: bool,
     stdout: &[u8],
     stderr: &[u8],
-) -> std::result::Result<String, String> {
+) -> Result<String> {
+    let not_private = |reason: String| LocalError::CacheNotPrivate {
+        path: root.to_owned(),
+        reason,
+    };
     if !command_succeeded {
         let detail = String::from_utf8_lossy(stderr);
         let detail = detail.trim();
-        return Err(if detail.is_empty() {
+        return Err(not_private(if detail.is_empty() {
             "whoami identity query failed".to_owned()
         } else {
             format!("whoami identity query failed: {detail}")
-        });
+        }));
     }
 
     let record = stdout
@@ -136,38 +141,50 @@ pub(super) fn parse_whoami_user_sid(
         .or_else(|| stdout.strip_suffix(b"\n"))
         .unwrap_or(stdout);
     if record.is_empty() {
-        return Err("whoami identity output is empty".to_owned());
+        return Err(not_private("whoami identity output is empty".to_owned()));
     }
     if record.contains(&b'\r') || record.contains(&b'\n') {
-        return Err("whoami identity output contains multiple records".to_owned());
+        return Err(not_private(
+            "whoami identity output contains multiple records".to_owned(),
+        ));
     }
 
     let Some(inner) = record
         .strip_prefix(b"\"")
         .and_then(|value| value.strip_suffix(b"\""))
     else {
-        return Err("whoami identity output is not quoted CSV".to_owned());
+        return Err(not_private(
+            "whoami identity output is not quoted CSV".to_owned(),
+        ));
     };
     let mut separators = inner
         .windows(3)
         .enumerate()
         .filter(|(_, window)| *window == b"\",\"");
     let Some((separator, _)) = separators.next() else {
-        return Err("whoami identity output does not contain two fields".to_owned());
+        return Err(not_private(
+            "whoami identity output does not contain two fields".to_owned(),
+        ));
     };
     if separators.next().is_some() {
-        return Err("whoami identity output contains extra fields".to_owned());
+        return Err(not_private(
+            "whoami identity output contains extra fields".to_owned(),
+        ));
     }
 
     let account = &inner[..separator];
     let sid_bytes = &inner[separator + 3..];
     if !account.iter().any(|byte| !byte.is_ascii_whitespace()) || account.contains(&b'"') {
-        return Err("whoami identity output has an invalid account".to_owned());
+        return Err(not_private(
+            "whoami identity output has an invalid account".to_owned(),
+        ));
     }
     let sid = std::str::from_utf8(sid_bytes)
-        .map_err(|_| "whoami identity output has a non-UTF-8 SID".to_owned())?;
+        .map_err(|_| not_private("whoami identity output has a non-UTF-8 SID".to_owned()))?;
     if !is_canonical_windows_sid(sid) {
-        return Err("whoami identity output has a non-canonical SID".to_owned());
+        return Err(not_private(
+            "whoami identity output has a non-canonical SID".to_owned(),
+        ));
     }
     Ok(sid.to_owned())
 }

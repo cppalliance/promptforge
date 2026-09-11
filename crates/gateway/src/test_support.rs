@@ -67,9 +67,8 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
 pub(crate) fn app_state_with_scripted_stt(
     config: Config,
     factory: gateway_stt::test_fixtures::ScriptedModelFactory,
-) -> Result<AppState, String> {
-    let service = gateway_stt::test_fixtures::scripted_service(factory, 15, 500)
-        .map_err(|error| error.to_string())?;
+) -> anyhow::Result<AppState> {
+    let service = gateway_stt::test_fixtures::scripted_service(factory, 15, 500)?;
     let mut state = app_state(config, None);
     state.speech = service;
     Ok(state)

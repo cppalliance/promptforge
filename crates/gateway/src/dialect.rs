@@ -325,8 +325,54 @@ fn peel_json_tool_calls_fence(input: &str) -> Peel<'_> {
     }
     match parse_openai_tool_calls(raw_calls) {
         Ok(calls) => Peel::Calls(calls, after),
-        Err(reason) => Peel::Malformed(reason),
+        Err(rejection) => Peel::Malformed(rejection.to_string()),
     }
+}
+
+/// Why one OpenAI `tool_calls` entry was rejected rather than coerced.
+///
+/// The display text becomes the turn's `gateway_warning` verbatim, so each
+/// variant's message is the exact wire string.
+#[derive(Debug, thiserror::Error)]
+enum ToolCallRejection {
+    /// The entry was not a JSON object.
+    #[error("tool call was not an object")]
+    NotObject,
+    /// The entry's `type` was not the string `"function"`.
+    #[error("tool call `type` must be the string \"function\"")]
+    TypeNotFunction,
+    /// The entry had no string `id`.
+    #[error("tool call had no string id")]
+    NoStringId,
+    /// The entry's `id` was blank.
+    #[error("tool call id was blank")]
+    BlankId,
+    /// The entry's `id` already appeared earlier in the same turn.
+    #[error("duplicate tool call id {0:?} within one turn")]
+    DuplicateId(String),
+    /// The entry had no `function` member.
+    #[error("tool call had no function")]
+    NoFunction,
+    /// The entry's `function` was not an object.
+    #[error("tool call `function` was not an object")]
+    FunctionNotObject,
+    /// The function had no string `name`.
+    #[error("tool call had no string name")]
+    NoStringName,
+    /// The function's `name` was blank.
+    #[error("tool call name was blank")]
+    BlankName,
+    /// The function's `arguments` string did not decode as JSON. The decode
+    /// failure is retained as the cause; its text stays in the message
+    /// because the message is the wire warning.
+    #[error("tool call arguments were not valid JSON: {0}")]
+    ArgumentsNotJson(#[source] serde_json::Error),
+    /// The decoded `arguments` were not a JSON object.
+    #[error("tool call arguments did not decode to an object")]
+    ArgumentsNotObject,
+    /// The function's `arguments` were missing or not a string.
+    #[error("tool call arguments were missing or not a string")]
+    ArgumentsMissing,
 }
 
 /// Parse the OpenAI `message.tool_calls` array into [`ParsedCall`]s.
@@ -337,39 +383,37 @@ fn peel_json_tool_calls_fence(input: &str) -> Peel<'_> {
 /// to a JSON object. Blank identifiers, duplicate ids within the turn, missing
 /// or null arguments, and arguments that do not decode to an object are all
 /// rejected rather than coerced.
-fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ParsedCall>, String> {
+fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ParsedCall>, ToolCallRejection> {
     let mut calls = Vec::with_capacity(raw_calls.len());
     let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for raw in raw_calls {
         if !raw.is_object() {
-            return Err("tool call was not an object".to_owned());
+            return Err(ToolCallRejection::NotObject);
         }
         match raw.get("type") {
             Some(Value::String(kind)) if kind == "function" => {}
-            _ => return Err("tool call `type` must be the string \"function\"".to_owned()),
+            _ => return Err(ToolCallRejection::TypeNotFunction),
         }
         let id = raw
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| "tool call had no string id".to_owned())?;
+            .ok_or(ToolCallRejection::NoStringId)?;
         if id.trim().is_empty() {
-            return Err("tool call id was blank".to_owned());
+            return Err(ToolCallRejection::BlankId);
         }
         if !seen_ids.insert(id) {
-            return Err(format!("duplicate tool call id {id:?} within one turn"));
+            return Err(ToolCallRejection::DuplicateId(id.to_owned()));
         }
-        let function = raw
-            .get("function")
-            .ok_or_else(|| "tool call had no function".to_owned())?;
+        let function = raw.get("function").ok_or(ToolCallRejection::NoFunction)?;
         if !function.is_object() {
-            return Err("tool call `function` was not an object".to_owned());
+            return Err(ToolCallRejection::FunctionNotObject);
         }
         let name = function
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| "tool call had no string name".to_owned())?;
+            .ok_or(ToolCallRejection::NoStringName)?;
         if name.trim().is_empty() {
-            return Err("tool call name was blank".to_owned());
+            return Err(ToolCallRejection::BlankName);
         }
         // OpenAI encodes `function.arguments` as a JSON string. It must be
         // present, a string, and decode to a JSON object - the shape tools
@@ -378,13 +422,13 @@ fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ParsedCall>, Strin
         let arguments = match function.get("arguments") {
             Some(Value::String(raw_args)) => {
                 let decoded = serde_json::from_str::<Value>(raw_args)
-                    .map_err(|error| format!("tool call arguments were not valid JSON: {error}"))?;
+                    .map_err(ToolCallRejection::ArgumentsNotJson)?;
                 if !decoded.is_object() {
-                    return Err("tool call arguments did not decode to an object".to_owned());
+                    return Err(ToolCallRejection::ArgumentsNotObject);
                 }
                 decoded
             }
-            _ => return Err("tool call arguments were missing or not a string".to_owned()),
+            _ => return Err(ToolCallRejection::ArgumentsMissing),
         };
         calls.push(ParsedCall {
             id: id.to_owned(),

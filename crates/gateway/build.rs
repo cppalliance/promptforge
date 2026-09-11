@@ -44,10 +44,10 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 </assembly>
 "#;
 
-fn main() -> Result<(), String> {
+fn main() -> anyhow::Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
-            .ok_or("CARGO_MANIFEST_DIR is not set; run through cargo")?,
+            .ok_or_else(|| anyhow::anyhow!("CARGO_MANIFEST_DIR is not set; run through cargo"))?,
     );
     let icon = manifest_dir.join(ICON);
     println!("cargo::rerun-if-changed={}", icon.display());
@@ -62,20 +62,22 @@ fn main() -> Result<(), String> {
 /// and compiles it with `rc.exe` (MSVC) or `windres` (GNU) through
 /// `embed-resource`, which links the result into every binary target.
 #[cfg(windows)]
-fn embed_resources(icon: &Path) -> Result<(), String> {
+fn embed_resources(icon: &Path) -> anyhow::Result<()> {
     use embed_resource::CompilationResult;
 
-    let out_dir =
-        PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is not set; run through cargo")?);
+    let out_dir = PathBuf::from(
+        std::env::var_os("OUT_DIR")
+            .ok_or_else(|| anyhow::anyhow!("OUT_DIR is not set; run through cargo"))?,
+    );
     let icon = icon
         .to_str()
-        .ok_or_else(|| format!("the icon path {} is not UTF-8", icon.display()))?;
+        .ok_or_else(|| anyhow::anyhow!("the icon path {} is not UTF-8", icon.display()))?;
     let manifest_path = out_dir.join("promptforge-gateway.manifest.xml");
     std::fs::write(&manifest_path, MANIFEST)
-        .map_err(|error| format!("write {}: {error}", manifest_path.display()))?;
-    let manifest = manifest_path
-        .to_str()
-        .ok_or_else(|| format!("the manifest path {} is not UTF-8", manifest_path.display()))?;
+        .map_err(|error| anyhow::anyhow!("write {}: {error}", manifest_path.display()))?;
+    let manifest = manifest_path.to_str().ok_or_else(|| {
+        anyhow::anyhow!("the manifest path {} is not UTF-8", manifest_path.display())
+    })?;
     // The resource compiler reads the file names as C string literals, so
     // path separators need doubling. Icon resource id 1: Explorer shows
     // the first icon group in the resource table, and this exe has one.
@@ -88,7 +90,7 @@ fn embed_resources(icon: &Path) -> Result<(), String> {
     );
     let script_path = out_dir.join("promptforge-gateway.rc");
     std::fs::write(&script_path, script)
-        .map_err(|error| format!("write {}: {error}", script_path.display()))?;
+        .map_err(|error| anyhow::anyhow!("write {}: {error}", script_path.display()))?;
     match embed_resource::compile(&script_path, embed_resource::NONE) {
         CompilationResult::Ok | CompilationResult::NotWindows => Ok(()),
         // A toolchain without a resource compiler still builds; the icon
@@ -100,7 +102,9 @@ fn embed_resources(icon: &Path) -> Result<(), String> {
             println!("cargo::warning=the exe resources were not embedded: {reason}");
             Ok(())
         }
-        CompilationResult::Failed(reason) => Err(format!("compile the exe resources: {reason}")),
+        CompilationResult::Failed(reason) => {
+            Err(anyhow::anyhow!("compile the exe resources: {reason}"))
+        }
     }
 }
 

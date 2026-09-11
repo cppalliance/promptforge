@@ -78,11 +78,9 @@ pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
 
 /// Converts the request body into the TOML document a shadow save takes.
 fn toml_document(body: serde_json::Value) -> Result<toml::Value, GatewayError> {
-    let value = json_to_toml(body)
-        .map_err(GatewayError::ConfigWriteRejected)?
-        .ok_or_else(|| {
-            GatewayError::ConfigWriteRejected("the body must be a JSON object".to_owned())
-        })?;
+    let value = json_to_toml(body)?.ok_or_else(|| {
+        GatewayError::ConfigWriteRejected("the body must be a JSON object".to_owned())
+    })?;
     if value.is_table() {
         Ok(value)
     } else {
@@ -97,7 +95,7 @@ fn toml_document(body: serde_json::Value) -> Result<toml::Value, GatewayError> {
 /// absent optionals on the way out, and the deserializer defaults them on
 /// the way back in). A null inside an array has no such reading and is an
 /// error, as is a number outside TOML's ranges.
-fn json_to_toml(value: serde_json::Value) -> Result<Option<toml::Value>, String> {
+fn json_to_toml(value: serde_json::Value) -> Result<Option<toml::Value>, GatewayError> {
     Ok(Some(match value {
         serde_json::Value::Null => return Ok(None),
         serde_json::Value::Bool(flag) => toml::Value::Boolean(flag),
@@ -107,7 +105,9 @@ fn json_to_toml(value: serde_json::Value) -> Result<Option<toml::Value>, String>
             } else if let Some(float) = number.as_f64() {
                 toml::Value::Float(float)
             } else {
-                return Err(format!("number {number} does not fit a TOML value"));
+                return Err(GatewayError::ConfigWriteRejected(format!(
+                    "number {number} does not fit a TOML value"
+                )));
             }
         }
         serde_json::Value::String(text) => toml::Value::String(text),
@@ -115,7 +115,9 @@ fn json_to_toml(value: serde_json::Value) -> Result<Option<toml::Value>, String>
             let mut converted = Vec::with_capacity(items.len());
             for item in items {
                 let Some(element) = json_to_toml(item)? else {
-                    return Err("null inside an array has no TOML form".to_owned());
+                    return Err(GatewayError::ConfigWriteRejected(
+                        "null inside an array has no TOML form".to_owned(),
+                    ));
                 };
                 converted.push(element);
             }

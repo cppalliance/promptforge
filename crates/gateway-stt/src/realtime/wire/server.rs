@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use serde_json::Value;
@@ -106,7 +108,7 @@ impl EffectiveSession {
     }
 
     #[cfg(test)]
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> anyhow::Result<()> {
         if self.id.is_empty()
             || self.object != SESSION_OBJECT
             || self.r#type != SESSION_TYPE
@@ -118,7 +120,7 @@ impl EffectiveSession {
             || !(self.include.is_empty()
                 || matches!(self.include.as_slice(), [value] if value == HYPOTHESIS_INCLUDE))
         {
-            return Err("invalid effective transcription session".to_owned());
+            return Err(anyhow!("invalid effective transcription session"));
         }
         Ok(())
     }
@@ -244,14 +246,14 @@ impl ServerEvent {
     }
 
     #[cfg(test)]
-    pub(in crate::realtime) fn from_value(value: Value) -> Result<Self, String> {
-        let event: Self = serde_json::from_value(value).map_err(|error| error.to_string())?;
+    pub(in crate::realtime) fn from_value(value: Value) -> anyhow::Result<Self> {
+        let event: Self = serde_json::from_value(value)?;
         event.validate()?;
         Ok(event)
     }
 
     #[cfg(test)]
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> anyhow::Result<()> {
         let (event_id, item_id, content_index) = match self {
             Self::SessionCreated { event_id, session }
             | Self::SessionUpdated { event_id, session } => {
@@ -308,14 +310,14 @@ impl ServerEvent {
             validate_id(item_id)?;
         }
         if content_index.is_some_and(|index| *index != 0) {
-            return Err("content_index must be zero".to_owned());
+            return Err(anyhow!("content_index must be zero"));
         }
         match self {
             Self::TranscriptionCompleted { usage, .. } => usage.validate(),
             Self::TranscriptionFailed { error, .. } => {
                 error.validate()?;
                 if error.has_event_id() {
-                    return Err("item failure must not contain a client event ID".to_owned());
+                    return Err(anyhow!("item failure must not contain a client event ID"));
                 }
                 Ok(())
             }
@@ -331,7 +333,7 @@ impl ServerEvent {
             } if transcript != &format!("{finalized}{agreed}{tentative}")
                 || audio_start_ms > audio_end_ms =>
             {
-                Err("invalid hypothesis snapshot".to_owned())
+                Err(anyhow!("invalid hypothesis snapshot"))
             }
             _ => Ok(()),
         }
@@ -340,7 +342,7 @@ impl ServerEvent {
 
 impl ConversationItem {
     #[cfg(test)]
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> anyhow::Result<()> {
         validate_id(&self.id)?;
         if self.r#type != "message"
             || self.status != "completed"
@@ -349,7 +351,7 @@ impl ConversationItem {
             || self.content[0].r#type != "input_audio"
             || !self.content[0].transcript.is_null()
         {
-            return Err("invalid conversation item".to_owned());
+            return Err(anyhow!("invalid conversation item"));
         }
         Ok(())
     }
@@ -357,9 +359,9 @@ impl ConversationItem {
 
 impl DurationUsage {
     #[cfg(test)]
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> anyhow::Result<()> {
         if self.r#type != "duration" || !self.seconds.is_finite() || self.seconds < 0.0 {
-            return Err("invalid duration usage".to_owned());
+            return Err(anyhow!("invalid duration usage"));
         }
         Ok(())
     }
@@ -372,29 +374,29 @@ impl WireError {
     }
 
     #[cfg(test)]
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> anyhow::Result<()> {
         if self.r#type.is_empty()
             || self.code.is_empty()
             || self.message.is_empty()
             || self.param.invalid_empty()
             || self.event_id.invalid_empty()
         {
-            return Err("invalid wire error".to_owned());
+            return Err(anyhow!("invalid wire error"));
         }
         Ok(())
     }
 }
 
 #[cfg(test)]
-fn validate_id(id: &str) -> Result<(), String> {
+fn validate_id(id: &str) -> anyhow::Result<()> {
     if id.is_empty() {
-        Err("opaque ID must not be empty".to_owned())
+        Err(anyhow!("opaque ID must not be empty"))
     } else {
         Ok(())
     }
 }
 
 #[cfg(test)]
-fn validate_optional_id(id: Option<&str>) -> Result<(), String> {
+fn validate_optional_id(id: Option<&str>) -> anyhow::Result<()> {
     id.map_or(Ok(()), validate_id)
 }

@@ -157,8 +157,7 @@ impl ToolPicker {
         if let Some(handle) = progress {
             handle.complete();
         }
-        let index =
-            Index::new(rows, EMBEDDING_DIMENSIONS, catalog.len()).map_err(IndexError::layout)?;
+        let index = Index::new(rows, EMBEDDING_DIMENSIONS, catalog.len())?;
         Ok(Self {
             catalog,
             config,

@@ -10,6 +10,9 @@ publish = false
 description = "PromptForge gateway-owned speech-to-text runtime and HTTP endpoints"
 
 [dependencies]
+# Optional: the fixture API's controlled-finalization task bound, enabled
+# only by the `test-fixtures` feature.
+anyhow = { workspace = true, optional = true }
 axum.workspace = true
 base64.workspace = true
 futures-util.workspace = true
@@ -27,6 +30,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 gateway-stt = { path = ".", features = ["test-fixtures"] }
 sha2.workspace = true
 tempfile.workspace = true
@@ -35,6 +39,7 @@ tower.workspace = true
 
 [features]
 test-fixtures = [
+    "dep:anyhow",
     "gateway-stt-backend-whisper/test-fixtures",
     "gateway-stt-engine/test-fixtures",
 ]

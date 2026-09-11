@@ -20,7 +20,7 @@ use std::sync::LazyLock;
 
 use mlua::{Function, Table};
 
-use super::{Error, Lua, LuaProgram, Result};
+use super::{Error, Lua, LuaProgram, Result, SharedSource};
 
 /// The builders chunk's name: `@`-prefixed so PUC renders it verbatim as a
 /// file path, making unexpected shim errors clickable `file:line:`
@@ -31,21 +31,21 @@ const MESSAGES_CHUNK_NAME: &str = "@crates/promptforge-lua/src/messages/__impl_m
 const MESSAGES_SOURCE: &str = include_str!("__impl_messages.lua");
 
 /// The builders program, compiled once and loaded per VM. Compilation of the
-/// bundled source fails only on a crate bug, so the payload is the error's
-/// display string (the crate `Error` is not `Clone`).
-static MESSAGES_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = LazyLock::new(|| {
-    LuaProgram::compile_internal(MESSAGES_SOURCE, MESSAGES_CHUNK_NAME)
-        .map_err(|error| error.to_string())
-});
+/// bundled source fails only on a crate bug, so the payload is a shareable
+/// [`SharedSource`] cause (the crate `Error` is not `Clone`), re-wrapped as
+/// a typed error at each install.
+static MESSAGES_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(MESSAGES_SOURCE, MESSAGES_CHUNK_NAME)
+            .map_err(SharedSource::new)
+    });
 
 /// Installs the `messages` global carrying the pure-Lua `new` builder.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the builders chunk or the global install fails.
 pub(crate) fn install_messages(lua: &Lua, globals: &Table) -> Result<()> {
-    let program = MESSAGES_PROGRAM
-        .as_ref()
-        .map_err(|message| Error::Lua(message.clone()))?;
+    let program = MESSAGES_PROGRAM.as_ref().map_err(Error::shared)?;
     let new: Function = program.load(lua)?.call(()).map_err(Error::lua)?;
     let messages = lua.create_table().map_err(Error::lua)?;
     messages.raw_set("new", new).map_err(Error::lua)?;

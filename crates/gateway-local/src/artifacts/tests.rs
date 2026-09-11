@@ -473,6 +473,7 @@ fn concurrent_provisioning_of_same_url_is_safe() {
 #[test]
 fn whoami_user_parser_accepts_an_ordinary_account_sid() {
     let sid = super::confine::parse_whoami_user_sid(
+        std::path::Path::new("cache"),
         true,
         br#""DESKTOP-EXAMPLE\alice","S-1-5-21-111111111-222222222-333333333-1001"
 "#,
@@ -486,6 +487,7 @@ fn whoami_user_parser_accepts_an_ordinary_account_sid() {
 #[test]
 fn whoami_user_parser_accepts_a_well_known_service_sid() {
     let sid = super::confine::parse_whoami_user_sid(
+        std::path::Path::new("cache"),
         true,
         b"\"NT AUTHORITY\\NETWORK SERVICE\",\"S-1-5-20\"\r\n",
         b"",
@@ -508,7 +510,8 @@ fn whoami_user_parser_rejects_malformed_or_multiple_csv_records() {
         b"\"alice\",\"S-1-5-4294967296\"".as_slice(),
     ] {
         assert!(
-            super::confine::parse_whoami_user_sid(true, output, b"").is_err(),
+            super::confine::parse_whoami_user_sid(std::path::Path::new("cache"), true, output, b"")
+                .is_err(),
             "unexpectedly accepted {output:?}"
         );
     }
@@ -516,21 +519,33 @@ fn whoami_user_parser_rejects_malformed_or_multiple_csv_records() {
 
 #[test]
 fn whoami_user_parser_rejects_a_missing_sid() {
-    assert!(super::confine::parse_whoami_user_sid(true, b"\"alice\",\"\"\r\n", b"").is_err());
-    assert!(super::confine::parse_whoami_user_sid(true, b"", b"").is_err());
+    assert!(
+        super::confine::parse_whoami_user_sid(
+            std::path::Path::new("cache"),
+            true,
+            b"\"alice\",\"\"\r\n",
+            b""
+        )
+        .is_err()
+    );
+    assert!(
+        super::confine::parse_whoami_user_sid(std::path::Path::new("cache"), true, b"", b"")
+            .is_err()
+    );
 }
 
 #[test]
 fn whoami_user_parser_rejects_command_failure() {
     let error = super::confine::parse_whoami_user_sid(
+        std::path::Path::new("cache"),
         false,
         b"\"alice\",\"S-1-5-21-1-2-3-1001\"\r\n",
         b"ERROR: access denied\r\n",
     )
     .expect_err("failed whoami must not yield a SID");
 
-    assert!(error.contains("whoami identity query failed"));
-    assert!(error.contains("access denied"));
+    assert!(error.to_string().contains("whoami identity query failed"));
+    assert!(error.to_string().contains("access denied"));
 }
 
 #[test]

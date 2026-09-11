@@ -255,7 +255,7 @@ Tests asserting the new error chains ship in the same commit; the component-scop
 
 <step-6>
 
-### Step 6: anyhow for test and build code, typed errors in remaining production
+### Step 6: anyhow for test and build code, typed errors in remaining production [completed]
 
 - Component: stringly-error-elimination
 

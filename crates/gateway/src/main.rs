@@ -185,14 +185,14 @@ fn main() -> ExitCode {
 /// Test-only process rendezvous used by integration tests that must place
 /// multiple production binaries immediately before lease acquisition.
 #[cfg(feature = "test-fixtures")]
-fn wait_for_test_start_rendezvous() -> Result<(), String> {
+fn wait_for_test_start_rendezvous() -> anyhow::Result<()> {
     let ready = std::env::var_os(TEST_START_READY_ENV);
     let release = std::env::var_os(TEST_START_RELEASE_ENV);
     let (Some(ready), Some(release)) = (&ready, &release) else {
         return if ready.is_none() && release.is_none() {
             Ok(())
         } else {
-            Err(format!(
+            Err(anyhow::anyhow!(
                 "{TEST_START_READY_ENV} and {TEST_START_RELEASE_ENV} must be set together"
             ))
         };
@@ -200,11 +200,11 @@ fn wait_for_test_start_rendezvous() -> Result<(), String> {
     let ready = PathBuf::from(ready);
     let release = PathBuf::from(release);
     std::fs::write(&ready, b"ready")
-        .map_err(|error| format!("write test start marker {}: {error}", ready.display()))?;
+        .map_err(|error| anyhow::anyhow!("write test start marker {}: {error}", ready.display()))?;
     let deadline = std::time::Instant::now() + TEST_START_TIMEOUT;
     while !release.is_file() {
         if std::time::Instant::now() >= deadline {
-            return Err(format!(
+            return Err(anyhow::anyhow!(
                 "test start release {} did not arrive within {TEST_START_TIMEOUT:?}",
                 release.display()
             ));

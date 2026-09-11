@@ -11,6 +11,8 @@
 
 use std::cmp::Ordering;
 
+use crate::error::IndexError;
+
 /// One scored tool: where it sits in the catalog and how well it matched.
 ///
 /// A candidate is a finding, not a decision, and it is produced only by ranking
@@ -91,20 +93,22 @@ impl Index {
     /// Builds a validated index from a flat `rows` buffer of `count` rows.
     ///
     /// # Errors
-    /// Returns a description of the broken invariant when `stride` is zero or
-    /// `rows` is not exactly `stride * count` long.
-    pub(crate) fn new(rows: Vec<f32>, stride: usize, count: usize) -> Result<Self, String> {
+    /// Returns [`IndexError`] when `stride` is zero or `rows` is not exactly
+    /// `stride * count` long.
+    pub(crate) fn new(rows: Vec<f32>, stride: usize, count: usize) -> Result<Self, IndexError> {
         if stride == 0 {
-            return Err("the model reported a zero embedding dimension".to_owned());
+            return Err(IndexError::layout(
+                "the model reported a zero embedding dimension",
+            ));
         }
         let expected = stride
             .checked_mul(count)
-            .ok_or_else(|| "the vector buffer length overflowed".to_owned())?;
+            .ok_or_else(|| IndexError::layout("the vector buffer length overflowed"))?;
         if rows.len() != expected {
-            return Err(format!(
+            return Err(IndexError::layout(format!(
                 "the vector buffer holds {} floats, expected {expected} for {count} rows of {stride}",
                 rows.len()
-            ));
+            )));
         }
         Ok(Self { rows, stride })
     }

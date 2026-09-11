@@ -44,16 +44,18 @@ pub struct UiBuild {
 /// bundle.
 ///
 /// # Errors
-/// Returns an error string when not run through Cargo, when the local
+/// Returns an error when not run through Cargo, when the local
 /// esbuild install is missing or fails, or when a static file cannot be
 /// copied.
-pub fn build(config: UiBuild) -> Result<(), String> {
+pub fn build(config: UiBuild) -> anyhow::Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
-            .ok_or("CARGO_MANIFEST_DIR is not set; run through cargo")?,
+            .ok_or_else(|| anyhow::anyhow!("CARGO_MANIFEST_DIR is not set; run through cargo"))?,
     );
-    let out_dir =
-        PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is not set; run through cargo")?);
+    let out_dir = PathBuf::from(
+        std::env::var_os("OUT_DIR")
+            .ok_or_else(|| anyhow::anyhow!("OUT_DIR is not set; run through cargo"))?,
+    );
     let ui_dir = manifest_dir.join("ui");
     let dist_dir = out_dir.join("ui-dist");
 
@@ -63,7 +65,7 @@ pub fn build(config: UiBuild) -> Result<(), String> {
     // linger into what debug builds serve and release builds embed.
     if dist_dir.exists() {
         std::fs::remove_dir_all(&dist_dir)
-            .map_err(|error| format!("clear {}: {error}", dist_dir.display()))?;
+            .map_err(|error| anyhow::anyhow!("clear {}: {error}", dist_dir.display()))?;
     }
     bundle(&ui_dir, &dist_dir, config.define_app_version)?;
     copy_static(&ui_dir, &dist_dir, config.static_files)?;
@@ -101,7 +103,7 @@ fn watch(ui_dir: &Path, config: &UiBuild) {
 /// Runs the esbuild bundle step from the local `ui/node_modules` install.
 /// There is no `npx` fallback: `npx` can download a different esbuild
 /// version and produce different output.
-fn bundle(ui_dir: &Path, dist_dir: &Path, define_app_version: bool) -> Result<(), String> {
+fn bundle(ui_dir: &Path, dist_dir: &Path, define_app_version: bool) -> anyhow::Result<()> {
     let mut command = esbuild_command(ui_dir)?;
     command.current_dir(ui_dir).args([
         "src/main.ts",
@@ -114,20 +116,23 @@ fn bundle(ui_dir: &Path, dist_dir: &Path, define_app_version: bool) -> Result<()
         command.arg("--minify");
     }
     if define_app_version {
-        let version = std::env::var("CARGO_PKG_VERSION")
-            .map_err(|error| format!("CARGO_PKG_VERSION is not set: {error}; run through cargo"))?;
+        let version = std::env::var("CARGO_PKG_VERSION").map_err(|error| {
+            anyhow::anyhow!("CARGO_PKG_VERSION is not set: {error}; run through cargo")
+        })?;
         // Single quotes: esbuild evaluates the define value as a JS string
         // literal, and unlike double quotes they pass through `cmd /c` on
         // Windows untouched.
         command.arg(format!("--define:__APP_VERSION__='{version}'"));
     }
     let output = command.output().map_err(|error| {
-        format!("esbuild could not be started: {error}; install Node.js 22 so it is on PATH")
+        anyhow::anyhow!(
+            "esbuild could not be started: {error}; install Node.js 22 so it is on PATH"
+        )
     })?;
     if output.status.success() {
         return Ok(());
     }
-    Err(format!(
+    Err(anyhow::anyhow!(
         "the UI bundle failed (status {}):\n{}\n{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
@@ -138,7 +143,7 @@ fn bundle(ui_dir: &Path, dist_dir: &Path, define_app_version: bool) -> Result<()
 /// Builds the command that invokes the local esbuild install, failing with
 /// the setup instructions when `ui/node_modules` is absent. On Windows the
 /// npm shim is a `.cmd` file, which only runs through `cmd /c`.
-fn esbuild_command(ui_dir: &Path) -> Result<Command, String> {
+fn esbuild_command(ui_dir: &Path) -> anyhow::Result<Command> {
     let bin_dir = ui_dir.join("node_modules").join(".bin");
 
     #[cfg(windows)]
@@ -159,7 +164,7 @@ fn esbuild_command(ui_dir: &Path) -> Result<Command, String> {
         }
     }
 
-    Err(format!(
+    Err(anyhow::anyhow!(
         "ui/node_modules is missing; run `npm ci` in {} first",
         ui_dir.display()
     ))
@@ -167,17 +172,17 @@ fn esbuild_command(ui_dir: &Path) -> Result<Command, String> {
 
 /// Copies the static UI files next to the bundle, keeping the relative
 /// paths.
-fn copy_static(ui_dir: &Path, dist_dir: &Path, static_files: &[&str]) -> Result<(), String> {
+fn copy_static(ui_dir: &Path, dist_dir: &Path, static_files: &[&str]) -> anyhow::Result<()> {
     std::fs::create_dir_all(dist_dir)
-        .map_err(|error| format!("create {}: {error}", dist_dir.display()))?;
+        .map_err(|error| anyhow::anyhow!("create {}: {error}", dist_dir.display()))?;
     for file in static_files {
         let target = dist_dir.join(file);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|error| format!("create the parent for {file}: {error}"))?;
+                .map_err(|error| anyhow::anyhow!("create the parent for {file}: {error}"))?;
         }
         std::fs::copy(ui_dir.join(file), &target)
-            .map_err(|error| format!("copy ui/{file} into the bundle output: {error}"))?;
+            .map_err(|error| anyhow::anyhow!("copy ui/{file} into the bundle output: {error}"))?;
     }
     Ok(())
 }

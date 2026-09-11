@@ -31,7 +31,7 @@ OPTIONS:
 
 /// Parses the command line into a [`BuildRequest`]. Every error exit
 /// prints the usage text.
-fn parse_args(args: &[String]) -> Result<BuildRequest, String> {
+fn parse_args(args: &[String]) -> anyhow::Result<BuildRequest> {
     let mut source: Option<PathBuf> = None;
     let mut tag: Option<String> = None;
     let mut out: Option<PathBuf> = None;
@@ -44,7 +44,7 @@ fn parse_args(args: &[String]) -> Result<BuildRequest, String> {
             iter.next()
                 .filter(|value| !value.starts_with("--"))
                 .cloned()
-                .ok_or_else(|| format!("{arg} needs a value\n\n{USAGE}"))
+                .ok_or_else(|| anyhow::anyhow!("{arg} needs a value\n\n{USAGE}"))
         };
         match arg.as_str() {
             "--source" => source = Some(PathBuf::from(value(&mut iter)?)),
@@ -56,7 +56,7 @@ fn parse_args(args: &[String]) -> Result<BuildRequest, String> {
                     if entry.is_empty()
                         || !entry.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
                     {
-                        return Err(format!(
+                        return Err(anyhow::anyhow!(
                             "malformed --arch entry `{entry}` (expected for example 120a-real)\n\n{USAGE}"
                         ));
                     }
@@ -64,15 +64,15 @@ fn parse_args(args: &[String]) -> Result<BuildRequest, String> {
                 }
             }
             "--no-smoke" => smoke = false,
-            "-h" | "--help" => return Err(USAGE.to_string()),
-            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
+            "-h" | "--help" => return Err(anyhow::anyhow!(USAGE.to_string())),
+            other => return Err(anyhow::anyhow!("unknown argument `{other}`\n\n{USAGE}")),
         }
     }
 
     Ok(BuildRequest {
-        source: source.ok_or_else(|| format!("missing required --source\n\n{USAGE}"))?,
-        tag: tag.ok_or_else(|| format!("missing required --tag\n\n{USAGE}"))?,
-        out: out.ok_or_else(|| format!("missing required --out\n\n{USAGE}"))?,
+        source: source.ok_or_else(|| anyhow::anyhow!("missing required --source\n\n{USAGE}"))?,
+        tag: tag.ok_or_else(|| anyhow::anyhow!("missing required --tag\n\n{USAGE}"))?,
+        out: out.ok_or_else(|| anyhow::anyhow!("missing required --out\n\n{USAGE}"))?,
         archs,
         smoke,
     })
