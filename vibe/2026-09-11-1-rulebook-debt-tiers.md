@@ -219,7 +219,7 @@ Tests in the same commit prove: drop no longer blocks and explicit shutdown stil
 
 <step-3>
 
-### Step 3: `#[non_exhaustive]` attributes and `#[expect]` conversions
+### Step 3: `#[non_exhaustive]` attributes and `#[expect]` conversions [completed]
 
 - Component: api-attributes
 

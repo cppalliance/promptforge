@@ -48,7 +48,14 @@ struct FaultInjector {
 }
 
 impl FaultInjector {
-    #[cfg_attr(not(test), allow(clippy::unused_self, clippy::unnecessary_wraps))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unused_self,
+            clippy::unnecessary_wraps,
+            reason = "in non-test builds the fault injector is inert: checkpoint ignores self and never fails"
+        )
+    )]
     fn checkpoint(&mut self, operation: &'static str) -> io::Result<()> {
         #[cfg(not(test))]
         let _ = operation;
@@ -66,7 +73,13 @@ impl FaultInjector {
         Ok(())
     }
 
-    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unused_self,
+            reason = "in non-test builds the injector state is cfg'd out, so the method ignores self"
+        )
+    )]
     fn is_simulated_crash(&self) -> bool {
         #[cfg(test)]
         {
@@ -78,7 +91,13 @@ impl FaultInjector {
         }
     }
 
-    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unused_self,
+            reason = "in non-test builds the injector state is cfg'd out, so the method ignores self"
+        )
+    )]
     fn record_commit_marker(&mut self) {
         #[cfg(test)]
         {

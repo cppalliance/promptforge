@@ -186,7 +186,10 @@ impl RunContext {
     /// The run's tool set, read-only.
     ///
     /// Unused until the `models.loop` step reads the call-time tool scope.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "unused until the models.loop step reads the call-time tool scope"
+    )]
     pub(crate) fn tools(&self) -> &dyn ToolView {
         &*self.tools
     }

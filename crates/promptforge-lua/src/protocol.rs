@@ -215,10 +215,6 @@ pub enum Request {
     /// broker and its host policy own the whole interaction.
     UserInput,
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
-    // The fields are read only by this module's own tests; production parses
-    // them for strict validation and never reads them until the variant
-    // gains a dispatch.
-    #[allow(dead_code)]
     Mcp {
         /// The reserved server name.
         server: String,

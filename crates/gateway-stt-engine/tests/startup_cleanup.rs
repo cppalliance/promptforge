@@ -41,6 +41,7 @@ impl ModelFactory for ConcurrentStartupFailureFactory {
                 PathBuf::from(FINAL_SENTINEL),
                 std::io::Error::other(FINAL_SENTINEL),
             )),
+            _ => unreachable!("the startup cleanup factory scripts only interim and final modes"),
         }
     }
 }

@@ -69,6 +69,7 @@ impl ModelFactory for WhisperModelFactory {
                 };
                 (path, "final")
             }
+            _ => return Ok(None),
         };
         let progress = self
             .config

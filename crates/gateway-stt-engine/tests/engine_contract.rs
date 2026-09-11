@@ -112,6 +112,7 @@ impl ModelFactory for FinalFailingModelFactory {
                 PathBuf::from(FINAL_INIT_SENTINEL),
                 std::io::Error::other(FINAL_INIT_SENTINEL),
             )),
+            _ => unreachable!("the engine contract factory scripts only interim and final modes"),
         }
     }
 }

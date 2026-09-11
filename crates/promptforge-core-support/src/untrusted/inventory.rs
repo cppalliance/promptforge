@@ -36,7 +36,13 @@ pub(super) enum Shape {
 pub(super) struct DelimiterGroup {
     /// The model family or protocol whose templates emit these delimiters.
     // Read by the table sanity tests; live matching keys on shape and names.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by the table sanity tests; live matching keys on shape and names"
+        )
+    )]
     pub(super) family: &'static str,
     /// How each entry in `names` spells its opener.
     pub(super) shape: Shape,

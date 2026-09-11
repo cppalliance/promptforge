@@ -86,8 +86,6 @@ impl GatewaySource {
 
     /// The caller-supplied client when the source wraps one, so a driver can
     /// seed a chain's client slot without forcing the environment build.
-    // Consumed by the scheduler driver until the flip.
-    #[allow(dead_code)]
     pub(crate) fn ready(&self) -> Option<&GatewayClient> {
         match self {
             GatewaySource::Ready(client) => Some(client),

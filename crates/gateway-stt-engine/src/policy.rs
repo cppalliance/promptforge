@@ -9,6 +9,7 @@ const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Checked capture, startup, and backend capability policy.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct EnginePolicy {
     window_samples: usize,
     interval: Duration,

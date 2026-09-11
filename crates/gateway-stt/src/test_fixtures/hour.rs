@@ -230,6 +230,7 @@ impl Decoder for HourSimulationDecoder {
                     .map_err(|_| marker_error("marker end does not fit fixture text"))?;
                 Ok(timeline_text(start_second, end_second))
             }
+            _ => unreachable!("the hour simulation scripts only interim and final decodes"),
         }
     }
 }

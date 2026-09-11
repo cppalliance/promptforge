@@ -91,6 +91,7 @@ pub enum ValidationError {
 /// let _ = ValidatedConnection::validate_named(raw, "my-test-binary");
 /// ```
 #[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ValidatedConnection {
     connection: GatewayDiscoveryFile,
     process_identity: ProcessIdentity,

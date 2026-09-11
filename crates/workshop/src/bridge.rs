@@ -198,13 +198,13 @@ fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Vec<PathBuf
     paths
 }
 
-// The clippy allows cover code the #[implement] macro expands in tests.
+// The clippy expects cover code the #[implement] macro expands in tests.
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::inline_always,
-    clippy::ref_as_ptr,
     clippy::ptr_as_ptr,
-    clippy::borrow_as_ptr
+    clippy::borrow_as_ptr,
+    reason = "the #[implement] macro expansion in tests triggers these lints"
 )]
 mod tests {
     use std::path::PathBuf;
@@ -243,7 +243,10 @@ mod tests {
 
     impl ICoreWebView2ObjectCollectionView_Impl for FakeObjects_Impl {
         fn Count(&self, value: *mut u32) -> windows_core::Result<()> {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the test fake holds a handful of objects, far below u32::MAX"
+            )]
             // SAFETY: `value` is the caller's out-pointer, valid for one write.
             unsafe {
                 *value = self.objects.len() as u32;

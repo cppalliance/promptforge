@@ -129,6 +129,10 @@ fn main() -> ExitCode {
             }
             return ExitCode::SUCCESS;
         }
+        Ok(_) => {
+            eprintln!("error: unrecognized gateway startup decision");
+            return ExitCode::FAILURE;
+        }
         Err(error) => {
             print_error_chain(&error);
             return ExitCode::FAILURE;

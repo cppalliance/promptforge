@@ -7,6 +7,7 @@ use crate::TranscribeError;
 
 /// Selects the physical worker and backend decode policy for one request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum DecodeMode {
     /// Responsive provisional transcription.
     Interim,
@@ -16,6 +17,7 @@ pub enum DecodeMode {
 
 /// One complete stateless decode job.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct DecodeRequest {
     mode: DecodeMode,
     samples: RequestSamples,

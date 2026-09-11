@@ -26,6 +26,7 @@ pub(crate) enum Relaunch {
 
 /// The process ownership decision made before Gateway startup side effects.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum GatewayStartup {
     /// This process owns the lifetime lease and may boot.
     Boot(shared_sidecar::GatewayInstanceLease),
@@ -48,6 +49,7 @@ pub enum GatewayStartupError {
     Resolve(#[source] shared_sidecar::SidecarError),
     /// The lease owner did not publish a validated record in time.
     #[error("the Gateway process owner published no validated connection within {timeout:?}")]
+    #[non_exhaustive]
     OwnerTimeout {
         /// The bounded wait that elapsed.
         timeout: Duration,

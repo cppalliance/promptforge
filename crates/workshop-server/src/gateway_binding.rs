@@ -97,6 +97,7 @@ struct PublicationState {
 pub enum GatewayPublicationError {
     /// The replacement clients could not be built.
     #[error(transparent)]
+    #[non_exhaustive]
     Build(#[from] GatewayError),
     /// The binding has permanently revoked replacement publication.
     #[error("gateway replacement publication is permanently closed")]

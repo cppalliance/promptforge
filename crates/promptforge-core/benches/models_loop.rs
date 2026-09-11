@@ -6,7 +6,10 @@
 
 // The criterion_group! macro expansion generates an undocumented public
 // entry point; bench targets have no docs contract.
-#![allow(missing_docs)]
+#![expect(
+    missing_docs,
+    reason = "the criterion_group! macro expansion generates an undocumented public entry point; bench targets have no docs contract"
+)]
 #![expect(
     clippy::expect_used,
     reason = "bench setup panics on construction failure, which is the desired behavior"

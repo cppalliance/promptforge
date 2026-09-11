@@ -44,7 +44,7 @@ fn timeline_text(start_second: usize, end_second: usize) -> String {
         .join(" ")
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the fixture creates one deterministic session and generation"
 )]
@@ -56,7 +56,7 @@ fn scripted_session(final_decoder: &ScriptedDecoder) -> RealtimeSessionFixture {
         .expect("the scripted Realtime session starts")
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the bounded decoder observation is a deterministic fixture assertion"
 )]
@@ -70,7 +70,7 @@ async fn wait_for_decodes(decoder: &ScriptedDecoder, count: usize) {
     );
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the bounded hour probe is observed off the async executor"
 )]
@@ -81,10 +81,6 @@ async fn wait_for_hour_decodes(probe: &HourSimulationProbe, count: usize) -> boo
         .expect("the hour decode observer joins")
 }
 
-#[allow(
-    clippy::expect_used,
-    reason = "the retry waits only for worker-owned PCM retirement"
-)]
 async fn append_after_retirement(session: &mut RealtimeSessionFixture, payload: &str) {
     let deadline = Instant::now() + WAIT;
     loop {
@@ -98,7 +94,7 @@ async fn append_after_retirement(session: &mut RealtimeSessionFixture, payload: 
     }
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the bounded fixture must observe one exact settled coverage frontier"
 )]
@@ -134,7 +130,7 @@ struct HourPeaks {
 }
 
 impl HourPeaks {
-    #[allow(
+    #[expect(
         clippy::expect_used,
         reason = "the bounded hour fixture keeps one input and a fixed stride count"
     )]
@@ -180,7 +176,7 @@ fn append_marked_rotated(
     }
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the complete decoded hypothesis has one deterministic fixture shape"
 )]

@@ -90,9 +90,12 @@ pub(crate) enum Command {
     /// into the routing table needs the model's full configuration, which
     /// this command does not carry; that arrives with the command's first
     /// producer.
-    #[allow(
-        dead_code,
-        reason = "no producer exists yet; the config UI's model download wires it in a later step"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no producer exists yet; the config UI's model download wires it in a later step"
+        )
     )]
     ProvisionModel {
         /// The model name, for status display and debounce.
@@ -104,9 +107,12 @@ pub(crate) enum Command {
     },
     /// Stop one local model's `llama-server` child and drop it from the
     /// routing table. Not debounced: unloads are fast and order-independent.
-    #[allow(
-        dead_code,
-        reason = "no producer exists yet; the admin queue routes wire it in a later step"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no producer exists yet; the admin queue routes wire it in a later step"
+        )
     )]
     UnloadModel {
         /// The model to stop.

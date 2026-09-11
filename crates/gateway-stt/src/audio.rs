@@ -44,7 +44,10 @@ impl CommittedAudio {
         self.input_samples
     }
 
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "sample counts at audio-buffer scale convert to f64 without meaningful precision loss"
+    )]
     pub(super) fn duration_seconds(&self) -> f64 {
         self.input_samples as f64 / INPUT_SAMPLE_RATE as f64
     }
@@ -151,7 +154,10 @@ impl AudioBuffer {
     }
 
     #[cfg(test)]
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "sample counts at audio-buffer scale convert to f64 without meaningful precision loss"
+    )]
     pub(super) fn buffered_duration_seconds(&self) -> f64 {
         self.input_samples as f64 / INPUT_SAMPLE_RATE as f64
     }

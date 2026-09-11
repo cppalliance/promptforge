@@ -19,7 +19,7 @@ fn encoded(samples: &[i16]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the isolated fixture constructs one session and one scripted generation"
 )]
@@ -47,7 +47,7 @@ fn session_with_audio(service: &crate::SpeechService, payload: &str, budget: usi
 
 /// Cancels the session's generation epoch the way production still can:
 /// closing the runtime's admission, as service shutdown does.
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the session owns its generation in these fixtures"
 )]
@@ -65,7 +65,7 @@ fn cancel_generation_epoch(service: &crate::SpeechService, session: &Session) {
     );
 }
 
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "the bounded worker observations are deterministic fixture assertions"
 )]
@@ -86,10 +86,6 @@ async fn wait_for_decode_retirement(decoder: ScriptedDecoder, service: &crate::S
 }
 
 #[tokio::test]
-#[allow(
-    clippy::expect_used,
-    reason = "the scripted interim sequence must reach every asserted ownership boundary"
-)]
 async fn blocked_interim_keeps_exact_budget_until_worker_retirement_and_commit_retries() {
     let interim = ScriptedDecoder::new();
     let service = scripted_service(ScriptedModelFactory::new(interim.clone()), 15, 500)
@@ -158,10 +154,6 @@ async fn blocked_interim_keeps_exact_budget_until_worker_retirement_and_commit_r
 }
 
 #[tokio::test]
-#[allow(
-    clippy::expect_used,
-    reason = "the scripted final sequence must reach every asserted ownership boundary"
-)]
 async fn blocked_final_keeps_budget_after_epoch_cancellation_until_worker_retirement() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();

@@ -183,7 +183,7 @@ impl ModelFactory for CancelDuringBuild {
         self.token.cancel();
         Ok(match mode {
             DecodeMode::Interim => Some(Box::new(TrackedDecoder(Arc::clone(&self.dropped)))),
-            DecodeMode::Final => None,
+            _ => None,
         })
     }
 }

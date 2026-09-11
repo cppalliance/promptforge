@@ -245,7 +245,6 @@ pub(crate) enum Error {
     /// until the `models.loop` step rewires it.
     #[error("model-facing schema build failure for tool alias {alias:?}")]
     #[non_exhaustive]
-    #[allow(dead_code)]
     BindSchema {
         /// The prompt-local alias whose schema could not be built.
         alias: String,
@@ -352,7 +351,6 @@ pub(crate) enum Error {
         similarity = diagnostic.similarity,
     )]
     #[non_exhaustive]
-    #[allow(dead_code)] // constructed by the scope validation, test-only until `models.loop`
     NearDuplicateTools {
         /// The complete pair diagnostic, boxed to keep every crate error small.
         /// The diagnostic vocabulary lives in tool-scope validation (F10).
