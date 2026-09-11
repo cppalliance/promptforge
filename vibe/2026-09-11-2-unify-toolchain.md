@@ -146,7 +146,7 @@ Apply every change in one commit (code fixes plus their tests, per repo conventi
 
 <step-2>
 
-### Step 2: Run the full verification gate on stable and confirm green CI
+### Step 2: Run the full verification gate on stable and confirm green CI [completed]
 
 - Component: `none`
 
