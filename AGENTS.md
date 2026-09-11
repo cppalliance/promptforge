@@ -12,4 +12,3 @@ Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gatew
 - Long-running work reports through `shared-progress`. Producers report operation state, hosts forward it, and renderers format it.
 - Unsafe code stays in its explicitly owned boundary. Every unsafe block documents its safety invariants immediately before the block.
 - Comments explain a non-obvious constraint, ordering requirement, or workaround. Every platform or external-bug workaround cites its upstream issue URL in the explanatory comment.
-- CI lints with a newer stable toolchain than the pinned local MSRV (`rust-toolchain.toml`). Lints introduced or strengthened after the pin, such as unused glob imports, may fail only on CI. Check with the newer toolchain before pushing when a change touches imports or doc comments; `cargo doc` runs with warnings denied on CI.

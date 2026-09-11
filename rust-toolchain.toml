@@ -1,6 +1,3 @@
-# Pin to the MSRV channel (rust-version in Cargo.toml): a developer with an
-# older default toolchain gets the right one through rustup instead of a
-# compile error. CI overrides this with RUSTUP_TOOLCHAIN where it means to
-# test a different channel.
+# Build and test on the current stable toolchain, matching CI.
 [toolchain]
-channel = "1.89"
+channel = "stable"

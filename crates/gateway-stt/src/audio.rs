@@ -314,7 +314,7 @@ mod tests {
         assert!(
             error
                 .source()
-                .is_some_and(<(dyn std::error::Error + 'static)>::is::<base64::DecodeError>),
+                .is_some_and(<dyn std::error::Error + 'static>::is::<base64::DecodeError>),
             "the error chain carries the decoder failure"
         );
     }

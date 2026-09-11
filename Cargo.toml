@@ -13,7 +13,6 @@ default-members = ["crates/gateway"]
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.89"
 license = "BSL-1.0"
 repository = "https://github.com/cppalliance/promptforge"
 

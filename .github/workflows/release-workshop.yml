@@ -26,11 +26,6 @@ concurrency:
   group: release-workshop-${{ github.ref_name }}
   cancel-in-progress: false
 
-env:
-  # The repo's rust-toolchain.toml pins the MSRV for local builds; CI tests
-  # the current stable.
-  RUSTUP_TOOLCHAIN: stable
-
 jobs:
   prepare:
     runs-on: ubuntu-latest

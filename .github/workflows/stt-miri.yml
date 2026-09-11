@@ -46,15 +46,8 @@ jobs:
   native-whisper:
     runs-on: [self-hosted, windows, cuda]
     timeout-minutes: 90
-    env:
-      RUSTUP_TOOLCHAIN: 1.89
-      RUSTUP_AUTO_INSTALL: "0"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify preinstalled MSRV Rust
-        shell: powershell
-        run: tools/validate-rust-1.89.0.ps1
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2

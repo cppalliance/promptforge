@@ -1,6 +1,5 @@
 [![CI](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml/badge.svg)](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org/)
 
 # PromptForge
 
@@ -65,7 +64,7 @@ Lua sets up the turn. The prose before a Lua block is that block's lazy `prose` 
 
 ## Build from source
 
-Every build needs Rust 1.89 or later and Node.js 22. The two web UIs are bundled with esbuild during the Cargo build, so run `npm ci` once in each `ui/` folder after cloning:
+Every build needs Rust and Node.js 22. The two web UIs are bundled with esbuild during the Cargo build, so run `npm ci` once in each `ui/` folder after cloning:
 
 ```bash
 git clone git@github.com:cppalliance/promptforge.git
@@ -108,10 +107,6 @@ flowchart LR
 Build the guide locally with `mdbook build guide`.
 
 ![Filing cabinets](images/banner-06.png)
-
-## Minimum Rust Version
-
-Rust 1.89 or later.
 
 ## Contributing
 

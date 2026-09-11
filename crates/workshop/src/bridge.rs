@@ -202,8 +202,7 @@ fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Vec<PathBuf
 #[cfg(test)]
 #[expect(
     clippy::inline_always,
-    clippy::ptr_as_ptr,
-    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr,
     reason = "the #[implement] macro expansion in tests triggers these lints"
 )]
 mod tests {

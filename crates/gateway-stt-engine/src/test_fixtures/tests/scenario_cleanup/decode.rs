@@ -71,7 +71,7 @@ async fn canceled_decode_scenario_releases_and_permits_a_follow_up() {
     engine.shutdown().expect("worker joins");
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn decode_rendezvous_timeout_releases_a_late_arrival_and_permits_a_follow_up() {
     let decoder = ScriptedDecoder::new();
     decoder.push_text("late arrival");
