@@ -99,6 +99,18 @@ function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+/**
+ * Drops fields the server accepts on one model kind only. A kind switch
+ * hides the voices control without clearing its value, and the server
+ * rejects a non-speech model carrying `voices`, so the payload must not
+ * keep the stale list.
+ */
+function stripKindBoundFields(data: EntryData): void {
+  if (data["kind"] !== "speech") {
+    delete data["voices"];
+  }
+}
+
 /** A config document's `active_profile` pointer, when it carries one. */
 function profilePointer(config: EntryData): string | null {
   const pointer = config["active_profile"];
@@ -700,7 +712,9 @@ export class ConfigStore {
     const array = modelArray(entry.kind);
     let items = this.entriesOf(payload, array);
     if (entry.draft) {
-      items.push(structuredClone(entry.data));
+      const data = structuredClone(entry.data);
+      stripKindBoundFields(data);
+      items.push(data);
       payload[array] = items;
       return payload;
     }
@@ -718,6 +732,7 @@ export class ConfigStore {
       for (const [key, value] of edits ?? []) {
         writePath(target, key, value);
       }
+      stripKindBoundFields(target);
       const renamed = String(target["name"] ?? entry.name);
       if (renamed !== entry.name) {
         for (const profile of this.entriesOf(payload, "profile")) {
