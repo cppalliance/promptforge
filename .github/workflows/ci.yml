@@ -203,6 +203,11 @@ jobs:
       - name: Test (workshop, concurrent via nextest)
         run: cargo nextest run --locked -p workshop -p workshop-server
 
+      # nextest does not run doctests; the workspace doctest step in the
+      # `test` job excludes both workshop crates, so cover them here.
+      - name: Doctests (workshop)
+        run: cargo test --doc -p workshop -p workshop-server
+
       - name: Test Gateway process ownership races
         run: |
           cargo test --locked -p shared-sidecar a_process_lifetime_lease_recovers_after_its_owner_is_terminated
@@ -379,3 +384,24 @@ jobs:
 
       - name: cargo audit
         run: cargo audit
+
+  # Single required status check for branch protection: it fails when any
+  # job fails or is cancelled, so a cancelled job cannot read as green.
+  # needs: is a static list, so every newly added job must be added to it
+  # or that job bypasses this gate.
+  ci-green:
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, msrv, supply-chain]
+    if: always()
+    steps:
+      - name: Verify every job succeeded
+        shell: bash
+        run: |
+          status=0
+          for result in ${{ join(needs.*.result, ' ') }}; do
+            if [ "$result" != "success" ]; then
+              echo "a required job did not succeed: $result"
+              status=1
+            fi
+          done
+          exit $status
