@@ -36,12 +36,12 @@ const PROJECTOR_URL: &str =
 const PROJECTOR_SHA256: &str = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa";
 
 /// First provisioning downloads the three pinned artifacts.
-const PROVISION_TIMEOUT: Duration = Duration::from_secs(45 * 60);
+const PROVISION_TIMEOUT: Duration = Duration::from_mins(45);
 /// A marker-hit relaunch skips downloads and re-hashing; only spawn and
 /// weight load remain.
-const RELAUNCH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const RELAUNCH_TIMEOUT: Duration = Duration::from_mins(15);
 /// One completion against a warm server.
-const COMPLETION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const COMPLETION_TIMEOUT: Duration = Duration::from_mins(5);
 /// Bound on waiting for the capture readers to drain the child's startup
 /// log: readiness is an HTTP probe, so it can beat the final piped bytes.
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(30);

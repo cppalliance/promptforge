@@ -77,7 +77,7 @@ const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// accepts the connection and then sends nothing can never pin the
 /// provisioning thread forever - and a reader thread parked past the idle
 /// bound reaps when the ceiling drops its body.
-const DOWNLOAD_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
+const DOWNLOAD_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_hours(2);
 
 type Result<T> = std::result::Result<T, LocalError>;
 

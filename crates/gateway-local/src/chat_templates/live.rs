@@ -13,7 +13,7 @@ const LIVE_ENV: &str = "PROMPTFORGE_LIVE_CHAT_TEMPLATES";
 const SERVER_ENV: &str = "PROMPTFORGE_LLAMA_SERVER";
 const MODELS_ENV: &str = "PROMPTFORGE_CHAT_TEMPLATE_MODELS";
 const API_KEY: &str = "promptforge-chat-template-live";
-const START_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const START_TIMEOUT: Duration = Duration::from_mins(20);
 static LIVE_SERIAL: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Deserialize)]

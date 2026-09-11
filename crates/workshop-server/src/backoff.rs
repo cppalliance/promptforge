@@ -34,7 +34,7 @@ const MAX_DELAY: Duration = Duration::from_secs(60);
 /// rqbit. At the 60s ceiling this is more than a day of continuous
 /// outage; a workshop whose gateway has been gone that long stops
 /// probing and says so.
-const TOTAL_DELAY_BUDGET: Duration = Duration::from_secs(24 * 60 * 60);
+const TOTAL_DELAY_BUDGET: Duration = Duration::from_hours(24);
 
 /// Shared reconnect-backoff state; clones feed one schedule.
 ///
