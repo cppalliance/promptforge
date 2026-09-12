@@ -158,7 +158,7 @@ Each step is one commit containing its code and tests.
 
 <step-5>
 
-### Step 5: remove the promptforge-bashkit crate
+### Step 5: remove the promptforge-bashkit crate [completed]
 
 - Component: vfs-debt-removal
 - Remove `promptforge/crates/promptforge-bashkit/` by moving it to `cabinet/_trash/` (stating the recovery sentence), regenerate `Cargo.lock`, and sweep remaining bashkit references in CI, guide, and READMEs.
