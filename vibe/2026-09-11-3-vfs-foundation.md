@@ -582,7 +582,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-3>
 
-### Step 3: handle, Access capability, and claims tables
+### Step 3: handle, Access capability, and claims tables [completed]
 
 - Component: shared-vfs core
 - Implement `ExecId` (opaque, process-global monotonic counter, no public constructor), `Volume` (backend and claims as separately Arc-shareable), `Claims` (readers/writers maps from interned VfsPath to live ExecIds plus the live set; retired or released claims are deleted, never stored), `VfsRef` (`Arc<Volume>`, poison-safe locking, `VfsRef::new` and `acquire()`), and `Access` (#[must_use]; canonicalizes at receipt, consults the Policy before the claims check so a denied operation never registers a claim, registers claims, locks the backend per call; `spawn()` vends a fresh ExecId and deletes the parent's claims; Drop releases the identity and its claims).

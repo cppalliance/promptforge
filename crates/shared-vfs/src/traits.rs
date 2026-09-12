@@ -20,8 +20,6 @@ pub struct ExecId(u64);
 
 impl ExecId {
     /// Vends the next process-unique identity.
-    // The handle arrives in a later step; nothing vends identities today.
-    #[allow(dead_code)]
     pub(crate) fn vend() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
@@ -38,10 +36,18 @@ pub trait Vfs: Send {
     /// Acquires an access object bound to `id`. Every operation on the
     /// returned object is attributed to that identity: backends that
     /// care can know who is touching what; the rest ignore it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot open a session.
     fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError>;
 
     /// Releases `id`. Also called from the access object's Drop, so
     /// teardown paths (cancel, panic, early return) cannot skip it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot release the identity.
     fn release(&mut self, id: ExecId) -> Result<(), VfsError>;
 
     /// Whether this backend rejects all mutations.
@@ -56,6 +62,11 @@ pub trait Vfs: Send {
 /// re-validate.
 pub trait VfsAccess: Send {
     /// Reads the file at `path` exactly as stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::NotFound`] when the file is absent, or a
+    /// backend error when the read fails.
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError>;
 
     /// Reads `len` bytes starting at byte `offset`.
@@ -63,6 +74,11 @@ pub trait VfsAccess: Send {
     /// Default: read whole, slice. Backends that can seek (host
     /// directory, SQLite) override and never materialize the file.
     /// The handle's line-based ranges are built on this.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the underlying read fails or the range
+    /// exceeds the addressable size.
     fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
         let data = self.read(path)?;
         let Ok(start) = usize::try_from(offset) else {
@@ -88,45 +104,94 @@ pub trait VfsAccess: Send {
     /// `write_owned(&mut self, path: &VfsPath, contents: Vec<u8>)`
     /// delegating to `write`, which the memory overlay would override to
     /// move the buffer with zero copies. Add when profiling calls for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot write the contents.
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError>;
 
     /// Appends to the file at `path`, creating it if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot append the contents.
     fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError>;
 
     /// Removes the file, link, or directory at `path`.
     /// Absent is NotFound; a directory without `recursive` is an error.
     /// On a symlink, removes the link, never the target.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::NotFound`] when the path is absent, or an
+    /// error when the removal fails.
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError>;
 
     /// A confirmed absence is `Ok(false)`; a backend failure is `Err`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend cannot determine existence.
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError>;
 
     /// Returns stored paths matching `pattern`, sorted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the pattern is invalid or the backend fails.
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError>;
 
     /// Lists the directory at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the path is not a directory or the
+    /// backend fails.
     fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError>;
 
     /// Returns metadata for `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::NotFound`] when the path is absent, or a
+    /// backend error when the stat fails.
     fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError>;
 
     /// Creates the directory at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the directory cannot be created.
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError>;
 
     /// Renames or moves, atomically where the backend allows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the rename fails; source and destination
+    /// are left unchanged.
     fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError>;
 
     /// Copies the file at `from` to `to`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the copy fails; source and destination
+    /// are left unchanged.
     fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError>;
 
     /// Replaces the unique occurrence of `old` with `new`.
     /// Zero matches and multiple matches are both errors.
     /// Default: read, count, replace, write. Override to push down.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file is not UTF-8, when the match
+    /// count is not exactly one, or when the read or write fails.
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         let bytes = self.read(path)?;
-        let text = String::from_utf8(bytes).map_err(|_| {
-            VfsError::Backend(format!("str_replace requires UTF-8 text: {path}"))
-        })?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| VfsError::Backend(format!("str_replace requires UTF-8 text: {path}")))?;
         let count = text.matches(old).count();
         if count == 0 {
             return Err(VfsError::Backend(format!(
@@ -149,6 +214,11 @@ pub trait VfsAccess: Send {
     /// [`VfsError::Unsupported`]: this crate is std-only, so a regex
     /// engine must come from an overriding backend. Non-UTF-8 files and
     /// directories are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::Unsupported`] for regex queries, or an error
+    /// when the glob or a read fails.
     fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
         if query.is_regex {
             return Err(VfsError::Unsupported(
@@ -178,19 +248,18 @@ pub trait VfsAccess: Send {
             };
             for (index, line) in text.lines().enumerate() {
                 let hit = if query.case_insensitive {
-                    line.to_lowercase()
-                        .contains(&query.pattern.to_lowercase())
+                    line.to_lowercase().contains(&query.pattern.to_lowercase())
                 } else {
                     line.contains(&query.pattern)
                 };
                 if !hit {
                     continue;
                 }
-                if let Some(cap) = query.max_results {
-                    if matches.len() >= cap {
-                        truncated = true;
-                        break 'files;
-                    }
+                if let Some(cap) = query.max_results
+                    && matches.len() >= cap
+                {
+                    truncated = true;
+                    break 'files;
                 }
                 matches.push(GrepMatch {
                     path: path.clone(),
@@ -205,6 +274,10 @@ pub trait VfsAccess: Send {
     /// Creates a symbolic link at `link` naming `target`.
     ///
     /// POSIX extra; the default returns [`VfsError::Unsupported`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::Unsupported`] unless a backend overrides.
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
         let _ = target;
         Err(VfsError::Unsupported(format!(
@@ -215,6 +288,10 @@ pub trait VfsAccess: Send {
     /// Reads the target of the symbolic link at `path`.
     ///
     /// POSIX extra; the default returns [`VfsError::Unsupported`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::Unsupported`] unless a backend overrides.
     fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
         Err(VfsError::Unsupported(format!(
             "read_link is not supported by this backend: {path}"
@@ -224,6 +301,10 @@ pub trait VfsAccess: Send {
     /// Changes the mode bits of `path`.
     ///
     /// POSIX extra; the default returns [`VfsError::Unsupported`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VfsError::Unsupported`] unless a backend overrides.
     fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
         let _ = mode;
         Err(VfsError::Unsupported(format!(
