@@ -249,6 +249,10 @@ fn file_type_of(file_type: fs::FileType) -> FileType {
 
 /// POSIX mode bits where the host tracks them.
 #[cfg(unix)]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the not(unix) variant returns None; the Option unifies the platform signatures"
+)]
 fn mode_of(metadata: &fs::Metadata) -> Option<u32> {
     use std::os::unix::fs::PermissionsExt;
     Some(metadata.permissions().mode())
