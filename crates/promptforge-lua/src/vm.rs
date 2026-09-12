@@ -410,7 +410,10 @@ impl SectionVm {
     ///
     /// let nonce = GuardNonce::fresh();
     /// let vfs = promptforge_vfs::empty();
-    /// let access = std::sync::Arc::new(vfs.acquire().expect("the stock backend acquires"));
+    /// let access = std::sync::Arc::new(
+    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
+    ///         .expect("the stock backend acquires"),
+    /// );
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &access)?;
     /// vm.teardown(&NullObserver::default(), "Example");
@@ -783,7 +786,10 @@ impl SectionVm {
     ///
     /// let nonce = GuardNonce::fresh();
     /// let vfs = promptforge_vfs::empty();
-    /// let access = std::sync::Arc::new(vfs.acquire().expect("the stock backend acquires"));
+    /// let access = std::sync::Arc::new(
+    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
+    ///         .expect("the stock backend acquires"),
+    /// );
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &access)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));

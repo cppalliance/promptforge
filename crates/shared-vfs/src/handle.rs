@@ -7,13 +7,16 @@
 //! so a denied operation never registers a claim, registers claims, and
 //! locks the backend's access object per call. Dropping an [`Access`]
 //! releases the identity and its claims, so cancellation, panics, and
-//! early returns cannot leak claims.
+//! early returns cannot leak claims. A handle with an installed op sink
+//! fires it on every admitted operation - after policy and claims pass,
+//! before the backend executes; see [`crate::observe`].
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
+use crate::observe::{OpEvent, OpSink, Origin};
 use crate::path::{VfsPath, canonicalize};
 use crate::router::{Mounts, Router, VfsRefBuilder};
 use crate::traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
@@ -154,6 +157,7 @@ fn conflict(
 struct Volume {
     backend: Arc<Mutex<Box<dyn Vfs>>>,
     claims: Arc<Claims>,
+    sink: Option<OpSink>,
 }
 
 /// The cloneable handle over one backend and its claims ledger.
@@ -190,6 +194,7 @@ impl VfsRef {
             volume: Arc::new(Volume {
                 backend: Arc::new(Mutex::new(Box::new(backend))),
                 claims: Arc::new(Claims::new()),
+                sink: None,
             }),
             policy: Arc::new(policy),
         }
@@ -232,6 +237,9 @@ impl VfsRef {
             volume: Arc::new(Volume {
                 backend: Arc::new(Mutex::new(Box::new(Router::new(mounts)))),
                 claims: Arc::clone(&self.volume.claims),
+                // One sink observes both views of the same storage, fired
+                // by the outer capability with the caller's origin.
+                sink: self.volume.sink.clone(),
             }),
             policy: Arc::clone(&self.policy),
         }
@@ -239,26 +247,36 @@ impl VfsRef {
 
     /// Acquires the capability for a new serial thread of execution.
     /// This is the only way in: every acquire vends a fresh [`ExecId`].
+    /// `origin` is pure observability: it labels every operation event
+    /// this capability fires and never gates anything.
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity.
-    pub fn acquire(&self) -> Result<Access, VfsError> {
-        self.acquire_with(ExecId::vend())
+    pub fn acquire(&self, origin: Origin) -> Result<Access, VfsError> {
+        self.acquire_with(ExecId::vend(), Some(origin))
     }
 
     /// Acquires the capability under a given identity: how a mounted
     /// handle forwards the caller's attribution. The identity registers
     /// as live in this handle's claims table, so conflicts are detected
-    /// across both views of the same storage.
+    /// across both views of the same storage. A `None` origin is the
+    /// mount forward: the outer handle already fired the caller's origin,
+    /// so the forward fires nothing rather than double the event with a
+    /// fabricated, less precise one.
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity;
     /// see [`VfsRef::acquire`].
-    pub(crate) fn acquire_with(&self, id: ExecId) -> Result<Access, VfsError> {
+    pub(crate) fn acquire_with(
+        &self,
+        id: ExecId,
+        origin: Option<Origin>,
+    ) -> Result<Access, VfsError> {
         let inner = self.backend().acquire(id)?;
         self.volume.claims.register_live(id);
         Ok(Access {
             id,
+            origin,
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             inner: Mutex::new(inner),
@@ -266,14 +284,19 @@ impl VfsRef {
     }
 
     /// Builds a handle over a router with a fresh claims table and the
-    /// [`AllowAll`] policy: the builder's exit.
-    pub(crate) fn from_router(router: Router) -> VfsRef {
+    /// installed policy and op sink: the builder's exit.
+    pub(crate) fn from_router(
+        router: Router,
+        policy: Arc<dyn Policy + Sync>,
+        sink: Option<OpSink>,
+    ) -> VfsRef {
         VfsRef {
             volume: Arc::new(Volume {
                 backend: Arc::new(Mutex::new(Box::new(router))),
                 claims: Arc::new(Claims::new()),
+                sink,
             }),
-            policy: Arc::new(AllowAll),
+            policy,
         }
     }
 
@@ -288,10 +311,14 @@ impl VfsRef {
 
 /// The public capability. Holds an [`ExecId`] and the backend's access
 /// object; every operation canonicalizes the path, checks the policy,
-/// checks the claims tables, then locks the backend per call.
+/// checks the claims tables, fires the op sink, then locks the backend
+/// per call.
 #[must_use = "an acquire dropped immediately is a bug: the capability carries the identity's claims"]
 pub struct Access {
     id: ExecId,
+    /// The caller-supplied observability origin; `None` only on the
+    /// crate-private mount forward, which never fires.
+    origin: Option<Origin>,
     volume: Arc<Volume>,
     policy: Arc<dyn Policy + Sync>,
     inner: Mutex<Box<dyn VfsAccess>>,
@@ -303,18 +330,21 @@ impl Access {
     /// are deleted from the tables: they predate the child by
     /// construction, so a retired claim can never conflict again. The
     /// spawn IS the happens-before edge - no fence call, no epochs.
+    /// `origin` labels the child's operation events, exactly as in
+    /// [`VfsRef::acquire`].
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the child's
     /// identity; see [`VfsRef::acquire`]. A failed spawn leaves this
     /// capability's claims untouched.
-    pub fn spawn(&self) -> Result<Access, VfsError> {
+    pub fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
         let id = ExecId::vend();
         let inner = self.backend().acquire(id)?;
         self.volume.claims.retire(self.id);
         self.volume.claims.register_live(id);
         Ok(Access {
             id,
+            origin: Some(origin),
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             inner: Mutex::new(inner),
@@ -334,6 +364,7 @@ impl Access {
     /// fails.
     pub fn read(&self, path: &str) -> Result<Vec<u8>, VfsError> {
         let path = self.gate(Op::Read, path, ClaimKind::Read)?;
+        self.fire(Op::Read, &path);
         self.inner().read(&path)
     }
 
@@ -396,6 +427,7 @@ impl Access {
     /// live identity holds a claim on `path`, or when the backend fails.
     pub fn write(&self, path: &str, contents: &[u8]) -> Result<(), VfsError> {
         let path = self.gate(Op::Write, path, ClaimKind::Write)?;
+        self.fire(Op::Write, &path);
         self.inner().write(&path, contents)
     }
 
@@ -406,6 +438,7 @@ impl Access {
     /// live identity holds a claim on `path`, or when the backend fails.
     pub fn append(&self, path: &str, contents: &[u8]) -> Result<(), VfsError> {
         let path = self.gate(Op::Append, path, ClaimKind::Write)?;
+        self.fire(Op::Append, &path);
         self.inner().append(&path, contents)
     }
 
@@ -418,6 +451,7 @@ impl Access {
     /// exactly one, or when the backend fails.
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), VfsError> {
         let path = self.gate(Op::Write, path, ClaimKind::Write)?;
+        self.fire(Op::Write, &path);
         self.inner().str_replace(&path, old, new)
     }
 
@@ -428,6 +462,7 @@ impl Access {
     /// live identity holds a claim on `path`, or when the backend fails.
     pub fn remove(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
         let path = self.gate(Op::Delete, path, ClaimKind::Write)?;
+        self.fire(Op::Delete, &path);
         self.inner().remove(&path, recursive)
     }
 
@@ -439,6 +474,7 @@ impl Access {
     /// fails.
     pub fn exists(&self, path: &str) -> Result<bool, VfsError> {
         let path = self.gate(Op::Exists, path, ClaimKind::Read)?;
+        self.fire(Op::Exists, &path);
         self.inner().exists(&path)
     }
 
@@ -450,7 +486,8 @@ impl Access {
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
         // The claim key is the canonicalized pattern; the backend
         // receives the pattern verbatim.
-        let _claimed = self.gate(Op::Glob, pattern, ClaimKind::Read)?;
+        let claimed = self.gate(Op::Glob, pattern, ClaimKind::Read)?;
+        self.fire(Op::Glob, &claimed);
         self.inner().glob(pattern)
     }
 
@@ -462,6 +499,7 @@ impl Access {
     /// fails.
     pub fn list(&self, path: &str) -> Result<Vec<Entry>, VfsError> {
         let path = self.gate(Op::List, path, ClaimKind::Read)?;
+        self.fire(Op::List, &path);
         self.inner().list(&path)
     }
 
@@ -473,6 +511,7 @@ impl Access {
     /// fails.
     pub fn stat(&self, path: &str) -> Result<Stat, VfsError> {
         let path = self.gate(Op::Stat, path, ClaimKind::Read)?;
+        self.fire(Op::Stat, &path);
         self.inner().stat(&path)
     }
 
@@ -483,6 +522,7 @@ impl Access {
     /// live identity holds a claim on `path`, or when the backend fails.
     pub fn mkdir(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
         let path = self.gate(Op::Mkdir, path, ClaimKind::Write)?;
+        self.fire(Op::Mkdir, &path);
         self.inner().mkdir(&path, recursive)
     }
 
@@ -496,6 +536,10 @@ impl Access {
     pub fn rename(&self, from: &str, to: &str) -> Result<(), VfsError> {
         let from = self.gate(Op::Rename, from, ClaimKind::Write)?;
         let to = self.gate(Op::Rename, to, ClaimKind::Write)?;
+        // Both paths gated, so the operation is admitted: one event per
+        // canonical path.
+        self.fire(Op::Rename, &from);
+        self.fire(Op::Rename, &to);
         self.inner().rename(&from, &to)
     }
 
@@ -509,6 +553,8 @@ impl Access {
     pub fn copy(&self, from: &str, to: &str) -> Result<(), VfsError> {
         let from = self.gate(Op::Copy, from, ClaimKind::Read)?;
         let to = self.gate(Op::Copy, to, ClaimKind::Write)?;
+        self.fire(Op::Copy, &from);
+        self.fire(Op::Copy, &to);
         self.inner().copy(&from, &to)
     }
 
@@ -521,7 +567,10 @@ impl Access {
     pub fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
         let root = canonicalize(query.root.as_str())?;
         self.check_policy(Op::Grep, &root)?;
-        self.volume.claims.claim(root, self.id, ClaimKind::Read)?;
+        self.volume
+            .claims
+            .claim(root.clone(), self.id, ClaimKind::Read)?;
+        self.fire(Op::Grep, &root);
         self.inner().grep(query)
     }
 
@@ -545,6 +594,18 @@ impl Access {
             Verdict::Allow => Ok(()),
             Verdict::Deny(reason) | Verdict::Ask(reason) => Err(VfsError::PermissionDenied(reason)),
         }
+    }
+
+    /// Fires the installed sink for one admitted path of `op` -
+    /// fire-and-forget, after policy and claims pass, before the backend
+    /// executes. A handle without a sink, or a capability vended to a
+    /// mounted-handle forward (the outer handle already fired with the
+    /// caller's origin), fires nothing.
+    fn fire(&self, op: Op, path: &VfsPath) {
+        let (Some(sink), Some(origin)) = (&self.volume.sink, &self.origin) else {
+            return;
+        };
+        sink(OpEvent { op, path, origin });
     }
 
     /// Reads the file and resolves one line range while its contents
@@ -613,7 +674,10 @@ impl Drop for Access {
 /// base's policy and claims under the caller's identity.
 impl Vfs for VfsRef {
     fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-        Ok(Box::new(HandleAccess(self.acquire_with(id)?)))
+        // The mount forward carries no origin: the outer handle already
+        // fired the caller's, and a fabricated one here would double the
+        // event with a less precise label.
+        Ok(Box::new(HandleAccess(self.acquire_with(id, None)?)))
     }
 
     fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
@@ -698,6 +762,7 @@ mod tests {
 
     use super::{Access, VfsRef};
     use crate::error::VfsError;
+    use crate::observe::{OpEvent, Origin};
     use crate::path::VfsPath;
     use crate::traits::{ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
     use crate::types::{Entry, Stat};
@@ -842,6 +907,27 @@ mod tests {
         VfsRef::new(stub.clone())
     }
 
+    /// The claims tests never observe origins, so they acquire under one
+    /// blanket label; the observability tests label precisely.
+    fn test_origin() -> Origin {
+        Origin::new("handle test")
+    }
+
+    /// A policy whose verdict flips through shared state mid-run.
+    struct FlipPolicy {
+        verdict: Arc<Mutex<Verdict>>,
+    }
+
+    impl Policy for FlipPolicy {
+        fn check(&self, op: Op, path: &VfsPath) -> Verdict {
+            let _ = (op, path);
+            self.verdict
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+    }
+
     /// Extracts the Conflict message or fails the test.
     fn conflict_message(result: Result<(), VfsError>) -> String {
         match result {
@@ -853,7 +939,7 @@ mod tests {
     #[test]
     fn an_access_reads_and_writes_through_the_handle() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         access.write("/notes/a.txt", b"hello")?;
         assert_eq!(access.read("/notes/a.txt")?, b"hello");
         assert!(access.exists("/notes/a.txt")?);
@@ -863,8 +949,8 @@ mod tests {
     #[test]
     fn every_acquire_vends_a_process_unique_identity() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
-        let first = vfs.acquire()?;
-        let second = vfs.acquire()?;
+        let first = vfs.acquire(test_origin())?;
+        let second = vfs.acquire(test_origin())?;
         assert_ne!(first.id(), second.id());
         Ok(())
     }
@@ -875,7 +961,7 @@ mod tests {
         // access, so sequential ops on one path by one identity stay
         // legal - no new identity, no false conflict.
         let vfs = handle(&StubFs::default());
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         access.write("/f.txt", b"one")?;
         access.write("/f.txt", b"two")?;
         access.append("/f.txt", b"!")?;
@@ -886,8 +972,8 @@ mod tests {
     #[test]
     fn a_write_conflicts_with_another_identitys_read_claim() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "data")]));
-        let reader = vfs.acquire()?;
-        let writer = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
+        let writer = vfs.acquire(test_origin())?;
         reader.read("/f.txt")?;
         let message = conflict_message(writer.write("/f.txt", b"new"));
         assert!(message.contains("/f.txt"), "names the path: {message}");
@@ -913,9 +999,9 @@ mod tests {
     #[test]
     fn a_read_conflicts_with_another_identitys_write_claim() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
-        let writer = vfs.acquire()?;
+        let writer = vfs.acquire(test_origin())?;
         writer.write("/f.txt", b"x")?;
-        let reader = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
         match reader.read("/f.txt") {
             Err(VfsError::Conflict(_)) => {}
             other => panic!("expected a conflict, got {other:?}"),
@@ -926,9 +1012,9 @@ mod tests {
     #[test]
     fn two_writes_by_two_identities_conflict() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
-        let first = vfs.acquire()?;
+        let first = vfs.acquire(test_origin())?;
         first.write("/f.txt", b"1")?;
-        let second = vfs.acquire()?;
+        let second = vfs.acquire(test_origin())?;
         let message = conflict_message(second.write("/f.txt", b"2"));
         assert!(message.contains("write claim"), "{message}");
         Ok(())
@@ -937,8 +1023,8 @@ mod tests {
     #[test]
     fn reads_by_two_identities_never_conflict() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "data")]));
-        let first = vfs.acquire()?;
-        let second = vfs.acquire()?;
+        let first = vfs.acquire(test_origin())?;
+        let second = vfs.acquire(test_origin())?;
         first.read("/f.txt")?;
         assert_eq!(second.read("/f.txt")?, b"data");
         Ok(())
@@ -949,9 +1035,9 @@ mod tests {
         // Copy claims the source as a read, and a read booms on another
         // live identity's write claim.
         let vfs = handle(&StubFs::default());
-        let writer = vfs.acquire()?;
+        let writer = vfs.acquire(test_origin())?;
         writer.write("/src.txt", b"data")?;
-        let copier = vfs.acquire()?;
+        let copier = vfs.acquire(test_origin())?;
         let message = conflict_message(copier.copy("/src.txt", "/dst.txt"));
         assert!(message.contains("/src.txt"), "names the source: {message}");
         Ok(())
@@ -963,9 +1049,9 @@ mod tests {
         // read claim on the source must not block the copy. Were the
         // source claimed as a write, this copy would conflict.
         let vfs = handle(&StubFs::seeded(&[("/src.txt", "data")]));
-        let reader = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
         reader.read("/src.txt")?;
-        let copier = vfs.acquire()?;
+        let copier = vfs.acquire(test_origin())?;
         copier.copy("/src.txt", "/dst.txt")?;
         assert_eq!(copier.read("/dst.txt")?, b"data");
         Ok(())
@@ -979,9 +1065,9 @@ mod tests {
             ("/src.txt", "data"),
             ("/dst.txt", "old"),
         ]));
-        let reader = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
         reader.read("/dst.txt")?;
-        let copier = vfs.acquire()?;
+        let copier = vfs.acquire(test_origin())?;
         let message = conflict_message(copier.copy("/src.txt", "/dst.txt"));
         assert!(
             message.contains("/dst.txt"),
@@ -993,9 +1079,9 @@ mod tests {
     #[test]
     fn a_rename_conflicts_with_a_claim_on_the_source_path() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/from.txt", "data")]));
-        let reader = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
         reader.read("/from.txt")?;
-        let renamer = vfs.acquire()?;
+        let renamer = vfs.acquire(test_origin())?;
         let message = conflict_message(renamer.rename("/from.txt", "/to.txt"));
         assert!(message.contains("/from.txt"), "names the source: {message}");
         Ok(())
@@ -1009,9 +1095,9 @@ mod tests {
             ("/from.txt", "data"),
             ("/to.txt", "old"),
         ]));
-        let reader = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
         reader.read("/to.txt")?;
-        let renamer = vfs.acquire()?;
+        let renamer = vfs.acquire(test_origin())?;
         let message = conflict_message(renamer.rename("/from.txt", "/to.txt"));
         assert!(
             message.contains("/to.txt"),
@@ -1024,12 +1110,12 @@ mod tests {
     fn dropping_an_access_releases_its_identity_and_claims() -> Result<(), VfsError> {
         let stub = StubFs::default();
         let vfs = handle(&stub);
-        let first = vfs.acquire()?;
+        let first = vfs.acquire(test_origin())?;
         let first_id = first.id();
         first.write("/f.txt", b"1")?;
         drop(first);
         assert!(stub.released().contains(&first_id));
-        let second = vfs.acquire()?;
+        let second = vfs.acquire(test_origin())?;
         second.write("/f.txt", b"2")?;
         assert_eq!(second.read("/f.txt")?, b"2");
         Ok(())
@@ -1038,9 +1124,9 @@ mod tests {
     #[test]
     fn spawn_deletes_the_parents_claims() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
-        let parent = vfs.acquire()?;
+        let parent = vfs.acquire(test_origin())?;
         parent.write("/f.txt", b"1")?;
-        let child = parent.spawn()?;
+        let child = parent.spawn(test_origin())?;
         assert_ne!(parent.id(), child.id());
         // The parent's pre-spawn write claim is retired: the child can
         // touch the same path without a false conflict.
@@ -1055,11 +1141,11 @@ mod tests {
         // arm in turn; a dropped arm releases its claims, so the next arm
         // can merge onto the same path.
         let vfs = handle(&StubFs::default());
-        let parent = vfs.acquire()?;
-        let arm_one = parent.spawn()?;
+        let parent = vfs.acquire(test_origin())?;
+        let arm_one = parent.spawn(test_origin())?;
         arm_one.write("/evidence.md", b"one\n")?;
         drop(arm_one);
-        let arm_two = parent.spawn()?;
+        let arm_two = parent.spawn(test_origin())?;
         arm_two.append("/evidence.md", b"two\n")?;
         assert_eq!(arm_two.read("/evidence.md")?, b"one\ntwo\n");
         Ok(())
@@ -1068,12 +1154,12 @@ mod tests {
     #[test]
     fn transfer_of_control_moves_the_claims_with_the_access() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "data")]));
-        let original = vfs.acquire()?;
+        let original = vfs.acquire(test_origin())?;
         original.read("/f.txt")?;
         // Transfer of control moves the access object; the identity and
         // its claims move with it.
         let moved = original;
-        let other = vfs.acquire()?;
+        let other = vfs.acquire(test_origin())?;
         let message = conflict_message(other.write("/f.txt", b"new"));
         assert!(message.contains(&format!("{:?}", moved.id())));
         assert_eq!(moved.read("/f.txt")?, b"data");
@@ -1083,9 +1169,9 @@ mod tests {
     #[test]
     fn alias_spellings_of_one_file_land_on_one_claim_key() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/a/b.txt", "x")]));
-        let reader = vfs.acquire()?;
+        let reader = vfs.acquire(test_origin())?;
         reader.read("/a/./b.txt")?;
-        let writer = vfs.acquire()?;
+        let writer = vfs.acquire(test_origin())?;
         let message = conflict_message(writer.write("/a//b.txt", b"y"));
         assert!(message.contains("/a/b.txt"), "the canonical key: {message}");
         Ok(())
@@ -1095,9 +1181,9 @@ mod tests {
     fn claims_are_shared_across_handle_clones() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
         let clone = vfs.clone();
-        let first = vfs.acquire()?;
+        let first = vfs.acquire(test_origin())?;
         first.write("/f.txt", b"1")?;
-        let second = clone.acquire()?;
+        let second = clone.acquire(test_origin())?;
         let message = conflict_message(second.write("/f.txt", b"2"));
         assert!(message.contains("/f.txt"), "{message}");
         Ok(())
@@ -1105,21 +1191,6 @@ mod tests {
 
     #[test]
     fn a_denied_operation_never_registers_a_claim() -> Result<(), VfsError> {
-        /// A policy whose verdict flips through shared state mid-run.
-        struct FlipPolicy {
-            verdict: Arc<Mutex<Verdict>>,
-        }
-
-        impl Policy for FlipPolicy {
-            fn check(&self, op: Op, path: &VfsPath) -> Verdict {
-                let _ = (op, path);
-                self.verdict
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .clone()
-            }
-        }
-
         let verdict = Arc::new(Mutex::new(Verdict::Deny("writes are sealed".to_owned())));
         let vfs = VfsRef::with_policy(
             StubFs::default(),
@@ -1127,7 +1198,7 @@ mod tests {
                 verdict: Arc::clone(&verdict),
             },
         );
-        let denied = vfs.acquire()?;
+        let denied = vfs.acquire(test_origin())?;
         match denied.write("/f.txt", b"x") {
             Err(VfsError::PermissionDenied(reason)) => {
                 assert_eq!(reason, "writes are sealed");
@@ -1136,7 +1207,7 @@ mod tests {
         }
         // The host flips the policy mid-run through shared state.
         *verdict.lock().unwrap_or_else(PoisonError::into_inner) = Verdict::Allow;
-        let allowed = vfs.acquire()?;
+        let allowed = vfs.acquire(test_origin())?;
         // Had the denied attempt registered a write claim, this write
         // would conflict with it.
         allowed.write("/f.txt", b"x")?;
@@ -1147,7 +1218,7 @@ mod tests {
     #[test]
     fn read_range_slices_lines_one_based_and_inclusive() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\nthree\n")]));
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         assert_eq!(access.read_range("/f.txt", 2, None)?, "two\nthree");
         assert_eq!(access.read_range("/f.txt", 2, Some(99))?, "two\nthree");
         assert_eq!(access.read_range("/f.txt", 99, None)?, "");
@@ -1158,7 +1229,7 @@ mod tests {
     #[test]
     fn read_range_rejects_invalid_bounds() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\n")]));
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         assert!(access.read_range("/f.txt", 0, None).is_err());
         assert!(access.read_range("/f.txt", 2, Some(1)).is_err());
         Ok(())
@@ -1167,7 +1238,7 @@ mod tests {
     #[test]
     fn read_range_numbered_numbers_absolutely_from_start() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\nthree\n")]));
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         assert_eq!(
             access.read_range_numbered("/f.txt", 1, None)?,
             "1| one\n2| two\n3| three"
@@ -1185,7 +1256,7 @@ mod tests {
         let lines: Vec<String> = (1..=10).map(|n| format!("line{n}")).collect();
         let text = lines.join("\n");
         let vfs = handle(&StubFs::seeded(&[("/f.txt", &text)]));
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         assert_eq!(
             access.read_range_numbered("/f.txt", 9, Some(10))?,
             " 9| line9\n10| line10"
@@ -1196,7 +1267,7 @@ mod tests {
     #[test]
     fn read_string_rejects_non_utf8() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::default());
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         access.write("/bin.dat", &[0xff, 0xfe])?;
         match access.read_string("/bin.dat") {
             Err(VfsError::Backend(_)) => {}
@@ -1234,7 +1305,7 @@ mod tests {
     #[test]
     fn a_backend_refusal_fails_acquire_with_an_error_instead_of_panicking() {
         let vfs = VfsRef::new(RefusingFs);
-        match vfs.acquire() {
+        match vfs.acquire(test_origin()) {
             Err(VfsError::Backend(message)) => {
                 assert_eq!(message, "the backend refuses acquisition");
             }
@@ -1274,9 +1345,9 @@ mod tests {
         let vfs = VfsRef::new(RefuseSecond {
             vended: Arc::new(Mutex::new(0)),
         });
-        let parent = vfs.acquire()?;
+        let parent = vfs.acquire(test_origin())?;
         parent.write("/f.txt", b"1")?;
-        match parent.spawn() {
+        match parent.spawn(test_origin()) {
             Err(VfsError::Backend(message)) => {
                 assert_eq!(message, "the backend refuses acquisition");
             }
@@ -1284,9 +1355,103 @@ mod tests {
         }
         // The failed spawn did not retire the parent's claims: a second
         // identity still conflicts with the parent's write.
-        let other = vfs.acquire()?;
+        let other = vfs.acquire(test_origin())?;
         let message = conflict_message(other.write("/f.txt", b"2"));
         assert!(message.contains("/f.txt"), "{message}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_sink_receives_events_in_order_with_op_path_and_label() -> Result<(), VfsError> {
+        /// One recorded event: op, canonical path, label, and line.
+        type Recorded = (Op, String, String, u32);
+
+        let events: Arc<Mutex<Vec<Recorded>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let vfs = VfsRef::builder()
+            .mount("/", StubFs::seeded(&[("/a.txt", "x")]))
+            .on_op(move |event: OpEvent<'_>| {
+                recorded
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push((
+                        event.op(),
+                        event.path().to_string(),
+                        event.origin().label.clone(),
+                        event.origin().line,
+                    ));
+            })
+            .build();
+        let access = vfs.acquire(Origin::at("the section", "the prompt", 7))?;
+        access.read("/a.txt")?;
+        access.write("/b.txt", b"y")?;
+        access.glob("/*.txt")?;
+        // A spawned child's events carry the child's own origin.
+        let child = access.spawn(Origin::at("the arm", "the prompt", 9))?;
+        child.append("/b.txt", b"!")?;
+        let events = events.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(
+            *events,
+            vec![
+                (Op::Read, "/a.txt".to_owned(), "the section".to_owned(), 7),
+                (Op::Write, "/b.txt".to_owned(), "the section".to_owned(), 7),
+                (Op::Glob, "/*.txt".to_owned(), "the section".to_owned(), 7),
+                (Op::Append, "/b.txt".to_owned(), "the arm".to_owned(), 9),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_handle_without_a_sink_serves_operations_without_firing() -> Result<(), VfsError> {
+        // The None sink branch: no `on_op`, and operations behave
+        // exactly as before - not firing is a no-op, never a panic.
+        let vfs = VfsRef::builder().mount("/", StubFs::default()).build();
+        let access = vfs.acquire(test_origin())?;
+        access.write("/f.txt", b"x")?;
+        assert_eq!(access.read("/f.txt")?, b"x");
+        Ok(())
+    }
+
+    #[test]
+    fn a_policy_denied_operation_never_fires_the_sink() -> Result<(), VfsError> {
+        let verdict = Arc::new(Mutex::new(Verdict::Deny("writes are sealed".to_owned())));
+        let events: Arc<Mutex<Vec<Op>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let vfs = VfsRef::builder()
+            .mount("/", StubFs::default())
+            .policy(FlipPolicy {
+                verdict: Arc::clone(&verdict),
+            })
+            .on_op(move |event: OpEvent<'_>| {
+                recorded
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(event.op());
+            })
+            .build();
+        let access = vfs.acquire(test_origin())?;
+        assert!(matches!(
+            access.write("/f.txt", b"x"),
+            Err(VfsError::PermissionDenied(_))
+        ));
+        assert!(
+            events
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "a denied operation fired the sink"
+        );
+        // The host flips the policy mid-run; the admitted write fires.
+        *verdict.lock().unwrap_or_else(PoisonError::into_inner) = Verdict::Allow;
+        access.write("/f.txt", b"x")?;
+        assert_eq!(
+            events
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_slice(),
+            &[Op::Write]
+        );
         Ok(())
     }
 }

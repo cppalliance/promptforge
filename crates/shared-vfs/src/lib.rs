@@ -1,5 +1,6 @@
 //! Generic virtual filesystem machinery: canonical interned paths, the
-//! claims model, the mount router, and backends.
+//! claims model, the mount router, the operation-observation seam, and
+//! backends.
 //!
 //! This crate is the permanent bottom of the dependency stack: std only,
 //! no workspace or external crates, and no promptforge policy (no
@@ -10,6 +11,7 @@ mod glob;
 mod handle;
 mod host;
 mod memory;
+mod observe;
 mod path;
 mod router;
 mod traits;
@@ -19,6 +21,7 @@ pub use error::VfsError;
 pub use handle::{Access, VfsRef};
 pub use host::HostBackend;
 pub use memory::MemoryBackend;
+pub use observe::{OpEvent, OpSink, Origin};
 pub use path::{VfsPath, VfsPathBuf};
 pub use router::VfsRefBuilder;
 pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};

@@ -154,7 +154,7 @@ Both fixes are tiny, share the PR #35 CI provenance (the GitHub-hosted `ubuntu-l
 
 <step-4>
 
-### Step 4: Add the VFS operation-observation hook
+### Step 4: Add the VFS operation-observation hook [completed]
 
 - Component: vfs-observation-hook
 

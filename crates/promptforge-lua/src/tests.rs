@@ -7,7 +7,7 @@ use promptforge_core_support::observe::{NullObserver, Observation};
 use promptforge_store::Store;
 use promptforge_tools::{Tool, ToolError, ToolOutput};
 use serde_json::json;
-use shared_vfs::{ExecId, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
+use shared_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 
 const EXECUTION: &str = "lua-test";
 
@@ -17,7 +17,7 @@ const EXECUTION: &str = "lua-test";
 fn fresh_access() -> Arc<Access> {
     Arc::new(
         promptforge_vfs::empty()
-            .acquire()
+            .acquire(Origin::new("lua test fixture"))
             .expect("the stock backend acquires"),
     )
 }
@@ -140,7 +140,7 @@ impl VfsAccess for FailingAccess {
 fn failing_access() -> Arc<Access> {
     Arc::new(
         VfsRef::new(FailingBackend)
-            .acquire()
+            .acquire(Origin::new("failing backend test"))
             .expect("the failing backend still acquires"),
     )
 }

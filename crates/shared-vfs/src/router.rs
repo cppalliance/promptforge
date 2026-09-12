@@ -15,8 +15,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
 use crate::handle::VfsRef;
+use crate::observe::{OpEvent, OpSink};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize};
-use crate::traits::{ExecId, Vfs, VfsAccess};
+use crate::traits::{AllowAll, ExecId, Policy, Vfs, VfsAccess};
 use crate::types::{Entry, GrepQuery, GrepResults, Stat};
 
 /// One mounted backend behind a shared lock.
@@ -329,6 +330,8 @@ impl Drop for RoutingAccess {
 /// `Arc`-share thereafter.
 pub struct VfsRefBuilder {
     mounts: Mounts,
+    policy: Option<Arc<dyn Policy + Sync>>,
+    sink: Option<OpSink>,
 }
 
 impl fmt::Debug for VfsRefBuilder {
@@ -341,6 +344,8 @@ impl VfsRefBuilder {
     pub(crate) fn new() -> VfsRefBuilder {
         VfsRefBuilder {
             mounts: BTreeMap::new(),
+            policy: None,
+            sink: None,
         }
     }
     /// Mounts `backend` at `prefix`, consuming and returning the
@@ -364,13 +369,37 @@ impl VfsRefBuilder {
         self
     }
 
-    /// Freezes the mount table into a handle with the [`AllowAll`]
-    /// policy.
+    /// Installs the policy consulted on every operation, consuming and
+    /// returning the builder. The default is [`AllowAll`].
+    ///
+    /// [`AllowAll`]: crate::AllowAll
+    #[must_use]
+    pub fn policy(mut self, policy: impl Policy + Sync + 'static) -> VfsRefBuilder {
+        self.policy = Some(Arc::new(policy));
+        self
+    }
+
+    /// Installs the operation sink, consuming and returning the builder.
+    /// The sink fires on every admitted operation - after policy and
+    /// claims pass, before the backend executes - with the op kind, the
+    /// canonical path, and the caller's origin. Fire-and-forget: no
+    /// outcome flows back, and a policy-denied operation never fires.
+    /// The sink must be cheap: store operations fire it from the
+    /// blocking pool.
+    #[must_use]
+    pub fn on_op(mut self, sink: impl Fn(OpEvent<'_>) + Send + Sync + 'static) -> VfsRefBuilder {
+        self.sink = Some(Arc::new(sink));
+        self
+    }
+
+    /// Freezes the mount table into a handle with the installed policy
+    /// and op sink (the [`AllowAll`] policy and no sink by default).
     ///
     /// [`AllowAll`]: crate::AllowAll
     #[must_use]
     pub fn build(self) -> VfsRef {
-        VfsRef::from_router(Router::new(self.mounts))
+        let policy = self.policy.unwrap_or_else(|| Arc::new(AllowAll));
+        VfsRef::from_router(Router::new(self.mounts), policy, self.sink)
     }
 }
 
@@ -381,6 +410,7 @@ mod tests {
 
     use crate::error::VfsError;
     use crate::handle::VfsRef;
+    use crate::observe::Origin;
     use crate::path::VfsPath;
     use crate::traits::{ExecId, Vfs, VfsAccess};
     use crate::types::{Entry, Stat};
@@ -555,6 +585,12 @@ mod tests {
         }
     }
 
+    /// The routing tests never observe origins, so they acquire under
+    /// one blanket label.
+    fn test_origin() -> Origin {
+        Origin::new("router test")
+    }
+
     #[test]
     fn the_longest_prefix_mount_wins_and_acquires_lazily() -> Result<(), VfsError> {
         let outer = StubFs::default();
@@ -565,7 +601,7 @@ mod tests {
             .mount("/a/b", inner.clone())
             .mount("/elsewhere", untouched.clone())
             .build();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         access.write("/a/b/f.txt", b"inner")?;
         access.write("/a/f.txt", b"outer")?;
         // Each backend keyed the file by its mount-relative path.
@@ -588,7 +624,7 @@ mod tests {
             .mount("/", base.clone())
             .mount("/mnt", shadow.clone())
             .build();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         // The shadow mount owns everything under /mnt.
         assert_eq!(access.read("/mnt/f.txt")?, b"shadow-mnt");
         // The base still owns the rest of the namespace.
@@ -612,14 +648,14 @@ mod tests {
             .mount("/base", base.clone())
             .mount("/local", local.clone())
             .build();
-        let writer = child.acquire()?;
+        let writer = child.acquire(test_origin())?;
         writer.write("/base/f.txt", b"nested")?;
         // The child router stripped its mount prefix: the base backend
         // keyed the file at its own root.
         assert!(base_storage.files().contains_key("/f.txt"));
         // A second child identity conflicts on the same path: the claim
         // registered through the mounted handle is visible.
-        let reader = child.acquire()?;
+        let reader = child.acquire(test_origin())?;
         match reader.read("/base/f.txt") {
             Err(VfsError::Conflict(_)) => {}
             other => panic!("expected a conflict, got {other:?}"),
@@ -639,7 +675,7 @@ mod tests {
             .mount("/", rw.clone())
             .mount("/ro", ro.clone())
             .build();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         // Reads are not gated.
         assert_eq!(access.read("/ro/a.txt")?, b"keep");
         // A write is denied with a clear read-only error.
@@ -673,7 +709,7 @@ mod tests {
     #[test]
     fn traversal_that_escapes_the_namespace_root_is_rejected() -> Result<(), VfsError> {
         let vfs = VfsRef::builder().mount("/mnt", StubFs::default()).build();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         assert!(matches!(
             access.read("/mnt/../../etc/passwd"),
             Err(VfsError::InvalidPath(_))
@@ -690,7 +726,7 @@ mod tests {
         // No root mount: the only storage lives at /mnt.
         let storage = StubFs::seeded(&[("/f.txt", "inside")]);
         let vfs = VfsRef::builder().mount("/mnt", storage.clone()).build();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         // Dot segments within the mount resolve within the mount: the
         // backend sees the clean mount-relative path.
         assert_eq!(access.read("/mnt/sub/../f.txt")?, b"inside");
@@ -717,7 +753,7 @@ mod tests {
             .mount("/a", StubFs::default())
             .mount("/a/b", inner.clone())
             .build();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(test_origin())?;
         let matches = access.glob("/a/b/*.txt")?;
         assert_eq!(matches, vec!["/a/b/x.txt".to_owned()]);
         Ok(())
@@ -734,7 +770,7 @@ mod tests {
             .build();
         let overlay = base.overlay("/overlay", extra.clone());
 
-        let writer = overlay.acquire()?;
+        let writer = overlay.acquire(test_origin())?;
         writer.write("/store/doc.md", b"store")?;
         writer.write("/scratch/tmp.txt", b"scratch")?;
         writer.write("/overlay/x.txt", b"overlay")?;
@@ -742,7 +778,7 @@ mod tests {
         drop(writer);
 
         // The base handle serves its own mounts from the same storage.
-        let reader = base.acquire()?;
+        let reader = base.acquire(test_origin())?;
         assert_eq!(reader.read("/store/doc.md")?, b"store");
         assert_eq!(reader.read("/scratch/tmp.txt")?, b"scratch");
         // The overlay mount exists only in the overlay's view.
@@ -757,11 +793,11 @@ mod tests {
     fn an_overlay_shares_the_bases_claims_table() -> Result<(), VfsError> {
         let base = VfsRef::builder().mount("/store", StubFs::default()).build();
         let overlay = base.overlay("/overlay", StubFs::default());
-        let first = base.acquire()?;
+        let first = base.acquire(test_origin())?;
         first.write("/store/shared.txt", b"1")?;
         // A write claim registered through the base conflicts with a
         // write attempted through the overlay: one claims table.
-        let second = overlay.acquire()?;
+        let second = overlay.acquire(test_origin())?;
         match second.write("/store/shared.txt", b"2") {
             Err(VfsError::Conflict(message)) => {
                 assert!(message.contains("/store/shared.txt"), "{message}");

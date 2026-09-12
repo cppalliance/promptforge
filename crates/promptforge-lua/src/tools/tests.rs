@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 fn fresh_access() -> Arc<promptforge_store::Access> {
     Arc::new(
         promptforge_vfs::empty()
-            .acquire()
+            .acquire(shared_vfs::Origin::new("tool test fixture"))
             .expect("the stock backend acquires"),
     )
 }
