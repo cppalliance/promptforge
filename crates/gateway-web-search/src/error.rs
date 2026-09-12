@@ -4,7 +4,7 @@
 //! gateway adapts it into its own route-level error type so the envelope and
 //! status mapping stay in one place.
 
-use shared_protocol::ProtocolError;
+use gateway_protocol::ProtocolError;
 
 /// A request-time failure of the web-search service.
 #[derive(Debug, thiserror::Error)]

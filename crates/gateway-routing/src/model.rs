@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use gateway_config::{Capabilities, ModelKind, ThinkingMode};
-use shared_protocol::upstream::Upstream;
+use gateway_protocol::upstream::Upstream;
 
 use crate::queue::DominionQueue;
 

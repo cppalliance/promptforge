@@ -1,4 +1,4 @@
-//! Cargo metadata checks for the four approved product dependency boundaries.
+//! Cargo metadata checks for the five approved product dependency boundaries.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -29,7 +29,9 @@ enum PackageSet {
     Gateway,
     PromptForge,
     Workshop,
+    Shared,
     GatewayOrWorkshop,
+    AnyProduct,
 }
 
 impl PackageSet {
@@ -37,9 +39,15 @@ impl PackageSet {
         match self {
             Self::Gateway => package == "gateway" || package.starts_with("gateway-"),
             Self::PromptForge => package == "promptforge" || package.starts_with("promptforge-"),
-            Self::Workshop => matches!(package, "workshop" | "workshop-server"),
+            Self::Workshop => package == "workshop" || package.starts_with("workshop-"),
+            Self::Shared => package.starts_with("shared-"),
             Self::GatewayOrWorkshop => {
                 Self::Gateway.contains(package) || Self::Workshop.contains(package)
+            }
+            Self::AnyProduct => {
+                Self::Gateway.contains(package)
+                    || Self::PromptForge.contains(package)
+                    || Self::Workshop.contains(package)
             }
         }
     }
@@ -51,7 +59,7 @@ struct DependencyRule {
     description: &'static str,
 }
 
-const PRODUCT_DEPENDENCY_RULES: [DependencyRule; 4] = [
+const PRODUCT_DEPENDENCY_RULES: [DependencyRule; 5] = [
     DependencyRule {
         dependent: PackageSet::Gateway,
         forbidden: PackageSet::Workshop,
@@ -71,6 +79,11 @@ const PRODUCT_DEPENDENCY_RULES: [DependencyRule; 4] = [
         dependent: PackageSet::Workshop,
         forbidden: PackageSet::Gateway,
         description: "Workshop cannot depend on Gateway",
+    },
+    DependencyRule {
+        dependent: PackageSet::Shared,
+        forbidden: PackageSet::AnyProduct,
+        description: "Shared cannot depend on any product",
     },
 ];
 
@@ -161,7 +174,7 @@ fn dependency_violations(metadata: &CargoMetadata) -> Vec<String> {
 }
 
 #[test]
-fn workspace_obeys_the_four_product_dependency_rules() {
+fn workspace_obeys_the_five_product_dependency_rules() {
     let violations = dependency_violations(workspace_metadata());
     assert!(
         violations.is_empty(),
@@ -229,6 +242,7 @@ fn adversarial_metadata_triggers_each_product_dependency_rule() {
     {
       "workspace_members": [
         "gateway-source", "promptforge-source", "workshop-source",
+        "workshop-shell-source", "shared-source",
         "gateway-target", "promptforge-target", "workshop-target"
       ],
       "packages": [
@@ -252,6 +266,16 @@ fn adversarial_metadata_triggers_each_product_dependency_rule() {
           "name": "workshop", "id": "workshop-source",
           "manifest_path": "C:/workspace/workshop-source/Cargo.toml",
           "dependencies": [{"path": "C:/workspace/gateway-target"}]
+        },
+        {
+          "name": "workshop-shell", "id": "workshop-shell-source",
+          "manifest_path": "C:/workspace/workshop-shell-source/Cargo.toml",
+          "dependencies": [{"path": "C:/workspace/gateway-target"}]
+        },
+        {
+          "name": "shared-source", "id": "shared-source",
+          "manifest_path": "C:/workspace/shared-source/Cargo.toml",
+          "dependencies": [{"path": "C:/workspace/promptforge-target"}]
         },
         {
           "name": "gateway-target", "id": "gateway-target",
@@ -282,7 +306,8 @@ fn adversarial_metadata_triggers_each_product_dependency_rule() {
     }
     assert_eq!(
         violations.len(),
-        5,
-        "PromptForge's combined rule rejects both forbidden product families"
+        7,
+        "PromptForge's combined rule rejects both forbidden product families, \
+         the Workshop rule is prefix-based, and Shared rejects every product"
     );
 }

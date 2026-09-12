@@ -14,10 +14,10 @@ use std::thread;
 use std::time::Duration;
 
 use gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingMode};
+use gateway_protocol::ShutdownError;
 use gateway_routing::queue::DominionQueue;
 use gateway_routing::{Endpoint, Model, dominion_queues};
 use shared_progress::ProgressHandle;
-use shared_protocol::ShutdownError;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, ArtifactStore, ProvisionedServer, ServerSelection};
@@ -658,7 +658,7 @@ impl LocalRuntime {
 
     /// Removes one started model and its upstream from the runtime, returning
     /// the model so the caller can tear the child down through the
-    /// [`Upstream`](shared_protocol::upstream::Upstream) seam (which disables
+    /// [`Upstream`](gateway_protocol::upstream::Upstream) seam (which disables
     /// respawn before killing the process). Returns `None` when no started
     /// model carries `name`.
     ///
@@ -682,7 +682,7 @@ impl LocalRuntime {
     /// Dropping the runtime does not guarantee child termination, because the
     /// routing table holds `Arc<dyn Upstream>` clones of these same models, so
     /// the runtime is not the sole owner (PFGL-MOD-001). This drives an explicit
-    /// teardown through the [`Upstream`](shared_protocol::upstream::Upstream) seam so a
+    /// teardown through the [`Upstream`](gateway_protocol::upstream::Upstream) seam so a
     /// profile switch frees the old children's VRAM deterministically before the
     /// replacement profile's children start. Every child is torn down even if an
     /// earlier one fails, so one stuck child never strands the rest.
