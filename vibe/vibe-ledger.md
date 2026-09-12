@@ -82,3 +82,7 @@
   - Decision: the virtual namespace requires a leading `/`; drive-letter-style paths (`C:/x`) are rejected as relative, with host-path translation deferred to the host backend | Falsifier: a later step requires identity-mount virtual paths of the form `C:/...` to canonicalize.
   - Decision: case is preserved and comparison is case-sensitive (POSIX semantics) in the virtual namespace | Falsifier: a host-backend requirement mandates case-insensitive virtual-path comparison.
   - Decision: `canonicalize`/`intern` carry targeted `#[allow(dead_code)]` until `Access` (a later step) becomes their caller | Falsifier: the next step wires `Access` and the allows remain.
+- Step 2: Vfs and VfsAccess traits and policy types - `cargo nextest run -p shared-vfs traits` - 12 passed, 0 failed. Review: clean.
+  - Decision: `Op` covers all sixteen access operations (the contract's `// ...` resolved to Exists/Glob/List/Stat/Symlink/ReadLink/Chmod) | Falsifier: a later step needs an op the policy cannot name.
+  - Decision: str_replace zero/multiple-match failures use `VfsError::Backend` with a descriptive message (no dedicated kind exists) | Falsifier: the facade or model recovery path needs to match on a distinct kind.
+  - Decision: default grep returns `Unsupported` for `is_regex` (std-only crate cannot ship a regex engine) and skips non-UTF-8 files | Falsifier: a caller requires regex semantics from the memory backend's default grep.

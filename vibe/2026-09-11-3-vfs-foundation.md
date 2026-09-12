@@ -572,7 +572,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-2>
 
-### Step 2: Vfs and VfsAccess traits and policy types
+### Step 2: Vfs and VfsAccess traits and policy types [completed]
 
 - Component: shared-vfs core
 - Define `trait Vfs` (acquire/release/read_only, Send, sync by design), `trait VfsAccess` (sixteen methods; defaults: read_range slices a whole read, str_replace is read-count-replace-write, grep is glob-read-line-scan, symlink/read_link/chmod return Unsupported), `trait Policy`, `enum Op`, `enum Verdict` (Deny and Ask carry reason strings), and `AllowAll`.

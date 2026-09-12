@@ -7,10 +7,12 @@
 
 mod error;
 mod path;
+mod traits;
 mod types;
 
 pub use error::VfsError;
 pub use path::{VfsPath, VfsPathBuf};
+pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 pub use types::{Entry, FileType, GrepMatch, GrepQuery, GrepResults, Stat};
 
 #[cfg(test)]

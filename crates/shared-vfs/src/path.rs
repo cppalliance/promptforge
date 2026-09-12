@@ -27,8 +27,6 @@ impl Interner {
         }
     }
 
-    // Callers arrive with `Access` in a later step; only tests intern today.
-    #[allow(dead_code)]
     fn intern(&mut self, s: &str) -> u32 {
         if let Some(&id) = self.ids.get(s) {
             return id;
@@ -129,8 +127,6 @@ impl fmt::Display for VfsPathBuf {
 /// trailing slash is dropped; the root canonicalizes to itself. Case is
 /// preserved and significant (POSIX semantics): paths differing only in
 /// case are distinct. Relative and empty paths are rejected.
-// Callers arrive with `Access` in a later step; only tests canonicalize today.
-#[allow(dead_code)]
 pub(crate) fn canonicalize(path: &str) -> Result<VfsPath, VfsError> {
     if path.is_empty() {
         return Err(VfsError::InvalidPath("empty path".into()));
