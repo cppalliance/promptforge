@@ -604,7 +604,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-5>
 
-### Step 5: memory backend
+### Step 5: memory backend [completed]
 
 - Component: shared-vfs backends
 - Implement the generic in-memory backend in shared-vfs carrying former MemStore semantics (Default where a zero value is meaningful; acquire/release accept ExecId attribution as a no-op).

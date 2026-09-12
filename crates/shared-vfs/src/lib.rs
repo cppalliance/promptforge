@@ -6,7 +6,9 @@
 //! `/_promptforge` paths, no Store, no run concepts).
 
 mod error;
+mod glob;
 mod handle;
+mod memory;
 mod path;
 mod router;
 mod traits;
@@ -14,6 +16,7 @@ mod types;
 
 pub use error::VfsError;
 pub use handle::{Access, VfsRef};
+pub use memory::MemoryBackend;
 pub use path::{VfsPath, VfsPathBuf};
 pub use router::VfsRefBuilder;
 pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};

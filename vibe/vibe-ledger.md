@@ -97,3 +97,7 @@
   - Decision: cross-mount rename/copy return `Unsupported` instead of read-plus-write | Falsifier: a caller needing atomic cross-mount moves.
   - Decision: `Router::release` and mounted-handle `release` are no-ops; teardown flows through the routing session's `Drop` | Falsifier: a backend requiring explicit release independent of `Drop`.
   - Decision: `overlay()` shares the base's policy `Arc` as well as its claims table | Falsifier: a requirement that overlays carry independent policy.
+- Step 5: memory backend - `cargo nextest run -p shared-vfs` - 91 passed, 0 failed; clippy `-D warnings` clean. Review: 1 Critical (renaming a directory onto the namespace root bypassed the DirectoryNotEmpty guard and rewrote subtree keys to unreachable `//...` paths - silent data loss), closed by rejecting `dest == "/"` in the directory branch with a regression test.
+  - Decision: writes materialize ancestor directories instead of requiring mkdir (MemStore flat-map semantics carried over) | Falsifier: the Store facade or a host backend needs POSIX ENOENT-on-missing-parent behavior.
+  - Decision: glob results include directories, not just files | Falsifier: a caller (engine adapter, grep default) misbehaves when directories match.
+  - Decision: backend named `MemoryBackend` (plan pins no name; parallels `HostBackend`) | Falsifier: a later plan step or review pins a different name.
