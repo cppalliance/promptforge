@@ -124,7 +124,7 @@ pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_over
 #[doc(hidden)]
 pub use coro::{
     install_agent_chat_shim, install_live_h1_shim_base, install_section_loop_shim,
-    install_section_user_input_shim, shim_live_h1_models,
+    install_section_user_input_shim, install_store_shims, shim_live_h1_models,
 };
 #[doc(hidden)]
 pub use dispatch::{ScriptReport, ToolDispatch, dispatch_tool};
@@ -133,6 +133,8 @@ pub use handles::{
     Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolResolver, ToolSet,
     ToolView,
 };
+#[doc(hidden)]
+pub use host::run_store_op;
 #[doc(hidden)]
 pub use live::LiveBindingProducer;
 #[doc(hidden)]
@@ -143,8 +145,9 @@ pub use projection::project_messages;
 pub use prose::ProseState;
 #[doc(hidden)]
 pub use protocol::{
-    Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request,
-    ToolCallOutcome, ToolCallRecord, UserInputOutcome, YieldParse, append_message_record,
+    Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
+    StoreOutcome, ToolCallOutcome, ToolCallRecord, UserInputOutcome, YieldParse,
+    append_message_record,
 };
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};

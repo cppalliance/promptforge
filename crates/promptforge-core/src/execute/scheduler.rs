@@ -47,8 +47,12 @@
 //! arm's finalizer reports `FANOUT_ARM_CANCELLED`, so exactly one terminal
 //! observation fires per arm), [`Error::ToolLoopExhausted`] soft-degrades
 //! its arm to the incomplete stub, and two live arms of one fanout touching
-//! the same store path with at least one write fail the second with the
-//! claims model's write-write race error. A received `mcp` request
+//! the same store path with at least one write terminate the whole run with
+//! the claims model's fatal determinism violation, intercepted at the
+//! answer boundary so no author `pcall` can catch it. Every store operation
+//! is such a leaf yield, answered on the blocking pool uniformly for all
+//! backends - no inline fast path - so interleaving behavior never depends
+//! on which backend serves the mount. A received `mcp` request
 //! is the protocol's typed reserved error.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -67,13 +71,13 @@ use crate::lua::{
     CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageRecord, OverflowReason,
     ScriptReport, SectionVm, ToolOutputKind, UserInputOutcome, append_message_record,
     current_tool_bindings, dispatch_tool, invoke_selected, project_messages, resolve_model_binding,
-    shim_live_h1_models,
+    run_store_op, shim_live_h1_models,
 };
 use crate::model::ModelBinding;
-use crate::observe::{Observer, detail};
+use crate::observe::{Observation, Observer, detail};
 use crate::parser::{Block, Section};
 use crate::resolve::RuntimeResolution;
-use crate::store::Access;
+use crate::store::{Access, Store, StoreError};
 use crate::tools::{Tool, ToolId};
 use crate::{Error, Result, cancel, subst};
 
@@ -82,7 +86,7 @@ use super::engine::{
     JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
 };
 use super::gateway::{GatewaySource, ResolutionContext};
-use super::protocol::{Answer, Request, ToolCallOutcome, YieldParse};
+use super::protocol::{Answer, Request, StoreOp, ToolCallOutcome, YieldParse};
 use super::scope::prepare_effective_scope;
 use super::section_context::SectionContext;
 use super::support::{GENERIC_COMPLETION, MAX_CALL_DEPTH, next_id, now_rfc3339_checked};
@@ -422,6 +426,44 @@ impl Chain<'_> {
     }
 }
 
+/// The succeeded/failed observation pair one store operation reports,
+/// matching the legacy direct closures event for event; `exists` reported
+/// nothing there and reports nothing here.
+fn store_observations(op: &StoreOp) -> Option<(Observation, Observation)> {
+    let pair = match op {
+        StoreOp::Write { .. } => (detail::STORE_WRITE_SUCCEEDED, detail::STORE_WRITE_FAILED),
+        StoreOp::Append { .. } => (detail::STORE_APPEND_SUCCEEDED, detail::STORE_APPEND_FAILED),
+        StoreOp::Read { .. } => (detail::STORE_READ_SUCCEEDED, detail::STORE_READ_FAILED),
+        StoreOp::ReadNumbered { .. } => (
+            detail::STORE_READ_NUMBERED_SUCCEEDED,
+            detail::STORE_READ_NUMBERED_FAILED,
+        ),
+        StoreOp::StrReplace { .. } => (
+            detail::STORE_REPLACE_SUCCEEDED,
+            detail::STORE_REPLACE_FAILED,
+        ),
+        StoreOp::Delete { .. } => (detail::STORE_DELETE_SUCCEEDED, detail::STORE_DELETE_FAILED),
+        StoreOp::Glob { .. } => (detail::STORE_GLOB_SUCCEEDED, detail::STORE_GLOB_FAILED),
+        StoreOp::Exists { .. } => return None,
+    };
+    Some(pair)
+}
+
+/// Classifies one store operation's failure for the answer channel. A
+/// claims-model conflict becomes the fatal determinism violation: the
+/// driver intercepts it at the answer boundary and ends the run on the
+/// spot rather than resuming it into Lua, so no author `pcall` can catch
+/// it. Every other failure rides back as the call's answer carrying the
+/// store's own message, exactly as the legacy closure's external error
+/// surfaced at the call site (and classified `Lua` if it aborts the chunk
+/// uncaught, exactly as then).
+fn classify_store_failure(error: &StoreError) -> Error {
+    if let Some(detail) = error.conflict_detail() {
+        return Error::Determinism(detail.to_owned());
+    }
+    Error::Lua(error.to_string())
+}
+
 /// The coroutine protocol's driver: the chain arena, ready queue, pending
 /// table, join table, and answer channel, owned outright by the driver
 /// loop's stack frame.
@@ -635,13 +677,24 @@ impl<'a> Scheduler<'a> {
                             "an answer arrived for a request with no pending entry and no recorded abort",
                         ));
                     };
-                    self.chains[chain_id.index()].incoming = Some(answer);
-                    self.ready.push_back(chain_id);
+                    match answer {
+                        // A claims-model conflict is fatal: the run ends on
+                        // the spot with the determinism violation rather
+                        // than resuming it into Lua, where an author
+                        // `pcall` could catch it. The suspended chains drop
+                        // unarmed with the scheduler, each fanout arm's
+                        // finalizer reporting its cancelled terminal
+                        // observation, exactly as on the cancellation path.
+                        Answer::Store(Err(error @ Error::Determinism(_))) => return Err(error),
+                        answer => {
+                            self.chains[chain_id.index()].incoming = Some(answer);
+                            self.ready.push_back(chain_id);
+                        }
+                    }
                 }
             }
         }
     }
-
     /// Creates one chain over `slice` from `index` and returns its id. The
     /// chain enters its first section on its first step. The chain's
     /// `var` slot seeds from `var` (a call chain's or arm's caller
@@ -1434,6 +1487,7 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_user_input(id);
                 Ok(())
             }
+            Request::Store { op } => self.dispatch_store(id, op),
             // Unreachable: no section VM installs the models.chat shim, and
             // stripped coroutines make a hand-rolled yield fail validation
             // before dispatch - the mirror of the agent driver's guards for
@@ -1685,6 +1739,54 @@ impl<'a> Scheduler<'a> {
         });
         self.io_tasks.insert(request_id, task.abort_handle());
         self.pending.insert(request_id, id);
+    }
+
+    /// Dispatches a `store` request: the chain's access capability runs the
+    /// operation on the blocking pool and posts the answer to the channel,
+    /// parking the chain in the pending table exactly as a leaf I/O round
+    /// does. Every store operation takes this yield path uniformly -
+    /// memory- and host-backed alike, with no inline fast path - so
+    /// interleaving behavior never depends on which backend serves the
+    /// mount. The operation's observation fires before the answer posts, so
+    /// the event stream keeps the legacy closure path's ordering (the op's
+    /// outcome precedes the chunk's closing boundary).
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the live chain's access capability
+    /// is gone, which only the chain-end paths take.
+    fn dispatch_store(&mut self, id: ChainId, op: StoreOp) -> Result<()> {
+        let chain = &self.chains[id.index()];
+        let access = Arc::clone(chain.access()?);
+        let observer = Arc::clone(chain.ctx.observer());
+        let execution = chain.ctx.execution().to_owned();
+        let section = chain.section_name().to_owned();
+        let observations = store_observations(&op);
+        let request_id = RequestId(self.next_request);
+        self.next_request += 1;
+        let tx = self.answer_tx.clone();
+        // spawn_blocking, not a plain task: the Vfs is sync by design, and
+        // the blocking pool keeps a slow host-backend op from stalling the
+        // driver. Aborting the handle detaches rather than interrupts, so a
+        // cancelled run's in-flight op completes without delivering.
+        let task = tokio::task::spawn_blocking(move || {
+            let result = run_store_op(&Store::new(&access), op);
+            if let Some((succeeded, failed)) = observations {
+                observer.observe(
+                    &execution,
+                    &section,
+                    if result.is_ok() { succeeded } else { failed },
+                );
+            }
+            // A send fails only when the driver is gone (a cancelled run);
+            // the answer is then moot.
+            let _ = tx.send((
+                request_id,
+                Answer::Store(result.map_err(|e| classify_store_failure(&e))),
+            ));
+        });
+        self.io_tasks.insert(request_id, task.abort_handle());
+        self.pending.insert(request_id, id);
+        Ok(())
     }
 
     /// Dispatches a `loop` request: runs the Rust-backed model-tool loop on

@@ -2016,7 +2016,10 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
     // plus the structured-result shape of `fanout_returns_structured_results`:
     // each arm entry takes the next run-global id, `sys.index` is the
     // 1-based per-fanout position, and the packed sequence carries `.ok`
-    // and `.item` with `__tostring` driving `table.concat`.
+    // and `.item` with `__tostring` driving `table.concat`. The ids log is
+    // arm-scoped (the pattern the claims model teaches): every store op is
+    // a leaf yield now, so two arms appending one path would genuinely race
+    // and boom; the parent's post-join read merges the arm logs in order.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -2030,7 +2033,7 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
         ```\n\n\
         ### Worker\n\n\
         ```lua\n\
-        store.append('ids.txt', sys.id .. ':' .. sys.index .. '\\n')\n\
+        store.append('ids-' .. sys.index .. '.txt', sys.id .. ':' .. sys.index .. '\\n')\n\
         return item\n\
         ```\n";
     let prompt = parse(md);
@@ -2042,9 +2045,19 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
 
     assert_eq!(out, "a,b");
     assert_eq!(
-        store.read("ids.txt").expect("the ids log"),
-        "2:1\n3:2\nparent:1\n",
-        "the arms take the next run-global ids with their per-fanout index"
+        store.read("ids-1.txt").expect("arm 1's ids log"),
+        "2:1\n",
+        "arm 1 takes the next run-global id with its per-fanout index"
+    );
+    assert_eq!(
+        store.read("ids-2.txt").expect("arm 2's ids log"),
+        "3:2\n",
+        "arm 2 takes the following run-global id with its per-fanout index"
+    );
+    assert_eq!(
+        store.read("ids.txt").expect("the parent's ids log"),
+        "parent:1\n",
+        "the parent keeps the run's first id"
     );
 }
 
@@ -2400,13 +2413,13 @@ async fn fanout_depth_cap_reads_the_chain_field() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn two_arms_writing_one_path_fail_with_a_write_race() {
-    // Mirror of the legacy `two_arms_writing_one_path_fail_with_a_write_race`,
-    // restructured for the claims model: the registry is gone, so the race
-    // needs both arms live at once - each arm writes, then suspends on an
-    // infer, so the second arm's write meets the first arm's standing write
-    // claim. The conflict is fatal to the second arm and fails the fanout;
-    // the first arm, still parked on its infer, is aborted as the sibling.
+async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violation() {
+    // Restructured for the leaf-yield store path: each arm's write is a
+    // yield answered from the blocking pool, so two live arms writing one
+    // path genuinely race and the loser's op booms. The violation is fatal
+    // to the whole run at the answer boundary - it never resumes into Lua,
+    // so no author pcall can catch it - and both parked arms drop unarmed,
+    // reporting cancelled rather than failed.
     let recorder = Arc::new(Recorder::default());
     let gateway = ScriptedGateway::start(vec![resp_text("p1"), resp_text("p2")]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -2427,31 +2440,44 @@ async fn two_arms_writing_one_path_fail_with_a_write_race() {
     let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect_err("two live arms writing one path must fail the fanout");
+        .expect_err("two live arms writing one path must terminate the run");
 
-    let text = error.to_string();
-    assert!(text.contains("write-write race"), "error was: {text}");
-    assert!(text.contains("shared.txt"), "error was: {text}");
+    match &error {
+        Error::Determinism(detail) => {
+            assert!(detail.contains("shared.txt"), "error was: {detail}");
+            assert!(
+                detail.contains("conflicts with"),
+                "the conflict is named: {detail}"
+            );
+            assert_eq!(
+                detail.matches("ExecId(").count(),
+                2,
+                "both arms' identities are named: {detail}"
+            );
+        }
+        other => panic!("expected the fatal determinism violation, got {other:?}"),
+    }
     assert_eq!(
         terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
-        1,
-        "the second arm's write raced: {:?}",
+        0,
+        "no arm fails on its own; the run ends at the answer boundary: {:?}",
         recorder.events()
     );
     assert_eq!(
         terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
-        1,
-        "the first arm, parked on its infer, is aborted as the sibling: {:?}",
+        2,
+        "both parked arms drop unarmed and report cancelled: {:?}",
         recorder.events()
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn two_live_arms_appending_one_path_fail_with_a_write_race() {
+async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation() {
     // The papergate case the WriteScope registry never caught: `append`
     // claims write intent now, so two live arms appending to one path
-    // conflict exactly as two writes do. The arms interleave because each
-    // appends before suspending on its infer.
+    // conflict exactly as two writes do - and under the leaf-yield store
+    // path the conflict is the fatal determinism violation, not a
+    // per-arm store error.
     let gateway = ScriptedGateway::start(vec![resp_text("p1"), resp_text("p2")]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -2471,20 +2497,28 @@ async fn two_live_arms_appending_one_path_fail_with_a_write_race() {
     let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect_err("two live arms appending one path must fail the fanout");
+        .expect_err("two live arms appending one path must terminate the run");
 
-    let text = error.to_string();
-    assert!(text.contains("write-write race"), "error was: {text}");
-    assert!(text.contains("evidence.md"), "error was: {text}");
+    match &error {
+        Error::Determinism(detail) => {
+            assert!(detail.contains("evidence.md"), "error was: {detail}");
+            assert_eq!(
+                detail.matches("ExecId(").count(),
+                2,
+                "both arms' identities are named: {detail}"
+            );
+        }
+        other => panic!("expected the fatal determinism violation, got {other:?}"),
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn two_arms_appending_one_path_succeed() {
-    // Mirror of the legacy case of the same name, with the claims-model
-    // rationale: arms that never suspend at I/O run one at a time, so each
-    // arm's claims release at its end and the next arm's append meets no
-    // live claimant. Only the relative order is unspecified - and with no
-    // interleaving points it is the collection order.
+async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
+    // The store operation alone is the interleaving point now: every store
+    // op is a leaf yield, so the arms park live on their appends and the
+    // second op to execute in the blocking pool meets the first arm's
+    // standing claim. The old premise - arms that never suspend at I/O run
+    // one at a time - is gone, and the cross-arm append booms.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -2500,15 +2534,24 @@ async fn two_arms_appending_one_path_succeed() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let error = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("concurrent appends to one path must succeed");
+        .expect_err("concurrent appends to one path must boom");
 
-    assert_eq!(out, "alpha,beta");
-    let log = store.read("log.txt").expect("both arms appended");
-    assert!(log.contains("alpha;"), "log was: {log:?}");
-    assert!(log.contains("beta;"), "log was: {log:?}");
+    match &error {
+        Error::Determinism(detail) => {
+            assert!(detail.contains("log.txt"), "error was: {detail}");
+        }
+        other => panic!("expected the fatal determinism violation, got {other:?}"),
+    }
+    // The losing arm's append never reached the backend: exactly one arm's
+    // append landed.
+    let log = store.read("log.txt").expect("one arm appended");
+    assert!(
+        log == "alpha;" || log == "beta;",
+        "exactly one arm's append may land: {log:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

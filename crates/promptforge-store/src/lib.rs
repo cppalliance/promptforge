@@ -490,8 +490,9 @@ fn map_vfs(err: VfsError, path: &str) -> StoreError {
         VfsError::NotFound(_) => StoreError::NotFound {
             path: path.to_owned(),
         },
-        VfsError::Conflict(_) => StoreError::WriteRace {
+        VfsError::Conflict(message) => StoreError::WriteRace {
             path: path.to_owned(),
+            detail: message,
         },
         other => StoreError::backend(other),
     }

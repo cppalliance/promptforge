@@ -47,6 +47,14 @@ const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 /// stays nil because nothing ever reads this stash there.
 const USER_INPUT_REGISTRY: &str = "promptforge.impl_coro.user_input";
 
+/// The registry key for the shim's store function table, stashed by the
+/// prelude and the live H1 base install so the executor can install the
+/// store yield shims onto a VM's `store` table. The registry is host-side
+/// only: an agent VM never installs them, so its store table keeps the
+/// direct closures - the agent driver is a single-identity loop with no
+/// interleaving for the claims model to govern.
+const STORE_REGISTRY: &str = "promptforge.impl_coro.store";
+
 /// The shim program, compiled once and loaded per VM. Compilation of the
 /// bundled source fails only on a crate bug, so the payload is a shareable
 /// [`SharedSource`] cause (the crate `Error` is not `Clone`), re-wrapped as
@@ -99,6 +107,9 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let user_input: Function = shims.raw_get("user_input").map_err(Error::lua)?;
     lua.set_named_registry_value(USER_INPUT_REGISTRY, user_input)
+        .map_err(Error::lua)?;
+    let store: Table = shims.raw_get("store").map_err(Error::lua)?;
+    lua.set_named_registry_value(STORE_REGISTRY, store)
         .map_err(Error::lua)?;
     globals
         .raw_set("coroutine", Value::Nil)
@@ -196,9 +207,40 @@ pub fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
     let infer: Function = shims.raw_get("infer").map_err(Error::lua)?;
     lua.set_named_registry_value(INFER_REGISTRY, infer)
         .map_err(Error::lua)?;
+    let store: Table = shims.raw_get("store").map_err(Error::lua)?;
+    lua.set_named_registry_value(STORE_REGISTRY, store)
+        .map_err(Error::lua)?;
     globals
         .raw_set("coroutine", Value::Nil)
         .map_err(Error::lua)?;
+    Ok(())
+}
+
+/// Installs the store yield shims onto a VM's `store` table, replacing the
+/// direct closures the host API install put there. Every store operation
+/// then suspends the block as a leaf yield the driver answers against the
+/// sync VFS via the blocking pool - uniformly for all backends, with no
+/// inline fast path, so interleaving behavior never depends on which
+/// backend serves the mount.
+///
+/// The executor's section setup and live H1 setup are the only callers:
+/// an agent VM never receives the shims (its driver is a single-identity
+/// loop with no interleaving for the claims model to govern), so its
+/// store table keeps the direct closures.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude (or the live H1 base
+/// install) never ran on this VM, the `store` table is absent, or the
+/// install fails.
+pub fn install_store_shims(lua: &Lua) -> Result<()> {
+    let shims: Table = lua
+        .named_registry_value(STORE_REGISTRY)
+        .map_err(Error::lua)?;
+    let store: Table = lua.globals().raw_get("store").map_err(Error::lua)?;
+    for pair in shims.pairs::<String, Function>() {
+        let (name, function) = pair.map_err(Error::lua)?;
+        store.raw_set(name, function).map_err(Error::lua)?;
+    }
     Ok(())
 }
 

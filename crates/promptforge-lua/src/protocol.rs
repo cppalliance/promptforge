@@ -2,8 +2,8 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer(handle?, prompt)`, `call`,
-//! `fanout`, `tools.call`, the section-only `models.loop` and
-//! `user_input()`, the agent-only `models.chat`) is a Lua-side shim
+//! `fanout`, `tools.call`, the section-only `models.loop`, `user_input()`,
+//! and `store.*`, the agent-only `models.chat`) is a Lua-side shim
 //! that yields a request table; the driver validates the yield into a
 //! [`Request`], dispatches it, and resumes the coroutine with the
 //! `(ok, result)` envelope rendered from an [`Answer`]. The two enums are
@@ -214,6 +214,17 @@ pub enum Request {
     /// exhaustive match forces. The request carries no arguments: the
     /// broker and its host policy own the whole interaction.
     UserInput,
+    /// `store.*(...)`: one run-scoped store operation as a leaf yield.
+    /// Section VMs and the live H1 VM run the store shims; the agent
+    /// driver carries an unreachable internal-invariant guard for the arm
+    /// its exhaustive match forces (an agent VM's store table keeps the
+    /// direct closures). Every operation takes this path uniformly -
+    /// memory- and host-backed alike, with no inline fast path - so
+    /// interleaving behavior never depends on the backend.
+    Store {
+        /// The validated operation and its author-supplied arguments.
+        op: StoreOp,
+    },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     Mcp {
         /// The reserved server name.
@@ -263,6 +274,7 @@ impl Request {
             // No author arguments exist to fail validation: a well-formed
             // `user_input` yield is always the unit request.
             "user_input" => YieldParse::Request(Request::UserInput),
+            "store" => classify(parse_store(table), |error| Answer::Store(Err(error))),
             "mcp" => match parse_mcp(lua, table) {
                 Ok(request) => YieldParse::Request(request),
                 Err(_) => YieldParse::Malformed(direct_yield_error()),
@@ -280,6 +292,90 @@ impl Request {
     pub fn mcp_reserved() -> Error {
         Error::Lua("mcp requests are reserved: no dispatcher exists yet".to_owned())
     }
+}
+
+/// One validated store operation: the `store.*` call's name and its
+/// author-supplied arguments, checked once here at the protocol boundary.
+///
+/// The read bounds stay `i64` exactly as the legacy callback's signature
+/// had them: a negative bound converts to 0 at execution, which the
+/// facade's range validation rejects with the same error a zero bound
+/// earns.
+#[derive(Debug)]
+pub enum StoreOp {
+    /// `store.write(path, contents)`.
+    Write {
+        /// The author-supplied logical path.
+        path: String,
+        /// The author-supplied file contents.
+        contents: String,
+    },
+    /// `store.append(path, contents)`.
+    Append {
+        /// The author-supplied logical path.
+        path: String,
+        /// The author-supplied text to append.
+        contents: String,
+    },
+    /// `store.read(path, start?, end?)`: no `start` reads the whole file;
+    /// a present `start` slices a 1-based inclusive line range.
+    Read {
+        /// The author-supplied logical path.
+        path: String,
+        /// The optional 1-based first line.
+        start: Option<i64>,
+        /// The optional 1-based last line.
+        end: Option<i64>,
+    },
+    /// `store.read_numbered(path, start?, end?)`: the read with absolute
+    /// line numbers under the same optional bounds.
+    ReadNumbered {
+        /// The author-supplied logical path.
+        path: String,
+        /// The optional 1-based first line.
+        start: Option<i64>,
+        /// The optional 1-based last line.
+        end: Option<i64>,
+    },
+    /// `store.str_replace(path, old, new)`.
+    StrReplace {
+        /// The author-supplied logical path.
+        path: String,
+        /// The anchor text, required to occur exactly once.
+        old: String,
+        /// The replacement text.
+        new: String,
+    },
+    /// `store.delete(path)` (idempotent).
+    Delete {
+        /// The author-supplied logical path.
+        path: String,
+    },
+    /// `store.glob(pattern)`.
+    Glob {
+        /// The author-supplied glob pattern.
+        pattern: String,
+    },
+    /// `store.exists(path)`.
+    Exists {
+        /// The author-supplied logical path.
+        path: String,
+    },
+}
+
+/// The outcome of one dispatched store operation: the value the shim
+/// returns to its caller. Mutating ops carry `Unit` (the shim returns
+/// nil), exactly as the legacy closures returned nil.
+#[derive(Debug)]
+pub enum StoreOutcome {
+    /// The operation succeeded with no return value.
+    Unit,
+    /// `read`/`read_numbered`: the (possibly bounded) file text.
+    Text(String),
+    /// `glob`: the matching paths, sorted.
+    Paths(Vec<String>),
+    /// `exists`: the presence flag.
+    Bool(bool),
 }
 
 /// Maps one per-op parse to the boundary outcome: a validated request, an
@@ -390,6 +486,85 @@ fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Reques
         Err(_) => return Err(FieldFailure::Malformed),
     };
     Ok(Request::ToolCall { alias, args })
+}
+
+/// Reads one author-supplied optional line bound: absent or nil is `None`,
+/// an integer (or a float with an integral value, matching the legacy
+/// callback's `i64` conversion) is `Some`, any other shape is the call's
+/// error.
+fn call_optional_line(
+    table: &mlua::Table,
+    name: &str,
+) -> std::result::Result<Option<i64>, FieldFailure> {
+    match table.raw_get::<Value>(name) {
+        Ok(Value::Nil) => Ok(None),
+        Ok(Value::Integer(line)) => Ok(Some(line)),
+        // The bounds are exact powers of two (-2^63 and 2^63), so the
+        // range check needs no lossy i64-to-f64 cast.
+        Ok(Value::Number(line))
+            if line.fract() == 0.0
+                && (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&line) =>
+        {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the range check above bounds the value to i64"
+            )]
+            Ok(Some(line as i64))
+        }
+        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+            "{name} must be an integer, got {}",
+            other.type_name()
+        )))),
+        Err(_) => Err(FieldFailure::Malformed),
+    }
+}
+
+/// Parses a `store` request: the operation name and its author-supplied
+/// arguments. Every wrong shape is the call's error, resumed as the answer
+/// so the shim raises it at the call site - an author `pcall` catches it,
+/// exactly as the legacy callback's argument conversion failed there.
+fn parse_store(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let op = call_string(table, "store_op")?;
+    let op = match op.as_str() {
+        "write" => StoreOp::Write {
+            path: call_string(table, "path")?,
+            contents: call_string(table, "contents")?,
+        },
+        "append" => StoreOp::Append {
+            path: call_string(table, "path")?,
+            contents: call_string(table, "contents")?,
+        },
+        "read" => StoreOp::Read {
+            path: call_string(table, "path")?,
+            start: call_optional_line(table, "start")?,
+            end: call_optional_line(table, "end")?,
+        },
+        "read_numbered" => StoreOp::ReadNumbered {
+            path: call_string(table, "path")?,
+            start: call_optional_line(table, "start")?,
+            end: call_optional_line(table, "end")?,
+        },
+        "str_replace" => StoreOp::StrReplace {
+            path: call_string(table, "path")?,
+            old: call_string(table, "old")?,
+            new: call_string(table, "new")?,
+        },
+        "delete" => StoreOp::Delete {
+            path: call_string(table, "path")?,
+        },
+        "glob" => StoreOp::Glob {
+            pattern: call_string(table, "pattern")?,
+        },
+        "exists" => StoreOp::Exists {
+            path: call_string(table, "path")?,
+        },
+        other => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "unknown store operation {other:?}"
+            ))));
+        }
+    };
+    Ok(Request::Store { op })
 }
 
 /// Parses a reserved `mcp` request. No call surface produces one, so every
@@ -1145,6 +1320,8 @@ pub enum Answer<E> {
     /// The outcome of a `user_input` request: the resumed text and its
     /// availability flag.
     UserInput(std::result::Result<UserInputOutcome, E>),
+    /// The outcome of a `store` request: the operation's return value.
+    Store(std::result::Result<StoreOutcome, E>),
 }
 
 impl<E> Answer<E> {
@@ -1158,6 +1335,7 @@ impl<E> Answer<E> {
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
             Answer::Loop(result) => Answer::Loop(result.map_err(map)),
             Answer::UserInput(result) => Answer::UserInput(result.map_err(map)),
+            Answer::Store(result) => Answer::Store(result.map_err(map)),
         }
     }
 }
@@ -1234,12 +1412,28 @@ impl<E: std::fmt::Display> Answer<E> {
                     None,
                 ))
             }
+            // The store op's return value: nil for the mutating ops, the
+            // text for reads, a sequence table for glob, a boolean for
+            // exists - the legacy closures' exact return shapes.
+            Answer::Store(Ok(outcome)) => {
+                let value = match outcome {
+                    StoreOutcome::Unit => Value::Nil,
+                    StoreOutcome::Text(text) => Value::String(lua.create_string(&text)?),
+                    StoreOutcome::Paths(paths) => Value::Table(lua.create_sequence_from(paths)?),
+                    StoreOutcome::Bool(exists) => Value::Boolean(exists),
+                };
+                Ok((
+                    MultiValue::from_vec(vec![Value::Boolean(true), value]),
+                    None,
+                ))
+            }
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
             | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
             | Answer::Loop(Err(error))
+            | Answer::Store(Err(error))
             | Answer::UserInput(Err(error)) => {
                 let message = lua.create_string(error.to_string())?;
                 Ok((

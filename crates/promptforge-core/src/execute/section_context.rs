@@ -23,7 +23,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use crate::debug::DebugCapture;
-use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base};
+use crate::lua::{
+    ProseState, SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base,
+    install_store_shims,
+};
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
 use crate::store::Access;
@@ -215,6 +218,7 @@ impl SectionContext {
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_live_h1(&mut vm, ctx, access, &sys, title)
             .and_then(|()| install_live_h1_shim_base(vm.lua()).map_err(Error::from))
+            .and_then(|()| install_store_shims(vm.lua()).map_err(Error::from))
         {
             vm.teardown(ctx.observer().as_ref(), title);
             return Err(error);

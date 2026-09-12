@@ -655,7 +655,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-10>
 
-### Step 10: store operations as leaf yields
+### Step 10: store operations as leaf yields [completed]
 
 - Component: promptforge-core
 - Add the new Request/Answer variants and one dispatch arm (the proven tools.call pattern) so every Lua store operation becomes a leaf yield answered via spawn_blocking against the sync Vfs: uniform for all backends, no inline fast path. Map the claims-violation VfsError to the fatal determinism RunErrorKind that terminates the run instantly and is not catchable from Lua.

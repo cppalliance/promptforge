@@ -124,5 +124,12 @@ where
         setup.observer_arc.as_ref(),
         setup.section_name,
     )?;
+    // The store yield shims install after the shared replay: the shared
+    // chunk runs as a main chunk, not a coroutine, so load-time store
+    // calls must hit the direct closures (which capture the same
+    // Arc<Access>, leaving claims attribution unchanged). Installing
+    // earlier would make a top-level `store.write` yield from outside a
+    // coroutine.
+    crate::lua::install_store_shims(vm.lua())?;
     vm.install_captured_bindings().map_err(Error::from)
 }

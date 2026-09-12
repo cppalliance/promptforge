@@ -381,3 +381,43 @@ pub(crate) fn install_store_table(
     globals.raw_set("store", table).map_err(Error::lua)?;
     Ok(())
 }
+
+/// Executes one validated store operation against the facade: the single
+/// implementation behind both the legacy direct closures and the
+/// executor's leaf-yield dispatch, so the two paths cannot drift. The
+/// bounded-read argument rules (a negative bound converts to 0, an `end`
+/// without a `start` is refused) live in the shared `read_store_bounded`
+/// helper above; the read ops route through their named wrappers exactly
+/// as the closures do.
+///
+/// # Errors
+/// Returns the [`StoreError`](promptforge_store::StoreError) the facade
+/// produces for the operation: path validation, not-found, anchor, range,
+/// write-race, or backend failure, exactly as the legacy closures
+/// surfaced it.
+pub fn run_store_op(
+    store: &Store,
+    op: crate::protocol::StoreOp,
+) -> std::result::Result<crate::protocol::StoreOutcome, promptforge_store::StoreError> {
+    use crate::protocol::{StoreOp, StoreOutcome};
+    match op {
+        StoreOp::Write { path, contents } => {
+            store.write(&path, &contents).map(|()| StoreOutcome::Unit)
+        }
+        StoreOp::Append { path, contents } => {
+            store.append(&path, &contents).map(|()| StoreOutcome::Unit)
+        }
+        StoreOp::Read { path, start, end } => {
+            read_store(store, &path, start, end).map(StoreOutcome::Text)
+        }
+        StoreOp::ReadNumbered { path, start, end } => {
+            read_store_numbered(store, &path, start, end).map(StoreOutcome::Text)
+        }
+        StoreOp::StrReplace { path, old, new } => store
+            .str_replace(&path, &old, &new)
+            .map(|()| StoreOutcome::Unit),
+        StoreOp::Delete { path } => store.delete(&path).map(|()| StoreOutcome::Unit),
+        StoreOp::Glob { pattern } => store.glob(&pattern).map(StoreOutcome::Paths),
+        StoreOp::Exists { path } => store.exists(&path).map(StoreOutcome::Bool),
+    }
+}

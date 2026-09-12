@@ -164,6 +164,8 @@ pub(crate) use crate::model::ModelSet;
 ///   request.
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
 /// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
+/// - [`RunErrorKind::Determinism`] - two live execution identities claimed
+///   one store path; the run terminated on the spot, uncatchably from Lua.
 /// - [`RunErrorKind::Cancelled`] - the host cancelled the run.
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
 ///

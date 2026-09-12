@@ -6,9 +6,9 @@
 
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::{Store, StoreError, StoreExt};
-use shared_vfs::VfsRef;
+use shared_vfs::{HostBackend, VfsRef};
 
-use super::support::{RunOptions, parse_execution_fixture, run};
+use super::support::{RunOptions, parse_execution_fixture, run, run_fixture};
 use crate::support::Recorder;
 use std::sync::Arc;
 
@@ -198,5 +198,90 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     assert!(
         error.contains("The output report"),
         "the error names the promise's description: {error}"
+    );
+}
+
+/// A unique temporary directory that removes itself on drop. The suite has
+/// no tempfile dependency; this mirrors shared-vfs's own test helper.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> TempDir {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the clock is after the epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "promptforge-core-vfs-{}-{unique}-{name}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&dir).expect("the temp dir creates");
+        TempDir(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
+    // The consistency rule: every store operation takes the leaf-yield path
+    // uniformly, with no inline fast path, so a run's observable behavior
+    // cannot depend on which backend serves the store mount. The same
+    // fanout fixture (arm-scoped writes, a post-join glob, the ordered
+    // merge) runs over the stock memory mount and over a host backend
+    // rooted in a temp dir; the result and the stored contents must be
+    // identical.
+    const FANOUT_STORE_WRITES: &str = include_str!("../prompts/execution/fanout-store-writes.md");
+    let memory = run_fixture(
+        FANOUT_STORE_WRITES,
+        "execution/fanout-store-writes.md",
+        "vfs-invariance-memory",
+        "",
+        None,
+    )
+    .await;
+    let memory_result = memory
+        .result
+        .expect("the memory-backed fanout must execute offline");
+
+    let temp = TempDir::new("host-backend");
+    let host_vfs = VfsRef::builder()
+        .mount(
+            promptforge_vfs::STORE_MOUNT,
+            HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
+        )
+        .build();
+    let host = run_fixture(
+        FANOUT_STORE_WRITES,
+        "execution/fanout-store-writes.md",
+        "vfs-invariance-host",
+        "",
+        Some(host_vfs),
+    )
+    .await;
+    let host_result = host
+        .result
+        .expect("the host-backed fanout must execute offline");
+
+    assert_eq!(
+        memory_result, host_result,
+        "the run's result must not depend on the backend"
+    );
+    for path in ["arm-1.md", "arm-2.md", "merged.md"] {
+        assert_eq!(
+            memory.store.read(path).ok(),
+            host.store.read(path).ok(),
+            "stored contents at {path} must not depend on the backend"
+        );
+    }
+    // The host backend really served the mount: the arm's write landed on
+    // the host filesystem under the root.
+    assert!(
+        temp.0.join("arm-1.md").is_file(),
+        "the host backend must persist the arm's write under its root"
     );
 }

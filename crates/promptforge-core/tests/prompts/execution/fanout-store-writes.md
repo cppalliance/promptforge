@@ -11,6 +11,10 @@ promptforge: 0
 ```lua
 local replies = fanout("### Worker", list_from_section("### Topics"))
 local files = store.glob("arm-*.md")
+-- The ordered merge: the join delivers arm results in collection order,
+-- never finish order, so the parent's merge is deterministic by
+-- construction.
+store.write("merged.md", table.concat(replies, ","))
 return tostring(#files) .. ":" .. table.concat(replies, ",")
 ```
 

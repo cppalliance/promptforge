@@ -122,6 +122,53 @@ local function user_input(...)
   return text, available
 end
 
+-- store.*: every store operation is a leaf yield, answered by the driver
+-- against the sync VFS uniformly for all backends - no inline fast path,
+-- so interleaving behavior never depends on which backend serves the
+-- mount. The host installs these onto the store table of section VMs and
+-- the live H1 VM only; an agent VM's store table keeps its direct
+-- closures. `end` is a keyword, so the read bounds travel under bracket
+-- keys.
+local function store_request(store_op, fields)
+  fields.op = "store"
+  fields.store_op = store_op
+  local ok, result = yield(fields)
+  if not ok then error(result, 0) end
+  return result
+end
+
+local function store_write(path, contents)
+  return store_request("write", { path = path, contents = contents })
+end
+
+local function store_append(path, contents)
+  return store_request("append", { path = path, contents = contents })
+end
+
+local function store_read(path, start, finish)
+  return store_request("read", { path = path, start = start, ["end"] = finish })
+end
+
+local function store_read_numbered(path, start, finish)
+  return store_request("read_numbered", { path = path, start = start, ["end"] = finish })
+end
+
+local function store_str_replace(path, old, new)
+  return store_request("str_replace", { path = path, old = old, new = new })
+end
+
+local function store_delete(path)
+  return store_request("delete", { path = path })
+end
+
+local function store_glob(pattern)
+  return store_request("glob", { pattern = pattern })
+end
+
+local function store_exists(path)
+  return store_request("exists", { path = path })
+end
+
 -- The section install passes the section's namespace tables; the live H1
 -- base install passes nil for both (H1's live models table exists only per
 -- block, given the shim by the host's per-step wrap) and takes `infer` from
@@ -140,4 +187,14 @@ return {
   infer = infer,
   loop = models_loop,
   user_input = user_input,
+  store = {
+    write = store_write,
+    append = store_append,
+    read = store_read,
+    read_numbered = store_read_numbered,
+    str_replace = store_str_replace,
+    delete = store_delete,
+    glob = store_glob,
+    exists = store_exists,
+  },
 }

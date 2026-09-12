@@ -165,6 +165,10 @@ pub enum StoreError {
     WriteRace {
         /// The logical path both arms wrote.
         path: String,
+        /// The claims model's conflict diagnosis, naming the canonical
+        /// path, both identities, and both claim kinds; the executor's
+        /// fatal determinism violation carries it verbatim.
+        detail: String,
     },
 
     /// The backend failed for a reason of its own, kept as an opaque source.
@@ -244,8 +248,20 @@ impl StoreError {
             | StoreError::AnchorAmbiguous { path, .. }
             | StoreError::InvalidPath { path, .. }
             | StoreError::InvalidRange { path, .. }
-            | StoreError::WriteRace { path } => Some(path),
+            | StoreError::WriteRace { path, .. } => Some(path),
             StoreError::InvalidPattern { .. } | StoreError::Backend { .. } => None,
+        }
+    }
+
+    /// Returns the claims model's conflict diagnosis when this is a write
+    /// race: the canonical path, both identities, and both claim kinds.
+    /// The executor carries it verbatim into its fatal determinism
+    /// violation, whose message is the whole diagnosis.
+    #[must_use]
+    pub fn conflict_detail(&self) -> Option<&str> {
+        match self {
+            StoreError::WriteRace { detail, .. } => Some(detail),
+            _ => None,
         }
     }
 

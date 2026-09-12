@@ -536,6 +536,15 @@ pub(crate) enum Error {
     #[error("store operation failed: {0}")]
     Store(#[source] shared_vfs::VfsError),
 
+    /// Two live execution identities claimed one store path: the claims
+    /// model's conflict, mapped from the store's write-race vocabulary at
+    /// the yield-answer boundary. Fatal to the run on the spot and never
+    /// resumed into Lua, so no author `pcall` can catch it; the message is
+    /// the claims model's whole diagnosis, naming the canonical path, both
+    /// identities, and both claim kinds.
+    #[error("store determinism violation: {0}")]
+    Determinism(String),
+
     /// Rendering the current time as an RFC 3339 string failed.
     ///
     /// Retains the [`time::error::Format`] failure as the private `#[source]`

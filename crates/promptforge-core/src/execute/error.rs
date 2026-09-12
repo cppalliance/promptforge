@@ -24,6 +24,9 @@ pub enum RunErrorKind {
     Tool,
     /// A run-scoped store operation failed.
     Store,
+    /// Two live execution identities claimed one store path: the claims
+    /// model terminated the run to keep interleaving deterministic.
+    Determinism,
     /// A section's Lua phase failed to run or return a usable value.
     Lua,
     /// A Lua host resource quota (log events, log bytes, or instructions) was
@@ -86,6 +89,7 @@ impl RunError {
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Internal(_) | Error::TimestampFormat(_) => RunErrorKind::Internal,
             Error::Store(_) => RunErrorKind::Store,
+            Error::Determinism(_) => RunErrorKind::Determinism,
             Error::Bind { .. }
             | Error::BindSchema { .. }
             | Error::BindQuery { .. }

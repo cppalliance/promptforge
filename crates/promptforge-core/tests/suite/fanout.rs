@@ -11,11 +11,14 @@ const FANOUT_BASIC_EXECUTION: &str = "fixture-fanout-basic";
 const FANOUT_EPILOG_EXECUTION: &str = "fixture-fanout-epilog";
 const FANOUT_STORE_EXECUTION: &str = "fixture-fanout-store";
 const FANOUT_FAILURE_EXECUTION: &str = "fixture-fanout-failure";
+const FANOUT_CROSS_ARM_EXECUTION: &str = "fixture-fanout-cross-arm-append";
 
 const FANOUT_BASIC: &str = include_str!("../prompts/execution/fanout-basic.md");
 const FANOUT_EPILOG: &str = include_str!("../prompts/execution/fanout-epilog.md");
 const FANOUT_STORE_WRITES: &str = include_str!("../prompts/execution/fanout-store-writes.md");
 const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-failure.md");
+const FANOUT_CROSS_ARM_APPEND: &str =
+    include_str!("../prompts/execution/fanout-cross-arm-append.md");
 
 /// The worker-template section name both fanout arms execute under. The
 /// observation stream keys arm events by this section, not by `sys.index`
@@ -131,6 +134,60 @@ async fn fanout_store_writes_persist_across_arms() {
     assert_eq!(
         run.store.read("arm-2.md").expect("arm 2 must write"),
         "beta"
+    );
+    // The ordered merge: the join's collection-order results land in one
+    // parent-written file, deterministic by construction.
+    assert_eq!(
+        run.store.read("merged.md").expect("the merge must land"),
+        "alpha,beta"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cross_arm_append_terminates_the_run_with_a_determinism_violation() {
+    // Every store operation is a leaf yield now, so two live arms appending
+    // one path genuinely race in the blocking pool; the claims model booms
+    // the loser and the violation fails the whole run at the answer
+    // boundary. The fixture's pcall proves the violation is uncatchable:
+    // were it resumed into the arm, the handler would record the catch and
+    // the run would return "alpha,beta" instead of failing.
+    let run = run_fixture(
+        FANOUT_CROSS_ARM_APPEND,
+        "execution/fanout-cross-arm-append.md",
+        FANOUT_CROSS_ARM_EXECUTION,
+        "",
+        None,
+    )
+    .await;
+    let error = match run.result {
+        Ok(value) => panic!("a cross-arm append must terminate the run, got {value:?}"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Determinism,
+        "a claims conflict classifies as a determinism violation: {error:?}"
+    );
+    let text = error.to_string();
+    assert!(
+        text.contains("evidence.md"),
+        "the violation names the contested path: {text}"
+    );
+    assert!(
+        text.contains("conflicts with"),
+        "the violation names the conflicting claim: {text}"
+    );
+    assert_eq!(
+        text.matches("ExecId(").count(),
+        2,
+        "the violation names both arms' identities: {text}"
+    );
+    // The losing arm's append never reached the backend: exactly one arm's
+    // line landed.
+    let evidence = run.store.read("evidence.md").expect("one arm appended");
+    assert!(
+        evidence == "alpha\n" || evidence == "beta\n",
+        "exactly one arm's append may land: {evidence:?}"
     );
 }
 

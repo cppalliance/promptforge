@@ -533,6 +533,9 @@ async fn dispatch(run: &AgentRun<'_>, request: Request) -> Result<Answer<AgentEr
         Request::Fanout { .. } => Err(AgentError::Internal(
             "an agent VM cannot yield a fanout request: the shim is never installed",
         )),
+        Request::Store { .. } => Err(AgentError::Internal(
+            "an agent VM cannot yield a store request: the store yield shims are never installed",
+        )),
         Request::Mcp { .. } => Err(AgentError::Internal(
             "an agent VM cannot yield an mcp request: no shim produces one",
         )),
