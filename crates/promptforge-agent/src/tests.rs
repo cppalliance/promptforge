@@ -28,7 +28,7 @@ use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, SecretStr
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_store::StoreExt;
 use promptforge_tools::{Tool, ToolCatalog, ToolError, ToolId, ToolOutput};
-use shared_vfs::VfsRef;
+use shared_vfs::{Origin, VfsRef};
 
 use crate::agent::run_agent_with_client;
 use crate::{AgentConfig, AgentError, AgentLimits, run_agent};
@@ -562,7 +562,10 @@ impl FixtureRun {
     /// immediately dropped access: the run's identity dropped with it, so
     /// nothing it wrote conflicts with the extraction.
     fn read(&self, path: &str) -> String {
-        let access = self.vfs.acquire().expect("the stock backend acquires");
+        let access = self
+            .vfs
+            .acquire(Origin::new("FixtureRun::read"))
+            .expect("the stock backend acquires");
         self.vfs
             .store(&access)
             .read(path)

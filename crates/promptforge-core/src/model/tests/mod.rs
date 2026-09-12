@@ -23,7 +23,7 @@ const EXECUTION: &str = "model-bind-test";
 fn fresh_access() -> Arc<Access> {
     Arc::new(
         promptforge_vfs::empty()
-            .acquire()
+            .acquire(shared_vfs::Origin::new("model test fixture"))
             .expect("the stock backend acquires"),
     )
 }

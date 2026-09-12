@@ -140,14 +140,14 @@ impl Policy for ModePolicy {
 
 #[cfg(test)]
 mod tests {
-    use shared_vfs::{VfsError, VfsRef};
+    use shared_vfs::{Origin, VfsError, VfsRef};
 
     use super::{Mode, ModePolicy, STORE_MOUNT, empty};
 
     #[test]
     fn empty_carries_the_store_mount() -> Result<(), VfsError> {
         let vfs = empty();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(Origin::new("empty store mount test"))?;
         let path = format!("{STORE_MOUNT}/paper.md");
         access.write(&path, b"# draft")?;
         assert_eq!(access.read(&path)?, b"# draft");
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn empty_serves_nothing_outside_the_store_mount() -> Result<(), VfsError> {
         let vfs = empty();
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(Origin::new("empty namespace test"))?;
         assert!(matches!(
             access.read("/elsewhere.txt"),
             Err(VfsError::NotFound(_))
@@ -173,7 +173,7 @@ mod tests {
         let policy = ModePolicy::new(Mode::Ask);
         let handle = policy.handle();
         let vfs = VfsRef::with_policy(empty(), policy);
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(Origin::new("mode flip test"))?;
         let path = format!("{STORE_MOUNT}/notes.md");
         match access.write(&path, b"x") {
             Err(VfsError::PermissionDenied(reason)) => {
@@ -196,7 +196,7 @@ mod tests {
     fn plan_mode_allows_mutations_only_to_markdown_paths() -> Result<(), VfsError> {
         let policy = ModePolicy::new(Mode::Plan);
         let vfs = VfsRef::with_policy(empty(), policy);
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(Origin::new("plan mode test"))?;
         let markdown = format!("{STORE_MOUNT}/notes.md");
         let binary = format!("{STORE_MOUNT}/data.bin");
         access.write(&markdown, b"# ok")?;
@@ -220,10 +220,11 @@ mod tests {
         let handle = policy.handle();
         let vfs = VfsRef::with_policy(empty(), policy);
         let path = format!("{STORE_MOUNT}/paper.md");
-        vfs.acquire()?.write(&path, b"text")?;
+        vfs.acquire(Origin::new("read gate test"))?
+            .write(&path, b"text")?;
         // Even in Ask, the strictest mode, reads flow.
         handle.set(Mode::Ask);
-        let access = vfs.acquire()?;
+        let access = vfs.acquire(Origin::new("read gate test"))?;
         assert_eq!(access.read(&path)?, b"text");
         assert!(access.exists(&path)?);
         Ok(())

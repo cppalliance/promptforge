@@ -38,7 +38,7 @@ use crate::untrusted::GuardNonce;
 fn fresh_access() -> Arc<Access> {
     Arc::new(
         promptforge_vfs::empty()
-            .acquire()
+            .acquire(shared_vfs::Origin::new("execute test fixture"))
             .expect("the stock backend acquires"),
     )
 }
@@ -231,12 +231,18 @@ impl TestStore {
     }
 
     fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
-        let access = self.0.acquire().map_err(StoreError::backend)?;
+        let access = self
+            .0
+            .acquire(shared_vfs::Origin::new("TestStore::read"))
+            .map_err(StoreError::backend)?;
         self.0.store(&access).read(path)
     }
 
     fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
-        let access = self.0.acquire().map_err(StoreError::backend)?;
+        let access = self
+            .0
+            .acquire(shared_vfs::Origin::new("TestStore::glob"))
+            .map_err(StoreError::backend)?;
         self.0.store(&access).glob(pattern)
     }
 }

@@ -116,7 +116,7 @@ fn scheduler_vm_with_tools(
     let sys = json!({});
     let access = Arc::new(
         promptforge_vfs::empty()
-            .acquire()
+            .acquire(shared_vfs::Origin::new("coroutine test fixture"))
             .expect("the stock backend acquires"),
     );
     let setup = SectionVmSetup {

@@ -45,7 +45,7 @@ use promptforge_model_client::model::{
 };
 use promptforge_store::Access;
 use promptforge_tools::ToolCatalog;
-use shared_vfs::VfsRef;
+use shared_vfs::{Origin, VfsRef};
 
 use crate::config::AgentConfig;
 
@@ -230,11 +230,16 @@ async fn drive(
     // exists - the section drivers' contract.
     vm.apply_lua_limits(limits.lua_memory_bytes, limits.lua_log_events)?;
     // The agent is one serial thread of execution: one capability for the
-    // whole run, released when it drops at the run's end.
-    let access = Arc::new(vfs.acquire().map_err(|error| AgentError::Program {
-        message: format!("the store capability acquisition failed: {error}"),
-        source: Some(Box::new(error)),
-    })?);
+    // whole run, released when it drops at the run's end. Its origin is
+    // the agent's own: the program is one chunk starting at its first
+    // line, and the agent's name is its source's name.
+    let access = Arc::new(
+        vfs.acquire(Origin::at(name.as_str(), name.as_str(), 1))
+            .map_err(|error| AgentError::Program {
+                message: format!("the store capability acquisition failed: {error}"),
+                source: Some(Box::new(error)),
+            })?,
+    );
     let (counts, events) =
         match setup_agent_vm(&mut vm, &access, &observer, &name, &tool_set, event_log, ui) {
             Ok(installed) => installed,
@@ -910,7 +915,7 @@ mod tests {
         path: &str,
     ) -> std::result::Result<String, promptforge_store::StoreError> {
         let access = vfs
-            .acquire()
+            .acquire(Origin::new("read_store"))
             .map_err(promptforge_store::StoreError::backend)?;
         promptforge_store::StoreExt::store(vfs, &access).read(path)
     }

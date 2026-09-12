@@ -2318,7 +2318,7 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     // or the run's writes.
     assert!(
         matches!(
-            vfs.acquire()
+            vfs.acquire(shared_vfs::Origin::new("overlay absence probe"))
                 .expect("the stock backend acquires")
                 .stat(promptforge_vfs::STORE_MOUNT),
             Err(shared_vfs::VfsError::NotFound(_))

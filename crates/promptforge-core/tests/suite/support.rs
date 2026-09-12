@@ -12,6 +12,7 @@ use promptforge_core::parser::Prompt;
 use promptforge_core::store::{StoreError, StoreExt, VfsRef};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 use promptforge_tools::{Tool, ToolCatalog};
+use shared_vfs::Origin;
 
 /// One correlated observation: which execution and section emitted it, plus the
 /// rendered event detail the fixtures assert on.
@@ -111,7 +112,10 @@ pub(super) struct FixtureStore(VfsRef);
 impl FixtureStore {
     /// Reads a store path through a fresh, immediately dropped access.
     pub(super) fn read(&self, path: &str) -> Result<String, StoreError> {
-        let access = self.0.acquire().map_err(StoreError::backend)?;
+        let access = self
+            .0
+            .acquire(Origin::new("FixtureStore::read"))
+            .map_err(StoreError::backend)?;
         self.0.store(&access).read(path)
     }
 }

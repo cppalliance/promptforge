@@ -60,6 +60,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use mlua::{RegistryKey, Thread};
+use shared_vfs::Origin;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 
@@ -75,7 +76,7 @@ use crate::lua::{
 };
 use crate::model::ModelBinding;
 use crate::observe::{Observation, Observer, detail};
-use crate::parser::{Block, Section};
+use crate::parser::{Block, Prompt, Section};
 use crate::resolve::RuntimeResolution;
 use crate::store::{Access, Store, StoreError};
 use crate::tools::{Tool, ToolId};
@@ -87,6 +88,26 @@ use super::engine::{
 };
 use super::gateway::{GatewaySource, ResolutionContext};
 use super::protocol::{Answer, Request, StoreOp, ToolCallOutcome, YieldParse};
+
+/// The most precise prompt-source line known for `blocks`: the first
+/// compiled chunk's absolute source line, else the prompt's opening line.
+fn first_chunk_line(blocks: &[Block]) -> u32 {
+    blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Lua(program) => Some(program.source_line().get()),
+            _ => None,
+        })
+        .unwrap_or(1)
+}
+
+/// The observability origin for a capability the run acquires: `label` is
+/// the section or pass the capability serves, and the prompt's title
+/// stands in for a file name - a prompt's name is its title, since the
+/// source may never have lived on disk.
+fn prompt_origin(prompt: &Prompt, label: &str, blocks: &[Block]) -> Origin {
+    Origin::at(label, prompt.title(), first_chunk_line(blocks))
+}
 use super::scope::prepare_effective_scope;
 use super::section_context::SectionContext;
 use super::support::{GENERIC_COMPLETION, MAX_CALL_DEPTH, next_id, now_rfc3339_checked};
@@ -770,7 +791,15 @@ impl<'a> Scheduler<'a> {
     /// # Errors
     /// Returns [`Error::Store`] when the backend refuses acquisition.
     fn install_root_slots(&mut self, root: ChainId) -> Result<()> {
-        let access = self.ctx.vfs().acquire().map_err(Error::Store)?;
+        // The walk capability serves every section in turn, so its label
+        // is the prompt's own; the line is where the walk starts.
+        let prompt = self.ctx.prompt();
+        let blocks: &[Block] = prompt
+            .sections()
+            .first()
+            .map_or(&[], |section| section.blocks());
+        let origin = prompt_origin(prompt, prompt.title(), blocks);
+        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
         self.chains[root.index()].access = Some(Arc::new(access));
         self.chains[root.index()].client = self.client.ready().cloned();
         Ok(())
@@ -791,7 +820,14 @@ impl<'a> Scheduler<'a> {
         // The pass owns its client slot, seeded from the run's configured
         // client, exactly as the legacy pass seeds its own.
         let client = self.client.ready().cloned();
-        let access = self.ctx.vfs().acquire().map_err(Error::Store)?;
+        // The live H1 pass runs under the prompt's title, from its first
+        // compiled H1 chunk.
+        let origin = prompt_origin(
+            self.ctx.prompt(),
+            self.ctx.prompt().title(),
+            self.ctx.prompt().h1_blocks(),
+        );
+        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
         self.chains.push(Chain {
             ctx: self.ctx.clone(),
             access: Some(Arc::new(access)),
@@ -2310,8 +2346,9 @@ impl<'a> Scheduler<'a> {
             // capability spawns from the fanout caller's, retiring the
             // caller's claims (the happens-before edge), and drops with
             // the chain so a finished arm's claims never linger into the
-            // join's merge.
-            let access = template.access.spawn().map_err(Error::Store)?;
+            // join's merge. The arm's origin is the worker section's.
+            let origin = prompt_origin(template.ctx.prompt(), worker.name(), worker.blocks());
+            let access = template.access.spawn(origin).map_err(Error::Store)?;
             self.chains[chain.index()].access = Some(Arc::new(access));
             // The arm inherits the caller's client slot: an
             // already-resolved client is shared, an unresolved one stays

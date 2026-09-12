@@ -6,7 +6,7 @@
 
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::{Store, StoreError, StoreExt};
-use shared_vfs::{HostBackend, VfsRef};
+use shared_vfs::{HostBackend, Origin, VfsRef};
 
 use super::support::{RunOptions, parse_execution_fixture, run, run_fixture};
 use crate::support::Recorder;
@@ -79,7 +79,9 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
         .frontmatter()
         .input()
         .expect("the fixture declares an input");
-    let access = vfs.acquire().expect("the stock backend acquires");
+    let access = vfs
+        .acquire(Origin::new("seed_declared_input"))
+        .expect("the stock backend acquires");
     vfs.store(&access)
         .write(input.path(), contents)
         .expect("the declared input seeds");
@@ -141,7 +143,9 @@ return store.read('handoff.txt')\n\
     assert_eq!(result, "across the reset");
     // Extraction after the run takes a fresh access: the run's identities
     // dropped with it, so nothing the run touched can conflict here.
-    let access = vfs.acquire().expect("the stock backend acquires");
+    let access = vfs
+        .acquire(Origin::new("stock handle extraction"))
+        .expect("the stock backend acquires");
     assert_eq!(
         vfs.store(&access)
             .read("handoff.txt")
@@ -165,7 +169,9 @@ async fn a_host_seeds_and_extracts_through_the_stock_handle_with_no_real_files()
         .await
         .expect("the seeded run executes offline");
     assert_eq!(result, "done");
-    let access = vfs.acquire().expect("the stock backend acquires");
+    let access = vfs
+        .acquire(Origin::new("round-trip extraction"))
+        .expect("the stock backend acquires");
     let report = extract_declared_output(&vfs.store(&access), &prompt)
         .expect("the run left its promised output");
     assert_eq!(report, "report on: the paper body");
@@ -188,7 +194,9 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
         .await
         .expect("the run itself succeeds");
     assert_eq!(result, "read: the paper body");
-    let access = vfs.acquire().expect("the stock backend acquires");
+    let access = vfs
+        .acquire(Origin::new("missing-output extraction"))
+        .expect("the stock backend acquires");
     let error = extract_declared_output(&vfs.store(&access), &prompt)
         .expect_err("the missing output is a contract error");
     assert!(

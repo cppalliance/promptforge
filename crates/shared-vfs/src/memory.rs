@@ -143,10 +143,10 @@ impl Tree {
 ///
 /// # Examples
 /// ```
-/// use shared_vfs::{MemoryBackend, VfsRef};
+/// use shared_vfs::{MemoryBackend, Origin, VfsRef};
 ///
 /// let vfs = VfsRef::new(MemoryBackend::new());
-/// let access = vfs.acquire()?;
+/// let access = vfs.acquire(Origin::new("memory backend example"))?;
 /// access.write("/notes.md", b"todo")?;
 /// assert_eq!(access.read("/notes.md")?, b"todo");
 /// # Ok::<(), shared_vfs::VfsError>(())
