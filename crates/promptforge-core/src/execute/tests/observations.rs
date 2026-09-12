@@ -77,7 +77,7 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
 #[tokio::test]
 async fn recording_and_null_observers_produce_the_same_result_and_store_state() {
     let prompt = fixture(STORE_SECTIONS);
-    let recorded_store = StoreRef::memory();
+    let recorded_store = TestStore::new();
     let sink = Arc::new(Recorder::default());
     let observed_result = run(
         &prompt,
@@ -92,7 +92,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         },
     )
     .await;
-    let null_store = StoreRef::memory();
+    let null_store = TestStore::new();
     let null_result = run(&prompt, "", &[], &null_store, silent()).await;
 
     assert_eq!(observed_result.unwrap(), null_result.unwrap());
@@ -113,7 +113,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         &failing,
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&sink) as Arc<dyn Observer>,
@@ -123,7 +123,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
     )
     .await
     .expect_err("the prologue fails");
-    let null_error = run(&failing, "", &[], &StoreRef::memory(), silent())
+    let null_error = run(&failing, "", &[], &TestStore::new(), silent())
         .await
         .expect_err("the prologue fails");
     assert_eq!(
@@ -314,7 +314,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         models: test_model_catalog(),
         picker_catalog: Some(Catalog::new(vec![descriptor])),
     };
-    let store = StoreRef::memory();
+    let store = TestStore::new();
 
     let result = run(
         &prompt,

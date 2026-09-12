@@ -1,6 +1,7 @@
 //! Logical store-path validation and canonicalization.
 //!
-//! `StoreRef` parses every caller-supplied `&str` into a [`StorePath`] before
+//! The `Store` facade parses every caller-supplied `&str` into a
+//! [`StorePath`] before
 //! dispatch, so a backend never sees an empty, absolute, traversing,
 //! control-bearing, backslash-bearing, platform-reserved, or over-long path
 //! (STORE-003).
@@ -36,9 +37,9 @@ fn is_numbered_device(name: &str, prefix: &str) -> bool {
 
 /// A validated logical store path in one canonical form.
 ///
-/// `StoreRef` parses every caller-supplied `&str` into this before dispatch, so
+/// The facade parses every caller-supplied `&str` into this before dispatch, so
 /// a backend never sees an empty, absolute, traversing, control-bearing, or
-/// empty-segment path. The trait boundary keeps `&str`; this type is internal.
+/// empty-segment path. The facade boundary keeps `&str`; this type is internal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StorePath(String);
 

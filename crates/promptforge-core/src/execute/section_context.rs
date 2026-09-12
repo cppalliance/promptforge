@@ -26,7 +26,7 @@ use crate::debug::DebugCapture;
 use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base};
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
-use crate::store::WriteScope;
+use crate::store::Access;
 use crate::{Error, Result, subst};
 
 use super::context::RunContext;
@@ -113,6 +113,7 @@ impl SectionContext {
     /// the teardown boundary still fires exactly once on that path.
     pub(crate) fn new(
         ctx: &RunContext,
+        access: &Arc<Access>,
         section: &Section,
         siblings: &[Section],
         section_id: u64,
@@ -152,9 +153,7 @@ impl SectionContext {
                 var: Some(var),
                 item: None,
             },
-            // Walk-section store writes are untracked; only fanout arms
-            // carry a write scope.
-            None,
+            access,
             section.name(),
         );
         // Setup runs on the bare VM so a failure tears it down here: the
@@ -184,8 +183,7 @@ impl SectionContext {
     /// control-global stubs, and the live H1 shim base.
     ///
     /// H1 is the level-1 section: it runs first and is never re-entered, so
-    /// the frame seeds an empty `var`, no item, and no write
-    /// scope. The scheduler answers the pass's `models.infer` yields (with
+    /// the frame seeds an empty `var` and no item. The scheduler answers the pass's `models.infer` yields (with
     /// or without a leading handle) through its driver, so the shim base
     /// keeps the control stubs,
     /// which raise before anything structural can yield.
@@ -195,7 +193,7 @@ impl SectionContext {
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
-    pub(crate) fn new_live_h1(ctx: &RunContext) -> Result<Self> {
+    pub(crate) fn new_live_h1(ctx: &RunContext, access: &Arc<Access>) -> Result<Self> {
         let title = ctx.prompt().title();
         let now = now_rfc3339_checked()?;
         let sys = sys_json(
@@ -215,7 +213,7 @@ impl SectionContext {
         )?;
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_live_h1(&mut vm, ctx, &sys, title)
+        if let Err(error) = setup_live_h1(&mut vm, ctx, access, &sys, title)
             .and_then(|()| install_live_h1_shim_base(vm.lua()).map_err(Error::from))
         {
             vm.teardown(ctx.observer().as_ref(), title);
@@ -243,9 +241,9 @@ impl SectionContext {
     /// visible set: its home slice plus its children; plus the yield
     /// shims), and the shared setup half.
     ///
-    /// The seed is the fanout's own: the collection `item`, the store-write
-    /// scope (this fanout's token plus the arm's index, matching
-    /// `sys.index`), and the caller's cloned `var`. The
+    /// The seed is the fanout's own: the collection `item`, the arm's
+    /// spawned access capability (its claims-model identity), and the
+    /// caller's cloned `var`. The
     /// effective reporting handles
     /// are the fanout's too: the run's own observer and debug sink with the
     /// fanout's fresh turn counter arrive through the context's fanout fork,
@@ -261,11 +259,11 @@ impl SectionContext {
     /// once.
     pub(crate) fn new_fanout_arm(
         ctx: &RunContext,
+        access: &Arc<Access>,
         worker: &Section,
         home: &[Section],
         index: usize,
         item: serde_json::Value,
-        write_token: u64,
         var: &serde_json::Value,
     ) -> Result<Self> {
         let tool_set = ctx.tool_set_snapshot()?;
@@ -304,9 +302,6 @@ impl SectionContext {
             }
         };
         let item = Some(item);
-        // The arm's store-write identity: this fanout's token plus the
-        // arm's 1-based index, matching `sys.index`.
-        let write_scope = Some(WriteScope::new(write_token, index + 1));
         // The `list_from_section` callback resolves over the worker's
         // visible set (its home slice plus its children); the suspending
         // calls are the yield shims the setup half installs.
@@ -320,7 +315,7 @@ impl SectionContext {
                 var: Some(var),
                 item: item.as_ref(),
             },
-            write_scope,
+            access,
             worker.name(),
         );
         // Setup runs on the bare VM so a failure tears it down here: the
@@ -497,10 +492,11 @@ fn install_section_scope(
 fn setup_live_h1(
     vm: &mut SectionVm,
     ctx: &RunContext,
+    access: &Arc<Access>,
     sys: &serde_json::Value,
     title: &str,
 ) -> Result<()> {
-    vm.inject_host(ctx.args(), sys, ctx.store())?;
+    vm.inject_host(ctx.args(), sys, access)?;
     vm.install_host_apis(ctx.observer(), title)?;
     vm.install_h1_control_stubs().map_err(Error::from)
 }

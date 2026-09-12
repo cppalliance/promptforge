@@ -26,8 +26,9 @@ use promptforge_core_support::events::{
 use promptforge_core_support::observe::{Observation, Observer};
 use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, SecretString, StreamDelta};
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge_store::StoreRef;
+use promptforge_store::StoreExt;
 use promptforge_tools::{Tool, ToolCatalog, ToolError, ToolId, ToolOutput};
+use shared_vfs::VfsRef;
 
 use crate::agent::run_agent_with_client;
 use crate::{AgentConfig, AgentError, AgentLimits, run_agent};
@@ -548,18 +549,22 @@ fn config() -> AgentConfig {
 }
 
 /// One completed fixture run: the gateway (its recorded requests), the
-/// run-scoped store the program wrote its assertions into, and the run's
+/// run's VFS handle the program wrote its assertions into, and the run's
 /// outcome.
 struct FixtureRun {
     gateway: FixtureGateway,
-    store: StoreRef,
+    vfs: VfsRef,
     result: Result<(), AgentError>,
 }
 
 impl FixtureRun {
-    /// Reads one store file the agent program wrote.
+    /// Reads one store file the agent program wrote, through a fresh,
+    /// immediately dropped access: the run's identity dropped with it, so
+    /// nothing it wrote conflicts with the extraction.
     fn read(&self, path: &str) -> String {
-        self.store
+        let access = self.vfs.acquire();
+        self.vfs
+            .store(&access)
             .read(path)
             .unwrap_or_else(|error| panic!("the program wrote {path}: {error}"))
     }
@@ -578,19 +583,19 @@ async fn run_over_fixture(
         .expect("the fixture endpoint is a valid URL");
     let key = SecretString::new("fixture-key").expect("the fixture key is non-empty");
     let client = GatewayClient::new(endpoint, key);
-    let store = StoreRef::memory();
+    let vfs = promptforge_vfs::empty();
     let result = run_agent_with_client(
         source,
         &tools,
         &fixture_models(),
-        &store,
+        &vfs,
         config,
         Some(client),
     )
     .await;
     FixtureRun {
         gateway,
-        store,
+        vfs,
         result,
     }
 }
@@ -1417,12 +1422,12 @@ async fn firing_cancel_interrupts_a_suspended_tool_call() {
     let mut config = config();
     config.cancel = cancel;
     let run = tokio::spawn(async move {
-        let store = StoreRef::memory();
+        let vfs = promptforge_vfs::empty();
         run_agent(
             "tools.call('blocking', {})",
             &tools,
             &fixture_models(),
-            &store,
+            &vfs,
             config,
         )
         .await

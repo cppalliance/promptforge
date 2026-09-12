@@ -335,7 +335,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     vm.inject_host(
         "",
         &serde_json::json!({}),
-        &promptforge_store::StoreRef::memory(),
+        &std::sync::Arc::new(promptforge_vfs::empty().acquire()),
     )
     .expect("host injection installs the H2 models table");
     vm

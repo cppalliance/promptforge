@@ -29,7 +29,7 @@ First ask.\n\n\
 Final ask.\n\n\
 ```lua\nstore.append('order.txt', 'lua3\\n')\nreturn models.infer(prose)\n```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
         .await
         .expect("alternating blocks must execute");
@@ -67,7 +67,7 @@ store.write('evidence.md', answer)\n\
 return answer\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&bound_for_model(md), "topic", &[], &store, gatewayed(addr))
         .await
         .expect("call must run named section as subroutine");
@@ -95,7 +95,7 @@ return r\n\
 Args: {{ args }}\n\n\
 ```lua\nreturn models.infer(prose)\n```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(
         &bound_for_model(md),
         "run-args",
@@ -158,7 +158,7 @@ store.write('seen.txt', 'should-not-run')\n\
 return 'helped:' .. store.read('seen.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("jump must transfer control");
@@ -233,7 +233,7 @@ store.append('order.txt', 'S2\\n')\n\
 return 's2-result'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("the call chain must jump, fall through, and return its final text");
@@ -268,7 +268,7 @@ store.append('order.txt', 'S2\\n')\n\
 return 's2-reply'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("the chain must run the addressed off-walk target and fall through");
@@ -301,7 +301,7 @@ store.append('order.txt', 'Tail\\n')\n\
 return 'tail-reply'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("a jump inside the chain must move within the chain");
@@ -335,7 +335,7 @@ store.append('order.txt', 'Peer\\n')\n\
 return 'p'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("the outer walk must resume at the section after the caller");
@@ -368,7 +368,7 @@ return 'sub-reply'\n\
 error('a return must end the chain before fall-through')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("a return must end the chain, not the run");
@@ -403,7 +403,7 @@ assert(sys.id == 3, 'the chain fall-through takes the next global id')\n\
 return 'tail-reply'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("a call chain must continue the global sys.id sequence");
@@ -590,7 +590,7 @@ Do work.\n\n\
 - alpha\n\
 - beta\n"
     );
-    let out = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
+    let out = run(&fixture(md), "", &[], &TestStore::new(), silent())
         .await
         .expect("fanout must return structured results");
     assert_eq!(out, "ok");
@@ -642,7 +642,7 @@ store.append('order.txt', 'B\\n')\n\
 return store.read('order.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("a jump to a child must start the child-level walk");
@@ -684,7 +684,7 @@ store.append('order.txt', 'B\\n')\n\
 return store.read('order.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("the child-level rule must recurse to H4");
@@ -719,7 +719,7 @@ store.append('order.txt', 'Y\\n')\n\
 return store.read('order.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("a jump to an off-walk child must run it");
@@ -748,7 +748,7 @@ store.append('order.txt', 'After\\n')\n\
 return 'after-reply'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("call to a child must start a contained chain");
@@ -776,7 +776,7 @@ store.append('order.txt', 'B\\n')\n\
 return store.read('order.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("the walk must never descend into children");
@@ -812,7 +812,7 @@ store.append('order.txt', 'Y\\n')\n\
 return store.read('order.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("a running child must address its own siblings and children");
@@ -899,7 +899,7 @@ store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
 return store.read('ids.txt')\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("sys.id must count sections entered run-wide");
@@ -1257,7 +1257,7 @@ return 'tail-reply'\n\
 ```\n",
     ]
     .concat();
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(&md), "", &[], &store, silent())
         .await
         .expect("a jump inside an arm must drive a child walk");
@@ -1295,7 +1295,7 @@ return 'child-tail-reply'\n\
 ```\n",
     ]
     .concat();
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(&md), "", &[], &store, silent())
         .await
         .expect("a jump to a worker child must drive the child slice");
@@ -1323,7 +1323,7 @@ store.append('order.txt', 'Target\\n')\n\
 ```\n",
     ]
     .concat();
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(&md), "", &[], &store, silent())
         .await
         .expect("a jump to a silent chain must succeed with empty text");
@@ -1497,7 +1497,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
         &bound_for_model(&md),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed(addr),
     )
     .await
@@ -1535,15 +1535,9 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 ```\n",
     ]
     .concat();
-    let error = run(
-        &bound_for_model(&md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        silent(),
-    )
-    .await
-    .expect_err("handle infer in an arm with no client must surface the lazy error");
+    let error = run(&bound_for_model(&md), "", &[], &TestStore::new(), silent())
+        .await
+        .expect_err("handle infer in an arm with no client must surface the lazy error");
     let rendered = error.to_string();
     assert!(
         rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
@@ -1562,15 +1556,9 @@ return models.infer(models.get('ghost'), 'ping')\n\
 ```\n",
     ]
     .concat();
-    let error = run(
-        &bound_for_model(&md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        silent(),
-    )
-    .await
-    .expect_err("an unknown model alias inside an arm must fail loudly");
+    let error = run(&bound_for_model(&md), "", &[], &TestStore::new(), silent())
+        .await
+        .expect_err("an unknown model alias inside an arm must fail loudly");
     let rendered = error.to_string();
     assert!(
         rendered.contains("models.get alias \"ghost\" was not declared"),
@@ -1672,7 +1660,7 @@ store.append('order.txt', 'Sub3\\n')\n\
 return 'sub3-reply'\n\
 ```\n"
     );
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("call to a later child must run the child slice from that index");
@@ -2295,5 +2283,44 @@ fn now_rfc3339_checked_produces_a_parseable_timestamp() {
     assert!(
         now.ends_with('Z') || now.contains('+'),
         "RFC 3339 UTC has a zone designator: {now}"
+    );
+}
+
+#[tokio::test]
+async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
+    // The defensive fallback in `run`: a hand-built VfsRef lacking the store
+    // mount gets a fresh memory store overlaid for the run, so the run's
+    // store writes land on the overlay (readable across sections) instead of
+    // failing for want of the mount, and the caller's backend stays
+    // untouched.
+    let md = flow_prompt!(
+        "# Test prompt\n\n\
+        ## First\n\n```lua\nstore.write('overlay.txt', 'overlaid')\n```\n\n\
+        ## Second\n\n```lua\nreturn store.read('overlay.txt')\n```\n"
+    );
+    let test = fixture(md);
+    let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
+    let picker = empty_test_picker();
+    let out = crate::execute::run(
+        &test.prompt,
+        "",
+        ResolutionContext::new(&picker, &test.models, &ToolCatalog::default()),
+        &vfs,
+        RunConfig::new(EXECUTION),
+    )
+    .await
+    .expect("a mount-less handle gets the defensive memory-store overlay");
+    assert_eq!(
+        out, "overlaid",
+        "the first section's write must be readable from the overlaid store"
+    );
+    // The overlay is throwaway: the caller's backend never gains the mount
+    // or the run's writes.
+    assert!(
+        matches!(
+            vfs.acquire().stat(promptforge_vfs::STORE_MOUNT),
+            Err(shared_vfs::VfsError::NotFound(_))
+        ),
+        "the run's writes must land on the overlay, not the caller's backend"
     );
 }

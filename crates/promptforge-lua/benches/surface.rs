@@ -24,7 +24,6 @@ use promptforge_lua::{
     project_messages,
 };
 use promptforge_model_client::model::ModelSet;
-use promptforge_store::StoreRef;
 use serde_json::json;
 
 const EXECUTION: &str = "bench";
@@ -42,8 +41,12 @@ fn builder_vm() -> SectionVm {
         SECTION,
     )
     .expect("the bench VM builds");
-    vm.inject_host("", &json!({}), &StoreRef::memory())
-        .expect("host injection installs the messages namespace");
+    vm.inject_host(
+        "",
+        &json!({}),
+        &std::sync::Arc::new(promptforge_vfs::empty().acquire()),
+    )
+    .expect("host injection installs the messages namespace");
     vm
 }
 

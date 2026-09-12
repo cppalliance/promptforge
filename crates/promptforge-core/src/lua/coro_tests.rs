@@ -19,7 +19,6 @@ use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelId, ModelInvocation, ModelSet};
 use crate::observe::{NullObserver, Observer};
-use crate::store::StoreRef;
 use crate::tools::{Tool, ToolError, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 
@@ -113,13 +112,12 @@ fn scheduler_vm_with_tools(
     .expect("the section VM builds");
     let shared = LuaProgram::empty().expect("the empty shared program compiles");
     let sys = json!({});
-    let store = StoreRef::memory();
+    let access = Arc::new(promptforge_vfs::empty().acquire());
     let setup = SectionVmSetup {
         args: "",
         sys: &sys,
-        store: &store,
+        access: &access,
         seed: VmSeed { var, item: None },
-        write_scope: None,
         observer_arc: &observer,
         section_name: "Test",
         shared: &shared,

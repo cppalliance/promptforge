@@ -248,7 +248,7 @@ tools.add_local('grab', 'Local grab', {}, function() return 'local' end)\n\
         &prompt,
         "",
         &[tool as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await

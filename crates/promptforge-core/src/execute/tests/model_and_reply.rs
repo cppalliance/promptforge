@@ -32,7 +32,7 @@ Ask the model.\n\n\
         picker_catalog: None,
     };
 
-    let out = run(&prompt, "", &[], &StoreRef::memory(), gatewayed(addr))
+    let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(addr))
         .await
         .unwrap();
     assert_eq!(out, "hello from the mock");
@@ -60,7 +60,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         &bound_for_model(md),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -132,7 +132,7 @@ return 'epilog result'\n\
     assert!(entry.epilog().is_some());
 
     let recorder = Arc::new(Recorder::default());
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(
         &prompt,
         "",
@@ -205,7 +205,7 @@ async fn add_without_h1_bindings_fails_the_run_loudly() {
 # Test prompt\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
     let prompt = fixture(md);
-    let error = run(&prompt, "", &[], &StoreRef::memory(), silent())
+    let error = run(&prompt, "", &[], &TestStore::new(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
@@ -222,7 +222,7 @@ async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
-    let error = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
+    let error = run(&fixture(md), "", &[], &TestStore::new(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
@@ -238,7 +238,7 @@ async fn prologue_return_skips_model_and_epilog() {
 ## Only\n\n```lua\nreturn 'early'\n```\n\n\
 This prose must not reach a model.\n\n\
 ```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'late'\n```\n";
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
 
     assert_eq!(out, "early");
@@ -260,7 +260,7 @@ Ask using {{ var.question }}.\n\n\
         &bound_for_model(md),
         "input",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -325,7 +325,7 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 ```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
 
     assert_eq!(
-        run(&fixture(md), "", &[], &StoreRef::memory(), silent())
+        run(&fixture(md), "", &[], &TestStore::new(), silent())
             .await
             .unwrap(),
         "prologue-epilog"
@@ -339,7 +339,7 @@ async fn whitespace_only_prose_skips_model_without_binding() {
 ## Only\n\n```lua\n-- prologue\n```\n\n   \n\t\n\n\
 ```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n";
     assert_eq!(
-        run(&fixture(md), "", &[], &StoreRef::memory(), silent())
+        run(&fixture(md), "", &[], &TestStore::new(), silent())
             .await
             .unwrap(),
         "ok"
@@ -352,7 +352,7 @@ async fn model_required_when_infer_has_no_binding() {
     // of it does.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nAsk the model.\n\n```lua\nreturn models.infer(prose)\n```\n";
-    let error = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
+    let error = run(&fixture(md), "", &[], &TestStore::new(), silent())
         .await
         .expect_err("an explicit infer without a model binding must fail");
     assert!(
@@ -374,7 +374,7 @@ async fn shared_function_sees_sys_model_unknown_before_scope_close() {
 ```lua\nmodels.default('writer', 'A general model for tests')\n```\n\n\
 ```lua shared\nfunction read_sys_model()\n  return sys.model\nend\n```\n\n\
 ## Only\n\n```lua\nreturn read_sys_model()\n```\n\nprose\n";
-    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+    let error = run(&bound_for_model(md), "", &[], &TestStore::new(), silent())
         .await
         .expect_err("shared function must not read sys.model before scope close");
     assert!(
@@ -387,7 +387,7 @@ async fn shared_function_sees_sys_model_unknown_before_scope_close() {
 async fn prologue_sys_model_unknown_before_scope_close() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn sys.model\n```\n\nprose\n";
-    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+    let error = run(&bound_for_model(md), "", &[], &TestStore::new(), silent())
         .await
         .expect_err("prologue must not read sys.model before scope close");
     assert!(
@@ -412,7 +412,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
         &prompt,
         "",
         &[Arc::new(EchoTool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await
@@ -432,7 +432,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
         &prompt,
         "",
         &[Arc::new(EchoTool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await
@@ -455,7 +455,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
         &prompt,
         "",
         &[Arc::new(EchoTool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await
@@ -477,7 +477,7 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
         &bound_for_model(md),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed(addr),
     )
     .await
@@ -557,7 +557,11 @@ fn analyst_only_catalog() -> ModelCatalog {
 }
 
 /// Run a parsed prompt against a scripted gateway with no external tools.
-async fn run_with_gateway(test: &TestPrompt, addr: SocketAddr, store: &StoreRef) -> Result<String> {
+async fn run_with_gateway(
+    test: &TestPrompt,
+    addr: SocketAddr,
+    store: &TestStore,
+) -> Result<String> {
     run(test, "", &[], store, gatewayed(addr)).await
 }
 
@@ -580,7 +584,7 @@ Ask the model.\n\n\
         models: writer_and_analyst_catalog(),
         picker_catalog: None,
     };
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run_with_gateway(&prompt, addr, &store).await.unwrap();
 
     assert_eq!(out, "hello from the mock");
@@ -606,7 +610,7 @@ async fn models_infer_uses_the_section_model_without_touching_reply() {
 ## Only\n\n\
 ```lua\nvar.r = models.infer('ping')\n```\n\n\
 ```lua\nreturn var.r .. ':' .. tostring(reply)\n```\n";
-    let out = run_with_gateway(&bound_for_model(md), addr, &StoreRef::memory())
+    let out = run_with_gateway(&bound_for_model(md), addr, &TestStore::new())
         .await
         .unwrap();
     assert_eq!(
@@ -646,7 +650,7 @@ models.bind('analyst', 'A careful analysis model')\n\
         models: writer_and_analyst_catalog(),
         picker_catalog: None,
     };
-    let out = run_with_gateway(&prompt, addr, &StoreRef::memory())
+    let out = run_with_gateway(&prompt, addr, &TestStore::new())
         .await
         .unwrap();
     assert_eq!(out, "pong");
@@ -681,7 +685,7 @@ return models.infer('ping')\n\
         models: writer_and_analyst_catalog(),
         picker_catalog: None,
     };
-    let out = run_with_gateway(&prompt, addr, &StoreRef::memory())
+    let out = run_with_gateway(&prompt, addr, &TestStore::new())
         .await
         .expect("re-selection within a section must succeed");
     assert_eq!(out, "second");
@@ -713,7 +717,7 @@ async fn models_infer_without_use_or_default_errors() {
         models: analyst_only_catalog(),
         picker_catalog: None,
     };
-    let error = run(&prompt, "", &[], &StoreRef::memory(), silent())
+    let error = run(&prompt, "", &[], &TestStore::new(), silent())
         .await
         .expect_err("models.infer with no current model must fail");
     assert!(
@@ -738,7 +742,7 @@ async fn models_get_infer_works_without_any_section_model() {
         models: analyst_only_catalog(),
         picker_catalog: None,
     };
-    let out = run_with_gateway(&prompt, addr, &StoreRef::memory())
+    let out = run_with_gateway(&prompt, addr, &TestStore::new())
         .await
         .unwrap();
     assert_eq!(out, "pong");

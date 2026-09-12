@@ -97,15 +97,14 @@ async fn fanout_epilog_two_items() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_store_writes_persist_across_arms() {
-    // The arms rendezvous by writing and polling ready-*.md, so concurrency is
-    // proven by both ready markers and both arm writes existing. Each poll
-    // iteration yields through `call` on the nop `## Yield` section: under
-    // the scheduler "concurrent" means interleaving at I/O points, not
-    // preemption, so the rendezvous completes only if the sibling arm gets the
-    // driver's thread while the poller is suspended. A sequential driver never
-    // reaches two ready files and the poll spins forever - no instruction
-    // ceiling ends it - so the timeout below is what turns that regression
-    // into a failure; the asserts, not the timeout, are the pass condition.
+    // Arm-scoped writes under the claims model: each arm writes only its
+    // own path, so no two live identities ever claim one path, and the
+    // parent's post-join glob sees the merged state because a finished
+    // arm's claims release at chain end. (The fixture's old ready-*.md
+    // rendezvous polled a live sibling's writes - precisely the cross-arm
+    // read-while-written pattern the claims model rejects - so it was
+    // removed; interleaving coverage lives in the scheduler's
+    // `fanout_arms_interleave_at_io_points_on_one_thread`.)
     let run = tokio::time::timeout(
         Duration::from_secs(30),
         run_fixture(
@@ -117,7 +116,7 @@ async fn fanout_store_writes_persist_across_arms() {
         ),
     )
     .await
-    .expect("concurrent fanout must finish; a sequential regression would hang on the rendezvous");
+    .expect("the fanout fixture completes");
     let result = run
         .result
         .expect("the fanout store fixture must execute offline");
@@ -132,18 +131,6 @@ async fn fanout_store_writes_persist_across_arms() {
     assert_eq!(
         run.store.read("arm-2.md").expect("arm 2 must write"),
         "beta"
-    );
-    assert_eq!(
-        run.store
-            .read("ready-1.md")
-            .expect("arm 1 rendezvous marker"),
-        "1"
-    );
-    assert_eq!(
-        run.store
-            .read("ready-2.md")
-            .expect("arm 2 rendezvous marker"),
-        "1"
     );
 }
 

@@ -17,7 +17,8 @@
 //!
 //! The `store` table is a deterministic host capability (like `var`), always
 //! present and independent of tool scoping. Its methods are backed by the
-//! run-scoped [`StoreRef`] handle threaded in from the executor, so every section
+//! [`Store`] facade over the run's VFS access capability, threaded in from
+//! the executor, so every section
 //! in a run shares one set of virtual files even though contexts clear on each
 //! transition. A failed store op raises a Lua error, which surfaces from
 //! `SectionVm::run_chunk` as [`Error::Lua`].
@@ -46,7 +47,7 @@ pub(crate) use promptforge_core_support::untrusted::GuardNonce;
 pub(crate) use promptforge_model_client::model::{
     ModelBinding, ModelResolver, ModelSet, ModelView,
 };
-pub(crate) use promptforge_store::{StoreRef, WriteScope};
+pub(crate) use promptforge_store::{Access, Store};
 pub(crate) use promptforge_tools::{Tool, ToolCatalog, ToolId};
 
 pub(crate) use crate::compactors::install_compactors;

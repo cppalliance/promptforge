@@ -1,6 +1,6 @@
 use super::{
-    Arc, AtomicU32, AtomicUsize, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua, LuaSerdeExt,
-    MultiValue, Observation, Observer, Ordering, Result, StoreRef, Value, WriteScope, detail,
+    Access, Arc, AtomicU32, AtomicUsize, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,
+    LuaSerdeExt, MultiValue, Observation, Observer, Ordering, Result, Store, Value, detail,
 };
 
 /// Shared body of the persistent per-section `log(message)` host callback.
@@ -172,10 +172,10 @@ pub(crate) fn observe_store_result(
 ///
 /// No `start` reads the whole file; a present `start` slices a 1-based
 /// inclusive line range. A negative bound converts to 0, which
-/// [`StoreRef::read_range`] rejects with the same error a zero bound earns,
+/// [`Store::read_range`] rejects with the same error a zero bound earns,
 /// and an `end` without a `start` is refused rather than silently ignored.
 fn read_store_bounded(
-    handle: &StoreRef,
+    store: &Store,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
@@ -184,9 +184,9 @@ fn read_store_bounded(
     match start {
         None if end.is_none() => {
             if numbered {
-                handle.read_range_numbered(path, 1, None)
+                store.read_range_numbered(path, 1, None)
             } else {
-                handle.read(path)
+                store.read(path)
             }
         }
         None => Err(promptforge_store::StoreError::invalid_range(
@@ -197,9 +197,9 @@ fn read_store_bounded(
             let start = usize::try_from(start).unwrap_or(0);
             let end = end.map(|line| usize::try_from(line).unwrap_or(0));
             if numbered {
-                handle.read_range_numbered(path, start, end)
+                store.read_range_numbered(path, start, end)
             } else {
-                handle.read_range(path, start, end)
+                store.read_range(path, start, end)
             }
         }
     }
@@ -207,27 +207,28 @@ fn read_store_bounded(
 
 /// Shared body of the persistent per-section `store.read` host callback.
 fn read_store(
-    handle: &StoreRef,
+    store: &Store,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
 ) -> std::result::Result<String, promptforge_store::StoreError> {
-    read_store_bounded(handle, path, start, end, false)
+    read_store_bounded(store, path, start, end, false)
 }
 
 /// Shared body of the persistent per-section `store.read_numbered` callback.
 fn read_store_numbered(
-    handle: &StoreRef,
+    store: &Store,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
 ) -> std::result::Result<String, promptforge_store::StoreError> {
-    read_store_bounded(handle, path, start, end, true)
+    read_store_bounded(store, path, start, end, true)
 }
 
 /// Expose an always-on `store` table whose methods (`write`, `append`,
 /// `read`, `read_numbered`, `str_replace`, `delete`,
-/// `glob`, `exists`) are backed by the run-scoped [`StoreRef`] handle.
+/// `glob`, `exists`) are backed by the [`Store`] facade over the caller's
+/// VFS access capability.
 /// Installed once per section with [`Lua::create_function`], so the table
 /// stays valid across every chunk the VM runs without a live [`mlua::Scope`].
 ///
@@ -241,14 +242,13 @@ fn read_store_numbered(
 /// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
 /// surfaces as [`Error::Lua`].
 ///
-/// The `StoreRef` handle locks a mutex internally per call and is synchronous, so
-/// nothing is held across an await.
-///
-/// A fanout arm's table carries its [`WriteScope`]: `store.write` goes
-/// through [`StoreRef::write_scoped`], so two arms of one fanout writing the
-/// same path fail the second writer with a write-write race error. Every
-/// other caller (walk sections, H1) installs with `None` and writes
-/// untracked.
+/// Every closure captures an `Arc` clone of the section's [`Access`]
+/// capability and builds the borrowing facade per call. The capability
+/// locks the backend per call and is synchronous, so nothing is held across
+/// an await. The capability's identity is what the claims model attributes
+/// operations to: a fanout arm's access is spawned from the caller's, so
+/// two live arms touching one path surface the conflict as
+/// [`StoreError::WriteRace`].
 ///
 /// [`StoreError`]: promptforge_store::StoreError
 ///
@@ -262,11 +262,10 @@ fn read_store_numbered(
 pub(crate) fn install_store_table(
     lua: &Lua,
     globals: &mlua::Table,
-    store: &StoreRef,
+    access: &Arc<Access>,
     execution: &str,
     observer: &Arc<dyn Observer>,
     section: &str,
-    write_scope: Option<WriteScope>,
 ) -> Result<()> {
     let table = lua.create_table().map_err(Error::lua)?;
     let reporter = Arc::new(StoreReporter {
@@ -285,7 +284,7 @@ pub(crate) fn install_store_table(
             $failure:expr,
             $operation:block
         ) => {{
-            let $handle = store.clone();
+            let $handle = Arc::clone(access);
             let report = Arc::clone(&reporter);
             let function = lua
                 .create_function(move |_, $arguments: $argument_type| {
@@ -305,12 +304,7 @@ pub(crate) fn install_store_table(
         (String, String),
         detail::STORE_WRITE_SUCCEEDED,
         detail::STORE_WRITE_FAILED,
-        {
-            match write_scope {
-                Some(scope) => handle.write_scoped(&path, &contents, scope),
-                None => handle.write(&path, &contents),
-            }
-        }
+        { Store::new(&handle).write(&path, &contents) }
     );
     install_reported_store_fn!(
         "append",
@@ -319,7 +313,7 @@ pub(crate) fn install_store_table(
         (String, String),
         detail::STORE_APPEND_SUCCEEDED,
         detail::STORE_APPEND_FAILED,
-        { handle.append(&path, &contents) }
+        { Store::new(&handle).append(&path, &contents) }
     );
     install_reported_store_fn!(
         "read",
@@ -328,7 +322,7 @@ pub(crate) fn install_store_table(
         (String, Option<i64>, Option<i64>),
         detail::STORE_READ_SUCCEEDED,
         detail::STORE_READ_FAILED,
-        { read_store(&handle, &path, start, end) }
+        { read_store(&Store::new(&handle), &path, start, end) }
     );
     install_reported_store_fn!(
         "read_numbered",
@@ -337,7 +331,7 @@ pub(crate) fn install_store_table(
         (String, Option<i64>, Option<i64>),
         detail::STORE_READ_NUMBERED_SUCCEEDED,
         detail::STORE_READ_NUMBERED_FAILED,
-        { read_store_numbered(&handle, &path, start, end) }
+        { read_store_numbered(&Store::new(&handle), &path, start, end) }
     );
     install_reported_store_fn!(
         "str_replace",
@@ -346,7 +340,7 @@ pub(crate) fn install_store_table(
         (String, String, String),
         detail::STORE_REPLACE_SUCCEEDED,
         detail::STORE_REPLACE_FAILED,
-        { handle.str_replace(&path, &old, &new) }
+        { Store::new(&handle).str_replace(&path, &old, &new) }
     );
     install_reported_store_fn!(
         "delete",
@@ -355,14 +349,14 @@ pub(crate) fn install_store_table(
         String,
         detail::STORE_DELETE_SUCCEEDED,
         detail::STORE_DELETE_FAILED,
-        { handle.delete(&path) }
+        { Store::new(&handle).delete(&path) }
     );
 
-    let handle = store.clone();
+    let handle = Arc::clone(access);
     let report = Arc::clone(&reporter);
     let glob = lua
         .create_function(move |lua, pattern: String| {
-            let result = handle.glob(&pattern);
+            let result = Store::new(&handle).glob(&pattern);
             report.report(
                 result.is_ok(),
                 detail::STORE_GLOB_SUCCEEDED,
@@ -374,9 +368,13 @@ pub(crate) fn install_store_table(
         .map_err(Error::lua)?;
     table.set("glob", glob).map_err(Error::lua)?;
 
-    let handle = store.clone();
+    let handle = Arc::clone(access);
     let exists = lua
-        .create_function(move |_, path: String| handle.exists(&path).map_err(mlua::Error::external))
+        .create_function(move |_, path: String| {
+            Store::new(&handle)
+                .exists(&path)
+                .map_err(mlua::Error::external)
+        })
         .map_err(Error::lua)?;
     table.set("exists", exists).map_err(Error::lua)?;
 

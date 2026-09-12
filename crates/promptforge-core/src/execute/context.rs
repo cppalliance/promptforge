@@ -17,7 +17,7 @@ use crate::lua::{LuaProgram, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::observe::Observer;
 use crate::parser::Prompt;
-use crate::store::{StoreRef, WriteScope};
+use crate::store::{Access, VfsRef};
 use crate::untrusted::GuardNonce;
 
 use super::config::{RunConfig, RunLimits};
@@ -40,8 +40,10 @@ pub(crate) struct RunContext {
     /// The untrusted-envelope nonce, minted once here so every wrap in the
     /// run shares it.
     nonce: GuardNonce,
-    /// The run-scoped store backing every section's Lua `store` table.
-    store: StoreRef,
+    /// The run's VFS handle: carries the store mount backing every
+    /// section's Lua `store` table. Chain steps acquire or spawn their
+    /// access capabilities from it.
+    vfs: VfsRef,
     /// The execution identifier every observation carries.
     execution: Arc<str>,
     /// The run's argument string for `{{ args }}` substitution.
@@ -104,7 +106,7 @@ impl RunContext {
     pub(crate) fn new(
         prompt: &Prompt,
         args: &str,
-        store: &StoreRef,
+        vfs: &VfsRef,
         shared: LuaProgram,
         config: &RunConfig,
     ) -> Self {
@@ -113,7 +115,7 @@ impl RunContext {
         Self {
             prompt: Arc::new(prompt.clone()),
             nonce: GuardNonce::fresh(),
-            store: store.clone(),
+            vfs: vfs.clone(),
             execution: Arc::from(config.execution.as_str()),
             args: Arc::from(args),
             limits: config.limits,
@@ -143,9 +145,9 @@ impl RunContext {
         &self.nonce
     }
 
-    /// The run-scoped store.
-    pub(crate) fn store(&self) -> &StoreRef {
-        &self.store
+    /// The run's VFS handle.
+    pub(crate) fn vfs(&self) -> &VfsRef {
+        &self.vfs
     }
 
     /// The execution identifier every observation carries.
@@ -307,23 +309,23 @@ impl RunContext {
     }
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, `store`, `observer`, `shared`) from this
+    /// run-wide slots (`args`, `observer`, `shared`) from this
     /// context; the driver supplies only its own deltas: the `sys` JSON,
-    /// the seed, the store-write scope (a fanout arm's
-    /// identity; `None` on the walk), and the section name.
+    /// the seed, the chain step's access capability (the walk's own, a
+    /// call chain's borrowed parent capability, a fanout arm's spawned
+    /// one), and the section name.
     pub(crate) fn vm_setup<'a>(
         &'a self,
         sys: &'a serde_json::Value,
         seed: VmSeed<'a>,
-        write_scope: Option<WriteScope>,
+        access: &'a Arc<Access>,
         section_name: &'a str,
     ) -> SectionVmSetup<'a> {
         SectionVmSetup {
             args: &self.args,
             sys,
-            store: &self.store,
+            access,
             seed,
-            write_scope,
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,
@@ -356,7 +358,7 @@ impl fmt::Debug for RunContext {
         f.debug_struct("RunContext")
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)
-            .field("store", &"<StoreRef>")
+            .field("vfs", &"<VfsRef>")
             .field("execution", &self.execution)
             .field("args", &self.args)
             .field("limits", &self.limits)
@@ -395,7 +397,7 @@ mod tests {
         RunContext::new(
             prompt,
             "",
-            &StoreRef::memory(),
+            &promptforge_vfs::empty(),
             LuaProgram::empty().expect("the empty chunk compiles"),
             &RunConfig::new("run-context-test"),
         )

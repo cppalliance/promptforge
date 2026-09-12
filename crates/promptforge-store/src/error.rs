@@ -2,8 +2,8 @@
 
 /// Why a logical store path was rejected before any backend saw it.
 ///
-/// `StoreRef` validates every caller-supplied path into one canonical form
-/// before dispatch; this names the rule the path broke.
+/// The `Store` facade validates every caller-supplied path into one
+/// canonical form before dispatch; this names the rule the path broke.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PathReason {

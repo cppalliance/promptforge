@@ -46,9 +46,9 @@
 //! scheduling, a fatal arm error aborts the sibling arms (each aborted
 //! arm's finalizer reports `FANOUT_ARM_CANCELLED`, so exactly one terminal
 //! observation fires per arm), [`Error::ToolLoopExhausted`] soft-degrades
-//! its arm to the incomplete stub, and two arms of one fanout writing the
-//! same store path fail with the store's write-write race error while
-//! `append` stays legal with unspecified order. A received `mcp` request
+//! its arm to the incomplete stub, and two live arms of one fanout touching
+//! the same store path with at least one write fail the second with the
+//! claims model's write-write race error. A received `mcp` request
 //! is the protocol's typed reserved error.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -73,6 +73,7 @@ use crate::model::ModelBinding;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Section};
 use crate::resolve::RuntimeResolution;
+use crate::store::Access;
 use crate::tools::{Tool, ToolId};
 use crate::{Error, Result, cancel, subst};
 
@@ -153,10 +154,11 @@ struct ArmTemplate<'a> {
     /// a chain never crosses) with a fresh turn counter, so arm turns count
     /// against the fanout's own cap.
     ctx: RunContext,
-    /// This fanout's store-write token: one per fanout, so the store's
-    /// write registry can tell two arms of this fanout (a write-write race)
-    /// from a later fanout's write (legal).
-    write_token: u64,
+    /// The fanout caller's access capability: each arm spawns its own
+    /// capability from it at dispatch, so the spawn retires the caller's
+    /// claims (the happens-before edge) and two live arms touching one
+    /// path meet the claims model's conflict rule.
+    access: Arc<Access>,
     /// The caller's `var` snapshot; each arm seeds from its own clone and
     /// its writes never reach the caller.
     var: serde_json::Value,
@@ -177,13 +179,11 @@ struct ArmState<'a> {
     /// The join this arm reports to.
     fanout: FanoutId,
     /// The arm's 0-based collection index: its result slot and (plus one)
-    /// its `sys.index` and write-scope arm id.
+    /// its `sys.index`.
     item_index: usize,
     /// The arm's collection member: the `item` global and `{{ item }}`
     /// substitution seed for the worker entry.
     item: serde_json::Value,
-    /// This fanout's store-write token.
-    write_token: u64,
     /// True while the worker is the chain's current section: the worker
     /// entry gets the arm seeds, and a control transfer out of the worker
     /// resolves over the arm's visible set. Cleared by the first jump.
@@ -319,6 +319,16 @@ struct Chain<'a> {
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for a call chain's input override.
     ctx: RunContext,
+    /// The chain's VFS access capability, installed into each section VM
+    /// the chain enters: the walk and the live H1 pass acquire their own,
+    /// a call chain borrows its parent's (a blocking child is the same
+    /// serial thread - no new identity, no false conflicts), and a fanout
+    /// arm spawns its own from the fanout caller's. `None` only after the
+    /// chain ends: the arena is append-only, so `finish` and
+    /// `abort_subtree` take the slot to release the identity's claims at
+    /// chain end rather than at scheduler drop - a fanout's join merge
+    /// must not meet a finished arm's lingering claims.
+    access: Option<Arc<Access>>,
     /// The per-section frame (VM, `sys`, conversation, counts): `Some`
     /// while a section is entered, `None` before the first entry and
     /// between sections.
@@ -380,6 +390,19 @@ struct Chain<'a> {
 }
 
 impl Chain<'_> {
+    /// The chain's access capability for section-VM installation. A live
+    /// chain always holds one; `finish` and `abort_subtree` take it at
+    /// chain end.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the chain's capability is gone,
+    /// which only the chain-end paths do - a live chain always holds it.
+    fn access(&self) -> Result<&Arc<Access>> {
+        self.access
+            .as_ref()
+            .ok_or(Error::Internal("a live chain holds its access capability"))
+    }
+
     /// The chain's current block sequence: the live H1 pass's blocks, or
     /// the current section's blocks on the walk.
     fn blocks(&self) -> &[Block] {
@@ -650,6 +673,7 @@ impl<'a> Scheduler<'a> {
         );
         self.chains.push(Chain {
             ctx,
+            access: None,
             frame: None,
             slice,
             index,
@@ -676,13 +700,21 @@ impl<'a> Scheduler<'a> {
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     fn start_root_walk(&mut self, sections: &'a [Section], var: &serde_json::Value) -> Result<()> {
         let root = self.start_chain(self.ctx.clone(), sections, 0, None, var, 0, None)?;
-        // Seed the root chain's client slot from the run's configured
-        // client, as the legacy walk's slot is seeded from run()'s client:
-        // a prose block before any infer must use it rather than fall back
-        // to building an environment client.
-        self.chains[root.index()].client = self.client.ready().cloned();
+        self.install_root_slots(root);
         self.ready.push_back(root);
         Ok(())
+    }
+
+    /// Seeds a fresh root walk chain's slots: its own access capability -
+    /// the walk is its own serial thread of execution, and a fresh acquire
+    /// (the H1 pass's identity ended with its chain) means nothing the pass
+    /// touched can false-conflict with the walk - and its client slot from
+    /// the run's configured client, as the legacy walk's slot is seeded
+    /// from run()'s client: a prose block before any infer must use it
+    /// rather than fall back to building an environment client.
+    fn install_root_slots(&mut self, root: ChainId) {
+        self.chains[root.index()].access = Some(Arc::new(self.ctx.vfs().acquire()));
+        self.chains[root.index()].client = self.client.ready().cloned();
     }
 
     /// Starts the live H1 pass as the driver loop's first chain: the
@@ -701,6 +733,7 @@ impl<'a> Scheduler<'a> {
         let client = self.client.ready().cloned();
         self.chains.push(Chain {
             ctx: self.ctx.clone(),
+            access: Some(Arc::new(self.ctx.vfs().acquire())),
             frame: None,
             slice: &[],
             index: 0,
@@ -737,6 +770,9 @@ impl<'a> Scheduler<'a> {
         };
         let var = frame.read_var()?;
         drop(frame);
+        // The pass's chain ends here: release its capability (and with it
+        // the identity's claims) before the walk acquires its own.
+        chain.access = None;
         let sections = self.ctx.prompt().sections();
         if sections.is_empty() {
             *root_result = Some(Ok(GENERIC_COMPLETION.to_owned()));
@@ -747,7 +783,7 @@ impl<'a> Scheduler<'a> {
         let when = now_rfc3339_checked()?;
         let walk_ctx = self.ctx.with_walk_state(&when);
         let root = self.start_chain(walk_ctx, sections, 0, None, &var, 0, None)?;
-        self.chains[root.index()].client = self.client.ready().cloned();
+        self.install_root_slots(root);
         self.ready.push_back(root);
         Ok(())
     }
@@ -769,7 +805,7 @@ impl<'a> Scheduler<'a> {
             // The live H1 pass enters its frame exactly once: id 0 under
             // the prompt's title, the control-stub surface, the shim base,
             // and no SECTION_STARTED - the pass is not a walked section.
-            let frame = SectionContext::new_live_h1(&chain.ctx)?;
+            let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?)?;
             chain.frame = Some(frame);
             chain.block = 0;
             return Ok(true);
@@ -784,18 +820,17 @@ impl<'a> Scheduler<'a> {
         {
             let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
             let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
-            let (item_index, item, write_token) =
-                (arm.item_index, arm.item.clone(), arm.write_token);
+            let (item_index, item) = (arm.item_index, arm.item.clone());
             let worker = &worker_slice[worker_index];
             let caller = &caller_slice[caller_index];
             let home = home_without(&visible_sections(caller_slice, caller), worker);
             let frame = SectionContext::new_fanout_arm(
                 &chain.ctx,
+                chain.access()?,
                 worker,
                 &home,
                 item_index,
                 item,
-                write_token,
                 &chain.var,
             )?;
             chain.frame = Some(frame);
@@ -811,6 +846,7 @@ impl<'a> Scheduler<'a> {
         let slice = chain.slice;
         let frame = SectionContext::new(
             &chain.ctx,
+            chain.access()?,
             &slice[index],
             slice,
             next_id(chain.ctx.ids()),
@@ -1935,6 +1971,10 @@ impl<'a> Scheduler<'a> {
         let args = input.unwrap_or_else(|| chain.ctx.args()).to_owned();
         let child_ctx = chain.ctx.with_args(&args);
         let client = chain.client.clone();
+        // A call chain is a blocking child: it borrows the caller's access
+        // capability (the same serial thread of execution), so the caller's
+        // standing claims never false-conflict with the child's ops.
+        let access = chain.access.clone();
         // `chain`'s arena borrow ends here; the resolution borrows the
         // prompt tree, so the target's slice outlives it.
         let target_section = self.resolve_chain_target(id, target)?;
@@ -1950,6 +1990,7 @@ impl<'a> Scheduler<'a> {
         // The child inherits the caller's client slot: an already-resolved
         // client is shared, an unresolved one stays lazy.
         self.chains[child.index()].client = client;
+        self.chains[child.index()].access = access;
         Ok(child)
     }
 
@@ -2020,6 +2061,12 @@ impl<'a> Scheduler<'a> {
         };
         let ctx = chain.ctx.clone();
         let client = chain.client.clone();
+        // The caller's capability: each arm spawns its own from it, so the
+        // spawn is the happens-before edge that retires the caller's claims.
+        let access = chain
+            .access
+            .clone()
+            .ok_or(Error::Internal("a live chain holds its access capability"))?;
         // `chain`'s arena borrow ends here; the resolution borrows the
         // prompt tree, so the worker's slice outlives it.
         let target = self.resolve_chain_target(id, worker_name)?;
@@ -2057,7 +2104,7 @@ impl<'a> Scheduler<'a> {
                         ctx.debug().cloned(),
                         Arc::new(AtomicU32::new(0)),
                     ),
-                    write_token: ctx.store().next_write_token(),
+                    access,
                     var: var.clone(),
                     call_depth: depth,
                     client,
@@ -2120,7 +2167,6 @@ impl<'a> Scheduler<'a> {
                 fanout,
                 item_index: index,
                 item,
-                write_token: template.write_token,
                 at_worker: true,
                 caller_slice: template.caller_slice,
                 caller_index: template.caller_index,
@@ -2142,6 +2188,12 @@ impl<'a> Scheduler<'a> {
                 template.call_depth,
                 Some(arm),
             )?;
+            // The arm is a new concurrent thread of execution: its
+            // capability spawns from the fanout caller's, retiring the
+            // caller's claims (the happens-before edge), and drops with
+            // the chain so a finished arm's claims never linger into the
+            // join's merge.
+            self.chains[chain.index()].access = Some(Arc::new(template.access.spawn()));
             // The arm inherits the caller's client slot: an
             // already-resolved client is shared, an unresolved one stays
             // lazy.
@@ -2334,6 +2386,7 @@ impl<'a> Scheduler<'a> {
         chain.coroutine = None;
         chain.incoming = None;
         chain.frame = None;
+        chain.access = None;
         chain.arm = None;
     }
 
@@ -2356,6 +2409,12 @@ impl<'a> Scheduler<'a> {
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
         let mut frame = chain.frame.take();
+        // Taken now, dropped after the frame: the VM's store closures hold
+        // their own Arc clones of the capability, so the identity's claims
+        // release only when both are gone - at chain end, before a fanout
+        // join resumes the parent into its merge. A call chain's slot is a
+        // borrowed clone, so its drop never releases the parent's identity.
+        let access = chain.access.take();
         // The live H1 pass never arms completion: SECTION_FINISHED is a
         // walked section's boundary, not the setup pass's. Its completion
         // paths (fall-through, scalar return) handle the frame themselves;
@@ -2388,6 +2447,7 @@ impl<'a> Scheduler<'a> {
         });
         // The frame drops here: the single teardown boundary.
         drop(frame);
+        drop(access);
         if let Some(arm) = arm {
             self.complete_arm(arm, outcome);
             return;

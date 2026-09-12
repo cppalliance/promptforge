@@ -121,7 +121,7 @@ async fn store_persists_across_sections() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
     assert_eq!(
         out, "carried across",

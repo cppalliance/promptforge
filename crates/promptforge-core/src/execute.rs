@@ -16,7 +16,7 @@
 //! the same rules, and the parent walk resumes after the jumper when that
 //! level exhausts.
 //!
-//! One run-scoped [`StoreRef`] is created once by the caller and threaded through
+//! One run-scoped [`VfsRef`] is created once by the caller and threaded through
 //! every section, so
 //! bulk state persists across the context-clearing transitions even though a
 //! section's Lua state never does.
@@ -129,7 +129,7 @@ use crate::Error;
 use crate::cancel;
 use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
-use crate::store::StoreRef;
+use crate::store::VfsRef;
 
 // Re-exported for the executor test glob.
 #[cfg(test)]
@@ -176,7 +176,6 @@ pub(crate) use crate::model::ModelSet;
 /// use promptforge_core::model::ModelCatalog;
 /// use promptforge_core::observe::NullObserver;
 /// use promptforge_core::parser::Prompt;
-/// use promptforge_core::store::StoreRef;
 /// use promptforge_core::tools::ToolCatalog;
 /// use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 ///
@@ -198,7 +197,7 @@ pub(crate) use crate::model::ModelSet;
 ///     &prompt,
 ///     "",
 ///     ResolutionContext::new(&picker, &models, &tools),
-///     &StoreRef::memory(),
+///     &promptforge_vfs::empty(),
 ///     RunConfig::new("doc-example"),
 /// ))?;
 /// assert_eq!(output, "hello");
@@ -218,7 +217,7 @@ pub async fn run(
     prompt: &Prompt,
     args: &str,
     resolution: ResolutionContext<'_>,
-    store: &StoreRef,
+    vfs: &VfsRef,
     config: RunConfig,
 ) -> std::result::Result<String, RunError> {
     match prompt.frontmatter().promptforge() {
@@ -241,7 +240,23 @@ pub async fn run(
             crate::lua::LuaProgram::empty().map_err(|error| RunError::from(Error::from(error)))?
         }
     };
-    let ctx = RunContext::new(prompt, args, store, shared, &config);
+    // The stock handle carries the store mount; a hand-built router lacking
+    // it gets a fresh memory store overlaid as a defensive fallback, so a
+    // run never fails for want of the mount. A mounted-but-failing backend
+    // is never shadowed by the throwaway overlay: its error fails the run.
+    let fallback;
+    let vfs = match store_mount_present(vfs) {
+        Ok(true) => vfs,
+        Ok(false) => {
+            fallback = vfs.overlay(
+                promptforge_vfs::STORE_MOUNT,
+                shared_vfs::MemoryBackend::new(),
+            );
+            &fallback
+        }
+        Err(error) => return Err(RunError::from(Error::Store(error))),
+    };
+    let ctx = RunContext::new(prompt, args, vfs, shared, &config);
 
     let RunConfig {
         execution,
@@ -280,6 +295,22 @@ pub async fn run(
         },
     );
     result.map_err(RunError::from)
+}
+
+/// Whether the handle already serves the store mount. The probe stats the
+/// mount root through a throwaway capability: a mounted backend answers
+/// (the memory backend's root always exists), an unmounted path is
+/// `NotFound`. Only `NotFound` means "mount absent": any other error is the
+/// mounted backend's own failure and propagates, so a loud backend failure
+/// is never converted into the run silently reading and writing a
+/// throwaway overlay. The probe's identity and claim release with the
+/// access.
+fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, shared_vfs::VfsError> {
+    match vfs.acquire().stat(promptforge_vfs::STORE_MOUNT) {
+        Ok(_) => Ok(true),
+        Err(shared_vfs::VfsError::NotFound(_)) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

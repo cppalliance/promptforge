@@ -8,9 +8,9 @@ use promptforge_core::{Prompt, ResolutionContext, RunConfig};
 use promptforge_core_support::observe::Observer;
 use promptforge_model_client::client::{GatewayClient as ModelClient, StreamDelta};
 use promptforge_model_client::model::ModelCatalog;
-use promptforge_store::StoreRef;
 use promptforge_tool_picker::{Config, ToolPicker};
 use promptforge_tools::ToolCatalog;
+use shared_vfs::VfsRef;
 
 use crate::catalog::ChatCatalog;
 use crate::gateway_binding::GatewaySnapshot;
@@ -38,7 +38,7 @@ pub(super) enum EffectOutcome {
 struct RunFactory {
     session: Arc<AgentSession>,
     tools: ToolCatalog,
-    store: StoreRef,
+    vfs: VfsRef,
     observer: Arc<dyn Observer>,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
@@ -68,7 +68,7 @@ impl RunFactory {
             ui: ui_provider(&host.menu, &host.workspace),
             session,
             tools,
-            store: StoreRef::memory(),
+            vfs: promptforge_vfs::empty(),
             observer,
             picker,
         }
@@ -92,7 +92,7 @@ impl RunFactory {
     ) -> RunFuture {
         let tools = self.tools.clone();
         let models = build_model_catalog(Some(models));
-        let store = self.store.clone();
+        let vfs = self.vfs.clone();
         let config = AgentConfig {
             name: self.session.agent.clone(),
             execution: self.session.id.clone(),
@@ -105,7 +105,7 @@ impl RunFactory {
         };
         Box::pin(async move {
             let result =
-                run_agent_with_client(&source, &tools, &models, &store, config, Some(client)).await;
+                run_agent_with_client(&source, &tools, &models, &vfs, config, Some(client)).await;
             (run, result)
         })
     }
@@ -117,7 +117,7 @@ impl RunFactory {
             observer: Arc::clone(&self.observer),
             ui: Arc::clone(&self.ui),
             on_delta: Arc::clone(&self.on_delta),
-            store: self.store.clone(),
+            vfs: self.vfs.clone(),
             picker: Arc::clone(
                 self.picker
                     .as_ref()
@@ -138,7 +138,7 @@ struct MarkdownRunParts {
     observer: Arc<dyn Observer>,
     ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
-    store: StoreRef,
+    vfs: VfsRef,
     picker: Arc<ToolPicker>,
 }
 
@@ -158,7 +158,7 @@ async fn run_markdown_agent(
         observer,
         ui,
         on_delta,
-        store,
+        vfs,
         picker,
     } = parts;
     let prompt = Prompt::parse(source, &session.id, observer.as_ref()).map_err(|error| {
@@ -185,7 +185,7 @@ async fn run_markdown_agent(
         &prompt,
         "",
         ResolutionContext::new(picker.as_ref(), &models, &tools),
-        &store,
+        &vfs,
         config,
     )
     .await

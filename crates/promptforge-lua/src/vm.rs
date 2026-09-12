@@ -1,13 +1,13 @@
 #[cfg(test)]
 use super::LuaFanoutResult;
 use super::{
-    Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
-    Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json, Lua, LuaBlockResult,
-    LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelRuntime,
-    ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, ProseState,
-    Result, StdLib, StoreRef, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime,
-    ToolSet, Value, WriteScope, detail, guarded_var, harden, install_compactors, install_h2_models,
-    install_h2_tools, install_instruction_budget, install_log, install_messages,
+    Access, Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
+    DEFAULT_LUA_MEMORY_BYTES, Error, Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json,
+    Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
+    ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer,
+    Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
+    ToolRuntime, ToolSet, Value, detail, guarded_var, harden, install_compactors,
+    install_h2_models, install_h2_tools, install_instruction_budget, install_log, install_messages,
     install_shim_prelude, install_store_table,
     install_tool_call_counts as install_tool_call_counts_impl, install_untrusted, log_byte_budget,
     resolve_section_target, scalar_return, seal_sys, var_to_json,
@@ -74,10 +74,10 @@ pub struct SectionVm {
     /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
     /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
-    store: Option<StoreRef>,
-    /// The fanout arm's write scope for `store.write`; `None` outside an arm
-    /// leaves walk-section writes untracked.
-    write_scope: Option<WriteScope>,
+    /// The section's VFS access capability: the `store` table's closures
+    /// share it, so every store op is attributed to the identity the
+    /// executor installed for this chain step.
+    access: Option<Arc<Access>>,
     host_injected: bool,
     /// Remaining `log()` events this VM may emit before the budget is exhausted.
     log_budget: Arc<AtomicU32>,
@@ -262,8 +262,7 @@ impl SectionVm {
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             jump_slot: Arc::new(Mutex::new(None)),
             sys_live: Arc::new(Mutex::new(None)),
-            store: None,
-            write_scope: None,
+            access: None,
             host_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
@@ -409,17 +408,18 @@ impl SectionVm {
     /// ```text
     /// use promptforge_lua::SectionVm;
     /// use promptforge_core_support::observe::NullObserver;
-    /// use promptforge_store::StoreRef;
     /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = std::sync::Arc::new(vfs.acquire());
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory())?;
+    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &access)?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub fn inject_host(&mut self, args: &str, sys: &Json, store: &StoreRef) -> Result<()> {
-        self.inject_host_with_var(args, sys, store, None, None)
+    pub fn inject_host(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
+        self.inject_host_with_var(args, sys, access, None)
     }
 
     /// Installs host values while seeding `var` from an earlier VM.
@@ -427,8 +427,10 @@ impl SectionVm {
     /// The `var` global is a guarded proxy (see [`guarded_var`]): writes are
     /// validated for JSON-representability at the assigning line, and the
     /// hidden data table behind it is what [`var`](Self::var) reads back.
-    /// `write_scope` is the fanout arm's store-write identity; it is `None`
-    /// for every other driver, leaving `store.write` untracked.
+    /// `access` is the chain step's VFS capability: the `store` table's
+    /// closures share it, so a fanout arm's store ops carry the arm's
+    /// spawned identity and a conflicting second live identity surfaces as
+    /// a write race.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or were already
@@ -437,9 +439,8 @@ impl SectionVm {
         &mut self,
         args: &str,
         sys: &Json,
-        store: &StoreRef,
+        access: &Arc<Access>,
         initial_var: Option<&Json>,
-        write_scope: Option<WriteScope>,
     ) -> Result<()> {
         if self.host_injected {
             return Err(Error::Lua(
@@ -476,8 +477,7 @@ impl SectionVm {
         )?;
         install_messages(&self.lua, &globals)?;
         install_compactors(&self.lua, &globals)?;
-        self.store = Some(store.clone());
-        self.write_scope = write_scope;
+        self.access = Some(Arc::clone(access));
         self.host_injected = true;
         Ok(())
     }
@@ -494,7 +494,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if host values have not been injected or the
     /// globals cannot be installed.
     pub fn install_host_apis(&self, observer: &Arc<dyn Observer>, section: &str) -> Result<()> {
-        let store = self.store.as_ref().ok_or_else(|| {
+        let access = self.access.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
         })?;
         install_log(
@@ -508,11 +508,10 @@ impl SectionVm {
         install_store_table(
             &self.lua,
             &self.lua.globals(),
-            store,
+            access,
             &self.execution,
             observer,
             section,
-            self.write_scope,
         )
     }
 
@@ -731,7 +730,7 @@ impl SectionVm {
     ///
     /// This is the legacy engine's path for running a section's Lua blocks;
     /// the scheduler drives blocks through
-    /// [`start_block_coro`](Self::start_block_coro) instead. StoreRef and
+    /// [`start_block_coro`](Self::start_block_coro) instead. Store and
     /// `log` reports go to the observer captured by
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
@@ -782,12 +781,13 @@ impl SectionVm {
     /// ```text
     /// use promptforge_lua::SectionVm;
     /// use promptforge_core_support::observe::NullObserver;
-    /// use promptforge_store::StoreRef;
     /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = std::sync::Arc::new(vfs.acquire());
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
+    /// vm.inject_host("", &serde_json::json!({}), &access)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
@@ -1210,13 +1210,13 @@ pub(crate) fn run_chunk(
     source: &str,
     args: &str,
     sys: &Json,
-    store: &StoreRef,
+    access: &Arc<Access>,
     execution: &str,
     observer: &Arc<dyn Observer>,
     section: &str,
 ) -> Result<LuaOutcome> {
     let mut vm = SectionVm::new(&GuardNonce::fresh(), execution, observer.as_ref(), section)?;
-    vm.inject_host(args, sys, store)?;
+    vm.inject_host(args, sys, access)?;
     vm.install_host_apis(observer, section)?;
     let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;
     let returned = scalar_return(returned)?;

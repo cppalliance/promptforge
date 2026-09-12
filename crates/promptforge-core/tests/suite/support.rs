@@ -9,7 +9,7 @@ use promptforge_core::execute::{ResolutionContext, RunConfig, RunError, run as r
 use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::StoreRef;
+use promptforge_core::store::{StoreError, StoreExt, VfsRef};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 use promptforge_tools::{Tool, ToolCatalog};
 
@@ -45,7 +45,7 @@ pub(super) async fn run(
     prompt: &Prompt,
     args: &str,
     tools: &[Arc<dyn Tool>],
-    store: &StoreRef,
+    vfs: &VfsRef,
     opts: RunOptions,
 ) -> Result<String, RunError> {
     let picker = ToolPicker::build_with_model(
@@ -61,7 +61,7 @@ pub(super) async fn run(
         prompt,
         args,
         ResolutionContext::new(&picker, &models, &tools),
-        store,
+        vfs,
         RunConfig::new(opts.execution).observer(opts.observer),
     )
     .await
@@ -103,31 +103,44 @@ pub(super) fn parse_execution_fixture(
         .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
 }
 
+/// The run's VFS handle with per-call fresh-access store reads, for
+/// post-run assertions: the run's identities dropped with it, so a fresh
+/// access never meets a lingering claim.
+pub(super) struct FixtureStore(VfsRef);
+
+impl FixtureStore {
+    /// Reads a store path through a fresh, immediately dropped access.
+    pub(super) fn read(&self, path: &str) -> Result<String, StoreError> {
+        let access = self.0.acquire();
+        self.0.store(&access).read(path)
+    }
+}
+
 /// The parsed prompt run plus the recorder and store an assertion needs.
 pub(super) struct FixtureRun {
     pub(super) result: Result<String, RunError>,
     pub(super) recorder: Arc<Recorder>,
-    pub(super) store: StoreRef,
+    pub(super) store: FixtureStore,
 }
 
 /// Parses `source` and runs it offline with `args`, no tools, and either the
-/// supplied `store` or a fresh in-memory one, returning the result together
+/// supplied `vfs` or a fresh stock handle, returning the result together
 /// with the recorder and store the caller asserts on.
 pub(super) async fn run_fixture(
     source: &'static str,
     name: &'static str,
     execution: &'static str,
     args: &str,
-    store: Option<StoreRef>,
+    vfs: Option<VfsRef>,
 ) -> FixtureRun {
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, name, execution, recorder.as_ref());
-    let store = store.unwrap_or_else(StoreRef::memory);
+    let vfs = vfs.unwrap_or_else(promptforge_vfs::empty);
     let result = run(
         &prompt,
         args,
         &[],
-        &store,
+        &vfs,
         RunOptions {
             execution,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -137,6 +150,6 @@ pub(super) async fn run_fixture(
     FixtureRun {
         result,
         recorder,
-        store,
+        store: FixtureStore(vfs),
     }
 }

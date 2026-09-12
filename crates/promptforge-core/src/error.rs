@@ -529,6 +529,13 @@ pub(crate) enum Error {
         source: Option<BoxedSource>,
     },
 
+    /// A run-scoped store operation failed at the virtual filesystem layer,
+    /// retaining the concrete [`shared_vfs::VfsError`] as the `#[source]`
+    /// cause so a backend failure survives the public wrappers instead of
+    /// being flattened to a string.
+    #[error("store operation failed: {0}")]
+    Store(#[source] shared_vfs::VfsError),
+
     /// Rendering the current time as an RFC 3339 string failed.
     ///
     /// Retains the [`time::error::Format`] failure as the private `#[source]`

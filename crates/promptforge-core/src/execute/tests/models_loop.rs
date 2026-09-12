@@ -44,7 +44,7 @@ fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunContext {
     let ctx = RunContext::new(
         prompt,
         "",
-        &StoreRef::memory(),
+        &TestStore::new(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunConfig::new(EXECUTION),
     );

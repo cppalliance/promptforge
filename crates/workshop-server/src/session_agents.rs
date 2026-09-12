@@ -1071,7 +1071,7 @@ mod tests {
         .expect("the empty picker builds");
         let models = ModelCatalog::empty();
         let tools = promptforge_tools::ToolCatalog::new(&[]).expect("an empty catalog is valid");
-        let store = promptforge_store::StoreRef::memory();
+        let store = promptforge_vfs::empty();
         let mut config = RunConfig::new("chat-unit").observer(observer);
         if let Some(broker) = broker {
             config = config.input_broker(broker);

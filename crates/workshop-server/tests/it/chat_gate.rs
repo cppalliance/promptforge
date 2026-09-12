@@ -37,7 +37,6 @@ use promptforge_model_client::client::{
     GatewayClient as ModelClient, GatewayEndpoint, SecretString,
 };
 use promptforge_model_client::model::ModelCatalog;
-use promptforge_store::StoreRef;
 use promptforge_tool_picker::{Catalog as PickerCatalog, Config as PickerConfig, ToolPicker};
 use promptforge_tools::ToolCatalog;
 use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
@@ -404,7 +403,7 @@ fn spawn_restored_chat(
                 .expect("the embedded chat prompt parses");
             let models = ModelCatalog::empty();
             let tools = ToolCatalog::new(&[]).expect("an empty tool catalog is valid");
-            let store = StoreRef::memory();
+            let store = promptforge_vfs::empty();
             promptforge_core::run(
                 &prompt,
                 "",

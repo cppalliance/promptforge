@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use crate::lua::{LuaProgram, SectionVm};
 use crate::observe::Observer;
-use crate::store::{StoreRef, WriteScope};
+use crate::store::Access;
 use crate::{Error, Result};
 
 /// What a section VM is seeded with beyond the shared host contract.
@@ -53,14 +53,14 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) args: &'a str,
     /// The `sys` JSON the driver built for this section or arm.
     pub(crate) sys: &'a serde_json::Value,
-    /// The run-scoped store backing the Lua `store` table.
-    pub(crate) store: &'a StoreRef,
+    /// The chain step's VFS access capability backing the Lua `store`
+    /// table: the walk's own, a call chain's borrowed parent capability, or
+    /// a fanout arm's spawned one. The store closures share it, so every
+    /// store op is attributed to the chain step's identity.
+    pub(crate) access: &'a Arc<Access>,
     /// The driver-specific seed: the walk's `var`, plus the collection
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
-    /// The fanout arm's store-write identity; `None` on the walk, whose
-    /// `store.write` calls stay untracked.
-    pub(crate) write_scope: Option<WriteScope>,
     /// The observer `Arc`: the persistent host APIs (`log`, `store`) capture
     /// it, and the shared-library replay reports through it.
     pub(crate) observer_arc: &'a Arc<dyn Observer>,
@@ -107,13 +107,7 @@ where
     if setup.ui.is_some() {
         vm.allow_raw_model_ids();
     }
-    vm.inject_host_with_var(
-        setup.args,
-        setup.sys,
-        setup.store,
-        setup.seed.var,
-        setup.write_scope,
-    )?;
+    vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var)?;
     vm.install_host_apis(setup.observer_arc, setup.section_name)?;
     if let Some(provider) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(provider))?;

@@ -644,7 +644,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-9>
 
-### Step 9: executor API pivot to VfsRef
+### Step 9: executor API pivot to VfsRef [completed]
 
 - Component: promptforge-core
 - Change `execute::run(prompt, args, resolution, vfs: &VfsRef, config)`; `RunContext::new` takes the VfsRef and builds the Store facade internally; run() overlays a fresh memory store only as a defensive fallback for hand-built routers lacking the mount; the scheduler installs the current Access per chain step.

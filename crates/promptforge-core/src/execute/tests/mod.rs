@@ -21,8 +21,15 @@ use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, current_tool_bindings};
 use crate::model::{CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::observe::{NullObserver, Observation, detail};
+use crate::store::{Access, StoreError, StoreExt, VfsRef};
 use crate::tools::{Tool, ToolCatalog, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
+
+/// A fresh stock handle's access capability, for tests that inject host
+/// values into a standalone VM.
+fn fresh_access() -> Arc<Access> {
+    Arc::new(promptforge_vfs::empty().acquire())
+}
 
 const EXECUTION: &str = "execute-test";
 
@@ -185,6 +192,43 @@ struct RunOptions {
     debug: Option<Arc<dyn DebugCapture>>,
 }
 
+/// The test stand-in for the old `StoreRef::memory()`: a stock VFS handle
+/// (the store mount preinstalled) whose `read`/`write` helpers each go
+/// through a fresh, immediately dropped access. A short-lived access per
+/// call is what keeps seeding and post-run assertions conflict-free: the
+/// claims model attributes every operation to a live identity, so a held
+/// seeder access would meet the run's own identities as a false race.
+struct TestStore(VfsRef);
+
+impl std::ops::Deref for TestStore {
+    type Target = VfsRef;
+
+    fn deref(&self) -> &VfsRef {
+        &self.0
+    }
+}
+
+impl TestStore {
+    fn new() -> TestStore {
+        TestStore(promptforge_vfs::empty())
+    }
+
+    /// The handle the run and the context builders take.
+    fn vfs(&self) -> &VfsRef {
+        &self.0
+    }
+
+    fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
+        let access = self.0.acquire();
+        self.0.store(&access).read(path)
+    }
+
+    fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
+        let access = self.0.acquire();
+        self.0.store(&access).glob(pattern)
+    }
+}
+
 /// Builds a [`RunConfig`] from the test-local [`RunOptions`], for the tests that
 /// call [`super::run`] directly with a custom picker and model catalog.
 fn to_config(opts: RunOptions) -> RunConfig {
@@ -248,14 +292,14 @@ fn gateway_env_is_unset() -> bool {
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.
 async fn run_offline(md: &str) -> Result<String> {
-    run(&fixture(md), "", &[], &StoreRef::memory(), silent()).await
+    run(&fixture(md), "", &[], &TestStore::new(), silent()).await
 }
 
 async fn run(
     test: &TestPrompt,
     args: &str,
     tools: &[Arc<dyn Tool>],
-    store: &StoreRef,
+    store: &TestStore,
     opts: RunOptions,
 ) -> Result<String> {
     let catalog = test.picker_catalog.clone().unwrap_or_else(|| {
@@ -290,7 +334,7 @@ async fn run(
         &test.prompt,
         args,
         ResolutionContext::new(&picker, &test.models, &tool_catalog),
-        store,
+        store.vfs(),
         run_config,
     )
     .await
@@ -339,7 +383,7 @@ async fn run_with_config(
         &test.prompt,
         "",
         ResolutionContext::new(&picker, &test.models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        TestStore::new().vfs(),
         configure(RunConfig::new(EXECUTION)),
     )
     .await
@@ -387,7 +431,7 @@ async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)
         &fixture(md),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -1086,7 +1130,7 @@ fn tool_description_override_appears_in_model_schema() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory())
+    vm.inject_host("", &json!({}), &fresh_access())
         .expect("host must inject");
 
     // tools.add(alias) with no override keeps the bound tool's catalog text.
@@ -1160,7 +1204,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory())
+    vm.inject_host("", &json!({}), &fresh_access())
         .expect("host must inject");
 
     let add_plain = LuaProgram::compile(
@@ -1679,7 +1723,7 @@ async fn untrusted_nonce_differs_across_runs() {
             &bound_with_tools(md, Vec::new()),
             "",
             &[Arc::new(UntrustedEchoTool) as Arc<dyn Tool>],
-            &StoreRef::memory(),
+            &TestStore::new(),
             silent(),
         )
         .await

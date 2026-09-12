@@ -25,7 +25,9 @@ mod path;
 use std::fmt::Write as _;
 
 use promptforge_vfs::STORE_MOUNT;
-use shared_vfs::{Access, FileType, VfsError, VfsRef};
+use shared_vfs::{FileType, VfsError, VfsRef};
+
+pub use shared_vfs::Access;
 
 pub use error::{PathReason, StoreError, StoreErrorKind};
 use path::StorePath;
@@ -59,6 +61,20 @@ pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 #[derive(Debug, Clone)]
 pub struct Store<'a> {
     access: &'a Access,
+}
+
+impl<'a> Store<'a> {
+    /// Returns the facade over one identity's capability, scoped to the
+    /// stock store mount.
+    ///
+    /// This is the constructor for holders that own the [`Access`] - the
+    /// Lua VM's store closures build a facade per call over their shared
+    /// `Arc<Access>`. Callers holding a `VfsRef` prefer the
+    /// [`StoreExt::store`] shape.
+    #[must_use]
+    pub fn new(access: &'a Access) -> Store<'a> {
+        Store { access }
+    }
 }
 
 impl Store<'_> {

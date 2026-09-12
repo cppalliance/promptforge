@@ -17,16 +17,12 @@ return tostring(#files) .. ":" .. table.concat(replies, ",")
 ### Worker
 
 ```lua
--- Rendezvous: both arms must be live before either writes its reply path.
--- Each poll iteration yields through `call`, giving the sibling arm its
--- I/O points: under the scheduler "concurrent" means interleaving at yield
--- points, not preemption. A sequential driver (arm 2 starting only after
--- arm 1 finishes) never reaches two ready files, and the loop spins
--- forever: no instruction ceiling ends it; the test's timeout bounds it.
-store.write("ready-" .. sys.index .. ".md", "1")
-while #store.glob("ready-*.md") < 2 do
-  call("## Yield")
-end
+-- Arm-scoped writes: the pattern the claims model teaches. Each arm writes
+-- only its own path, so no two live identities ever claim one path, and the
+-- parent's post-join glob reads the merged state after every arm's claims
+-- released at its end. (The old ready-*.md rendezvous - polling a sibling
+-- arm's files while that arm is live - is exactly the cross-arm
+-- read-while-written pattern the claims model rejects.)
 store.write("arm-" .. sys.index .. ".md", item)
 return item
 ```
@@ -37,9 +33,3 @@ Write to store.
 
 - alpha
 - beta
-
-## Yield
-
-```lua
-return "yielded"
-```

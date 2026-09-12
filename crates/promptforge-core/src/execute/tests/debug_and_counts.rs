@@ -12,7 +12,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
         &bound_for_model(md),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
@@ -98,7 +98,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         &prompt,
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
@@ -148,7 +148,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
         &prompt,
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
@@ -184,7 +184,7 @@ async fn debug_capture_none_changes_nothing() {
         &bound_for_model(md),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed(addr),
     )
     .await
@@ -217,7 +217,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         &prompt,
         "",
         &[Arc::clone(&tool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await
@@ -309,7 +309,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
             Arc::new(search) as Arc<dyn Tool>,
             Arc::new(other) as Arc<dyn Tool>,
         ],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await
@@ -338,7 +338,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
         &prompt,
         "",
         &[Arc::new(tool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         silent(),
     )
     .await
@@ -543,7 +543,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md, Vec::new());
-    let out = run(&prompt, "", &[], &StoreRef::memory(), gatewayed(addr))
+    let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(addr))
         .await
         .expect("handle-form infer must return text");
     assert_eq!(out, "pong");

@@ -1,7 +1,6 @@
 use mlua::{Lua, Value, Variadic};
 use promptforge_core_support::observe::NullObserver;
 use promptforge_core_support::untrusted::GuardNonce;
-use promptforge_store::StoreRef;
 use serde_json::json;
 
 use super::decode::{add_local_params_schema, collect_tools_add_entries, tool_alias};
@@ -12,6 +11,11 @@ use crate::scope::ToolRuntime;
 use crate::{SectionVm, ToolBinding};
 use promptforge_tools::ToolId;
 use std::sync::{Arc, Mutex};
+
+/// A fresh stock handle's access capability for a test VM.
+fn fresh_access() -> Arc<promptforge_store::Access> {
+    Arc::new(promptforge_vfs::empty().acquire())
+}
 
 fn echo_handle() -> LuaToolHandle {
     LuaToolHandle::from_binding(
@@ -189,7 +193,7 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
     let observer = NullObserver::default();
     let mut vm = SectionVm::new(&nonce, "test-run", &observer, "Test")
         .expect("section VM construction cannot fail");
-    vm.inject_host("", &json!({}), &StoreRef::memory())
+    vm.inject_host("", &json!({}), &fresh_access())
         .expect("host injection cannot fail");
     vm.install_coro_shims().expect("the shim prelude installs");
     let (call_is_function, bare_is_nil): (bool, bool) = vm

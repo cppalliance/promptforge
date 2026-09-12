@@ -43,8 +43,9 @@ use promptforge_model_client::client::{
 use promptforge_model_client::model::{
     ModelBinding, ModelCatalog, ModelInvocation, ModelSet, ModelView,
 };
-use promptforge_store::StoreRef;
+use promptforge_store::Access;
 use promptforge_tools::ToolCatalog;
+use shared_vfs::VfsRef;
 
 use crate::config::AgentConfig;
 
@@ -152,10 +153,10 @@ pub async fn run_agent(
     source: &str,
     tools: &ToolCatalog,
     models: &ModelCatalog,
-    store: &StoreRef,
+    vfs: &VfsRef,
     config: AgentConfig,
 ) -> Result<(), AgentError> {
-    run_agent_with_client(source, tools, models, store, config, None).await
+    run_agent_with_client(source, tools, models, vfs, config, None).await
 }
 
 /// [`run_agent`] with an explicit gateway client instead of the lazy
@@ -177,12 +178,12 @@ pub async fn run_agent_with_client(
     source: &str,
     tools: &ToolCatalog,
     models: &ModelCatalog,
-    store: &StoreRef,
+    vfs: &VfsRef,
     config: AgentConfig,
     client: Option<GatewayClient>,
 ) -> Result<(), AgentError> {
     let cancel = config.cancel.clone();
-    cancel::scope(cancel, drive(source, tools, models, store, config, client)).await
+    cancel::scope(cancel, drive(source, tools, models, vfs, config, client)).await
 }
 
 /// One agent run: compile, build the agent VM, drive the program coroutine
@@ -191,7 +192,7 @@ async fn drive(
     source: &str,
     tools: &ToolCatalog,
     models: &ModelCatalog,
-    store: &StoreRef,
+    vfs: &VfsRef,
     config: AgentConfig,
     client: Option<GatewayClient>,
 ) -> Result<(), AgentError> {
@@ -227,8 +228,11 @@ async fn drive(
     // A limits failure propagates bare, before any teardown observation
     // exists - the section drivers' contract.
     vm.apply_lua_limits(limits.lua_memory_bytes, limits.lua_log_events)?;
+    // The agent is one serial thread of execution: one capability for the
+    // whole run, released when it drops at the run's end.
+    let access = Arc::new(vfs.acquire());
     let (counts, events) =
-        match setup_agent_vm(&mut vm, store, &observer, &name, &tool_set, event_log, ui) {
+        match setup_agent_vm(&mut vm, &access, &observer, &name, &tool_set, event_log, ui) {
             Ok(installed) => installed,
             Err(error) => {
                 vm.teardown(observer.as_ref(), &name);
@@ -347,14 +351,14 @@ fn agent_model_set(catalog: &ModelCatalog) -> ModelSet {
 /// never in a section VM.
 fn setup_agent_vm(
     vm: &mut SectionVm,
-    store: &StoreRef,
+    access: &Arc<Access>,
     observer: &Arc<dyn Observer>,
     name: &str,
     tool_set: &ToolSet,
     event_log: Option<Arc<dyn EventLog>>,
     ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
 ) -> Result<(ToolCallCounts, Option<EventsSnapshot>), AgentError> {
-    vm.inject_host_with_var("", &serde_json::json!({}), store, None, None)?;
+    vm.inject_host_with_var("", &serde_json::json!({}), access, None)?;
     vm.install_host_apis(observer, name)?;
     vm.install_coro_shims()?;
     install_agent_chat_shim(vm.lua())?;
@@ -892,6 +896,16 @@ mod tests {
 
     const EXECUTION: &str = "agent-test";
 
+    /// Reads one store file through a fresh, immediately dropped access:
+    /// the run's identity dropped with it, so nothing it wrote conflicts.
+    fn read_store(
+        vfs: &VfsRef,
+        path: &str,
+    ) -> std::result::Result<String, promptforge_store::StoreError> {
+        let access = vfs.acquire();
+        promptforge_store::StoreExt::store(vfs, &access).read(path)
+    }
+
     fn config() -> AgentConfig {
         AgentConfig {
             name: "test-agent".to_owned(),
@@ -911,18 +925,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_trivial_agent_writes_to_the_store_and_returns() {
-        let store = StoreRef::memory();
+        let vfs = promptforge_vfs::empty();
         run_agent(
             "store.write('notes.txt', 'from the agent')\nreturn 'done'",
             &empty_tools(),
             &ModelCatalog::empty(),
-            &store,
+            &vfs,
             config(),
         )
         .await
         .expect("the trivial agent runs to completion");
         assert_eq!(
-            store.read("notes.txt").expect("the agent's write persists"),
+            read_store(&vfs, "notes.txt").expect("the agent's write persists"),
             "from the agent",
             "the agent's store write must be visible through the run-scoped handle"
         );
@@ -932,12 +946,12 @@ mod tests {
     async fn the_control_globals_are_nil_in_the_agent_vm() {
         // Absent, not stubbed: a stub function would tostring as
         // `function: 0x...`; only true absence renders three nils.
-        let store = StoreRef::memory();
+        let vfs = promptforge_vfs::empty();
         let error = run_agent(
             "return tostring(call) .. ' ' .. tostring(fanout) .. ' ' .. tostring(jump)",
             &empty_tools(),
             &ModelCatalog::empty(),
-            &store,
+            &vfs,
             config(),
         )
         .await;
@@ -951,13 +965,13 @@ mod tests {
             "store.write('nils.txt', tostring(call) .. ' ' .. tostring(fanout) .. ' ' .. tostring(jump))",
             &empty_tools(),
             &ModelCatalog::empty(),
-            &store,
+            &vfs,
             config(),
         )
         .await
         .expect("the probe agent runs");
         assert_eq!(
-            store.read("nils.txt").expect("the probe wrote its reading"),
+            read_store(&vfs, "nils.txt").expect("the probe wrote its reading"),
             "nil nil nil",
             "call, fanout, and jump must all be nil in the agent VM"
         );
@@ -966,13 +980,13 @@ mod tests {
     #[tokio::test]
     async fn calling_an_absent_control_global_is_an_undefined_global_failure() {
         for global in ["call", "fanout", "jump"] {
-            let store = StoreRef::memory();
+            let vfs = promptforge_vfs::empty();
             let source = format!("{global}('anything')");
             let error = run_agent(
                 &source,
                 &empty_tools(),
                 &ModelCatalog::empty(),
-                &store,
+                &vfs,
                 config(),
             )
             .await
@@ -991,7 +1005,7 @@ mod tests {
 
     #[tokio::test]
     async fn ui_snapshots_are_fresh_per_call_and_json_nulls_read_nil() {
-        let store = StoreRef::memory();
+        let vfs = promptforge_vfs::empty();
         let calls = Arc::new(AtomicU32::new(0));
         let counter = Arc::clone(&calls);
         let mut run_config = config();
@@ -1009,13 +1023,13 @@ mod tests {
              store.write('ui.txt', first .. '|' .. second .. '|' .. root)",
             &empty_tools(),
             &ModelCatalog::empty(),
-            &store,
+            &vfs,
             run_config,
         )
         .await
         .expect("the ui probe agent runs");
         assert_eq!(
-            store.read("ui.txt").expect("the probe wrote its readings"),
+            read_store(&vfs, "ui.txt").expect("the probe wrote its readings"),
             "m1|m2|nil",
             "every ui() call invokes the provider afresh, and a JSON null field reads nil"
         );
@@ -1028,18 +1042,18 @@ mod tests {
 
     #[tokio::test]
     async fn ui_is_nil_without_a_provider() {
-        let store = StoreRef::memory();
+        let vfs = promptforge_vfs::empty();
         run_agent(
             "store.write('ui.txt', tostring(ui))",
             &empty_tools(),
             &ModelCatalog::empty(),
-            &store,
+            &vfs,
             config(),
         )
         .await
         .expect("the probe agent runs");
         assert_eq!(
-            store.read("ui.txt").expect("the probe wrote its reading"),
+            read_store(&vfs, "ui.txt").expect("the probe wrote its reading"),
             "nil",
             "no provider means no ui global at all - absent, not stubbed"
         );
@@ -1070,12 +1084,12 @@ mod tests {
         )])
         .expect("the test catalog has one unique model");
         let run = tokio::spawn(async move {
-            let store = StoreRef::memory();
+            let vfs = promptforge_vfs::empty();
             run_agent_with_client(
                 "models.use('test-model')\nreturn models.infer('hello')",
                 &empty_tools(),
                 &models,
-                &store,
+                &vfs,
                 run_config,
                 Some(client),
             )

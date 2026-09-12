@@ -28,7 +28,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_core::observe::NullObserver;
-use promptforge_core::store::StoreRef;
+
 use promptforge_core::tools::ToolCatalog;
 use promptforge_core::{Prompt, ResolutionContext, RunConfig, run};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
@@ -174,7 +174,7 @@ fn models_loop(c: &mut Criterion) {
                     &prompt,
                     "",
                     resolution(&picker, &models, &tools),
-                    &StoreRef::memory(),
+                    &promptforge_vfs::empty(),
                     RunConfig::new(EXECUTION)
                         .observer(Arc::new(NullObserver::default()))
                         .client(gateway.client()),
@@ -210,7 +210,7 @@ fn compactors_fail(c: &mut Criterion) {
                     &prompt,
                     "",
                     resolution(&picker, &models, &tools),
-                    &StoreRef::memory(),
+                    &promptforge_vfs::empty(),
                     RunConfig::new(EXECUTION)
                         .observer(Arc::new(NullObserver::default()))
                         .client(gateway.client()),

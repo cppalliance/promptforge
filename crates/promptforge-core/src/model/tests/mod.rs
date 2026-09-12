@@ -8,7 +8,7 @@ use crate::lua::{
     LiveBindingProducer, LuaProgram, SectionVm, ToolResolver, ToolSet, resolve_model_binding,
 };
 use crate::observe::NullObserver;
-use crate::store::StoreRef;
+use crate::store::Access;
 use crate::tools::ToolCatalog;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
@@ -16,6 +16,12 @@ use promptforge_model_client::Error as GatewayClientError;
 use serde_json::json;
 
 const EXECUTION: &str = "model-bind-test";
+
+/// A fresh stock handle's access capability, for tests that inject host
+/// values into a standalone VM.
+fn fresh_access() -> Arc<Access> {
+    Arc::new(promptforge_vfs::empty().acquire())
+}
 
 fn ctx(window: u32) -> NonZeroU32 {
     NonZeroU32::new(window).expect("test context window is non-zero")

@@ -7,8 +7,9 @@
 //! and child descents with the parent resuming after the jumper), the
 //! scalar return's chain scoping, and the section-boundary observations.
 //! The fanout coverage mirrors the legacy engine's mechanics (ordering,
-//! the concurrency window, interleaving) and its failure semantics (the
-//! store write-write race as a hard error, unordered-legal appends, the
+//! the concurrency window, interleaving) and its failure semantics under
+//! the claims model (a live cross-arm write conflict as a hard error,
+//! sequential-arm appends staying legal, the
 //! fatal-arm sibling abort, the pre-scheduling guards, and cancellation
 //! while suspended in an arm).
 
@@ -42,24 +43,20 @@ fn writer_models() -> ModelSet {
 /// Builds the run context for a scheduler test: the parsed prompt, an empty
 /// shared library, and the model set pre-filled.
 fn scheduler_context(prompt: &Prompt) -> RunContext {
-    scheduler_context_on(
-        prompt,
-        &StoreRef::memory(),
-        Arc::new(NullObserver::default()),
-    )
+    scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
 /// Builds the run context on the given store and observer, so a walk test
 /// can inspect the store's contents and the observation stream afterward.
 fn scheduler_context_on(
     prompt: &Prompt,
-    store: &StoreRef,
+    store: &TestStore,
     observer: Arc<dyn Observer>,
 ) -> RunContext {
     let ctx = RunContext::new(
         prompt,
         "",
-        store,
+        store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunConfig::new(EXECUTION).observer(observer),
     );
@@ -255,7 +252,7 @@ async fn sections_run_in_fall_through_order() {
     // Mirror of the legacy `falls_through_to_next_section`, strengthened
     // with an order log: a section without a return falls through to the
     // next section in document order.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: walk\ndescription: d\npromptforge: 0\n---\n\n\
         # Walk\n\n\
         ## First\n\n\
@@ -317,7 +314,7 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
     // S1, which runs because it is addressed; the chain falls through to
     // S2, and S2's reply returns to A. The main walk ends at B and never
     // runs S1 or S2.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Siblings\n\n\
         ## A\n\n\
@@ -410,7 +407,7 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
     // Mirror of the legacy case of the same name: the contained chain's
     // entries take the next run-global ids, and the outer walk resumes the
     // same sequence when the chain ends.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sequence\n\n\
         ## Main\n\n\
@@ -481,7 +478,7 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
         ## Two\n\n\
         ```lua\nreturn 'two-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -516,7 +513,7 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
     // `jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks`:
     // the jump transfers control and the jumper's remaining blocks never
     // run.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Jump\n\n\
         ## Check\n\n\
@@ -638,7 +635,7 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
         ## B\n\n\
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -674,7 +671,7 @@ async fn an_erroring_section_reports_started_but_not_finished() {
         ## Only\n\n\
         ```lua\nerror('expected failure')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = Scheduler::new(&ctx, None).drive().await;
 
     assert!(result.is_err());
@@ -697,7 +694,7 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
     // starts a child-level walk at the target, which falls through to the
     // target's following siblings; when the level exhausts, the parent walk
     // resumes after the jumper.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Descend\n\n\
         ## A\n\n\
@@ -730,7 +727,7 @@ async fn child_walk_recurses_to_h4() {
     // recurses - a jump from an H3 child to an H4 grandchild starts an
     // H4-level walk, and each level's exhaustion resumes its parent after
     // the jumper.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Recurse\n\n\
         ## A\n\n\
@@ -769,7 +766,7 @@ async fn jump_to_an_off_walk_child_runs_it() {
     // Mirror of the legacy case of the same name: an off-walk child stays
     // addressable - a jump to it runs it, and the fall-through that follows
     // skips nothing addressed.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # OffChild\n\n\
         ## A\n\n\
@@ -798,7 +795,7 @@ async fn running_child_addresses_its_own_siblings_and_children() {
     // Mirror of the legacy case of the same name: a running child's visible
     // set is its own siblings plus its own children - it can execute a
     // child and jump to a sibling.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Visible\n\n\
         ## A\n\n\
@@ -883,7 +880,7 @@ async fn sys_id_counts_sections_entered_run_wide() {
     // Mirror of the legacy case of the same name: `sys.id` counts the
     // sections the walk has entered run-wide - the detour into a child
     // level continues the count rather than restarting it.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
         ## A\n\n\
@@ -968,7 +965,7 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
     // `call()` chain to a sibling moves within the contained chain - the
     // walk continues from the jump target under the normal rules, and the
     // chain's final reply is the call's return value.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Move\n\n\
         ## A\n\n\
@@ -1004,7 +1001,7 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
     // starting a child-level walk that falls through to S2; S2's return is
     // the chain's final text back to A, and the outer walk continues at B,
     // never having moved.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Chain\n\n\
         ## A\n\n\
@@ -1046,7 +1043,7 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
     // Mirror of the legacy case of the same name: the outer walk never
     // moves while a contained chain runs - wherever the chain ends, the
     // outer walk resumes at the section after the caller.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Outer\n\n\
         ## A\n\n\
@@ -1082,7 +1079,7 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
     // contained chain ends the chain, not the run - the returned value is
     // the call's return, the chain's remaining sections do not run, and
     // the outer walk continues.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Scoped\n\n\
         ## A\n\n\
@@ -1115,7 +1112,7 @@ async fn call_to_a_child_starts_a_contained_chain() {
     // starts a contained chain at the target - the chain falls through to
     // the target's following siblings under the same rules as any walk, and
     // the chain's final reply is the call's return value.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ChildExecute\n\n\
         ## Main\n\n\
@@ -1150,7 +1147,7 @@ async fn a_jump_descent_does_not_consume_call_depth() {
     // the ninth nested call would run (depth 9 > 8), after exactly nine
     // section entries - a descent that wrongly consumed depth would trip
     // the cap one entry earlier.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Main\n\n\
@@ -1189,7 +1186,7 @@ async fn walk_never_descends_into_children() {
     // a section's children do not run unless addressed. This is the
     // negative half of the child-descent rule: a fall-through that
     // descended would run the child and trip its error.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # NoDescent\n\n\
         ## A\n\n\
@@ -1223,7 +1220,7 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
         ## A\n\n\
         ```lua\njump('## Missing')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = Scheduler::new(&ctx, None).drive().await;
 
     let error = result.expect_err("an unresolvable jump target must fail the run");
@@ -1244,21 +1241,17 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
 /// set starts empty - the live H1 pass under test records its own
 /// bindings, exactly as the legacy run's H1 hand-off leaves them.
 fn h1_context(prompt: &Prompt) -> RunContext {
-    h1_context_on(
-        prompt,
-        &StoreRef::memory(),
-        Arc::new(NullObserver::default()),
-    )
+    h1_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
 /// Builds the H1 run context on the given store and observer, so a pass
 /// test can inspect the store's contents and the observation stream
 /// afterward.
-fn h1_context_on(prompt: &Prompt, store: &StoreRef, observer: Arc<dyn Observer>) -> RunContext {
+fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>) -> RunContext {
     RunContext::new(
         prompt,
         "",
-        store,
+        store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunConfig::new(EXECUTION).observer(observer),
     )
@@ -1410,7 +1403,7 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
         ## Result\n\n\
         ```lua\nreturn 'unexpected'\n```\n";
     let prompt = parse(md);
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let ctx = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
@@ -1444,7 +1437,7 @@ async fn a_caught_h1_callback_error_reports_the_chunk_succeeded() {
         assert(not ok)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
     let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
         .with_live_h1(resolution.context())
@@ -1818,7 +1811,7 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
         ## Only\n\n\
         ```lua\nreturn 'done-now'\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
     let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
         .with_live_h1(resolution.context())
@@ -1865,7 +1858,7 @@ fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunConte
     let ctx = RunContext::new(
         prompt,
         "",
-        &StoreRef::memory(),
+        &TestStore::new(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunConfig::new(EXECUTION).limits(limits),
     );
@@ -2024,7 +2017,7 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
     // each arm entry takes the next run-global id, `sys.index` is the
     // 1-based per-fanout position, and the packed sequence carries `.ok`
     // and `.item` with `__tostring` driving `table.concat`.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2132,7 +2125,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
     let ctx = RunContext::new(
         &prompt,
         "",
-        &StoreRef::memory(),
+        &TestStore::new(),
         shared,
         &RunConfig::new(EXECUTION),
     );
@@ -2182,7 +2175,7 @@ async fn the_shared_replay_sees_the_arm_item() {
     let ctx = RunContext::new(
         &prompt,
         "",
-        &StoreRef::memory(),
+        &TestStore::new(),
         shared,
         &RunConfig::new(EXECUTION),
     );
@@ -2229,7 +2222,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         store.append('order.txt', 'Tail\\n')\n\
         return 'tail-reply'\n\
         ```\n";
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
@@ -2276,7 +2269,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         store.append('order.txt', 'ChildTail\\n')\n\
         return 'child-tail-reply'\n\
         ```\n";
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
@@ -2314,7 +2307,7 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
     // `an_empty_collection_is_rejected_before_any_scheduling`: the fanout
     // errors before any arm is created - no STARTED observation, and the
     // worker's store tripwire never fires.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -2408,12 +2401,14 @@ async fn fanout_depth_cap_reads_the_chain_field() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn two_arms_writing_one_path_fail_with_a_write_race() {
-    // Mirror of the legacy `two_arms_writing_one_path_fail_with_a_write_race`:
-    // two arms of one fanout calling `store.write` on the same path is a
-    // hard write-write race; the store's registry is the semantic guard
-    // (one thread runs everything, so no locks are involved), and the race
-    // is fatal to the arm and fails the fanout.
+    // Mirror of the legacy `two_arms_writing_one_path_fail_with_a_write_race`,
+    // restructured for the claims model: the registry is gone, so the race
+    // needs both arms live at once - each arm writes, then suspends on an
+    // infer, so the second arm's write meets the first arm's standing write
+    // claim. The conflict is fatal to the second arm and fails the fanout;
+    // the first arm, still parked on its infer, is aborted as the sibling.
     let recorder = Arc::new(Recorder::default());
+    let gateway = ScriptedGateway::start(vec![resp_text("p1"), resp_text("p2")]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2424,38 +2419,73 @@ async fn two_arms_writing_one_path_fail_with_a_write_race() {
         ### Worker\n\n\
         ```lua\n\
         store.write('shared.txt', item)\n\
+        models.infer('pause ' .. item)\n\
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
-    let error = Scheduler::new(&ctx, None)
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect_err("two arms writing one path must fail the fanout");
+        .expect_err("two live arms writing one path must fail the fanout");
 
     let text = error.to_string();
     assert!(text.contains("write-write race"), "error was: {text}");
     assert!(text.contains("shared.txt"), "error was: {text}");
-    assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
-        1,
-        "the first arm's write landed: {:?}",
-        recorder.events()
-    );
     assert_eq!(
         terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
         1,
         "the second arm's write raced: {:?}",
         recorder.events()
     );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
+        1,
+        "the first arm, parked on its infer, is aborted as the sibling: {:?}",
+        recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_live_arms_appending_one_path_fail_with_a_write_race() {
+    // The papergate case the WriteScope registry never caught: `append`
+    // claims write intent now, so two live arms appending to one path
+    // conflict exactly as two writes do. The arms interleave because each
+    // appends before suspending on its infer.
+    let gateway = ScriptedGateway::start(vec![resp_text("p1"), resp_text("p2")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.append('evidence.md', item .. '\\n')\n\
+        models.infer('pause ' .. item)\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect_err("two live arms appending one path must fail the fanout");
+
+    let text = error.to_string();
+    assert!(text.contains("write-write race"), "error was: {text}");
+    assert!(text.contains("evidence.md"), "error was: {text}");
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn two_arms_appending_one_path_succeed() {
-    // Mirror of the legacy case of the same name: `append` is untracked, so
-    // concurrent appends to one path are legal; only the relative order is
-    // unspecified.
-    let store = StoreRef::memory();
+    // Mirror of the legacy case of the same name, with the claims-model
+    // rationale: arms that never suspend at I/O run one at a time, so each
+    // arm's claims release at its end and the next arm's append meets no
+    // live claimant. Only the relative order is unspecified - and with no
+    // interleaving points it is the collection order.
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2486,7 +2516,7 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
     // Mirror of the legacy case of the same name: the registry records
     // (fanout token, arm index), so the same arm writing the same path
     // again is a rewrite, not a race.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2516,7 +2546,7 @@ async fn sequential_fanouts_may_write_one_path() {
     // Mirror of the legacy case of the same name: a later fanout carries a
     // fresh write token, so its write overwrites the earlier fanout's
     // registry record instead of racing against it.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2548,7 +2578,7 @@ async fn fatal_arm_aborts_queued_siblings() {
     // arm fails fatally they are never created - proven by the store
     // side-channel only the fatal arm ever wrote to, and by the terminal
     // observations: one FAILED, nothing else.
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -2634,7 +2664,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         Scheduler::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
@@ -2756,7 +2786,7 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ### Worker\n\n\
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let cancel = CancelHandle::new();
     let canceller = cancel.clone();
     let calls = Arc::clone(&gateway.calls);
@@ -2832,7 +2862,7 @@ async fn a_mid_refill_arm_start_failure_tears_down_the_join() {
         ### Worker\n\n\
         ```lua\nreturn 'worked:' .. item\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.

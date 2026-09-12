@@ -48,7 +48,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
         &test,
         "quantum",
         &[Arc::new(EchoTool) as Arc<dyn Tool>],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed(addr),
     )
     .await

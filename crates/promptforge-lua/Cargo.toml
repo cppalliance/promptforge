@@ -25,6 +25,8 @@ tokio.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 criterion.workspace = true
+promptforge-vfs.workspace = true
+shared-vfs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
 [[bench]]

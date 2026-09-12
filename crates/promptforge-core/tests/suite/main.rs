@@ -12,3 +12,4 @@ mod fanout;
 mod parsing;
 mod shipped;
 mod support;
+mod vfs;

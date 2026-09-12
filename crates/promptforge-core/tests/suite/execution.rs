@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use promptforge_core::execute::RunErrorKind;
 use promptforge_core::observe::Observer;
-use promptforge_core::store::StoreRef;
 
 use super::support::{Record, Recorder, RunOptions, parse_execution_fixture, run, run_fixture};
 
@@ -182,7 +181,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             first_prompt.as_ref(),
             "first result",
             &[],
-            &StoreRef::memory(),
+            &promptforge_vfs::empty(),
             RunOptions {
                 execution: FIRST,
                 observer: Arc::clone(&first_recorder) as Arc<dyn Observer>,
@@ -198,7 +197,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             second_prompt.as_ref(),
             "second result",
             &[],
-            &StoreRef::memory(),
+            &promptforge_vfs::empty(),
             RunOptions {
                 execution: SECOND,
                 observer: Arc::clone(&second_recorder) as Arc<dyn Observer>,

@@ -21,7 +21,7 @@ async fn live_h1_infer_runs_once() {
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(gatewayed(addr)),
     )
     .await
@@ -43,7 +43,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         {{ var.omit }}\n\n\
         ## Result\n\n\
         ```lua\nreturn 'ok'\n```\n";
-    let out = super::run(&fixture(unread), "", &[], &StoreRef::memory(), silent())
+    let out = super::run(&fixture(unread), "", &[], &TestStore::new(), silent())
         .await
         .expect("unread H1 prose must not require a model");
     assert_eq!(out, "ok");
@@ -52,7 +52,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         # Read H1\n\n\
         ask\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
-    let error = super::run(&fixture(reading), "", &[], &StoreRef::memory(), silent())
+    let error = super::run(&fixture(reading), "", &[], &TestStore::new(), silent())
         .await
         .expect_err("an explicit infer of H1 prose with no binding must fail");
     assert!(
@@ -72,7 +72,7 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
         ```lua\nstore.write('later.txt', 'ran')\n```\n\n\
         ## Result\n\n\
         ```lua\nreturn 'unexpected'\n```\n";
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let error = super::run(&fixture(source), "", &[], &store, silent())
         .await
         .expect_err("a caught resolver callback error must fail its own block");
@@ -102,7 +102,7 @@ async fn shared_function_resolves_host_globals_when_called() {
         &prompt,
         "later host value",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(silent()),
     )
     .await
@@ -118,7 +118,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // `log`, and `args` at load.
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let store = StoreRef::memory();
+    let store = TestStore::new();
     let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\n---\n\n\
         # Shared Host Load\n\n\
         ```lua shared\n\
@@ -191,7 +191,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &catalog),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(silent()),
     )
     .await
@@ -225,7 +225,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(gatewayed(gateway.addr())),
     )
     .await
@@ -275,7 +275,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -339,7 +339,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         RunConfig::new(EXECUTION)
             .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
             .client(gateway_client(gateway.addr()))
@@ -379,7 +379,7 @@ async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
         &bound_for_model(source),
         "",
         &[],
-        &StoreRef::memory(),
+        &TestStore::new(),
         gatewayed(gateway.addr()),
     )
     .await
@@ -423,7 +423,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(gatewayed(addr)),
     )
     .await
@@ -459,7 +459,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(gatewayed(gateway.addr())),
     )
     .await
@@ -509,7 +509,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
         &prompt,
         "",
         ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
-        &StoreRef::memory(),
+        &TestStore::new(),
         to_config(silent()),
     )
     .await

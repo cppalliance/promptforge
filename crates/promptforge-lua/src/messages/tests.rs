@@ -1,12 +1,16 @@
 use mlua::{Lua, LuaSerdeExt, Value};
 use promptforge_core_support::observe::NullObserver;
 use promptforge_core_support::untrusted::GuardNonce;
-use promptforge_store::StoreRef;
 use serde_json::json;
 
 use super::install_messages;
 use crate::protocol::{Answer, MessageRecord, Request, ToolCallRecord, YieldParse};
 use crate::{Error, SectionVm};
+
+/// A fresh stock handle's access capability for a test VM.
+fn fresh_access() -> std::sync::Arc<promptforge_store::Access> {
+    std::sync::Arc::new(promptforge_vfs::empty().acquire())
+}
 
 fn lua_with_messages() -> Lua {
     let lua = Lua::new();
@@ -198,7 +202,7 @@ fn the_builders_run_under_the_hardened_section_sandbox() {
     let observer = NullObserver::default();
     let mut vm = SectionVm::new(&nonce, "test-run", &observer, "Test")
         .expect("section VM construction cannot fail");
-    vm.inject_host("", &json!({}), &StoreRef::memory())
+    vm.inject_host("", &json!({}), &fresh_access())
         .expect("host injection cannot fail");
     let json: serde_json::Value = vm
         .lua()

@@ -85,6 +85,7 @@ impl RunError {
             | Error::UnboundToolCall { .. }
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Internal(_) | Error::TimestampFormat(_) => RunErrorKind::Internal,
+            Error::Store(_) => RunErrorKind::Store,
             Error::Bind { .. }
             | Error::BindSchema { .. }
             | Error::BindQuery { .. }
