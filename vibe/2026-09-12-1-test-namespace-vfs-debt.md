@@ -180,7 +180,7 @@ Each step is one commit containing its code and tests.
 
 <step-7>
 
-### Step 7: make handle acquisition fallible
+### Step 7: make handle acquisition fallible [completed]
 
 - Component: vfs-debt-removal
 - Depends on step 5: the described caller set assumes the bashkit adapter (three acquisition call sites) is gone.

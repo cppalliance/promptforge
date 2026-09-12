@@ -750,10 +750,11 @@ impl<'a> Scheduler<'a> {
     /// enqueues it.
     ///
     /// # Errors
-    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
+    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
+    /// or [`Error::Store`] when the backend refuses acquisition.
     fn start_root_walk(&mut self, sections: &'a [Section], var: &serde_json::Value) -> Result<()> {
         let root = self.start_chain(self.ctx.clone(), sections, 0, None, var, 0, None)?;
-        self.install_root_slots(root);
+        self.install_root_slots(root)?;
         self.ready.push_back(root);
         Ok(())
     }
@@ -765,9 +766,14 @@ impl<'a> Scheduler<'a> {
     /// the run's configured client, as the legacy walk's slot is seeded
     /// from run()'s client: a prose block before any infer must use it
     /// rather than fall back to building an environment client.
-    fn install_root_slots(&mut self, root: ChainId) {
-        self.chains[root.index()].access = Some(Arc::new(self.ctx.vfs().acquire()));
+    ///
+    /// # Errors
+    /// Returns [`Error::Store`] when the backend refuses acquisition.
+    fn install_root_slots(&mut self, root: ChainId) -> Result<()> {
+        let access = self.ctx.vfs().acquire().map_err(Error::Store)?;
+        self.chains[root.index()].access = Some(Arc::new(access));
         self.chains[root.index()].client = self.client.ready().cloned();
+        Ok(())
     }
 
     /// Starts the live H1 pass as the driver loop's first chain: the
@@ -775,7 +781,8 @@ impl<'a> Scheduler<'a> {
     /// coroutine machinery as any section under the live pass's rules.
     ///
     /// # Errors
-    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
+    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
+    /// or [`Error::Store`] when the backend refuses acquisition.
     fn start_live_h1(&mut self) -> Result<ChainId> {
         let id = ChainId(
             u32::try_from(self.chains.len())
@@ -784,9 +791,10 @@ impl<'a> Scheduler<'a> {
         // The pass owns its client slot, seeded from the run's configured
         // client, exactly as the legacy pass seeds its own.
         let client = self.client.ready().cloned();
+        let access = self.ctx.vfs().acquire().map_err(Error::Store)?;
         self.chains.push(Chain {
             ctx: self.ctx.clone(),
-            access: Some(Arc::new(self.ctx.vfs().acquire())),
+            access: Some(Arc::new(access)),
             frame: None,
             slice: &[],
             index: 0,
@@ -815,6 +823,7 @@ impl<'a> Scheduler<'a> {
     /// # Errors
     /// Returns [`Error::Lua`] when the final `var` read-back fails,
     /// [`Error::TimestampFormat`] when the walk's `when` fails to format,
+    /// [`Error::Store`] when the backend refuses the walk's acquisition,
     /// or [`Error::Internal`] when the chain holds no frame.
     fn end_live_h1(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
         let chain = &mut self.chains[id.index()];
@@ -836,7 +845,7 @@ impl<'a> Scheduler<'a> {
         let when = now_rfc3339_checked()?;
         let walk_ctx = self.ctx.with_walk_state(&when);
         let root = self.start_chain(walk_ctx, sections, 0, None, &var, 0, None)?;
-        self.install_root_slots(root);
+        self.install_root_slots(root)?;
         self.ready.push_back(root);
         Ok(())
     }
@@ -2239,7 +2248,8 @@ impl<'a> Scheduler<'a> {
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the join is not live or the run's
-    /// chain count exceeds `u32`.
+    /// chain count exceeds `u32`, or [`Error::Store`] when the backend
+    /// refuses an arm's acquisition.
     fn refill_fanout(&mut self, fanout: FanoutId) -> Result<()> {
         loop {
             let (index, item, template) = {
@@ -2295,7 +2305,8 @@ impl<'a> Scheduler<'a> {
             // caller's claims (the happens-before edge), and drops with
             // the chain so a finished arm's claims never linger into the
             // join's merge.
-            self.chains[chain.index()].access = Some(Arc::new(template.access.spawn()));
+            let access = template.access.spawn().map_err(Error::Store)?;
+            self.chains[chain.index()].access = Some(Arc::new(access));
             // The arm inherits the caller's client slot: an
             // already-resolved client is shared, an unresolved one stays
             // lazy.

@@ -15,7 +15,11 @@ const EXECUTION: &str = "lua-test";
 /// exists and the vended identity is the test's own, so seeding through the
 /// facade and the VM's store ops never meet a second live identity.
 fn fresh_access() -> Arc<Access> {
-    Arc::new(promptforge_vfs::empty().acquire())
+    Arc::new(
+        promptforge_vfs::empty()
+            .acquire()
+            .expect("the stock backend acquires"),
+    )
 }
 
 #[derive(Default)]
@@ -134,7 +138,11 @@ impl VfsAccess for FailingAccess {
 
 /// The access a failing backend vends, for tests driving the error path.
 fn failing_access() -> Arc<Access> {
-    Arc::new(VfsRef::new(FailingBackend).acquire())
+    Arc::new(
+        VfsRef::new(FailingBackend)
+            .acquire()
+            .expect("the failing backend still acquires"),
+    )
 }
 
 struct BoundaryRecorder {

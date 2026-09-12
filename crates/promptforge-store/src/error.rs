@@ -189,7 +189,7 @@ impl StoreError {
     /// use promptforge_store::{StoreErrorKind, StoreExt};
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().expect("the stock backend acquires");
     /// let store = vfs.store(&access);
     /// let err = store.read("missing.txt").unwrap_err();
     /// assert_eq!(err.kind(), StoreErrorKind::NotFound);
@@ -217,7 +217,7 @@ impl StoreError {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().expect("the stock backend acquires");
     /// let store = vfs.store(&access);
     /// let err = store.read("missing.txt").unwrap_err();
     /// assert!(err.is_not_found());
@@ -234,7 +234,7 @@ impl StoreError {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().expect("the stock backend acquires");
     /// let store = vfs.store(&access);
     /// let err = store.read("missing.txt").unwrap_err();
     /// assert_eq!(err.path(), Some("missing.txt"));

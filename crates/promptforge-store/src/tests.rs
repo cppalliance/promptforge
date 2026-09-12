@@ -17,7 +17,7 @@ use super::{MAX_GLOB_PATTERN_BYTES, PathReason, Store, StoreError, StoreErrorKin
 /// single-identity test starts from.
 fn stock() -> (VfsRef, Access) {
     let vfs = promptforge_vfs::empty();
-    let access = vfs.acquire();
+    let access = vfs.acquire().expect("the stock backend acquires");
     (vfs, access)
 }
 
@@ -80,7 +80,7 @@ fn a_second_identitys_write_to_a_claimed_path_races() {
     store
         .write("a.txt", "uno")
         .expect("one identity may rewrite its own path");
-    let second = vfs.acquire();
+    let second = vfs.acquire().expect("the stock backend acquires");
     let contender = vfs.store(&second);
     let err = contender
         .write("a.txt", "two")
@@ -115,7 +115,7 @@ fn a_glob_over_a_claimed_path_races_like_a_read() {
     let (vfs, first) = stock();
     let store = vfs.store(&first);
     store.write("a.txt", "one").expect("first write");
-    let second = vfs.acquire();
+    let second = vfs.acquire().expect("the stock backend acquires");
     let contender = vfs.store(&second);
     let err = contender
         .glob("*.txt")
@@ -147,7 +147,7 @@ fn identities_share_backing_state_once_claims_are_released() {
         .write("shared.txt", "written by the first")
         .expect("write");
     drop(first);
-    let second = vfs.acquire();
+    let second = vfs.acquire().expect("the stock backend acquires");
     let reader = vfs.store(&second);
     assert_eq!(
         reader.read("shared.txt").expect("read"),
@@ -777,7 +777,7 @@ fn a_panicking_operation_does_not_wedge_the_store() {
     let vfs = VfsRef::builder()
         .mount(STORE_MOUNT, PanicBackend(MemoryBackend::new()))
         .build();
-    let access = vfs.acquire();
+    let access = vfs.acquire().expect("the stock backend acquires");
     let store = vfs.store(&access);
     let outcome =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| store.write("a.txt", "x")));

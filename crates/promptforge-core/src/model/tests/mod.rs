@@ -21,7 +21,11 @@ const EXECUTION: &str = "model-bind-test";
 /// A fresh stock handle's access capability, for tests that inject host
 /// values into a standalone VM.
 fn fresh_access() -> Arc<Access> {
-    Arc::new(promptforge_vfs::empty().acquire())
+    Arc::new(
+        promptforge_vfs::empty()
+            .acquire()
+            .expect("the stock backend acquires"),
+    )
 }
 
 fn ctx(window: u32) -> NonZeroU32 {

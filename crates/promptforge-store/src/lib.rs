@@ -52,7 +52,7 @@ pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 /// use promptforge_store::StoreExt;
 ///
 /// let vfs = promptforge_vfs::empty();
-/// let access = vfs.acquire();
+/// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
 /// let store = vfs.store(&access);
 /// store.write("shared.txt", "state")?;
 /// assert_eq!(store.read("shared.txt")?, "state");
@@ -90,7 +90,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi")?;
     /// # Ok::<(), promptforge_store::StoreError>(())
@@ -114,7 +114,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.append("a.txt", "hi")?;
     /// # Ok::<(), promptforge_store::StoreError>(())
@@ -140,7 +140,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi\n")?;
     /// assert_eq!(store.read("a.txt")?, "hi\n");
@@ -171,7 +171,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
     /// assert_eq!(store.read_range("a.txt", 2, None)?, "two\nthree");
@@ -210,7 +210,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
     /// assert_eq!(
@@ -264,7 +264,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "one two")?;
     /// store.str_replace("a.txt", "two", "three")?;
@@ -314,7 +314,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi")?;
     /// store.delete("a.txt")?;
@@ -350,7 +350,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "")?;
     /// store.write("b.md", "")?;
@@ -427,7 +427,7 @@ impl Store<'_> {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// assert!(!store.exists("a.txt")?);
     /// store.write("a.txt", "hi")?;
@@ -457,7 +457,7 @@ pub trait StoreExt {
     /// use promptforge_store::StoreExt;
     ///
     /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs.acquire();
+    /// let access = vfs.acquire().map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("seeded.txt", "input")?;
     /// # Ok::<(), promptforge_store::StoreError>(())

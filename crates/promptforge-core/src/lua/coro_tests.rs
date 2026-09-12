@@ -114,7 +114,11 @@ fn scheduler_vm_with_tools(
     .expect("the section VM builds");
     let shared = LuaProgram::empty().expect("the empty shared program compiles");
     let sys = json!({});
-    let access = Arc::new(promptforge_vfs::empty().acquire());
+    let access = Arc::new(
+        promptforge_vfs::empty()
+            .acquire()
+            .expect("the stock backend acquires"),
+    );
     let setup = SectionVmSetup {
         args: "",
         sys: &sys,

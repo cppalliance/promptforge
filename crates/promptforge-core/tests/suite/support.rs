@@ -111,7 +111,7 @@ pub(super) struct FixtureStore(VfsRef);
 impl FixtureStore {
     /// Reads a store path through a fresh, immediately dropped access.
     pub(super) fn read(&self, path: &str) -> Result<String, StoreError> {
-        let access = self.0.acquire();
+        let access = self.0.acquire().map_err(StoreError::backend)?;
         self.0.store(&access).read(path)
     }
 }

@@ -61,8 +61,9 @@ pub enum AgentError {
     Interrupted,
 
     /// The agent program failed: a Lua compile or runtime error, an
-    /// exhausted Lua resource quota, a failed host contract, or a dispatch
-    /// failure the program did not catch.
+    /// exhausted Lua resource quota, a failed host contract, a dispatch
+    /// failure the program did not catch, or the store capability's
+    /// acquisition failure before the program started.
     #[error("{message}")]
     Program {
         /// The failure rendered as its location-tagged diagnostic.
@@ -230,7 +231,10 @@ async fn drive(
     vm.apply_lua_limits(limits.lua_memory_bytes, limits.lua_log_events)?;
     // The agent is one serial thread of execution: one capability for the
     // whole run, released when it drops at the run's end.
-    let access = Arc::new(vfs.acquire());
+    let access = Arc::new(vfs.acquire().map_err(|error| AgentError::Program {
+        message: format!("the store capability acquisition failed: {error}"),
+        source: Some(Box::new(error)),
+    })?);
     let (counts, events) =
         match setup_agent_vm(&mut vm, &access, &observer, &name, &tool_set, event_log, ui) {
             Ok(installed) => installed,
@@ -905,7 +909,9 @@ mod tests {
         vfs: &VfsRef,
         path: &str,
     ) -> std::result::Result<String, promptforge_store::StoreError> {
-        let access = vfs.acquire();
+        let access = vfs
+            .acquire()
+            .map_err(promptforge_store::StoreError::backend)?;
         promptforge_store::StoreExt::store(vfs, &access).read(path)
     }
 

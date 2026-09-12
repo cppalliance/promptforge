@@ -335,7 +335,11 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     vm.inject_host(
         "",
         &serde_json::json!({}),
-        &std::sync::Arc::new(promptforge_vfs::empty().acquire()),
+        &std::sync::Arc::new(
+            promptforge_vfs::empty()
+                .acquire()
+                .expect("the stock backend acquires"),
+        ),
     )
     .expect("host injection installs the H2 models table");
     vm

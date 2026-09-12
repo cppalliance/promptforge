@@ -272,7 +272,7 @@ pub async fn run(
 /// throwaway overlay. The probe's identity and claim release with the
 /// access.
 fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, shared_vfs::VfsError> {
-    match vfs.acquire().stat(promptforge_vfs::STORE_MOUNT) {
+    match vfs.acquire()?.stat(promptforge_vfs::STORE_MOUNT) {
         Ok(_) => Ok(true),
         Err(shared_vfs::VfsError::NotFound(_)) => Ok(false),
         Err(error) => Err(error),

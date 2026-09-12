@@ -9,7 +9,11 @@ use crate::{Error, SectionVm};
 
 /// A fresh stock handle's access capability for a test VM.
 fn fresh_access() -> std::sync::Arc<promptforge_store::Access> {
-    std::sync::Arc::new(promptforge_vfs::empty().acquire())
+    std::sync::Arc::new(
+        promptforge_vfs::empty()
+            .acquire()
+            .expect("the stock backend acquires"),
+    )
 }
 
 fn lua_with_messages() -> Lua {

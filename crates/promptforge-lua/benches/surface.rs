@@ -44,7 +44,11 @@ fn builder_vm() -> SectionVm {
     vm.inject_host(
         "",
         &json!({}),
-        &std::sync::Arc::new(promptforge_vfs::empty().acquire()),
+        &std::sync::Arc::new(
+            promptforge_vfs::empty()
+                .acquire()
+                .expect("the stock backend acquires"),
+        ),
     )
     .expect("host injection installs the messages namespace");
     vm

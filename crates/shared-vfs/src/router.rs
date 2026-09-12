@@ -258,9 +258,7 @@ impl VfsAccess for RoutingAccess {
         self.one_mount(from, to, "rename")?;
         let from_stripped = self.strip(from)?;
         let to_stripped = self.strip(to)?;
-        self.with_mount(from, |session| {
-            session.rename(&from_stripped, &to_stripped)
-        })
+        self.with_mount(from, |session| session.rename(&from_stripped, &to_stripped))
     }
 
     fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
@@ -567,7 +565,7 @@ mod tests {
             .mount("/a/b", inner.clone())
             .mount("/elsewhere", untouched.clone())
             .build();
-        let access = vfs.acquire();
+        let access = vfs.acquire()?;
         access.write("/a/b/f.txt", b"inner")?;
         access.write("/a/f.txt", b"outer")?;
         // Each backend keyed the file by its mount-relative path.
@@ -590,7 +588,7 @@ mod tests {
             .mount("/", base.clone())
             .mount("/mnt", shadow.clone())
             .build();
-        let access = vfs.acquire();
+        let access = vfs.acquire()?;
         // The shadow mount owns everything under /mnt.
         assert_eq!(access.read("/mnt/f.txt")?, b"shadow-mnt");
         // The base still owns the rest of the namespace.
@@ -614,14 +612,14 @@ mod tests {
             .mount("/base", base.clone())
             .mount("/local", local.clone())
             .build();
-        let writer = child.acquire();
+        let writer = child.acquire()?;
         writer.write("/base/f.txt", b"nested")?;
         // The child router stripped its mount prefix: the base backend
         // keyed the file at its own root.
         assert!(base_storage.files().contains_key("/f.txt"));
         // A second child identity conflicts on the same path: the claim
         // registered through the mounted handle is visible.
-        let reader = child.acquire();
+        let reader = child.acquire()?;
         match reader.read("/base/f.txt") {
             Err(VfsError::Conflict(_)) => {}
             other => panic!("expected a conflict, got {other:?}"),
@@ -641,7 +639,7 @@ mod tests {
             .mount("/", rw.clone())
             .mount("/ro", ro.clone())
             .build();
-        let access = vfs.acquire();
+        let access = vfs.acquire()?;
         // Reads are not gated.
         assert_eq!(access.read("/ro/a.txt")?, b"keep");
         // A write is denied with a clear read-only error.
@@ -673,9 +671,9 @@ mod tests {
     }
 
     #[test]
-    fn traversal_that_escapes_the_namespace_root_is_rejected() {
+    fn traversal_that_escapes_the_namespace_root_is_rejected() -> Result<(), VfsError> {
         let vfs = VfsRef::builder().mount("/mnt", StubFs::default()).build();
-        let access = vfs.acquire();
+        let access = vfs.acquire()?;
         assert!(matches!(
             access.read("/mnt/../../etc/passwd"),
             Err(VfsError::InvalidPath(_))
@@ -684,6 +682,7 @@ mod tests {
             access.glob("/mnt/../../*"),
             Err(VfsError::InvalidPath(_))
         ));
+        Ok(())
     }
 
     #[test]
@@ -691,7 +690,7 @@ mod tests {
         // No root mount: the only storage lives at /mnt.
         let storage = StubFs::seeded(&[("/f.txt", "inside")]);
         let vfs = VfsRef::builder().mount("/mnt", storage.clone()).build();
-        let access = vfs.acquire();
+        let access = vfs.acquire()?;
         // Dot segments within the mount resolve within the mount: the
         // backend sees the clean mount-relative path.
         assert_eq!(access.read("/mnt/sub/../f.txt")?, b"inside");
@@ -718,7 +717,7 @@ mod tests {
             .mount("/a", StubFs::default())
             .mount("/a/b", inner.clone())
             .build();
-        let access = vfs.acquire();
+        let access = vfs.acquire()?;
         let matches = access.glob("/a/b/*.txt")?;
         assert_eq!(matches, vec!["/a/b/x.txt".to_owned()]);
         Ok(())
@@ -735,7 +734,7 @@ mod tests {
             .build();
         let overlay = base.overlay("/overlay", extra.clone());
 
-        let writer = overlay.acquire();
+        let writer = overlay.acquire()?;
         writer.write("/store/doc.md", b"store")?;
         writer.write("/scratch/tmp.txt", b"scratch")?;
         writer.write("/overlay/x.txt", b"overlay")?;
@@ -743,7 +742,7 @@ mod tests {
         drop(writer);
 
         // The base handle serves its own mounts from the same storage.
-        let reader = base.acquire();
+        let reader = base.acquire()?;
         assert_eq!(reader.read("/store/doc.md")?, b"store");
         assert_eq!(reader.read("/scratch/tmp.txt")?, b"scratch");
         // The overlay mount exists only in the overlay's view.
@@ -758,11 +757,11 @@ mod tests {
     fn an_overlay_shares_the_bases_claims_table() -> Result<(), VfsError> {
         let base = VfsRef::builder().mount("/store", StubFs::default()).build();
         let overlay = base.overlay("/overlay", StubFs::default());
-        let first = base.acquire();
+        let first = base.acquire()?;
         first.write("/store/shared.txt", b"1")?;
         // A write claim registered through the base conflicts with a
         // write attempted through the overlay: one claims table.
-        let second = overlay.acquire();
+        let second = overlay.acquire()?;
         match second.write("/store/shared.txt", b"2") {
             Err(VfsError::Conflict(message)) => {
                 assert!(message.contains("/store/shared.txt"), "{message}");

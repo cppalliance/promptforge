@@ -14,7 +14,11 @@ use std::sync::{Arc, Mutex};
 
 /// A fresh stock handle's access capability for a test VM.
 fn fresh_access() -> Arc<promptforge_store::Access> {
-    Arc::new(promptforge_vfs::empty().acquire())
+    Arc::new(
+        promptforge_vfs::empty()
+            .acquire()
+            .expect("the stock backend acquires"),
+    )
 }
 
 fn echo_handle() -> LuaToolHandle {

@@ -2318,7 +2318,9 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     // or the run's writes.
     assert!(
         matches!(
-            vfs.acquire().stat(promptforge_vfs::STORE_MOUNT),
+            vfs.acquire()
+                .expect("the stock backend acquires")
+                .stat(promptforge_vfs::STORE_MOUNT),
             Err(shared_vfs::VfsError::NotFound(_))
         ),
         "the run's writes must land on the overlay, not the caller's backend"

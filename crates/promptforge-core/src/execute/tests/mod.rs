@@ -36,7 +36,11 @@ use crate::untrusted::GuardNonce;
 /// A fresh stock handle's access capability, for tests that inject host
 /// values into a standalone VM.
 fn fresh_access() -> Arc<Access> {
-    Arc::new(promptforge_vfs::empty().acquire())
+    Arc::new(
+        promptforge_vfs::empty()
+            .acquire()
+            .expect("the stock backend acquires"),
+    )
 }
 
 const EXECUTION: &str = "execute-test";
@@ -227,12 +231,12 @@ impl TestStore {
     }
 
     fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
-        let access = self.0.acquire();
+        let access = self.0.acquire().map_err(StoreError::backend)?;
         self.0.store(&access).read(path)
     }
 
     fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
-        let access = self.0.acquire();
+        let access = self.0.acquire().map_err(StoreError::backend)?;
         self.0.store(&access).glob(pattern)
     }
 }

@@ -562,7 +562,7 @@ impl FixtureRun {
     /// immediately dropped access: the run's identity dropped with it, so
     /// nothing it wrote conflicts with the extraction.
     fn read(&self, path: &str) -> String {
-        let access = self.vfs.acquire();
+        let access = self.vfs.acquire().expect("the stock backend acquires");
         self.vfs
             .store(&access)
             .read(path)
