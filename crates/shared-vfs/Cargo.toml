@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge shared virtual filesystem machinery: canonical interned paths, claims, routing, and backends"
+description = "PromptForge shared virtual filesystem machinery: canonical shared paths, claims, routing, and backends"
 
 # Zero-dependency rule: std only. No dependencies, workspace or external.
 # The manifest test enforces this; never weaken it.

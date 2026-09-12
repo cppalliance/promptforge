@@ -26,6 +26,20 @@ pub use types::{Entry, FileType, GrepMatch, GrepQuery, GrepResults, Stat};
 
 #[cfg(test)]
 mod tests {
+    /// A manifest section is a dependency table when it is exactly one of
+    /// the three dependency tables, a sub-table of one
+    /// (`[dependencies.foo]` declares a dependency the same way), or a
+    /// target-qualified dependency table.
+    fn is_dependency_table(section: &str) -> bool {
+        const TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+        TABLES.iter().any(|table| {
+            section == *table
+                || section
+                    .strip_prefix(*table)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        }) || (section.starts_with("target.") && section.ends_with(".dependencies"))
+    }
+
     /// The zero-dependency rule is load-bearing: this crate compiles alone
     /// and never rebuilds for a dependency rev, so the manifest must never
     /// declare a dependency. This test reads the crate's own Cargo.toml and
@@ -45,15 +59,31 @@ mod tests {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let is_dependency_table = section == "dependencies"
-                || section == "dev-dependencies"
-                || section == "build-dependencies"
-                || (section.starts_with("target.") && section.ends_with(".dependencies"));
             assert!(
-                !is_dependency_table,
+                !is_dependency_table(&section),
                 "zero-dependency rule violated: [{section}] declares `{line}`"
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn dependency_sub_tables_count_as_dependency_tables() {
+        // Regression: `[dependencies.foo]` once slipped past the exact-
+        // match section check while still declaring a dependency.
+        for section in [
+            "dependencies",
+            "dependencies.foo",
+            "dev-dependencies",
+            "dev-dependencies.foo",
+            "build-dependencies",
+            "build-dependencies.foo",
+            "target.'cfg(windows)'.dependencies",
+        ] {
+            assert!(is_dependency_table(section), "[{section}] must be caught");
+        }
+        for section in ["package", "lints", "features", "dependenciesfoo"] {
+            assert!(!is_dependency_table(section), "[{section}] must pass");
+        }
     }
 }

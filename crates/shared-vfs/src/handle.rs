@@ -78,13 +78,13 @@ impl Claims {
     /// never conflicts. An identity never conflicts with itself.
     fn claim(&self, path: VfsPath, id: ExecId, kind: ClaimKind) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        if let Some(other) = other_claimant(&tables.writers, path, id) {
-            return Err(conflict(path, id, kind, other, ClaimKind::Write));
+        if let Some(other) = other_claimant(&tables.writers, &path, id) {
+            return Err(conflict(&path, id, kind, other, ClaimKind::Write));
         }
         if kind == ClaimKind::Write
-            && let Some(other) = other_claimant(&tables.readers, path, id)
+            && let Some(other) = other_claimant(&tables.readers, &path, id)
         {
-            return Err(conflict(path, id, kind, other, ClaimKind::Read));
+            return Err(conflict(&path, id, kind, other, ClaimKind::Read));
         }
         let map = match kind {
             ClaimKind::Read => &mut tables.readers,
@@ -115,10 +115,10 @@ impl Claims {
 /// Returns the first claimant of `path` in `map` other than `id`.
 fn other_claimant(
     map: &HashMap<VfsPath, Vec<ExecId>>,
-    path: VfsPath,
+    path: &VfsPath,
     id: ExecId,
 ) -> Option<ExecId> {
-    map.get(&path)?.iter().find(|&&other| other != id).copied()
+    map.get(path)?.iter().find(|&&other| other != id).copied()
 }
 
 /// Removes every claim held by `id`, dropping emptied path entries.
@@ -137,7 +137,7 @@ fn delete_claims(tables: &mut ClaimsTables, id: ExecId) {
 /// kinds: the executor maps it to a fatal run error, and the message is
 /// the whole diagnosis.
 fn conflict(
-    path: VfsPath,
+    path: &VfsPath,
     id: ExecId,
     kind: ClaimKind,
     other: ExecId,
@@ -527,26 +527,28 @@ impl Access {
     /// backend fails.
     pub fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
         let root = canonicalize(query.root.as_str())?;
-        self.check_policy(Op::Grep, root)?;
+        self.check_policy(Op::Grep, &root)?;
         self.volume.claims.claim(root, self.id, ClaimKind::Read)?;
         self.inner().grep(query)
     }
 
     /// Canonicalizes at receipt, consults the policy, then registers the
     /// claim - in that order, so a denied operation never registers a
-    /// claim and every claim key is the canonical interned path.
+    /// claim and every claim key is the canonical path.
     fn gate(&self, op: Op, path: &str, claim: ClaimKind) -> Result<VfsPath, VfsError> {
         let path = canonicalize(path)?;
-        self.check_policy(op, path)?;
-        self.volume.claims.claim(path, self.id, claim)?;
+        self.check_policy(op, &path)?;
+        // The claims table holds its own clone: the string frees when
+        // the claim and every other owner drop.
+        self.volume.claims.claim(path.clone(), self.id, claim)?;
         Ok(path)
     }
 
     /// Consults the handle's policy. v1 maps `Ask` to `PermissionDenied`:
     /// the approval dialog is a host concern above this layer, and the
     /// reason string still names what was asked and which rule fired.
-    fn check_policy(&self, op: Op, path: VfsPath) -> Result<(), VfsError> {
-        match self.policy.check(op, &path) {
+    fn check_policy(&self, op: Op, path: &VfsPath) -> Result<(), VfsError> {
+        match self.policy.check(op, path) {
             Verdict::Allow => Ok(()),
             Verdict::Deny(reason) | Verdict::Ask(reason) => Err(VfsError::PermissionDenied(reason)),
         }

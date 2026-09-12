@@ -168,7 +168,7 @@ Each step is one commit containing its code and tests.
 
 <step-6>
 
-### Step 6: de-intern VfsPath, close the manifest test bypass, and correct archdoc
+### Step 6: de-intern VfsPath, close the manifest test bypass, and correct archdoc [completed]
 
 - Component: vfs-debt-removal
 - In `promptforge/crates/shared-vfs/src/path.rs`: remove the `Interner` and the `OnceLock<Mutex<..>>` global; give `VfsPath` an `Arc<str>` field so `canonicalize` allocates one `Arc<str>` per call and the string frees when its last owner drops. `VfsPath` loses `Copy`; `VfsPath::as_str` returns `&str` borrowed from self instead of `&'static str`. Update claim sites to hold clones, change the `identical_paths_intern_to_one_entry` property test's pointer-equality assertion to content equality, and add the regression check that a loop canonicalizing distinct paths does not grow the heap monotonically.

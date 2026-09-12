@@ -63,7 +63,7 @@ fn lua_error_message(error: &Error) -> &str {
 struct FailingBackend;
 
 impl FailingBackend {
-    fn error(path: VfsPath) -> VfsError {
+    fn error(path: &VfsPath) -> VfsError {
         VfsError::Backend(format!(
             "the failing backend rejects every operation: {path}"
         ))
@@ -86,23 +86,23 @@ struct FailingAccess;
 
 impl VfsAccess for FailingAccess {
     fn read(&self, path: &VfsPath) -> std::result::Result<Vec<u8>, VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn write(&mut self, path: &VfsPath, _contents: &[u8]) -> std::result::Result<(), VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn append(&mut self, path: &VfsPath, _contents: &[u8]) -> std::result::Result<(), VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn remove(&mut self, path: &VfsPath, _recursive: bool) -> std::result::Result<(), VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn exists(&self, path: &VfsPath) -> std::result::Result<bool, VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, VfsError> {
@@ -112,23 +112,23 @@ impl VfsAccess for FailingAccess {
     }
 
     fn list(&self, path: &VfsPath) -> std::result::Result<Vec<shared_vfs::Entry>, VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn stat(&self, path: &VfsPath) -> std::result::Result<shared_vfs::Stat, VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn mkdir(&mut self, path: &VfsPath, _recursive: bool) -> std::result::Result<(), VfsError> {
-        Err(FailingBackend::error(*path))
+        Err(FailingBackend::error(path))
     }
 
     fn rename(&mut self, from: &VfsPath, _to: &VfsPath) -> std::result::Result<(), VfsError> {
-        Err(FailingBackend::error(*from))
+        Err(FailingBackend::error(from))
     }
 
     fn copy(&mut self, from: &VfsPath, _to: &VfsPath) -> std::result::Result<(), VfsError> {
-        Err(FailingBackend::error(*from))
+        Err(FailingBackend::error(from))
     }
 }
 

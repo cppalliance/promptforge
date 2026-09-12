@@ -131,7 +131,7 @@ impl RoutingAccess {
     /// acquiring that session on first touch.
     fn with_mount<R>(
         &self,
-        path: VfsPath,
+        path: &VfsPath,
         op: impl FnOnce(&mut dyn VfsAccess) -> Result<R, VfsError>,
     ) -> Result<R, VfsError> {
         let (prefix, backend) = resolve(&self.mounts, path.as_str())
@@ -148,7 +148,7 @@ impl RoutingAccess {
     }
 
     /// The mount-relative path the serving backend sees.
-    fn strip(&self, path: VfsPath) -> Result<VfsPath, VfsError> {
+    fn strip(&self, path: &VfsPath) -> Result<VfsPath, VfsError> {
         let (prefix, _) = resolve(&self.mounts, path.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {path}")))?;
         canonicalize(strip_mount(prefix.as_str(), path.as_str()))
@@ -156,7 +156,7 @@ impl RoutingAccess {
 
     /// Rejects mutations on read-only mounts before anything is
     /// touched: a denied operation never partially applies.
-    fn check_writable(&self, path: VfsPath) -> Result<(), VfsError> {
+    fn check_writable(&self, path: &VfsPath) -> Result<(), VfsError> {
         let (prefix, backend) = resolve(&self.mounts, path.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {path}")))?;
         if lock(backend).read_only() {
@@ -169,7 +169,7 @@ impl RoutingAccess {
 
     /// Two-path operations require one mount: backend atomicity
     /// guarantees stop at the mount boundary.
-    fn one_mount(&self, from: VfsPath, to: VfsPath, op: &str) -> Result<(), VfsError> {
+    fn one_mount(&self, from: &VfsPath, to: &VfsPath, op: &str) -> Result<(), VfsError> {
         let from_prefix = resolve(&self.mounts, from.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {from}")))?
             .0;
@@ -187,38 +187,38 @@ impl RoutingAccess {
 
 impl VfsAccess for RoutingAccess {
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.read(&stripped))
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.read(&stripped))
     }
 
     fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
         // Delegated, not defaulted, so backends that can seek never
         // materialize the file.
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.read_range(&stripped, offset, len))
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.read_range(&stripped, offset, len))
     }
 
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.write(&stripped, contents))
+        self.check_writable(path)?;
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.write(&stripped, contents))
     }
 
     fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.append(&stripped, contents))
+        self.check_writable(path)?;
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.append(&stripped, contents))
     }
 
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.remove(&stripped, recursive))
+        self.check_writable(path)?;
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.remove(&stripped, recursive))
     }
 
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.exists(&stripped))
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.exists(&stripped))
     }
 
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
@@ -229,7 +229,7 @@ impl VfsAccess for RoutingAccess {
         let (prefix, _) = resolve(&self.mounts, canonical.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {canonical}")))?;
         let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
-        let mut matches = self.with_mount(canonical, |session| session.glob(&scoped))?;
+        let mut matches = self.with_mount(&canonical, |session| session.glob(&scoped))?;
         for path in &mut matches {
             *path = rejoin(prefix.as_str(), path);
         }
@@ -237,46 +237,46 @@ impl VfsAccess for RoutingAccess {
     }
 
     fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.list(&stripped))
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.list(&stripped))
     }
 
     fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.stat(&stripped))
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.stat(&stripped))
     }
 
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.mkdir(&stripped, recursive))
+        self.check_writable(path)?;
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.mkdir(&stripped, recursive))
     }
 
     fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(*from)?;
-        self.check_writable(*to)?;
-        self.one_mount(*from, *to, "rename")?;
-        let from_stripped = self.strip(*from)?;
-        let to_stripped = self.strip(*to)?;
-        self.with_mount(*from, |session| {
+        self.check_writable(from)?;
+        self.check_writable(to)?;
+        self.one_mount(from, to, "rename")?;
+        let from_stripped = self.strip(from)?;
+        let to_stripped = self.strip(to)?;
+        self.with_mount(from, |session| {
             session.rename(&from_stripped, &to_stripped)
         })
     }
 
     fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(*to)?;
-        self.one_mount(*from, *to, "copy")?;
-        let from_stripped = self.strip(*from)?;
-        let to_stripped = self.strip(*to)?;
-        self.with_mount(*from, |session| session.copy(&from_stripped, &to_stripped))
+        self.check_writable(to)?;
+        self.one_mount(from, to, "copy")?;
+        let from_stripped = self.strip(from)?;
+        let to_stripped = self.strip(to)?;
+        self.with_mount(from, |session| session.copy(&from_stripped, &to_stripped))
     }
 
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         // Delegated so backends can push down; the read-only check here
         // covers the backend's default read-plus-write as well.
-        self.check_writable(*path)?;
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.str_replace(&stripped, old, new))
+        self.check_writable(path)?;
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.str_replace(&stripped, old, new))
     }
 
     fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
@@ -285,7 +285,7 @@ impl VfsAccess for RoutingAccess {
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {root}")))?;
         let mut scoped = query.clone();
         scoped.root = canonicalize(strip_mount(prefix.as_str(), root.as_str()))?.to_buf();
-        let mut results = self.with_mount(root, |session| session.grep(&scoped))?;
+        let mut results = self.with_mount(&root, |session| session.grep(&scoped))?;
         for hit in &mut results.matches {
             hit.path = rejoin(prefix.as_str(), &hit.path);
         }
@@ -293,21 +293,21 @@ impl VfsAccess for RoutingAccess {
     }
 
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(*link)?;
-        let stripped = self.strip(*link)?;
+        self.check_writable(link)?;
+        let stripped = self.strip(link)?;
         // The target is a stored name, not resolved: it passes verbatim.
-        self.with_mount(*link, |session| session.symlink(target, &stripped))
+        self.with_mount(link, |session| session.symlink(target, &stripped))
     }
 
     fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.read_link(&stripped))
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.read_link(&stripped))
     }
 
     fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let stripped = self.strip(*path)?;
-        self.with_mount(*path, |session| session.chmod(&stripped, mode))
+        self.check_writable(path)?;
+        let stripped = self.strip(path)?;
+        self.with_mount(path, |session| session.chmod(&stripped, mode))
     }
 }
 
@@ -460,7 +460,7 @@ mod tests {
             self.files.lock().unwrap_or_else(PoisonError::into_inner)
         }
 
-        fn record(&self, path: VfsPath) {
+        fn record(&self, path: &VfsPath) {
             self.seen
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -470,7 +470,7 @@ mod tests {
 
     impl VfsAccess for StubAccess {
         fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
-            self.record(*path);
+            self.record(path);
             self.files()
                 .get(path.as_str())
                 .cloned()
@@ -478,13 +478,13 @@ mod tests {
         }
 
         fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-            self.record(*path);
+            self.record(path);
             self.files().insert(path.to_string(), contents.to_vec());
             Ok(())
         }
 
         fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-            self.record(*path);
+            self.record(path);
             self.files()
                 .entry(path.to_string())
                 .or_default()
@@ -494,7 +494,7 @@ mod tests {
 
         fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
             let _ = recursive;
-            self.record(*path);
+            self.record(path);
             self.files()
                 .remove(path.as_str())
                 .map(|_| ())
@@ -502,7 +502,7 @@ mod tests {
         }
 
         fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-            self.record(*path);
+            self.record(path);
             Ok(self.files().contains_key(path.as_str()))
         }
 
@@ -534,8 +534,8 @@ mod tests {
         }
 
         fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-            self.record(*from);
-            self.record(*to);
+            self.record(from);
+            self.record(to);
             let bytes = self
                 .files()
                 .remove(from.as_str())
@@ -545,8 +545,8 @@ mod tests {
         }
 
         fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-            self.record(*from);
-            self.record(*to);
+            self.record(from);
+            self.record(to);
             let bytes = self
                 .files()
                 .get(from.as_str())

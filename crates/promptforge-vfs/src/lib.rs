@@ -112,7 +112,7 @@ fn is_mutation(op: Op) -> bool {
     clippy::case_sensitive_file_extension_comparisons,
     reason = "virtual paths are POSIX-strict; case-insensitive extension matching is a host-OS notion"
 )]
-fn is_markdown(path: VfsPath) -> bool {
+fn is_markdown(path: &VfsPath) -> bool {
     path.as_str().ends_with(".md")
 }
 
@@ -130,7 +130,7 @@ impl Policy for ModePolicy {
             // so Plan refuses to even read a non-markdown source. The
             // policy cannot tell the two apart; conservative refusal
             // is the safe side.
-            Mode::Plan if is_markdown(*path) => Verdict::Allow,
+            Mode::Plan if is_markdown(path) => Verdict::Allow,
             Mode::Plan => Verdict::Deny(format!(
                 "{op:?} on {path} is refused: the Plan mode allows mutations only to markdown paths"
             )),

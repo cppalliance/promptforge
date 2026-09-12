@@ -1,77 +1,30 @@
-//! Canonical, interned virtual paths.
+//! Canonical, shared virtual paths.
 //!
-//! Paths are canonicalized at the moment the API receives them and interned,
-//! so claim lookups are pointer-cheap and aliases cannot slip past the
+//! Paths are canonicalized at the moment the API receives them, so claim
+//! lookups compare one canonical form and aliases cannot slip past the
 //! claims tables. The only way to form a [`VfsPath`] is through
 //! `canonicalize`, which is crate-private: canonicalization at receipt is
 //! enforced by visibility, not convention.
 
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::Arc;
 
 use crate::error::VfsError;
 
-/// Hand-rolled string interner on std. Strings are leaked once each, so
-/// resolution is a vector index and equality is an integer compare.
-struct Interner {
-    ids: HashMap<&'static str, u32>,
-    strings: Vec<&'static str>,
-}
-
-impl Interner {
-    fn new() -> Self {
-        Self {
-            ids: HashMap::new(),
-            strings: Vec::new(),
-        }
-    }
-
-    fn intern(&mut self, s: &str) -> u32 {
-        if let Some(&id) = self.ids.get(s) {
-            return id;
-        }
-        let leaked: &'static str = Box::leak(s.into());
-        let Ok(id) = u32::try_from(self.strings.len()) else {
-            panic!("vfs path interner exhausted")
-        };
-        self.strings.push(leaked);
-        self.ids.insert(leaked, id);
-        id
-    }
-
-    fn resolve(&self, id: u32) -> &'static str {
-        match self.strings.get(id as usize) {
-            Some(s) => s,
-            None => panic!("vfs path id {id} was never interned"),
-        }
-    }
-}
-
-/// Poison-safe lock: each guard scope is one complete mutation, so a
-/// panicking writer cannot leave the tables half-updated and recovery is
-/// safe.
-fn interner() -> MutexGuard<'static, Interner> {
-    static INTERNER: OnceLock<Mutex<Interner>> = OnceLock::new();
-    INTERNER
-        .get_or_init(|| Mutex::new(Interner::new()))
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Canonical, interned virtual path. Produced by `canonicalize` at the
-/// moment the API receives a path; interning makes claim lookups
-/// pointer-cheap and guarantees alias detection.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/// Canonical virtual path. Produced by `canonicalize` at the moment the
+/// API receives a path. The string is `Arc`-shared per value lineage:
+/// clones share one allocation, and the string frees when its last
+/// owner drops. There is no global table and no lock.
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VfsPath {
-    id: u32,
+    text: Arc<str>,
 }
 
 impl VfsPath {
     /// Returns the canonical string for this path.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        interner().resolve(self.id)
+    pub fn as_str(&self) -> &str {
+        &self.text
     }
 
     /// Returns an owned copy of this path.
@@ -162,12 +115,15 @@ pub(crate) fn canonicalize(path: &str) -> Result<VfsPath, VfsError> {
         }
         s
     };
-    let id = interner().intern(&canonical);
-    Ok(VfsPath { id })
+    Ok(VfsPath {
+        text: canonical.into(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{VfsPath, canonicalize};
     use crate::VfsError;
 
@@ -235,11 +191,40 @@ mod tests {
     }
 
     #[test]
-    fn identical_paths_intern_to_one_entry() -> Result<(), VfsError> {
+    fn identical_paths_canonicalize_to_equal_values() -> Result<(), VfsError> {
         let first = canonicalize("/a/b")?;
         let second = canonicalize("/a/./b/")?;
         assert_eq!(first, second);
-        assert!(std::ptr::eq(first.as_str(), second.as_str()));
+        assert_eq!(first.as_str(), second.as_str());
+        Ok(())
+    }
+
+    #[test]
+    fn clones_share_one_allocation() -> Result<(), VfsError> {
+        let path = canonicalize("/a/b")?;
+        let clone = path.clone();
+        assert_eq!(Arc::strong_count(&path.text), 2);
+        drop(clone);
+        assert_eq!(Arc::strong_count(&path.text), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn canonicalizing_distinct_paths_in_a_loop_does_not_retain_their_strings()
+    -> Result<(), VfsError> {
+        // Regression: the interner leaked every distinct string for the
+        // process's life, so a loop like this grew the heap
+        // monotonically. Each path's string must free with its last
+        // owner - here, at the end of its own iteration.
+        let mut dangling = Vec::new();
+        for index in 0..1000 {
+            let path = canonicalize(&format!("/loop/{index}"))?;
+            dangling.push(Arc::downgrade(&path.text));
+        }
+        assert!(
+            dangling.iter().all(|weak| weak.upgrade().is_none()),
+            "a dropped path's string must free with its last owner"
+        );
         Ok(())
     }
 }

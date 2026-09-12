@@ -103,7 +103,7 @@ fn join_virtual(root: &Path, virtual_path: &str) -> PathBuf {
 /// is canonicalized and must sit under the (already canonical) root;
 /// the missing tail is re-appended lexically. This catches link escapes
 /// for existing paths while still resolving paths yet to be created.
-fn contain(root: &Path, candidate: &Path, original: VfsPath) -> Result<PathBuf, VfsError> {
+fn contain(root: &Path, candidate: &Path, original: &VfsPath) -> Result<PathBuf, VfsError> {
     let denied = || VfsError::PermissionDenied(format!("{original} escapes the mounted root"));
     let mut ancestor = candidate;
     let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
@@ -169,7 +169,7 @@ fn atomic_write(dest: &Path, contents: &[u8]) -> Result<(), VfsError> {
 
 /// Creates the destination's ancestor directories, matching the memory
 /// backend's materialize-on-write semantics.
-fn create_parent(host: &Path, path: VfsPath) -> Result<(), VfsError> {
+fn create_parent(host: &Path, path: &VfsPath) -> Result<(), VfsError> {
     if let Some(parent) = host.parent() {
         fs::create_dir_all(parent).map_err(|err| map_io(path.as_str(), &err))?;
     }
@@ -358,7 +358,7 @@ struct HostAccess {
 impl HostAccess {
     /// Resolves a canonical virtual path to its host path, applying
     /// containment in rooted mode.
-    fn resolve(&self, path: VfsPath) -> Result<PathBuf, VfsError> {
+    fn resolve(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
         match &self.root {
             HostRoot::Identity => Ok(identity_to_host(path.as_str())),
             HostRoot::Rooted(root) => {
@@ -390,7 +390,7 @@ impl HostAccess {
 
     /// Rejects mutations on a read-only backend before anything is
     /// touched: a denied operation never partially applies.
-    fn check_writable(&self, path: VfsPath) -> Result<(), VfsError> {
+    fn check_writable(&self, path: &VfsPath) -> Result<(), VfsError> {
         if self.read_only {
             return Err(VfsError::PermissionDenied(format!(
                 "the host backend is read-only, so {path} cannot be mutated"
@@ -402,7 +402,7 @@ impl HostAccess {
 
 impl VfsAccess for HostAccess {
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
-        let host = self.resolve(*path)?;
+        let host = self.resolve(path)?;
         if host.is_dir() {
             return Err(VfsError::IsADirectory(path.to_string()));
         }
@@ -411,7 +411,7 @@ impl VfsAccess for HostAccess {
 
     fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
         // Seek, never materialize: the host can position directly.
-        let host = self.resolve(*path)?;
+        let host = self.resolve(path)?;
         if host.is_dir() {
             return Err(VfsError::IsADirectory(path.to_string()));
         }
@@ -426,22 +426,22 @@ impl VfsAccess for HostAccess {
     }
 
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let host = self.resolve(*path)?;
+        self.check_writable(path)?;
+        let host = self.resolve(path)?;
         if host.is_dir() {
             return Err(VfsError::IsADirectory(path.to_string()));
         }
-        create_parent(&host, *path)?;
+        create_parent(&host, path)?;
         atomic_write(&host, contents)
     }
 
     fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let host = self.resolve(*path)?;
+        self.check_writable(path)?;
+        let host = self.resolve(path)?;
         if host.is_dir() {
             return Err(VfsError::IsADirectory(path.to_string()));
         }
-        create_parent(&host, *path)?;
+        create_parent(&host, path)?;
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -452,13 +452,13 @@ impl VfsAccess for HostAccess {
     }
 
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
+        self.check_writable(path)?;
         if path.as_str() == "/" {
             return Err(VfsError::PermissionDenied(
                 "the mounted root cannot be removed".into(),
             ));
         }
-        let host = self.resolve(*path)?;
+        let host = self.resolve(path)?;
         let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
         // symlink_metadata does not follow links: a symlink is removed
         // as a link, never its target.
@@ -475,7 +475,7 @@ impl VfsAccess for HostAccess {
     }
 
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-        let host = self.resolve(*path)?;
+        let host = self.resolve(path)?;
         // symlink_metadata counts a dangling link as existing. Only a
         // confirmed absence is Ok(false); every other failure (a
         // denied permission, a genuine I/O error) surfaces as Err, as
@@ -499,7 +499,7 @@ impl VfsAccess for HostAccess {
             )));
         }
         let tokens = compile_glob(pattern.as_bytes());
-        let root = self.resolve(canonicalize(walk_root(pattern))?)?;
+        let root = self.resolve(&canonicalize(walk_root(pattern))?)?;
         if !root.is_dir() {
             return Ok(Vec::new());
         }
@@ -515,7 +515,7 @@ impl VfsAccess for HostAccess {
     }
 
     fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-        let host = self.resolve(*path)?;
+        let host = self.resolve(path)?;
         let entries = fs::read_dir(&host).map_err(|err| map_io(path.as_str(), &err))?;
         let mut result = Vec::new();
         for entry in entries {
@@ -535,14 +535,14 @@ impl VfsAccess for HostAccess {
     }
 
     fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-        let host = self.resolve(*path)?;
+        let host = self.resolve(path)?;
         let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
         Ok(stat_of(&metadata))
     }
 
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.check_writable(*path)?;
-        let host = self.resolve(*path)?;
+        self.check_writable(path)?;
+        let host = self.resolve(path)?;
         if fs::symlink_metadata(&host).is_ok() {
             return Err(VfsError::AlreadyExists(path.to_string()));
         }
@@ -555,7 +555,7 @@ impl VfsAccess for HostAccess {
     }
 
     fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(*from)?;
+        self.check_writable(from)?;
         if from.as_str() == "/" {
             return Err(VfsError::PermissionDenied(
                 "the mounted root cannot be renamed".into(),
@@ -571,19 +571,19 @@ impl VfsAccess for HostAccess {
                 "cannot rename {from} into its own descendant {to}"
             )));
         }
-        let host_from = self.resolve(*from)?;
-        let host_to = self.resolve(*to)?;
+        let host_from = self.resolve(from)?;
+        let host_to = self.resolve(to)?;
         // Validation finishes before the rename syscall, so a failed
         // rename changes nothing; the rename itself is atomic.
         fs::symlink_metadata(&host_from).map_err(|err| map_io(from.as_str(), &err))?;
-        create_parent(&host_to, *to)?;
+        create_parent(&host_to, to)?;
         fs::rename(&host_from, &host_to).map_err(|err| map_io(from.as_str(), &err))
     }
 
     fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(*to)?;
-        let host_from = self.resolve(*from)?;
-        let host_to = self.resolve(*to)?;
+        self.check_writable(to)?;
+        let host_from = self.resolve(from)?;
+        let host_to = self.resolve(to)?;
         if host_from.is_dir() {
             return Err(VfsError::IsADirectory(from.to_string()));
         }
@@ -591,7 +591,7 @@ impl VfsAccess for HostAccess {
         if host_to.is_dir() {
             return Err(VfsError::IsADirectory(to.to_string()));
         }
-        create_parent(&host_to, *to)?;
+        create_parent(&host_to, to)?;
         atomic_write(&host_to, &bytes)
     }
 }
