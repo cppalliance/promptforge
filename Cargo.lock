@@ -4942,6 +4942,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-vfs"
+version = "0.3.0"
+dependencies = [
+ "shared-vfs",
+]
+
+[[package]]
 name = "promptforge-web-search"
 version = "0.3.0"
 dependencies = [

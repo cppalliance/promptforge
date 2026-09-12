@@ -30,6 +30,7 @@ gateway-logging = { path = "crates/gateway-logging", version = "0.3.0" }
 shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
 shared-protocol = { path = "crates/shared-protocol", version = "0.3.0" }
 shared-sidecar = { path = "crates/shared-sidecar", version = "0.3.0" }
+shared-vfs = { path = "crates/shared-vfs", version = "0.3.0" }
 gateway-routing = { path = "crates/gateway-routing", version = "0.3.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.3.0" }
 promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.3.0" }

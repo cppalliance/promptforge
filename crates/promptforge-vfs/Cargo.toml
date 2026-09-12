@@ -1,0 +1,15 @@
+[package]
+name = "promptforge-vfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge virtual filesystem policy: the /_promptforge mount layout, the empty() stock handle, and the mode policy"
+
+[dependencies]
+shared-vfs.workspace = true
+
+[lints]
+workspace = true

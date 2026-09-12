@@ -624,7 +624,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-7>
 
-### Step 7: promptforge-vfs policy crate
+### Step 7: promptforge-vfs policy crate [completed]
 
 - Component: promptforge-vfs
 - Create `crates/promptforge-vfs` (depends on shared-vfs only): the `/_promptforge/store` mount layout, the `empty()` stock constructor (a router with a fresh memory backend at the store mount; empty of content, not of mounts), and `ModePolicy` (Ask denies all mutations, Plan allows mutations only to markdown paths, Agent allows all; modes gate mutations, never reads) behind a UI-flippable shared Arc so a mode change mid-run takes effect on the next operation.
