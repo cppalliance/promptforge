@@ -400,7 +400,8 @@ impl VfsAccess for MemoryAccess {
             .collect();
         for key in moved_files {
             if let Some(bytes) = tree.files.remove(&key) {
-                tree.files.insert(format!("{dest}{}", &key[source.len()..]), bytes);
+                tree.files
+                    .insert(format!("{dest}{}", &key[source.len()..]), bytes);
             }
         }
         for key in moved_dirs {
@@ -566,11 +567,7 @@ mod tests {
 
     #[test]
     fn remove_with_recursive_deletes_the_whole_subtree() -> Result<(), VfsError> {
-        let mut access = seeded(&[
-            ("/d/a.txt", "a"),
-            ("/d/sub/b.txt", "b"),
-            ("/keep.txt", "k"),
-        ])?;
+        let mut access = seeded(&[("/d/a.txt", "a"), ("/d/sub/b.txt", "b"), ("/keep.txt", "k")])?;
         access.remove(&path("/d")?, true)?;
         assert!(!access.exists(&path("/d")?)?);
         assert!(!access.exists(&path("/d/sub")?)?);

@@ -8,6 +8,7 @@
 mod error;
 mod glob;
 mod handle;
+mod host;
 mod memory;
 mod path;
 mod router;
@@ -16,6 +17,7 @@ mod types;
 
 pub use error::VfsError;
 pub use handle::{Access, VfsRef};
+pub use host::HostBackend;
 pub use memory::MemoryBackend;
 pub use path::{VfsPath, VfsPathBuf};
 pub use router::VfsRefBuilder;

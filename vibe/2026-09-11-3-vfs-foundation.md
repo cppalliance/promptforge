@@ -614,7 +614,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-6>
 
-### Step 6: host backend, stage 1 thin
+### Step 6: host backend, stage 1 thin [completed]
 
 - Component: shared-vfs backends
 - Implement `HostBackend::identity()` (virtual path is the host path) and `HostBackend::rooted(dir)` (chroot-style) in shared-vfs over direct std::fs: lexical plus canonicalize containment for rooted, failure-atomic writes (sibling temp file plus rename; a failed write, copy, or rename leaves source, destination, and accounting unchanged), and the read_only flag rejecting all mutations.
