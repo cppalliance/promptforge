@@ -1786,6 +1786,12 @@ impl<'a> Scheduler<'a> {
                     if result.is_ok() { succeeded } else { failed },
                 );
             }
+            // Claims-release ordering constraint: the access clone must
+            // drop after the op and its observation and before the answer
+            // posts, so the claims it holds release before a resumed chain
+            // can acquire overlapping claims; the fix changes when claims
+            // release, never whether an operation succeeds.
+            drop(access);
             // A send fails only when the driver is gone (a cancelled run);
             // the answer is then moot.
             let _ = tx.send((

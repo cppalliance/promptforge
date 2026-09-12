@@ -144,7 +144,7 @@ One coupled commit - the new Shared rule fails against the pre-rename workspace,
 
 <step-3>
 
-### Step 3: Fix the two PR #35 code failures
+### Step 3: Fix the two PR #35 code failures [completed]
 
 - Component: ci-code-fixes
 
