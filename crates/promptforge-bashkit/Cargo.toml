@@ -1,0 +1,24 @@
+[package]
+name = "promptforge-bashkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "Spike: the Bashkit engine's FsBackend implemented over the shared VFS handle, evidencing that the VFS trait subsumes Bashkit"
+
+[dependencies]
+shared-vfs.workspace = true
+tracing.workspace = true
+# Spike-only path dependency on the local Bashkit clone (a sibling of this
+# repository). Default features stay off: the spike needs the embeddable
+# interpreter only, not the LLM tool wrapper or the timezone database.
+bashkit = { path = "../../../bashkit/crates/bashkit", default-features = false }
+
+[dev-dependencies]
+promptforge-vfs.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

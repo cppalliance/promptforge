@@ -665,7 +665,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-11>
 
-### Step 11: Bashkit adapter spike
+### Step 11: Bashkit adapter spike [completed]
 
 - Component: bashkit adapter spike
 - Implement `bashkit::FsBackend` over VfsRef as a path dependency against the local `bashkit/` clone: whole-file reads served from read, symlink/chmod return the engine's unsupported error, FileType maps the first four kinds directly and the three specials to File with a trace, Stat mode None emits the 0o644/0o755 defaults, and the adapter captures the current ExecId at exec start.
