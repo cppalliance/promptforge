@@ -75,3 +75,10 @@
 - Step 2: Flip the version gate to 0-only and migrate prompts (DEBT-UPM-04) - FULL verify: build, fmt, clippy, workspace suite, workshop crates, doctests all passed (nextest fallback).
   - Decision: removed `SUPPORTED_MAJOR` outright rather than repurposing it, since the literal `Some(0)` arm left no uses | Falsifier: a future arm or message that needs a named supported-major constant.
   - Decision: updated the `UnsupportedVersion` display text to "supports major 0" though not explicitly listed in the step, since the gate flip made "major 1" false | Falsifier: a reviewer who wants the message wording owned by a separate change.
+
+## 2026-09-11-3-vfs-foundation
+
+- Step 1: shared-vfs skeleton, value types, and canonical paths - `cargo nextest run -p shared-vfs` - 11 passed, 0 failed; clippy `-D warnings` and fmt clean. Review: clean.
+  - Decision: the virtual namespace requires a leading `/`; drive-letter-style paths (`C:/x`) are rejected as relative, with host-path translation deferred to the host backend | Falsifier: a later step requires identity-mount virtual paths of the form `C:/...` to canonicalize.
+  - Decision: case is preserved and comparison is case-sensitive (POSIX semantics) in the virtual namespace | Falsifier: a host-backend requirement mandates case-insensitive virtual-path comparison.
+  - Decision: `canonicalize`/`intern` carry targeted `#[allow(dead_code)]` until `Access` (a later step) becomes their caller | Falsifier: the next step wires `Access` and the allows remain.

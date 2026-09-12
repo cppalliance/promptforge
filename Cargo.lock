@@ -6102,6 +6102,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared-vfs"
+version = "0.3.0"
+
+[[package]]
 name = "shellexpand"
 version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
