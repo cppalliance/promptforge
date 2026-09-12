@@ -124,7 +124,7 @@ Components in dependency order: rule-landing first (the initial-commit constrain
 
 <step-1>
 
-### Step 1: Land the dependency-rule revisions
+### Step 1: Land the dependency-rule revisions [completed]
 
 - Component: rule-landing
 
