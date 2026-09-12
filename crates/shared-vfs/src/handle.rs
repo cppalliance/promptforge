@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
 use crate::path::{VfsPath, canonicalize};
+use crate::router::{Mounts, Router, VfsRefBuilder};
 use crate::traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 use crate::types::{Entry, GrepQuery, GrepResults, Stat};
 
@@ -194,6 +195,48 @@ impl VfsRef {
         }
     }
 
+    /// Returns a builder for installing mounts. Mounts are fixed at
+    /// [`VfsRefBuilder::build`], so the table is immutable and cheap to
+    /// `Arc`-share thereafter.
+    #[must_use]
+    pub fn builder() -> VfsRefBuilder {
+        VfsRefBuilder::new()
+    }
+
+    /// Returns a handle with `backend` mounted at `prefix` over this
+    /// handle's namespace. The claims table is shared: conflicts are
+    /// detected across both views of the same storage.
+    ///
+    /// # Panics
+    /// Panics when `prefix` is not an absolute virtual path or is the
+    /// root: an overlay at `/` would replace the base entirely, so use
+    /// [`VfsRef::new`] instead.
+    #[must_use]
+    pub fn overlay(&self, prefix: &str, backend: impl Vfs + 'static) -> VfsRef {
+        let canonical = canonicalize(prefix)
+            .unwrap_or_else(|err| panic!("invalid overlay prefix {prefix:?}: {err}"));
+        assert!(
+            canonical.as_str() != "/",
+            "an overlay at / would replace the base entirely; use VfsRef::new instead"
+        );
+        // The base handle mounts at the root of the overlay's router:
+        // operations outside the overlay prefix route through the base's
+        // own policy and claims under the caller's identity.
+        let mut mounts = Mounts::new();
+        let root = canonicalize("/")
+            .unwrap_or_else(|err| panic!("the namespace root is always valid: {err}"))
+            .to_buf();
+        mounts.insert(root, Arc::new(Mutex::new(Box::new(self.clone()))));
+        mounts.insert(canonical.to_buf(), Arc::new(Mutex::new(Box::new(backend))));
+        VfsRef {
+            volume: Arc::new(Volume {
+                backend: Arc::new(Mutex::new(Box::new(Router::new(mounts)))),
+                claims: Arc::clone(&self.volume.claims),
+            }),
+            policy: Arc::clone(&self.policy),
+        }
+    }
+
     /// Acquires the capability for a new serial thread of execution.
     /// This is the only way in: every acquire vends a fresh [`ExecId`].
     ///
@@ -202,7 +245,18 @@ impl VfsRef {
     /// are expected to accept attribution; a refusal is a backend bug,
     /// not a runtime condition.
     pub fn acquire(&self) -> Access {
-        let id = ExecId::vend();
+        self.acquire_with(ExecId::vend())
+    }
+
+    /// Acquires the capability under a given identity: how a mounted
+    /// handle forwards the caller's attribution. The identity registers
+    /// as live in this handle's claims table, so conflicts are detected
+    /// across both views of the same storage.
+    ///
+    /// # Panics
+    /// Panics when the backend fails to acquire the identity; see
+    /// [`VfsRef::acquire`].
+    pub(crate) fn acquire_with(&self, id: ExecId) -> Access {
         let inner = self
             .backend()
             .acquire(id)
@@ -213,6 +267,18 @@ impl VfsRef {
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             inner: Mutex::new(inner),
+        }
+    }
+
+    /// Builds a handle over a router with a fresh claims table and the
+    /// [`AllowAll`] policy: the builder's exit.
+    pub(crate) fn from_router(router: Router) -> VfsRef {
+        VfsRef {
+            volume: Arc::new(Volume {
+                backend: Arc::new(Mutex::new(Box::new(router))),
+                claims: Arc::new(Claims::new()),
+            }),
+            policy: Arc::new(AllowAll),
         }
     }
 
@@ -543,6 +609,90 @@ impl Drop for Access {
         // claims are already gone, so a backend failure here cannot
         // leave a conflict behind.
         let _ = self.backend().release(self.id);
+    }
+}
+
+/// A handle is itself a backend: mounting a base handle under a child
+/// router - which is how [`VfsRef::overlay`] shares one claims table
+/// across two views of the same storage - routes operations through the
+/// base's policy and claims under the caller's identity.
+impl Vfs for VfsRef {
+    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
+        Ok(Box::new(HandleAccess(self.acquire_with(id))))
+    }
+
+    fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
+        // The vended session's Drop releases the identity and its
+        // claims; nothing is registered at this level.
+        let _ = id;
+        Ok(())
+    }
+
+    fn read_only(&self) -> bool {
+        self.backend().read_only()
+    }
+}
+
+/// The session vended by a mounted handle: forwards every operation
+/// through the base handle's capability, so its policy and claims apply
+/// under the caller's identity. Paths arrive canonical, so the
+/// capability's canonicalization at receipt is an idempotent re-check.
+///
+/// Byte-range reads and the POSIX extras keep their trait defaults: the
+/// public capability exposes neither, so there is nothing to forward to.
+struct HandleAccess(Access);
+
+impl VfsAccess for HandleAccess {
+    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
+        self.0.read(path.as_str())
+    }
+
+    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.0.write(path.as_str(), contents)
+    }
+
+    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.0.append(path.as_str(), contents)
+    }
+
+    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.0.remove(path.as_str(), recursive)
+    }
+
+    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
+        self.0.exists(path.as_str())
+    }
+
+    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        self.0.glob(pattern)
+    }
+
+    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
+        self.0.list(path.as_str())
+    }
+
+    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
+        self.0.stat(path.as_str())
+    }
+
+    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.0.mkdir(path.as_str(), recursive)
+    }
+
+    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.0.rename(from.as_str(), to.as_str())
+    }
+
+    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.0.copy(from.as_str(), to.as_str())
+    }
+
+    fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
+        self.0.str_replace(path.as_str(), old, new)
+    }
+
+    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
+        self.0.grep(query)
     }
 }
 

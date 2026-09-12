@@ -593,7 +593,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-4>
 
-### Step 4: router, builder, and overlays
+### Step 4: router, builder, and overlays [completed]
 
 - Component: shared-vfs router
 - Implement crate-private `Router` (BTreeMap mount table, longest-prefix dispatch, lazy per-mount acquire on first touch), `impl Vfs for Router` (routers nest), `impl Vfs for VfsRef` (forwards acquire with the given ExecId, so a base handle mounts under a child router), `VfsRefBuilder` (mount consumes and returns self; build() freezes the table), and `VfsRef::overlay()` (shares the claims table, swaps only the backend view).

@@ -92,3 +92,8 @@
   - Decision: policy stored as `Arc<dyn Policy + Sync>` so `VfsRef`/`Access` are Send+Sync despite `Policy: Send` | Falsifier: a Send-but-not-Sync policy impl forces revisiting the bound.
   - Decision: invalid line ranges return `VfsError::Backend` (no InvalidRange kind) | Falsifier: step 8's parity suite demands a dedicated kind.
   - Decision: alias test uses lexical spellings (`/a/./b.txt` vs `/a//b.txt`); facade-relative spelling belongs to the step-8 Store facade since `canonicalize` rejects relative paths here | Falsifier: step 8's alias test covers facade-relative vs mount-absolute.
+- Step 4: router, builder, and overlays - COMPONENT verify: `cargo build`, `cargo fmt --all --check`, `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings`, `cargo nextest run -p shared-vfs` - pass (58/58 tests). Review: clean (with component-base drift check). Verification fixes: fmt normalization; clippy `#[must_use]` on builder/overlay/build, `VfsPath` by value in private helpers, let-else rewrite.
+  - Decision: backends see mount-relative rooted paths (router strips on dispatch, rejoins on glob/grep results) | Falsifier: a contract passage requiring backends to see full virtual paths.
+  - Decision: cross-mount rename/copy return `Unsupported` instead of read-plus-write | Falsifier: a caller needing atomic cross-mount moves.
+  - Decision: `Router::release` and mounted-handle `release` are no-ops; teardown flows through the routing session's `Drop` | Falsifier: a backend requiring explicit release independent of `Drop`.
+  - Decision: `overlay()` shares the base's policy `Arc` as well as its claims table | Falsifier: a requirement that overlays carry independent policy.

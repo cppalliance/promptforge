@@ -94,8 +94,9 @@ impl fmt::Display for VfsPath {
 }
 
 /// Owned canonical virtual path, for places that outlive an interned
-/// reference or arrive owned (grep roots, symlink targets).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// reference or arrive owned (grep roots, symlink targets). Ordered for
+/// the mount table's `BTreeMap`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VfsPathBuf(String);
 
 impl VfsPathBuf {
