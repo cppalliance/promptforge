@@ -8,7 +8,8 @@ use super::*;
 use crate::execute::scheduler::Scheduler;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputBroker, InputError, InputOutcome, InputTool};
 use crate::lua::{ToolBinding, ToolSet};
-use crate::model::{ModelBinding, ModelId, ModelInvocation};
+use crate::model::{ModelBinding, ModelId};
+use promptforge_model_client::model::ModelInvocation;
 
 /// The model set an input test's run carries: `writer` (the prompt-wide
 /// default, model `test-model`), so `models.loop` resolves a binding.
@@ -302,7 +303,8 @@ async fn an_uncaught_broker_failure_fails_the_run_typed() {
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn cancellation_interrupts_a_pending_input_wait() {
-    use crate::cancel::{self, CancelHandle};
+    use crate::cancel::CancelHandle;
+    use promptforge_core_support::cancel::scope;
     use std::time::{Duration, Instant};
 
     let md = input_prompt("user_input()\nreturn 'unreachable'");
@@ -317,7 +319,7 @@ async fn cancellation_interrupts_a_pending_input_wait() {
     });
     let start = Instant::now();
     let mut scheduler = Scheduler::new(&ctx, None);
-    let result = cancel::scope(handle, scheduler.drive()).await;
+    let result = scope(handle, scheduler.drive()).await;
     assert!(
         start.elapsed() < Duration::from_secs(5),
         "cancel during a pending input wait must return promptly, took {:?}",

@@ -10,8 +10,9 @@ use tempfile::TempDir;
 use shared_progress::{EventState, ProgressHub};
 use tokio_util::sync::CancellationToken;
 
-use super::archive::{extract_archive_with_progress, safe_archive_path};
+use super::archive::{extract_archive, extract_archive_with_progress, safe_archive_path};
 use super::assets::ArchiveRef;
+use super::confine::source_marker_path;
 use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
 use super::progress::{DownloadProgress, TreeProgress};

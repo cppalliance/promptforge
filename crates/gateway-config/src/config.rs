@@ -19,8 +19,6 @@ pub use companion::{
     SpeculativeConfig,
 };
 pub(crate) use imp::reject_profiles_directory;
-#[cfg(test)]
-pub(crate) use interpolate::interpolate;
 pub(crate) use interpolate::interpolate_value;
 use stt::RawSttPipelineConfig;
 pub use stt::{

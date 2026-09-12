@@ -14,7 +14,7 @@
 
 mod archive;
 mod assets;
-mod confine;
+pub(crate) mod confine;
 mod digest;
 mod download;
 mod progress;
@@ -33,8 +33,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::LocalError;
 
-#[cfg(test)]
-use archive::extract_archive;
 use archive::extract_archive_with_progress;
 use archive::find_executable;
 use archive::require_executable;
@@ -56,10 +54,6 @@ pub(crate) use confine::{
     enforce_private_cache_root, ensure_cache_directory, part_path, remove_cache_entry,
     rename_confined, safe_relative_path, validate_cache_path, write_synced,
 };
-// Test builds only: the resume tests in this module and cache.rs build the
-// marker path; the download path itself imports it from confine directly.
-#[cfg(test)]
-pub(crate) use confine::source_marker_path;
 pub(crate) use digest::hex_digest;
 pub use digest::parse_expected_digest;
 pub(crate) use download::{download_with_progress, hub_bearer_token_from_env};

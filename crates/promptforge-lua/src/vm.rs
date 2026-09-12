@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::LuaFanoutResult;
 use super::{
     Access, Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
     DEFAULT_LUA_MEMORY_BYTES, Error, Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json,
@@ -539,7 +537,7 @@ impl SectionVm {
     ) -> Result<()>
     where
         E: Fn(Value, Option<String>, Json) -> std::result::Result<String, Error> + Send + 'static,
-        F: Fn(String, Vec<Json>, Json) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+        F: Fn(String, Vec<Json>, Json) -> std::result::Result<Vec<super::LuaFanoutResult>, Error>
             + Send
             + 'static,
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,

@@ -1,3 +1,4 @@
+use super::interpolate::interpolate;
 use super::*;
 
 const SAMPLE: &str = r#"

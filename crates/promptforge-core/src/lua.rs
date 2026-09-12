@@ -21,16 +21,7 @@ pub(crate) use promptforge_lua::{
     project_messages, resolve_model_binding, run_store_op, shim_live_h1_models,
 };
 
-// The typed compactor policy is read only by the tool loop's test-only
-// prose wrapper; the production loop invokes compactor callbacks through
-// `invoke_selected`.
-#[cfg(test)]
-pub(crate) use promptforge_lua::Compactor;
-
 pub(crate) use promptforge_lua::ToolOutputKind;
-
-#[cfg(test)]
-pub(crate) use promptforge_lua::{Conflict, ToolRuntime};
 
 #[cfg(test)]
 mod coro_tests;

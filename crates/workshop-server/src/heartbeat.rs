@@ -33,8 +33,6 @@ use std::time::Duration;
 use tokio::sync::{oneshot, watch};
 
 use crate::backoff::ReconnectBackoff;
-#[cfg(test)]
-use crate::gateway::GatewayClient;
 use crate::gateway_binding::{GatewayBinding, GatewaySnapshot};
 use crate::protocol::{Activity, Severity, StatusBarUpdate};
 use crate::push::Push;
@@ -343,6 +341,7 @@ async fn refresh_incomplete_sources(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gateway::GatewayClient;
 
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

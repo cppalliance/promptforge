@@ -1,6 +1,7 @@
 use super::super::*;
 use super::*;
-use crate::lua::{Compactor, OverflowReason};
+use crate::lua::OverflowReason;
+use promptforge_lua::Compactor;
 
 /// Runs the standard echo fixture with the requested loop cap.
 async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String> {

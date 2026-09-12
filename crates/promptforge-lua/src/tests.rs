@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::program::map_chunk_line_to_absolute;
-use crate::vm::LocalTools;
+use crate::vm::{LocalTools, LuaOutcome, run_chunk};
 use promptforge_core_support::observe::{NullObserver, Observation};
 use promptforge_store::Store;
 use promptforge_tools::{Tool, ToolError, ToolOutput};

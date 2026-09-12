@@ -13,14 +13,16 @@ use serde_json::json;
 
 use promptforge_lua::Error;
 
-use crate::cancel::{CancelHandle, scope};
+use crate::cancel::CancelHandle;
 use crate::execute::protocol::Request;
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, SectionVm, ToolBinding, ToolSet};
-use crate::model::{ModelBinding, ModelId, ModelInvocation, ModelSet};
+use crate::model::{ModelBinding, ModelId, ModelSet};
 use crate::observe::{NullObserver, Observer};
 use crate::tools::{Tool, ToolError, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
+use promptforge_core_support::cancel::scope;
+use promptforge_model_client::model::ModelInvocation;
 
 fn test_models() -> ModelSet {
     ModelSet {

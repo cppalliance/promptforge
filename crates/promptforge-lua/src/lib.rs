@@ -102,8 +102,6 @@ mod tools;
 pub(crate) use tools::{LuaToolHandle, install_h2_tools, install_tool_call_counts};
 mod vm;
 pub(crate) use vm::pack_sequence;
-#[cfg(test)]
-pub(crate) use vm::{LuaOutcome, run_chunk};
 mod handles;
 mod live;
 mod messages;

@@ -1,5 +1,6 @@
 //! Unit tests for section execution, tool scoping, and the tool-call loop.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -13,14 +14,21 @@ use axum::routing::post;
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
+use super::gateway::{GatewaySource, env_client_with_limits};
+use super::scope::{DispatchTarget, prepare_effective_scope, prepare_scoped_tools};
+use super::support::{advance_turn, now_rfc3339_checked};
+use super::tool_loop::{LocalDispatch, run_prose_inference};
 use super::*;
-use crate::client::{GatewayClient, GatewayEndpoint, SecretString};
+use crate::Result;
+use crate::client::{GatewayClient, GatewayEndpoint, SecretString, ToolSchema};
 use crate::debug::DebugCapture;
-use crate::lua::{LuaProgram, current_tool_bindings};
-use crate::model::{CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use crate::observe::{NullObserver, Observation, detail};
+use crate::lua::{LuaProgram, SectionVm, ToolCallCounts, current_tool_bindings};
+use crate::model::{
+    CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ModelSet, ThinkingMode,
+};
+use crate::observe::{NullObserver, Observation, Observer, detail};
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
 use crate::tools::{Tool, ToolCatalog, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
@@ -1329,7 +1337,8 @@ impl Tool for SlowTool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancel_during_in_flight_tool_call_returns_promptly() {
-    use crate::cancel::{self, CancelHandle};
+    use crate::cancel::CancelHandle;
+    use promptforge_core_support::cancel::scope;
     use std::time::{Duration, Instant};
 
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
@@ -1350,7 +1359,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
     });
 
     let start = Instant::now();
-    let result = cancel::scope(
+    let result = scope(
         handle,
         run_tool_loop(
             &client,

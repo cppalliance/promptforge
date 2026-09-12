@@ -18,7 +18,8 @@ use std::num::NonZeroUsize;
 use super::*;
 use crate::execute::protocol::Answer;
 use crate::execute::scheduler::Scheduler;
-use crate::model::{ModelBinding, ModelId, ModelInvocation};
+use crate::model::{ModelBinding, ModelId};
+use promptforge_model_client::model::ModelInvocation;
 
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
@@ -112,7 +113,8 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
-    use crate::cancel::{self, CancelHandle};
+    use crate::cancel::CancelHandle;
+    use promptforge_core_support::cancel::scope;
 
     let gateway = ScriptedGateway::start(vec![resp_delayed_text(
         "too late",
@@ -138,7 +140,7 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         canceller.cancel();
     });
 
-    let result = cancel::scope(cancel, async {
+    let result = scope(cancel, async {
         Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
             .drive()
             .await
@@ -2095,7 +2097,8 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     // Mirror of the legacy `pre_cancelled_fanout_returns_interrupted`: a
     // fanout entered under an already-cancelled handle fails the run with
     // Error::Interrupted instead of running the arms.
-    use crate::cancel::{self, CancelHandle};
+    use crate::cancel::CancelHandle;
+    use promptforge_core_support::cancel::scope;
 
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -2110,7 +2113,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     let ctx = scheduler_context(&prompt);
     let cancel = CancelHandle::new();
     cancel.cancel();
-    let result = cancel::scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
+    let result = scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
     assert!(
         matches!(result, Err(Error::Interrupted)),
         "a pre-cancelled fanout must interrupt the run, got {result:?}"
@@ -2811,7 +2814,8 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // exactly-once terminal contract holds on the cancellation path. The
     // 30-second answers and the timeout guard prove the aborted I/O is
     // never awaited.
-    use crate::cancel::{self, CancelHandle};
+    use crate::cancel::CancelHandle;
+    use promptforge_core_support::cancel::scope;
 
     let gateway = ScriptedGateway::start(vec![resp_delayed_text(
         "too late",
@@ -2845,7 +2849,7 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        cancel::scope(cancel, async {
+        scope(cancel, async {
             Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
                 .drive()
                 .await
@@ -3166,7 +3170,8 @@ impl Tool for SignallingSlowTool {
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn cancellation_interrupts_a_slow_script_tools_call() {
-    use crate::cancel::{self, CancelHandle};
+    use crate::cancel::CancelHandle;
+    use promptforge_core_support::cancel::scope;
 
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
@@ -3199,7 +3204,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
     });
 
     let start = std::time::Instant::now();
-    let result = cancel::scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
+    let result = scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
 
     assert!(
         matches!(result, Err(Error::Interrupted)),

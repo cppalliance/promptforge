@@ -13,8 +13,6 @@
 //! re-exported here unchanged, so existing `promptforge_core::model::*` paths
 //! keep working.
 
-#[cfg(test)]
-pub(crate) use promptforge_model_client::model::ModelInvocation;
 pub use promptforge_model_client::model::{
     CompletionError, CompletionErrorKind, CompletionOptions, ModelCatalog, ModelCatalogError,
     ModelDescriptor, ModelId, ModelIdError, TemperatureError, ThinkingMode, fetch_model_catalog,

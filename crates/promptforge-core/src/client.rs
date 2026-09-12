@@ -18,6 +18,3 @@ pub use promptforge_model_client::client::{
     Completion, CompletionResult, GatewayClient, GatewayEndpoint, Message, SecretError,
     SecretString, StreamDelta, ToolArguments, ToolCall, ToolSchema,
 };
-
-#[cfg(test)]
-pub(crate) use promptforge_model_client::client::ToolSchemaError;

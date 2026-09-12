@@ -20,7 +20,7 @@ fn declared_tools_are_not_injected_without_always_or_add() {
         )],
         Vec::new(),
     );
-    let runtime = Mutex::new(crate::lua::ToolRuntime {
+    let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: Vec::new(),
         description_overrides: BTreeMap::new(),
     });
@@ -48,7 +48,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         )],
         vec!["local_alias".to_owned()],
     );
-    let runtime = Mutex::new(crate::lua::ToolRuntime {
+    let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: Vec::new(),
         description_overrides: BTreeMap::new(),
     });
@@ -195,13 +195,13 @@ fn near_duplicate_tools_are_valid_when_isolated_in_separate_scopes() {
     ));
     let mut first_binding =
         crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first));
-    first_binding.conflicts.push(crate::lua::Conflict {
+    first_binding.conflicts.push(promptforge_lua::Conflict {
         alias: "second_local".to_owned(),
         similarity: 0.98,
     });
     let mut second_binding =
         crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second));
-    second_binding.conflicts.push(crate::lua::Conflict {
+    second_binding.conflicts.push(promptforge_lua::Conflict {
         alias: "first_local".to_owned(),
         similarity: 0.98,
     });
@@ -233,13 +233,13 @@ fn near_duplicate_always_scope_fails_at_the_scope_rebuild() {
     ));
     let mut first_binding =
         crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first));
-    first_binding.conflicts.push(crate::lua::Conflict {
+    first_binding.conflicts.push(promptforge_lua::Conflict {
         alias: "second_local".to_owned(),
         similarity: 0.98,
     });
     let mut second_binding =
         crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second));
-    second_binding.conflicts.push(crate::lua::Conflict {
+    second_binding.conflicts.push(promptforge_lua::Conflict {
         alias: "first_local".to_owned(),
         similarity: 0.98,
     });
@@ -247,7 +247,7 @@ fn near_duplicate_always_scope_fails_at_the_scope_rebuild() {
         vec![first_binding, second_binding],
         vec!["first_local".to_owned(), "second_local".to_owned()],
     );
-    let runtime = Mutex::new(crate::lua::ToolRuntime {
+    let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: Vec::new(),
         description_overrides: BTreeMap::new(),
     });
@@ -279,13 +279,13 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
     // half's alias and the picker's score.
     let mut first_binding =
         crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first));
-    first_binding.conflicts.push(crate::lua::Conflict {
+    first_binding.conflicts.push(promptforge_lua::Conflict {
         alias: "second_local".to_owned(),
         similarity: 0.98,
     });
     let mut second_binding =
         crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second));
-    second_binding.conflicts.push(crate::lua::Conflict {
+    second_binding.conflicts.push(promptforge_lua::Conflict {
         alias: "first_local".to_owned(),
         similarity: 0.98,
     });

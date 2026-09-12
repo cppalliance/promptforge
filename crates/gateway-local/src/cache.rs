@@ -615,7 +615,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::artifacts::source_marker_path;
+    use crate::artifacts::confine::source_marker_path;
     use crate::testsupport::{FakeServer, hex_sha256};
 
     /// Test double recording the progress callbacks a download drives.

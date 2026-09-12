@@ -466,7 +466,7 @@ pub(crate) async fn run_prose_inference(
     prose: String,
     max_tool_iterations: usize,
     context: NonZeroU32,
-    compactor: Option<crate::lua::Compactor>,
+    compactor: Option<promptforge_lua::Compactor>,
     execution: &str,
     observer: &dyn Observer,
     section: &str,

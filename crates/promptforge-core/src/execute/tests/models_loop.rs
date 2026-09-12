@@ -9,7 +9,8 @@
 use super::*;
 use crate::execute::scheduler::Scheduler;
 use crate::lua::{OverflowReason, ToolSet};
-use crate::model::{ModelBinding, ModelId, ModelInvocation};
+use crate::model::{ModelBinding, ModelId};
+use promptforge_model_client::model::ModelInvocation;
 
 /// The model set a loop test's run carries: `writer` (the prompt-wide
 /// default, model `test-model`) and `other` (model `other-model`), so an

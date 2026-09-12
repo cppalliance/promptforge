@@ -13,6 +13,7 @@ use crate::tools::ToolCatalog;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use promptforge_model_client::Error as GatewayClientError;
+use promptforge_model_client::model::ModelInvocation;
 use serde_json::json;
 
 const EXECUTION: &str = "model-bind-test";

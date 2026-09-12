@@ -128,7 +128,7 @@ Each step is one commit containing its code and tests.
 
 <step-3>
 
-### Step 3: remove test-only re-exports workspace-wide and relocate test imports
+### Step 3: remove test-only re-exports workspace-wide and relocate test imports [completed]
 
 - Component: cleanup
 - One behavior slice across five crates: delete every `#[cfg(test)]` import or re-export whose only consumers are test modules, and let each consumer import the name directly from its real home. The `execute.rs` and `execute/tests/mod.rs` portion is already applied in the worktree (coded before the re-decomposition); this step completes the remaining files and lands the whole slice as one commit.

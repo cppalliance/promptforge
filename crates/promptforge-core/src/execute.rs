@@ -77,7 +77,7 @@ mod engine;
 mod error;
 mod gateway;
 pub(crate) mod protocol;
-pub(crate) mod scheduler;
+mod scheduler;
 mod scope;
 mod section_context;
 pub(crate) mod section_vm;
@@ -90,50 +90,14 @@ pub use config::{RunConfig, RunLimits};
 pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
-// Crate-internal items reused through the historical `crate::execute::` path.
-// Re-exported so the split stays surface-neutral for the public API while
-// keeping one import path for internal collaborators.
-pub(crate) use context::RunContext;
-
+use context::RunContext;
 use scheduler::Scheduler;
-
-// Everything the executor's own tests reach through `use super::super::*`
-// (and that `tests/mod.rs` does not itself import): executor-internal items,
-// crate types, and the two external conveniences (`json`, `BTreeMap`).
-// Test-only, so the non-test lib carries no unused re-export while the
-// historic executor namespace stays intact for the test glob.
-#[cfg(test)]
-pub(crate) use crate::Result;
-#[cfg(test)]
-pub(crate) use crate::client::ToolSchema;
-#[cfg(test)]
-pub(crate) use crate::lua::{SectionVm, ToolCallCounts};
-#[cfg(test)]
-pub(crate) use crate::observe::Observer;
-#[cfg(test)]
-pub(crate) use gateway::GatewaySource;
-#[cfg(test)]
-pub(crate) use gateway::env_client_with_limits;
-#[cfg(test)]
-pub(crate) use scope::{DispatchTarget, prepare_effective_scope, prepare_scoped_tools};
-#[cfg(test)]
-pub(crate) use serde_json::json;
-#[cfg(test)]
-pub(crate) use std::collections::BTreeMap;
-#[cfg(test)]
-pub(crate) use support::{advance_turn, now_rfc3339_checked};
-#[cfg(test)]
-pub(crate) use tool_loop::{LocalDispatch, run_prose_inference};
 
 use crate::Error;
 use crate::cancel;
 use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::VfsRef;
-
-// Re-exported for the executor test glob.
-#[cfg(test)]
-pub(crate) use crate::model::ModelSet;
 
 /// Executes a parsed prompt and returns its final text.
 ///

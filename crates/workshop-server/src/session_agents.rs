@@ -40,8 +40,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use promptforge_core_support::cancel::CancelHandle;
 use promptforge_core_support::events::{CallMetrics, RuntimeEventKind, ToolCallEvent};
 use promptforge_core_support::observe::{Observation, Observer};
-#[cfg(test)]
-use promptforge_model_client::client::GatewayClient as ModelClient;
 use promptforge_model_client::client::StreamDelta;
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use tokio::sync::{broadcast, mpsc};
@@ -731,7 +729,10 @@ fn fresh_session_id() -> String {
 /// [`LaunchRefusal::GatewayUnusable`] - when the key is empty (the model
 /// client refuses blank credentials) or the URL does not parse.
 #[cfg(test)]
-fn model_client(base_url: &str, api_key: &str) -> Option<ModelClient> {
+fn model_client(
+    base_url: &str,
+    api_key: &str,
+) -> Option<promptforge_model_client::client::GatewayClient> {
     crate::gateway_binding::model_client(base_url, api_key)
 }
 

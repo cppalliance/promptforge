@@ -812,7 +812,9 @@ mod tests {
         // F5: the binding and tool-scope failures keep the originating typed
         // error as a private `source()` instead of flattening it to a string,
         // and the chain survives through the public `RunError` wrapper.
-        let schema_error = crate::client::ToolSchemaError::NonObjectSchema {
+        use promptforge_model_client::client::ToolSchemaError;
+
+        let schema_error = ToolSchemaError::NonObjectSchema {
             name: "echo".to_owned(),
         };
         let bind = Error::BindSchema {
