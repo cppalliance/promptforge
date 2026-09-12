@@ -4908,7 +4908,8 @@ dependencies = [
 name = "promptforge-store"
 version = "0.3.0"
 dependencies = [
- "tempfile",
+ "promptforge-vfs",
+ "shared-vfs",
  "thiserror 2.0.19",
 ]
 

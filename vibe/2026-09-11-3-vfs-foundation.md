@@ -634,7 +634,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-8>
 
-### Step 8: Store facade rewrite and parity suite
+### Step 8: Store facade rewrite and parity suite [completed]
 
 - Component: promptforge-store
 - Rewrite `promptforge-store`: the Store trait, MemStore, and FileStore disappear from the public API; a public concrete `Store` facade wraps a prefix-scoped Access and is exposed as `vfs.store(&access)` via a prelude-exported extension trait (see decision record). Preserve the StoreError vocabulary exactly with a total VfsError-to-StoreError mapping, anchor-edit rules, numbered reads, idempotent delete (NotFound maps to Ok), and the glob grammar (port one glob implementation, delete the other). Delete the WriteScope registry.

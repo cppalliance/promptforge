@@ -1,14 +1,5 @@
 //! Store error types and their stable classifiers.
 
-/// The backend lock was poisoned by a panicked holder.
-///
-/// Kept private and surfaced only as an opaque [`StoreError::Backend`] source
-/// (STORE-004), so a poisoned lock is a visible backend failure rather than a
-/// silent recovery of state this handle cannot vouch for.
-#[derive(Debug, thiserror::Error)]
-#[error("store backend lock was poisoned by a panicked holder")]
-pub(crate) struct StorePoisoned;
-
 /// Why a logical store path was rejected before any backend saw it.
 ///
 /// `StoreRef` validates every caller-supplied path into one canonical form
@@ -77,7 +68,7 @@ pub enum StoreErrorKind {
     InvalidPattern,
     /// A caller-supplied line range failed validation.
     InvalidRange,
-    /// Two arms of one fanout wrote the same path.
+    /// Two live identities touched the same path.
     WriteRace,
     /// The backend itself failed.
     Backend,
@@ -166,9 +157,10 @@ pub enum StoreError {
         reason: &'static str,
     },
 
-    /// Two arms of one fanout wrote the same path: a write-write race. The
-    /// losing write never reached the backend.
-    #[error("write-write race on {path}: another arm of the same fanout already wrote it")]
+    /// Two live identities touched the same path: a write-write race
+    /// detected by the claims model. The losing write never reached the
+    /// backend.
+    #[error("write-write race on {path}: another live identity holds a claim on it")]
     #[non_exhaustive]
     WriteRace {
         /// The logical path both arms wrote.
@@ -190,9 +182,12 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::{StoreErrorKind, StoreRef};
+    /// use promptforge_store::{StoreErrorKind, StoreExt};
     ///
-    /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
+    /// let err = store.read("missing.txt").unwrap_err();
     /// assert_eq!(err.kind(), StoreErrorKind::NotFound);
     /// ```
     #[must_use]
@@ -215,9 +210,12 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
+    /// let err = store.read("missing.txt").unwrap_err();
     /// assert!(err.is_not_found());
     /// ```
     #[must_use]
@@ -229,9 +227,12 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
+    /// let err = store.read("missing.txt").unwrap_err();
     /// assert_eq!(err.path(), Some("missing.txt"));
     /// ```
     #[must_use]
@@ -250,8 +251,9 @@ impl StoreError {
 
     /// Wraps a backend's own error as an opaque [`StoreError::Backend`] source.
     ///
-    /// A downstream [`Store`](crate::Store) implementation uses this so its concrete error
-    /// type never leaks through this crate's public API.
+    /// The facade uses this for VFS failures without a store-vocabulary
+    /// home, so the concrete error type never leaks through this crate's
+    /// public API.
     ///
     /// # Examples
     /// ```

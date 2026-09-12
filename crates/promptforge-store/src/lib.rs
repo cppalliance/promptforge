@@ -1,290 +1,140 @@
 //! Run-scoped virtual files, shared by Lua and the model.
 //!
 //! A prompt run keeps its bulk state in virtual files addressed by logical
-//! string paths. [`Store`] is the backend contract, [`MemStore`] is an
-//! in-memory backend, and [`StoreRef`] is the cheaply cloneable, thread-safe
-//! handle the runtime hands to both the Lua VM and (later) the model's file
-//! tools. [`StoreRef::read`] returns verbatim contents for trusted handoff,
-//! [`StoreRef::read_range`] slices a 1-based inclusive line range out of the
-//! same verbatim contents, and [`StoreRef::read_range_numbered`] numbers such
-//! a slice absolutely (with no bounds it numbers the whole file from 1). For
-//! model-facing re-injection the caller wraps a verbatim read in an
-//! untrusted guard envelope (the `untrusted` Lua global).
-//! Edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
-//! the shape that works for a model.
+//! string paths. [`Store`] is a concrete facade over a prefix-scoped
+//! [`Access`] capability from the shared VFS: the [`StoreExt`] extension
+//! trait (re-exported in [`prelude`]) gives every `VfsRef` the
+//! `vfs.store(&access)` call shape, binding the facade to the caller's
+//! identity so its operations participate in the claims model - a second
+//! live identity's conflicting write surfaces as [`StoreError::WriteRace`].
 //!
-//! This crate wires no execution; it defines the store and its backends only.
-
-use std::collections::HashMap;
-use std::fmt;
-use std::fmt::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+//! The facade keeps the store's caller-facing contract: logical paths
+//! validated before dispatch, verbatim reads, anchor-based edits
+//! ([`Store::str_replace`]), 1-based inclusive line ranges with optional
+//! absolute numbering, idempotent deletes, and the `*`/`**` glob grammar.
+//! The `Store` trait, `MemStore`, `FileStore`, and the `WriteScope`
+//! registry are gone: backends live in `shared-vfs`, the mount layout in
+//! `promptforge-vfs`, and race detection in the claims model.
+//!
+//! This crate wires no execution; it defines the facade and its error
+//! vocabulary only.
 
 mod error;
-mod file;
-mod glob;
-mod mem;
 mod path;
 
-use error::StorePoisoned;
+use std::fmt::Write as _;
+
+use promptforge_vfs::STORE_MOUNT;
+use shared_vfs::{Access, FileType, VfsError, VfsRef};
+
 pub use error::{PathReason, StoreError, StoreErrorKind};
-pub use file::FileStore;
-use glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
-pub use mem::{MemStore, Store};
 use path::StorePath;
 
-/// The provenance of one fanout arm's scoped write: which fanout, and which
-/// arm within it.
+/// The largest glob pattern, in bytes, the facade will attempt to match.
 ///
-/// Vended per fanout by [`StoreRef::next_write_token`] and paired with the
-/// arm's 1-based index, so the write registry can tell "another arm of the
-/// same fanout" (a write-write race) from "the same arm again" or "a later
-/// fanout" (both legal).
-///
-/// `#[doc(hidden)]`: a cross-crate seam for the executor's fanout machinery
-/// in `promptforge-core`, not host API.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WriteScope {
-    token: u64,
-    arm: usize,
-}
+/// The matcher is linear, but an unbounded pattern is still a cheap
+/// denial-of-service lever, so an over-long pattern is refused outright.
+pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 
-impl WriteScope {
-    /// Pairs one fanout's token with the arm's 1-based index within it.
-    #[must_use]
-    pub fn new(token: u64, arm: usize) -> WriteScope {
-        WriteScope { token, arm }
-    }
-}
-
-/// A cheaply cloneable, thread-safe handle to a run's virtual files.
+/// A concrete facade over one identity's prefix-scoped VFS capability.
 ///
-/// The handle wraps `Arc<Mutex<Box<dyn Store + Send>>>`: the `Mutex` supplies
-/// the synchronization around a `Send` (not necessarily `Sync`) backend
-/// (STORE-008), so cloning shares one backend and the store can be held by both
-/// the synchronous Lua VM and an asynchronous tool whose `call` crosses an
-/// `.await`. The inherent
-/// methods mirror [`Store`], each taking the lock, delegating, and
-/// releasing it before returning; no lock is ever held across an await, and the
-/// operations are synchronous in any case.
-///
-/// Beside the backend lock the handle keeps a write registry mapping each
-/// path to the `WriteScope` that last wrote it: a fanout arm's scoped
-/// write (`StoreRef::write_scoped`) to a path already written by a
-/// different arm of the same fanout fails with [`StoreError::WriteRace`].
-/// Plain [`StoreRef::write`] (walk sections), `append`, and reads never
-/// touch the registry.
+/// A `Store` borrows the caller's [`Access`]: every operation is
+/// attributed to the caller's identity and participates in its claims, so
+/// a conflicting operation by a second live identity surfaces as
+/// [`StoreError::WriteRace`]. Paths are logical (relative to the store
+/// mount); the facade validates them, joins them onto the mount prefix,
+/// and maps the VFS error vocabulary back onto [`StoreError`].
 ///
 /// # Examples
 /// ```
-/// use promptforge_store::StoreRef;
+/// use promptforge_store::StoreExt;
 ///
-/// let store = StoreRef::memory();
-/// let clone = store.clone();
+/// let vfs = promptforge_vfs::empty();
+/// let access = vfs.acquire();
+/// let store = vfs.store(&access);
 /// store.write("shared.txt", "state")?;
-/// assert_eq!(clone.read("shared.txt")?, "state");
+/// assert_eq!(store.read("shared.txt")?, "state");
 /// # Ok::<(), promptforge_store::StoreError>(())
 /// ```
-#[derive(Clone)]
-#[non_exhaustive]
-pub struct StoreRef {
-    inner: Arc<Mutex<Box<dyn Store + Send>>>,
-    writers: Arc<Mutex<HashMap<String, WriteScope>>>,
-    write_tokens: Arc<AtomicU64>,
+#[derive(Debug, Clone)]
+pub struct Store<'a> {
+    access: &'a Access,
 }
 
-impl fmt::Debug for StoreRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StoreRef").finish_non_exhaustive()
-    }
-}
-
-impl StoreRef {
-    /// Wraps `backend` in a shareable handle.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_store::{MemStore, StoreRef};
-    ///
-    /// let store = StoreRef::new(Box::new(MemStore::new()));
-    /// # let _ = store;
-    /// ```
-    #[must_use]
-    pub fn new(backend: Box<dyn Store + Send>) -> StoreRef {
-        StoreRef {
-            inner: Arc::new(Mutex::new(backend)),
-            writers: Arc::new(Mutex::new(HashMap::new())),
-            write_tokens: Arc::new(AtomicU64::new(0)),
-        }
-    }
-
-    /// Builds a handle over a [`MemStore`] pre-populated with the given files.
-    ///
-    /// Each path is validated at construction time. See
-    /// [`MemStore::with_files`] for details.
+impl Store<'_> {
+    /// Creates or overwrites the file at `path`.
     ///
     /// # Errors
-    /// Returns [`StoreError::InvalidPath`] if any path fails validation.
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation,
+    /// [`StoreError::WriteRace`] if another live identity holds a claim on
+    /// `path`, or [`StoreError::Backend`] if the backend fails.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::with_files([
-    ///     ("data.txt".to_owned(), "contents".to_owned()),
-    /// ])?;
-    /// assert_eq!(store.read("data.txt")?, "contents");
-    /// # Ok::<(), promptforge_store::StoreError>(())
-    /// ```
-    pub fn with_files(
-        files: impl IntoIterator<Item = (String, String)>,
-    ) -> Result<StoreRef, StoreError> {
-        Ok(StoreRef::new(Box::new(MemStore::with_files(files)?)))
-    }
-
-    /// Builds a handle over a fresh in-memory [`MemStore`] backend.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_store::StoreRef;
-    ///
-    /// let store = StoreRef::memory();
-    /// # let _ = store;
-    /// ```
-    #[must_use]
-    pub fn memory() -> StoreRef {
-        StoreRef::new(Box::new(MemStore::new()))
-    }
-
-    /// Locks the shared backend, or reports it unavailable if a prior holder
-    /// panicked while mutating it.
-    ///
-    /// STORE-004: the backend behind this handle is an arbitrary [`Store`] trait
-    /// object, not a known-consistent [`MemStore`]. A panic mid-mutation can
-    /// leave a filesystem/network backend in a half-applied state, so we do NOT
-    /// blindly `PoisonError::into_inner` and hand back state we cannot vouch
-    /// for. Absent an explicit backend recovery contract, a poisoned lock is a
-    /// backend failure the caller must see.
-    fn lock(&self) -> Result<MutexGuard<'_, Box<dyn Store + Send>>, StoreError> {
-        self.inner
-            .lock()
-            .map_err(|_| StoreError::backend(StorePoisoned))
-    }
-
-    /// Creates or overwrites the file at `path`. See [`Store::write`].
-    ///
-    /// # Errors
-    /// Propagates any [`StoreError`] from the backend.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_store::StoreRef;
-    ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi")?;
     /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     pub fn write(&self, path: &str, contents: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock()?.write(path.as_str(), contents)
+        self.access
+            .write(&full(path.as_str()), contents.as_bytes())
+            .map_err(|err| map_vfs(err, path.as_str()))
     }
 
-    /// Vends a fresh token identifying one fanout's write scope.
-    ///
-    /// Each fanout takes one token and every arm pairs it with its own index
-    /// via [`WriteScope::new`]; tokens are unique per [`StoreRef`], so two
-    /// fanouts (sequential or nested) never share a scope.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's fanout
-    /// machinery in `promptforge-core`, not host API.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn next_write_token(&self) -> u64 {
-        self.write_tokens.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Creates or overwrites the file at `path` on behalf of one fanout arm,
-    /// recording the arm's [`WriteScope`] as the path's writer.
-    ///
-    /// The registry is checked and updated atomically before the backend is
-    /// touched: a path already written by a different arm of the SAME fanout
-    /// is a write-write race and fails without reaching the backend; the same
-    /// arm rewriting its own path succeeds, and a write carrying a different
-    /// fanout's token overwrites the record, so sequential fanouts stay
-    /// legal.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's fanout
-    /// machinery in `promptforge-core`, not host API.
+    /// Appends to the file at `path`, creating it if absent.
     ///
     /// # Errors
-    /// Returns [`StoreError::WriteRace`] on a same-fanout write-write race,
-    /// [`StoreError::InvalidPath`] if `path` fails validation, or any
-    /// [`StoreError`] the backend reports.
-    #[doc(hidden)]
-    pub fn write_scoped(
-        &self,
-        path: &str,
-        contents: &str,
-        scope: WriteScope,
-    ) -> Result<(), StoreError> {
-        let path = StorePath::parse(path)?;
-        {
-            let mut writers = self
-                .writers
-                .lock()
-                .map_err(|_| StoreError::backend(StorePoisoned))?;
-            if let Some(&prior) = writers.get(path.as_str())
-                && prior.token == scope.token
-                && prior.arm != scope.arm
-            {
-                return Err(StoreError::WriteRace {
-                    path: path.as_str().to_owned(),
-                });
-            }
-            writers.insert(path.as_str().to_owned(), scope);
-        }
-        self.lock()?.write(path.as_str(), contents)
-    }
-
-    /// Appends to the file at `path`, creating it if absent. See
-    /// [`Store::append`].
-    ///
-    /// # Errors
-    /// Propagates any [`StoreError`] from the backend.
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation,
+    /// [`StoreError::WriteRace`] if another live identity holds a claim on
+    /// `path`, or [`StoreError::Backend`] if the backend fails.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.append("a.txt", "hi")?;
     /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     pub fn append(&self, path: &str, contents: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock()?.append(path.as_str(), contents)
+        self.access
+            .append(&full(path.as_str()), contents.as_bytes())
+            .map_err(|err| map_vfs(err, path.as_str()))
     }
 
     /// Reads the file at `path` exactly as stored, with no line numbering.
-    /// See [`Store::read`].
+    ///
+    /// This is the accessor for verbatim handoff, clean dumps, and trusted
+    /// re-injection. Numbered output for navigation is derived from a read
+    /// at this layer.
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`] if no file exists at `path`.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi\n")?;
     /// assert_eq!(store.read("a.txt")?, "hi\n");
     /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     pub fn read(&self, path: &str) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock()?.read(path.as_str())
+        self.access
+            .read_string(&full(path.as_str()))
+            .map_err(|err| map_vfs(err, path.as_str()))
     }
 
     /// Reads lines `start..=end` of the file at `path`, 1-based and
@@ -302,9 +152,11 @@ impl StoreRef {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
     /// assert_eq!(store.read_range("a.txt", 2, None)?, "two\nthree");
     /// assert_eq!(store.read_range("a.txt", 2, Some(99))?, "two\nthree");
@@ -327,7 +179,7 @@ impl StoreRef {
     /// the largest emitted number, followed by `"| "`; lines are joined with
     /// `"\n"` and there is no trailing newline. With `start` of 1 and no
     /// `end` the whole file is numbered from 1. Bounds are evaluated exactly
-    /// as in [`StoreRef::read_range`]: a `start` below 1 is an error; a
+    /// as in [`Store::read_range`]: a `start` below 1 is an error; a
     /// `start` past the last line reads as the empty string; an omitted
     /// `end` means the last line, and a given `end` clamps down to it; an
     /// `end` before `start` at that point is an error.
@@ -339,9 +191,11 @@ impl StoreRef {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
     /// assert_eq!(
     ///     store.read_range_numbered("a.txt", 1, None)?,
@@ -369,7 +223,7 @@ impl StoreRef {
         render: impl FnOnce(&[&str], usize) -> String,
     ) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
-        let contents = self.lock()?.read(path.as_str())?;
+        let contents = self.read(path.as_str())?;
         let lines: Vec<&str> = contents.lines().collect();
         let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
             return Ok(String::new());
@@ -377,19 +231,25 @@ impl StoreRef {
         Ok(render(&lines[start - 1..end], start))
     }
 
-    /// Replaces the unique occurrence of `old` with `new`. See
-    /// [`Store::str_replace`].
+    /// Replaces the unique occurrence of `old` with `new`.
+    ///
+    /// The edit is anchor-based: `old` must occur exactly once. Zero matches
+    /// and more-than-one match are both refused, so an edit never lands on
+    /// an arbitrary match.
     ///
     /// # Errors
-    /// Returns [`StoreError::InvalidAnchor`] when `old` is empty. Otherwise,
-    /// returns [`StoreError::NotFound`], [`StoreError::AnchorNotFound`], or
-    /// [`StoreError::AnchorAmbiguous`] per [`Store::str_replace`].
+    /// Returns [`StoreError::InvalidAnchor`] when `old` is empty,
+    /// [`StoreError::NotFound`] if no file exists at `path`,
+    /// [`StoreError::AnchorNotFound`] if `old` does not occur, or
+    /// [`StoreError::AnchorAmbiguous`] if `old` occurs more than once.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "one two")?;
     /// store.str_replace("a.txt", "two", "three")?;
     /// assert_eq!(store.read("a.txt")?, "one three");
@@ -400,28 +260,46 @@ impl StoreRef {
         if old.is_empty() {
             // STORE-007: an empty anchor is a malformed edit request, not an
             // anchor that merely failed to match; refuse it with a dedicated
-            // invalid-anchor condition before any backend search.
+            // invalid-anchor condition before any search.
             return Err(StoreError::InvalidAnchor {
                 path: path.as_str().to_owned(),
                 reason: "anchor must not be empty",
             });
         }
-        self.lock()?.str_replace(path.as_str(), old, new)
+        let contents = self.read(path.as_str())?;
+        let count = contents.matches(old).count();
+        match count {
+            0 => Err(StoreError::AnchorNotFound {
+                path: path.as_str().to_owned(),
+                anchor: old.to_owned(),
+            }),
+            1 => {
+                let replaced = contents.replacen(old, new, 1);
+                self.write(path.as_str(), &replaced)
+            }
+            count => Err(StoreError::AnchorAmbiguous {
+                path: path.as_str().to_owned(),
+                anchor: old.to_owned(),
+                count,
+            }),
+        }
     }
 
-    /// Removes the file at `path`. See [`Store::delete`].
+    /// Removes the file at `path`.
     ///
     /// Delete is idempotent: a missing file is not an error.
     ///
     /// # Errors
-    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or any
-    /// [`StoreError`] the backend reports.
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or
+    /// [`StoreError::Backend`] if the backend fails.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi")?;
     /// store.delete("a.txt")?;
     /// store.delete("a.txt")?; // already gone; still Ok
@@ -429,19 +307,35 @@ impl StoreRef {
     /// ```
     pub fn delete(&self, path: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock()?.delete(path.as_str())
+        match self.access.remove(&full(path.as_str()), false) {
+            // Idempotent: an absent path is already in the post-delete state.
+            Ok(()) | Err(VfsError::NotFound(_)) => Ok(()),
+            Err(other) => Err(map_vfs(other, path.as_str())),
+        }
     }
 
-    /// Returns stored paths matching `pattern`, sorted. See [`Store::glob`].
+    /// Returns stored paths matching `pattern`, sorted.
+    ///
+    /// Two wildcards are supported: `*` matches any run of characters within
+    /// a single path segment (it never crosses `/`), and `**` matches any
+    /// run of characters including `/`. All other characters match
+    /// literally. Only files are listed: the store vocabulary has no
+    /// directories.
     ///
     /// # Errors
-    /// Propagates any [`StoreError`] from the backend.
+    /// Returns [`StoreError::InvalidPattern`] if `pattern` is empty,
+    /// over-long, control-bearing, or grammar-invalid,
+    /// [`StoreError::WriteRace`] if another live identity holds a writer
+    /// claim on a matched path, or [`StoreError::Backend`] if the backend
+    /// fails.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// store.write("a.txt", "")?;
     /// store.write("b.md", "")?;
     /// assert_eq!(store.glob("*.txt")?, vec!["a.txt"]);
@@ -466,38 +360,59 @@ impl StoreRef {
                 reason: "pattern contains a control character".to_owned(),
             });
         }
-        if let Err(reason) = validate_glob_grammar(pattern) {
+        // The grammar has no escape syntax, and the router canonicalizes
+        // patterns (separators included) before the backend can reject
+        // them, so the backslash refusal must happen here.
+        if pattern.contains('\\') {
             return Err(StoreError::InvalidPattern {
                 pattern: pattern.to_owned(),
-                reason: reason.to_owned(),
+                reason: "pattern does not support backslash escapes".to_owned(),
             });
         }
-        // AUDIT-MUTEX-EXPENSIVE: snapshot every stored path under a brief lock
-        // (a trivial `**` full enumeration), then release the lock and run the
-        // arbitrary-pattern matcher on the owned snapshot. The O(tokens * path)
-        // matching never executes while the shared backend mutex is held; only
-        // the backend's own enumeration does.
-        let snapshot = self.lock()?.glob("**")?;
-        let tokens = compile_glob(pattern.as_bytes());
-        Ok(snapshot
-            .into_iter()
-            .filter(|path| matches_tokens(&tokens, path.as_bytes()))
-            .collect())
+        // One glob implementation lives in shared-vfs; the facade scopes
+        // the pattern to the mount and maps a grammar rejection back onto
+        // the store vocabulary.
+        let scoped = format!("{STORE_MOUNT}/{pattern}");
+        let matches = self.access.glob(&scoped).map_err(|err| match err {
+            VfsError::InvalidPath(reason) => StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason,
+            },
+            other => map_vfs(other, pattern),
+        })?;
+        let prefix = format!("{STORE_MOUNT}/");
+        let mut paths = Vec::new();
+        for matched in matches {
+            // The VFS glob lists directories as well as files; the store
+            // vocabulary lists files only.
+            let logical = matched.strip_prefix(&prefix).unwrap_or(&matched);
+            let stat = self
+                .access
+                .stat(&matched)
+                .map_err(|err| map_vfs(err, logical))?;
+            if stat.file_type != FileType::File {
+                continue;
+            }
+            paths.push(logical.to_owned());
+        }
+        Ok(paths)
     }
 
-    /// Returns whether a file exists at `path`. See [`Store::exists`].
+    /// Returns whether a file exists at `path`.
     ///
     /// A confirmed absence is `Ok(false)`; a backend failure is `Err`.
     ///
     /// # Errors
-    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or any
-    /// [`StoreError`] the backend reports.
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or
+    /// [`StoreError::Backend`] if the backend fails.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreRef;
+    /// use promptforge_store::StoreExt;
     ///
-    /// let store = StoreRef::memory();
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
     /// assert!(!store.exists("a.txt")?);
     /// store.write("a.txt", "hi")?;
     /// assert!(store.exists("a.txt")?);
@@ -505,7 +420,64 @@ impl StoreRef {
     /// ```
     pub fn exists(&self, path: &str) -> Result<bool, StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock()?.exists(path.as_str())
+        self.access
+            .exists(&full(path.as_str()))
+            .map_err(|err| map_vfs(err, path.as_str()))
+    }
+}
+
+/// The extension trait behind the `vfs.store(&access)` call shape.
+///
+/// The [`Store`] facade type lives in this crate, above `promptforge-vfs`
+/// and `shared-vfs` in the dependency stack, so the method cannot be
+/// inherent on `VfsRef`; a prelude-exported extension trait preserves the
+/// declared call shape without inverting the stack.
+pub trait StoreExt {
+    /// Returns the store facade scoped to the stock store mount, bound to
+    /// `access`'s identity.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreExt;
+    ///
+    /// let vfs = promptforge_vfs::empty();
+    /// let access = vfs.acquire();
+    /// let store = vfs.store(&access);
+    /// store.write("seeded.txt", "input")?;
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    fn store<'a>(&self, access: &'a Access) -> Store<'a>;
+}
+
+impl StoreExt for VfsRef {
+    fn store<'a>(&self, access: &'a Access) -> Store<'a> {
+        Store { access }
+    }
+}
+
+/// The integrator prelude: the facade and its extension trait.
+pub mod prelude {
+    pub use crate::{Store, StoreExt};
+}
+
+/// Joins a validated logical path onto the store mount prefix.
+fn full(path: &str) -> String {
+    format!("{STORE_MOUNT}/{path}")
+}
+
+/// Maps the VFS error vocabulary onto the store's, keeping the logical
+/// path the caller supplied. A claim conflict is the write-write race the
+/// claims model detects; everything without a store-vocabulary home is an
+/// opaque backend failure.
+fn map_vfs(err: VfsError, path: &str) -> StoreError {
+    match err {
+        VfsError::NotFound(_) => StoreError::NotFound {
+            path: path.to_owned(),
+        },
+        VfsError::Conflict(_) => StoreError::WriteRace {
+            path: path.to_owned(),
+        },
+        other => StoreError::backend(other),
     }
 }
 
