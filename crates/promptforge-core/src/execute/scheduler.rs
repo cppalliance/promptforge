@@ -62,7 +62,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use mlua::{RegistryKey, Thread};
 use shared_vfs::Origin;
 use tokio::sync::mpsc;
-use tokio::task::AbortHandle;
+use tokio::task::JoinHandle;
 
 use crate::client::GatewayClient;
 use crate::fanout;
@@ -510,11 +510,14 @@ pub(crate) struct Scheduler<'a> {
     answer_tx: mpsc::UnboundedSender<(RequestId, Answer<Error>)>,
     /// The receive half the driver awaits when no chain is ready.
     answers: mpsc::UnboundedReceiver<(RequestId, Answer<Error>)>,
-    /// Abort handles of the in-flight leaf I/O tasks, keyed by request so
+    /// Join handles of the in-flight leaf I/O tasks, keyed by request so
     /// a fatal fanout arm can abort a sibling arm's own in-flight round;
     /// every handle is aborted on cancellation, and aborting a completed
-    /// task is a no-op.
-    io_tasks: HashMap<RequestId, AbortHandle>,
+    /// task is a no-op. The handles are kept joinable (not bare abort
+    /// handles) so a terminal run outcome can drain them: a store op
+    /// runs on the blocking pool, where abort detaches rather than
+    /// interrupts, and only the op's completion drops its access clone.
+    io_tasks: HashMap<RequestId, JoinHandle<()>>,
     /// The request ids whose in-flight tasks an abort discarded: a task
     /// that posted its answer before the abort landed delivers it late,
     /// and the driver discards exactly those answers. An unknown id that
@@ -619,7 +622,31 @@ impl<'a> Scheduler<'a> {
     /// Returns [`Error::Interrupted`] when the run's cancellation handle is
     /// signaled while chains are running or suspended.
     pub(crate) async fn drive(&mut self) -> Result<String> {
-        self.drive_inner().await
+        let result = self.drive_inner().await;
+        self.drain_io_tasks().await;
+        result
+    }
+
+    /// Claims-release ordering constraint: the run's result - success,
+    /// determinism failure, or cancellation alike - must not be delivered
+    /// while an in-flight leaf op still holds its access clone. A store
+    /// op runs on the blocking pool, where aborting the task detaches
+    /// rather than interrupts, so an abandoned op would release its
+    /// identity's claims only when the closure finishes - past the run's
+    /// end, where a fresh access could meet the lingering claim. Abort
+    /// every task still recorded (prompt for an async task, a no-op for
+    /// a blocking op already running, which runs to completion), then
+    /// await each handle: the join resolves only once the op's access
+    /// clone - and with it the identity's claims - is gone. This changes
+    /// when claims release, never what an operation does.
+    async fn drain_io_tasks(&mut self) {
+        let tasks = std::mem::take(&mut self.io_tasks);
+        for task in tasks.values() {
+            task.abort();
+        }
+        for (_, task) in tasks {
+            let _ = task.await;
+        }
     }
 
     async fn drive_inner(&mut self) -> Result<String> {
@@ -1552,7 +1579,7 @@ impl<'a> Scheduler<'a> {
     fn dispatch_infer(&mut self, id: ChainId, prompt: String, binding: Option<ModelBinding>) {
         match self.prepare_infer(id, prompt, binding) {
             Ok((request_id, task)) => {
-                self.io_tasks.insert(request_id, task.abort_handle());
+                self.io_tasks.insert(request_id, task);
                 self.pending.insert(request_id, id);
             }
             Err(error) => {
@@ -1629,7 +1656,7 @@ impl<'a> Scheduler<'a> {
     fn dispatch_tool_call(&mut self, id: ChainId, alias: &str, args: serde_json::Value) {
         match self.prepare_tool_call(id, alias, args) {
             Ok((request_id, task)) => {
-                self.io_tasks.insert(request_id, task.abort_handle());
+                self.io_tasks.insert(request_id, task);
                 self.pending.insert(request_id, id);
             }
             Err(error) => {
@@ -1782,7 +1809,7 @@ impl<'a> Scheduler<'a> {
             // the answer is then moot.
             let _ = tx.send((request_id, answer));
         });
-        self.io_tasks.insert(request_id, task.abort_handle());
+        self.io_tasks.insert(request_id, task);
         self.pending.insert(request_id, id);
     }
 
@@ -1835,7 +1862,7 @@ impl<'a> Scheduler<'a> {
                 Answer::Store(result.map_err(|e| classify_store_failure(&e))),
             ));
         });
-        self.io_tasks.insert(request_id, task.abort_handle());
+        self.io_tasks.insert(request_id, task);
         self.pending.insert(request_id, id);
         Ok(())
     }
@@ -2529,7 +2556,13 @@ impl<'a> Scheduler<'a> {
             // the driver discards; anything else stays a loud invariant
             // failure.
             self.aborted_requests.insert(request);
-            if let Some(task) = self.io_tasks.remove(&request) {
+            // The handle stays in `io_tasks`: aborting a blocking-pool op
+            // detaches rather than interrupts, so the op's access clone -
+            // and the claims it holds - releases only when the op finishes.
+            // The run-end drain awaits the handle, keeping claim release
+            // bounded to the run's lifetime on this path too; if the op's
+            // late answer arrives first, the answer loop takes the handle.
+            if let Some(task) = self.io_tasks.get(&request) {
                 task.abort();
             }
         }
