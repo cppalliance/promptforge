@@ -147,11 +147,12 @@ Each step is one commit containing its code and tests.
 
 <step-4>
 
-### Step 4: remove the three committed ledger files
+### Step 4: remove the three committed ledger files [completed]
 
 - Component: cleanup
 - In the promptforge repository: move root `vibe-ledger.md`, root `vibe-review.md`, and `vibe/vibe-ledger.md` to `cabinet/_trash/`, stating the recovery sentence for each, and commit the removal.
-- Verification: `git status` clean; the commit touches only those three files.
+- Verification: `git status` clean; the commit touches only the tracked deletions (root `vibe-ledger.md` and `vibe/vibe-ledger.md`; `vibe-review.md` was never tracked and is moved to `cabinet/_trash/` alongside them).
+- Component verification for `cleanup` (the survey's per-crate pattern cannot derive a cross-crate component target): `cargo check`, `cargo clippy --all-targets`, and `cargo test` for `promptforge-core`, `promptforge-lua`, `gateway-config`, `gateway-local`, and `workshop-server`.
 
 </step-4>
 
