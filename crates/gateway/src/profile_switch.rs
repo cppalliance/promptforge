@@ -1266,7 +1266,7 @@ struct OldRuntimes {
 }
 
 impl OldRuntimes {
-    fn shutdown(self) -> Result<(), shared_protocol::ShutdownError> {
+    fn shutdown(self) -> Result<(), gateway_protocol::ShutdownError> {
         #[cfg(feature = "local")]
         let result = self.local.shutdown();
         #[cfg(not(feature = "local"))]

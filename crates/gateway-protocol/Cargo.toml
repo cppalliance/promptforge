@@ -1,12 +1,12 @@
 [package]
-name = "shared-protocol"
+name = "gateway-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway protocol: OpenAI wire types, validation, and the upstream abstraction"
+description = "Gateway protocol: OpenAI wire types, validation, and the upstream abstraction"
 readme = "README.md"
 keywords = ["llm", "gateway", "openai", "proxy"]
 categories = ["web-programming::http-client"]

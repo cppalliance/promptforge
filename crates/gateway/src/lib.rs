@@ -113,7 +113,7 @@ mod tray;
 // The wire protocol and upstream abstraction live in the protocol crate;
 // these re-exports keep every `crate::wire::*` and `crate::upstream::*`
 // path resolving unchanged.
-pub(crate) use shared_protocol::{upstream, wire};
+pub(crate) use gateway_protocol::{upstream, wire};
 // The dominion admission queues live in the routing crate; this re-export
 // keeps every `crate::queue::*` path resolving unchanged.
 pub(crate) use gateway_routing::queue;
@@ -169,12 +169,12 @@ use crate::wire::{
 use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
+use gateway_protocol::ProtocolError;
 #[cfg(feature = "stt")]
 use gateway_stt::SpeechService;
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
 use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
-use shared_protocol::ProtocolError;
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.

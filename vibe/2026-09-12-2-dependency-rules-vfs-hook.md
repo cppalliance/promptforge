@@ -134,7 +134,7 @@ Commit exactly the working tree's `AGENTS.md` revisions together with the two `d
 
 <step-2>
 
-### Step 2: Rename shared-protocol to gateway-protocol and enforce the Shared rule
+### Step 2: Rename shared-protocol to gateway-protocol and enforce the Shared rule [completed]
 
 - Component: rename-and-enforcement
 

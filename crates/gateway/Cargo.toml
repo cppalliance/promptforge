@@ -51,7 +51,7 @@ rand.workspace = true
 # The shared loopback wall for the admin config endpoints; always on,
 # because those endpoints hold secrets in every build.
 shared-loopback.workspace = true
-shared-protocol.workspace = true
+gateway-protocol.workspace = true
 # The gateway-discovery-file seam: gateway.json is written after every successful
 # bind, in every build, so the workshop can discover a running gateway.
 shared-sidecar.workspace = true

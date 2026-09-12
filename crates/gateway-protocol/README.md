@@ -1,4 +1,4 @@
-# shared-protocol
+# gateway-protocol
 
 The OpenAI wire protocol and upstream abstraction for the PromptForge
 inference gateway: request/response wire types with trust-boundary
