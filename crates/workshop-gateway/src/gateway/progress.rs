@@ -6,7 +6,7 @@
 //! the progress hub verbatim, so the decode keeps the stricter posture
 //! the subscriber always had: only blank-line-terminated blocks
 //! dispatch (an incomplete trailing block is discarded), and a block
-//! that grows past [`MAX_EVENT_BLOCK`] without its terminator is
+//! that grows past `MAX_EVENT_BLOCK` without its terminator is
 //! refused rather than buffered unbounded.
 
 use std::pin::Pin;
@@ -30,7 +30,7 @@ const MAX_ERROR_BODY: usize = 2000;
 ///
 /// A `data:` block that does not decode is yielded as one error item
 /// without ending the stream; a read failure or an event block oversized
-/// beyond [`MAX_EVENT_BLOCK`] is yielded as one error item that ends the
+/// beyond `MAX_EVENT_BLOCK` is yielded as one error item that ends the
 /// stream. The stream ends when the gateway closes the body; whether to
 /// resubscribe is the caller's decision.
 pub type ProgressEventStream =

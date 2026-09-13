@@ -39,6 +39,14 @@ Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gatew
 - Unsafe code stays in its explicitly owned boundary. Every unsafe block documents its safety invariants immediately before the block.
 - Comments explain a non-obvious constraint, ordering requirement, or workaround. Every platform or external-bug workaround cites its upstream issue URL in the explanatory comment.
 
+## Verification
+
+- Full suite: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features`, then doctests via `cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc`; workshop crates separately: `cargo nextest run --locked -p workshop -p workshop-server`.
+- Linter: `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings` (workshop: `cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings`).
+- Formatter: `cargo fmt --all --check`.
+- Docs: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server` with `RUSTDOCFLAGS="-D warnings"`; user guide: `mdbook build guide`. Rustdoc lints are not covered by clippy; never skip the docs gate.
+- Boundary and structural harness: `cargo test -p build-xtask`.
+
 ## Structural Rules
 
 - Dependencies flow one way: shell -> features -> services -> vocabulary. Never add a dependency from a lower tier to a higher one. If Cargo rejects a cycle, the design is wrong, not the graph. On the SPA side, lazy-loaded panels never import the boot shell; shared code lives in services/ or base/.
