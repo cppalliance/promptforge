@@ -75,6 +75,10 @@ Each work item carries a focused check; the shared-vfs changes add new regressio
   - Rejected debt candidates, recorded so they are not re-litigated: claim granularity for glob/list/grep matches the designed per-path contract; overlays lose `read_range` push-down (performance only); `Ask` collapses to `PermissionDenied` (recorded v1 decision); `write_owned` deferred with no caller; host-backend stage-1 containment limits explicitly scoped; nested-handle double claim registration never self-conflicts; plan-mode copy refusal is conservative and visible; a cancelled run's in-flight store op completes (bounded, documented); anchor-replace duplication shows no drift; agent VMs keep inline store closures (single identity); process-global tables beyond the interner show no independent contradiction.
   - `promptforge/vibe/archdoc-next.md` does not exist at the disposition ref; no queue records needed resolution.
 
+### Deferred and Out of Scope
+
+- `write_owned` (deferred pending profiling, no caller); content-level dedup (rejected, revisit on measurement); the twelve rejected debt candidates; `#[cfg(test)]` helpers whose consumers live in the same module (legitimate, stay); the facade re-exports (deliberate, stay); historical run plans under `promptforge/vibe/` that reference the removed ledger files (dated records, stay).
+
 </decision-record>
 <project-survey>
 
@@ -191,6 +195,5 @@ Each step is one commit containing its code and tests.
 
 </step-7>
 
-- Deferred and out of scope: `write_owned` (deferred pending profiling, no caller); content-level dedup (rejected, revisit on measurement); the twelve rejected debt candidates; `#[cfg(test)]` helpers whose consumers live in the same module (legitimate, stay); the facade re-exports (deliberate, stay); historical run plans under `promptforge/vibe/` that reference the removed ledger files (dated records, stay).
 - Exit criteria: per-step verification above, then the Testing Plan exit criteria - `cargo check`, `cargo clippy --all-targets`, and `cargo test` green for `promptforge-core`, `promptforge-lua`, `gateway-config`, `gateway-local`, `workshop-server`, `shared-vfs`, `promptforge-vfs`, `promptforge-store`, and `promptforge-agent`; `cargo metadata --locked` and `cargo build` green at workspace root; a grep of `tools-public/coding/vibe-coder.md` confirms no instruction stages or commits a ledger file.
 </execution-plan>

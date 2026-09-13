@@ -196,6 +196,13 @@ Light by design: each debt gets one focused check and the existing suites are th
   - Per-crate guidance stays two-layered: AGENTS.md for product contracts, `lib.rs` `//! ## Invariants` for structural rules. No AGENTS.md files are created for the six extracted crates (their invariant docs are that layer), and rules already enforced by xtask or the compiler are not restated as prose. The review of the three existing per-crate AGENTS.md files found one active contradiction (the workshop-server service-locator bullet, broken by the decomposition at HEAD) and two gaps (the supervisor KEEP decision, the `user_input` standing rule); the contradiction is fixed in step 2 because it would otherwise forbid step 3's work, and the two gaps are added in step 5.
   - Analysis provenance: six findings accepted by the analysis subagent and upheld by an independent challenger (WSD-02's panic aspect narrowed to a doc conflict, WSD-03's exposure widened by the five SPA test files); 19 candidates rejected (7 residual-but-acceptable, 9 weak/speculative, 2 false, 3 unrelated pre-existing).
 
+### Deferred and Out of Scope
+
+- The exposed pre-existing items in the Decision Record (oversized shell and SPA test files, supervisor port, untyped catalog, stringly-typed errors elsewhere).
+- The 0-byte session log and missing upstream-error logging investigations.
+- SPA per-directory menu ownership; the phased contribution lifecycle; build-implementer unification; the CSS raw-value lint and `lib.rs` shape check (both need operator approval as structural checks).
+- Any `promptforge-*` or `shared-*` public API change beyond step 1's doc comment.
+
 </decision-record>
 <project-survey>
 
@@ -375,12 +382,5 @@ Single piece, single step.
 </step-5>
 
 Exit gate after step 5: the full regression set from the Testing Plan (the nextest sets, both clippy sets, `cargo fmt --all --check`, the docs command, `npm run build`, `npm run typecheck`, `npm test`), the release-build visual pass (five menus, all panels, shortcuts, five-turn agent chat), push, and green CI on the branch head.
-
-Deferred and out of scope:
-
-- The exposed pre-existing items in the Decision Record (oversized shell and SPA test files, supervisor port, untyped catalog, stringly-typed errors elsewhere).
-- The 0-byte session log and missing upstream-error logging investigations.
-- SPA per-directory menu ownership; the phased contribution lifecycle; build-implementer unification; the CSS raw-value lint and `lib.rs` shape check (both need operator approval as structural checks).
-- Any `promptforge-*` or `shared-*` public API change beyond step 1's doc comment.
 
 </execution-plan>

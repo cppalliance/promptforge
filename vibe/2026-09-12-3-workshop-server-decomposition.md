@@ -312,6 +312,14 @@ The test suites are the invariant. Every work item passes the full suite before 
   - Risk: if the per-concern state split turns out artificial, a `workshop-common` crate could recreate the big interaction surface one level down. The registry's proxy-slot design mitigates this - subsystems meet through protocol types, not shared state.
   - CI is currently red: `promptforge-core` scheduler determinism-violation test broken by the drain commit (`f566cc1`). Must be fixed before any decomposition work.
 
+### Deferred and Out of Scope
+
+- Phased contribution lifecycle (VS Code `WorkbenchPhase`, JupyterLab activation phases) - only once subsystem count justifies it.
+- Versioned extension API (Zed's immutable WIT snapshots) - only when a real extension API ships.
+- Shadow DOM / Web Components - `.ws-*` prefix sufficient; Shadow DOM duplicates CSS across roots.
+- HTML template files (Vite `?raw` imports) - CSS is the primary designer touchpoint, not HTML.
+- LSP integration - out of scope for this plan.
+
 </decision-record>
 <project-survey>
 
@@ -530,14 +538,6 @@ Verification: `.cursor/rules/` renders correctly and states the invariants above
 - Every Rust step verifies with: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --locked --workspace`.
 - Every SPA step verifies with: `npm run build`, `npm run typecheck`, `npm test`, visual check.
 - Stop condition: two consecutive failures on one step stops the run for a re-plan.
-
-### Deferred and Out of Scope
-
-- Phased contribution lifecycle (VS Code `WorkbenchPhase`, JupyterLab activation phases) - only once subsystem count justifies it.
-- Versioned extension API (Zed's immutable WIT snapshots) - only when a real extension API ships.
-- Shadow DOM / Web Components - `.ws-*` prefix sufficient; Shadow DOM duplicates CSS across roots.
-- HTML template files (Vite `?raw` imports) - CSS is the primary designer touchpoint, not HTML.
-- LSP integration - out of scope for this plan.
 
 ### SPA file inventory
 

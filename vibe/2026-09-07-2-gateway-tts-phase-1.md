@@ -115,6 +115,10 @@ isProject: false
   - Codebase anchors were verified against master `d539a6d9` on 2026-09-07 and re-anchored to branch `add-tts-phase-1` (`f8e07fb6`, carrying PR #18) the same day: the STT routes live in gateway-stt behind the `authorize_stt_route` middleware, the guide already has `05-speech.md` (Speech-to-Text), and no `FromRequest` import remains in the gateway crate. Line numbers are approximate and cited with symbols.
   - Branch `gate-way-tts-phase-1` stays in the repository untouched; deleting it is a separate explicit action.
 
+### Deferred and Out of Scope
+
+- The phase-2 local engine (a spike choosing between a managed CrispASR child and llama-server plus in-process SNAC decode, scored on time-to-first-audio, real-time factor under concurrent load, and an ASR-roundtrip quality gate); `ServeMode::Speech`; encoder and WAV-header policy; speech-model sampling-default pins (the design's Risks recipe targets Orpheus generation and lands with the local engine; no remote speech dialect carries sampling fields); Together SSE reframing; Workshop playback; the config-UI voice picker; text conditioning; ElevenLabs and Baseten adapters.
+
 ## Project survey
 
 Surveyed 2026-09-07 on branch `add-tts-phase-1` at its original base `f8e07fb6` (carrying PR #18's STT rework); re-validated 2026-09-09 against the rebased branch base `5edcb3c9` (current cppalliance master), whose tooling, CI, and layout this survey records. Architecture anchor: `vibe/archdoc.md`, read in full; its component list and invariants A1-A30 anchor the component map below. The invariants this plan leans on: A2 (each credential, connection record, lifecycle, and persisted state has exactly one owning subsystem), A3 (explicit dependency direction), A5 (bound every loop, queue, wait, stream, retry, and tool invocation), A6 (validate capabilities and semantics before queue admission or side effects), A19 (vendor and remote-service credentials stay inside the gateway), A27 (hold stream permits until body termination and expire stalled reads).
@@ -215,5 +219,3 @@ Components, in dependency order:
 
 - `design/design-gateway-tts-phase-1.md`: spawn a generator subagent to write the design as built: a title stating what was built, a standalone executive summary, and a numbered list of the key design choices, reconciled against the finished work and this plan's Decision Record (including the bounded relay, the split deadlines, the provisioning preflight, the Node live probe, and the A19 credential numbering).
 - Metadata synchronization: the six frontmatter todo statuses flip to `completed` in this final execution commit, and the as-built's commit and tree references name the objects the finished history actually contains.
-
-Deferred and out of scope: the phase-2 local engine (a spike choosing between a managed CrispASR child and llama-server plus in-process SNAC decode, scored on time-to-first-audio, real-time factor under concurrent load, and an ASR-roundtrip quality gate); `ServeMode::Speech`; encoder and WAV-header policy; speech-model sampling-default pins (the design's Risks recipe targets Orpheus generation and lands with the local engine; no remote speech dialect carries sampling fields); Together SSE reframing; Workshop playback; the config-UI voice picker; text conditioning; ElevenLabs and Baseten adapters.

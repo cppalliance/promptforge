@@ -534,6 +534,10 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
   - Strictness will bite spawn-and-forget patterns: a parent that keeps writing paths a live task has claimed will boom. Error message quality decides whether authors experience this as guidance or noise.
   - The policy seam was pressure-tested against learned allow-rules ("Always allow this directory" via a rule-list policy) and absorbed the feature with zero changes to the trait, Access, claims, or executor - evidence the interface is wide enough before it was needed.
 
+### Deferred and Out of Scope
+
+- do_shell dispatcher and argv pattern, git builtins and commit path, SQLite run-record backend and /_promptforge renderers, terminal mirrors, annotated listings, Bashkit integration proper (hooks, TraceMode, analyze), kaish fallback, stage-2 host-backend hardening.
+
 </decision-record>
 <project-survey>
 
@@ -672,7 +676,5 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 - Compile-check and smoke-test an ls/cat/grep script across mounted memory and store backends, verifying output and exit codes. The deliverable is evidence that the trait subsumes Bashkit; a mapping failure is the spike working as intended.
 
 </step-11>
-
-- Deferred and out of scope: do_shell dispatcher and argv pattern, git builtins and commit path, SQLite run-record backend and /_promptforge renderers, terminal mirrors, annotated listings, Bashkit integration proper (hooks, TraceMode, analyze), kaish fallback, stage-2 host-backend hardening.
 
 </execution-plan>

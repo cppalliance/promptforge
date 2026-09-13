@@ -41,7 +41,7 @@ isProject: false
 A 150-commit audit of the promptforge repository against the workspace Rust rulebook found 78 commits introducing deviations. The maintainers who run this repository need the correctness-relevant subset of that debt eliminated without a style-churn campaign, because the audit also showed that the repository holds several deliberate counter-conventions where the rulebook, not the code, is what should change.
 
 - Goals: fix every verified Tier 1 finding (blocking or fallible destructors, discarded error causes, a CI doctest coverage gap, an unused dev-dependency, an unbounded channel) and every verified Tier 2 finding (stringly `Result<_, String>` errors, missing `#[non_exhaustive]` on public items, `#[allow]` suppressions that should be `#[expect]`, real-time sleeps in in-process async tests) at HEAD `da1456b`.
-- Non-goals: the entire Deferred Workstream cataloged under Execution Instructions - documentation-example convergence, oversized-file splits, import regrouping, bool-flag elimination, test-layout consolidation, the toolchain-pin policy question, and the real-network test sleeps.
+- Non-goals: the entire Deferred and Out of Scope catalog in the Decision Record - documentation-example convergence, oversized-file splits, import regrouping, bool-flag elimination, test-layout consolidation, the toolchain-pin policy question, and the real-network test sleeps.
 - Success criteria: every finding verified at HEAD is either fixed with the full verification gate green or explicitly recorded as deferred.
 - Constraints, from the repository's own policy:
   - Behavior changes ship with tests in the same change.
@@ -158,6 +158,51 @@ Assumptions, risks, and notes:
 - A pre-execution review corrected the plan itself: the channel work originally claimed bounded `try_send` preserves today's semantics exactly (false - a full queue drops lifecycle events that today are only lost when the receiver is gone), the detach work lacked a check that workers hold no borrows from the dropped object, two either/or instructions were unresolved, and the C/D ordering contradicted itself. All were repaired before handoff.
 - A final conformance pass inlined the governing rules into Technical Design so execution needs no external reference: it added variant-level `#[non_exhaustive]` for the error variants that become data-carrying, the style requirements for the new `FixtureError` (operation-named variants, lowercase noun-phrase messages, `Send + Sync + 'static`), and the documentation requirement for new public items.
 
+### Deferred and Out of Scope
+
+Five catalogs of findings deliberately not executed in this pass; each must be re-verified at the then-current HEAD before scheduling, because the audit judged commits historically and some entries have already self-healed.
+
+#### F1. Documentation gaps
+
+- Missing `# Examples` doctests on public items across promptforge-core `execute/config.rs`, promptforge-lua `vm.rs`, promptforge-tool-picker `model.rs`, gateway-stt `service.rs` and the test-fixture modules, gateway-stt-engine `decoder.rs` and `test_fixtures/native.rs`, shared-sidecar `shutdown.rs`/`stale.rs`/`health.rs`/`lock.rs`/`validated.rs`, workshop-server `gateway_binding.rs`/`serve.rs`/`menu.rs`/`session_agents.rs`, gateway `diagnostics.rs`, shared-loopback `lib.rs`, and gateway-config `config/stt.rs` with `accessors.rs`.
+- Missing or variant-less `# Errors` on workshop-server `fixtures.rs` and `lib.rs` and gateway-stt `service.rs`.
+- Third-person summary style in shared-sidecar `cancellation.rs` among others.
+
+#### F2. Module and file structure
+
+- Missing `//!` module docs across the gateway-stt `take/` and `realtime/` subtrees, gateway-stt `audio.rs`, gateway-stt-engine `test_fixtures/scenarios.rs`, and several workshop-server and gateway test modules.
+- Fifteen files past the 500-line split rule, largest being gateway `src/lib.rs` at ~4858 lines, `profile_switch.rs` at 1997, gateway-logging `worker.rs` at ~1455, and build-workshop `main.rs` at 1319.
+- Logic in the gateway-logging, gateway, and shared-loopback crate roots.
+- `include!`-assembled test splits in workshop-server `tests/it/chat_gate.rs` and `realtime_relay.rs` and gateway `tests/it/realtime_stt.rs`.
+- Mixed `mod.rs` versus `foo.rs` module style within gateway-stt.
+
+#### F3. API design
+
+- Bool flag parameters in gateway `commands.rs`, gateway-stt `segment.rs` and `segment/boundary.rs`, workshop `menu.rs`, shared-sidecar `health.rs`, gateway-logging `queue.rs`, gateway-stt `model.rs` and `realtime/wire/client.rs`, and the engine worker/model loaders.
+- Clone-returning getters in workshop-server `app.rs` and `serve.rs`.
+- Missing compile-time Send/Sync assertions in promptforge-core `input.rs` and gateway-logging `runtime.rs`/`writer.rs`.
+- Missing `#[must_use]` on shared-sidecar's `GatewayInstanceLease`.
+- Over-long combinator chains in promptforge-lua `protocol.rs` and gateway-logging `redact.rs`; the bool-producing match in workshop-server `catalog/chat.rs`.
+- The `Cow` candidate in gateway-logging `redact.rs`; `{}` printing of anyhow errors in workshop `gateway.rs`.
+
+#### F4. Test layout and hygiene
+
+- Integration tests outside the single `tests/it/main.rs` binary in product-integration-tests, build-workshop, workshop, gateway-stt-engine, gateway-stt-backend-whisper, and gateway-transcribe.
+- Unit tests in sibling `tests.rs` files across promptforge-lua, gateway-stt, and workshop-server.
+- Bare `#[test]` functions at module scope in workshop-server `test_gateway/process.rs` and gateway-stt `test_fixtures/native.rs`.
+- Hand-rolled temp dirs in gateway-logging `runtime.rs` and `worker.rs`; blocking `std::fs` and thread joins inside async tests in gateway-stt `tests/common/mod.rs`.
+- Operation-style `expect` messages in gateway-transcribe `tests/native_whisper.rs`.
+- The ~26 real-network async-test sleeps deferred by the recorded decision.
+- Duplicated fixture helpers left behind when the `test-fixtures` feature was deleted.
+
+#### F5. Tooling, CI, and policy
+
+- The `rust-toolchain.toml` MSRV pin codified in AGENTS.md - a policy decision to resolve by unpinning or by amending the rulebook for application repos.
+- `tokio::spawn` inside gateway-stt library code at `realtime/registry.rs` and `realtime/session/items.rs`.
+- Import grouping outside the three-block rule across promptforge-lua, gateway, gateway-stt, gateway-logging, and workshop-server files; the free-function import in gateway-stt `realtime/wire/server.rs`.
+- The `failed to` Display prefix in gateway `config_write.rs`.
+- Build-script hygiene in workshop `build.rs` (boxed error instead of anyhow) and gateway `build.rs` (untested manifest-generation logic).
+
 </decision-record>
 
 <project-survey>
@@ -264,50 +309,5 @@ Eliminate the remaining ~32 stringly sites. Use `anyhow::Result` in test-only co
 This is the final step, so the full verification gate from the Testing Plan runs here: `cargo fmt --all --check`; `cargo clippy --all-targets --all-features -- -D warnings`, additionally on the newer CI stable because imports and doc comments were touched; `cargo test --locked --workspace --all-features` plus `cargo nextest run -p workshop -p workshop-server`; `cargo test --doc`; and `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features`. The commit lands only with the gate green and every acceptance behavior under the Functional Specification observable.
 
 </step-6>
-
-### Deferred Workstream
-
-Five catalogs of findings deliberately not executed in this pass; each must be re-verified at the then-current HEAD before scheduling, because the audit judged commits historically and some entries have already self-healed.
-
-#### F1. Documentation gaps
-
-- Missing `# Examples` doctests on public items across promptforge-core `execute/config.rs`, promptforge-lua `vm.rs`, promptforge-tool-picker `model.rs`, gateway-stt `service.rs` and the test-fixture modules, gateway-stt-engine `decoder.rs` and `test_fixtures/native.rs`, shared-sidecar `shutdown.rs`/`stale.rs`/`health.rs`/`lock.rs`/`validated.rs`, workshop-server `gateway_binding.rs`/`serve.rs`/`menu.rs`/`session_agents.rs`, gateway `diagnostics.rs`, shared-loopback `lib.rs`, and gateway-config `config/stt.rs` with `accessors.rs`.
-- Missing or variant-less `# Errors` on workshop-server `fixtures.rs` and `lib.rs` and gateway-stt `service.rs`.
-- Third-person summary style in shared-sidecar `cancellation.rs` among others.
-
-#### F2. Module and file structure
-
-- Missing `//!` module docs across the gateway-stt `take/` and `realtime/` subtrees, gateway-stt `audio.rs`, gateway-stt-engine `test_fixtures/scenarios.rs`, and several workshop-server and gateway test modules.
-- Fifteen files past the 500-line split rule, largest being gateway `src/lib.rs` at ~4858 lines, `profile_switch.rs` at 1997, gateway-logging `worker.rs` at ~1455, and build-workshop `main.rs` at 1319.
-- Logic in the gateway-logging, gateway, and shared-loopback crate roots.
-- `include!`-assembled test splits in workshop-server `tests/it/chat_gate.rs` and `realtime_relay.rs` and gateway `tests/it/realtime_stt.rs`.
-- Mixed `mod.rs` versus `foo.rs` module style within gateway-stt.
-
-#### F3. API design
-
-- Bool flag parameters in gateway `commands.rs`, gateway-stt `segment.rs` and `segment/boundary.rs`, workshop `menu.rs`, shared-sidecar `health.rs`, gateway-logging `queue.rs`, gateway-stt `model.rs` and `realtime/wire/client.rs`, and the engine worker/model loaders.
-- Clone-returning getters in workshop-server `app.rs` and `serve.rs`.
-- Missing compile-time Send/Sync assertions in promptforge-core `input.rs` and gateway-logging `runtime.rs`/`writer.rs`.
-- Missing `#[must_use]` on shared-sidecar's `GatewayInstanceLease`.
-- Over-long combinator chains in promptforge-lua `protocol.rs` and gateway-logging `redact.rs`; the bool-producing match in workshop-server `catalog/chat.rs`.
-- The `Cow` candidate in gateway-logging `redact.rs`; `{}` printing of anyhow errors in workshop `gateway.rs`.
-
-#### F4. Test layout and hygiene
-
-- Integration tests outside the single `tests/it/main.rs` binary in product-integration-tests, build-workshop, workshop, gateway-stt-engine, gateway-stt-backend-whisper, and gateway-transcribe.
-- Unit tests in sibling `tests.rs` files across promptforge-lua, gateway-stt, and workshop-server.
-- Bare `#[test]` functions at module scope in workshop-server `test_gateway/process.rs` and gateway-stt `test_fixtures/native.rs`.
-- Hand-rolled temp dirs in gateway-logging `runtime.rs` and `worker.rs`; blocking `std::fs` and thread joins inside async tests in gateway-stt `tests/common/mod.rs`.
-- Operation-style `expect` messages in gateway-transcribe `tests/native_whisper.rs`.
-- The ~26 real-network async-test sleeps deferred by the recorded decision.
-- Duplicated fixture helpers left behind when the `test-fixtures` feature was deleted.
-
-#### F5. Tooling, CI, and policy
-
-- The `rust-toolchain.toml` MSRV pin codified in AGENTS.md - a policy decision to resolve by unpinning or by amending the rulebook for application repos.
-- `tokio::spawn` inside gateway-stt library code at `realtime/registry.rs` and `realtime/session/items.rs`.
-- Import grouping outside the three-block rule across promptforge-lua, gateway, gateway-stt, gateway-logging, and workshop-server files; the free-function import in gateway-stt `realtime/wire/server.rs`.
-- The `failed to` Display prefix in gateway `config_write.rs`.
-- Build-script hygiene in workshop `build.rs` (boxed error instead of anyhow) and gateway `build.rs` (untested manifest-generation logic).
 
 </execution-plan>

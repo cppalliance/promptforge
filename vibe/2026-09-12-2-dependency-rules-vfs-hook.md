@@ -97,6 +97,11 @@ Each work item carries a focused check; the WriteRace fix adds a stress loop; th
   - The WriteRace mechanism is grounded in code reading of `dispatch_store`: the `spawn_blocking` closure's `Arc<Access>` clone outlives the answer send, and claims release only when the last clone drops. The fix bounds release to chain teardown inside `run()`.
   - The unix clippy lint is invisible on Windows by `cfg`; the Linux-target clippy check in the Testing Plan is the local proxy.
 
+### Deferred and Out of Scope
+
+- Historical `vibe/*.md` references to `shared-protocol` (dated records) and the PR #35 runner configuration repair (operator's machine, already applied and proven green) are out of scope.
+- Deferred above the VFS observation hook (which lands in this plan): the bounded run-scoped event log, the pull-based Lua query (the agent asks; the host never pushes), and every enrichment policy - deferred because context enrichment is per-host policy (a UI coding agent wants open windows and touched files; a headless agent has no windows; a report run wants nothing).
+
 </decision-record>
 <project-survey>
 
@@ -161,7 +166,5 @@ Both fixes are tiny, share the PR #35 CI provenance (the GitHub-hosted `ubuntu-l
 One seam, one commit. In `crates/shared-vfs/`: add `Origin` (a `#[non_exhaustive]` struct: `label`, `file`, `line`, all mandatory - `Origin::new(label)` is `#[track_caller]` and stamps the Rust call site via `Location::caller()`, `Origin::at(label, file, line)` sets an explicit position); `VfsRef::acquire` and `Access::spawn` gain a mandatory caller-supplied `Origin` (claims still key on the internal `ExecId`; the `Origin` is for observability); `VfsRef::builder()` gains the op-sink installation; the handle (`crates/shared-vfs/src/handle.rs`) fires the sink on every admitted operation - after policy and claims pass, before the backend executes - with the op kind, the canonical path, and the origin; fire-and-forget, no outcome, and a policy-denied operation never fires. Reads, writes, and enumeration (list, glob) all fire. The sink is `Send + Sync` and must be cheap: store ops fire it from the blocking pool. Update every call site: the executor and agent call `Origin::at` with the section name and the prompt's source position (all inputs already exist - the section VM is tagged with the section name, every compiled chunk carries its absolute `source_line`, sections carry spans, and the prompt carries its name); host code like the mount probe and tests call `Origin::new` and get the Rust call site for free. Module docs document the seam and name the deferred consumers (the bounded event log, the Lua pull query, enrichment policies); doc comments on `Origin::new` and `Origin::at` carry the most-specific-label guidance at the point of use (a section name for a chain, a tool id for a tool, a fixture name for a test - never a generic label when a specific one exists), and `crates/shared-vfs/AGENTS.md` carries it as a rule so agents working in the crate get it as instructions, not just docs. Verification: new shared-vfs tests - a sink receives events in order with op, path, and label; `Origin::new` stamps the caller's file and line; no sink means no events; a policy-denied operation never fires the sink - plus the shared-vfs and promptforge-vfs suites green and the workspace building with the new `acquire` signature.
 
 </step-4>
-
-Deferred and out of scope: historical `vibe/*.md` references to `shared-protocol` (dated records); the PR #35 runner configuration repair (operator's machine, already applied and proven green). Deferred above the VFS observation hook (which lands in this plan): the bounded run-scoped event log, the pull-based Lua query (the agent asks; the host never pushes), and every enrichment policy - deferred because context enrichment is per-host policy (a UI coding agent wants open windows and touched files; a headless agent has no windows; a report run wants nothing).
 
 </execution-plan>
