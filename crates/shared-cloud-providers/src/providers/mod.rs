@@ -3,11 +3,14 @@
 //! shape, pagination, and response mapping never leave the file.
 
 pub mod anthropic;
+pub mod azure_speech;
 pub mod baidu;
+pub mod bedrock;
 pub mod cohere;
 pub mod deepgram;
 pub mod deepseek;
 pub mod elevenlabs;
+pub mod foundry;
 pub mod gemini;
 pub mod groq;
 pub mod leonardo;

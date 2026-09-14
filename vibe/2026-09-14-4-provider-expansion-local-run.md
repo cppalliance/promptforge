@@ -226,7 +226,7 @@ Add under `crates/shared-cloud-providers/src/providers/` and register in `lib.rs
 
 <step-7>
 
-### Step 7: Heavy providers
+### Step 7: Heavy providers [completed]
 
 - Component: subprime-providers
 

@@ -38,11 +38,14 @@ pub struct Provider {
 pub fn providers() -> &'static [Provider] {
     &[
         providers::anthropic::PROVIDER,
+        providers::azure_speech::PROVIDER,
         providers::baidu::PROVIDER,
+        providers::bedrock::PROVIDER,
         providers::cohere::PROVIDER,
         providers::deepgram::PROVIDER,
         providers::deepseek::PROVIDER,
         providers::elevenlabs::PROVIDER,
+        providers::foundry::PROVIDER,
         providers::gemini::PROVIDER,
         providers::groq::PROVIDER,
         providers::leonardo::PROVIDER,
@@ -107,11 +110,14 @@ pub async fn fetch_models(
 ) -> Result<Vec<ModelEntry>, FetchError> {
     match provider.name {
         "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
+        "azure_speech" => providers::azure_speech::fetch(client, provider.base_url, key).await,
         "baidu" => providers::baidu::fetch(client, provider.base_url, key).await,
+        "bedrock" => providers::bedrock::fetch(client, provider.base_url, key).await,
         "cohere" => providers::cohere::fetch(client, provider.base_url, key).await,
         "deepgram" => providers::deepgram::fetch(client, provider.base_url, key).await,
         "deepseek" => providers::deepseek::fetch(client, provider.base_url, key).await,
         "elevenlabs" => providers::elevenlabs::fetch(client, provider.base_url, key).await,
+        "foundry" => providers::foundry::fetch(client, provider.base_url, key).await,
         "gemini" => providers::gemini::fetch(client, provider.base_url, key).await,
         "groq" => providers::groq::fetch(client, provider.base_url, key).await,
         "leonardo" => providers::leonardo::fetch(client, provider.base_url, key).await,
