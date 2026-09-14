@@ -90,13 +90,13 @@ The counter `tools.calls[alias]` reads how many times the model has called a too
 
 ## Trusted and untrusted output
 
-Output from a tool that marks its result untrusted is wrapped in a preface and nonce-tagged `<untrusted_input_...>` markers before the model sees it. Trusted tool output appends verbatim, and structured JSON output from a trusted tool resumes into Lua as a table.
+Output from a tool that marks its result untrusted is wrapped in a preface and nonce-tagged `<untrusted_input_...>` markers before the model sees it. Trusted tool output appends verbatim, and structured JSON output from a trusted tool resumes into Lua as a table. A bound tool's failure text is wrapped as untrusted whatever the tool's trust marking, so an error message from the outside world never reaches the model as trusted prose.
 
 ## Validation and edge cases
 
 Two semantic near-duplicate tools in one model-visible scope fail validation, with an error naming both aliases, both identities, and the similarity score. If you genuinely need both, isolate them in separate sections with per-section `tools.add`.
 
-An empty final reply from the model fails the loop unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. And a tool handler failure aborts the tool loop and fails the run with the tool's own error, preserving the underlying cause in the error chain.
+An empty final reply from the model fails the loop unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. A bound tool's own failure does not abort the loop: the error message arrives as the call's tool result, wrapped as untrusted input, so the model reads the failure and the run continues. Cancellation and every other dispatch failure still abort the loop, and a local tool's handler error still fails the run.
 
 ## Migrating from tools.bind
 

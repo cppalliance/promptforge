@@ -402,12 +402,12 @@ pub(crate) async fn run_models_loop(
                                 // the counts increment, and every other
                                 // dispatch failure still abort the loop.
                                 Err(Error::Tool { message, .. }) => {
-                                    let content = nonce.wrap(&message);
+                                    let wrapped = nonce.wrap(&message);
                                     observer.on_tool_result(
                                         execution, section, 0, 0, turn, &call.id, &call.name,
-                                        &content, false,
+                                        &wrapped, false,
                                     );
-                                    content
+                                    wrapped
                                 }
                                 Err(error) => return Err(error),
                             }

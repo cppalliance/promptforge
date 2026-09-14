@@ -318,7 +318,10 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
     )
     .await
     .expect("a tool's own failure becomes the call's result, not the loop's");
-    assert_eq!(out, "final answer", "the loop continues to the terminal reply");
+    assert_eq!(
+        out, "final answer",
+        "the loop continues to the terminal reply"
+    );
 
     // The result record carries the tool's error message, guard-wrapped as
     // untrusted content.

@@ -195,7 +195,7 @@ Components in dependency order:
 
 <step-5>
 
-### Step 5: document tool failures as tool results in the guide
+### Step 5: document tool failures as tool results in the guide [completed]
 
 - Component: tool-errors-as-results
 - Piece: guide-documentation (sequential after the bound-arm piece)
