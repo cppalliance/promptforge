@@ -1026,7 +1026,7 @@ Combine `promptforge-webfetch` and `promptforge-web-search` into the single `pro
 
 <step-17>
 
-### Step 17: Workshop wiring
+### Step 17: Workshop wiring [completed]
 
 - Component: first-party
 

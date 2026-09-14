@@ -200,14 +200,13 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
     socket.close().await;
 }
 
-/// GATE 7 - selection-loss recovery. A selection can vanish after the
-/// browser accepted an input but before the built-in reads its fresh
-/// `ui()` snapshot. The missing selection skips the model call silently -
-/// no error, no request - and the loop returns to input with the accepted
-/// text retained in its message list, so the next valid selection answers
-/// both.
+/// GATE 7 - selection-loss recovery, unified-runtime semantics: the run's
+/// model is the dropdown selection bound at launch, so a selection that
+/// vanishes mid-turn no longer skips anything - the frozen binding carries
+/// the raced turn to completion, and the same run keeps serving turns
+/// until a catalog replacement retires it.
 #[tokio::test]
-async fn gate_selection_loss_skips_the_turn_and_recovers_after_selection() {
+async fn gate_selection_loss_leaves_the_runs_frozen_binding_untouched() {
     let server = spawn_chat_server(&["test-model"]).await;
     let mut socket = connect_chat(&server.ws_base).await;
     let session = launch_chat(&mut socket).await;
@@ -231,18 +230,10 @@ async fn gate_selection_loss_skips_the_turn_and_recovers_after_selection() {
         .expect("the launched session remains registered")
         .expect("the submitted input completes its live wait");
 
-    // No error frame may surface (next_wait_token refuses one), no request
-    // may leave: the skipped turn simply returns to input.
-    let fresh = next_wait_token(&mut socket).await;
-    assert_eq!(
-        server
-            .captured
-            .lock()
-            .expect("the capture lock is healthy")
-            .len(),
-        0,
-        "a missing selection never reaches the gateway"
-    );
+    // The selection is gone, but the run's binding was frozen at launch:
+    // the raced turn dispatches and completes, and no error frame surfaces.
+    let turn = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&turn), "echo:accepted before loss");
 
     server
         .state
@@ -253,28 +244,31 @@ async fn gate_selection_loss_skips_the_turn_and_recovers_after_selection() {
         .menu()
         .set_selected("test-model")
         .expect("the retained model can be selected for recovery");
-    answer(&mut socket, &fresh, "recovered after selection").await;
+    let token = wait_after(&mut socket, &turn).await;
+    answer(&mut socket, &token, "recovered after selection").await;
     let turn = collect_turn(&mut socket).await;
     assert_eq!(
         delta_text(&turn),
-        "echo:accepted before loss\n\nrecovered after selection",
-        "the next input completes after selection becomes valid"
+        "echo:recovered after selection",
+        "the same run answers the next input on its frozen binding"
     );
     {
         let requests = server.captured.lock().expect("the capture lock is healthy");
         assert_eq!(
             requests.len(),
-            1,
-            "only the recovered turn reaches the gateway"
+            2,
+            "both turns reach the gateway on the frozen model"
         );
+        assert_eq!(requests[0]["model"], "test-model");
+        assert_eq!(requests[1]["model"], "test-model");
         assert_eq!(
-            role_content_pairs(&requests[0]),
-            vec![pair(
-                "user",
-                "accepted before loss\n\nrecovered after selection"
-            )],
-            "the skipped input was retained in the message list; the projection joins \
-             the two consecutive user utterances with a blank line"
+            role_content_pairs(&requests[1]),
+            vec![
+                pair("user", "accepted before loss"),
+                pair("assistant", "echo:accepted before loss"),
+                pair("user", "recovered after selection"),
+            ],
+            "the same run retains its message list across the selection loss"
         );
     }
     socket.close().await;

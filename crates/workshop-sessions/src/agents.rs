@@ -25,6 +25,7 @@
 //! resumes, and the socket derives the same count from the event sequence
 //! itself, so both sides agree without sharing more than the log.
 
+mod environment;
 mod lifecycle;
 mod session;
 pub(crate) mod socket;
@@ -48,6 +49,7 @@ use crate::input::WaitRegistry;
 
 use self::lifecycle::RunLifecycle;
 
+pub use environment::session_environment;
 pub(crate) use session::{AgentDelta, AgentSession, AgentSource, SessionObserver};
 pub(crate) use session::{delta_stamp, reply_stamp, ui_provider};
 

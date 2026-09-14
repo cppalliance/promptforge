@@ -28,9 +28,10 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use promptforge_api::client::{GatewayClient as ModelClient, GatewayEndpoint, SecretString};
-use promptforge_api::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api::{Prompt, RunContext, RunResult};
 use shared_promptforge_api::cancel::CancelHandle;
 use shared_promptforge_api::events::{EventLog as _, RuntimeEventKind};
+use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
 use shared_promptforge_api::observe::Observer;
 use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
 use workshop_server::{
@@ -327,8 +328,12 @@ struct RestoredChat {
 
 /// The relaunch half of the restart gate: the supervisor's own pieces -
 /// the session's wait registry behind the generic input broker, the
-/// embedded chat prompt, and a client aimed at the mock gateway - run on
-/// the unified runtime over the restored log.
+/// embedded chat prompt, the shared session environment carrying the
+/// first-party capabilities, and a client aimed at the mock gateway - run
+/// on the unified runtime over the restored log. The context carries the
+/// current model directly: the supervisor resolves the dropdown's
+/// selection at launch, and this harness drives the run beneath that
+/// seam.
 fn spawn_restored_chat(
     restored: &Arc<WorkshopObserver>,
     session: &str,
@@ -343,15 +348,20 @@ fn spawn_restored_chat(
     );
     let cancel = CancelHandle::new();
     let observer: Arc<dyn Observer> = restored.clone();
-    let env = Environment::new();
+    let env = workshop_sessions::session_environment(gateway_url, "test-key")
+        .expect("the mock gateway shape builds the session environment");
+    let model = ModelDescriptor::new(
+        ModelId::gateway("test-model").expect("the test model id is valid"),
+        "test model",
+        std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
+        ThinkingMode::Never,
+    );
     let ctx = RunContext::new(session.to_owned())
         .observer(Arc::clone(&observer))
         .client(client)
         .cancel(cancel.clone())
         .input_broker(broker)
-        .ui(Arc::new(
-            || json!({ "selected_model": "test-model", "workspace_root": serde_json::Value::Null }),
-        ));
+        .model(model);
     let execution = session.to_owned();
     let run = tokio::spawn(async move {
         let result = async {

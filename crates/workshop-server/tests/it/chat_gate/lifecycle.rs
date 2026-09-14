@@ -1,8 +1,9 @@
-/// GATE 3 - model switch. Current-chat behavior: selecting another model
-/// takes effect on the next turn, and the reply is attributed to the
-/// model that produced it.
+/// GATE 3 - model switch. Current-chat behavior: the run's model is the
+/// dropdown selection bound at launch, so selecting another model leaves
+/// the live run untouched and takes effect on the next run; the reply is
+/// attributed to the model that produced it.
 #[tokio::test]
-async fn gate_model_switch_takes_effect_next_turn_with_attribution() {
+async fn gate_model_switch_takes_effect_on_the_next_run_with_attribution() {
     let server = spawn_chat_server(&["model-a", "model-b"]).await;
     let mut socket = connect_chat(&server.ws_base).await;
     let _session = launch_chat(&mut socket).await;
@@ -22,20 +23,39 @@ async fn gate_model_switch_takes_effect_next_turn_with_attribution() {
         .set_selected("model-b")
         .expect("model-b is in the retained catalog");
 
+    // The live run's binding is frozen at launch: the next turn still
+    // runs on the launch-time model.
     let token = wait_after(&mut socket, &turn).await;
     answer(&mut socket, &token, "two").await;
     let turn = collect_turn(&mut socket).await;
     let reply = turn.events.last().expect("the second turn completes");
     assert_eq!(
+        reply["event"]["model"], "model-a",
+        "a selection change never reaches a run already launched"
+    );
+
+    // The next run binds the live selection: an operator cancel retires
+    // the waiting run, and the relaunch prepares against model-b.
+    let _waiting = wait_after(&mut socket, &turn).await;
+    socket.send_json(&json!({ "type": "cancel" })).await;
+    let token = next_wait_token(&mut socket).await;
+    answer(&mut socket, &token, "three").await;
+    let turn = collect_turn(&mut socket).await;
+    let reply = turn.events.last().expect("the third turn completes");
+    assert_eq!(
         reply["event"]["model"], "model-b",
-        "the switch takes effect next turn; the reply event carries the new model id"
+        "the relaunched run binds the new selection; the reply event carries its id"
     );
     {
         let requests = server.captured.lock().expect("the capture lock is healthy");
         assert_eq!(requests[0]["model"], "model-a");
         assert_eq!(
-            requests[1]["model"], "model-b",
-            "the request itself names the newly selected model"
+            requests[1]["model"], "model-a",
+            "the frozen run keeps its launch-time model after the switch"
+        );
+        assert_eq!(
+            requests[2]["model"], "model-b",
+            "the switch takes effect on the next run's request"
         );
     }
     socket.close().await;
@@ -111,8 +131,8 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
 }
 
 /// GATE 9 - catalog replacement during a profile switch. The supervisor
-/// relaunches on the new generation, and the relaunched run reads the new
-/// selection from its fresh `ui()` snapshot. The message list starts
+/// relaunches on the new generation, and the relaunched run binds the new
+/// selection at launch. The message list starts
 /// fresh: history lives in the section's Lua state until the deferred
 /// persistence work lands.
 #[tokio::test]
@@ -167,10 +187,9 @@ async fn gate_profile_switch_relaunches_chat_on_the_new_catalog() {
 
 /// GATE 10 - accepted-input replacement race. Catalog retirement waits
 /// until the in-flight turn settles, then relaunches on the new
-/// generation. On the unified runtime the raced turn reads its model from
-/// the fresh `ui()` snapshot - the raw-id `models.get` hack - so it
-/// dispatches once against the live selection and completes; the accepted
-/// input is recorded exactly once.
+/// generation. On the unified runtime the raced turn's model was frozen
+/// at launch, so it dispatches once against the launch-time selection and
+/// completes; the accepted input is recorded exactly once.
 #[tokio::test]
 async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_once() {
     let server = spawn_chat_server(&["model-a"]).await;
@@ -202,11 +221,11 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
         .expect("the launched session remains registered")
         .expect("the accepted input resumes its original run");
 
-    // The raced turn dispatches against the live selection and completes;
-    // its settlement retires the run. Every wait the retiring run opens is
-    // answered harmlessly (its run is cancelled before the answer can
-    // dispatch) or cancelled outright; the relaunched run's wait runs the
-    // next turn.
+    // The raced turn dispatches against its launch-frozen binding and
+    // completes; its settlement retires the run. Every wait the retiring
+    // run opens is answered harmlessly (its run is cancelled before the
+    // answer can dispatch) or cancelled outright; the relaunched run's
+    // wait runs the next turn, bound to the live selection.
     let mut accepted_events = 0;
     let mut announced: Vec<String> = Vec::new();
     let second = tokio::time::timeout(Duration::from_secs(10), async {
@@ -253,8 +272,8 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
         let requests = server.captured.lock().expect("the capture lock is healthy");
         assert_eq!(requests.len(), 2, "the raced turn and the recovery turn each dispatch once");
         assert_eq!(
-            requests[0]["model"], "model-b",
-            "the raced turn reads the live selection through the raw-id hack"
+            requests[0]["model"], "model-a",
+            "the raced turn runs on its launch-frozen binding, never the live selection"
         );
         assert_eq!(
             role_content_pairs(&requests[0]),

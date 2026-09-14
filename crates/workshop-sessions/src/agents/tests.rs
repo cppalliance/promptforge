@@ -1,6 +1,8 @@
+use std::num::NonZeroU32;
 use std::sync::atomic::AtomicU64;
 
 use shared_promptforge_api::events::RuntimeEventKind;
+use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
 use shared_promptforge_api::observe::{Observation, Observer};
 use workshop_protocol::Activity;
 
@@ -237,17 +239,33 @@ fn the_model_client_requires_a_usable_key_and_url() {
     assert!(agent_client("not a url", "k").is_none());
 }
 
+/// The descriptor the chat unit runs bind the declared `chat` role to.
+fn test_model() -> ModelDescriptor {
+    ModelDescriptor::new(
+        ModelId::gateway("test-model").expect("the test model id is valid"),
+        "test model",
+        NonZeroU32::new(8192).expect("8192 is non-zero"),
+        ThinkingMode::Never,
+    )
+}
+
 /// Runs the embedded chat prompt on the unified runtime with the given
-/// broker configuration, against a client no model call can survive.
+/// broker configuration, against a client no model call can survive. The
+/// environment carries the first-party capabilities exactly as the
+/// session wiring builds them, and the context carries the current model,
+/// because the prompt now declares its contract in frontmatter.
 async fn run_builtin_chat(
     broker: Option<Arc<dyn promptforge_api::input::InputBroker>>,
 ) -> Result<String, promptforge_api::execute::RunError> {
-    use promptforge_api::{Environment, Prompt, RunContext, RunResult};
+    use promptforge_api::{Prompt, RunContext, RunResult};
     let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
     let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
         .expect("the embedded chat prompt parses");
-    let env = Environment::new();
-    let mut ctx = RunContext::new("chat-unit").observer(observer);
+    let env = session_environment("http://127.0.0.1:9", "k")
+        .expect("a well-shaped gateway root builds the session environment");
+    let mut ctx = RunContext::new("chat-unit")
+        .observer(observer)
+        .model(test_model());
     if let Some(broker) = broker {
         ctx = ctx.input_broker(broker);
     }
@@ -256,6 +274,36 @@ async fn run_builtin_chat(
         RunResult::Cancelled => panic!("the chat unit run is never cancelled"),
         RunResult::Failure(error) => Err(error),
     }
+}
+
+#[test]
+fn the_builtin_chat_declares_its_contract_in_frontmatter() {
+    let prompt = promptforge_api::Prompt::parse(
+        BUILTIN_CHAT_SOURCE,
+        "chat-unit",
+        &shared_promptforge_api::observe::NullObserver::default(),
+    )
+    .expect("the embedded chat prompt parses");
+    let frontmatter = prompt.frontmatter();
+    let capabilities = frontmatter.capabilities();
+    assert_eq!(
+        capabilities.len(),
+        1,
+        "chat declares exactly one capability"
+    );
+    assert_eq!(capabilities[0].id().to_string(), "promptforge/web");
+    assert!(
+        !capabilities[0].is_optional(),
+        "the built-in host always installs its own web capability"
+    );
+    let tools = frontmatter.tools();
+    assert_eq!(tools.len(), 2, "both web tools get exact slots");
+    assert!(tools.get("fetch").is_some(), "the fetch slot is declared");
+    assert!(tools.get("search").is_some(), "the search slot is declared");
+    assert!(
+        frontmatter.models().get("chat").is_some(),
+        "the chat role is declared for the host's current model"
+    );
 }
 
 #[tokio::test]

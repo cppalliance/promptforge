@@ -8,7 +8,10 @@
 //! loop runs over this client. The client holds only the gateway's URL and
 //! the shared key; the vendor credential lives in the gateway, so the
 //! executor never sees it. Point `PROMPTFORGE_GATEWAY_URL` at a local server
-//! or another gateway to retarget it.
+//! or another gateway to retarget it. [`fetch_model_catalog`] reads the
+//! gateway's typed model list for host-side concerns (the Workshop dropdown
+//! and its selection resolution); the list never crosses into the
+//! environment an executor run prepares against.
 //!
 //! The implementation lives in the `promptforge-model-client` crate and is
 //! re-exported here: hosts pass a [`GatewayClient`] to
@@ -16,7 +19,9 @@
 //! [`CompletionError`].
 
 pub use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, SecretString};
-pub use promptforge_model_client::model::{CompletionError, CompletionErrorKind};
+pub use promptforge_model_client::model::{
+    CompletionError, CompletionErrorKind, fetch_model_catalog,
+};
 
 pub(crate) use promptforge_model_client::client::{
     Completion, CompletionResult, Message, StreamDelta, ToolCall, ToolSchema,

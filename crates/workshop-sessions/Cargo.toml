@@ -17,6 +17,7 @@ async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 promptforge-api.workspace = true
+promptforge-web.workspace = true
 shared-promptforge-api.workspace = true
 rand.workspace = true
 serde.workspace = true

@@ -11,6 +11,7 @@ use workshop_gateway::GatewaySnapshot;
 use workshop_menu::ChatCatalog;
 use workshop_protocol::Activity;
 
+use crate::agents::environment::{current_model, session_environment};
 use crate::agents::{
     AgentSession, AgentSource, SessionHost, SessionObserver, agent_client, delta_stamp, ui_provider,
 };
@@ -55,6 +56,7 @@ struct RunFactory {
     observer: Arc<dyn Observer>,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
+    host: SessionHost,
 }
 
 impl RunFactory {
@@ -73,25 +75,41 @@ impl RunFactory {
             ui: ui_provider(host.menu(), host.registry()),
             session,
             observer,
+            host: host.clone(),
         }
     }
 
     /// Builds one run over retained history and frozen bindings.
-    fn launch(&self, run: RunId, client: ModelClient) -> RunFuture {
+    fn launch(
+        &self,
+        run: RunId,
+        client: ModelClient,
+        environment: Arc<Environment>,
+        gateway: Arc<GatewaySnapshot>,
+    ) -> RunFuture {
         let AgentSource::Markdown(source) = self.session.source.clone();
-        self.launch_markdown(run, source, client)
+        self.launch_markdown(run, source, client, environment, gateway)
     }
 
     /// Builds one unified-runtime run of a Markdown prompt document.
-    fn launch_markdown(&self, run: RunId, source: String, client: ModelClient) -> RunFuture {
+    fn launch_markdown(
+        &self,
+        run: RunId,
+        source: String,
+        client: ModelClient,
+        environment: Arc<Environment>,
+        gateway: Arc<GatewaySnapshot>,
+    ) -> RunFuture {
         let parts = MarkdownRunParts {
             session: Arc::clone(&self.session),
             observer: Arc::clone(&self.observer),
             ui: Arc::clone(&self.ui),
             on_delta: Arc::clone(&self.on_delta),
+            host: self.host.clone(),
         };
         Box::pin(async move {
-            let result = run_markdown_agent(&source, parts, run, client).await;
+            let result =
+                run_markdown_agent(&source, parts, run, client, &environment, &gateway).await;
             (run, result)
         })
     }
@@ -104,25 +122,30 @@ struct MarkdownRunParts {
     observer: Arc<dyn Observer>,
     ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
+    host: SessionHost,
 }
 
 /// Runs one Markdown agent prompt on the unified runtime: the session's
 /// wait registry behind the generic input broker, the menu selection
 /// behind `ui().selected_model`, deltas forwarded to the session's
-/// channel. The prompt declares no capabilities, so the resolution
-/// context carries no picker and the run config keeps its stock store
-/// handle.
+/// channel. The run prepares against the session's shared environment -
+/// the first-party capabilities the prompt's frontmatter declares - and
+/// the context carries the dropdown's current model resolved at launch,
+/// so a selection change takes effect on the next run.
 async fn run_markdown_agent(
     source: &str,
     parts: MarkdownRunParts,
     run: RunId,
     client: ModelClient,
+    environment: &Environment,
+    gateway: &GatewaySnapshot,
 ) -> Result<(), AgentRunError> {
     let MarkdownRunParts {
         session,
         observer,
         ui,
         on_delta,
+        host,
     } = parts;
     let prompt = Prompt::parse(source, &session.id, observer.as_ref()).map_err(|error| {
         AgentRunError::Failed {
@@ -134,15 +157,18 @@ async fn run_markdown_agent(
         Arc::clone(&session.waits),
         session.input_frames.clone(),
     ));
-    let env = Environment::new();
-    let ctx = RunContext::new(session.id.clone())
+    let model = current_model(&host, gateway.base_url(), gateway.api_key()).await;
+    let mut ctx = RunContext::new(session.id.clone())
         .observer(observer)
         .client(client)
         .cancel(session.arm_cancel(run))
         .input_broker(broker)
         .ui(ui)
         .on_delta(on_delta);
-    match env.run(&prompt, "", ctx).await {
+    if let Some(model) = model {
+        ctx = ctx.model(model);
+    }
+    match environment.run(&prompt, "", ctx).await {
         RunResult::Ok(_output) => Ok(()),
         RunResult::Cancelled => Err(AgentRunError::Interrupted),
         RunResult::Failure(error) => Err(AgentRunError::Failed {
@@ -157,6 +183,12 @@ pub(super) struct EffectExecutor {
     session: Arc<AgentSession>,
     host: SessionHost,
     factory: RunFactory,
+    /// The shared model-free environment every run prepares against,
+    /// rebuilt when the gateway generation changes so a replacement
+    /// gateway's root and key reach the contributed tools.
+    environment: Option<Arc<Environment>>,
+    /// The gateway generation `environment` was built from.
+    environment_generation: u64,
     latest_catalog: Option<ChatCatalog>,
     active_catalog: Option<ChatCatalog>,
     latest_gateway: Arc<GatewaySnapshot>,
@@ -172,8 +204,13 @@ impl EffectExecutor {
         initial_catalog: Option<ChatCatalog>,
         initial_gateway: Arc<GatewaySnapshot>,
     ) -> Self {
+        let environment =
+            session_environment(initial_gateway.base_url(), initial_gateway.api_key())
+                .map(Arc::new);
         Self {
             factory: RunFactory::new(Arc::clone(&session), &host),
+            environment_generation: initial_gateway.generation(),
+            environment,
             session,
             host,
             latest_catalog: initial_catalog,
@@ -268,12 +305,28 @@ impl EffectExecutor {
             );
             return failed_relaunch(relaunch.run);
         };
+        if gateway.generation() != self.environment_generation {
+            self.environment =
+                session_environment(gateway.base_url(), gateway.api_key()).map(Arc::new);
+            self.environment_generation = gateway.generation();
+        }
+        let Some(environment) = self.environment.clone() else {
+            report_failure(
+                &self.session,
+                &self.host,
+                "the Gateway settings cannot build the promptforge/web capability",
+            );
+            return failed_relaunch(relaunch.run);
+        };
         match relaunch.history {
             HistoryEffect::Preserve => {}
         }
         self.active_catalog = Some(catalog);
-        self.active_gateway = Some(gateway);
-        self.active_run = Some(self.factory.launch(relaunch.run, client));
+        self.active_gateway = Some(Arc::clone(&gateway));
+        self.active_run = Some(
+            self.factory
+                .launch(relaunch.run, client, environment, gateway),
+        );
         EffectOutcome::Continue
     }
 }
