@@ -42,10 +42,13 @@ pub fn providers() -> &'static [Provider] {
         providers::deepseek::PROVIDER,
         providers::elevenlabs::PROVIDER,
         providers::gemini::PROVIDER,
+        providers::groq::PROVIDER,
         providers::meta::PROVIDER,
+        providers::minimax::PROVIDER,
         providers::moonshot::PROVIDER,
         providers::openai::PROVIDER,
         providers::qwen::PROVIDER,
+        providers::stepfun::PROVIDER,
         providers::xai::PROVIDER,
     ]
 }
@@ -101,10 +104,13 @@ pub async fn fetch_models(
         "deepseek" => providers::deepseek::fetch(client, provider.base_url, key).await,
         "elevenlabs" => providers::elevenlabs::fetch(client, provider.base_url, key).await,
         "gemini" => providers::gemini::fetch(client, provider.base_url, key).await,
+        "groq" => providers::groq::fetch(client, provider.base_url, key).await,
         "meta" => providers::meta::fetch(client, provider.base_url, key).await,
+        "minimax" => providers::minimax::fetch(client, provider.base_url, key).await,
         "moonshot" => providers::moonshot::fetch(client, provider.base_url, key).await,
         "openai" => providers::openai::fetch(client, provider.base_url, key).await,
         "qwen" => providers::qwen::fetch(client, provider.base_url, key).await,
+        "stepfun" => providers::stepfun::fetch(client, provider.base_url, key).await,
         "xai" => providers::xai::fetch(client, provider.base_url, key).await,
         _ => Err(FetchError::UnsupportedProvider {
             name: provider.name.to_owned(),

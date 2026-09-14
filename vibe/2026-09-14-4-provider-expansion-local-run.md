@@ -196,7 +196,7 @@ Add `dotenvy.workspace = true` to `crates/shared-cloud-providers/Cargo.toml`. At
 
 <step-4>
 
-### Step 4: OpenAI-dialect Subprime providers
+### Step 4: OpenAI-dialect Subprime providers [completed]
 
 - Component: subprime-providers
 
