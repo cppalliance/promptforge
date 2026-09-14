@@ -388,9 +388,9 @@ async fn model_required_when_infer_has_no_binding() {
 
 #[tokio::test]
 async fn shared_function_sees_sys_model_unknown_before_scope_close() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n\
-```lua\nmodels.default('writer', 'A general model for tests')\n```\n\n\
+```lua\nmodels.default('writer')\n```\n\n\
 ```lua shared\nfunction read_sys_model()\n  return sys.model\nend\n```\n\n\
 ## Only\n\n```lua\nreturn read_sys_model()\n```\n\nprose\n";
     let error = run(&bound_for_model(md), "", &[], &TestStore::new(), silent())

@@ -4,10 +4,12 @@ Models reach the outside world through tools, and a prompt controls exactly whic
 
 ## Declaring a tool
 
-Declare a tool alias in the preamble with a natural-language capability description:
+Declare a tool slot in the frontmatter with the `tools` key; a `want` description is filled by the picker at prepare, an exact global path by identity:
 
-````lua
-tools.bind('search', 'search the web')
+````yaml
+tools:
+  search:
+    want: search the web
 ````
 
 The call `tools.bind` alone advertises nothing to the model; it only declares the alias. Binding resolves the description against the live catalog, and the failures are typed and specific: no match for the description, an ambiguous match listing the candidate identities, a duplicate alias, the same tool selected twice, or a picked tool absent from the live catalog. A capability description is resolved at most once per run, so repeated binds of the same description return the identical cached outcome, including identical failures.

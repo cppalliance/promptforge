@@ -1,18 +1,18 @@
 ---
 name: analyst_example
-description: Demonstrate models.bind and models.use for careful model resolution.
+description: Demonstrate frontmatter model roles and models.use for careful model selection.
 promptforge: 0
+models:
+  analyst:
+    min_context: 40000
+    description: A model suited for careful analysis
 ---
 
 # Analyst Example
 
-```lua
-models.bind("analyst", "A model suited for careful analysis", { thinking = false, temperature = 0, context = 40000 })
-```
-
 ---
 
-Demonstrates prompt-local model resolution. H1 `models.bind` resolves against the host's gateway catalog. A section that calls `models.use` runs every completion under that model object's frozen invocation; a section that omits `models.use` inherits the prompt-wide `models.default` model when one is declared.
+Demonstrates prompt-local model selection. The frontmatter `models:` key declares the `analyst` role, filled from the host's current model at prepare. A section that calls `models.use` runs every completion under that role's bound model; a section that omits `models.use` inherits the prompt-wide `models.default` model when one is declared.
 
 ## Analyze
 

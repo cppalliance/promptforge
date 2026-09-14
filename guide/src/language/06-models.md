@@ -4,23 +4,26 @@ A prompt does not name a model directly. It describes the capability it needs, a
 
 ## Binding a model
 
-Declare a model alias in the preamble with `models.bind`:
+Declare a model role in the frontmatter with the `models` key:
 
-````lua
-models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })
+````yaml
+models:
+  analyst:
+    keywords: [no-thinking]
+    description: careful analysis
 ````
 
-The first argument is the local alias, the second is a natural-language capability description, and the third attaches invocation options such as `temperature`, `max_tokens`, `thinking`, and `context`. The options freeze at bind time and ride on every request that uses the binding.
+Each key is a local label. A role carries a keyword set from a closed vocabulary, an optional `min_context` token floor, and a description. Prepare fills every declared role from the host's current model and checks the hard keywords and the context minimum against the filled model.
 
 ## The default model
 
-The call `models.default` designates the prompt-wide default, and it comes in two forms. The multi-argument form binds and designates in one call:
+The call `models.default` designates the prompt-wide default, parking a declared role by its label:
 
 ````lua
-models.default("writer", "A tiny model", { thinking = false, temperature = 0 })
+models.default("writer")
 ````
 
-The single-argument form designates an already-bound alias: `models.default("writer")`. The two forms cannot be combined, and `models.default` may be called at most once per prompt, only during the live H1 pass.
+The label names a role declared in the frontmatter `models` key, and `models.default` may be called at most once per prompt.
 
 ## Selecting a model for a section
 

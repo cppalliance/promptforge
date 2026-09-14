@@ -135,19 +135,13 @@ fn test_completion_options() -> CompletionOptions {
 }
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
-/// model-facing fixture prompt runs its sections under a bound model. The
-/// canonical prose default rewrites to the label form over the declared
-/// role; prompts with their own richer `models.bind`/`models.default`
-/// shapes keep them (hand-migration cases).
+/// model-facing fixture prompt runs its sections under a bound model.
+/// Prompts carrying their own `models.default` call (or the legacy
+/// `models.bind` of the removal tests) keep their shape and get only the
+/// role declaration.
 fn ensure_model_h1(md: &str) -> String {
-    let mut source = md.to_string();
+    let source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
-        // The canonical prose default becomes the label form over a
-        // declared role; richer bind shapes are hand-migration cases.
-        source = source.replace(
-            "models.default('writer', 'A general model for tests')",
-            "models.default('writer')",
-        );
         return declare_writer(&source);
     }
     let source = declare_writer(&source);

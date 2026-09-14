@@ -3,14 +3,19 @@ name: real_tool_call
 description: Exercise one aliased real-model tool call and continuation
 promptforge: 0
 max_tool_iterations: 2
+tools:
+  ask_fixture:
+    want: Return one deterministic fixture value for one supplied string.
+models:
+  writer:
+    description: A careful analysis model suited to structured reasoning and long-context review
 ---
 
 # Real Tool Call
 
 ```lua
-tools.bind("ask_fixture", "Return one deterministic fixture value for one supplied string.")
 tools.always("ask_fixture")
-models.default("writer", "A careful analysis model suited to structured reasoning and long-context review")
+models.default("writer")
 ```
 
 ## Call And Continue

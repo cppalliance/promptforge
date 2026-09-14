@@ -3,14 +3,19 @@ name: research_person
 description: Research a person from the open web and return a concise, factual summary.
 promptforge: 0
 max_tool_iterations: 20
+capabilities:
+  - promptforge/web
+tools:
+  search: promptforge/web/search
+  fetch: promptforge/web/fetch
+models:
+  researcher: {}
 ---
 
 # Research a Person
 
 ```lua
-tools.bind("search", "Search the web and return a list of results (title, url, description).")
-tools.bind("fetch", "Fetch a web page and return its main content as markdown.")
-models.default("researcher", "A model suited for careful analysis, coding, and general assistance")
+models.default("researcher")
 ```
 
 ## Research

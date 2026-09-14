@@ -288,23 +288,26 @@ A prompt does not name a model directly. It describes the capability it needs, a
 
 ## Binding a model
 
-Declare a model alias in the preamble with `models.bind`:
+Declare a model role in the frontmatter with the `models` key:
 
-````lua
-models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })
+````yaml
+models:
+  analyst:
+    keywords: [no-thinking]
+    description: careful analysis
 ````
 
-The first argument is the local alias, the second is a natural-language capability description, and the third attaches invocation options such as `temperature`, `max_tokens`, `thinking`, and `context`. The options freeze at bind time and ride on every request that uses the binding.
+Each key is a local label. A role carries a keyword set from a closed vocabulary, an optional `min_context` token floor, and a description. Prepare fills every declared role from the host's current model and checks the hard keywords and the context minimum against the filled model.
 
 ## The default model
 
-The call `models.default` designates the prompt-wide default, and it comes in two forms. The multi-argument form binds and designates in one call:
+The call `models.default` designates the prompt-wide default, parking a declared role by its label:
 
 ````lua
-models.default("writer", "A tiny model", { thinking = false, temperature = 0 })
+models.default("writer")
 ````
 
-The single-argument form designates an already-bound alias: `models.default("writer")`. The two forms cannot be combined, and `models.default` may be called at most once per prompt, only during the live H1 pass.
+The label names a role declared in the frontmatter `models` key, and `models.default` may be called at most once per prompt.
 
 ## Selecting a model for a section
 
@@ -363,10 +366,12 @@ Models reach the outside world through tools, and a prompt controls exactly whic
 
 ## Declaring a tool
 
-Declare a tool alias in the preamble with a natural-language capability description:
+Declare a tool slot in the frontmatter with the `tools` key; a `want` description is filled by the picker at prepare, an exact global path by identity:
 
-````lua
-tools.bind('search', 'search the web')
+````yaml
+tools:
+  search:
+    want: search the web
 ````
 
 The call `tools.bind` alone advertises nothing to the model; it only declares the alias. Binding resolves the description against the live catalog, and the failures are typed and specific: no match for the description, an ambiguous match listing the candidate identities, a duplicate alias, the same tool selected twice, or a picked tool absent from the live catalog. A capability description is resolved at most once per run, so repeated binds of the same description return the identical cached outcome, including identical failures.

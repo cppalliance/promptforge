@@ -3,12 +3,15 @@ name: real_text
 description: Exercise one deterministic real-model text completion and epilog
 promptforge: 0
 max_tool_iterations: 1
+models:
+  writer:
+    description: A careful analysis model suited to structured reasoning and long-context review
 ---
 
 # Real Text
 
 ```lua
-models.default("writer", "A careful analysis model suited to structured reasoning and long-context review")
+models.default("writer")
 ```
 
 ## Complete

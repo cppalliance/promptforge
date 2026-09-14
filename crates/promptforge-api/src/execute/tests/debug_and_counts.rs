@@ -85,9 +85,9 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        writer = models.default('writer', 'A general model for tests')\n```\n\n\
+        writer = models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = models.infer(writer, 'say hello')\n\
@@ -132,9 +132,9 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
     let gateway = ScriptedGateway::start(vec![resp_text("arm reply")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Parent\n\n\
         ```lua\n\
         local r = fanout('### Worker', {'alpha'})\n\
@@ -522,9 +522,9 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     // sets `reply` or `sys.reply_finish_reason`.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        writer = models.default('writer', 'A general model for tests')\n```\n\n\
+        writer = models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = models.infer(writer, 'say hello')\n\

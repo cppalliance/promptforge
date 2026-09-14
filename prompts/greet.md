@@ -2,12 +2,14 @@
 name: greet
 description: Greet the named input using a Lua-computed value
 promptforge: 0
+models:
+  writer: {}
 ---
 
 # Greet
 
 ```lua
-models.default("writer", "A model suited for careful analysis, coding, and general assistance")
+models.default("writer")
 ```
 
 Computes a greeting from the input in Lua, substitutes it into the prose, and

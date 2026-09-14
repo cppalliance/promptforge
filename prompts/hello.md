@@ -2,12 +2,14 @@
 name: hello
 description: Say hello
 promptforge: 0
+models:
+  writer: {}
 ---
 
 # Hello World
 
 ```lua
-models.default("writer", "A model suited for careful analysis, coding, and general assistance")
+models.default("writer")
 ```
 
 A minimal test prompt.

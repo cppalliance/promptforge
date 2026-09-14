@@ -1006,7 +1006,7 @@ In `promptforge-lua`: `tools.bind` removed entirely (binding is frontmatter), `m
 
 <step-15>
 
-### Step 15: Prose binding migration
+### Step 15: Prose binding migration [completed]
 
 - Component: binding
 
