@@ -216,7 +216,7 @@ Add under `crates/shared-cloud-providers/src/providers/` and register in `lib.rs
 
 <step-6>
 
-### Step 6: Keyless providers
+### Step 6: Keyless providers [completed]
 
 - Component: subprime-providers
 

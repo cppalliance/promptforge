@@ -115,6 +115,9 @@ fn empty_home(test: &str) -> PathBuf {
 
 /// Run the binary with every provider key stripped from the environment,
 /// so no host credential can turn a fixture run into a live fetch.
+/// Keyless providers (no `key_env`) have no credential to strip: they
+/// still fetch live, so their slice status depends on egress and the
+/// universal `unavailable` assertions below exempt them.
 fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
     let mut command = Command::new(BIN);
     command.arg(output);
@@ -241,11 +244,16 @@ fn binary_tolerates_first_run_without_previous_sheet() {
 
     assert_eq!(sheet.schema_version, 1);
     assert_eq!(sheet.providers.len(), providers().len());
-    for (name, slice) in &sheet.providers {
+    for provider in providers() {
+        if provider.key_env.is_none() {
+            continue;
+        }
+        let slice = &sheet.providers[provider.name];
         assert_eq!(
             slice.status,
             SliceStatus::Unavailable,
-            "first run with no keys must record `{name}` as unavailable, not fail"
+            "first run with no keys must record `{}` as unavailable, not fail",
+            provider.name
         );
     }
 }
@@ -282,11 +290,16 @@ fn binary_treats_404_previous_sheet_as_first_run() {
 
     assert_eq!(sheet.schema_version, 1);
     assert_eq!(sheet.providers.len(), providers().len());
-    for (name, slice) in &sheet.providers {
+    for provider in providers() {
+        if provider.key_env.is_none() {
+            continue;
+        }
+        let slice = &sheet.providers[provider.name];
         assert_eq!(
             slice.status,
             SliceStatus::Unavailable,
-            "a 404 previous sheet means first run: `{name}` must record unavailable"
+            "a 404 previous sheet means first run: `{}` must record unavailable",
+            provider.name
         );
     }
 }
