@@ -1,0 +1,61 @@
+//! The preflight report: [`Requirements`].
+
+use shared_promptforge_api::capabilities::CapabilityId;
+
+/// The preflight report: what the caller must still satisfy before the
+/// prompt can run.
+///
+/// [`Environment::prepare`](super::Environment::prepare) returns one
+/// alongside the enriched context. The report lists only what needs human
+/// attention: a skipped optional capability is a log line at prepare, not
+/// a report field.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Requirements {
+    /// The model requirements the filled bindings do not satisfy: the
+    /// role, which check, and required versus actual (a `min_context` of
+    /// 200000 against a 32k model; `thinking` against a Never model).
+    /// Populated by the model fill; capability activation adds none.
+    pub unmet_requirements: Vec<UnmetRequirement>,
+    /// The required capabilities the run cannot have: absent from the
+    /// environment's registry, or present but failed to activate. The
+    /// run fails until every one is satisfied.
+    pub missing_required: Vec<CapabilityId>,
+}
+
+impl Requirements {
+    /// Returns whether nothing blocks the run: no unmet model requirements
+    /// and no missing required capabilities.
+    #[must_use]
+    pub fn is_satisfied(&self) -> bool {
+        self.unmet_requirements.is_empty() && self.missing_required.is_empty()
+    }
+}
+
+/// One failed model requirement: the role, which check failed, and what
+/// the prompt required versus what the filled model provides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnmetRequirement {
+    /// The declared role label whose requirement failed.
+    pub role: String,
+    /// Which requirement check failed.
+    pub check: RequirementCheck,
+    /// What the prompt required (a context minimum of `200000`; the
+    /// `thinking` keyword).
+    pub required: String,
+    /// What the filled model provides (a context of `32000`; a `Never`
+    /// thinking capability).
+    pub actual: String,
+}
+
+/// Which model requirement check failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RequirementCheck {
+    /// The role's context minimum exceeds the filled model's context.
+    ContextMinimum,
+    /// A hard keyword (`thinking`, `no-thinking`) the filled model's
+    /// descriptor does not satisfy.
+    HardKeyword,
+}

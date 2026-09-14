@@ -10,6 +10,7 @@
 mod execution;
 mod fanout;
 mod parsing;
+mod prepare;
 mod shipped;
 mod support;
 mod vfs;

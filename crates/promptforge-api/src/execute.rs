@@ -58,7 +58,8 @@
 //! The orchestration boundary ([`run`]) lives here; the rest is split into
 //! focused private children: `error` (the public [`RunError`]), `config`
 //! ([`RunContext`]/[`RunLimits`]), `environment` (the public
-//! [`Environment`]), `context` (the ambient `RunState` run
+//! [`Environment`]), `requirements` (the preflight
+//! [`Requirements`] report), `context` (the ambient `RunState` run
 //! state), `gateway` (client acquisition and the live H1 resolution
 //! inputs),
 //! `tools` (the nested-inference round),
@@ -81,6 +82,7 @@ mod environment;
 mod error;
 mod gateway;
 pub(crate) mod protocol;
+mod requirements;
 mod scheduler;
 mod scope;
 mod section_context;
@@ -94,6 +96,7 @@ pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub(crate) use gateway::ResolutionContext;
+pub use requirements::{RequirementCheck, Requirements, UnmetRequirement};
 
 use context::RunState;
 use scheduler::Scheduler;

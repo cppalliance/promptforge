@@ -94,6 +94,7 @@ pub(crate) use crate::tools::NearDuplicateDiagnostic;
 pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use crate::client::{CompletionError, CompletionErrorKind};
 pub use crate::execute::{
-    Environment, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, run,
+    Environment, RequirementCheck, Requirements, RunContext, RunError, RunErrorKind, RunLimits,
+    RunResult, SourceLocation, UnmetRequirement, run,
 };
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

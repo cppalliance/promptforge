@@ -946,7 +946,7 @@ New `capabilities` module in `shared-promptforge-api` (the crate gains its `shar
 
 <step-9>
 
-### Step 9: prepare, Requirements, and the per-run VFS
+### Step 9: prepare, Requirements, and the per-run VFS [completed]
 
 - Component: capabilities
 

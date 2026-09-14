@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use promptforge_tool_picker::ToolPicker;
+use shared_promptforge_api::capabilities::Contribution;
 
 use crate::cancel::CancelHandle;
 use crate::client::{GatewayClient, StreamDelta};
@@ -222,6 +223,11 @@ pub struct RunContext {
     pub(crate) ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
     pub(crate) on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
     pub(crate) vfs: VfsRef,
+    /// The activated capabilities' contributions, in declaration order.
+    /// Written by [`Environment::prepare`](super::Environment::prepare);
+    /// the catalog-assembly step consumes them into the run's tool
+    /// catalog.
+    pub(crate) contributions: Vec<Contribution>,
     /// The resolution inputs [`Environment::run`](super::Environment::run)
     /// installs; `None` on a caller-built context, which the free
     /// [`run`](super::run) treats as capability-free.
@@ -248,6 +254,7 @@ impl RunContext {
             ui: None,
             on_delta: None,
             vfs: promptforge_vfs::empty(),
+            contributions: Vec::new(),
             resolution: None,
         }
     }
@@ -333,6 +340,18 @@ impl RunContext {
         self
     }
 
+    /// Returns the run's VFS handle. After
+    /// [`Environment::prepare`](super::Environment::prepare) this is the
+    /// per-run router - the shared base mounted at `/` plus the run's
+    /// fresh store - and hosts extract run output through it.
+    ///
+    /// Named `vfs_handle` because the builder half already owns
+    /// [`vfs`](RunContext::vfs).
+    #[must_use]
+    pub fn vfs_handle(&self) -> &VfsRef {
+        &self.vfs
+    }
+
     /// Returns the run identity shared by every report.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -369,6 +388,7 @@ impl fmt::Debug for RunContext {
             .field("ui", &self.ui.is_some())
             .field("on_delta", &self.on_delta.is_some())
             .field("vfs", &self.vfs)
+            .field("contributions", &self.contributions)
             .field("resolution", &self.resolution.is_some())
             .finish()
     }
