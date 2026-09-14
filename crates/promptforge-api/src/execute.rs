@@ -75,6 +75,7 @@
 //! Rust-backed model-tool loop behind the section-visible `models.loop`),
 //! and `support` (shared helpers).
 
+mod bindings;
 mod config;
 mod context;
 mod engine;
@@ -92,6 +93,7 @@ mod tool_loop;
 mod tools;
 
 // Public API surface.
+pub use bindings::ModelBindings;
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
@@ -130,8 +132,9 @@ pub enum RunResult {
 ///
 /// The free `run` receives an already-prepared [`RunContext`] and has
 /// nothing to prepare from: a context that never passed through
-/// [`Environment::run`] runs capability-free (no picker, empty catalogs).
-/// Hosts normally go through [`Environment::run`], the zero-burden path.
+/// [`Environment::prepare`] runs capability-free (no picker, empty
+/// catalogs). Hosts normally go through [`Environment::run`], the
+/// zero-burden path.
 ///
 /// # Outcomes
 /// - [`RunResult::Ok`] - the run completed with its final text.

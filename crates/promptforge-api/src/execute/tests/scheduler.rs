@@ -61,7 +61,7 @@ fn scheduler_context_on(
     let ctx = RunState::new(
         prompt,
         "",
-        store.vfs(),
+        &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(EXECUTION).observer(observer),
     );
@@ -1257,7 +1257,7 @@ fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>
     RunState::new(
         prompt,
         "",
-        store.vfs(),
+        &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(EXECUTION).observer(observer),
     )
@@ -1864,7 +1864,7 @@ fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState
     let ctx = RunState::new(
         prompt,
         "",
-        &TestStore::new(),
+        &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(EXECUTION).limits(limits),
     );
@@ -2145,7 +2145,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
     let ctx = RunState::new(
         &prompt,
         "",
-        &TestStore::new(),
+        &TestStore::new().vfs(),
         shared,
         &RunContext::new(EXECUTION),
     );
@@ -2195,7 +2195,7 @@ async fn the_shared_replay_sees_the_arm_item() {
     let ctx = RunState::new(
         &prompt,
         "",
-        &TestStore::new(),
+        &TestStore::new().vfs(),
         shared,
         &RunContext::new(EXECUTION),
     );
@@ -2804,7 +2804,7 @@ async fn fatal_arm_aborts_queued_siblings() {
     let ctx = RunState::new(
         &prompt,
         "",
-        &store,
+        &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(EXECUTION)
             .limits(

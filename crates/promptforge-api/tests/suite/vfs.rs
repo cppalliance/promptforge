@@ -1,14 +1,15 @@
-//! The executor's `VfsRef` host contract: an end-to-end run over the stock
-//! handle, and the papergate-shaped seed-run-extract round trip a production
-//! host drives with no real files - seed the declared input through
-//! `vfs.store()`, run, extract the declared output, and charge a missing
-//! output to the prompt's promise as an explicit contract error.
+//! The executor's `VfsRef` host contract: an end-to-end run over the
+//! prepared handle, and the papergate-shaped seed-run-extract round trip
+//! a production host drives with no real files - prepare, seed the
+//! declared input through the run's handle, run, extract the declared
+//! output, and charge a missing output to the prompt's promise as an
+//! explicit contract error.
 
 use promptforge_api::parser::Prompt;
 use promptforge_store::{Store, StoreError, StoreExt};
 use shared_vfs::{HostBackend, Origin, VfsRef};
 
-use super::support::{RunOptions, parse_execution_fixture, run, run_fixture};
+use super::support::{RunOptions, drive, parse_execution_fixture, prepare_run, run_fixture};
 use crate::support::Recorder;
 use std::sync::Arc;
 
@@ -71,9 +72,9 @@ fn extract_declared_output(store: &Store, prompt: &Prompt) -> Result<String, Str
     })
 }
 
-/// Seeds the prompt's declared input through the stock handle's store
-/// facade. The seeding access drops here - its claims release - so the
-/// run's own identity never meets the host's.
+/// Seeds the prompt's declared input through the run's prepared handle.
+/// The seeding access drops here - its claims release - so the run's own
+/// identity never meets the host's.
 fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
     let input = prompt
         .frontmatter()
@@ -87,33 +88,36 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
         .expect("the declared input seeds");
 }
 
+/// Prepares a fixture run and returns the run's handle (for seeding
+/// before and extraction after) plus the pending run: the host's
+/// seed-run-extract sequence is prepare, seed through the handle, drive,
+/// extract through the handle.
 fn offline_run(
     prompt: &Prompt,
-    vfs: &VfsRef,
     execution: &'static str,
-) -> impl std::future::Future<Output = Result<String, promptforge_api::execute::RunError>> {
+) -> (
+    VfsRef,
+    impl std::future::Future<Output = Result<String, promptforge_api::execute::RunError>>,
+) {
     let recorder = Arc::new(Recorder::default());
     let prompt = prompt.clone();
-    let vfs = vfs.clone();
-    async move {
-        run(
-            &prompt,
-            "",
-            &[],
-            &vfs,
-            RunOptions {
-                execution,
-                observer: recorder,
-            },
-        )
-        .await
-    }
+    let (ctx, vfs) = prepare_run(
+        &prompt,
+        &[],
+        RunOptions {
+            execution,
+            observer: recorder,
+        },
+    );
+    let run = async move { drive(&prompt, "", ctx).await };
+    (vfs, run)
 }
 
 #[tokio::test]
 async fn an_end_to_end_run_threads_one_vfs_ref_through_every_section() {
     // The store survives the context-clearing section transition: one
-    // section's write is the next section's read, over the stock handle.
+    // section's write is the next section's read, over the run's
+    // prepared handle.
     let source = "\
 ---\nname: vfs-end-to-end\ndescription: d\npromptforge: 0\n---\n\n\
 # Title\n\n\
@@ -127,25 +131,23 @@ return store.read('handoff.txt')\n\
 ```\n";
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, "vfs-end-to-end", "vfs-e2e", recorder.as_ref());
-    let vfs = promptforge_vfs::empty();
-    let result = run(
+    let (ctx, vfs) = prepare_run(
         &prompt,
-        "",
         &[],
-        &vfs,
         RunOptions {
             execution: "vfs-e2e",
             observer: recorder,
         },
-    )
-    .await
-    .expect("the run threads the stock handle through both sections");
+    );
+    let result = drive(&prompt, "", ctx)
+        .await
+        .expect("the run threads the prepared handle through both sections");
     assert_eq!(result, "across the reset");
     // Extraction after the run takes a fresh access: the run's identities
     // dropped with it, so nothing the run touched can conflict here.
     let access = vfs
-        .acquire(Origin::new("stock handle extraction"))
-        .expect("the stock backend acquires");
+        .acquire(Origin::new("prepared handle extraction"))
+        .expect("the prepared backend acquires");
     assert_eq!(
         vfs.store(&access)
             .read("handoff.txt")
@@ -155,7 +157,7 @@ return store.read('handoff.txt')\n\
 }
 
 #[tokio::test]
-async fn a_host_seeds_and_extracts_through_the_stock_handle_with_no_real_files() {
+async fn a_host_seeds_and_extracts_through_the_prepared_handle_with_no_real_files() {
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         ROUND_TRIP,
@@ -163,15 +165,13 @@ async fn a_host_seeds_and_extracts_through_the_stock_handle_with_no_real_files()
         "vfs-round-trip",
         recorder.as_ref(),
     );
-    let vfs = promptforge_vfs::empty();
+    let (vfs, run) = offline_run(&prompt, "vfs-round-trip");
     seed_declared_input(&vfs, &prompt, "the paper body");
-    let result = offline_run(&prompt, &vfs, "vfs-round-trip")
-        .await
-        .expect("the seeded run executes offline");
+    let result = run.await.expect("the seeded run executes offline");
     assert_eq!(result, "done");
     let access = vfs
         .acquire(Origin::new("round-trip extraction"))
-        .expect("the stock backend acquires");
+        .expect("the prepared backend acquires");
     let report = extract_declared_output(&vfs.store(&access), &prompt)
         .expect("the run left its promised output");
     assert_eq!(report, "report on: the paper body");
@@ -186,17 +186,15 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
         "vfs-missing-output",
         recorder.as_ref(),
     );
-    let vfs = promptforge_vfs::empty();
+    let (vfs, run) = offline_run(&prompt, "vfs-missing-output");
     seed_declared_input(&vfs, &prompt, "the paper body");
     // The executor does not enforce the declaration; the run succeeds and
     // the host's extraction is where the broken promise surfaces.
-    let result = offline_run(&prompt, &vfs, "vfs-missing-output")
-        .await
-        .expect("the run itself succeeds");
+    let result = run.await.expect("the run itself succeeds");
     assert_eq!(result, "read: the paper body");
     let access = vfs
         .acquire(Origin::new("missing-output extraction"))
-        .expect("the stock backend acquires");
+        .expect("the prepared backend acquires");
     let error = extract_declared_output(&vfs.store(&access), &prompt)
         .expect_err("the missing output is a contract error");
     assert!(
@@ -244,12 +242,14 @@ async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
     // rooted in a temp dir; the result and the stored contents must be
     // identical.
     const FANOUT_STORE_WRITES: &str = include_str!("../prompts/execution/fanout-store-writes.md");
+    // Both arms drive the raw host-handle contract (no prepare pass), so
+    // the caller's own backend serves the store mount in each.
     let memory = run_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
         "vfs-invariance-memory",
         "",
-        None,
+        Some(promptforge_vfs::empty()),
     )
     .await;
     let memory_result = memory

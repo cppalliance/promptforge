@@ -37,7 +37,7 @@ fn input_context(prompt: &Prompt, tools: ToolSet, config: &RunContext) -> RunSta
     let ctx = RunState::new(
         prompt,
         "",
-        &TestStore::new(),
+        &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         config,
     );

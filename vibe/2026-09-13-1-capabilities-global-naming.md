@@ -956,7 +956,7 @@ New `capabilities` module in `shared-promptforge-api` (the crate gains its `shar
 
 <step-10>
 
-### Step 10: ModelBindings and the trivial fill
+### Step 10: ModelBindings and the trivial fill [completed]
 
 - Component: binding
 

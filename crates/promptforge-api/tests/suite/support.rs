@@ -41,13 +41,15 @@ pub(super) struct RunOptions {
     pub(super) observer: Arc<dyn Observer>,
 }
 
-pub(super) async fn run(
+/// Prepares a fixture run against a fixture environment (dummy picker,
+/// the given tools) and returns the prepared context plus the run's own
+/// VFS handle - the prepared router - for seeding before the run and
+/// extraction after.
+pub(super) fn prepare_run(
     prompt: &Prompt,
-    args: &str,
     tools: &[Arc<dyn Tool>],
-    vfs: &VfsRef,
     opts: RunOptions,
-) -> Result<String, RunError> {
+) -> (RunContext, VfsRef) {
     let picker = ToolPicker::build_with_model(
         &promptforge_tool_picker::Model::dummy(),
         Catalog::default(),
@@ -57,14 +59,54 @@ pub(super) async fn run(
     .expect("empty fixture picker must build");
     let tools = ToolCatalog::new(tools).expect("fixture tools are unique");
     let env = Environment::new().picker(picker).tools(tools);
-    let ctx = RunContext::new(opts.execution)
-        .observer(opts.observer)
-        .vfs(vfs.clone());
-    match env.run(prompt, args, ctx).await {
+    let ctx = RunContext::new(opts.execution).observer(opts.observer);
+    let (ctx, requirements) = env.prepare(prompt, ctx);
+    assert!(
+        requirements.is_satisfied(),
+        "fixture prompts declare no capabilities or model roles: {requirements:?}"
+    );
+    let vfs = ctx.vfs_handle().clone();
+    (ctx, vfs)
+}
+
+/// Drives a prepared context to its result through the free `run`.
+pub(super) async fn drive(
+    prompt: &Prompt,
+    args: &str,
+    ctx: RunContext,
+) -> Result<String, RunError> {
+    match promptforge_api::execute::run(prompt, args, ctx).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),
         RunResult::Failure(error) => Err(error),
     }
+}
+
+/// Prepares and runs a fixture prompt in one call.
+pub(super) async fn run(
+    prompt: &Prompt,
+    args: &str,
+    tools: &[Arc<dyn Tool>],
+    opts: RunOptions,
+) -> Result<String, RunError> {
+    let (ctx, _vfs) = prepare_run(prompt, tools, opts);
+    drive(prompt, args, ctx).await
+}
+
+/// Runs `prompt` over a caller-built handle with no prepare pass: the raw
+/// host-handle contract, for tests of custom store backends (a gated or
+/// host-rooted store mount the prepare pass would replace with the run's
+/// own fresh store).
+pub(super) async fn run_unprepared(
+    prompt: &Prompt,
+    args: &str,
+    vfs: VfsRef,
+    opts: RunOptions,
+) -> Result<String, RunError> {
+    let ctx = RunContext::new(opts.execution)
+        .observer(opts.observer)
+        .vfs(vfs);
+    drive(prompt, args, ctx).await
 }
 
 /// A synchronized observer shared by concurrent fixture runs.
@@ -126,9 +168,11 @@ pub(super) struct FixtureRun {
     pub(super) store: FixtureStore,
 }
 
-/// Parses `source` and runs it offline with `args`, no tools, and either the
-/// supplied `vfs` or a fresh stock handle, returning the result together
-/// with the recorder and store the caller asserts on.
+/// Parses `source` and runs it offline with `args` and no tools, returning
+/// the result together with the recorder and store the caller asserts on.
+/// With `vfs` absent the run goes through prepare and the store is the
+/// prepared router's handle; an explicit `vfs` is the raw host-handle
+/// contract - no prepare pass, the run uses the handle as-is.
 pub(super) async fn run_fixture(
     source: &'static str,
     name: &'static str,
@@ -138,21 +182,33 @@ pub(super) async fn run_fixture(
 ) -> FixtureRun {
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, name, execution, recorder.as_ref());
-    let vfs = vfs.unwrap_or_else(promptforge_vfs::empty);
-    let result = run(
-        &prompt,
-        args,
-        &[],
-        &vfs,
-        RunOptions {
-            execution,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-        },
-    )
-    .await;
+    let (result, store) = if let Some(vfs) = vfs {
+        let result = run_unprepared(
+            &prompt,
+            args,
+            vfs.clone(),
+            RunOptions {
+                execution,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
+            },
+        )
+        .await;
+        (result, vfs)
+    } else {
+        let (ctx, vfs) = prepare_run(
+            &prompt,
+            &[],
+            RunOptions {
+                execution,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
+            },
+        );
+        let result = drive(&prompt, args, ctx).await;
+        (result, vfs)
+    };
     FixtureRun {
         result,
         recorder,
-        store: FixtureStore(vfs),
+        store: FixtureStore(store),
     }
 }

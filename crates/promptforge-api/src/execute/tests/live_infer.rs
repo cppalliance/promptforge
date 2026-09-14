@@ -153,7 +153,6 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // `log`, and `args` at load.
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let store = TestStore::new();
     let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\n---\n\n\
         # Shared Host Load\n\n\
         ```lua shared\n\
@@ -167,14 +166,16 @@ async fn shared_library_calls_host_apis_at_load_time() {
         .picker(picker)
         .models(models)
         .tools(ToolCatalog::default());
-    let RunResult::Ok(out) = env
-        .run(
-            &prompt,
-            "load-time args",
-            to_context(silent()).vfs(store.vfs().clone()),
-        )
-        .await
-    else {
+    // The multi-step path: prepare builds the run's own router, and the
+    // test store wraps the prepared handle so the post-run assertion
+    // reads what the run actually wrote.
+    let (ctx, requirements) = env.prepare(&prompt, to_context(silent()));
+    assert!(
+        requirements.is_satisfied(),
+        "the fixture declares nothing: {requirements:?}"
+    );
+    let store = TestStore::from_vfs(ctx.vfs_handle().clone());
+    let RunResult::Ok(out) = crate::execute::run(&prompt, "load-time args", ctx).await else {
         panic!("top-level shared host calls must succeed");
     };
 

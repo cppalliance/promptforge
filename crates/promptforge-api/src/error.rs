@@ -487,6 +487,19 @@ pub(crate) enum Error {
     #[error("unsupported promptforge version: {0} (this build supports major 0)")]
     UnsupportedVersion(u32),
 
+    /// The environment cannot satisfy the prompt's declared requirements:
+    /// required capabilities are missing, or the filled model fails a
+    /// declared hard requirement (a context minimum or hard keyword).
+    ///
+    /// The notice is the whole message, written to be read by a model: it
+    /// may arrive as tool output when the prompt runs as a sub-run tool.
+    #[error("{notice}")]
+    #[non_exhaustive]
+    RequirementsUnmet {
+        /// The model-readable refusal notice, one line per gap.
+        notice: String,
+    },
+
     /// A dispatched [`shared_promptforge_api::tools::Tool`] returned a model-safe failure.
     ///
     /// The tool's own [`shared_promptforge_api::tools::ToolError`] is preserved as the
@@ -1049,5 +1062,22 @@ mod tests {
         // position to navigate to.
         let run_error = crate::RunError::from(Error::Interrupted);
         assert!(run_error.location().is_none());
+    }
+
+    #[test]
+    fn requirements_unmet_classifies_and_carries_the_notice_as_its_message() {
+        // Step 10: the refusal notice is the whole Display - it may arrive
+        // as tool output when the prompt runs as a sub-run tool - and the
+        // kind classifies it for code. Retrying cannot help: the
+        // environment, not the transport, is what falls short.
+        let error = Error::RequirementsUnmet {
+            notice: "the environment cannot satisfy this prompt:\n- role 'analyst': requires a context of at least 200000 tokens; the current model provides 32000".to_owned(),
+        };
+        let run_error = crate::RunError::from(error);
+        assert_eq!(run_error.kind(), crate::RunErrorKind::RequirementsUnmet);
+        assert!(!run_error.is_cancelled());
+        assert!(!run_error.is_retryable());
+        assert!(run_error.location().is_none());
+        assert!(run_error.to_string().contains("analyst"));
     }
 }

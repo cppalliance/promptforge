@@ -12,10 +12,12 @@ use crate::cancel::CancelHandle;
 use crate::client::{GatewayClient, StreamDelta};
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
-use crate::model::ModelCatalog;
+use crate::model::{ModelCatalog, ModelDescriptor};
 use crate::observe::{NullObserver, Observer};
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
+
+use super::bindings::ModelBindings;
 
 /// Generates one `nz_*` constructor per `NonZero*` type: a `const fn`
 /// building the wrapper from a compile-time-known non-zero value.
@@ -173,9 +175,10 @@ impl Default for RunLimits {
     }
 }
 
-/// The live resolution inputs [`Environment::run`](super::Environment::run)
-/// installs on a context before the free [`run`](super::run) drives it: the
-/// interim stand-in for the prepare pass, absorbing what the retired
+/// The live resolution inputs
+/// [`Environment::prepare`](super::Environment::prepare) installs on a
+/// context before the free [`run`](super::run) drives it: the interim
+/// stand-in for the catalog-assembly step, absorbing what the retired
 /// borrowed resolution context carried (a picker, a model catalog, a tool
 /// catalog). A context without one runs capability-free.
 #[derive(Clone, Default)]
@@ -223,13 +226,24 @@ pub struct RunContext {
     pub(crate) ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
     pub(crate) on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
     pub(crate) vfs: VfsRef,
+    /// The run's current model: the host's selection (in Workshop, the
+    /// dropdown), set before prepare. Input to prepare's fill function,
+    /// which binds every declared role to it. Grows into a catalog or
+    /// policy in the deferred multi-model future - a field change, never
+    /// a signature change.
+    pub(crate) model: Option<ModelDescriptor>,
+    /// The run's model satisfaction, written by
+    /// [`Environment::prepare`](super::Environment::prepare)'s fill
+    /// function: which concrete model each declared role is bound to.
+    pub(crate) model_bindings: ModelBindings,
     /// The activated capabilities' contributions, in declaration order.
     /// Written by [`Environment::prepare`](super::Environment::prepare);
     /// the catalog-assembly step consumes them into the run's tool
     /// catalog.
     pub(crate) contributions: Vec<Contribution>,
-    /// The resolution inputs [`Environment::run`](super::Environment::run)
-    /// installs; `None` on a caller-built context, which the free
+    /// The resolution inputs
+    /// [`Environment::prepare`](super::Environment::prepare) installs;
+    /// `None` on a caller-built context, which the free
     /// [`run`](super::run) treats as capability-free.
     pub(crate) resolution: Option<RunResolution>,
 }
@@ -254,6 +268,8 @@ impl RunContext {
             ui: None,
             on_delta: None,
             vfs: promptforge_vfs::empty(),
+            model: None,
+            model_bindings: ModelBindings::default(),
             contributions: Vec::new(),
             resolution: None,
         }
@@ -329,11 +345,31 @@ impl RunContext {
         self
     }
 
+    /// Sets the run's current model: the host's selection (in Workshop,
+    /// the dropdown). Input to
+    /// [`Environment::prepare`](super::Environment::prepare)'s fill
+    /// function, which binds every declared role to it and checks the
+    /// roles' hard keywords and context minimums against its descriptor.
+    /// The default (`None`) fills nothing: the interim Lua-side catalog
+    /// resolution carries the run.
+    #[must_use]
+    pub fn model(mut self, model: ModelDescriptor) -> RunContext {
+        self.model = Some(model);
+        self
+    }
+
     /// Sets the run's VFS handle, which carries the store mount every
-    /// section's `store` table operates on. Hosts that seed before the run
-    /// or extract after it build their own handle and set it here; the
-    /// default is the stock handle (`promptforge_vfs::empty()`), a fresh
-    /// memory backend at the store mount.
+    /// section's `store` table operates on. The default is the stock
+    /// handle (`promptforge_vfs::empty()`), a fresh memory backend at the
+    /// store mount.
+    ///
+    /// [`Environment::prepare`](super::Environment::prepare) - and so
+    /// [`Environment::run`](super::Environment::run) - replaces this
+    /// handle unconditionally with the per-run router (the shared base
+    /// mounted at `/` plus the run's fresh store), so a handle set here
+    /// is discarded on the zero-burden path. Hosts that seed before the
+    /// run or extract after it go through the prepared handle
+    /// ([`vfs_handle`](RunContext::vfs_handle)) instead.
     #[must_use]
     pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
         self.vfs = vfs;
@@ -350,6 +386,22 @@ impl RunContext {
     #[must_use]
     pub fn vfs_handle(&self) -> &VfsRef {
         &self.vfs
+    }
+
+    /// Returns the run's current model, when the host set one.
+    #[must_use]
+    pub fn current_model(&self) -> Option<&ModelDescriptor> {
+        self.model.as_ref()
+    }
+
+    /// Returns the run's model satisfaction, written by
+    /// [`Environment::prepare`](super::Environment::prepare)'s fill
+    /// function: which concrete model each declared role is bound to, and
+    /// the descriptors this run may use. Handles resolve
+    /// label -> id -> descriptor.
+    #[must_use]
+    pub fn model_bindings(&self) -> &ModelBindings {
+        &self.model_bindings
     }
 
     /// Returns the run identity shared by every report.
@@ -388,6 +440,8 @@ impl fmt::Debug for RunContext {
             .field("ui", &self.ui.is_some())
             .field("on_delta", &self.on_delta.is_some())
             .field("vfs", &self.vfs)
+            .field("model", &self.model)
+            .field("model_bindings", &self.model_bindings)
             .field("contributions", &self.contributions)
             .field("resolution", &self.resolution.is_some())
             .finish()

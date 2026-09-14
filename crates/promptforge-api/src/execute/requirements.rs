@@ -30,6 +30,41 @@ impl Requirements {
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty() && self.missing_required.is_empty()
     }
+
+    /// The refusal notice [`Environment::run`](super::Environment::run)
+    /// fails with when the report is unsatisfied.
+    ///
+    /// Written to be read by a model - concise, factual, self-contained -
+    /// because it may arrive as tool output when the prompt runs as a
+    /// sub-run tool. Each line names what is missing or unmet, with
+    /// required versus actual.
+    #[must_use]
+    pub(crate) fn notice(&self) -> String {
+        // Writing to a String is infallible; the `let _` mirrors the
+        // crate's established pattern (subst.rs) under the denied
+        // `unwrap_used`/`expect_used` lints.
+        use std::fmt::Write as _;
+        let mut notice = String::from("the environment cannot satisfy this prompt:");
+        for id in &self.missing_required {
+            let _ = write!(notice, "\n- missing required capability: {id}");
+        }
+        for unmet in &self.unmet_requirements {
+            let line = match unmet.check {
+                RequirementCheck::ContextMinimum => format!(
+                    "role '{}': requires a context of at least {} tokens; \
+                     the current model provides {}",
+                    unmet.role, unmet.required, unmet.actual
+                ),
+                RequirementCheck::HardKeyword => format!(
+                    "role '{}': requires '{}'; \
+                     the current model's thinking capability is {}",
+                    unmet.role, unmet.required, unmet.actual
+                ),
+            };
+            let _ = write!(notice, "\n- {line}");
+        }
+        notice
+    }
 }
 
 /// One failed model requirement: the role, which check failed, and what

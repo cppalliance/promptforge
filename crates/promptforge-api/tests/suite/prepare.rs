@@ -1,18 +1,26 @@
 //! Prepare-pass integration tests: capability resolution against the
 //! registry (missing required reported, absent optional skipped and
 //! logged), the run's services reaching `create`, activation failure
-//! semantics, and the per-run VFS claims isolation matrix.
+//! semantics, the per-run VFS claims isolation matrix, and model
+//! satisfaction - the trivial fill binding every declared role to the
+//! context's current model, the hard-keyword and context-minimum checks
+//! against its descriptor, and `Environment::run` refusing an
+//! unsatisfiable prompt.
 
 use std::io;
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use promptforge_api::capabilities::CapabilityRegistry;
-use promptforge_api::execute::{Environment, RunContext};
+use promptforge_api::execute::{
+    Environment, RequirementCheck, RunContext, RunErrorKind, RunResult,
+};
 use promptforge_api::parser::Prompt;
 use shared_promptforge_api::cancel::CancelHandle;
 use shared_promptforge_api::capabilities::{
     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
 };
+use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
 use shared_promptforge_api::observe::NullObserver;
 use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
 
@@ -360,4 +368,222 @@ fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
         std::fs::read(temp.0.join("shared.txt")).expect("run a's write landed on disk"),
         b"from a"
     );
+}
+
+/// A prompt declaring one model role with a hard keyword and a context
+/// minimum.
+const DECLARES_ANALYST: &str = concat!(
+    "---\n",
+    "name: declares-analyst\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "models:\n",
+    "  analyst:\n",
+    "    keywords: [frontier, thinking]\n",
+    "    min_context: 200000\n",
+    "    description: Deep analysis\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "```lua\n",
+    "return 'done'\n",
+    "```\n",
+);
+
+/// A prompt declaring one role per soft keyword: documentation of author
+/// intent, never a check.
+const DECLARES_SOFT_ROLES: &str = concat!(
+    "---\n",
+    "name: declares-soft-roles\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "models:\n",
+    "  scout:\n",
+    "    keywords: [frontier, fast]\n",
+    "  sprinter:\n",
+    "    keywords: [small, creative, chat]\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "```lua\n",
+    "return 'done'\n",
+    "```\n",
+);
+
+/// A prompt declaring one role with the `no-thinking` hard keyword.
+const DECLARES_NO_THINKING: &str = concat!(
+    "---\n",
+    "name: declares-no-thinking\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "models:\n",
+    "  triage:\n",
+    "    keywords: [no-thinking]\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "```lua\n",
+    "return 'done'\n",
+    "```\n",
+);
+
+/// Builds the host's one current model with the given context window and
+/// thinking capability.
+fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
+    ModelDescriptor::new(
+        ModelId::gateway("current").expect("the id is valid"),
+        "The host's current model",
+        NonZeroU32::new(context).expect("the context window is non-zero"),
+        thinking,
+    )
+}
+
+#[test]
+fn every_declared_role_resolves_to_the_current_model() {
+    let prompt = parse(DECLARES_SOFT_ROLES, "declares-soft-roles");
+    let env = Environment::new();
+    let model = current_model(32_000, ThinkingMode::Never);
+    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill").model(model.clone()));
+    // Soft keywords document intent and the roles declare no minimum:
+    // nothing is reported.
+    assert!(requirements.is_satisfied());
+    // The trivial fill binds every declared role to the current model,
+    // and handles resolve label -> id -> descriptor.
+    let bindings = ctx.model_bindings();
+    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings.role_id("scout"), Some(model.id()));
+    assert_eq!(bindings.resolve("scout"), Some(&model));
+    assert_eq!(bindings.resolve("sprinter"), Some(&model));
+    assert_eq!(bindings.model(model.id()), Some(&model));
+    assert!(bindings.resolve("undeclared").is_none());
+}
+
+#[test]
+fn a_context_minimum_above_the_current_models_is_reported() {
+    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
+    let env = Environment::new();
+    // min_context 200000 against the model's 32000.
+    let (_ctx, requirements) = env.prepare(
+        &prompt,
+        RunContext::new("fill").model(current_model(32_000, ThinkingMode::Always)),
+    );
+    assert!(!requirements.is_satisfied());
+    assert_eq!(requirements.missing_required, []);
+    let [unmet] = requirements.unmet_requirements.as_slice() else {
+        panic!(
+            "exactly one requirement is unmet: {:?}",
+            requirements.unmet_requirements
+        );
+    };
+    assert_eq!(unmet.role, "analyst");
+    assert_eq!(unmet.check, RequirementCheck::ContextMinimum);
+    assert_eq!(unmet.required, "200000");
+    assert_eq!(unmet.actual, "32000");
+}
+
+#[test]
+fn a_hard_keyword_the_current_model_fails_is_reported() {
+    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
+    let env = Environment::new();
+    // `thinking` against a Never model, with the context minimum met so
+    // only the keyword check fires.
+    let (_ctx, requirements) = env.prepare(
+        &prompt,
+        RunContext::new("fill").model(current_model(200_000, ThinkingMode::Never)),
+    );
+    let [unmet] = requirements.unmet_requirements.as_slice() else {
+        panic!(
+            "exactly one requirement is unmet: {:?}",
+            requirements.unmet_requirements
+        );
+    };
+    assert_eq!(unmet.role, "analyst");
+    assert_eq!(unmet.check, RequirementCheck::HardKeyword);
+    assert_eq!(unmet.required, "thinking");
+    assert_eq!(unmet.actual, "Never");
+
+    let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
+    // `no-thinking` against a Switchable model.
+    let (_ctx, requirements) = env.prepare(
+        &prompt,
+        RunContext::new("fill").model(current_model(32_000, ThinkingMode::Switchable)),
+    );
+    let [unmet] = requirements.unmet_requirements.as_slice() else {
+        panic!(
+            "exactly one requirement is unmet: {:?}",
+            requirements.unmet_requirements
+        );
+    };
+    assert_eq!(unmet.role, "triage");
+    assert_eq!(unmet.check, RequirementCheck::HardKeyword);
+    assert_eq!(unmet.required, "no-thinking");
+    assert_eq!(unmet.actual, "Switchable");
+}
+
+#[tokio::test]
+async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
+    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
+    let env = Environment::new();
+    let result = env
+        .run(
+            &prompt,
+            "",
+            RunContext::new("refuse").model(current_model(32_000, ThinkingMode::Never)),
+        )
+        .await;
+    let RunResult::Failure(error) = result else {
+        panic!("an unsatisfiable prompt is refused: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
+    // The notice is written to be read by a model: it names the role,
+    // each failed check, and required versus actual.
+    assert!(
+        notice.contains("analyst"),
+        "the notice names the role: {notice}"
+    );
+    assert!(
+        notice.contains("200000") && notice.contains("32000"),
+        "the notice gives required versus actual context: {notice}"
+    );
+    assert!(
+        notice.contains("thinking") && notice.contains("Never"),
+        "the notice gives required versus actual keywords: {notice}"
+    );
+}
+
+#[tokio::test]
+async fn env_run_refuses_a_missing_required_capability_with_a_notice_naming_it() {
+    let prompt = parse(DECLARES_REQUIRED, "declares-required");
+    // No registry: the declared required capability is absent.
+    let env = Environment::new();
+    let result = env.run(&prompt, "", RunContext::new("refuse-missing")).await;
+    let RunResult::Failure(error) = result else {
+        panic!("a prompt missing a required capability is refused: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
+    assert!(
+        notice.contains("missing required capability: promptforge/web"),
+        "the notice names the missing capability: {notice}"
+    );
+}
+
+#[tokio::test]
+async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
+    let prompt = parse(DECLARES_ANALYST, "declares-analyst");
+    let env = Environment::new();
+    // The zero-burden path: no explicit prepare call, and the declared
+    // role's requirements are met by the current model.
+    let result = env
+        .run(
+            &prompt,
+            "",
+            RunContext::new("implicit").model(current_model(200_000, ThinkingMode::Always)),
+        )
+        .await;
+    let RunResult::Ok(text) = result else {
+        panic!("a satisfiable prompt runs through implicit prepare: {result:?}");
+    };
+    assert_eq!(text, "done");
 }

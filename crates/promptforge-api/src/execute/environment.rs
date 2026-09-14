@@ -3,19 +3,21 @@
 use std::fmt;
 use std::sync::Arc;
 
+use promptforge_parser::ModelKeyword;
 use promptforge_tool_picker::ToolPicker;
 use shared_promptforge_api::capabilities::{CapabilityId, RunServices};
 
 use crate::capabilities::CapabilityRegistry;
 use crate::client::GatewayClient;
-use crate::model::ModelCatalog;
+use crate::model::{ModelCatalog, ThinkingMode};
 use crate::parser::Prompt;
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
 
 use super::RunResult;
+use super::bindings::ModelBindings;
 use super::config::{RunContext, RunResolution};
-use super::requirements::Requirements;
+use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 
 /// What exists in this deployment and its standing policy.
 ///
@@ -27,11 +29,12 @@ use super::requirements::Requirements;
 /// Interim state (the interface consolidation step): the environment
 /// absorbs the retired resolution context's contents - the picker, the
 /// model catalog, and the tool catalog - as internal fields, and prose
-/// binding still works. [`prepare`](Environment::prepare) resolves the
-/// prompt's declared capabilities against the registry and builds the
-/// per-run router from `base_vfs`; the `max_depth` guard lands with the
-/// sub-run adapter in the deferred prompt-pack work and is carried, not
-/// consulted, until then.
+/// binding still works. [`prepare`](Environment::prepare) installs those
+/// inputs on the context, resolves the prompt's declared capabilities
+/// against the registry, builds the per-run router from `base_vfs`, and
+/// fills the model bindings from the context's current model; the
+/// `max_depth` guard lands with the sub-run adapter in the deferred
+/// prompt-pack work and is carried, not consulted, until then.
 #[non_exhaustive]
 pub struct Environment {
     /// Semantic picker behind executed H1 binds (interim home, absorbed
@@ -129,8 +132,10 @@ impl Environment {
     }
 
     /// Enriches the caller-created context against the prompt's
-    /// declarations: builds the run's VFS and activates every declared
-    /// capability, reporting what the caller must still satisfy.
+    /// declarations: installs the environment's live resolution inputs and
+    /// client default, builds the run's VFS, activates every declared
+    /// capability, and fills the model bindings - reporting what the
+    /// caller must still satisfy.
     ///
     /// The per-run VFS is a fresh router mounting the environment's
     /// [`base_vfs`](Environment::base_vfs) at `/` plus a fresh memory
@@ -150,8 +155,31 @@ impl Environment {
     /// it also lands in [`Requirements::missing_required`], since the
     /// run cannot have what the prompt declared. The contributions ride
     /// the context for the catalog-assembly step.
+    ///
+    /// Model satisfaction is a fill function over the declared roles, and
+    /// v1's fill is deliberately trivial: every role binds to the
+    /// context's current model, and each role's hard keywords
+    /// (`thinking`, `no-thinking`) and context minimum are CHECKED
+    /// against its descriptor - reported in
+    /// [`Requirements::unmet_requirements`] with required versus actual,
+    /// never shopped for. Soft keywords document author intent. With no
+    /// current model there is nothing to fill or check, and the interim
+    /// Lua-side catalog resolution carries the run.
     pub fn prepare(&self, prompt: &Prompt, ctx: RunContext) -> (RunContext, Requirements) {
         let mut ctx = ctx;
+        // The interim resolution inputs (picker, live catalogs) ride the
+        // environment until prose binding leaves the run path; prepare
+        // installs them so a prepared context is fully equipped whether
+        // the host drives the free run itself or goes through
+        // [`run`](Environment::run).
+        ctx.resolution = Some(RunResolution {
+            picker: self.picker.clone(),
+            models: self.models.clone(),
+            tools: self.tools.clone(),
+        });
+        if ctx.client.is_none() {
+            ctx.client.clone_from(&self.client);
+        }
         ctx.vfs = VfsRef::builder()
             .mount("/", self.base_vfs.clone())
             .mount(
@@ -198,24 +226,90 @@ impl Environment {
                 }
             }
         }
+        ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
     }
 
-    /// The zero-burden path: installs the environment's live resolution
-    /// inputs and client default on the context - the interim stand-in for
-    /// the prepare pass, which will also fail unsatisfiable requirements
-    /// here - and runs the prompt.
+    /// The zero-burden path: [prepares](Environment::prepare) implicitly
+    /// and refuses an unsatisfiable prompt - missing required
+    /// capabilities, or unmet model requirements - with
+    /// [`RunResult::Failure`] carrying
+    /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and
+    /// a model-readable notice naming each gap. The notice may arrive as
+    /// tool output when the prompt runs as a sub-run tool, so it is
+    /// written for a model to reason about.
     pub async fn run(&self, prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
-        let mut ctx = ctx;
-        ctx.resolution = Some(RunResolution {
-            picker: self.picker.clone(),
-            models: self.models.clone(),
-            tools: self.tools.clone(),
-        });
-        if ctx.client.is_none() {
-            ctx.client = self.client.clone();
+        let (ctx, requirements) = self.prepare(prompt, ctx);
+        if !requirements.is_satisfied() {
+            return RunResult::Failure(crate::RunError::from(crate::Error::RequirementsUnmet {
+                notice: requirements.notice(),
+            }));
         }
         super::run(prompt, args, ctx).await
+    }
+}
+
+/// v1's deliberately trivial fill: binds every declared role to the
+/// context's current model and checks each role's hard keywords and
+/// context minimum against its descriptor, reporting required versus
+/// actual into [`Requirements::unmet_requirements`]. With no current
+/// model there is nothing to fill or check.
+fn fill_model_bindings(
+    prompt: &Prompt,
+    model: Option<&crate::model::ModelDescriptor>,
+    requirements: &mut Requirements,
+) -> ModelBindings {
+    let mut bindings = ModelBindings::default();
+    let Some(model) = model else {
+        return bindings;
+    };
+    for (label, role) in prompt.frontmatter().models().iter() {
+        if let Some(minimum) = role.min_context()
+            && model.context() < minimum
+        {
+            requirements.unmet_requirements.push(UnmetRequirement {
+                role: label.to_owned(),
+                check: RequirementCheck::ContextMinimum,
+                required: minimum.to_string(),
+                actual: model.context().to_string(),
+            });
+        }
+        for keyword in role.keywords() {
+            // Soft keywords document author intent; only the hard
+            // keywords have a descriptor property to check against.
+            let failed = match keyword {
+                ModelKeyword::Thinking if model.thinking() == ThinkingMode::Never => {
+                    Some("thinking")
+                }
+                ModelKeyword::NoThinking if model.thinking() != ThinkingMode::Never => {
+                    Some("no-thinking")
+                }
+                _ => None,
+            };
+            if let Some(required) = failed {
+                requirements.unmet_requirements.push(UnmetRequirement {
+                    role: label.to_owned(),
+                    check: RequirementCheck::HardKeyword,
+                    required: required.to_owned(),
+                    actual: thinking_name(model.thinking()).to_owned(),
+                });
+            }
+        }
+        bindings.bind(label, model.clone());
+    }
+    bindings
+}
+
+/// The thinking capability as a stable word for required-versus-actual
+/// reporting.
+fn thinking_name(thinking: ThinkingMode) -> &'static str {
+    match thinking {
+        ThinkingMode::Never => "Never",
+        ThinkingMode::Always => "Always",
+        ThinkingMode::Switchable => "Switchable",
+        // The vocabulary is closed today; a future mode reports as
+        // unknown rather than breaking the report.
+        _ => "unknown",
     }
 }
 

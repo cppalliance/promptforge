@@ -45,7 +45,7 @@ fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
     let ctx = RunState::new(
         prompt,
         "",
-        &TestStore::new(),
+        &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &RunContext::new(EXECUTION),
     );

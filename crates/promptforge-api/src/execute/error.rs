@@ -93,6 +93,7 @@ impl RunError {
                 RunErrorKind::Lua
             }
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
+            Error::RequirementsUnmet { .. } => RunErrorKind::RequirementsUnmet,
             Error::MissingEnv(_)
             | Error::InvalidEnv(_)
             | Error::InvalidConfig(_)

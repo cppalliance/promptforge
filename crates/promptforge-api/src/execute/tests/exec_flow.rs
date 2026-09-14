@@ -2288,11 +2288,13 @@ fn now_rfc3339_checked_produces_a_parseable_timestamp() {
 
 #[tokio::test]
 async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
-    // The defensive fallback in `run`: a hand-built VfsRef lacking the store
-    // mount gets a fresh memory store overlaid for the run, so the run's
-    // store writes land on the overlay (readable across sections) instead of
-    // failing for want of the mount, and the caller's backend stays
-    // untouched.
+    // The defensive fallback in the free `run`: a hand-built VfsRef
+    // lacking the store mount gets a fresh memory store overlaid for the
+    // run, so the run's store writes land on the overlay (readable across
+    // sections) instead of failing for want of the mount, and the
+    // caller's backend stays untouched. (`Environment::run` never needs
+    // the fallback: its prepare pass builds a router that always carries
+    // the store mount.)
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## First\n\n```lua\nstore.write('overlay.txt', 'overlaid')\n```\n\n\
@@ -2300,16 +2302,12 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     );
     let test = fixture(md);
     let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
-    let env = Environment::new()
-        .picker(empty_test_picker())
-        .models(test.models.clone());
-    let RunResult::Ok(out) = env
-        .run(
-            &test.prompt,
-            "",
-            RunContext::new(EXECUTION).vfs(vfs.clone()),
-        )
-        .await
+    let RunResult::Ok(out) = crate::execute::run(
+        &test.prompt,
+        "",
+        RunContext::new(EXECUTION).vfs(vfs.clone()),
+    )
+    .await
     else {
         panic!("a mount-less handle gets the defensive memory-store overlay");
     };

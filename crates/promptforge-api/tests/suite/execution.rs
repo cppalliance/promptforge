@@ -181,7 +181,6 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             first_prompt.as_ref(),
             "first result",
             &[],
-            &promptforge_vfs::empty(),
             RunOptions {
                 execution: FIRST,
                 observer: Arc::clone(&first_recorder) as Arc<dyn Observer>,
@@ -197,7 +196,6 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             second_prompt.as_ref(),
             "second result",
             &[],
-            &promptforge_vfs::empty(),
             RunOptions {
                 execution: SECOND,
                 observer: Arc::clone(&second_recorder) as Arc<dyn Observer>,

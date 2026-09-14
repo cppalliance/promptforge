@@ -213,46 +213,52 @@ struct RunOptions {
 /// call is what keeps seeding and post-run assertions conflict-free: the
 /// claims model attributes every operation to a live identity, so a held
 /// seeder access would meet the run's own identities as a false race.
-struct TestStore(VfsRef);
-
-impl std::ops::Deref for TestStore {
-    type Target = VfsRef;
-
-    fn deref(&self) -> &VfsRef {
-        &self.0
-    }
-}
+///
+/// The handle is reconnectable: [`run`]'s prepare pass builds the run's
+/// own router (a fresh store backend per run), so the wrapper points the
+/// store at the prepared handle before driving, and post-run assertions
+/// read what the run actually wrote.
+struct TestStore(Mutex<VfsRef>);
 
 impl TestStore {
     fn new() -> TestStore {
-        TestStore(promptforge_vfs::empty())
+        TestStore(Mutex::new(promptforge_vfs::empty()))
     }
 
     /// Wraps a caller-built handle - a gated backend, say - in the test
     /// store's seeding and post-run assertion helpers.
     fn from_vfs(vfs: VfsRef) -> TestStore {
-        TestStore(vfs)
+        TestStore(Mutex::new(vfs))
     }
 
     /// The handle the run and the context builders take.
-    fn vfs(&self) -> &VfsRef {
-        &self.0
+    fn vfs(&self) -> VfsRef {
+        self.0
+            .lock()
+            .expect("the store lock is not poisoned")
+            .clone()
+    }
+
+    /// Points the store at the run's prepared handle, so post-run
+    /// assertions read the store the run actually used.
+    fn reconnect(&self, vfs: VfsRef) {
+        *self.0.lock().expect("the store lock is not poisoned") = vfs;
     }
 
     fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
-        let access = self
-            .0
+        let vfs = self.vfs();
+        let access = vfs
             .acquire(shared_vfs::Origin::new("TestStore::read"))
             .map_err(StoreError::backend)?;
-        self.0.store(&access).read(path)
+        vfs.store(&access).read(path)
     }
 
     fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
-        let access = self
-            .0
+        let vfs = self.vfs();
+        let access = vfs
             .acquire(shared_vfs::Origin::new("TestStore::glob"))
             .map_err(StoreError::backend)?;
-        self.0.store(&access).glob(pattern)
+        vfs.store(&access).glob(pattern)
     }
 }
 
@@ -350,16 +356,24 @@ async fn run(
         .picker(picker)
         .models(test.models.clone())
         .tools(tool_catalog);
-    let mut ctx = RunContext::new(opts.execution)
-        .observer(opts.observer)
-        .vfs(store.vfs().clone());
+    let mut ctx = RunContext::new(opts.execution).observer(opts.observer);
     if let Some(client) = opts.client {
         ctx = ctx.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.debug(debug);
     }
-    match env.run(&test.prompt, args, ctx).await {
+    // The multi-step path: prepare builds the run's own router (a fresh
+    // store backend per run), so the test store reconnects to the
+    // prepared handle for its post-run assertions to read what the run
+    // actually wrote.
+    let (ctx, requirements) = env.prepare(&test.prompt, ctx);
+    assert!(
+        requirements.is_satisfied(),
+        "fixture prompts declare no capabilities or model roles: {requirements:?}"
+    );
+    store.reconnect(ctx.vfs_handle().clone());
+    match super::run(&test.prompt, args, ctx).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
@@ -406,7 +420,7 @@ async fn run_with_context(
     let env = Environment::new()
         .picker(empty_test_picker())
         .models(test.models.clone());
-    let ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs().clone());
+    let ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs());
     match env.run(&test.prompt, "", ctx).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
