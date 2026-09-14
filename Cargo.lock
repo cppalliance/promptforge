@@ -6046,6 +6046,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared-gateway-api"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "shared-loopback"
 version = "0.3.0"
 dependencies = [
