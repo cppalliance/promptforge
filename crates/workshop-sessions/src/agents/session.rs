@@ -194,21 +194,26 @@ pub(crate) struct SessionObserver {
 
 impl Observer for SessionObserver {
     fn observe(&self, execution: &str, section: &str, event: Observation) {
-        // A failed model round is operator-visible: the program survives
-        // it (the built-in chat pcalls models.chat and returns to
-        // waiting), so the run never fails and only the session can tell
-        // the SPA. The observation carries no payload; the frame names
-        // the boundary that failed.
-        if matches!(event, Observation::ModelTurnFailed) {
+        // A failed model round or tool dispatch is operator-visible: the
+        // program survives it (the built-in chat pcalls models.loop and
+        // returns to waiting), so the run never fails and only the session
+        // can tell the SPA. A tool dispatch failure aborts the loop just as
+        // a failed round does, so both are terminal for the turn. The
+        // observation carries no payload; the frame names the boundary
+        // that failed.
+        if matches!(
+            event,
+            Observation::ModelTurnFailed | Observation::ToolCallFailed
+        ) {
             self.lifecycle.settle_current_turn();
             let message = format!("{event} in agent `{section}`");
             let _ = self.errors.send(message.clone());
-            // The failed round never reaches on_assistant_reply, so this
+            // The failed turn never reaches on_assistant_reply, so this
             // terminal status is the only frame that releases the
             // turn-dispatch Thinking push; without it the status bar's
             // sustained amber LED never returns to idle.
             self.push
-                .push_failure("Model turn failed", message, Activity::General);
+                .push_failure(event.to_string(), message, Activity::General);
         }
         self.log.observe(execution, section, event);
     }

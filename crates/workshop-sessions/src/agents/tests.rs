@@ -226,6 +226,47 @@ async fn a_failed_model_turn_pushes_a_terminal_failure_status() {
     );
 }
 
+#[tokio::test]
+async fn a_failed_tool_call_pushes_a_terminal_failure_status() {
+    // A tool dispatch failure aborts the model loop the same way a failed
+    // model round does, and the built-in chat's pcall swallows both; without
+    // this frame the operator sees a tool call that never returns and a
+    // status bar stuck busy.
+    let status = workshop_status::StatusBus::new();
+    let mut status_rx = status.subscribe();
+    let catalog = CatalogBus::new();
+    let menu = MenuBus::new(catalog.clone(), None);
+    let (push, _guards) = wired_push(&status, &catalog, &menu);
+    let (errors, mut errors_rx) = broadcast::channel(ERROR_CAPACITY);
+    let (supervisor_events, _events) = mpsc::unbounded_channel();
+    let (cancellations, _cancellation_events) = mpsc::channel(lifecycle::CANCELLATION_CAPACITY);
+    let observer = SessionObserver {
+        log: Arc::new(WorkshopObserver::new(None).expect("a memory log")),
+        rounds: Arc::new(AtomicU64::new(0)),
+        push,
+        backoff: ReconnectBackoff::new(),
+        errors,
+        lifecycle: Arc::new(RunLifecycle::new(supervisor_events, cancellations)),
+    };
+
+    observer.observe("run", "chat", Observation::ToolCallFailed);
+
+    let update = status_rx
+        .recv()
+        .await
+        .expect("the failed dispatch pushes a terminal status");
+    assert_eq!(update.severity, workshop_protocol::Severity::Error);
+    assert_eq!(
+        update.activity,
+        Activity::General,
+        "a non-thinking activity releases the status bar's sustained amber LED"
+    );
+    assert_eq!(
+        errors_rx.recv().await.expect("the error frame is sent"),
+        "Tool call failed in agent `chat`"
+    );
+}
+
 #[test]
 fn the_model_client_requires_a_usable_key_and_url() {
     assert!(
