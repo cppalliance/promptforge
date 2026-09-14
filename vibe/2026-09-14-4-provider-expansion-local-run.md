@@ -1,6 +1,6 @@
 ---
 name: Provider expansion and local sheet run
-overview: "Expand shared-cloud-providers from the ten Prime providers to the full surveyed set (twelve Subprime plus the OpenRouter aggregator), make provider fetches concurrent, and get the executable working locally: the binary loads ~/.promptforge/cloud-provider-secrets.env with override semantics and a local run with real keys produces a schema-valid models.json. The GitHub workflow in the aggregation repo is deferred."
+overview: "Expand shared-cloud-providers from the ten Prime providers to the full surveyed set (twelve Subprime plus the OpenRouter aggregator), make provider fetches concurrent, and get the executable working locally: the binary loads ~/.promptforge/cloud-provider-secrets.env with override semantics and a local run with real keys produces a schema-valid cloud-provider-models.json. The GitHub workflow in the aggregation repo is deferred."
 todos:
   - id: descriptor-keyless
     content: "Descriptor extension: Provider.key_env to Option, fetch_models takes Option<&str>, adapt ten Prime files, keyless fetch path"
@@ -27,7 +27,7 @@ todos:
     content: Registry completeness test extended to all 23 providers with tiers
     status: pending
   - id: local-run
-    content: Run the binary locally against the real cloud-provider-secrets.env and verify the emitted models.json parses as a valid Sheet
+    content: Run the binary locally against the real cloud-provider-secrets.env and verify the emitted cloud-provider-models.json parses as a valid Sheet
     status: pending
 isProject: false
 ---
@@ -46,14 +46,14 @@ Two threads join here. The provider-model-sheets run landed ten Prime providers 
   - The `Provider` descriptor extended so keyless providers (NVIDIA, OpenRouter) and multi-credential or regional providers (Bedrock, Foundry, Azure Speech) fit without breaking the one-file-one-provider shape.
   - Provider fetches fan out concurrently; the emitted sheet stays byte-deterministic.
   - The binary loads `<home>/.promptforge/cloud-provider-secrets.env` when present, overriding ambient environment variables.
-  - A local run with the real secrets file produces a schema-valid `models.json`.
+  - A local run with the real secrets file produces a schema-valid `cloud-provider-models.json`.
 - Non-goals: the GitHub workflow in `cppalliance/promptforge-cloud-providers` (deferred - the operator narrowed scope to local execution); Niche static lists; SiliconFlow; any Gateway or UI consumption; changes to the ten landed Prime files beyond what the descriptor extension mechanically requires.
 - Success criteria: the registry completeness test covers all 23 providers with their settled tiers; every new provider normalizes a fixture into `ModelEntry`; concurrent overlap is proven deterministically; a provider without a provisioned secret records `unavailable` and never fails the build; the override-proving subprocess test passes; a real local run exits zero with a sheet that parses as a valid `Sheet`.
 - Constraints:
   - The secrets file must never be read, printed, copied, or committed by any person, agent, or tool. The binary loads it; tests use fixture files inside temp-dir homes only; nothing else touches it. This is an absolute operator directive (2026-09-14). It applies both to the new `~/.promptforge/cloud-provider-secrets.env` and to the repo-root `secrets.env` the operator already created, until that file is moved.
   - Endpoint facts come from the 2026-09-14 provider-landscape survey recorded in `vibe/2026-09-14-2-provider-model-sheets.md`, whose underlying evidence set is the 2026-09-14 research collection (per-provider model-list endpoint schemas from official docs, the Chinese-provider API survey, the image/STT/TTS provider surveys, and the three live payload captures - Anthropic, OpenRouter, NVIDIA). The collection lives in the workspace's research staging area (`cabinet/_research/`, filenames prefixed `2026-09-14-`); fixture authors should read those extractions before writing JSON by hand. The official docs govern on any conflict.
   - Tiers are a curated product opinion with a functional basis (settled in `vibe/2026-09-14-2-provider-model-sheets.md`): Prime and Subprime have working key-callable model-list endpoints, Niche have none (their slices are static compiled-in lists), Aggregators list many providers' models through one endpoint.
-  - The binary contract from `crates/shared-cloud-providers/src/main.rs` stands: keys via each descriptor's `key_env`, previous-sheet URL via `MODELS_SHEET_PREVIOUS_URL` (optional), output to argv[1] (default `./models.json`), exit code signals success or failure, HTTP 404 on the previous-sheet URL means first run. The 404-versus-fatal split is deliberate - it is the DEBT-PMS-1 repair (commit `5945b706`): a configured-but-unreachable previous sheet must never silently publish a regressed one.
+  - The binary contract from `crates/shared-cloud-providers/src/main.rs` stands: keys via each descriptor's `key_env`, previous-sheet URL via `MODELS_SHEET_PREVIOUS_URL` (optional), output to argv[1] (default `~/.promptforge/cloud-provider-models.json`), exit code signals success or failure, HTTP 404 on the previous-sheet URL means first run. The 404-versus-fatal split is deliberate - it is the DEBT-PMS-1 repair (commit `5945b706`): a configured-but-unreachable previous sheet must never silently publish a regressed one.
   - dotenvy is already a workspace dependency (`dotenvy = "0.15"` in `Cargo.toml`); the gateway's dotenv idiom at `crates/gateway/src/runner.rs` is the precedent. Home resolution follows the repo convention: `USERPROFILE` on Windows, `HOME` otherwise (ART-009, `crates/gateway-local/src/artifacts.rs`).
   - Workspace conventions apply: edition 2024, workspace lints, no file over 500 lines, tests beside the change; no secret material in the crate.
 - Open questions: None
@@ -63,7 +63,7 @@ Two threads join here. The provider-model-sheets run landed ten Prime providers 
 One actor: the operator running the binary locally (the scheduled workflow is deferred). The binary loads the profile-dir secrets file when present, fetches every registered provider concurrently, and writes the sheet. Everything else about the build pipeline - propagation, statuses, exit codes - is unchanged.
 
 - Actors and workflows: the operator runs `cargo run -p shared-cloud-providers <output-path>` from any directory; the binary loads the secrets file, fans out fetches across all 23 registered providers, propagates last-known-good data for failures when history exists, and writes the merged sheet.
-- Inputs and outputs: `~/.promptforge/cloud-provider-secrets.env` (local, outside the repo, override precedence) and the process environment in; one `models.json` at the argv[1] path out; exit code and stderr notes as the run report.
+- Inputs and outputs: `~/.promptforge/cloud-provider-secrets.env` (local, outside the repo, override precedence) and the process environment in; one `cloud-provider-models.json` at the argv[1] path out; exit code and stderr notes as the run report.
 - States and validation: the secrets file missing (or home unresolvable) is ignored with a stderr note - CI and bare-shell runs use the environment as-is; malformed earns a stderr warning and the run continues. Keyless providers never produce `MissingKey`. Providers requiring an endpoint or region env var that is absent record `unavailable`, exactly as a missing key would.
 - Errors and recovery: unchanged from the landed propagation matrix - failed provider fetches record `stale` with history or `unavailable` without, and never fail the run; a failed previous-sheet download on a configured URL is fatal before any write; SigV4 signing failures are fetch errors like any other.
 - Security and privacy behavior: keys remain env-only or in the profile-dir secrets file; `/secrets.env` stays in promptforge's `.gitignore` as a standing guard because the operator's original file sits at the repo root until moved and every commit path in this workspace stages with `git add -A`; SigV4 signs in memory; no secret reaches the sheet.
@@ -250,7 +250,7 @@ Extend the registry completeness test in `crates/shared-cloud-providers/src/lib.
 
 - Component: finalization
 
-Move the operator's repo-root `secrets.env` to `~/.promptforge/cloud-provider-secrets.env` with a plain `Move-Item` (contents never read by any tool or agent). Run `cargo run -p shared-cloud-providers <output-path>` from any directory with the output path outside git's view; verify exit code zero and parse the emitted `models.json` as a valid `Sheet`, eyeballing per-provider statuses. Final gate: `cargo nextest run -p shared-cloud-providers`, clippy with `-D warnings`, and `cargo fmt --check` all green. One commit for any fixes the run surfaces.
+Move the operator's repo-root `secrets.env` to `~/.promptforge/cloud-provider-secrets.env` with a plain `Move-Item` (contents never read by any tool or agent). Run `cargo run -p shared-cloud-providers <output-path>` from any directory with the output path outside git's view; verify exit code zero and parse the emitted `cloud-provider-models.json` as a valid `Sheet`, eyeballing per-provider statuses. Final gate: `cargo nextest run -p shared-cloud-providers`, clippy with `-D warnings`, and `cargo fmt --check` all green. One commit for any fixes the run surfaces.
 
 </step-9>
 
