@@ -31,7 +31,15 @@ pub struct Provider {
 /// Every known provider.
 #[must_use]
 pub fn providers() -> &'static [Provider] {
-    &[providers::anthropic::PROVIDER]
+    &[
+        providers::anthropic::PROVIDER,
+        providers::deepseek::PROVIDER,
+        providers::meta::PROVIDER,
+        providers::moonshot::PROVIDER,
+        providers::openai::PROVIDER,
+        providers::qwen::PROVIDER,
+        providers::xai::PROVIDER,
+    ]
 }
 
 /// A failed provider fetch or sheet download. Never fatal to a sheet
@@ -65,6 +73,12 @@ pub async fn fetch_models(
 ) -> Result<Vec<ModelEntry>, FetchError> {
     match provider.name {
         "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
+        "deepseek" => providers::deepseek::fetch(client, provider.base_url, key).await,
+        "meta" => providers::meta::fetch(client, provider.base_url, key).await,
+        "moonshot" => providers::moonshot::fetch(client, provider.base_url, key).await,
+        "openai" => providers::openai::fetch(client, provider.base_url, key).await,
+        "qwen" => providers::qwen::fetch(client, provider.base_url, key).await,
+        "xai" => providers::xai::fetch(client, provider.base_url, key).await,
         _ => Err(FetchError::UnsupportedProvider {
             name: provider.name.to_owned(),
         }),

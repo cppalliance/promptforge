@@ -611,7 +611,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-5>
 
-### Step 5: OpenAI-dialect provider files
+### Step 5: OpenAI-dialect provider files [completed]
 
 - Component: shared-cloud-providers
 - Add `openai.rs`, `xai.rs`, `deepseek.rs`, `qwen.rs`, `moonshot.rs`, and `meta.rs`, sharing one private helper for the OpenAI response shape; per-file variance covers xAI's `aliases`/`context_length`/pricing (normalized from USD cents per 100M to per-million-token), Moonshot's `context_length` and image/video/reasoning flags, and DashScope's compatible-mode endpoint.
