@@ -18,6 +18,7 @@
 pub mod cancel;
 pub mod events;
 pub mod models;
+pub mod names;
 pub mod observe;
 pub mod tools;
 pub mod untrusted;
