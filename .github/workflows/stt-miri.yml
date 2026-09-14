@@ -44,6 +44,10 @@ jobs:
         run: cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_
 
   native-whisper:
+    # A self-hosted runner must never execute untrusted code: run this job
+    # on pushes, dispatches, and same-repository PRs only. Fork PRs still
+    # get the Miri jobs, which run on GitHub-hosted runners.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, windows, cuda]
     timeout-minutes: 90
     steps:
