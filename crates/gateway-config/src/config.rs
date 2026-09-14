@@ -20,6 +20,9 @@ pub use companion::{
 };
 pub(crate) use imp::reject_profiles_directory;
 pub(crate) use interpolate::interpolate_value;
+// The canonical home of the model-metadata types is `shared-gateway-api`;
+// these re-exports keep the old paths compiling unchanged.
+pub use shared_gateway_api::{Capabilities, ModelKind, ThinkingMode};
 use stt::RawSttPipelineConfig;
 pub use stt::{
     RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttPipelineConfig, SttRole,
@@ -482,25 +485,6 @@ pub struct EndpointConfig {
     dominion: Option<String>,
 }
 
-/// How a model exposes chain-of-thought / thinking tokens to callers.
-///
-/// Catalogued on each `[[model]]` so hosts can filter bindings before a
-/// request is built. `never` and `always` mean the backend ignores a
-/// per-call switch; `switchable` means the client may emit
-/// `chat_template_kwargs.enable_thinking`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum ThinkingMode {
-    /// The backend never emits thinking tokens; a per-call switch is ignored.
-    #[default]
-    Never,
-    /// The backend always emits thinking tokens; a per-call switch is ignored.
-    Always,
-    /// The client may turn thinking on or off per request.
-    Switchable,
-}
-
 /// The tool-calling dialect a chat model speaks.
 ///
 /// `openai` (the default) forwards tool definitions verbatim and expects
@@ -527,84 +511,6 @@ impl fmt::Display for ToolDialect {
         };
         f.write_str(spelling)
     }
-}
-
-/// The workload a model serves: chat completions, embeddings,
-/// classification, or speech synthesis.
-///
-/// The kind scopes which configuration fields are meaningful: chat-only
-/// fields (for example `thinking`, `default_max_tokens`,
-/// `chat_template_file`) are rejected for non-chat kinds at validation,
-/// while `context` applies to every kind. The catalog carries the kind so
-/// clients can filter before building a request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum ModelKind {
-    /// Chat completions (`POST /v1/chat/completions`). The default.
-    #[default]
-    Chat,
-    /// Text embeddings.
-    Embedding,
-    /// Classification / reranking.
-    Classifier,
-    /// Speech synthesis (`POST /v1/audio/speech`).
-    Speech,
-}
-
-impl fmt::Display for ModelKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let spelling = match self {
-            ModelKind::Chat => "chat",
-            ModelKind::Embedding => "embedding",
-            ModelKind::Classifier => "classifier",
-            ModelKind::Speech => "speech",
-        };
-        f.write_str(spelling)
-    }
-}
-
-/// Capability metadata advertised on the model catalog.
-///
-/// These fields describe what a model can do rather than how the gateway
-/// reaches it. They are flattened into `[[model]]` and `[[local_model]]`,
-/// validated at load, and surfaced verbatim on `GET /v1/models` so clients
-/// can shape requests before sending them. The effort knobs are chat-only
-/// and require a `thinking` mode other than `never`; the `voices` list is
-/// speech-only.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Capabilities {
-    /// Max output tokens the model can emit per completion. Must not exceed
-    /// `context` when set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_output: Option<u32>,
-    /// Sampling temperature applied when the caller omits one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    default_temperature: Option<f32>,
-    /// Whether the model accepts image inputs. Defaults to false; a
-    /// `[local_model.multimodal_projector]` companion implies true.
-    #[serde(default)]
-    images: bool,
-    /// Whether the model can emit parallel tool calls. Defaults to false.
-    #[serde(default)]
-    parallel_tool_calls: bool,
-    /// The reasoning-effort levels the model accepts. Empty means the model
-    /// has no effort knob.
-    #[serde(default)]
-    effort_levels: Vec<String>,
-    /// The effort level applied when the caller omits one; requires a
-    /// non-empty `effort_levels` and must name a listed level.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    default_effort: Option<String>,
-    /// Whether the model adaptively chooses how much to think per request;
-    /// chat kind only. Defaults to false.
-    #[serde(default)]
-    adaptive_thinking: bool,
-    /// The voices the model offers for speech synthesis; speech kind only.
-    /// Empty means the model exposes no fixed voice list.
-    #[serde(default)]
-    voices: Vec<String>,
 }
 
 /// One model name and the backend it resolves to.

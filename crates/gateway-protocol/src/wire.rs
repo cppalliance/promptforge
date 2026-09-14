@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use gateway_config::{Capabilities, ModelKind, ThinkingMode};
+pub use shared_gateway_api::ModelInfo;
 
 /// An incoming chat completions request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -582,30 +582,10 @@ pub struct ModelsResponse {
     pub data: Vec<ModelInfo>,
 }
 
-/// One catalogued model, with PromptForge extensions beside the OpenAI `id`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ModelInfo {
-    /// The caller-facing model name (`[[model]].name`).
-    pub id: String,
-    /// Always `"model"`.
-    pub object: &'static str,
-    /// The workload this model serves (`"chat"`, `"embedding"`,
-    /// `"classifier"`, `"speech"`).
-    pub kind: ModelKind,
-    /// Prose describing the model for catalog consumers and semantic bind.
-    pub description: String,
-    /// Context window size in tokens.
-    pub context: u32,
-    /// Whether thinking tokens are never, always, or switchably available.
-    pub thinking: ThinkingMode,
-    /// Capability metadata (`max_output`, `images`, effort levels, and so
-    /// on), flattened into the catalog entry.
-    #[serde(flatten)]
-    pub capabilities: Capabilities,
-}
-
 #[cfg(test)]
 mod tests {
+    use shared_gateway_api::{Capabilities, ModelKind, ThinkingMode};
+
     use super::*;
 
     fn request(model: &str, messages: Vec<Value>) -> ChatRequest {

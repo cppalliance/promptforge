@@ -10,6 +10,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
 
+mod metadata;
+
+pub use metadata::{Capabilities, ModelInfo, ModelKind, ThinkingMode};
+
 /// The sheet envelope: one atomic snapshot of every provider's models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
@@ -119,28 +123,6 @@ pub struct ModelEntry {
     pub pricing: Option<Pricing>,
     /// Sunset information, when the provider reports it.
     pub deprecation: Option<Deprecation>,
-}
-
-/// The workload a model serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum ModelKind {
-    /// Chat completions. The default.
-    #[default]
-    Chat,
-    /// Text embeddings.
-    Embedding,
-    /// Classification / reranking.
-    Classifier,
-    /// Speech synthesis (TTS).
-    Speech,
-    /// Speech-to-text (STT).
-    Transcription,
-    /// Image generation.
-    Image,
-    /// Video generation.
-    Video,
 }
 
 /// Reasoning capability.

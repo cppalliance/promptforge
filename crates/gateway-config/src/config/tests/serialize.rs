@@ -237,17 +237,19 @@ fn enums_round_trip_with_their_toml_spellings() {
 
 #[test]
 fn capabilities_round_trip_through_json() {
-    let capabilities = Capabilities {
-        max_output: Some(4096),
-        default_temperature: Some(0.5),
-        images: true,
-        parallel_tool_calls: true,
-        effort_levels: vec!["low".to_owned(), "high".to_owned()],
-        default_effort: Some("low".to_owned()),
-        adaptive_thinking: true,
-        voices: vec!["alloy".to_owned()],
-    };
-    let json = serde_json::to_value(&capabilities).expect("serializes");
-    let back: Capabilities = serde_json::from_value(json).expect("deserializes");
-    assert_eq!(capabilities, back);
+    // `Capabilities` is `#[non_exhaustive]` in `shared-gateway-api`, so the
+    // fixture is built from JSON rather than a struct literal.
+    let json = serde_json::json!({
+        "max_output": 4096,
+        "default_temperature": 0.5,
+        "images": true,
+        "parallel_tool_calls": true,
+        "effort_levels": ["low", "high"],
+        "default_effort": "low",
+        "adaptive_thinking": true,
+        "voices": ["alloy"],
+    });
+    let capabilities: Capabilities = serde_json::from_value(json.clone()).expect("deserializes");
+    let back = serde_json::to_value(&capabilities).expect("serializes");
+    assert_eq!(json, back);
 }

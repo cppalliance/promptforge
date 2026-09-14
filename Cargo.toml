@@ -21,6 +21,7 @@ base64 = "0.22"
 bytes = "1"
 promptforge-api = { path = "crates/promptforge-api", version = "0.3.0" }
 shared-promptforge-api = { path = "crates/shared-promptforge-api", version = "0.3.0" }
+shared-gateway-api = { path = "crates/shared-gateway-api", version = "0.3.0" }
 gateway = { path = "crates/gateway", version = "0.3.0" }
 gateway-config = { path = "crates/gateway-config", version = "0.3.0" }
 gateway-config-ui = { path = "crates/gateway-config-ui", version = "0.3.0" }

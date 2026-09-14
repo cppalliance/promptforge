@@ -578,7 +578,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-2>
 
-### Step 2: hoist model-metadata types into shared-gateway-api
+### Step 2: hoist model-metadata types into shared-gateway-api [completed]
 
 - Component: shared-gateway-api
 - Move `Capabilities`, `ModelInfo`, `ModelKind`, and `ThinkingMode` from `crates/gateway-config/src/config.rs` and `crates/gateway-protocol` into `shared-gateway-api` as their canonical home; extend `ModelKind` with the `transcription`, `image`, and `video` variants.
