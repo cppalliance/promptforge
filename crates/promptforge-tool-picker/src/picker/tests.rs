@@ -4,6 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde_json::json;
 use shared_progress::{EventState, ProgressHub};
+use shared_promptforge_api::capabilities::CapabilityId;
 
 use super::ToolPicker;
 use crate::catalog::{Catalog, ToolDescriptor, ToolId};
@@ -238,8 +239,14 @@ fn near_duplicates_reuses_the_indexed_vectors_inclusively() {
     let pairs = picker.near_duplicates(&ids).expect("analysis");
     assert_eq!(pairs.len(), 1);
     let pair = pairs.get(0).expect("one pair");
-    assert_eq!(pair.first().id().capability().to_string(), "tests/files");
-    assert_eq!(pair.second().id().capability().to_string(), "tests/blobs");
+    assert_eq!(
+        pair.first().id().capability(),
+        CapabilityId::parse("tests/files").expect("a valid capability id")
+    );
+    assert_eq!(
+        pair.second().id().capability(),
+        CapabilityId::parse("tests/blobs").expect("a valid capability id")
+    );
     assert!(pair.similarity() >= picker.config().duplicate_threshold());
 }
 

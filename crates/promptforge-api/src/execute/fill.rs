@@ -113,9 +113,7 @@ pub(super) fn fill_tool_bindings(
                     tracing::info!(alias, tool = %id, "tool slot filled");
                     bindings.bind(alias, tool);
                 } else {
-                    // The parser validated the path's arity, so its first
-                    // two segments are a valid capability id.
-                    let capability = CapabilityId::from_validated(&id.capability().to_string());
+                    let capability = id.capability();
                     if activated.contains(&capability) {
                         // The capability is active but the tool is not in
                         // the catalog: the contribution was rejected at

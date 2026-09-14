@@ -508,7 +508,11 @@ mod tests {
         // last segment must yield the contributing capability's id.
         let id = WebFetch::new().id();
         assert_eq!(id.name(), "fetch");
-        assert_eq!(id.capability().to_string(), "promptforge/web");
+        assert_eq!(
+            id.capability(),
+            shared_promptforge_api::capabilities::CapabilityId::parse("promptforge/web")
+                .expect("a valid capability id")
+        );
     }
 
     #[derive(Clone)]

@@ -82,6 +82,20 @@ impl CapabilityId {
         CapabilityId(name)
     }
 
+    /// Builds an identity from a 2-segment prefix split off a validated
+    /// tool id.
+    ///
+    /// Crate-internal: backs [`crate::tools::ToolId::capability`]. The
+    /// source tool id was validated at parse, so its first two segments
+    /// are already a valid capability id and need no re-parse.
+    pub(crate) fn from_prefix(prefix: GlobalName) -> CapabilityId {
+        debug_assert!(
+            prefix.segments().len() == 2,
+            "a tool id's capability prefix must have exactly 2 segments (namespace/pack)"
+        );
+        CapabilityId(prefix)
+    }
+
     /// Returns the namespace segment (reverse-DNS or `promptforge`).
     ///
     /// # Examples
@@ -137,7 +151,7 @@ impl CapabilityId {
     /// ```
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
-        tool.capability() == self.0
+        tool.capability() == *self
     }
 }
 

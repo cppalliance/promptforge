@@ -481,7 +481,11 @@ mod tests {
         assert_ne!(id, tid("blobs", "read_file"));
         assert_ne!(id, tid("files", "write_file"));
         assert_eq!(id.name(), "read_file");
-        assert_eq!(id.capability().to_string(), "tests/files");
+        assert_eq!(
+            id.capability(),
+            shared_promptforge_api::capabilities::CapabilityId::parse("tests/files")
+                .expect("a valid capability id")
+        );
         assert_eq!(id.to_string(), "tests/files/read_file");
     }
 

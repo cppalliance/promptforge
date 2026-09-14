@@ -158,7 +158,11 @@ fn the_migrated_id_names_its_contributing_capability() {
     let tool = WebSearch::new("http://localhost", "test").expect("valid web search configuration");
     let id = tool.id();
     assert_eq!(id.name(), "search");
-    assert_eq!(id.capability().to_string(), "promptforge/web");
+    assert_eq!(
+        id.capability(),
+        shared_promptforge_api::capabilities::CapabilityId::parse("promptforge/web")
+            .expect("a valid capability id")
+    );
 }
 
 #[tokio::test]

@@ -1,5 +1,6 @@
 //! Stable tool identity and its validation errors.
 
+use crate::capabilities::CapabilityId;
 use crate::names::{GlobalName, GlobalNameErrorKind};
 
 /// The stable identity of a live tool.
@@ -29,12 +30,13 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
+    /// use shared_promptforge_api::capabilities::CapabilityId;
     /// use shared_promptforge_api::tools::ToolId;
     ///
     /// let id = ToolId::parse("promptforge/web/fetch")?;
     /// assert_eq!(id.name(), "fetch");
-    /// assert_eq!(id.capability().to_string(), "promptforge/web");
-    /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
+    /// assert_eq!(id.capability(), CapabilityId::parse("promptforge/web")?);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn parse(id: &str) -> Result<ToolId, ToolIdError> {
         let name =
@@ -84,22 +86,23 @@ impl ToolId {
     /// Returns the contributing capability's id: the first two segments.
     ///
     /// Containment is total - dropping the last segment of any tool id always
-    /// yields the id of the capability that contributed it. The return type
-    /// re-types to the capabilities module's `CapabilityId` when that module
-    /// lands; the value is already exactly that id.
+    /// yields the id of the capability that contributed it. The prefix was
+    /// validated when the tool id was parsed, so it builds the
+    /// [`CapabilityId`] directly, with no re-parse.
     ///
     /// # Examples
     ///
     /// ```
+    /// use shared_promptforge_api::capabilities::CapabilityId;
     /// use shared_promptforge_api::tools::ToolId;
     ///
     /// let id = ToolId::parse("promptforge/web/fetch")?;
-    /// assert_eq!(id.capability().to_string(), "promptforge/web");
-    /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
+    /// assert_eq!(id.capability(), CapabilityId::parse("promptforge/web")?);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn capability(&self) -> GlobalName {
-        self.0.capability_prefix()
+    pub fn capability(&self) -> CapabilityId {
+        CapabilityId::from_prefix(self.0.capability_prefix())
     }
 }
 

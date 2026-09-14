@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolCatalog, ToolCatalogErrorKind, ToolError, ToolId, ToolOutput};
-use crate::names::GlobalName;
+use crate::capabilities::CapabilityId;
 
 fn inspect_id() -> ToolId {
     ToolId::parse("fixtures/tools/inspect").expect("fixture id is valid")
@@ -238,7 +238,7 @@ fn a_tool_ids_capability_is_always_its_two_segment_prefix() {
     let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
     assert_eq!(
         id.capability(),
-        GlobalName::parse("promptforge/web").expect("a valid capability name"),
+        CapabilityId::parse("promptforge/web").expect("a valid capability id"),
         "dropping the last segment must yield the contributing capability's id"
     );
 }
@@ -247,7 +247,10 @@ fn a_tool_ids_capability_is_always_its_two_segment_prefix() {
 fn containment_holds_for_a_reverse_dns_namespace() {
     let id = ToolId::parse("org.rustalliance/core/search").expect("a valid tool id");
     assert_eq!(id.name(), "search");
-    assert_eq!(id.capability().to_string(), "org.rustalliance/core");
+    assert_eq!(
+        id.capability(),
+        CapabilityId::parse("org.rustalliance/core").expect("a valid capability id")
+    );
 }
 
 #[test]
@@ -312,7 +315,10 @@ fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
 fn from_validated_builds_a_static_id_without_revalidating() {
     let id = ToolId::from_validated("promptforge/web/search");
     assert_eq!(id.name(), "search");
-    assert_eq!(id.capability().to_string(), "promptforge/web");
+    assert_eq!(
+        id.capability(),
+        CapabilityId::parse("promptforge/web").expect("a valid capability id")
+    );
 }
 
 #[test]
