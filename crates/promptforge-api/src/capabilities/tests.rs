@@ -140,6 +140,52 @@ fn registering_a_near_duplicate_description_fires_the_lint() {
 }
 
 #[test]
+fn a_punctuation_twin_of_a_registered_id_is_rejected() {
+    for twin in ["acme/web_search", "acme/web.search"] {
+        let mut registry = CapabilityRegistry::new();
+        registry
+            .register(stub("acme/web-search", "Web tools."))
+            .expect("the first registration succeeds");
+        let error = registry
+            .register(stub(twin, "Other web tools."))
+            .expect_err("a punctuation twin is rejected");
+        assert_eq!(error.kind(), RegistryErrorKind::NormalizationCollision);
+        assert_eq!(
+            error.collides_with(),
+            Some(&capability_id("acme/web-search"))
+        );
+        let message = error.to_string();
+        assert!(
+            message.contains("acme/web-search"),
+            "the message names the registered id: {message}"
+        );
+        assert!(
+            message.contains(twin),
+            "the message names the rejected id: {message}"
+        );
+        // The rejected twin is not registered; the original survives.
+        assert!(registry.get(&capability_id(twin)).is_none());
+        assert!(registry.get(&capability_id("acme/web-search")).is_some());
+    }
+}
+
+#[test]
+fn punctuation_distinct_non_twins_register() {
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(stub("acme/web-search", "Web tools."))
+        .expect("the first registration succeeds");
+    registry
+        .register(stub("acme/web-search-extra", "Extra web tools."))
+        .expect("a punctuation-distinct non-twin registers");
+    assert!(
+        registry
+            .get(&capability_id("acme/web-search-extra"))
+            .is_some()
+    );
+}
+
+#[test]
 fn distinct_descriptions_do_not_fire_the_lint() {
     let warnings = captured_warnings(|| {
         let mut registry = CapabilityRegistry::new();

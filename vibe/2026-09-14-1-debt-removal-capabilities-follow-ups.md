@@ -159,7 +159,7 @@ Components in dependency order:
 
 <step-2>
 
-### Step 2: reject punctuation-twin capability ids at registration
+### Step 2: reject punctuation-twin capability ids at registration [completed]
 
 - Component: registry-twin-rejection
 - Piece: normalization-collision-rejection (single piece: one error kind, one register check, one test set)
