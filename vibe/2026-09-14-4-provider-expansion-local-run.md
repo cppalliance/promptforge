@@ -236,7 +236,7 @@ Add under `crates/shared-cloud-providers/src/providers/` and register in `lib.rs
 
 <step-8>
 
-### Step 8: Registry completeness for 23 providers
+### Step 8: Registry completeness for 23 providers [completed]
 
 - Component: finalization
 

@@ -169,6 +169,61 @@ mod tests {
         ("deepgram", "Deepgram", "https://api.deepgram.com"),
     ];
 
+    /// The Subprime tier settled in the decision record (2026-09-14):
+    /// `(name, display_name, base_url)`.
+    const SUBPRIME: &[(&str, &str, &str)] = &[
+        ("mistral", "Mistral AI", "https://api.mistral.ai"),
+        ("cohere", "Cohere", "https://api.cohere.com"),
+        ("baidu", "Baidu", "https://qianfan.baidubce.com"),
+        ("minimax", "MiniMax", "https://api.minimax.io/v1"),
+        ("stepfun", "StepFun", "https://api.stepfun.ai/v1"),
+        (
+            "bedrock",
+            "Amazon Bedrock",
+            "https://bedrock.us-east-1.amazonaws.com",
+        ),
+        ("foundry", "Azure AI Foundry", ""),
+        ("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1"),
+        ("groq", "Groq", "https://api.groq.com/openai/v1"),
+        ("soniox", "Soniox", "https://api.soniox.com"),
+        (
+            "azure_speech",
+            "Azure Speech",
+            "https://{region}.cognitiveservices.azure.com",
+        ),
+        (
+            "leonardo",
+            "Leonardo",
+            "https://cloud.leonardo.ai/api/rest/v1",
+        ),
+    ];
+
+    /// The Aggregator tier settled in the decision record (2026-09-14):
+    /// `(name, display_name, base_url)`.
+    const AGGREGATOR: &[(&str, &str, &str)] =
+        &[("openrouter", "OpenRouter", "https://openrouter.ai")];
+
+    /// The keyless providers settled in the decision record: fetched
+    /// with no credential, so `key_env` must be `None`.
+    const KEYLESS: &[&str] = &["nvidia", "openrouter"];
+
+    /// The full decision record: `(name, display_name, base_url, tier)`.
+    fn decision_record() -> impl Iterator<Item = (&'static str, &'static str, &'static str, Tier)> {
+        PRIME
+            .iter()
+            .map(|&(name, display, url)| (name, display, url, Tier::Prime))
+            .chain(
+                SUBPRIME
+                    .iter()
+                    .map(|&(name, display, url)| (name, display, url, Tier::Subprime)),
+            )
+            .chain(
+                AGGREGATOR
+                    .iter()
+                    .map(|&(name, display, url)| (name, display, url, Tier::Aggregator)),
+            )
+    }
+
     #[test]
     fn registry_names_are_unique() {
         let mut seen = BTreeSet::new();
@@ -196,36 +251,32 @@ mod tests {
     }
 
     #[test]
-    fn all_prime_providers_are_registered() {
+    fn all_decision_record_providers_are_registered() {
         let registered: BTreeSet<&str> = providers().iter().map(|provider| provider.name).collect();
-        for &(name, ..) in PRIME {
+        for (name, _, _, tier) in decision_record() {
             assert!(
                 registered.contains(name),
-                "prime provider `{name}` from the decision record is not registered"
+                "decision-record provider `{name}` is not registered"
             );
             let provider = providers()
                 .iter()
                 .find(|provider| provider.name == name)
                 .expect("checked above");
             assert_eq!(
-                provider.tier,
-                Tier::Prime,
-                "decision-record provider `{name}` must be Tier::Prime"
+                provider.tier, tier,
+                "decision-record provider `{name}` must be {tier:?}"
             );
         }
     }
 
     #[test]
-    fn prime_descriptors_match_decision_record() {
+    fn descriptors_match_decision_record() {
         for provider in providers() {
-            if provider.tier != Tier::Prime {
-                continue;
-            }
-            let Some(&(_, display_name, base_url)) =
-                PRIME.iter().find(|(name, ..)| *name == provider.name)
+            let Some((_, display_name, base_url, _)) =
+                decision_record().find(|(name, ..)| *name == provider.name)
             else {
                 panic!(
-                    "prime provider `{}` is not in the decision record",
+                    "registered provider `{}` is not in the decision record",
                     provider.name
                 );
             };
@@ -239,11 +290,19 @@ mod tests {
                 "base URL for `{}`",
                 provider.name
             );
-            assert!(
-                provider.key_env.is_some_and(|key_env| !key_env.is_empty()),
-                "prime provider `{}` must name its key env var",
-                provider.name
-            );
+            if KEYLESS.contains(&provider.name) {
+                assert!(
+                    provider.key_env.is_none(),
+                    "keyless provider `{}` must not name a key env var",
+                    provider.name
+                );
+            } else {
+                assert!(
+                    provider.key_env.is_some_and(|key_env| !key_env.is_empty()),
+                    "keyed provider `{}` must name its key env var",
+                    provider.name
+                );
+            }
         }
     }
 
