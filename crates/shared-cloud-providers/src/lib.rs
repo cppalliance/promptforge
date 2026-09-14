@@ -33,7 +33,9 @@ pub struct Provider {
 pub fn providers() -> &'static [Provider] {
     &[
         providers::anthropic::PROVIDER,
+        providers::deepgram::PROVIDER,
         providers::deepseek::PROVIDER,
+        providers::elevenlabs::PROVIDER,
         providers::gemini::PROVIDER,
         providers::meta::PROVIDER,
         providers::moonshot::PROVIDER,
@@ -74,7 +76,9 @@ pub async fn fetch_models(
 ) -> Result<Vec<ModelEntry>, FetchError> {
     match provider.name {
         "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
+        "deepgram" => providers::deepgram::fetch(client, provider.base_url, key).await,
         "deepseek" => providers::deepseek::fetch(client, provider.base_url, key).await,
+        "elevenlabs" => providers::elevenlabs::fetch(client, provider.base_url, key).await,
         "gemini" => providers::gemini::fetch(client, provider.base_url, key).await,
         "meta" => providers::meta::fetch(client, provider.base_url, key).await,
         "moonshot" => providers::moonshot::fetch(client, provider.base_url, key).await,
@@ -138,6 +142,27 @@ mod tests {
                 seen.insert(provider.key_env),
                 "duplicate key env in the registry: {}",
                 provider.key_env
+            );
+        }
+    }
+
+    #[test]
+    fn all_prime_providers_are_registered() {
+        let registered: BTreeSet<&str> =
+            providers().iter().map(|provider| provider.name).collect();
+        for &(name, ..) in PRIME {
+            assert!(
+                registered.contains(name),
+                "prime provider `{name}` from the decision record is not registered"
+            );
+            let provider = providers()
+                .iter()
+                .find(|provider| provider.name == name)
+                .expect("checked above");
+            assert_eq!(
+                provider.tier,
+                Tier::Prime,
+                "decision-record provider `{name}` must be Tier::Prime"
             );
         }
     }

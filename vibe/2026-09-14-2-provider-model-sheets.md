@@ -633,7 +633,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-7>
 
-### Step 7: media provider files (elevenlabs, deepgram)
+### Step 7: media provider files (elevenlabs, deepgram) [completed]
 
 - Component: shared-cloud-providers
 - Add `elevenlabs.rs` and `deepgram.rs`: ElevenLabs uses the `xi-api-key` header and its rich list response (languages, capabilities, rates); Deepgram uses the `Authorization: Token` prefix and splits its STT models and TTS array into separate `ModelEntry` values.
