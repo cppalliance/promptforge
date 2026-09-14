@@ -113,8 +113,8 @@ fn hanging_completions(started: &Notify) -> Response {
 
 /// Adds the typed `/v1/models` catalog a launch resolves the menu selection
 /// through. Every id these tests select carries a window that clears the
-/// built-in chat's declared minimum, so a mock without this route would
-/// bind the fallback descriptor and the role's minimum would refuse the run.
+/// built-in chat's declared minimum; a mock without this route fails the
+/// launch with the reported catalog-fetch cause.
 fn with_typed_catalog(router: Router) -> Router {
     router.route(
         "/v1/models",
@@ -181,8 +181,10 @@ fn assert_replacement_request(
 /// holding `test-model`. Returns the server's base `ws://` URL, the
 /// tempdir keeping the state alive, and the shared state handle.
 async fn spawn_agent_server() -> (String, tempfile::TempDir, AppState) {
-    let base_url =
-        spawn_gateway(Router::new().route("/v1/chat/completions", post(echo_completions))).await;
+    let base_url = spawn_gateway(with_typed_catalog(
+        Router::new().route("/v1/chat/completions", post(echo_completions)),
+    ))
+    .await;
     spawn_agent_server_for_gateway(base_url).await
 }
 

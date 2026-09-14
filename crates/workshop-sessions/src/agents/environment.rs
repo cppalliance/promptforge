@@ -2,22 +2,13 @@
 //! [`Environment`] every session run prepares against, and the launch-time
 //! resolution of the dropdown's current model into the per-run context.
 
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use promptforge_api::client::fetch_model_catalog;
-use promptforge_api::{CapabilityRegistry, Environment, Web};
-use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_api::{CapabilityRegistry, CompletionError, Environment, Web};
+use shared_promptforge_api::models::{ModelDescriptor, ModelId};
 
 use super::SessionHost;
-
-/// The context window a selection resolved without catalog metadata
-/// records: a conservative default keeps the compactor precheck safe,
-/// mirroring the raw-id binding's fallback.
-const FALLBACK_CONTEXT: NonZeroU32 = match NonZeroU32::new(8192) {
-    Some(value) => value,
-    None => unreachable!(),
-};
 
 /// Builds the sessions' shared environment for one gateway generation:
 /// model-free (the gateway's model list feeds the dropdown UI and never
@@ -48,26 +39,38 @@ pub fn session_environment(base_url: &str, api_key: &str) -> Option<Environment>
     Some(Environment::new().registry(registry))
 }
 
+/// Why launch-time model resolution cannot bind a descriptor. Each cause
+/// becomes the chat launch error, reported to the operator instead of
+/// binding a fabricated fallback descriptor.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CurrentModelError {
+    /// The gateway's model catalog could not be fetched.
+    #[error("the model catalog fetch failed: {0}")]
+    CatalogFetchFailed(#[source] CompletionError),
+    /// The selected id is absent from the fetched catalog.
+    #[error("the selected model `{0}` is absent from the fetched catalog")]
+    SelectionAbsent(String),
+}
+
 /// Resolves the dropdown's current model for one run's context. The
 /// selection is read at launch, so a selection change takes effect on the
 /// next run. A launch with no selection yet - the boot window before the
 /// menu's own auto-select settles - binds the retained catalog's first
 /// chat-capable model, the same fallback the menu applies. The typed
 /// descriptor comes from the gateway's model list through
-/// [`fetch_model_catalog`]; when the fetch fails or the selection is
-/// absent from it, a minimal descriptor under the fallback context window
-/// keeps the run on the selected id, mirroring the raw-id binding's
-/// fallback.
+/// [`fetch_model_catalog`].
 ///
-/// Returns `None` only when neither a selection nor a catalog model
+/// Returns `Ok(None)` only when neither a selection nor a catalog model
 /// exists, or the id is not representable; the prompt's declared roles
-/// then stay unbound.
+/// then stay unbound. A failed catalog fetch or a selection absent from
+/// the fetched catalog is a reported [`CurrentModelError`], never a
+/// fabricated fallback descriptor.
 pub(crate) async fn current_model(
     host: &SessionHost,
     base_url: &str,
     api_key: &str,
-) -> Option<ModelDescriptor> {
-    let selected = host
+) -> Result<Option<ModelDescriptor>, CurrentModelError> {
+    let Some(selected) = host
         .menu()
         .latest()
         .and_then(|snapshot| snapshot.selected_model)
@@ -79,32 +82,35 @@ pub(crate) async fn current_model(
                 .get("id")?
                 .as_str()
                 .map(str::to_owned)
-        })?;
+        })
+    else {
+        return Ok(None);
+    };
     let id = match ModelId::gateway(&selected) {
         Ok(id) => id,
         Err(error) => {
             tracing::warn!(%error, "the selected model id is invalid");
-            return None;
+            return Ok(None);
         }
     };
     let root = format!("{}/v1", base_url.trim_end_matches('/'));
-    let fetched = match fetch_model_catalog(&root, api_key).await {
-        Ok(catalog) => catalog.get(&id).cloned(),
-        Err(error) => {
-            tracing::warn!(%error, "the model catalog fetch failed; the selection binds under the fallback descriptor");
-            None
-        }
-    };
-    Some(fetched.unwrap_or_else(|| {
-        tracing::debug!(model = %selected, "binding the selection under the fallback descriptor");
-        ModelDescriptor::new(id, "", FALLBACK_CONTEXT, ThinkingMode::Never)
-    }))
+    let catalog = fetch_model_catalog(&root, api_key)
+        .await
+        .map_err(CurrentModelError::CatalogFetchFailed)?;
+    let descriptor = catalog
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| CurrentModelError::SelectionAbsent(selected))?;
+    Ok(Some(descriptor))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
     use std::sync::Mutex;
     use std::time::Duration;
+
+    use shared_promptforge_api::models::ThinkingMode;
 
     use workshop_gateway::GatewayBinding;
     use workshop_menu::{CatalogBus, MenuBus};
@@ -169,33 +175,61 @@ mod tests {
         let host = host_with_catalog(true);
         let model = current_model(&host, &base_url, "k")
             .await
+            .expect("the fetch succeeds")
             .expect("the selection resolves");
         assert_eq!(model.id().name(), "test-model");
         assert_eq!(
             model.context(),
             NonZeroU32::new(4096).expect("4096 is non-zero"),
-            "the fetched descriptor wins over the fallback"
+            "the fetched descriptor binds"
         );
         assert_eq!(model.thinking(), ThinkingMode::Switchable);
     }
 
     #[tokio::test]
-    async fn a_failed_catalog_fetch_binds_the_fallback_descriptor() {
+    async fn a_failed_catalog_fetch_reports_the_fetch_as_the_launch_cause() {
         // Port 1 refuses the connection: the fetch fails fast.
         let host = host_with_catalog(true);
-        let model = current_model(&host, "http://127.0.0.1:1", "k")
+        let error = current_model(&host, "http://127.0.0.1:1", "k")
             .await
-            .expect("the fallback keeps the selected id");
-        assert_eq!(model.id().name(), "test-model");
-        assert_eq!(model.context(), FALLBACK_CONTEXT);
-        assert_eq!(model.thinking(), ThinkingMode::Never);
+            .expect_err("a failed fetch is a reported cause, never a fallback descriptor");
+        assert!(
+            matches!(error, CurrentModelError::CatalogFetchFailed(_)),
+            "the cause is the failed fetch: {error}"
+        );
+        assert!(
+            error.to_string().contains("catalog fetch failed"),
+            "the reported launch error names the fetch as cause: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_selection_absent_from_the_fetched_catalog_is_reported() {
+        let base_url = spawn_models_gateway().await;
+        let catalog = CatalogBus::new();
+        catalog.publish(vec![
+            serde_json::json!({ "id": "elsewhere-model", "object": "model" }),
+        ]);
+        let menu = MenuBus::new(catalog.clone(), None);
+        menu.set_selected("elsewhere-model")
+            .expect("the id is in the catalog");
+        let host = SessionHost::new(Registry::new(), ReconnectBackoff::new(), menu, catalog);
+        let error = current_model(&host, &base_url, "k")
+            .await
+            .expect_err("a selection missing from the fetched catalog is a reported cause");
+        assert!(
+            matches!(error, CurrentModelError::SelectionAbsent(_)),
+            "the cause is the absent selection: {error}"
+        );
     }
 
     #[tokio::test]
     async fn a_launch_without_a_selection_binds_the_first_catalog_model() {
+        let base_url = spawn_models_gateway().await;
         let host = host_with_catalog(false);
-        let model = current_model(&host, "http://127.0.0.1:1", "k")
+        let model = current_model(&host, &base_url, "k")
             .await
+            .expect("the fetch succeeds")
             .expect("the catalog's first model stands in");
         assert_eq!(model.id().name(), "test-model");
     }
@@ -208,6 +242,7 @@ mod tests {
         assert!(
             current_model(&host, "http://127.0.0.1:1", "k")
                 .await
+                .expect("no selection is no model, not a reported cause")
                 .is_none()
         );
     }
@@ -420,5 +455,36 @@ mod tests {
         );
 
         assert!(sessions.close(&session.id), "the session ends");
+    }
+
+    #[tokio::test]
+    async fn a_failed_catalog_fetch_fails_the_chat_launch_naming_the_fetch_as_cause() {
+        // Port 1 refuses the connection: the launch-time catalog fetch
+        // fails fast, and the run must fail with the launch error rather
+        // than launch with unbound roles.
+        let host = host_with_catalog(true);
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let sessions = AgentSessions::new(
+            dir.path().join("missing-agents"),
+            dir.path().join("sessions"),
+            GatewayBinding::new("http://127.0.0.1:1", "test-key").expect("the binding builds"),
+            host,
+        );
+        let session = sessions.launch("chat").expect("the built-in chat launches");
+        // Subscribed before the first yield, so the failure frame the
+        // supervisor task is about to send cannot be missed.
+        let mut errors = session.subscribe_errors();
+        let message = tokio::time::timeout(Duration::from_secs(10), errors.recv())
+            .await
+            .expect("the failed run reports an error frame")
+            .expect("the error channel is live");
+        assert!(
+            message.contains("the chat cannot launch"),
+            "the run failed with the launch error: {message}"
+        );
+        assert!(
+            message.contains("catalog fetch failed"),
+            "the launch error names the fetch as cause: {message}"
+        );
     }
 }

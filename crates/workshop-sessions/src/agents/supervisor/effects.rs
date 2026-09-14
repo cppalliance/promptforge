@@ -157,7 +157,15 @@ async fn run_markdown_agent(
         Arc::clone(&session.waits),
         session.input_frames.clone(),
     ));
-    let model = current_model(&host, gateway.base_url(), gateway.api_key()).await;
+    let model = match current_model(&host, gateway.base_url(), gateway.api_key()).await {
+        Ok(model) => model,
+        Err(cause) => {
+            return Err(AgentRunError::Failed {
+                message: format!("the chat cannot launch: {cause}"),
+                source: Some(Box::new(cause)),
+            });
+        }
+    };
     let mut ctx = RunContext::new(session.id.clone())
         .observer(observer)
         .client(client)

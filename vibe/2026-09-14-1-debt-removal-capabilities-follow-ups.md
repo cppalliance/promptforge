@@ -171,7 +171,7 @@ Components in dependency order:
 
 <step-3>
 
-### Step 3: delete the 8192 fallback model descriptor
+### Step 3: delete the 8192 fallback model descriptor [completed]
 
 - Component: fallback-descriptor-removal
 - Piece: catalog-failure-reporting (single piece, joint construction: the `current_model` signature change, the fallback deletion, and the caller's error reporting compile together)
