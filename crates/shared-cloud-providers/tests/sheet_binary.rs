@@ -1,0 +1,187 @@
+//! Integration tests for the sheet-building binary: the binary runs
+//! against a recorded previous-sheet fixture served over loopback HTTP,
+//! and the emitted `models.json` must parse as a schema-valid [`Sheet`].
+
+use std::io::{Read as _, Write as _};
+use std::net::TcpListener;
+use std::path::PathBuf;
+use std::process::{Command, Output};
+
+use shared_cloud_providers::providers;
+use shared_gateway_api::{Sheet, SliceStatus};
+
+/// The binary under test, built by Cargo alongside the integration test.
+const BIN: &str = env!("CARGO_BIN_EXE_shared-cloud-providers");
+
+/// The environment variable carrying the previous release's sheet URL.
+const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
+
+/// A recorded previous release: one fresh Anthropic slice with one model.
+const PREVIOUS_SHEET_JSON: &str = r#"{
+  "schema_version": 1,
+  "generated_at": "2026-09-01T00:00:00Z",
+  "providers": {
+    "anthropic": {
+      "display_name": "Anthropic",
+      "tier": "prime",
+      "status": "ok",
+      "fetched_at": "2026-09-01T00:00:00Z",
+      "models": [
+        {
+          "id": "recorded-m1",
+          "display_name": "Recorded M1",
+          "kind": "chat",
+          "released_at": null,
+          "context_window": 200000,
+          "max_output": 8192,
+          "images": true,
+          "pdf_input": false,
+          "video_input": false,
+          "audio_input": false,
+          "batch": false,
+          "citations": false,
+          "code_execution": false,
+          "structured_outputs": true,
+          "tool_calling": true,
+          "thinking": { "supported": true, "enabled": true, "adaptive": false },
+          "effort_levels": ["low", "high"],
+          "default_effort": "high",
+          "pricing": null,
+          "deprecation": null
+        }
+      ]
+    }
+  }
+}"#;
+
+/// Serve one HTTP response carrying `body`, returning the URL to request.
+fn serve_once(body: &'static str) -> String {
+    let Ok(listener) = TcpListener::bind("127.0.0.1:0") else {
+        panic!("bind fixture server");
+    };
+    let Ok(addr) = listener.local_addr() else {
+        panic!("fixture server addr");
+    };
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            panic!("accept fixture client");
+        };
+        // Read the request first: replying before the client finishes
+        // sending is an HTTP protocol error. A short read timeout bounds
+        // the capture without a sleep; once the client awaits the
+        // response, the next read simply times out.
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+        let mut buf = [0_u8; 4096];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        assert!(
+            stream.write_all(response.as_bytes()).is_ok(),
+            "write fixture response"
+        );
+    });
+    format!("http://{addr}/models.json")
+}
+
+/// A unique output path in the temp directory for one test run.
+fn output_path(test: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "shared-cloud-providers-{test}-{}.json",
+        std::process::id()
+    ))
+}
+
+/// Run the binary with every provider key stripped from the environment,
+/// so no host credential can turn a fixture run into a live fetch.
+fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
+    let mut command = Command::new(BIN);
+    command.arg(output);
+    for provider in providers() {
+        command.env_remove(provider.key_env);
+    }
+    match previous_url {
+        Some(url) => command.env(PREVIOUS_SHEET_URL_ENV, url),
+        None => command.env_remove(PREVIOUS_SHEET_URL_ENV),
+    };
+    let Ok(output) = command.output() else {
+        panic!("run the sheet-building binary");
+    };
+    output
+}
+
+/// Read the emitted sheet, failing with the binary's stderr when the
+/// run itself failed.
+fn read_output(output: &PathBuf, result: &Output) -> Sheet {
+    assert!(
+        result.status.success(),
+        "the binary must exit successfully: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let Ok(json) = std::fs::read_to_string(output) else {
+        panic!("the binary must write the output file");
+    };
+    let Ok(sheet) = serde_json::from_str(&json) else {
+        panic!("the output must parse as a schema-valid Sheet");
+    };
+    sheet
+}
+
+#[test]
+fn binary_emits_valid_sheet_and_propagates_stale_slices() {
+    let url = serve_once(PREVIOUS_SHEET_JSON);
+    let output = output_path("stale");
+    let result = run_binary(&output, Some(&url));
+    let sheet = read_output(&output, &result);
+    let _ = std::fs::remove_file(&output);
+
+    assert_eq!(sheet.schema_version, 1);
+    assert_eq!(
+        sheet.providers.len(),
+        providers().len(),
+        "every registered provider must appear in the sheet"
+    );
+    let anthropic = &sheet.providers["anthropic"];
+    assert_eq!(
+        anthropic.status,
+        SliceStatus::Stale,
+        "a failed fetch must propagate the previous slice as stale"
+    );
+    assert_eq!(
+        anthropic.models.len(),
+        1,
+        "stale propagation keeps the recorded models"
+    );
+    assert_eq!(anthropic.models[0].id, "recorded-m1");
+    let openai = &sheet.providers["openai"];
+    assert_eq!(
+        openai.status,
+        SliceStatus::Unavailable,
+        "a provider with no key and no previous slice records unavailable"
+    );
+    assert!(openai.models.is_empty());
+}
+
+#[test]
+fn binary_tolerates_first_run_without_previous_sheet() {
+    let output = output_path("first-run");
+    let result = run_binary(&output, None);
+    let sheet = read_output(&output, &result);
+    let _ = std::fs::remove_file(&output);
+
+    assert_eq!(sheet.schema_version, 1);
+    assert_eq!(sheet.providers.len(), providers().len());
+    for (name, slice) in &sheet.providers {
+        assert_eq!(
+            slice.status,
+            SliceStatus::Unavailable,
+            "first run with no keys must record `{name}` as unavailable, not fail"
+        );
+    }
+}

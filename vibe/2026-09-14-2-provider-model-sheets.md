@@ -656,7 +656,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-9>
 
-### Step 9: sheet-building binary
+### Step 9: sheet-building binary [completed]
 
 - Component: shared-cloud-providers
 - Add `src/main.rs`, a thin `main` over the lib: read provider keys from environment variables (names from each descriptor's `key_env`), download the previous release's `models.json` when it exists (tolerate its absence on first run), call `build_sheet`, and write the merged `models.json`.
