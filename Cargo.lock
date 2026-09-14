@@ -4923,6 +4923,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-web"
+version = "0.3.0"
+dependencies = [
+ "promptforge-web-search",
+ "promptforge-webfetch",
+ "shared-promptforge-api",
+ "shared-vfs",
+]
+
+[[package]]
 name = "promptforge-web-search"
 version = "0.3.0"
 dependencies = [

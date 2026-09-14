@@ -1016,7 +1016,7 @@ Migrate the 4 shipped prompts, the executor fixtures, the 3 fenced guide example
 
 <step-16>
 
-### Step 16: The promptforge/web capability
+### Step 16: The promptforge/web capability [completed]
 
 - Component: first-party
 

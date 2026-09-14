@@ -1,0 +1,24 @@
+[package]
+name = "promptforge-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge promptforge/web capability: web fetch and search tools in one pack"
+readme = "README.md"
+keywords = ["promptforge", "llm", "tools", "web", "ai"]
+categories = ["web-programming::http-client", "api-bindings"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+shared-promptforge-api.workspace = true
+promptforge-webfetch.workspace = true
+promptforge-web-search.workspace = true
+
+[dev-dependencies]
+shared-vfs.workspace = true
+
+[lints]
+workspace = true
