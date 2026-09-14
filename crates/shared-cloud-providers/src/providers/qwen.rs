@@ -1,6 +1,6 @@
 //! Alibaba Qwen provider: the public descriptor plus the private variance
 //! of the DashScope compatible-mode endpoint - `GET /models` under
-//! `https://dashscope.aliyuncs.com/compatible-mode/v1`, Bearer auth, and
+//! `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Bearer auth, and
 //! the plain OpenAI response shape. The native `/api/v1/models` endpoint
 //! adds pagination, pricing, and context length; the compatible-mode
 //! endpoint is IDs-only, so every entry is the conservative base entry.
@@ -23,7 +23,7 @@ pub const PROVIDER: Provider = Provider {
     display_name: "Alibaba Qwen",
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
 };
 
 /// The list path under the base URL.

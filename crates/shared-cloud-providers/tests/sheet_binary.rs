@@ -1,6 +1,7 @@
 //! Integration tests for the sheet-building binary: the binary runs
 //! against a recorded previous-sheet fixture served over loopback HTTP,
-//! and the emitted `models.json` must parse as a schema-valid [`Sheet`].
+//! and the emitted `cloud-provider-models.json` must parse as a
+//! schema-valid [`Sheet`].
 
 use std::io::{Read as _, Write as _};
 use std::net::TcpListener;
@@ -302,6 +303,51 @@ fn binary_treats_404_previous_sheet_as_first_run() {
             provider.name
         );
     }
+}
+
+#[test]
+fn binary_reports_each_failed_keyed_provider_on_stderr() {
+    let output = output_path("stderr-notes");
+    let result = run_binary(&output, None);
+    read_output(&output, &result);
+    let _ = std::fs::remove_file(&output);
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    for provider in providers() {
+        if provider.key_env.is_none() {
+            continue;
+        }
+        let note = format!("note: {} fetch failed", provider.name);
+        assert!(
+            stderr.contains(&note),
+            "stderr must carry one note per failed keyed provider (`{}`): {stderr}",
+            provider.name
+        );
+    }
+}
+
+#[test]
+fn binary_defaults_output_to_the_profile_dir() {
+    // No output argument: the sheet must land at
+    // `<home>/.promptforge/cloud-provider-models.json`.
+    let home = empty_home("default-output");
+    let mut command = Command::new(BIN);
+    for provider in providers() {
+        if let Some(key_env) = provider.key_env {
+            command.env_remove(key_env);
+        }
+    }
+    command.env_remove(PREVIOUS_SHEET_URL_ENV);
+    command.env("HOME", &home).env("USERPROFILE", &home);
+    let Ok(result) = command.output() else {
+        panic!("run the sheet-building binary");
+    };
+    let output = home.join(".promptforge").join("cloud-provider-models.json");
+    let sheet = read_output(&output, &result);
+    let _ = std::fs::remove_dir_all(&home);
+
+    assert_eq!(sheet.schema_version, 1);
+    assert_eq!(sheet.providers.len(), providers().len());
 }
 
 #[test]

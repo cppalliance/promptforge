@@ -246,7 +246,7 @@ Extend the registry completeness test in `crates/shared-cloud-providers/src/lib.
 
 <step-9>
 
-### Step 9: Real local run and final verification
+### Step 9: Real local run and final verification [completed]
 
 - Component: finalization
 

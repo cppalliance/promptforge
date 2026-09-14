@@ -112,7 +112,18 @@ async fn build_sheet_with(
                 fetched_at: Some(now),
                 models,
             },
-            Err(_) => stale_or_unavailable(&provider, prior),
+            Err(err) => {
+                // Surface the failure cause: the sheet records only
+                // stale/unavailable, so the stderr note is the run report.
+                // `FetchError`'s Display carries provider names, env var
+                // names, URLs, and reqwest errors only - never key material,
+                // which travels in request headers reqwest does not echo.
+                eprintln!(
+                    "shared-cloud-providers: note: {} fetch failed: {err}",
+                    provider.name
+                );
+                stale_or_unavailable(&provider, prior)
+            }
         };
         slices.insert(provider.name.to_owned(), slice);
     }

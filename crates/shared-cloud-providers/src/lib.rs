@@ -161,7 +161,7 @@ mod tests {
         (
             "qwen",
             "Alibaba Qwen",
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         ),
         ("moonshot", "Moonshot AI", "https://api.moonshot.ai/v1"),
         ("meta", "Meta", "https://api.meta.ai/v1"),

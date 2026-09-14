@@ -10,8 +10,9 @@
 //! download failure is fatal, since silently losing history would demote
 //! every slice to `unavailable`), and writes the merged sheet as
 //! pretty-printed JSON to the output path named by the first argument,
-//! defaulting to `./models.json`.
+//! defaulting to `~/.promptforge/cloud-provider-models.json`.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -19,6 +20,9 @@ use shared_gateway_api::Sheet;
 
 /// Environment variable carrying the previous release's sheet URL.
 const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
+
+/// The sheet's default output filename.
+const DEFAULT_OUTPUT_NAME: &str = "cloud-provider-models.json";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -35,28 +39,31 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Load operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
-/// overriding the process environment so local runs need no exported keys.
-///
-/// Home resolution mirrors the ART-009 convention (`USERPROFILE` on Windows,
-/// `HOME` otherwise) rather than importing `gateway-local`, which `shared-*`
-/// crates may not depend on. A missing file or unresolvable home earns a
-/// stderr note and a malformed file a stderr warning; the run continues with
-/// the environment either way.
-fn load_secrets() {
+/// Resolve the operator's home directory, mirroring the ART-009
+/// convention (`USERPROFILE` on Windows, `HOME` otherwise) rather than
+/// importing `gateway-local`, which `shared-*` crates may not depend on.
+fn home_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     let home = std::env::var_os("USERPROFILE");
     #[cfg(not(windows))]
     let home = std::env::var_os("HOME");
-    let Some(home) = home.filter(|home| !home.is_empty()) else {
+    home.filter(|home| !home.is_empty()).map(PathBuf::from)
+}
+
+/// Load operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
+/// overriding the process environment so local runs need no exported keys.
+///
+/// A missing file or unresolvable home earns a stderr note and a
+/// malformed file a stderr warning; the run continues with the
+/// environment either way.
+fn load_secrets() {
+    let Some(home) = home_dir() else {
         eprintln!(
             "shared-cloud-providers: note: home directory unresolved; skipping the secrets file"
         );
         return;
     };
-    let path = std::path::Path::new(&home)
-        .join(".promptforge")
-        .join("cloud-provider-secrets.env");
+    let path = home.join(".promptforge").join("cloud-provider-secrets.env");
     match dotenvy::from_path_override(&path) {
         Ok(()) => {}
         Err(dotenvy::Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -74,11 +81,31 @@ fn load_secrets() {
     }
 }
 
+/// The default output path: `cloud-provider-models.json` in the profile
+/// directory `<home>/.promptforge`, created when absent. An unresolvable
+/// home or an uncreatable profile directory falls back to the current
+/// directory with a stderr note.
+fn default_output() -> String {
+    let Some(home) = home_dir() else {
+        eprintln!(
+            "shared-cloud-providers: note: home directory unresolved; writing ./{DEFAULT_OUTPUT_NAME}"
+        );
+        return DEFAULT_OUTPUT_NAME.to_owned();
+    };
+    let dir = home.join(".promptforge");
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!(
+            "shared-cloud-providers: warning: profile directory {} not created: {err}; writing ./{DEFAULT_OUTPUT_NAME}",
+            dir.display()
+        );
+        return DEFAULT_OUTPUT_NAME.to_owned();
+    }
+    dir.join(DEFAULT_OUTPUT_NAME).to_string_lossy().into_owned()
+}
+
 /// Build the sheet and write it to the output path, returning the path.
 async fn run() -> Result<String, Box<dyn std::error::Error>> {
-    let output = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "models.json".to_owned());
+    let output = std::env::args().nth(1).unwrap_or_else(default_output);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()?;
