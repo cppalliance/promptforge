@@ -6,13 +6,16 @@ Prose blocks are not static text. When a Lua block reads its `prose` value, `{{ 
 
 Each placeholder names a namespace and, for most of them, a key:
 
-- `{{ args }}` inserts the run's input string.
+- `{{ args }}` inserts the run's input string, exactly as passed.
+- `{{ argv }}` inserts the parsed form of the input as compact JSON, and `{{ argv.key }}` indexes into it.
 - `{{ item }}` inserts the current member when the section runs as an arm of a fanout.
 - `{{ var.key }}` inserts a field of the `var` clipboard.
 - `{{ sys.key }}` inserts runtime metadata.
 - A bare name, such as `{{ kind }}`, inserts a section-local Lua global.
 
 So `hi {{ args }}!` with the run argument `Acme Corp` reads as `hi Acme Corp!`.
+
+The `args` and `argv` namespaces are two views of one input. `{{ args }}` is always the exact string the run was started with. `{{ argv }}` is its parsed shape under the prompt's `args:` declaration (see [Lua Globals and the Store](04-lua-globals-and-store.md)): `{{ argv }}` renders the whole value as compact JSON, and a dotted path such as `{{ argv.query }}` indexes into it.
 
 ## Dotted paths and structured values
 
@@ -32,7 +35,7 @@ Substitution is also lazy. It runs on the first read of `prose`, not at block en
 
 Substitution failures are ordinary Lua errors raised at the read site, with specific messages, so a block can catch them with `pcall`. The failures cover an unknown namespace or global, a missing key, a null value, a bare `{{ var }}` or `{{ sys }}`, dotted indexing into a string, an unclosed `{{`, empty path segments, and non-JSON globals.
 
-One placeholder has a precondition. Using `{{ item }}` outside a fanout arm is an error because no collection member exists.
+Two placeholders have preconditions. Using `{{ item }}` outside a fanout arm is an error because no collection member exists. And using `{{ argv }}` or any `{{ argv.key }}` path when the input did not parse - a nil `argv` - is an error, never a silent empty string.
 
 ## How item renders
 

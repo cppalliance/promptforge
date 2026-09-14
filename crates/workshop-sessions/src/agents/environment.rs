@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use promptforge_api::client::fetch_model_catalog;
-use promptforge_api::{CapabilityRegistry, Environment};
+use promptforge_api::{CapabilityRegistry, Environment, Web};
 use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
 
 use super::SessionHost;
@@ -32,7 +32,7 @@ const FALLBACK_CONTEXT: NonZeroU32 = match NonZeroU32::new(8192) {
 #[must_use]
 pub fn session_environment(base_url: &str, api_key: &str) -> Option<Environment> {
     let root = format!("{}/v1", base_url.trim_end_matches('/'));
-    let web = match promptforge_web::Web::new(&root, api_key) {
+    let web = match Web::new(&root, api_key) {
         Ok(web) => web,
         Err(error) => {
             tracing::warn!(%error, "agent sessions degraded: the gateway cannot build promptforge/web");

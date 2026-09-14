@@ -1,10 +1,16 @@
 # The Run
 
-You can now write a well-formed prompt file, so the next question is what happens when it runs. This chapter walks a run from beginning to end: the live pass over the title, the ordered walk through the sections, how results appear, and how a run finishes. Once you can picture a run, every other feature of the language has a place to attach.
+You can now write a well-formed prompt file, so the next question is what happens when it runs. This chapter walks a run from beginning to end: the prepare pass that satisfies the prompt's contract, the live pass over the title, the ordered walk through the sections, how results appear, and how a run finishes. Once you can picture a run, every other feature of the language has a place to attach.
+
+## Prepare: satisfaction before the walk
+
+A prompt never binds its own models and tools; it declares them, and the host satisfies the declaration before the run begins. When you run a prompt, the host first prepares the run against its environment: it activates each declared capability, assembles the catalog of tools those capabilities contribute, and fills every declared slot - each model role bound to a concrete model, each tool slot bound to a concrete tool. Every fill is journaled, so the host can show you exactly what a fuzzy `want` resolved to.
+
+Prepare then checks the declaration against what the environment could satisfy and reports what still needs human attention: model requirements the filled model does not meet (a `min_context` above the model's context window, or a hard keyword its descriptor contradicts), required capabilities that are missing or failed to activate, and declared capability pairs that cannot activate together. When the report is clean the run begins. When it is not, the run fails before the walk with a notice naming each gap, required versus actual.
 
 ## The preamble
 
-When a run starts, the H1 section's Lua and prose blocks run first, in a live pass with full host access. This pass is the prompt's preamble. It is where the prompt declares which models and tools the run may use: `models.bind` and `models.default` declare model aliases resolved from capability descriptions, and `tools.bind` declares a tool alias the same way. Once the preamble finishes, those bindings are structurally frozen for the rest of the run.
+When a run starts, the H1 section's Lua and prose blocks run first, in a live pass with full host access. This pass is the prompt's preamble. Binding is already done - prepare filled every declared role and slot - so the preamble arranges the run's own affairs: `models.default` parks a declared role as the prompt-wide default, `tools.always` advertises a bound tool in every section, and the H1 pass is the one place `argv` is writable, so a prompt that repairs malformed input does it here (see [Lua Globals and the Store](04-lua-globals-and-store.md)).
 
 A prompt with only an H1 title and no sections still runs. And a scalar `return` from the live H1 pass short-circuits the whole run: the returned value becomes the run's result, and no section ever fires.
 
@@ -16,7 +22,7 @@ After the preamble, the top-level sections run in file order. The first H2 secti
 
 Each section runs in its own isolated, sandboxed Lua state. Only the `string`, `table`, and `math` standard libraries plus safe base functions are available. The state is created at section entry and torn down at exit, so one section's Lua cannot leak into the next.
 
-A section that talks to the model needs a model. `models.use` selects a bound alias for one section, and the prompt-wide default covers sections that select nothing; a model-facing call with neither fails with a model-required error. Tools follow the same pattern: `tools.always` or `tools.add` scope a bound tool to the model under its local alias.
+A section that talks to the model needs a model. `models.use` selects a declared role by its label for one section, and the prompt-wide default covers sections that select nothing; a model-facing call with neither fails with a model-required error. Tools follow the same pattern: `tools.always` or `tools.add` advertise a bound tool to the model under its local alias.
 
 ## Lua blocks and prose blocks
 
@@ -27,6 +33,8 @@ Prose is data, not an implicit model turn. The prose written between a heading o
 ## Returns and the run result
 
 A scalar `return` from a section's Lua block ends the run early with that value. When the first section returns `"first"`, a later section's own `return "unreached"` is never reached. A run in which no section returns finishes with the generic completion "done".
+
+The host sees one of three outcomes. A completed run yields its final text. A cancelled run reports cancellation distinctly, so an interrupted run is never mistaken for a failed one. A failure carries a typed error whose kind classifies the fault - parse, binding, completion, tool, and so on - with a message written to be read and, when the failure has a source position, the prompt name and line to navigate to. Domain outcomes, including the prompt declining to answer, are ordinary result text, not failures.
 
 ## What carries between sections
 

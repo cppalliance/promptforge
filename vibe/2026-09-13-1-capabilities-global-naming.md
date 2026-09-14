@@ -1036,7 +1036,7 @@ Combine `promptforge-webfetch` and `promptforge-web-search` into the single `pro
 
 <step-18>
 
-### Step 18: Guide and AGENTS.md
+### Step 18: Guide and AGENTS.md [completed]
 
 - Component: docs
 

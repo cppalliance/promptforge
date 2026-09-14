@@ -10,6 +10,7 @@ Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gatew
   2. Make the smallest improvement to an existing facility which enables the capability.
   3. Add a new facility. New machinery must have a material benefit beyond tidiness.
 - When improving an existing facility, prefer an improvement that serves a problem class beyond the current case over one that solves only the case at hand, when the general shape costs no more.
+- Error and status messages are designed assuming model consumption: concise, factual, and self-contained, naming what is missing or unmet with required versus actual, because a message may arrive as tool output that a model reasons about.
 
 ## Roles
 

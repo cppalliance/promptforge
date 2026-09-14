@@ -1,14 +1,30 @@
 # Lua Globals and the Store
 
-Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args`, `sys`, `var`, `prose`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
+Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args` and `argv`, `sys`, `var`, `prose`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
 
-## args: the run's input
+## args and argv: the run's input
 
-Every section's Lua block can read the run's argument string through the `args` global:
+Every section's Lua block can read the run's exact argument string through the `args` global:
 
 ````lua
 log('the run was started with: ' .. args)
 ````
+
+The `argv` global is the parsed form of that string, shaped by the prompt's `args:` declaration. A prompt with no `args:` key has the default declaration - one optional string field named `prose` - and the interface wraps the argument string into it, so `argv.prose` reads the input text on every channel, the empty string included. A prompt with a structured `args:` declaration receives its argument string as JSON: the call argument `{"query": "papers", "limit": 5}` arrives as a table with `argv.query` and `argv.limit`. When the string does not parse as JSON, or parses as `null`, `argv` is nil, so `if argv then` is the idiomatic malformed-input check.
+
+Optional means absent. A call that omits an optional field leaves `argv.field` nil; absent is not the empty string, and a present empty string is a real value the caller chose to send.
+
+### The H1 repair pattern
+
+The `argv` global is writable in the H1 pass and frozen everywhere else. A prompt that tolerates malformed input reads the raw `args`, computes the repair, and assigns it:
+
+````lua
+if not argv then
+  argv = { query = args }
+end
+````
+
+The executor reads the value back when the H1 pass completes, and every later section sees the repaired value frozen: reads work, absent fields read nil, and any assignment - `argv = ...` or a field write at any depth - fails with an error naming the freeze.
 
 ## sys: runtime metadata
 
@@ -64,4 +80,8 @@ Three more operations help with larger files. The call `store.read_numbered(path
 ## untrusted: guarding re-injected content
 
 When store content goes back to the model, wrap it first. The `untrusted(text)` global wraps store content in a guard envelope before it is re-injected, so the model treats it as data rather than instructions.
+
+## Designed, not yet built: the prompt global
+
+A `prompt` reflection global is designed but not yet built. It will expose the prompt's own declaration to section Lua - the declared model roles, tool slots, and args - so a prompt can adapt its behavior to how it was satisfied. Today the declaration is visible to the host that runs the prompt, not to the prompt's own code.
 

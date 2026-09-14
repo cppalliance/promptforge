@@ -1,8 +1,8 @@
 # Models
 
-A prompt does not name a model directly. It describes the capability it needs, and the runtime resolves that description against the catalog. This chapter teaches the three calls that declare and select models, `models.bind`, `models.default`, and `models.use`, plus the two operations that run model rounds from Lua, `models.infer` and `models.loop`. Capability-based binding is what keeps a prompt portable across catalogs, so it is worth learning as a habit from the start.
+A prompt does not name a model directly. It declares the roles it needs in the frontmatter, and the host binds every role to a concrete model before the run begins. This chapter teaches the declaration, the two calls that select among bound roles, `models.default` and `models.use`, plus the two operations that run model rounds from Lua, `models.infer` and `models.loop`. Declared roles are what keep a prompt portable across catalogs, so it is worth learning as a habit from the start.
 
-## Binding a model
+## Declaring a role
 
 Declare a model role in the frontmatter with the `models` key:
 
@@ -10,10 +10,15 @@ Declare a model role in the frontmatter with the `models` key:
 models:
   analyst:
     keywords: [no-thinking]
+    min_context: 40000
     description: careful analysis
 ````
 
-Each key is a local label. A role carries a keyword set from a closed vocabulary, an optional `min_context` token floor, and a description. Prepare fills every declared role from the host's current model and checks the hard keywords and the context minimum against the filled model.
+Each key is a prompt-local label. A role carries a keyword set, an optional `min_context` token floor, and a description.
+
+The keyword vocabulary is closed, and split in two. The hard keywords, `thinking` and `no-thinking`, are checked at prepare against the filled model's descriptor, as is the context minimum: a role requiring `min_context: 200000` filled with a 32k model, or requiring `thinking` filled with a model that never thinks, is reported as an unmet requirement naming the role, required versus actual. The soft keywords - `frontier`, `fast`, `small`, `creative`, and `chat` - document author intent for the day a smarter fill can shop for them. An unknown keyword fails the parse; adding a keyword is a language change.
+
+Today's fill is deliberately trivial: every declared role binds to the host's current model (in the Workshop, the dropdown's selection). The declaration is written for the full contract - roles, requirements, checks - so the same prompt runs unchanged when a smarter fill arrives; only the binding decisions change.
 
 ## The default model
 
@@ -23,15 +28,15 @@ The call `models.default` designates the prompt-wide default, parking a declared
 models.default("writer")
 ````
 
-The label names a role declared in the frontmatter `models` key, and `models.default` may be called at most once per prompt.
+The label names a role declared in the frontmatter `models` key, and an unknown label is a hard error, because every label must be declared. Naming the same label again is a no-op, so a shared library replayed into every section may name the default; naming a different label fails, because the prompt-wide default cannot change mid-run.
 
 ## Selecting a model for a section
 
-Inside a section, `models.use('analyst')` selects a bound alias for that section. The selection is read when a model round starts, so a later `models.use` call in the same section replaces it and steers the next round. A section that runs a model round needs a model from `models.use` or from the prompt-wide default; with neither, the call fails with a model-required error.
+Inside a section, `models.use('analyst')` selects a bound role by its label for that section. The selection is read when a model round starts, so a later `models.use` call in the same section replaces it and steers the next round. A section that runs a model round needs a model from `models.use` or from the prompt-wide default; with neither, the call fails with a model-required error.
 
 ## Inspecting a binding
 
-The call `models.get(alias)` returns an inspectable handle with `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens` fields. Reading a handle does not change the section's selection. Handles are plain values: they have no methods, and every operation that accepts one takes it as a leading argument.
+Every bound role is also a bare global holding an inspectable handle, and `models.get(label)` returns the same handle, with `name`, `label`, `capabilities`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens` fields. Reading a handle does not change the section's selection. Handles are plain values: they have no methods, and every operation that accepts one takes it as a leading argument.
 
 ## Direct inference
 
@@ -73,3 +78,27 @@ The field `sys.model` is not readable from Lua before the section's first model 
 ## Environment variables
 
 A run that needs an environment variable that is not set fails with an error naming the missing variable. A variable that is set but holds a non-Unicode value is a distinct failure.
+
+## Migrating from models.bind
+
+Earlier versions bound models from Lua, resolving a prose description against the catalog at run time. The declaration moved to the frontmatter, and binding moved to prepare. Before:
+
+````lua
+models.bind('analyst', 'a careful model that does not think')
+models.default('analyst')
+````
+
+After:
+
+````yaml
+models:
+  analyst:
+    keywords: [no-thinking]
+    description: careful analysis
+````
+
+````lua
+models.default('analyst')
+````
+
+The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements ride `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.

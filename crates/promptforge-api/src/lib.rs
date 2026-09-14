@@ -90,7 +90,7 @@ pub(crate) mod untrusted;
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
-pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind};
+pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind, Web};
 pub use crate::client::{CompletionError, CompletionErrorKind};
 pub use crate::execute::{
     Environment, RequirementCheck, Requirements, RunContext, RunError, RunErrorKind, RunLimits,

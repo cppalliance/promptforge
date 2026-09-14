@@ -65,6 +65,10 @@ use shared_promptforge_api::capabilities::{Capability, CapabilityId};
 #[cfg(test)]
 mod tests;
 
+// The first-party capability rides the facade so hosts never name the
+// internal pack crate (the one-door rule).
+pub use promptforge_web::Web;
+
 /// The synthetic third segment keying a capability in the lint catalog.
 ///
 /// The picker's catalog speaks three-segment tool ids, so each capability

@@ -34,6 +34,17 @@ The `promptforge` key is what makes the file a promptforge prompt at all. A file
 
 The parser is strict here. A leading UTF-8 byte-order mark is dropped. Malformed YAML fails the parse and preserves the underlying cause. Unknown or misspelled keys are rejected at parse time rather than silently ignored, so a typo such as `desciption:` fails loudly instead of being skipped.
 
+## The contract keys
+
+Four optional frontmatter keys declare what the prompt needs from its host. Together they form the prompt's contract, and the host satisfies it before anything runs (see [The Run](02-the-run.md)):
+
+- `capabilities:` lists the capabilities the prompt activates, by global id. A capability id has exactly two segments, `namespace/pack`. A bare id declares a required capability; the map form, `{ ref: namespace/pack, optional: true }`, declares one the run skips when absent, and may carry prompt-side `config` data. See [Tools](07-tools.md).
+- `tools:` declares the run's tool slots, keyed by a prompt-local alias. A bare string is an exact global tool path (`namespace/pack/name`, exactly three segments); the map form, `{ want: "prose description" }`, is a fuzzy slot filled at prepare. See [Tools](07-tools.md).
+- `models:` declares the run's model roles, keyed by a prompt-local label, each with a keyword set, an optional `min_context` token floor, and a description. See [Models](06-models.md).
+- `args:` declares the run's typed input fields, each with a `type` (`string`, `boolean`, `integer`, or `number`), an `optional` flag, an optional `default`, and a description. A prompt with no `args:` key gets the default declaration: one optional string field named `prose`. See [Lua Globals and the Store](04-lua-globals-and-store.md).
+
+Aliases, labels, and arg names share one grammar: `[A-Za-z][A-Za-z0-9_-]{0,63}`. These names are prompt-local; the model only ever sees them, never a global path. The parser's strictness covers the contract keys too: a malformed capability id, an unknown model keyword, or an arg default whose type differs from its declaration fails the parse with the position named.
+
 ## Declaring input and output files
 
 Two optional frontmatter keys declare the store files your prompt works with. The `input:` key names a file the prompt expects at start. The `output:` key names a file it leaves at finish. Each declaration pairs a store-internal `path` with a human-readable `description` that documents the file's role.
@@ -58,11 +69,17 @@ One last structural rule. A prompt allows at most one `lua shared` fence, and on
 
 # The Run
 
-You can now write a well-formed prompt file, so the next question is what happens when it runs. This chapter walks a run from beginning to end: the live pass over the title, the ordered walk through the sections, how results appear, and how a run finishes. Once you can picture a run, every other feature of the language has a place to attach.
+You can now write a well-formed prompt file, so the next question is what happens when it runs. This chapter walks a run from beginning to end: the prepare pass that satisfies the prompt's contract, the live pass over the title, the ordered walk through the sections, how results appear, and how a run finishes. Once you can picture a run, every other feature of the language has a place to attach.
+
+## Prepare: satisfaction before the walk
+
+A prompt never binds its own models and tools; it declares them, and the host satisfies the declaration before the run begins. When you run a prompt, the host first prepares the run against its environment: it activates each declared capability, assembles the catalog of tools those capabilities contribute, and fills every declared slot - each model role bound to a concrete model, each tool slot bound to a concrete tool. Every fill is journaled, so the host can show you exactly what a fuzzy `want` resolved to.
+
+Prepare then checks the declaration against what the environment could satisfy and reports what still needs human attention: model requirements the filled model does not meet (a `min_context` above the model's context window, or a hard keyword its descriptor contradicts), required capabilities that are missing or failed to activate, and declared capability pairs that cannot activate together. When the report is clean the run begins. When it is not, the run fails before the walk with a notice naming each gap, required versus actual.
 
 ## The preamble
 
-When a run starts, the H1 section's Lua and prose blocks run first, in a live pass with full host access. This pass is the prompt's preamble. It is where the prompt declares which models and tools the run may use: `models.bind` and `models.default` declare model aliases resolved from capability descriptions, and `tools.bind` declares a tool alias the same way. Once the preamble finishes, those bindings are structurally frozen for the rest of the run.
+When a run starts, the H1 section's Lua and prose blocks run first, in a live pass with full host access. This pass is the prompt's preamble. Binding is already done - prepare filled every declared role and slot - so the preamble arranges the run's own affairs: `models.default` parks a declared role as the prompt-wide default, `tools.always` advertises a bound tool in every section, and the H1 pass is the one place `argv` is writable, so a prompt that repairs malformed input does it here (see [Lua Globals and the Store](04-lua-globals-and-store.md)).
 
 A prompt with only an H1 title and no sections still runs. And a scalar `return` from the live H1 pass short-circuits the whole run: the returned value becomes the run's result, and no section ever fires.
 
@@ -74,7 +91,7 @@ After the preamble, the top-level sections run in file order. The first H2 secti
 
 Each section runs in its own isolated, sandboxed Lua state. Only the `string`, `table`, and `math` standard libraries plus safe base functions are available. The state is created at section entry and torn down at exit, so one section's Lua cannot leak into the next.
 
-A section that talks to the model needs a model. `models.use` selects a bound alias for one section, and the prompt-wide default covers sections that select nothing; a model-facing call with neither fails with a model-required error. Tools follow the same pattern: `tools.always` or `tools.add` scope a bound tool to the model under its local alias.
+A section that talks to the model needs a model. `models.use` selects a declared role by its label for one section, and the prompt-wide default covers sections that select nothing; a model-facing call with neither fails with a model-required error. Tools follow the same pattern: `tools.always` or `tools.add` advertise a bound tool to the model under its local alias.
 
 ## Lua blocks and prose blocks
 
@@ -85,6 +102,8 @@ Prose is data, not an implicit model turn. The prose written between a heading o
 ## Returns and the run result
 
 A scalar `return` from a section's Lua block ends the run early with that value. When the first section returns `"first"`, a later section's own `return "unreached"` is never reached. A run in which no section returns finishes with the generic completion "done".
+
+The host sees one of three outcomes. A completed run yields its final text. A cancelled run reports cancellation distinctly, so an interrupted run is never mistaken for a failed one. A failure carries a typed error whose kind classifies the fault - parse, binding, completion, tool, and so on - with a message written to be read and, when the failure has a source position, the prompt name and line to navigate to. Domain outcomes, including the prompt declining to answer, are ordinary result text, not failures.
 
 ## What carries between sections
 
@@ -173,15 +192,31 @@ Remember that the H1 pass runs first with full host access. The tool and model b
 
 # Lua Globals and the Store
 
-Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args`, `sys`, `var`, `prose`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
+Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args` and `argv`, `sys`, `var`, `prose`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
 
-## args: the run's input
+## args and argv: the run's input
 
-Every section's Lua block can read the run's argument string through the `args` global:
+Every section's Lua block can read the run's exact argument string through the `args` global:
 
 ````lua
 log('the run was started with: ' .. args)
 ````
+
+The `argv` global is the parsed form of that string, shaped by the prompt's `args:` declaration. A prompt with no `args:` key has the default declaration - one optional string field named `prose` - and the interface wraps the argument string into it, so `argv.prose` reads the input text on every channel, the empty string included. A prompt with a structured `args:` declaration receives its argument string as JSON: the call argument `{"query": "papers", "limit": 5}` arrives as a table with `argv.query` and `argv.limit`. When the string does not parse as JSON, or parses as `null`, `argv` is nil, so `if argv then` is the idiomatic malformed-input check.
+
+Optional means absent. A call that omits an optional field leaves `argv.field` nil; absent is not the empty string, and a present empty string is a real value the caller chose to send.
+
+### The H1 repair pattern
+
+The `argv` global is writable in the H1 pass and frozen everywhere else. A prompt that tolerates malformed input reads the raw `args`, computes the repair, and assigns it:
+
+````lua
+if not argv then
+  argv = { query = args }
+end
+````
+
+The executor reads the value back when the H1 pass completes, and every later section sees the repaired value frozen: reads work, absent fields read nil, and any assignment - `argv = ...` or a field write at any depth - fails with an error naming the freeze.
 
 ## sys: runtime metadata
 
@@ -238,6 +273,10 @@ Three more operations help with larger files. The call `store.read_numbered(path
 
 When store content goes back to the model, wrap it first. The `untrusted(text)` global wraps store content in a guard envelope before it is re-injected, so the model treats it as data rather than instructions.
 
+## Designed, not yet built: the prompt global
+
+A `prompt` reflection global is designed but not yet built. It will expose the prompt's own declaration to section Lua - the declared model roles, tool slots, and args - so a prompt can adapt its behavior to how it was satisfied. Today the declaration is visible to the host that runs the prompt, not to the prompt's own code.
+
 ---
 
 # Prose Substitution
@@ -248,13 +287,16 @@ Prose blocks are not static text. When a Lua block reads its `prose` value, `{{ 
 
 Each placeholder names a namespace and, for most of them, a key:
 
-- `{{ args }}` inserts the run's input string.
+- `{{ args }}` inserts the run's input string, exactly as passed.
+- `{{ argv }}` inserts the parsed form of the input as compact JSON, and `{{ argv.key }}` indexes into it.
 - `{{ item }}` inserts the current member when the section runs as an arm of a fanout.
 - `{{ var.key }}` inserts a field of the `var` clipboard.
 - `{{ sys.key }}` inserts runtime metadata.
 - A bare name, such as `{{ kind }}`, inserts a section-local Lua global.
 
 So `hi {{ args }}!` with the run argument `Acme Corp` reads as `hi Acme Corp!`.
+
+The `args` and `argv` namespaces are two views of one input. `{{ args }}` is always the exact string the run was started with. `{{ argv }}` is its parsed shape under the prompt's `args:` declaration (see [Lua Globals and the Store](04-lua-globals-and-store.md)): `{{ argv }}` renders the whole value as compact JSON, and a dotted path such as `{{ argv.query }}` indexes into it.
 
 ## Dotted paths and structured values
 
@@ -274,7 +316,7 @@ Substitution is also lazy. It runs on the first read of `prose`, not at block en
 
 Substitution failures are ordinary Lua errors raised at the read site, with specific messages, so a block can catch them with `pcall`. The failures cover an unknown namespace or global, a missing key, a null value, a bare `{{ var }}` or `{{ sys }}`, dotted indexing into a string, an unclosed `{{`, empty path segments, and non-JSON globals.
 
-One placeholder has a precondition. Using `{{ item }}` outside a fanout arm is an error because no collection member exists.
+Two placeholders have preconditions. Using `{{ item }}` outside a fanout arm is an error because no collection member exists. And using `{{ argv }}` or any `{{ argv.key }}` path when the input did not parse - a nil `argv` - is an error, never a silent empty string.
 
 ## How item renders
 
@@ -284,9 +326,9 @@ Inside a fanout arm, `{{ item }}` renders the current collection member by type.
 
 # Models
 
-A prompt does not name a model directly. It describes the capability it needs, and the runtime resolves that description against the catalog. This chapter teaches the three calls that declare and select models, `models.bind`, `models.default`, and `models.use`, plus the two operations that run model rounds from Lua, `models.infer` and `models.loop`. Capability-based binding is what keeps a prompt portable across catalogs, so it is worth learning as a habit from the start.
+A prompt does not name a model directly. It declares the roles it needs in the frontmatter, and the host binds every role to a concrete model before the run begins. This chapter teaches the declaration, the two calls that select among bound roles, `models.default` and `models.use`, plus the two operations that run model rounds from Lua, `models.infer` and `models.loop`. Declared roles are what keep a prompt portable across catalogs, so it is worth learning as a habit from the start.
 
-## Binding a model
+## Declaring a role
 
 Declare a model role in the frontmatter with the `models` key:
 
@@ -294,10 +336,15 @@ Declare a model role in the frontmatter with the `models` key:
 models:
   analyst:
     keywords: [no-thinking]
+    min_context: 40000
     description: careful analysis
 ````
 
-Each key is a local label. A role carries a keyword set from a closed vocabulary, an optional `min_context` token floor, and a description. Prepare fills every declared role from the host's current model and checks the hard keywords and the context minimum against the filled model.
+Each key is a prompt-local label. A role carries a keyword set, an optional `min_context` token floor, and a description.
+
+The keyword vocabulary is closed, and split in two. The hard keywords, `thinking` and `no-thinking`, are checked at prepare against the filled model's descriptor, as is the context minimum: a role requiring `min_context: 200000` filled with a 32k model, or requiring `thinking` filled with a model that never thinks, is reported as an unmet requirement naming the role, required versus actual. The soft keywords - `frontier`, `fast`, `small`, `creative`, and `chat` - document author intent for the day a smarter fill can shop for them. An unknown keyword fails the parse; adding a keyword is a language change.
+
+Today's fill is deliberately trivial: every declared role binds to the host's current model (in the Workshop, the dropdown's selection). The declaration is written for the full contract - roles, requirements, checks - so the same prompt runs unchanged when a smarter fill arrives; only the binding decisions change.
 
 ## The default model
 
@@ -307,15 +354,15 @@ The call `models.default` designates the prompt-wide default, parking a declared
 models.default("writer")
 ````
 
-The label names a role declared in the frontmatter `models` key, and `models.default` may be called at most once per prompt.
+The label names a role declared in the frontmatter `models` key, and an unknown label is a hard error, because every label must be declared. Naming the same label again is a no-op, so a shared library replayed into every section may name the default; naming a different label fails, because the prompt-wide default cannot change mid-run.
 
 ## Selecting a model for a section
 
-Inside a section, `models.use('analyst')` selects a bound alias for that section. The selection is read when a model round starts, so a later `models.use` call in the same section replaces it and steers the next round. A section that runs a model round needs a model from `models.use` or from the prompt-wide default; with neither, the call fails with a model-required error.
+Inside a section, `models.use('analyst')` selects a bound role by its label for that section. The selection is read when a model round starts, so a later `models.use` call in the same section replaces it and steers the next round. A section that runs a model round needs a model from `models.use` or from the prompt-wide default; with neither, the call fails with a model-required error.
 
 ## Inspecting a binding
 
-The call `models.get(alias)` returns an inspectable handle with `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens` fields. Reading a handle does not change the section's selection. Handles are plain values: they have no methods, and every operation that accepts one takes it as a leading argument.
+Every bound role is also a bare global holding an inspectable handle, and `models.get(label)` returns the same handle, with `name`, `label`, `capabilities`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens` fields. Reading a handle does not change the section's selection. Handles are plain values: they have no methods, and every operation that accepts one takes it as a leading argument.
 
 ## Direct inference
 
@@ -358,27 +405,71 @@ The field `sys.model` is not readable from Lua before the section's first model 
 
 A run that needs an environment variable that is not set fails with an error naming the missing variable. A variable that is set but holds a non-Unicode value is a distinct failure.
 
+## Migrating from models.bind
+
+Earlier versions bound models from Lua, resolving a prose description against the catalog at run time. The declaration moved to the frontmatter, and binding moved to prepare. Before:
+
+````lua
+models.bind('analyst', 'a careful model that does not think')
+models.default('analyst')
+````
+
+After:
+
+````yaml
+models:
+  analyst:
+    keywords: [no-thinking]
+    description: careful analysis
+````
+
+````lua
+models.default('analyst')
+````
+
+The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements ride `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.
+
 ---
 
 # Tools
 
-Models reach the outside world through tools, and a prompt controls exactly which tools the model can see. This chapter teaches the declaration and scoping calls, `tools.bind`, `tools.always`, and `tools.add`, plus local tools written in Lua, direct dispatch with `tools.call`, and the failure modes you will meet. Tool scoping is the prompt's main safety surface, so we build it up one call at a time.
+Models reach the outside world through tools, and a prompt controls exactly which tools the model can see. Tools arrive in capabilities, the installation unit, and a prompt declares the capabilities it activates and the tool slots it binds in the frontmatter; the host fills every slot before the run begins. This chapter teaches the declaration, the advertising calls `tools.always` and `tools.add`, local tools written in Lua, direct dispatch with `tools.call`, and the failure modes you will meet. Tool scoping is the prompt's main safety surface, so we build it up one idea at a time.
 
-## Declaring a tool
+## Capabilities and global names
 
-Declare a tool slot in the frontmatter with the `tools` key; a `want` description is filled by the picker at prepare, an exact global path by identity:
+A capability is the activation unit: code that runs at run setup and contributes tools. Every capability has a global id of exactly two segments, `namespace/pack`, where the namespace is a reverse-DNS name such as `io.github.corp` or the reserved first-party prefix `promptforge`. Every tool has a global path of exactly three segments, `namespace/pack/name`, and a tool's first two segments always name the capability that contributed it: `promptforge/web/fetch` comes from the `promptforge/web` capability, no exceptions.
+
+Declare the capabilities a prompt activates with the `capabilities` key:
+
+````yaml
+capabilities:
+  - promptforge/web
+  - ref: io.github.corp/vault
+    optional: true
+````
+
+A bare id declares a required capability: when it is absent from the host's registry or fails to activate, the run cannot start, and the preflight report names it. The map form with `optional: true` declares a capability the run skips with a log line when absent, so one prompt runs with or without an enhancement; the optional `config` key carries prompt-side data to the capability. User-specific configuration such as credentials is host-supplied and never named in the prompt.
+
+## Declaring a tool slot
+
+The `tools` key declares the run's tool slots, keyed by a prompt-local alias:
 
 ````yaml
 tools:
   search:
     want: search the web
+  fetch: promptforge/web/fetch
 ````
 
-The call `tools.bind` alone advertises nothing to the model; it only declares the alias. Binding resolves the description against the live catalog, and the failures are typed and specific: no match for the description, an ambiguous match listing the candidate identities, a duplicate alias, the same tool selected twice, or a picked tool absent from the live catalog. A capability description is resolved at most once per run, so repeated binds of the same description return the identical cached outcome, including identical failures.
+A bare string is an exact global path, filled by identity against the assembled catalog. Since the path's first two segments name its capability, a slot whose capability is not active cannot fill, and the preflight report says so. The map form is a fuzzy slot: the `want` prose is matched against the catalog at prepare by the picker, a local sentence-embedding model that maps English descriptions to tools, and every fill is journaled so you can see what the fuzz resolved to. A fuzzy slot with `optional: true` skips with a log line when nothing fills it.
 
-## Scoping a tool to the model
+## Binding versus advertising
 
-Two calls scope a declared tool to the model under its local alias. The call `tools.always('search')` advertises the tool in every section. The call `tools.add('search')` advertises it in the current section only. To add several declared aliases at once, pass an array:
+Binding and advertising are separate facts. Binding is decided entirely at prepare: everything a binding decision could depend on - the frontmatter, the active capabilities, the assembled catalog - is known by then, and the journaled result is the run's bindings, alias to tool. What remains for run time is advertising: the prompt's Lua decides per section which already-bound aliases the model gets to see. The model only ever sees the alias, never the global path.
+
+## Advertising a tool to the model
+
+Two calls advertise a bound tool under its local alias. The call `tools.always('search')` advertises the tool in every section, conventionally from the H1 preamble. The call `tools.add('search')` advertises it in the current section only. To advertise several bound aliases at once, pass an array:
 
 ````lua
 tools.add({"search", "fetch"})
@@ -386,15 +477,15 @@ tools.add({"search", "fetch"})
 
 The array form takes no per-element overrides.
 
-You can replace the description the model sees. The call `tools.add(alias, override)` takes an override, and `tools.bind` and `tools.always` accept the same override as a trailing parameter. Precedence is the `tools.add` override over the `tools.bind` or `tools.always` override over the tool's catalog text.
+You can replace the description the model sees. The call `tools.add(alias, override)` takes an override, and `tools.always` accepts the same override as a trailing parameter. Precedence is the `tools.add` override over the `tools.always` override over the tool's catalog text.
 
-The calls `tools.bind` and `tools.always` return a frozen Tool object with `name`, `description`, `parameters`, `wire_name`, and `untrusted` fields, and `tools.add` accepts Tool objects as well as alias strings.
+Each bound slot is also a bare global holding a frozen Tool object with `name`, `description`, `parameters`, `wire_name`, and `untrusted` fields, and `tools.add` accepts Tool objects as well as alias strings. Because `tools.always` records a prompt-wide fact in state every section shares, naming the same alias again is a no-op, so a shared library replayed into every section may name it.
 
 ## The tool loop
 
 The tool loop lives inside `models.loop`. When the model answers a loop request with structured tool calls, the runtime dispatches each call to a tool in the section's scope, appends the correlated results to the message list, and asks again, until the model replies with terminal text. The scope is read at call time, so a `tools.add` earlier in the same Lua block applies to the `models.loop` call that follows it.
 
-Calling `tools.add` with an alias that no `tools.bind` declared fails the run loudly. A model that calls a tool outside the section's advertised scope fails with an error listing the in-scope aliases, and the error notes when the alias was declared by `tools.bind` but not added to this section's scope.
+Calling `tools.add` with an alias that no frontmatter slot declared fails the run loudly. A model that calls a tool outside the section's advertised scope fails with an error listing the in-scope aliases, and the error notes when the alias was declared but not added to this section's scope.
 
 ## Local tools
 
@@ -406,13 +497,29 @@ tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)
 end)
 ````
 
-The handler runs as a Lua function in the section's own state. The parameter table is rendered to the model as a JSON schema with required properties. The handler's returned string goes back to the model verbatim and trusted. The handler can use `store` and section-global variables, but it cannot call `jump`, and a handler error fails the run with the handler's message. A local tool alias cannot collide with a `tools.bind` alias or with another local alias, and every tool schema advertised to the model is validated before it is sent.
+The handler runs as a Lua function in the section's own state. The parameter table is rendered to the model as a JSON schema with required properties; each value is a bare type string or a `{type, description}` pair. The handler's returned string goes back to the model verbatim and trusted. The handler can use `store` and section-global variables, but it cannot call `jump`, and a handler error fails the run with the handler's message. A local tool alias cannot collide with a declared slot alias or with another local alias, and every tool schema advertised to the model is validated before it is sent.
+
+## The decision-tool recipe
+
+When prose guidance should steer the run's shape - which sections to walk, which bound tools to advertise - do not ask the model for prose and string-parse the answer. Interpret the guidance into flags with a local decision tool in the H1 preamble:
+
+````lua
+tools['add_local']('decide', 'Record the verdict: one of use_mcp, no_mcp, or unspecified', { choice = 'string' }, function(args)
+  var.verdict = args.choice
+  return 'recorded'
+end)
+local msgs = messages.new()
+msgs:user('Given these instructions, decide whether the private sources are needed: ' .. args)
+models.loop(msgs)
+````
+
+The model's tool call lands in the Lua handler, which records the verdict where the walk can read it. Three rules keep the recipe honest. The choice set must include an explicit "unspecified" verdict, so a genuine abstention has a name. The no-call exit is handled in code: when the loop finishes without a call, `var.verdict` is simply unset, and the prompt treats that as abstention. And for weaker models that struggle with parameterized calls, the fallback is three no-arg tools, one per verdict, instead of one tool with a parameter. Decision-tool results are journaled like any tool call, so a replay consumes the recorded verdict rather than re-rolling it.
 
 ## Direct dispatch and call counts
 
-The call `tools.call(alias, args)` invokes any tool bound in the document directly from a Lua block, even one not scoped into the section, without widening the set advertised to the model. A `tools.call` with an alias that has no binding fails with an error listing every bound alias. A Tool object works in place of the alias, so `tools.call(tool, args)` dispatches a held object directly.
+The call `tools.call(alias, args)` invokes any tool bound in the document directly from a Lua block, even one not advertised in the section, without widening the set the model can see. A `tools.call` with an alias that has no binding fails with an error listing every bound alias. A Tool object works in place of the alias, so `tools.call(tool, args)` dispatches a held object directly.
 
-The counter `tools.calls[alias]` reads how many times the model has called a tool in the section. Reading it with an alias that was never bound is a hard error naming the bad key and listing the seeded aliases. The counter records a call even when the tool errors.
+The counter `tools.calls[alias]` reads how many times the model has called a tool in the section. Reading it with an alias that was never declared is a hard error naming the bad key and listing the declared aliases. The counter records a call even when the tool errors.
 
 ## Trusted and untrusted output
 
@@ -423,6 +530,35 @@ Output from a tool that marks its result untrusted is wrapped in a preface and n
 Two semantic near-duplicate tools in one model-visible scope fail validation, with an error naming both aliases, both identities, and the similarity score. If you genuinely need both, isolate them in separate sections with per-section `tools.add`.
 
 An empty final reply from the model fails the loop unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. And a tool handler failure aborts the tool loop and fails the run with the tool's own error, preserving the underlying cause in the error chain.
+
+## Migrating from tools.bind
+
+Earlier versions bound tools from Lua, resolving a prose description against the catalog at run time. The declaration moved to the frontmatter, and binding moved to prepare. Before:
+
+````lua
+tools.bind('search', 'search the web')
+tools.always('search')
+````
+
+After:
+
+````yaml
+capabilities:
+  - promptforge/web
+tools:
+  search:
+    want: search the web
+````
+
+````lua
+tools.always('search')
+````
+
+The `tools.bind` call is removed. What was its prose description is now the fuzzy slot's `want`, filled by the picker at prepare with the fill journaled; an exact path fills by identity. The advertising calls, `tools.always` and `tools.add`, are unchanged.
+
+## Designed, not yet built
+
+Two extensions are designed but not yet built. The open posture, `tools: { open: true }`, lets a prompt accept whatever capabilities the host arms the run with instead of declaring its own; the `open` key is reserved today, so writing it fails the parse with a message saying so. And the prompt-pack capability contributes a directory of prompts as tools, one tool per prompt: invoking the tool runs the prompt as a sub-run, and the sub-run's result text becomes the tool output. Both arrive without structural change to what this chapter teaches.
 
 ---
 
