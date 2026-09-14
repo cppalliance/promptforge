@@ -38,16 +38,21 @@ pub struct Provider {
 pub fn providers() -> &'static [Provider] {
     &[
         providers::anthropic::PROVIDER,
+        providers::baidu::PROVIDER,
+        providers::cohere::PROVIDER,
         providers::deepgram::PROVIDER,
         providers::deepseek::PROVIDER,
         providers::elevenlabs::PROVIDER,
         providers::gemini::PROVIDER,
         providers::groq::PROVIDER,
+        providers::leonardo::PROVIDER,
         providers::meta::PROVIDER,
         providers::minimax::PROVIDER,
+        providers::mistral::PROVIDER,
         providers::moonshot::PROVIDER,
         providers::openai::PROVIDER,
         providers::qwen::PROVIDER,
+        providers::soniox::PROVIDER,
         providers::stepfun::PROVIDER,
         providers::xai::PROVIDER,
     ]
@@ -100,16 +105,21 @@ pub async fn fetch_models(
 ) -> Result<Vec<ModelEntry>, FetchError> {
     match provider.name {
         "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
+        "baidu" => providers::baidu::fetch(client, provider.base_url, key).await,
+        "cohere" => providers::cohere::fetch(client, provider.base_url, key).await,
         "deepgram" => providers::deepgram::fetch(client, provider.base_url, key).await,
         "deepseek" => providers::deepseek::fetch(client, provider.base_url, key).await,
         "elevenlabs" => providers::elevenlabs::fetch(client, provider.base_url, key).await,
         "gemini" => providers::gemini::fetch(client, provider.base_url, key).await,
         "groq" => providers::groq::fetch(client, provider.base_url, key).await,
+        "leonardo" => providers::leonardo::fetch(client, provider.base_url, key).await,
         "meta" => providers::meta::fetch(client, provider.base_url, key).await,
         "minimax" => providers::minimax::fetch(client, provider.base_url, key).await,
+        "mistral" => providers::mistral::fetch(client, provider.base_url, key).await,
         "moonshot" => providers::moonshot::fetch(client, provider.base_url, key).await,
         "openai" => providers::openai::fetch(client, provider.base_url, key).await,
         "qwen" => providers::qwen::fetch(client, provider.base_url, key).await,
+        "soniox" => providers::soniox::fetch(client, provider.base_url, key).await,
         "stepfun" => providers::stepfun::fetch(client, provider.base_url, key).await,
         "xai" => providers::xai::fetch(client, provider.base_url, key).await,
         _ => Err(FetchError::UnsupportedProvider {

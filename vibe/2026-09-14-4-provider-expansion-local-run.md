@@ -206,7 +206,7 @@ Add `minimax.rs`, `stepfun.rs`, and `groq.rs` under `crates/shared-cloud-provide
 
 <step-5>
 
-### Step 5: Rich Subprime providers
+### Step 5: Rich Subprime providers [completed]
 
 - Component: subprime-providers
 
