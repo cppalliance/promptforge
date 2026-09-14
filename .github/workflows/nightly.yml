@@ -59,8 +59,8 @@ jobs:
       ARTIFACT: gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-x64
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Cache the embedding model
         uses: ./.github/actions/hf-model-cache
       - uses: actions/setup-node@v4
@@ -92,8 +92,8 @@ jobs:
       ARTIFACT: gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-arm64
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Cache the embedding model
         uses: ./.github/actions/hf-model-cache
       - uses: actions/setup-node@v4
@@ -149,8 +149,8 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Cache the embedding model
         uses: ./.github/actions/hf-model-cache
 
@@ -209,7 +209,7 @@ jobs:
           cp "$src" "crates/workshop/binaries/promptforge-gateway-$triple$ext"
 
       - name: Build the app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
           projectPath: crates/workshop
           args: ${{ matrix.args }} --config tauri.nightly.conf.json

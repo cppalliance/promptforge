@@ -99,10 +99,10 @@ jobs:
           [ "$actual" = "$expected" ] || { echo "checkout $actual does not match execution SHA $expected"; exit 1; }
           echo "Execution SHA: $actual"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Add the Rust target
         if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
@@ -177,7 +177,7 @@ jobs:
       - name: Build the signed release app
         if: github.event_name == 'push'
         id: release-build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -188,7 +188,7 @@ jobs:
       - name: Build the unsigned temporary app
         if: github.event_name == 'workflow_dispatch'
         id: temporary-build
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
           projectPath: crates/workshop
           args: ${{ matrix.args }} --config tauri.nightly.conf.json
@@ -560,7 +560,7 @@ jobs:
           python3 -m json.tool dist/latest.json
 
       - name: Publish the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: PromptForge Workshop ${{ github.ref_name }}
