@@ -229,11 +229,13 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
 async fn tool_calls_count_increments_even_when_tool_errors() {
     // TESTS-002: drive a real `FailingTool` through `run_tool_loop` and prove the
     // counter records exactly one call even though the tool errors (the count is
-    // incremented before dispatch), and that the tool's backend error still ends
-    // the loop. The old version poked `ToolCallCounts` directly and dispatched no
-    // tool at all.
-    let gateway =
-        ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
+    // incremented before dispatch). The tool's own failure is now the call's
+    // error result, so the loop continues to the terminal reply.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
+        resp_text("final answer"),
+    ])
+    .await;
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
@@ -249,7 +251,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     // The gateway always calls the tool wired as "echo".
     let counts = ToolCallCounts::new(["echo".to_string()]);
 
-    let err = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -265,15 +267,8 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
         None,
     )
     .await
-    .expect_err("a tool whose call fails must fail the loop");
-
-    match &err {
-        Error::Tool { message, .. } => assert!(
-            message.contains("the tool's own backend failed"),
-            "the tool's own backend error must propagate: {message}"
-        ),
-        other => panic!("expected the tool's own backend error, got {other:?}"),
-    }
+    .expect("a tool's own failure becomes the call's result, not the loop's");
+    assert_eq!(out, "final answer");
 
     assert_eq!(
         counts.get("echo").expect("echo is a tracked alias"),

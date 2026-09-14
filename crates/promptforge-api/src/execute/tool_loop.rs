@@ -8,8 +8,10 @@
 //! streaming gateway completion under cancellation, and either appends the
 //! terminal assistant text and returns, or dispatches the requested
 //! tool-call batch and appends the exchange - the assistant record and its
-//! correlated tool results together, only after every dispatch in the batch
-//! succeeded - before looping. Overflow on the precheck or at the provider
+//! correlated tool results together, once every dispatch in the batch has
+//! its result - before looping. A bound tool's own failure is the call's
+//! result record (the error message, nonce-wrapped as untrusted), not the
+//! loop's. Overflow on the precheck or at the provider
 //! invokes the selected compactor (the omitted-compactor default is
 //! `compactors.fail`, which always raises typed context exhaustion).
 //!
@@ -113,16 +115,19 @@ fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
 /// The conversation arrives projected from the author's validated records;
 /// the loop appends its own wire messages as rounds complete. Each append
 /// to the author's list lands as its round completes: a tool-call exchange
-/// appends atomically once every dispatch in the batch succeeded, and the
-/// terminal assistant text is the final record. Returns `()` on success -
-/// the Lua shim resumes nil.
+/// appends atomically once every dispatch in the batch has its result
+/// record, and the terminal assistant text is the final record. Returns
+/// `()` on success - the Lua shim resumes nil.
 ///
 /// # Errors
 /// Returns an out-of-scope tool error if the model calls an alias absent from
 /// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit
 /// without a text reply, [`Error::Interrupted`]
-/// when the run is cancelled, any transport/backend error from a model call
-/// or a tool's own failure, or the append sink's own error. Returns the
+/// when the run is cancelled, any transport/backend error from a model call,
+/// a local tool handler's failure, a bound call's cancellation or counts
+/// failure, or the append sink's own error. A bound tool's own failure is
+/// not the loop's: it becomes the call's result record and the run
+/// continues. Returns the
 /// selected compactor's error - typed [`Error::ContextExhausted`] from the
 /// `compactors.fail` default - when the pre-dispatch precheck or the
 /// provider reports a context-window overflow. Returns [`Error::Internal`]
@@ -160,9 +165,9 @@ pub(crate) async fn run_models_loop(
         Some(schemas)
     };
 
-    // Completed dispatches only: a tool handler failure aborts the loop, so
-    // reaching the next round already proves the earlier calls succeeded.
-    let mut successful_tool_calls: usize = 0;
+    // Answered dispatches: any call that received a result record, error
+    // included, counts toward the clean-exit check below.
+    let mut answered_tool_calls: usize = 0;
 
     for _ in 0..max_tool_iterations {
         // The pre-dispatch precheck: estimate the request against the
@@ -207,7 +212,7 @@ pub(crate) async fn run_models_loop(
         // failure.
         if let Err(Error::EmptyModelReply { finish_reason, .. }) = &completion
             && finish_reason.as_deref() == Some("stop")
-            && successful_tool_calls > 0
+            && answered_tool_calls > 0
         {
             // The accepted exit is still a completed turn: count it and report
             // it so observers and turn totals match a text-reply exit. No
@@ -373,28 +378,49 @@ pub(crate) async fn run_models_loop(
                                 None,
                             )
                             .await
-                            .map_err(Error::from)?;
-                            observer.on_tool_result(
-                                execution,
-                                section,
-                                0,
-                                0,
-                                turn,
-                                &call.id,
-                                &call.name,
-                                outcome.content(),
-                                outcome.trusted(),
-                            );
-                            outcome.into_content()
+                            .map_err(Error::from);
+                            match outcome {
+                                Ok(outcome) => {
+                                    observer.on_tool_result(
+                                        execution,
+                                        section,
+                                        0,
+                                        0,
+                                        turn,
+                                        &call.id,
+                                        &call.name,
+                                        outcome.content(),
+                                        outcome.trusted(),
+                                    );
+                                    outcome.into_content()
+                                }
+                                // A tool's own failure is the call's result
+                                // record - the error message, nonce-wrapped as
+                                // untrusted - so the model reads the failure
+                                // and the run continues; `dispatch_tool` has
+                                // already fired TOOL_CALL_FAILED. Cancellation,
+                                // the counts increment, and every other
+                                // dispatch failure still abort the loop.
+                                Err(Error::Tool { message, .. }) => {
+                                    let content = nonce.wrap(&message);
+                                    observer.on_tool_result(
+                                        execution, section, 0, 0, turn, &call.id, &call.name,
+                                        &content, false,
+                                    );
+                                    content
+                                }
+                                Err(error) => return Err(error),
+                            }
                         }
                     };
-                    successful_tool_calls += 1;
+                    answered_tool_calls += 1;
                     results.push((call.id.clone(), result));
                 }
 
                 // The exchange appends atomically: reaching here means every
-                // dispatch in the batch succeeded, so the author's list never
-                // holds an assistant call its results did not answer.
+                // dispatch in the batch has its result record, so the author's
+                // list never holds an assistant call its results did not
+                // answer.
                 //
                 // Echo in the OpenAI wire shape: the assistant's tool-call turn
                 // followed by one `role=tool` message per result. The assistant

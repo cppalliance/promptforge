@@ -280,12 +280,15 @@ async fn tool_loop_errors_on_unknown_tool() {
 }
 
 #[tokio::test]
-async fn a_failing_tool_is_reported_before_the_error_propagates() {
-    // The dispatch is split from the `?` precisely so a tool that fails is
-    // still reported: the recorder must see `ToolCalled { ok: false }` and
-    // the tool's own error must still end the loop.
-    let gateway =
-        ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
+async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues() {
+    // A bound tool's own failure is the call's result record - the ToolError
+    // message, nonce-wrapped as untrusted - with TOOL_CALL_FAILED firing
+    // alongside it, and the loop continues to the terminal reply.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
+        resp_text("final answer"),
+    ])
+    .await;
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
@@ -298,7 +301,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let nonce = GuardNonce::fresh();
-    let err = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -314,26 +317,23 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
         None,
     )
     .await
-    .expect_err("a tool whose call fails must fail the loop");
-    match &err {
-        Error::Tool { message, .. } => assert!(
-            message.contains("the tool's own backend failed"),
-            "the tool's own error propagates: {message}"
-        ),
-        other => panic!("expected the tool's own error, got {other:?}"),
-    }
-    // The tool's error (and its own inner cause) must be preserved as the
-    // error's source chain, not discarded when bridged into the run error.
-    let source = std::error::Error::source(&err).expect("tool error is kept as the source");
-    let chain = std::iter::successors(Some(source), |error| error.source())
-        .map(std::string::ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(" -> ");
+    .expect("a tool's own failure becomes the call's result, not the loop's");
+    assert_eq!(out, "final answer", "the loop continues to the terminal reply");
+
+    // The result record carries the tool's error message, guard-wrapped as
+    // untrusted content.
+    let content = last_tool_turn_content(&gateway.requests());
     assert!(
-        chain.contains("upstream socket reset"),
-        "the tool's inner cause must survive in the source chain, got: {chain}"
+        content.contains("the tool's own backend failed"),
+        "the result record must carry the tool's error message, got: {content}"
+    );
+    assert!(
+        content.contains("<untrusted_input_") && content.contains("</untrusted_input_"),
+        "the error result must be nonce-wrapped as untrusted, got: {content}"
     );
 
+    // TOOL_CALL_FAILED fires alongside the error result, and the loop runs a
+    // second completed turn to the terminal reply.
     assert_eq!(
         recorder.events(),
         vec![
@@ -342,14 +342,112 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
                 detail::MODEL_TURN_COMPLETED.to_string(),
             ),
             ("Gather".to_string(), detail::TOOL_CALL_FAILED.to_string(),),
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
         ],
-        "the failed dispatch must be reported before the error propagates"
+        "the failed dispatch is reported and the loop continues"
     );
     assert!(
         recorder
             .records()
             .iter()
             .all(|(execution, _, _)| execution == EXECUTION)
+    );
+}
+
+#[tokio::test]
+async fn a_counts_failure_still_aborts_the_loop() {
+    // The counts increment runs before the tool call; an alias that was
+    // never seeded fails there, and that quota-layer failure still aborts
+    // the loop rather than becoming a tool result.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
+        resp_text("unreachable"),
+    ])
+    .await;
+    let client = gateway_client(gateway.addr());
+
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![echo];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    // Seeded with a different alias: the increment for "echo" fails.
+    let counts = ToolCallCounts::new(["other".to_string()]);
+    let err = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "ask the model".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        Some(&counts),
+        None,
+        None,
+    )
+    .await
+    .expect_err("a counts failure must abort the loop");
+    assert!(
+        err.to_string().contains("was not pre-seeded"),
+        "the counts failure propagates unchanged, got: {err}"
+    );
+    assert_eq!(
+        gateway.call_count(),
+        1,
+        "the loop aborted on the first dispatch"
+    );
+}
+
+#[tokio::test]
+async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
+    // Every round's failing call becomes an error result, so a model that
+    // keeps calling the failing tool never converges: the loop exits at
+    // exactly `max_tool_iterations`.
+    let cap = 3;
+    let gateway =
+        ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
+    let addr = gateway.addr();
+    let client = gateway_client(addr);
+
+    let failing: Arc<dyn Tool> = Arc::new(FailingTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![failing];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
+    let err = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        "ask the model".to_string(),
+        cap,
+        &NullObserver::default(),
+        "Only",
+        &turns,
+        &options,
+        &nonce,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("a never-converging model should exhaust the loop");
+    assert!(matches!(err, Error::ToolLoopExhausted));
+    assert_eq!(
+        gateway.call_count(),
+        cap,
+        "each round answers the failing call and loops, exiting at the cap"
     );
 }
 

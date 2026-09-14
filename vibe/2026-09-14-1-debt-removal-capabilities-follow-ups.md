@@ -183,7 +183,7 @@ Components in dependency order:
 
 <step-4>
 
-### Step 4: convert bound-tool dispatch failures into tool results
+### Step 4: convert bound-tool dispatch failures into tool results [completed]
 
 - Component: tool-errors-as-results
 - Piece: bound-arm-error-as-result (sequential before the guide piece: behavior lands first, docs describe landed behavior)
