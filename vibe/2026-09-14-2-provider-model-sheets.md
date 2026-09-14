@@ -622,7 +622,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-6>
 
-### Step 6: gemini provider file
+### Step 6: gemini provider file [completed]
 
 - Component: shared-cloud-providers
 - Add `src/providers/gemini.rs`: public descriptor plus private variance - `?key=` query param or `x-goog-api-key` header, `pageToken` pagination on `GET /v1beta/models`, and normalization of `inputTokenLimit`, `outputTokenLimit`, `supportedGenerationMethods`, and the thinking flag.

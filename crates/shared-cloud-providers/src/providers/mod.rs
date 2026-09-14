@@ -4,6 +4,7 @@
 
 pub mod anthropic;
 pub mod deepseek;
+pub mod gemini;
 pub mod meta;
 pub mod moonshot;
 pub mod openai;

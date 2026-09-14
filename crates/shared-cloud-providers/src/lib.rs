@@ -34,6 +34,7 @@ pub fn providers() -> &'static [Provider] {
     &[
         providers::anthropic::PROVIDER,
         providers::deepseek::PROVIDER,
+        providers::gemini::PROVIDER,
         providers::meta::PROVIDER,
         providers::moonshot::PROVIDER,
         providers::openai::PROVIDER,
@@ -74,6 +75,7 @@ pub async fn fetch_models(
     match provider.name {
         "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
         "deepseek" => providers::deepseek::fetch(client, provider.base_url, key).await,
+        "gemini" => providers::gemini::fetch(client, provider.base_url, key).await,
         "meta" => providers::meta::fetch(client, provider.base_url, key).await,
         "moonshot" => providers::moonshot::fetch(client, provider.base_url, key).await,
         "openai" => providers::openai::fetch(client, provider.base_url, key).await,
