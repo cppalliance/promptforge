@@ -186,7 +186,7 @@ In `crates/shared-cloud-providers/src/sheet.rs`, rewrite the serial provider loo
 
 <step-3>
 
-### Step 3: Profile-dir secrets loader
+### Step 3: Profile-dir secrets loader [completed]
 
 - Component: sheet-core
 

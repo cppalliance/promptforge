@@ -3,7 +3,8 @@
 //! locally for testing and sheet building.
 //!
 //! Reads each provider's API key from the environment variable named by
-//! its descriptor, downloads the previous release's `models.json` when
+//! its descriptor (after loading operator secrets from
+//! `~/.promptforge/cloud-provider-secrets.env` when present), downloads the previous release's `models.json` when
 //! `MODELS_SHEET_PREVIOUS_URL` is set (an unset URL or an HTTP 404 means
 //! first run: the build proceeds with no previous sheet; any other
 //! download failure is fatal, since silently losing history would demote
@@ -21,6 +22,7 @@ const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    load_secrets();
     match run().await {
         Ok(path) => {
             eprintln!("shared-cloud-providers: wrote {path}");
@@ -29,6 +31,45 @@ async fn main() -> ExitCode {
         Err(err) => {
             eprintln!("shared-cloud-providers: {err}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// Load operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
+/// overriding the process environment so local runs need no exported keys.
+///
+/// Home resolution mirrors the ART-009 convention (`USERPROFILE` on Windows,
+/// `HOME` otherwise) rather than importing `gateway-local`, which `shared-*`
+/// crates may not depend on. A missing file or unresolvable home earns a
+/// stderr note and a malformed file a stderr warning; the run continues with
+/// the environment either way.
+fn load_secrets() {
+    #[cfg(windows)]
+    let home = std::env::var_os("USERPROFILE");
+    #[cfg(not(windows))]
+    let home = std::env::var_os("HOME");
+    let Some(home) = home.filter(|home| !home.is_empty()) else {
+        eprintln!(
+            "shared-cloud-providers: note: home directory unresolved; skipping the secrets file"
+        );
+        return;
+    };
+    let path = std::path::Path::new(&home)
+        .join(".promptforge")
+        .join("cloud-provider-secrets.env");
+    match dotenvy::from_path_override(&path) {
+        Ok(()) => {}
+        Err(dotenvy::Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!(
+                "shared-cloud-providers: note: no secrets file at {}; using the environment",
+                path.display()
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "shared-cloud-providers: warning: secrets file at {} not loaded: {err}",
+                path.display()
+            );
         }
     }
 }

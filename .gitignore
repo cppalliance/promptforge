@@ -7,6 +7,8 @@
 /guide/book/
 /guide/scratch/
 *.env
+# Standing guard: the operator's real secrets file must never be tracked.
+/secrets.env
 # Voice test fixtures, downloaded out of band (see design/design-promptforge-workshop.md).
 /crates/gateway-stt-backend-whisper/tests/fixtures/
 # UI build pipeline: npm install target and the esbuild output. The build

@@ -20,6 +20,7 @@ name = "shared-cloud-providers"
 path = "src/main.rs"
 
 [dependencies]
+dotenvy.workspace = true
 futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true

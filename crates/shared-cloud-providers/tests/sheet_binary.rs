@@ -99,6 +99,20 @@ fn output_path(test: &str) -> PathBuf {
     ))
 }
 
+/// An empty temp home directory: the binary's secrets loader must never
+/// read the operator's real `~/.promptforge/cloud-provider-secrets.env`
+/// during a fixture run.
+fn empty_home(test: &str) -> PathBuf {
+    let home = std::env::temp_dir().join(format!(
+        "shared-cloud-providers-empty-home-{test}-{}",
+        std::process::id()
+    ));
+    let Ok(()) = std::fs::create_dir_all(&home) else {
+        panic!("create the empty fixture home");
+    };
+    home
+}
+
 /// Run the binary with every provider key stripped from the environment,
 /// so no host credential can turn a fixture run into a live fetch.
 fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
@@ -113,6 +127,8 @@ fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
         Some(url) => command.env(PREVIOUS_SHEET_URL_ENV, url),
         None => command.env_remove(PREVIOUS_SHEET_URL_ENV),
     };
+    let home = empty_home("default");
+    command.env("HOME", &home).env("USERPROFILE", &home);
     let Ok(output) = command.output() else {
         panic!("run the sheet-building binary");
     };
@@ -169,6 +185,51 @@ fn binary_emits_valid_sheet_and_propagates_stale_slices() {
         "a provider with no key and no previous slice records unavailable"
     );
     assert!(openai.models.is_empty());
+}
+
+#[test]
+fn binary_secrets_file_overrides_environment() {
+    let url = serve_once("200 OK", PREVIOUS_SHEET_JSON);
+    // A temp home whose secrets file points at the fixture server, while
+    // the process environment holds a deliberately wrong URL: the run can
+    // only succeed if the file loaded and overrode the environment.
+    let home = std::env::temp_dir().join(format!(
+        "shared-cloud-providers-secrets-home-{}",
+        std::process::id()
+    ));
+    let secrets_dir = home.join(".promptforge");
+    let Ok(()) = std::fs::create_dir_all(&secrets_dir) else {
+        panic!("create the fixture secrets directory");
+    };
+    let secrets_path = secrets_dir.join("cloud-provider-secrets.env");
+    let Ok(()) = std::fs::write(&secrets_path, format!("{PREVIOUS_SHEET_URL_ENV}={url}\n")) else {
+        panic!("write the fixture secrets file");
+    };
+    let output = output_path("secrets-override");
+    let mut command = Command::new(BIN);
+    command.arg(&output);
+    for provider in providers() {
+        if let Some(key_env) = provider.key_env {
+            command.env_remove(key_env);
+        }
+    }
+    command.env(PREVIOUS_SHEET_URL_ENV, "http://127.0.0.1:1/models.json");
+    command.env("HOME", &home).env("USERPROFILE", &home);
+    let Ok(result) = command.output() else {
+        panic!("run the sheet-building binary");
+    };
+    let sheet = read_output(&output, &result);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&home);
+
+    let anthropic = &sheet.providers["anthropic"];
+    assert_eq!(
+        anthropic.status,
+        SliceStatus::Stale,
+        "the secrets file must override the environment's wrong previous-sheet URL"
+    );
+    assert_eq!(anthropic.models.len(), 1);
+    assert_eq!(anthropic.models[0].id, "recorded-m1");
 }
 
 #[test]

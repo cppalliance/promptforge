@@ -480,23 +480,21 @@ mod tests {
         let keys = |_provider: &Provider| Some("test-key".to_owned());
         let in_flight = Arc::new(AtomicUsize::new(0));
         let barrier = Arc::new(Barrier::new(2));
-        let fetch = move |_client: reqwest::Client,
-                          provider: Provider,
-                          _key: Option<String>|
-              -> BoxFetch {
-            let in_flight = Arc::clone(&in_flight);
-            let barrier = Arc::clone(&barrier);
-            Box::pin(async move {
-                in_flight.fetch_add(1, Ordering::SeqCst);
-                // Park until both fetches are in flight: both sides
-                // passing the barrier proves the fetches overlap, with
-                // no timing assertion. A serial loop deadlocks here, so
-                // the timeout below is a hang guard, not a clock check.
-                barrier.wait().await;
-                in_flight.fetch_sub(1, Ordering::SeqCst);
-                Ok(vec![entry(&format!("{}-m1", provider.name))])
-            })
-        };
+        let fetch =
+            move |_client: reqwest::Client, provider: Provider, _key: Option<String>| -> BoxFetch {
+                let in_flight = Arc::clone(&in_flight);
+                let barrier = Arc::clone(&barrier);
+                Box::pin(async move {
+                    in_flight.fetch_add(1, Ordering::SeqCst);
+                    // Park until both fetches are in flight: both sides
+                    // passing the barrier proves the fetches overlap, with
+                    // no timing assertion. A serial loop deadlocks here, so
+                    // the timeout below is a hang guard, not a clock check.
+                    barrier.wait().await;
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok(vec![entry(&format!("{}-m1", provider.name))])
+                })
+            };
         let client = reqwest::Client::new();
         let sheet = tokio::time::timeout(
             std::time::Duration::from_secs(10),
