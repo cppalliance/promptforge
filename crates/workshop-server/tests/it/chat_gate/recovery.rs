@@ -7,22 +7,29 @@ async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
 
     let replacement_captured = CapturedRequests::default();
     let captured = Arc::clone(&replacement_captured);
-    let replacement = spawn_gateway(Router::new().route(
-        "/v1/chat/completions",
-        post(move |headers: axum::http::HeaderMap, body: String| {
-            let captured = Arc::clone(&captured);
-            async move {
-                if headers
-                    .get(header::AUTHORIZATION)
-                    .and_then(|value| value.to_str().ok())
-                    != Some("Bearer replacement-key")
-                {
-                    return StatusCode::UNAUTHORIZED.into_response();
-                }
-                gate_completions(&captured, &body)
-            }
-        }),
-    ))
+    let replacement = spawn_gateway(
+        Router::new()
+            .route(
+                "/v1/chat/completions",
+                post(move |headers: axum::http::HeaderMap, body: String| {
+                    let captured = Arc::clone(&captured);
+                    async move {
+                        if headers
+                            .get(header::AUTHORIZATION)
+                            .and_then(|value| value.to_str().ok())
+                            != Some("Bearer replacement-key")
+                        {
+                            return StatusCode::UNAUTHORIZED.into_response();
+                        }
+                        gate_completions(&captured, &body)
+                    }
+                }),
+            )
+            // The relaunch resolves its model through the replacement's
+            // catalog; without one it binds the fallback window and the
+            // chat role's minimum refuses the run.
+            .route("/v1/models", get(gate_models)),
+    )
     .await;
     replace_gateway(
         &gateway_updater(&server.state),

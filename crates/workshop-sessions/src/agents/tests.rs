@@ -280,12 +280,13 @@ fn the_model_client_requires_a_usable_key_and_url() {
     assert!(agent_client("not a url", "k").is_none());
 }
 
-/// The descriptor the chat unit runs bind the declared `chat` role to.
+/// The descriptor the chat unit runs bind the declared `chat` role to; its
+/// window clears the role's declared minimum.
 fn test_model() -> ModelDescriptor {
     ModelDescriptor::new(
         ModelId::gateway("test-model").expect("the test model id is valid"),
         "test model",
-        NonZeroU32::new(8192).expect("8192 is non-zero"),
+        NonZeroU32::new(200_000).expect("200000 is non-zero"),
         ThinkingMode::Never,
     )
 }
@@ -341,9 +342,47 @@ fn the_builtin_chat_declares_its_contract_in_frontmatter() {
     assert_eq!(tools.len(), 2, "both web tools get exact slots");
     assert!(tools.get("fetch").is_some(), "the fetch slot is declared");
     assert!(tools.get("search").is_some(), "the search slot is declared");
+    let chat = frontmatter
+        .models()
+        .get("chat")
+        .expect("the chat role is declared for the host's current model");
+    assert_eq!(
+        chat.min_context(),
+        NonZeroU32::new(32768),
+        "the role declares the window its web tools need, so an undersized \
+         binding is refused at prepare instead of failing mid-conversation"
+    );
+}
+
+#[tokio::test]
+async fn an_undersized_model_is_refused_before_the_first_turn() {
+    // The scenario this pins: a launch that bound a small descriptor (the
+    // catalog fetch's fallback window) used to run, then fail the first
+    // conversation that outgrew it. The declared minimum turns that into a
+    // refusal at prepare naming the role.
+    use promptforge_api::execute::RunErrorKind;
+    use promptforge_api::{Prompt, RunContext, RunResult};
+    let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
+    let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
+        .expect("the embedded chat prompt parses");
+    let env = session_environment("http://127.0.0.1:9", "k")
+        .expect("a well-shaped gateway root builds the session environment");
+    let small = ModelDescriptor::new(
+        ModelId::gateway("small-model").expect("the test model id is valid"),
+        "small model",
+        NonZeroU32::new(8192).expect("8192 is non-zero"),
+        ThinkingMode::Never,
+    );
+    let ctx = RunContext::new("chat-unit").observer(observer).model(small);
+
+    let RunResult::Failure(error) = env.run(&prompt, "", ctx).await else {
+        panic!("an 8192-token model cannot satisfy the chat role");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
     assert!(
-        frontmatter.models().get("chat").is_some(),
-        "the chat role is declared for the host's current model"
+        notice.contains("chat") && notice.contains("32768") && notice.contains("8192"),
+        "the notice names the role, the minimum, and the actual window: {notice}"
     );
 }
 

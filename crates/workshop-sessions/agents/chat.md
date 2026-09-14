@@ -8,7 +8,9 @@ tools:
   fetch: promptforge/web/fetch
   search: promptforge/web/search
 models:
-  chat: {}
+  chat:
+    min_context: 32768
+    description: "A conversational frontier model suitable for long-lived operator sessions"
 ---
 
 # Chat

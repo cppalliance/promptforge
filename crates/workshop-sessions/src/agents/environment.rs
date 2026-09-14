@@ -335,7 +335,7 @@ mod tests {
                 get(|| async {
                     axum::Json(serde_json::json!({
                         "object": "list",
-                        "data": [{ "id": "test-model", "description": "d", "context": 8192, "thinking": "never" }],
+                        "data": [{ "id": "test-model", "description": "d", "context": 200_000, "thinking": "never" }],
                     }))
                 }),
             );

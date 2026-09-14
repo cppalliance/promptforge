@@ -159,6 +159,30 @@ struct GateServer {
     dir: tempfile::TempDir,
 }
 
+/// The typed catalog a mock gateway serves from `/v1/models`: the launch
+/// resolves the menu selection through it, so every id a gate may select
+/// carries a window that clears chat's declared minimum, and a gate tests
+/// the host wiring rather than a refused binding. `model-b` stays first:
+/// the profile-switch gates rely on the menu auto-selecting it from this
+/// list.
+async fn gate_models() -> axum::Json<serde_json::Value> {
+    let entry = |id: &str| {
+        json!({
+            "id": id, "object": "model", "kind": "chat", "description": id,
+            "context": 200_000, "thinking": "never",
+        })
+    };
+    axum::Json(json!({
+        "object": "list",
+        "data": [
+            entry("model-b"),
+            entry("model-a"),
+            entry("test-model"),
+            entry("claude-opus-4-6"),
+        ],
+    }))
+}
+
 /// Spawns the gate server with `models` in the retained catalog and the
 /// first of them selected in the menu.
 async fn spawn_chat_server(models: &[&str]) -> GateServer {
@@ -189,15 +213,7 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
                 "/admin/status",
                 get(|| async { axum::Json(json!({"profile": "beta"})) }),
             )
-            .route(
-                "/v1/models",
-                get(|| async {
-                    axum::Json(json!({
-                        "object": "list",
-                        "data": [{"id": "model-b", "object": "model"}],
-                    }))
-                }),
-            ),
+            .route("/v1/models", get(gate_models)),
     )
     .await;
     let dir = tempfile::TempDir::new().expect("tempdir");
@@ -353,7 +369,7 @@ fn spawn_restored_chat(
     let model = ModelDescriptor::new(
         ModelId::gateway("test-model").expect("the test model id is valid"),
         "test model",
-        std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
+        std::num::NonZeroU32::new(200_000).expect("200000 is non-zero"),
         ThinkingMode::Never,
     );
     let ctx = RunContext::new(session.to_owned())

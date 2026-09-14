@@ -111,6 +111,33 @@ fn hanging_completions(started: &Notify) -> Response {
         .into_response()
 }
 
+/// Adds the typed `/v1/models` catalog a launch resolves the menu selection
+/// through. Every id these tests select carries a window that clears the
+/// built-in chat's declared minimum, so a mock without this route would
+/// bind the fallback descriptor and the role's minimum would refuse the run.
+fn with_typed_catalog(router: Router) -> Router {
+    router.route(
+        "/v1/models",
+        axum::routing::get(|| async {
+            let entry = |id: &str| {
+                json!({
+                    "id": id, "object": "model", "kind": "chat", "description": id,
+                    "context": 200_000, "thinking": "never",
+                })
+            };
+            axum::Json(json!({
+                "object": "list",
+                "data": [
+                    entry("model-a"),
+                    entry("model-b"),
+                    entry("model-c"),
+                    entry("test-model"),
+                ],
+            }))
+        }),
+    )
+}
+
 /// Records one completion body for endpoint and binding assertions.
 fn record_request(requests: &Mutex<Vec<serde_json::Value>>, body: &str) {
     requests

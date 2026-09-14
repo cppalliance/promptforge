@@ -11,7 +11,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
     let request_started = Arc::clone(&started);
     let original_requests = Arc::new(Mutex::new(Vec::new()));
     let captured_original = Arc::clone(&original_requests);
-    let original = spawn_gateway(Router::new().route(
+    let original = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
             let request_started = Arc::clone(&request_started);
@@ -21,7 +21,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
                 hanging_completions(&request_started)
             }
         }),
-    ))
+    )))
     .await;
     let (base, _dir, state) = spawn_agent_server_for_gateway(original).await;
     state
@@ -72,7 +72,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
         .expect("the replacement model becomes selected");
     let replacement_requests = Arc::new(Mutex::new(Vec::new()));
     let captured_replacement = Arc::clone(&replacement_requests);
-    let replacement = spawn_gateway(Router::new().route(
+    let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
             let captured_replacement = Arc::clone(&captured_replacement);
@@ -81,7 +81,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
                 echo_completions(body).await
             }
         }),
-    ))
+    )))
     .await;
     replace_gateway(&state, &replacement, 1_757_000_000);
 
@@ -103,7 +103,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
 async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
     let started = Arc::new(Notify::new());
     let request_started = Arc::clone(&started);
-    let original = spawn_gateway(Router::new().route(
+    let original = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
             let request_started = Arc::clone(&request_started);
@@ -116,7 +116,7 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
                 hanging_completions(&request_started)
             }
         }),
-    ))
+    )))
     .await;
     let (base, _dir, state) = spawn_agent_server_for_gateway(original).await;
     state
@@ -157,7 +157,7 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
         .publish(vec![json!({ "id": "model-a", "object": "model" })]);
     let replacement_requests = Arc::new(Mutex::new(Vec::new()));
     let captured_replacement = Arc::clone(&replacement_requests);
-    let replacement = spawn_gateway(Router::new().route(
+    let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
             let captured_replacement = Arc::clone(&captured_replacement);
@@ -166,7 +166,7 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
                 echo_completions(body).await
             }
         }),
-    ))
+    )))
     .await;
     replace_gateway(&state, &replacement, 1_757_000_001);
 
@@ -184,13 +184,13 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
 async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     let started = Arc::new(Notify::new());
     let request_started = Arc::clone(&started);
-    let original = spawn_gateway(Router::new().route(
+    let original = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move || {
             let request_started = Arc::clone(&request_started);
             async move { hanging_completions(&request_started) }
         }),
-    ))
+    )))
     .await;
     let (base, _dir, state) = spawn_agent_server_for_gateway(original).await;
     state
@@ -236,7 +236,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     let replacement_request_started = Arc::clone(&replacement_started);
     let replacement_requests = Arc::new(Mutex::new(Vec::new()));
     let captured_replacement = Arc::clone(&replacement_requests);
-    let replacement = spawn_gateway(Router::new().route(
+    let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
             let replacement_request_started = Arc::clone(&replacement_request_started);
@@ -247,7 +247,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
                 echo_completions(body).await
             }
         }),
-    ))
+    )))
     .await;
     replace_gateway(&state, &replacement, 1_757_000_002);
 
