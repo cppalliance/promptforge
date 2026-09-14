@@ -8,12 +8,21 @@ use super::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMod
 use crate::Error;
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
+///
+/// The list mixes inference models with the gateway's speech-to-text models,
+/// which carry only `id`, `object`, and `kind` because they answer no
+/// completion request. The inference fields are therefore optional at the
+/// wire, and an entry without a context window is skipped rather than
+/// failing the whole catalog.
 #[derive(Debug, Deserialize)]
 struct ModelsListEntry {
     id: String,
+    #[serde(default)]
     description: String,
-    context: u32,
-    thinking: ThinkingMode,
+    #[serde(default)]
+    context: Option<u32>,
+    #[serde(default)]
+    thinking: Option<ThinkingMode>,
 }
 
 /// Wire shape of gateway `GET /v1/models`.
@@ -188,14 +197,26 @@ pub async fn fetch_model_catalog(
     })?;
     let mut descriptors = Vec::with_capacity(list.data.len());
     for entry in list.data {
+        // An entry with no context window is not an inference model (the
+        // gateway lists its transcription models here too); it is not a
+        // descriptor and must not fail the catalog.
+        let Some(context) = entry.context else {
+            continue;
+        };
         let id = ModelId::gateway(entry.id).map_err(|error| {
             CompletionError::from(Error::MalformedResponse(format!(
                 "model catalog entry has an invalid id: {error}"
             )))
         })?;
-        let context = NonZeroU32::new(entry.context).ok_or_else(|| {
+        let context = NonZeroU32::new(context).ok_or_else(|| {
             CompletionError::from(Error::MalformedResponse(format!(
                 "model {} declares a zero-token context window",
+                id.name()
+            )))
+        })?;
+        let thinking = entry.thinking.ok_or_else(|| {
+            CompletionError::from(Error::MalformedResponse(format!(
+                "model {} declares a context window but no thinking mode",
                 id.name()
             )))
         })?;
@@ -203,7 +224,7 @@ pub async fn fetch_model_catalog(
             id,
             entry.description,
             context,
-            entry.thinking,
+            thinking,
         ));
     }
     ModelCatalog::new(descriptors).map_err(|error| {
@@ -302,6 +323,75 @@ mod tests {
             source.downcast_ref::<serde_json::Error>().is_some(),
             "the preserved source must be the JSON decode error, got {source}"
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_skips_entries_without_a_context_window() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // A gateway with speech-to-text lists its transcription models beside
+        // the inference models, and those entries carry no `context` or
+        // `thinking` (they answer no completion request). The fetch must keep
+        // the inference descriptors instead of rejecting the whole list,
+        // otherwise every host on such a gateway binds under a fallback
+        // descriptor and the context precheck refuses real conversations.
+        async fn models() -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({
+                "object": "list",
+                "data": [
+                    { "id": "chat-model", "object": "model", "kind": "chat",
+                      "description": "a chat model", "context": 1_000_000, "thinking": "never" },
+                    { "id": "whisper-base-en", "object": "model", "kind": "transcription" },
+                    { "id": "whisper-small-en", "object": "model", "kind": "transcription" }
+                ]
+            }))
+        }
+        let app = Router::new().route("/models", get(models));
+        let addr = spawn_models(app).await;
+
+        let catalog = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect("transcription entries must not fail the inference catalog");
+        assert_eq!(
+            catalog.models().len(),
+            1,
+            "only the inference model is a descriptor"
+        );
+        let chat = catalog
+            .get(&ModelId::gateway("chat-model").expect("valid id"))
+            .expect("the inference model survives the filter");
+        assert_eq!(
+            chat.context(),
+            NonZeroU32::new(1_000_000).expect("non-zero")
+        );
+        assert_eq!(chat.thinking(), ThinkingMode::Never);
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_still_rejects_a_zero_context_window() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // Skipping applies only to entries with no context field at all; an
+        // inference entry that declares a zero window is still malformed.
+        async fn models() -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({
+                "object": "list",
+                "data": [
+                    { "id": "broken", "object": "model", "kind": "chat",
+                      "description": "d", "context": 0, "thinking": "never" }
+                ]
+            }))
+        }
+        let app = Router::new().route("/models", get(models));
+        let addr = spawn_models(app).await;
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a zero context window is malformed");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(err.to_string().contains("zero-token"), "got {err}");
     }
 
     #[tokio::test]
