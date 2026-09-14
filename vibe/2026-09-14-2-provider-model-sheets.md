@@ -589,7 +589,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-3>
 
-### Step 3: shared-cloud-providers scaffold and fetch seam
+### Step 3: shared-cloud-providers scaffold and fetch seam [completed]
 
 - Component: shared-cloud-providers
 - Create `crates/shared-cloud-providers/` (Cargo.toml with `lib` and `bin` targets, `src/lib.rs`), depending on `shared-gateway-api` and `reqwest`.
@@ -639,7 +639,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 - Add `elevenlabs.rs` and `deepgram.rs`: ElevenLabs uses the `xi-api-key` header and its rich list response (languages, capabilities, rates); Deepgram uses the `Authorization: Token` prefix and splits its STT models and TTS array into separate `ModelEntry` values.
 - Both files set `ModelEntry.kind` to `transcription` or `speech` (and `image` where applicable), exercising the extended `ModelKind`.
 - Register both in `providers()`.
-- Tests: per-provider normalization against documented example responses as fixtures; STT and TTS entries from one Deepgram payload carry distinct kinds.
+- Tests: per-provider normalization against documented example responses as fixtures; STT and TTS entries from one Deepgram payload carry distinct kinds; a registry completeness test asserting all ten Prime providers from the decision record are registered with `Tier::Prime` (deferred from step 3, where the registry is intentionally empty).
 
 </step-7>
 
