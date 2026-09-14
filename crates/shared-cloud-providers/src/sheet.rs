@@ -58,17 +58,17 @@ pub async fn build_sheet(
 ///
 /// # Errors
 ///
-/// Returns [`FetchError::Http`] when the download fails, the response is
-/// not a success, or the body does not parse as a [`Sheet`].
+/// Returns [`FetchError::NotFound`] on HTTP 404 and [`FetchError::Http`]
+/// when the download fails, the response is any other non-success, or
+/// the body does not parse as a [`Sheet`].
 pub async fn fetch_sheet(client: &reqwest::Client, release_url: &str) -> Result<Sheet, FetchError> {
-    let sheet = client
-        .get(release_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    Ok(sheet)
+    let response = client.get(release_url).send().await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(FetchError::NotFound {
+            url: release_url.to_owned(),
+        });
+    }
+    Ok(response.error_for_status()?.json().await?)
 }
 
 /// The testable core of [`build_sheet`]: the registry and the fetch seam

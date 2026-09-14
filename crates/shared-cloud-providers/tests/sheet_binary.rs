@@ -54,8 +54,9 @@ const PREVIOUS_SHEET_JSON: &str = r#"{
   }
 }"#;
 
-/// Serve one HTTP response carrying `body`, returning the URL to request.
-fn serve_once(body: &'static str) -> String {
+/// Serve one HTTP response with `status` carrying `body`, returning the
+/// URL to request.
+fn serve_once(status: &'static str, body: &'static str) -> String {
     let Ok(listener) = TcpListener::bind("127.0.0.1:0") else {
         panic!("bind fixture server");
     };
@@ -79,7 +80,7 @@ fn serve_once(body: &'static str) -> String {
             }
         }
         let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         assert!(
@@ -135,7 +136,7 @@ fn read_output(output: &PathBuf, result: &Output) -> Sheet {
 
 #[test]
 fn binary_emits_valid_sheet_and_propagates_stale_slices() {
-    let url = serve_once(PREVIOUS_SHEET_JSON);
+    let url = serve_once("200 OK", PREVIOUS_SHEET_JSON);
     let output = output_path("stale");
     let result = run_binary(&output, Some(&url));
     let sheet = read_output(&output, &result);
@@ -184,4 +185,62 @@ fn binary_tolerates_first_run_without_previous_sheet() {
             "first run with no keys must record `{name}` as unavailable, not fail"
         );
     }
+}
+
+#[test]
+fn binary_fails_without_writing_when_previous_sheet_errors() {
+    let url = serve_once("500 Internal Server Error", "boom");
+    let output = output_path("previous-500");
+    let _ = std::fs::remove_file(&output);
+    let result = run_binary(&output, Some(&url));
+
+    assert!(
+        !result.status.success(),
+        "a 500 previous-sheet response must fail the run"
+    );
+    assert!(
+        !output.exists(),
+        "a failed run must not write the output file"
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains(url.as_str()),
+        "stderr must name the failing URL: {stderr}"
+    );
+}
+
+#[test]
+fn binary_treats_404_previous_sheet_as_first_run() {
+    let url = serve_once("404 Not Found", "not found");
+    let output = output_path("previous-404");
+    let result = run_binary(&output, Some(&url));
+    let sheet = read_output(&output, &result);
+    let _ = std::fs::remove_file(&output);
+
+    assert_eq!(sheet.schema_version, 1);
+    assert_eq!(sheet.providers.len(), providers().len());
+    for (name, slice) in &sheet.providers {
+        assert_eq!(
+            slice.status,
+            SliceStatus::Unavailable,
+            "a 404 previous sheet means first run: `{name}` must record unavailable"
+        );
+    }
+}
+
+#[test]
+fn binary_fails_without_writing_when_previous_sheet_is_unparseable() {
+    let url = serve_once("200 OK", "this is not a sheet");
+    let output = output_path("previous-invalid");
+    let _ = std::fs::remove_file(&output);
+    let result = run_binary(&output, Some(&url));
+
+    assert!(
+        !result.status.success(),
+        "an unparseable 200 previous-sheet body must fail the run"
+    );
+    assert!(
+        !output.exists(),
+        "a failed run must not write the output file"
+    );
 }

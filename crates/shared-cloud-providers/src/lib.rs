@@ -61,6 +61,13 @@ pub enum FetchError {
     /// The HTTP request to the provider failed.
     #[error("provider request failed: {0}")]
     Http(#[from] reqwest::Error),
+    /// The previous release's sheet URL answered HTTP 404: the release
+    /// does not exist yet.
+    #[error("no sheet at `{url}` (HTTP 404)")]
+    NotFound {
+        /// The release URL that answered 404.
+        url: String,
+    },
     /// The provider's API key is not available in the environment.
     #[error("missing API key for provider `{name}`: environment variable `{key_env}` is not set")]
     MissingKey {

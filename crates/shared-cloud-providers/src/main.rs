@@ -4,13 +4,17 @@
 //!
 //! Reads each provider's API key from the environment variable named by
 //! its descriptor, downloads the previous release's `models.json` when
-//! `MODELS_SHEET_PREVIOUS_URL` is set (an unset URL or a failed download
-//! is tolerated: the build proceeds with no previous sheet), and writes
-//! the merged sheet as pretty-printed JSON to the output path named by
-//! the first argument, defaulting to `./models.json`.
+//! `MODELS_SHEET_PREVIOUS_URL` is set (an unset URL or an HTTP 404 means
+//! first run: the build proceeds with no previous sheet; any other
+//! download failure is fatal, since silently losing history would demote
+//! every slice to `unavailable`), and writes the merged sheet as
+//! pretty-printed JSON to the output path named by the first argument,
+//! defaulting to `./models.json`.
 
 use std::process::ExitCode;
 use std::time::Duration;
+
+use shared_gateway_api::Sheet;
 
 /// Environment variable carrying the previous release's sheet URL.
 const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
@@ -37,7 +41,11 @@ async fn run() -> Result<String, Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()?;
-    let previous = previous_sheet(&client).await;
+    let url = std::env::var(PREVIOUS_SHEET_URL_ENV).ok();
+    let previous = match previous_sheet(&client, url.as_deref()).await? {
+        PreviousSheet::FirstRun => None,
+        PreviousSheet::Fetched(sheet) => Some(sheet),
+    };
     let keys = |provider: &shared_cloud_providers::Provider| std::env::var(provider.key_env).ok();
     let sheet = shared_cloud_providers::build_sheet(&client, previous, &keys).await;
     let mut json = serde_json::to_string_pretty(&sheet)?;
@@ -46,21 +54,144 @@ async fn run() -> Result<String, Box<dyn std::error::Error>> {
     Ok(output)
 }
 
-/// Download the previous release's sheet when its URL is configured.
-/// Both an unset URL (first run) and a failed download (the release may
-/// not exist yet) are tolerated by building with no previous sheet.
-async fn previous_sheet(client: &reqwest::Client) -> Option<shared_gateway_api::Sheet> {
-    let url = match std::env::var(PREVIOUS_SHEET_URL_ENV) {
-        Ok(url) if !url.is_empty() => url,
-        _ => return None,
+/// The outcome of resolving the previous release's sheet.
+enum PreviousSheet {
+    /// No URL configured, or the release does not exist yet (HTTP 404):
+    /// build without history.
+    FirstRun,
+    /// The previous release's sheet, fetched and parsed.
+    Fetched(Sheet),
+}
+
+/// Resolve the previous release's sheet. An unset URL and an HTTP 404
+/// both mean first run; any other failure - transport error, non-404
+/// non-success status, unparseable body - is fatal, since silently
+/// losing history would demote every slice to `unavailable`.
+async fn previous_sheet(
+    client: &reqwest::Client,
+    url: Option<&str>,
+) -> Result<PreviousSheet, Box<dyn std::error::Error>> {
+    let Some(url) = url.filter(|url| !url.is_empty()) else {
+        return Ok(PreviousSheet::FirstRun);
     };
-    match shared_cloud_providers::fetch_sheet(client, &url).await {
-        Ok(sheet) => Some(sheet),
-        Err(err) => {
+    match shared_cloud_providers::fetch_sheet(client, url).await {
+        Ok(sheet) => Ok(PreviousSheet::Fetched(sheet)),
+        Err(shared_cloud_providers::FetchError::NotFound { .. }) => {
             eprintln!(
-                "shared-cloud-providers: previous sheet at {url} unavailable ({err}); building without it"
+                "shared-cloud-providers: no previous release at {url} (HTTP 404); building without history"
             );
-            None
+            Ok(PreviousSheet::FirstRun)
         }
+        Err(err) => Err(format!("previous sheet at {url}: {err}").into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Serve one HTTP response with `status` carrying `body`, returning
+    /// the URL to request.
+    fn serve_once(status: &'static str, body: &'static str) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+        let addr = listener.local_addr().expect("fixture server addr");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept fixture client");
+            // Read the request first: replying before the client finishes
+            // sending is an HTTP protocol error. A short read timeout bounds
+            // the capture without a sleep; once the client awaits the
+            // response, the next read simply times out.
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+            let mut buf = [0_u8; 4096];
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write fixture response");
+        });
+        format!("http://{addr}/models.json")
+    }
+
+    #[tokio::test]
+    async fn previous_sheet_without_url_is_first_run() {
+        let client = reqwest::Client::new();
+        let outcome = previous_sheet(&client, None)
+            .await
+            .expect("an unset URL is not an error");
+        assert!(
+            matches!(outcome, PreviousSheet::FirstRun),
+            "an unset URL must mean first run"
+        );
+        let outcome = previous_sheet(&client, Some(""))
+            .await
+            .expect("an empty URL is not an error");
+        assert!(
+            matches!(outcome, PreviousSheet::FirstRun),
+            "an empty URL must mean first run"
+        );
+    }
+
+    #[tokio::test]
+    async fn previous_sheet_treats_404_as_first_run() {
+        let url = serve_once("404 Not Found", "not found");
+        let client = reqwest::Client::new();
+        let outcome = previous_sheet(&client, Some(&url))
+            .await
+            .expect("a 404 previous release is not an error");
+        assert!(
+            matches!(outcome, PreviousSheet::FirstRun),
+            "a 404 must mean first run: the release does not exist yet"
+        );
+    }
+
+    #[tokio::test]
+    async fn previous_sheet_propagates_transport_error() {
+        let client = reqwest::Client::new();
+        let result = previous_sheet(&client, Some("http://127.0.0.1:1/models.json")).await;
+        let Err(err) = result else {
+            panic!("an unreachable previous-sheet URL must be fatal");
+        };
+        assert!(
+            err.to_string().contains("http://127.0.0.1:1/models.json"),
+            "the error must name the URL: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn previous_sheet_propagates_500() {
+        let url = serve_once("500 Internal Server Error", "boom");
+        let client = reqwest::Client::new();
+        let result = previous_sheet(&client, Some(&url)).await;
+        let Err(err) = result else {
+            panic!("a 500 previous-sheet response must be fatal");
+        };
+        assert!(
+            err.to_string().contains(url.as_str()),
+            "the error must name the URL: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn previous_sheet_propagates_unparseable_200() {
+        let url = serve_once("200 OK", "this is not a sheet");
+        let client = reqwest::Client::new();
+        let result = previous_sheet(&client, Some(&url)).await;
+        let Err(err) = result else {
+            panic!("a 200 with an unparseable body must be fatal");
+        };
+        assert!(
+            err.to_string().contains(url.as_str()),
+            "the error must name the URL: {err}"
+        );
     }
 }
