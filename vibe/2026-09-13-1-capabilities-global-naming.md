@@ -896,7 +896,7 @@ Migrate the picker's own 2-part `ToolId` (`promptforge-tool-picker/src/catalog.r
 
 <step-4>
 
-### Step 4: Interface consolidation (parity gate)
+### Step 4: Interface consolidation (parity gate) [completed]
 
 - Component: interface
 

@@ -26,7 +26,7 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_api::client::{GatewayClient, GatewayEndpoint, SecretString};
-use promptforge_api::{Prompt, ResolutionContext, RunConfig, run};
+use promptforge_api::{Environment, Prompt, RunContext, RunResult};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 use shared_promptforge_api::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use shared_promptforge_api::observe::NullObserver;
@@ -141,14 +141,13 @@ fn parse_loop_prompt() -> Prompt {
         .expect("the bench prompt parses")
 }
 
-/// The resolution context every bench run shares: an empty tool picker and
-/// no tools, so the loop is one terminal turn.
-fn resolution<'a>(
-    picker: &'a ToolPicker,
-    models: &'a ModelCatalog,
-    tools: &'a ToolCatalog,
-) -> ResolutionContext<'a> {
-    ResolutionContext::new(Some(picker), models, tools)
+/// The environment every bench run shares: an empty tool picker and no
+/// tools, so the loop is one terminal turn.
+fn bench_env(picker: ToolPicker, models: ModelCatalog) -> Environment {
+    Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::new(&[]).expect("the empty bench tool catalog builds"))
 }
 
 /// One `models.loop` turn end to end: parse is excluded, so the measurement
@@ -164,20 +163,22 @@ fn models_loop(c: &mut Criterion) {
     let prompt = parse_loop_prompt();
     let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())
         .expect("the empty bench picker builds");
-    let models = bench_catalog(131_072);
-    let tools = ToolCatalog::new(&[]).expect("the empty bench tool catalog builds");
+    let env = bench_env(picker, bench_catalog(131_072));
     c.bench_function("models_loop", |b| {
         b.iter(|| {
-            runtime
-                .block_on(run(
+            let result = runtime.block_on(
+                env.run(
                     &prompt,
                     "",
-                    resolution(&picker, &models, &tools),
-                    RunConfig::new(EXECUTION)
+                    RunContext::new(EXECUTION)
                         .observer(Arc::new(NullObserver::default()))
                         .client(gateway.client()),
-                ))
-                .expect("the loop bench run succeeds");
+                ),
+            );
+            assert!(
+                matches!(result, RunResult::Ok(_)),
+                "the loop bench run succeeds: {result:?}"
+            );
         });
     });
     assert!(
@@ -199,20 +200,21 @@ fn compactors_fail(c: &mut Criterion) {
     let prompt = parse_loop_prompt();
     let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())
         .expect("the empty bench picker builds");
-    let models = bench_catalog(1);
-    let tools = ToolCatalog::new(&[]).expect("the empty bench tool catalog builds");
+    let env = bench_env(picker, bench_catalog(1));
     c.bench_function("compactors_fail", |b| {
         b.iter(|| {
-            let error = runtime
-                .block_on(run(
+            let result = runtime.block_on(
+                env.run(
                     &prompt,
                     "",
-                    resolution(&picker, &models, &tools),
-                    RunConfig::new(EXECUTION)
+                    RunContext::new(EXECUTION)
                         .observer(Arc::new(NullObserver::default()))
                         .client(gateway.client()),
-                ))
-                .expect_err("a one-token window must exhaust at the precheck");
+                ),
+            );
+            let RunResult::Failure(error) = result else {
+                panic!("a one-token window must exhaust at the precheck");
+            };
             assert_eq!(
                 error.kind(),
                 promptforge_api::RunErrorKind::ContextExhausted,

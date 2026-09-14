@@ -47,18 +47,21 @@ const EXECUTION: &str = "execute-test";
 
 /// F10: compile-time proof that the public execution types are thread-safe.
 ///
-/// `RunConfig` carries `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
+/// `RunContext` carries `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
-/// boundaries; the typed error/limit/resolution surfaces must be too.
+/// boundaries; the typed error/limit/result surfaces and the environment must
+/// be too.
 const fn _public_execution_types_are_send_sync_static() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     const fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync_static::<RunConfig>();
+    assert_send_sync_static::<Environment>();
+    assert_send_sync_static::<RunContext>();
     assert_send_sync_static::<RunLimits>();
+    assert_send_sync_static::<RunResult>();
     assert_send_sync_static::<RunError>();
     assert_send_sync_static::<RunErrorKind>();
-    // Borrowing resolution context: a fixed concrete lifetime still proves the
-    // auto traits hold for its owned shape.
+    // Borrowing resolution inputs: a fixed concrete lifetime still proves the
+    // auto traits hold for their owned shape.
     assert_send_sync::<ResolutionContext<'static>>();
 }
 
@@ -194,9 +197,9 @@ fn bound_with_tools(
     }
 }
 
-/// Owned run inputs a test supplies: the execution id, the progress observer,
+/// Owned run inputs a test supplies: the run name, the progress observer,
 /// and optional client/capture sinks. Mirrors the old borrowed `RunOptions`
-/// with owned `Arc` instrumentation so it can build a [`RunConfig`].
+/// with owned `Arc` instrumentation so it can build a [`RunContext`].
 struct RunOptions {
     execution: &'static str,
     observer: Arc<dyn Observer>,
@@ -253,17 +256,18 @@ impl TestStore {
     }
 }
 
-/// Builds a [`RunConfig`] from the test-local [`RunOptions`], for the tests that
-/// call [`super::run`] directly with a custom picker and model catalog.
-fn to_config(opts: RunOptions) -> RunConfig {
-    let mut config = RunConfig::new(opts.execution).observer(opts.observer);
+/// Builds a [`RunContext`] from the test-local [`RunOptions`], for the tests
+/// that call [`Environment::run`] directly with a custom picker and model
+/// catalog.
+fn to_context(opts: RunOptions) -> RunContext {
+    let mut ctx = RunContext::new(opts.execution).observer(opts.observer);
     if let Some(client) = opts.client {
-        config = config.client(client);
+        ctx = ctx.client(client);
     }
     if let Some(debug) = opts.debug {
-        config = config.debug(debug);
+        ctx = ctx.debug(debug);
     }
-    config
+    ctx
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -342,21 +346,24 @@ async fn run(
         .expect("test thresholds are in the supported domain");
     let picker = build_test_picker(catalog, config);
     let tool_catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
-    let mut run_config = RunConfig::new(opts.execution).observer(opts.observer);
+    let env = Environment::new()
+        .picker(picker)
+        .models(test.models.clone())
+        .tools(tool_catalog);
+    let mut ctx = RunContext::new(opts.execution)
+        .observer(opts.observer)
+        .vfs(store.vfs().clone());
     if let Some(client) = opts.client {
-        run_config = run_config.client(client);
+        ctx = ctx.client(client);
     }
     if let Some(debug) = opts.debug {
-        run_config = run_config.debug(debug);
+        ctx = ctx.debug(debug);
     }
-    super::run(
-        &test.prompt,
-        args,
-        ResolutionContext::new(Some(&picker), &test.models, &tool_catalog),
-        run_config.vfs(store.vfs().clone()),
-    )
-    .await
-    .map_err(Error::from)
+    match env.run(&test.prompt, args, ctx).await {
+        RunResult::Ok(output) => Ok(output),
+        RunResult::Cancelled => Err(Error::Interrupted),
+        RunResult::Failure(error) => Err(Error::from(error)),
+    }
 }
 
 pub(super) fn empty_test_picker() -> ToolPicker {
@@ -389,21 +396,22 @@ pub(super) fn shared_test_model() -> &'static promptforge_tool_picker::Model {
     MODEL.get_or_init(|| promptforge_tool_picker::Model::load().expect("the test model loads"))
 }
 
-/// Runs a fixture offline through the real [`run`](super::run) entry point
-/// with a caller-customized [`RunConfig`], returning the typed [`RunError`]
+/// Runs a fixture offline through the real [`Environment::run`] entry point
+/// with a caller-customized [`RunContext`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
-async fn run_with_config(
+async fn run_with_context(
     test: &TestPrompt,
-    configure: impl FnOnce(RunConfig) -> RunConfig,
+    configure: impl FnOnce(RunContext) -> RunContext,
 ) -> std::result::Result<String, RunError> {
-    let picker = empty_test_picker();
-    super::run(
-        &test.prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &test.models, &ToolCatalog::default()),
-        configure(RunConfig::new(EXECUTION)).vfs(TestStore::new().vfs().clone()),
-    )
-    .await
+    let env = Environment::new()
+        .picker(empty_test_picker())
+        .models(test.models.clone());
+    let ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs().clone());
+    match env.run(&test.prompt, "", ctx).await {
+        RunResult::Ok(output) => Ok(output),
+        RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
+        RunResult::Failure(error) => Err(error),
+    }
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
@@ -1404,14 +1412,14 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
     use crate::cancel::CancelHandle;
 
     // The explicit-cancel wiring of the public entry point: a handle passed
-    // through `RunConfig::cancel` is installed around the whole run body, so
+    // through `RunContext::cancel` is installed around the whole run body, so
     // the section's Lua instruction hook observes it and the run maps the
     // interruption to `RunErrorKind::Cancelled`.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
     let handle = CancelHandle::new();
     handle.cancel();
-    let error = run_with_config(&fixture(md), |config| config.cancel(handle))
+    let error = run_with_context(&fixture(md), |ctx| ctx.cancel(handle))
         .await
         .expect_err("a pre-cancelled handle must fail the run");
     assert!(

@@ -47,7 +47,7 @@ fn writer_models() -> ModelSet {
 
 /// Builds the run context for a scheduler test: the parsed prompt, an empty
 /// shared library, and the model set pre-filled.
-fn scheduler_context(prompt: &Prompt) -> RunContext {
+fn scheduler_context(prompt: &Prompt) -> RunState {
     scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
@@ -57,13 +57,13 @@ fn scheduler_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,
-) -> RunContext {
-    let ctx = RunContext::new(
+) -> RunState {
+    let ctx = RunState::new(
         prompt,
         "",
         store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunConfig::new(EXECUTION).observer(observer),
+        &RunContext::new(EXECUTION).observer(observer),
     );
     *ctx.model_set()
         .lock()
@@ -1246,20 +1246,20 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
 /// Builds the run context for a scheduler live-H1 test: the shared model
 /// set starts empty - the live H1 pass under test records its own
 /// bindings, exactly as the legacy run's H1 hand-off leaves them.
-fn h1_context(prompt: &Prompt) -> RunContext {
+fn h1_context(prompt: &Prompt) -> RunState {
     h1_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
 /// Builds the H1 run context on the given store and observer, so a pass
 /// test can inspect the store's contents and the observation stream
 /// afterward.
-fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>) -> RunContext {
-    RunContext::new(
+fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>) -> RunState {
+    RunState::new(
         prompt,
         "",
         store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunConfig::new(EXECUTION).observer(observer),
+        &RunContext::new(EXECUTION).observer(observer),
     )
 }
 
@@ -1860,13 +1860,13 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
 
 /// Builds the run context for a scheduler fanout test with the given
 /// limits, so a window test can narrow the concurrency.
-fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunContext {
-    let ctx = RunContext::new(
+fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState {
+    let ctx = RunState::new(
         prompt,
         "",
         &TestStore::new(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunConfig::new(EXECUTION).limits(limits),
+        &RunContext::new(EXECUTION).limits(limits),
     );
     *ctx.model_set()
         .lock()
@@ -2142,12 +2142,12 @@ async fn model_required_when_arm_infer_has_no_binding() {
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = RunContext::new(
+    let ctx = RunState::new(
         &prompt,
         "",
         &TestStore::new(),
         shared,
-        &RunConfig::new(EXECUTION),
+        &RunContext::new(EXECUTION),
     );
     let error = Scheduler::new(&ctx, None)
         .drive()
@@ -2192,12 +2192,12 @@ async fn the_shared_replay_sees_the_arm_item() {
         .replay()
         .cloned()
         .expect("the prompt's shared chunk compiles at parse");
-    let ctx = RunContext::new(
+    let ctx = RunState::new(
         &prompt,
         "",
         &TestStore::new(),
         shared,
-        &RunConfig::new(EXECUTION),
+        &RunContext::new(EXECUTION),
     );
     let out = Scheduler::new(&ctx, None)
         .drive()
@@ -2801,12 +2801,12 @@ async fn fatal_arm_aborts_queued_siblings() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = RunContext::new(
+    let ctx = RunState::new(
         &prompt,
         "",
         &store,
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunConfig::new(EXECUTION)
+        &RunContext::new(EXECUTION)
             .limits(
                 RunLimits::new()
                     .max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
@@ -3145,7 +3145,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope carries them
 /// without an H1 pass.
-fn arm_tool_set(ctx: &RunContext, bindings: Vec<crate::lua::ToolBinding>) {
+fn arm_tool_set(ctx: &RunState, bindings: Vec<crate::lua::ToolBinding>) {
     let always = bindings
         .iter()
         .map(|binding| binding.alias().to_owned())
@@ -3157,7 +3157,7 @@ fn arm_tool_set(ctx: &RunContext, bindings: Vec<crate::lua::ToolBinding>) {
 /// the prompt-wide scope, so a binding can sit in the document catalog
 /// without entering any section's effective scope.
 fn arm_tool_set_scoped(
-    ctx: &RunContext,
+    ctx: &RunState,
     bindings: Vec<crate::lua::ToolBinding>,
     always: Vec<String>,
 ) {

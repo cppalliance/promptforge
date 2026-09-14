@@ -249,9 +249,8 @@ async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());
     let sink = Arc::clone(&recorder) as Arc<dyn Observer>;
-    let result = run_with_config(&fixture(md), move |config| {
-        config
-            .observer(sink)
+    let result = run_with_context(&fixture(md), move |ctx| {
+        ctx.observer(sink)
             .limits(RunLimits::new().lua_memory_bytes(std::num::NonZeroUsize::MIN))
     })
     .await;

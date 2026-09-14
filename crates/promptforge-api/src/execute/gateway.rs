@@ -12,9 +12,13 @@ use crate::{Error, Result};
 use super::config::RunLimits;
 
 /// Live capability inputs for the parse-to-run execution path.
+///
+/// Crate-internal: the public interface carries these on the
+/// [`Environment`](super::Environment), which installs them on the
+/// [`RunContext`](super::RunContext) before the free [`run`](super::run)
+/// borrows them back into this borrowed shape for the live H1 pass.
 #[derive(Clone, Copy)]
-#[non_exhaustive]
-pub struct ResolutionContext<'a> {
+pub(crate) struct ResolutionContext<'a> {
     /// Semantic picker used by executed H1 capability calls. `None` for
     /// capability-free agents: a `tools.bind` or `models.bind` executed
     /// without a picker fails as a binding error naming the missing picker.
@@ -28,8 +32,7 @@ pub struct ResolutionContext<'a> {
 impl<'a> ResolutionContext<'a> {
     /// Builds a resolution context from an optional live picker, a model
     /// catalog, and a tool catalog.
-    #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         picker: Option<&'a ToolPicker>,
         models: &'a ModelCatalog,
         tools: &'a ToolCatalog,

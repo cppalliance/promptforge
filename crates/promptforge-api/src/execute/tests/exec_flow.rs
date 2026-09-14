@@ -2300,15 +2300,19 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     );
     let test = fixture(md);
     let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
-    let picker = empty_test_picker();
-    let out = crate::execute::run(
-        &test.prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &test.models, &ToolCatalog::default()),
-        RunConfig::new(EXECUTION).vfs(vfs.clone()),
-    )
-    .await
-    .expect("a mount-less handle gets the defensive memory-store overlay");
+    let env = Environment::new()
+        .picker(empty_test_picker())
+        .models(test.models.clone());
+    let RunResult::Ok(out) = env
+        .run(
+            &test.prompt,
+            "",
+            RunContext::new(EXECUTION).vfs(vfs.clone()),
+        )
+        .await
+    else {
+        panic!("a mount-less handle gets the defensive memory-store overlay");
+    };
     assert_eq!(
         out, "overlaid",
         "the first section's write must be readable from the overlaid store"
@@ -2329,26 +2333,22 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
 #[tokio::test]
 async fn picker_less_context_runs_a_capability_free_prompt() {
     // The picker is optional: a prompt with no capability binds runs under
-    // `ResolutionContext::new(None, ...)`.
+    // a picker-less `Environment`.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## Only\n\n```lua\nreturn 'no capabilities'\n```\n"
     );
     let test = fixture(md);
-    let out = crate::execute::run(
-        &test.prompt,
-        "",
-        ResolutionContext::new(None, &test.models, &ToolCatalog::default()),
-        RunConfig::new(EXECUTION),
-    )
-    .await
-    .expect("a capability-free prompt runs without a picker");
+    let env = Environment::new().models(test.models.clone());
+    let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
+        panic!("a capability-free prompt runs without a picker");
+    };
     assert_eq!(out, "no capabilities");
 }
 
 #[tokio::test]
-async fn default_run_config_store_handle_carries_the_stock_mount() {
-    // `RunConfig` absorbs the store handle with a `promptforge_vfs::empty()`
+async fn default_run_context_store_handle_carries_the_stock_mount() {
+    // `RunContext` absorbs the store handle with a `promptforge_vfs::empty()`
     // default: a store-using run needs no host-supplied handle.
     let md = flow_prompt!(
         "# Test prompt\n\n\
@@ -2356,14 +2356,10 @@ async fn default_run_config_store_handle_carries_the_stock_mount() {
         ## Second\n\n```lua\nreturn store.read('default.txt')\n```\n"
     );
     let test = fixture(md);
-    let out = crate::execute::run(
-        &test.prompt,
-        "",
-        ResolutionContext::new(None, &test.models, &ToolCatalog::default()),
-        RunConfig::new(EXECUTION),
-    )
-    .await
-    .expect("the default store handle carries the stock mount");
+    let env = Environment::new().models(test.models.clone());
+    let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
+        panic!("the default store handle carries the stock mount");
+    };
     assert_eq!(out, "stock");
 }
 
@@ -2377,14 +2373,11 @@ async fn picker_less_context_fails_a_tool_bind_as_a_binding_error() {
         ## Only\n\n```lua\nreturn 'unreachable'\n```\n"
     );
     let test = fixture(md);
-    let error = crate::execute::run(
-        &test.prompt,
-        "",
-        ResolutionContext::new(None, &test.models, &ToolCatalog::default()),
-        RunConfig::new(EXECUTION),
-    )
-    .await
-    .expect_err("a tools.bind without a picker must fail");
+    let env = Environment::new().models(test.models.clone());
+    let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
+    else {
+        panic!("a tools.bind without a picker must fail");
+    };
     assert_eq!(
         error.kind(),
         RunErrorKind::Binding,
@@ -2407,14 +2400,11 @@ async fn picker_less_context_fails_a_model_bind_as_a_binding_error() {
     );
     let mut test = fixture(md);
     test.models = test_model_catalog();
-    let error = crate::execute::run(
-        &test.prompt,
-        "",
-        ResolutionContext::new(None, &test.models, &ToolCatalog::default()),
-        RunConfig::new(EXECUTION),
-    )
-    .await
-    .expect_err("a models.bind without a picker must fail");
+    let env = Environment::new().models(test.models.clone());
+    let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
+    else {
+        panic!("a models.bind without a picker must fail");
+    };
     assert_eq!(
         error.kind(),
         RunErrorKind::Binding,

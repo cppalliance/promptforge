@@ -11,12 +11,12 @@
 //! (`shared_promptforge_api::observe`, `shared_promptforge_api::models`,
 //! `shared_promptforge_api::tools`), and the store handle a host seeds or
 //! extracts comes from `shared-vfs` and `promptforge-vfs`.
-//! [`execute::run`] takes an [`execute::RunConfig`] carrying the
+//! [`execute::run`] takes an [`execute::RunContext`] carrying the
 //! observer the correlated report records go to, and
 //! `shared_promptforge_api::observe::NullObserver` is what a caller wanting
 //! silence passes.
 //! [`debug::DebugCapture`] is an opt-in raw request/response seam on the same
-//! config; production hosts leave it unset.
+//! context; production hosts leave it unset.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
@@ -42,33 +42,28 @@
 //! # Ok::<(), promptforge_api::ParseError>(())
 //! ```
 //!
-//! Executing a parsed prompt goes through [`run`] with a [`RunConfig`] and a
-//! [`ResolutionContext`] (an optional picker, a model catalog, and a tool
-//! catalog); the store handle rides on the config, defaulting to the stock
-//! in-memory mount. That path can perform gateway I/O, so it is shown as
-//! `no_run`:
+//! Executing a parsed prompt goes through [`run`] with a [`RunContext`]
+//! built from an [`Environment`] (which holds the optional picker, the
+//! model catalog, and the tool catalog); the store handle rides on the
+//! context, defaulting to the stock in-memory mount. That path can perform
+//! gateway I/O, so it is shown as `no_run`:
 //!
 //! ```no_run
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use promptforge_api::{Prompt, ResolutionContext, RunConfig, run};
-//! use shared_promptforge_api::models::ModelCatalog;
+//! use promptforge_api::{Environment, Prompt, RunContext, RunResult};
 //! use shared_promptforge_api::observe::NullObserver;
-//! use shared_promptforge_api::tools::ToolCatalog;
 //!
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
 //! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
 //!
-//! // Capability-free agents pass no picker.
-//! let models = ModelCatalog::empty();
-//! let tools = ToolCatalog::new(&[])?;
-//! let answer = run(
-//!     &prompt,
-//!     "",
-//!     ResolutionContext::new(None, &models, &tools),
-//!     RunConfig::new("run-example"),
-//! )
-//! .await?;
-//! println!("{answer}");
+//! // Capability-free agents use the default environment: no picker, empty
+//! // catalogs.
+//! let env = Environment::new();
+//! let answer = env.run(&prompt, "", RunContext::new("run-example")).await;
+//! let RunResult::Ok(text) = answer else {
+//!     panic!("the greeter run succeeds: {answer:?}");
+//! };
+//! println!("{text}");
 //! # Ok(())
 //! # }
 //! ```
@@ -96,5 +91,7 @@ pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
 pub use crate::client::{CompletionError, CompletionErrorKind};
-pub use crate::execute::{ResolutionContext, RunConfig, RunError, RunErrorKind, RunLimits, run};
+pub use crate::execute::{
+    Environment, RunContext, RunError, RunErrorKind, RunLimits, RunResult, run,
+};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

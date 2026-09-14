@@ -42,6 +42,8 @@ pub enum RunErrorKind {
     Cancelled,
     /// An unexpected internal invariant failure.
     Internal,
+    /// An H1 assertion or model requirement the environment cannot satisfy.
+    RequirementsUnmet,
 }
 
 /// The error returned by [`run`](super::run), the orchestration boundary of a

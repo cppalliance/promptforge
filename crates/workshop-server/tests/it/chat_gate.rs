@@ -28,13 +28,10 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use promptforge_api::client::{GatewayClient as ModelClient, GatewayEndpoint, SecretString};
-use promptforge_api::execute::RunErrorKind;
-use promptforge_api::{Prompt, ResolutionContext, RunConfig};
+use promptforge_api::{Environment, Prompt, RunContext, RunResult};
 use shared_promptforge_api::cancel::CancelHandle;
 use shared_promptforge_api::events::{EventLog as _, RuntimeEventKind};
-use shared_promptforge_api::models::ModelCatalog;
 use shared_promptforge_api::observe::Observer;
-use shared_promptforge_api::tools::ToolCatalog;
 use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,
@@ -346,7 +343,8 @@ fn spawn_restored_chat(
     );
     let cancel = CancelHandle::new();
     let observer: Arc<dyn Observer> = restored.clone();
-    let config = RunConfig::new(session.to_owned())
+    let env = Environment::new();
+    let ctx = RunContext::new(session.to_owned())
         .observer(Arc::clone(&observer))
         .client(client)
         .cancel(cancel.clone())
@@ -359,23 +357,13 @@ fn spawn_restored_chat(
         let result = async {
             let prompt = Prompt::parse(CHAT_MD, &execution, observer.as_ref())
                 .expect("the embedded chat prompt parses");
-            let models = ModelCatalog::empty();
-            let tools = ToolCatalog::default();
-            promptforge_api::run(
-                &prompt,
-                "",
-                ResolutionContext::new(None, &models, &tools),
-                config,
-            )
-            .await
+            env.run(&prompt, "", ctx).await
         }
         .await;
         match result {
-            Ok(_output) => Ok(()),
-            Err(error) if matches!(error.kind(), RunErrorKind::Cancelled) => {
-                Err(AgentError::Interrupted)
-            }
-            Err(error) => Err(AgentError::Program {
+            RunResult::Ok(_output) => Ok(()),
+            RunResult::Cancelled => Err(AgentError::Interrupted),
+            RunResult::Failure(error) => Err(AgentError::Program {
                 message: error.to_string(),
             }),
         }

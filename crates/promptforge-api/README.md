@@ -15,26 +15,19 @@ shared-promptforge-api = "0.1"
 ```
 
 ```rust
-use promptforge_api::{Prompt, ResolutionContext, RunConfig, run};
-use shared_promptforge_api::models::ModelCatalog;
+use promptforge_api::{Environment, Prompt, RunContext, RunResult};
 use shared_promptforge_api::observe::NullObserver;
-use shared_promptforge_api::tools::ToolCatalog;
 
 async fn execute(source: &str) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = Prompt::parse(source, "readme", &NullObserver::default())?;
-    // Capability-free agents pass no picker; the store handle defaults to a
-    // stock in-memory mount.
-    let models = ModelCatalog::empty();
-    let tools = ToolCatalog::new(&[])?;
-
-    let result = run(
-        &prompt,
-        "",
-        ResolutionContext::new(None, &models, &tools),
-        RunConfig::new("readme"),
-    )
-    .await?;
-    Ok(result)
+    // Capability-free agents use the default environment (no picker, empty
+    // catalogs); the store handle defaults to a stock in-memory mount.
+    let env = Environment::new();
+    match env.run(&prompt, "", RunContext::new("readme")).await {
+        RunResult::Ok(text) => Ok(text),
+        RunResult::Cancelled => Err("the run was cancelled".into()),
+        RunResult::Failure(error) => Err(error.into()),
+    }
 }
 ```
 

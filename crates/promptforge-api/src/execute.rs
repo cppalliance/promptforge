@@ -16,13 +16,13 @@
 //! the same rules, and the parent walk resumes after the jumper when that
 //! level exhausts.
 //!
-//! One run-scoped store handle travels with the run's [`RunConfig`] (the
+//! One run-scoped store handle travels with the run's [`RunContext`] (the
 //! stock handle by default), shared by
 //! every section, so
 //! bulk state persists across the context-clearing transitions even though a
 //! section's Lua state never does.
 //!
-//! A run reports itself as it goes: the [`RunConfig`] observer receives a
+//! A run reports itself as it goes: the [`RunContext`] observer receives a
 //! `(execution, section, event)` record when the run starts and ends, at each
 //! section boundary, model turn, tool call, and harness-mediated store
 //! operation. Reporting is a side channel and never
@@ -57,8 +57,10 @@
 //!
 //! The orchestration boundary ([`run`]) lives here; the rest is split into
 //! focused private children: `error` (the public [`RunError`]), `config`
-//! (`RunConfig`/`RunLimits`), `context` (the ambient `RunContext` run
-//! state), `gateway` (client acquisition and [`ResolutionContext`]),
+//! ([`RunContext`]/[`RunLimits`]), `environment` (the public
+//! [`Environment`]), `context` (the ambient `RunState` run
+//! state), `gateway` (client acquisition and the live H1 resolution
+//! inputs),
 //! `tools` (the nested-inference round),
 //! `section_vm` (the section VM setup half shared by the walk and
 //! the fanout arm), `section_context` (the per-section `SectionContext`
@@ -75,6 +77,7 @@
 mod config;
 mod context;
 mod engine;
+mod environment;
 mod error;
 mod gateway;
 pub(crate) mod protocol;
@@ -87,11 +90,12 @@ mod tool_loop;
 mod tools;
 
 // Public API surface.
-pub use config::{RunConfig, RunLimits};
+pub use config::{RunContext, RunLimits};
+pub use environment::Environment;
 pub use error::{RunError, RunErrorKind};
-pub use gateway::ResolutionContext;
+pub(crate) use gateway::ResolutionContext;
 
-use context::RunContext;
+use context::RunState;
 use scheduler::Scheduler;
 
 use crate::Error;
@@ -100,15 +104,37 @@ use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::VfsRef;
 
+/// What the run produced. Domain outcomes (including "the prompt
+/// declined") are values, not thrown errors: the variant is for code, the
+/// payload is for humans and models.
+#[derive(Debug)]
+pub enum RunResult {
+    /// The run completed with its final text. Mirrors `Result` vocabulary,
+    /// so patterns need `RunResult::Ok` qualification wherever `Result` is
+    /// also in scope.
+    Ok(String),
+    /// The host cancelled the run.
+    Cancelled,
+    /// The run failed; the typed error classifies the failure.
+    Failure(RunError),
+}
+
 /// Executes a parsed prompt and returns its final text.
 ///
 /// H1 Lua and prose blocks run once in source order with full host access;
 /// capability calls resolve when executed. If H1 does not return, the H2 section
 /// walk runs and its final text is returned.
 ///
-/// # Errors
-/// Returns a [`RunError`] whose [`kind`](RunError::kind) classifies the failure
-/// by condition:
+/// The free `run` receives an already-prepared [`RunContext`] and has
+/// nothing to prepare from: a context that never passed through
+/// [`Environment::run`] runs capability-free (no picker, empty catalogs).
+/// Hosts normally go through [`Environment::run`], the zero-burden path.
+///
+/// # Outcomes
+/// - [`RunResult::Ok`] - the run completed with its final text.
+/// - [`RunResult::Cancelled`] - the host cancelled the run.
+/// - [`RunResult::Failure`] - the run failed; the [`RunError`]'s
+///   [`kind`](RunError::kind) classifies the failure by condition:
 /// - [`RunErrorKind::Parse`] - a prompt/frontmatter or compiled Lua region was
 ///   invalid.
 /// - [`RunErrorKind::Version`] - the prompt declared an unsupported
@@ -131,19 +157,20 @@ use crate::store::VfsRef;
 /// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
 /// - [`RunErrorKind::Determinism`] - two live execution identities claimed
 ///   one store path; the run terminated on the spot, uncatchably from Lua.
-/// - [`RunErrorKind::Cancelled`] - the host cancelled the run.
+/// - [`RunErrorKind::Cancelled`] - the host cancelled the run (mid-run
+///   classification only; the interface reports [`RunResult::Cancelled`]).
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
+/// - [`RunErrorKind::RequirementsUnmet`] - an H1 assertion or model
+///   requirement the environment cannot satisfy.
 ///
 /// # Examples
 /// A no-network prompt whose walk makes a nested host call: `call` is a
 /// structural request the scheduler drives on the run's one thread, so the
 /// current-thread runtime below runs the whole prompt, host calls included:
 /// ```
-/// use promptforge_api::execute::{run, RunConfig, ResolutionContext};
+/// use promptforge_api::execute::{RunContext, RunResult, run};
 /// use promptforge_api::parser::Prompt;
-/// use shared_promptforge_api::models::ModelCatalog;
 /// use shared_promptforge_api::observe::NullObserver;
-/// use shared_promptforge_api::tools::ToolCatalog;
 ///
 /// let source = concat!(
 ///     "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
@@ -154,17 +181,12 @@ use crate::store::VfsRef;
 ///     "```lua\nreturn 'hello'\n```\n",
 /// );
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
-/// let models = ModelCatalog::empty();
-/// let tools = ToolCatalog::new(&[])?;
-///
 /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-/// let output = runtime.block_on(run(
-///     &prompt,
-///     "",
-///     ResolutionContext::new(None, &models, &tools),
-///     RunConfig::new("doc-example"),
-/// ))?;
-/// assert_eq!(output, "hello");
+/// let output = runtime.block_on(run(&prompt, "", RunContext::new("doc-example")));
+/// let RunResult::Ok(text) = output else {
+///     panic!("the doc example run succeeds: {output:?}");
+/// };
+/// assert_eq!(text, "hello");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -177,17 +199,14 @@ use crate::store::VfsRef;
 /// from interleaving chains at I/O points, not from threads; on a
 /// multi-thread runtime only the leaf I/O waits, which never touch Lua or
 /// scheduler state, may run on other workers.
-pub async fn run(
-    prompt: &Prompt,
-    args: &str,
-    resolution: ResolutionContext<'_>,
-    config: RunConfig,
-) -> std::result::Result<String, RunError> {
+pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
     match prompt.frontmatter().promptforge() {
         Some(0) => {}
-        Some(other) => return Err(RunError::from(Error::UnsupportedVersion(other))),
+        Some(other) => {
+            return RunResult::Failure(RunError::from(Error::UnsupportedVersion(other)));
+        }
         None => {
-            return Err(RunError::from(Error::parse(
+            return RunResult::Failure(RunError::from(Error::parse(
                 ParseErrorKind::Structure,
                 "not a promptforge prompt: no promptforge version",
             )));
@@ -199,45 +218,56 @@ pub async fn run(
     // sequence carries no `Option` branch.
     let shared = match prompt.replay() {
         Some(program) => program.clone(),
-        None => {
-            crate::lua::LuaProgram::empty().map_err(|error| RunError::from(Error::from(error)))?
-        }
+        None => match crate::lua::LuaProgram::empty() {
+            Ok(program) => program,
+            Err(error) => return RunResult::Failure(RunError::from(Error::from(error))),
+        },
     };
     // The stock handle carries the store mount; a hand-built router lacking
     // it gets a fresh memory store overlaid as a defensive fallback, so a
     // run never fails for want of the mount. A mounted-but-failing backend
     // is never shadowed by the throwaway overlay: its error fails the run.
-    let mut config = config;
-    match store_mount_present(&config.vfs) {
+    let mut ctx = ctx;
+    match store_mount_present(&ctx.vfs) {
         Ok(true) => {}
         Ok(false) => {
-            config.vfs = config.vfs.overlay(
+            ctx.vfs = ctx.vfs.overlay(
                 promptforge_vfs::STORE_MOUNT,
                 shared_vfs::MemoryBackend::new(),
             );
         }
-        Err(error) => return Err(RunError::from(Error::Store(error))),
+        Err(error) => return RunResult::Failure(RunError::from(Error::Store(error))),
     }
-    let ctx = RunContext::new(prompt, args, &config.vfs, shared, &config);
+    let state = RunState::new(prompt, args, &ctx.vfs, shared, &ctx);
 
-    let RunConfig {
-        execution,
+    let RunContext {
+        name,
         observer,
         client,
         cancel,
         limits,
+        resolution,
         ..
-    } = config;
+    } = ctx;
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
-    observer.observe(&execution, prompt.title(), detail::RUN_STARTED);
+    observer.observe(&name, prompt.title(), detail::RUN_STARTED);
+
+    // A context that never passed through `Environment::run` carries no
+    // resolution inputs and runs capability-free: no picker, empty catalogs.
+    let resolution = resolution.unwrap_or_default();
+    let live = ResolutionContext::new(
+        resolution.picker.as_deref(),
+        &resolution.models,
+        &resolution.tools,
+    );
 
     // Boxed: the driver future carries the whole scheduler step machinery,
     // and `run`'s own future must stay small for its callers (the
     // workspace's large-futures lint gates every one of them).
     let run_body = Box::pin(async {
-        Scheduler::new(&ctx, client)
-            .with_live_h1(resolution)
+        Scheduler::new(&state, client)
+            .with_live_h1(live)
             .drive()
             .await
     });
@@ -248,7 +278,7 @@ pub async fn run(
     let result = cancel::maybe_scope(cancel, run_body).await;
 
     observer.observe(
-        &execution,
+        &name,
         prompt.title(),
         if result.is_ok() {
             detail::RUN_SUCCEEDED
@@ -256,7 +286,11 @@ pub async fn run(
             detail::RUN_FAILED
         },
     );
-    result.map_err(RunError::from)
+    match result {
+        Ok(text) => RunResult::Ok(text),
+        Err(Error::Interrupted) => RunResult::Cancelled,
+        Err(error) => RunResult::Failure(RunError::from(error)),
+    }
 }
 
 /// Whether the handle already serves the store mount. The probe stats the

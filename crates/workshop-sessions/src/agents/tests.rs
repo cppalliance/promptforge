@@ -1,7 +1,6 @@
 use std::sync::atomic::AtomicU64;
 
 use shared_promptforge_api::events::RuntimeEventKind;
-use shared_promptforge_api::models::ModelCatalog;
 use shared_promptforge_api::observe::{Observation, Observer};
 use workshop_protocol::Activity;
 
@@ -243,23 +242,20 @@ fn the_model_client_requires_a_usable_key_and_url() {
 async fn run_builtin_chat(
     broker: Option<Arc<dyn promptforge_api::input::InputBroker>>,
 ) -> Result<String, promptforge_api::execute::RunError> {
-    use promptforge_api::{Prompt, ResolutionContext, RunConfig};
+    use promptforge_api::{Environment, Prompt, RunContext, RunResult};
     let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
     let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
         .expect("the embedded chat prompt parses");
-    let models = ModelCatalog::empty();
-    let tools = shared_promptforge_api::tools::ToolCatalog::default();
-    let mut config = RunConfig::new("chat-unit").observer(observer);
+    let env = Environment::new();
+    let mut ctx = RunContext::new("chat-unit").observer(observer);
     if let Some(broker) = broker {
-        config = config.input_broker(broker);
+        ctx = ctx.input_broker(broker);
     }
-    promptforge_api::run(
-        &prompt,
-        "",
-        ResolutionContext::new(None, &models, &tools),
-        config,
-    )
-    .await
+    match env.run(&prompt, "", ctx).await {
+        RunResult::Ok(text) => Ok(text),
+        RunResult::Cancelled => panic!("the chat unit run is never cancelled"),
+        RunResult::Failure(error) => Err(error),
+    }
 }
 
 #[tokio::test]

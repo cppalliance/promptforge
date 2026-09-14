@@ -1,16 +1,20 @@
-//! Run configuration and resource limits: [`RunConfig`] and [`RunLimits`].
+//! Per-run context and resource limits: [`RunContext`] and [`RunLimits`].
 
 use std::fmt;
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
+
+use promptforge_tool_picker::ToolPicker;
 
 use crate::cancel::CancelHandle;
 use crate::client::{GatewayClient, StreamDelta};
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
+use crate::model::ModelCatalog;
 use crate::observe::{NullObserver, Observer};
 use crate::store::VfsRef;
+use crate::tools::ToolCatalog;
 
 /// Generates one `nz_*` constructor per `NonZero*` type: a `const fn`
 /// building the wrapper from a compile-time-known non-zero value.
@@ -168,24 +172,47 @@ impl Default for RunLimits {
     }
 }
 
-/// Everything a run needs beyond the prompt, its input, and its tools: the
-/// execution id, where progress is reported, the raw-capture seam,
-/// the gateway client, an explicit cancellation handle, resource limits, and
-/// the store handle.
+/// The live resolution inputs [`Environment::run`](super::Environment::run)
+/// installs on a context before the free [`run`](super::run) drives it: the
+/// interim stand-in for the prepare pass, absorbing what the retired
+/// borrowed resolution context carried (a picker, a model catalog, a tool
+/// catalog). A context without one runs capability-free.
+#[derive(Clone, Default)]
+pub(crate) struct RunResolution {
+    /// Semantic picker behind executed H1 binds; `None` fails a bind as a
+    /// binding error naming the missing picker.
+    pub(crate) picker: Option<Arc<ToolPicker>>,
+    /// Live model catalog behind executed H1 model calls.
+    pub(crate) models: ModelCatalog,
+    /// Tool catalog behind executed H1 `tools.bind` calls.
+    pub(crate) tools: ToolCatalog,
+}
+
+/// One run. Created by the host from the
+/// [`Environment`](super::Environment) carrying the per-run inputs,
+/// enriched at prepare, owned by the executor during
+/// [`run`](super::run). Never shared between runs.
 ///
-/// `RunConfig` is owned (no borrows), so its observer and debug sinks reach the
-/// nested `models.infer` path that a borrowed option could not.
+/// `RunContext` is owned (no borrows), so its observer and debug sinks reach
+/// the nested `models.infer` path that a borrowed option could not.
 ///
 /// # Examples
 /// ```
-/// use promptforge_api::execute::{RunConfig, RunLimits};
+/// use promptforge_api::execute::{RunContext, RunLimits};
 ///
-/// let config = RunConfig::new("example-run").limits(RunLimits::new());
-/// assert_eq!(config.execution(), "example-run");
+/// let ctx = RunContext::new("example-run").limits(RunLimits::new());
+/// assert_eq!(ctx.name(), "example-run");
 /// ```
 #[non_exhaustive]
-pub struct RunConfig {
-    pub(crate) execution: String,
+pub struct RunContext {
+    /// Run identity, carried on every report and event.
+    pub(crate) name: String,
+    /// When the context was created.
+    pub(crate) start_time: SystemTime,
+    /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
+    /// Always 0 today - the sub-run adapter that increments it lands with
+    /// the deferred prompt-pack.
+    pub(crate) depth: u32,
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) debug: Option<Arc<dyn DebugCapture>>,
     pub(crate) client: Option<GatewayClient>,
@@ -195,17 +222,23 @@ pub struct RunConfig {
     pub(crate) ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
     pub(crate) on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
     pub(crate) vfs: VfsRef,
+    /// The resolution inputs [`Environment::run`](super::Environment::run)
+    /// installs; `None` on a caller-built context, which the free
+    /// [`run`](super::run) treats as capability-free.
+    pub(crate) resolution: Option<RunResolution>,
 }
 
-impl RunConfig {
-    /// Builds a config for `execution` with default observer, no client, no
-    /// capture, no cancellation, no input broker, no `ui` provider, no delta
-    /// callback, default [`RunLimits`], and the stock store handle
+impl RunContext {
+    /// Builds a context for the run `name` with default observer, no client,
+    /// no capture, no cancellation, no input broker, no `ui` provider, no
+    /// delta callback, default [`RunLimits`], and the stock store handle
     /// (`promptforge_vfs::empty()`).
     #[must_use]
-    pub fn new(execution: impl Into<String>) -> RunConfig {
-        RunConfig {
-            execution: execution.into(),
+    pub fn new(name: impl Into<String>) -> RunContext {
+        RunContext {
+            name: name.into(),
+            start_time: SystemTime::now(),
+            depth: 0,
             observer: Arc::new(NullObserver::default()),
             debug: None,
             client: None,
@@ -215,41 +248,43 @@ impl RunConfig {
             ui: None,
             on_delta: None,
             vfs: promptforge_vfs::empty(),
+            resolution: None,
         }
     }
 
     /// Sets the progress observer, retained for the whole run and its infer hook.
     #[must_use]
-    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunConfig {
+    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunContext {
         self.observer = observer;
         self
     }
 
     /// Sets the opt-in raw request/response capture sink.
     #[must_use]
-    pub fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunConfig {
+    pub fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunContext {
         self.debug = Some(debug);
         self
     }
 
-    /// Sets the gateway client; `None` builds one from the environment on first
-    /// use.
+    /// Sets the gateway client, overriding the
+    /// [`Environment`](super::Environment)'s; `None` builds one from the
+    /// process environment on first use.
     #[must_use]
-    pub fn client(mut self, client: GatewayClient) -> RunConfig {
+    pub fn client(mut self, client: GatewayClient) -> RunContext {
         self.client = Some(client);
         self
     }
 
     /// Sets the explicit cancellation handle threaded through the run.
     #[must_use]
-    pub fn cancel(mut self, handle: CancelHandle) -> RunConfig {
+    pub fn cancel(mut self, handle: CancelHandle) -> RunContext {
         self.cancel = Some(handle);
         self
     }
 
     /// Sets the resource limits honored across the run.
     #[must_use]
-    pub fn limits(mut self, limits: RunLimits) -> RunConfig {
+    pub fn limits(mut self, limits: RunLimits) -> RunContext {
         self.limits = limits;
         self
     }
@@ -260,7 +295,7 @@ impl RunConfig {
     /// [`INPUT_UNAVAILABLE_FALLBACK`](crate::input::INPUT_UNAVAILABLE_FALLBACK)
     /// with `available` false.
     #[must_use]
-    pub fn input_broker(mut self, broker: Arc<dyn InputBroker>) -> RunConfig {
+    pub fn input_broker(mut self, broker: Arc<dyn InputBroker>) -> RunContext {
         self.input = Some(broker);
         self
     }
@@ -273,7 +308,7 @@ impl RunConfig {
     /// without declaring its model. The default (`None`) installs no `ui`
     /// global and keeps strict declared-alias resolution.
     #[must_use]
-    pub fn ui(mut self, provider: Arc<dyn Fn() -> serde_json::Value + Send + Sync>) -> RunConfig {
+    pub fn ui(mut self, provider: Arc<dyn Fn() -> serde_json::Value + Send + Sync>) -> RunContext {
         self.ui = Some(provider);
         self
     }
@@ -282,7 +317,7 @@ impl RunConfig {
     /// forward their chunks to. The default (`None`) drops deltas at the
     /// leaf.
     #[must_use]
-    pub fn on_delta(mut self, hook: Arc<dyn Fn(StreamDelta) + Send + Sync>) -> RunConfig {
+    pub fn on_delta(mut self, hook: Arc<dyn Fn(StreamDelta) + Send + Sync>) -> RunContext {
         self.on_delta = Some(hook);
         self
     }
@@ -293,22 +328,38 @@ impl RunConfig {
     /// default is the stock handle (`promptforge_vfs::empty()`), a fresh
     /// memory backend at the store mount.
     #[must_use]
-    pub fn vfs(mut self, vfs: VfsRef) -> RunConfig {
+    pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
         self.vfs = vfs;
         self
     }
 
-    /// Returns the execution identifier shared by every report.
+    /// Returns the run identity shared by every report.
     #[must_use]
-    pub fn execution(&self) -> &str {
-        &self.execution
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns when the context was created.
+    #[must_use]
+    pub fn start_time(&self) -> SystemTime {
+        self.start_time
+    }
+
+    /// Returns the model-orchestrated prompt-tool nesting depth (always 0
+    /// for a root run; the sub-run adapter that increments it lands with
+    /// the deferred prompt-pack).
+    #[must_use]
+    pub fn depth(&self) -> u32 {
+        self.depth
     }
 }
 
-impl fmt::Debug for RunConfig {
+impl fmt::Debug for RunContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunConfig")
-            .field("execution", &self.execution)
+        f.debug_struct("RunContext")
+            .field("name", &self.name)
+            .field("start_time", &self.start_time)
+            .field("depth", &self.depth)
             .field("observer", &"<dyn Observer>")
             .field("client", &self.client)
             .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
@@ -318,6 +369,7 @@ impl fmt::Debug for RunConfig {
             .field("ui", &self.ui.is_some())
             .field("on_delta", &self.on_delta.is_some())
             .field("vfs", &self.vfs)
+            .field("resolution", &self.resolution.is_some())
             .finish()
     }
 }

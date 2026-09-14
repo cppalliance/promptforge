@@ -17,17 +17,52 @@ async fn live_h1_infer_runs_once() {
     let prompt = parse(source);
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(gatewayed(addr)),
-    )
-    .await
-    .expect("live H1 path must run");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
+        panic!("live H1 path must run");
+    };
 
     assert_eq!(out, "h1 answer");
     assert_eq!(gateway.call_count(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_environment_client_serves_a_run_when_the_context_carries_none() {
+    // `Environment::run` defaults a client-less context to the environment's
+    // client: the run's own client overrides it, and with none on the
+    // context the environment's client must serve the run's completions.
+    let gateway = ScriptedGateway::start(vec![resp_text("env answer")]).await;
+    let addr = gateway.addr();
+
+    let source = "---\nname: env-client\ndescription: d\npromptforge: 0\n---\n\n\
+        # Env Client\n\n\
+        ```lua\n\
+        local writer = models.default('writer', 'A general model for tests')\n\
+        var.answer = models.infer(writer, 'answer once')\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer\n```\n";
+    let prompt = parse(source);
+    let env = Environment::new()
+        .picker(empty_test_picker())
+        .models(test_model_catalog())
+        .tools(ToolCatalog::default())
+        .client(gateway_client(addr));
+    // The context deliberately carries no client: the defaulting in
+    // `Environment::run` is the only path to the gateway.
+    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
+        panic!("the environment's client must serve a client-less context");
+    };
+
+    assert_eq!(out, "env answer");
+    assert_eq!(
+        gateway.call_count(),
+        1,
+        "the completion must have gone to the environment's client"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -97,14 +132,16 @@ async fn shared_function_resolves_host_globals_when_called() {
     let prompt = parse(source);
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let out = super::super::run(
-        &prompt,
-        "later host value",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(silent()),
-    )
-    .await
-    .expect("shared function must resolve host globals when called");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env
+        .run(&prompt, "later host value", to_context(silent()))
+        .await
+    else {
+        panic!("shared function must resolve host globals when called");
+    };
 
     assert_eq!(out, "later host value");
 }
@@ -126,14 +163,20 @@ async fn shared_library_calls_host_apis_at_load_time() {
         ## Result\n\n\
         ```lua\nreturn store.read('loaded.txt')\n```\n";
     let prompt = parse(source);
-    let out = super::super::run(
-        &prompt,
-        "load-time args",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(silent()).vfs(store.vfs().clone()),
-    )
-    .await
-    .expect("top-level shared host calls must succeed");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env
+        .run(
+            &prompt,
+            "load-time args",
+            to_context(silent()).vfs(store.vfs().clone()),
+        )
+        .await
+    else {
+        panic!("top-level shared host calls must succeed");
+    };
 
     assert_eq!(out, "load-time args");
     assert_eq!(
@@ -184,14 +227,13 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
     let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &catalog),
-        to_config(silent()),
-    )
-    .await
-    .expect("captured bindings must be installed in every section VM");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(catalog);
+    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
+        panic!("captured bindings must be installed in every section VM");
+    };
 
     assert_eq!(
         out,
@@ -217,14 +259,16 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     let prompt = parse(source);
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(gatewayed(gateway.addr())),
-    )
-    .await
-    .expect("live H1 models.infer must run");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env
+        .run(&prompt, "", to_context(gatewayed(gateway.addr())))
+        .await
+    else {
+        panic!("live H1 models.infer must run");
+    };
 
     assert_eq!(out, "h1 answer:true");
     assert_eq!(gateway.call_count(), 1);
@@ -265,20 +309,26 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     let picker = empty_test_picker();
     let models = test_model_catalog();
     let recorder = Arc::new(Recorder::default());
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
 
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
-            debug: None,
-        }),
-    )
-    .await
-    .expect("nested infer must run");
+    let RunResult::Ok(out) = env
+        .run(
+            &prompt,
+            "",
+            to_context(RunOptions {
+                execution: EXECUTION,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
+                client: Some(gateway_client(addr)),
+                debug: None,
+            }),
+        )
+        .await
+    else {
+        panic!("nested infer must run");
+    };
 
     assert_eq!(out, "pong");
     let details: Vec<String> = recorder
@@ -329,20 +379,23 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         .await;
         canceller.cancel();
     });
-    let error = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        RunConfig::new(EXECUTION)
-            .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
-            .client(gateway_client(gateway.addr()))
-            .cancel(cancel),
-    )
-    .await
-    .expect_err("cancelling an in-flight infer must interrupt the run");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let result = env
+        .run(
+            &prompt,
+            "",
+            RunContext::new(EXECUTION)
+                .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
+                .client(gateway_client(gateway.addr()))
+                .cancel(cancel),
+        )
+        .await;
     assert!(
-        error.to_string().contains("interrupted"),
-        "expected interruption, got {error}"
+        matches!(result, RunResult::Cancelled),
+        "cancelling an in-flight infer must interrupt the run: {result:?}"
     );
     assert_eq!(
         gateway.call_count(),
@@ -412,14 +465,13 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     let prompt = parse(source);
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(gatewayed(addr)),
-    )
-    .await
-    .expect("live H1 prose infers explicitly");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
+        panic!("live H1 prose infers explicitly");
+    };
 
     assert_eq!(out, "final answer:2");
     assert_eq!(gateway.call_count(), 1);
@@ -447,14 +499,16 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     let prompt = parse(source);
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(gatewayed(gateway.addr())),
-    )
-    .await
-    .expect("H1 prose and H2 prose each infer explicitly");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env
+        .run(&prompt, "", to_context(gatewayed(gateway.addr())))
+        .await
+    else {
+        panic!("H1 prose and H2 prose each infer explicitly");
+    };
 
     assert_eq!(out, "h2 reply");
     assert_eq!(
@@ -496,14 +550,13 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
     let prompt = parse(source);
     let picker = empty_test_picker();
     let models = test_model_catalog();
-    let out = super::super::run(
-        &prompt,
-        "",
-        ResolutionContext::new(Some(&picker), &models, &ToolCatalog::default()),
-        to_config(silent()),
-    )
-    .await
-    .expect("the H1 chunk keeps id 0 and the first walked section takes id 1");
+    let env = Environment::new()
+        .picker(picker)
+        .models(models)
+        .tools(ToolCatalog::default());
+    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
+        panic!("the H1 chunk keeps id 0 and the first walked section takes id 1");
+    };
 
     assert_eq!(out, "ok");
 }

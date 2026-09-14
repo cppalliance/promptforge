@@ -41,13 +41,13 @@ fn loop_models() -> ModelSet {
 /// Builds the run context for a loop test: the parsed prompt, an empty
 /// shared library, and the shared model and tool sets pre-filled (the
 /// scheduler tests bypass the live H1 pass that would fill them).
-fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunContext {
-    let ctx = RunContext::new(
+fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
+    let ctx = RunState::new(
         prompt,
         "",
         &TestStore::new(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunConfig::new(EXECUTION),
+        &RunContext::new(EXECUTION),
     );
     *ctx.model_set()
         .lock()

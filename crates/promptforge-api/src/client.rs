@@ -12,7 +12,7 @@
 //!
 //! The implementation lives in the `promptforge-model-client` crate and is
 //! re-exported here: hosts pass a [`GatewayClient`] to
-//! [`RunConfig::client`](crate::RunConfig) and classify its failures through
+//! [`RunContext::client`](crate::RunContext) and classify its failures through
 //! [`CompletionError`].
 
 pub use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, SecretString};

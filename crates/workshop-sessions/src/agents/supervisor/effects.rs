@@ -3,11 +3,8 @@
 use std::sync::Arc;
 
 use promptforge_api::client::GatewayClient as ModelClient;
-use promptforge_api::execute::RunErrorKind;
-use promptforge_api::{Prompt, ResolutionContext, RunConfig};
-use shared_promptforge_api::models::ModelCatalog;
+use promptforge_api::{Environment, Prompt, RunContext, RunResult};
 use shared_promptforge_api::observe::Observer;
-use shared_promptforge_api::tools::ToolCatalog;
 use shared_promptforge_api::wire::StreamDelta;
 
 use workshop_gateway::GatewaySnapshot;
@@ -137,30 +134,22 @@ async fn run_markdown_agent(
         Arc::clone(&session.waits),
         session.input_frames.clone(),
     ));
-    let models = ModelCatalog::empty();
-    let tools = ToolCatalog::default();
-    let config = RunConfig::new(session.id.clone())
+    let env = Environment::new();
+    let ctx = RunContext::new(session.id.clone())
         .observer(observer)
         .client(client)
         .cancel(session.arm_cancel(run))
         .input_broker(broker)
         .ui(ui)
         .on_delta(on_delta);
-    promptforge_api::run(
-        &prompt,
-        "",
-        ResolutionContext::new(None, &models, &tools),
-        config,
-    )
-    .await
-    .map(|_output| ())
-    .map_err(|error| match error.kind() {
-        RunErrorKind::Cancelled => AgentRunError::Interrupted,
-        _ => AgentRunError::Failed {
+    match env.run(&prompt, "", ctx).await {
+        RunResult::Ok(_output) => Ok(()),
+        RunResult::Cancelled => Err(AgentRunError::Interrupted),
+        RunResult::Failure(error) => Err(AgentRunError::Failed {
             message: error.to_string(),
             source: Some(Box::new(error)),
-        },
-    })
+        }),
+    }
 }
 
 /// Mutable runtime bindings and the currently executing run.

@@ -19,9 +19,9 @@
 //! ready the driver awaits the answer channel or cancellation, whichever
 //! comes first.
 //!
-//! [`RunContext`] stays the ambient shared read-mostly context, borrowed by
+//! [`RunState`] stays the ambient shared read-mostly context, borrowed by
 //! chain steps; the scheduler is the exclusively owned mutable counterpart.
-//! The two are deliberately not merged: `RunContext` is cloned into
+//! The two are deliberately not merged: `RunState` is cloned into
 //! callbacks, while the scheduler must stay unreachable from the callback
 //! layer.
 //!
@@ -82,7 +82,7 @@ use crate::store::{Access, Store, StoreError};
 use crate::tools::ToolId;
 use crate::{Error, Result, cancel, subst};
 
-use super::context::RunContext;
+use super::context::RunState;
 use super::engine::{
     JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
 };
@@ -178,7 +178,7 @@ struct ArmTemplate<'a> {
     /// (the legacy proxies exist to cross the spawned-task boundary, which
     /// a chain never crosses) with a fresh turn counter, so arm turns count
     /// against the fanout's own cap.
-    ctx: RunContext,
+    ctx: RunState,
     /// The fanout caller's access capability: each arm spawns its own
     /// capability from it at dispatch, so the spawn retires the caller's
     /// claims (the happens-before edge) and two live arms touching one
@@ -314,7 +314,7 @@ fn resolve_arm_target<'a>(
 struct Chain<'a> {
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for a call chain's input override.
-    ctx: RunContext,
+    ctx: RunState,
     /// The chain's VFS access capability, installed into each section VM
     /// the chain enters: the walk and the live H1 pass acquire their own,
     /// a call chain borrows its parent's (a blocking child is the same
@@ -462,7 +462,7 @@ fn classify_store_failure(error: &StoreError) -> Error {
 pub(crate) struct Scheduler<'a> {
     /// The ambient run context, borrowed by chain steps and forked by
     /// call chains.
-    ctx: &'a RunContext,
+    ctx: &'a RunState,
     /// The chain arena: append-only, indexed by [`ChainId`].
     chains: Vec<Chain<'a>>,
     /// The call-nesting chain stack (LIFO): a call dispatch pushes
@@ -538,7 +538,7 @@ impl<'a> Scheduler<'a> {
     /// Builds the scheduler for one run over `ctx`'s prompt. `client` is the
     /// run's gateway client, if the caller supplied one; otherwise each
     /// chain builds one from the environment on first inference.
-    pub(crate) fn new(ctx: &'a RunContext, client: Option<GatewayClient>) -> Self {
+    pub(crate) fn new(ctx: &'a RunState, client: Option<GatewayClient>) -> Self {
         let (answer_tx, answers) = mpsc::unbounded_channel();
         Self {
             ctx,
@@ -745,7 +745,7 @@ impl<'a> Scheduler<'a> {
     )]
     fn start_chain(
         &mut self,
-        ctx: RunContext,
+        ctx: RunState,
         slice: &'a [Section],
         index: usize,
         parent: Option<ChainId>,

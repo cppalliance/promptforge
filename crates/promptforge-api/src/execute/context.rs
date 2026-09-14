@@ -1,7 +1,7 @@
 //! The execute subtree's ambient run state.
 //!
-//! [`RunContext`] is built once in [`run`](super::run) and travels through
-//! the execute subtree as parameter one (`ctx: &RunContext`). The
+//! [`RunState`] is built once in [`run`](super::run) and travels through
+//! the execute subtree as parameter one (`ctx: &RunState`). The
 //! invariant: a new run-scoped concern becomes a field here, never a new
 //! parameter. Per-call data (a section, a `var` snapshot) stays
 //! in parameters or on the per-section frame.
@@ -20,7 +20,7 @@ use crate::parser::Prompt;
 use crate::store::{Access, VfsRef};
 use crate::untrusted::GuardNonce;
 
-use super::config::{RunConfig, RunLimits};
+use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{now_rfc3339_checked, sys_json};
 
@@ -34,7 +34,7 @@ use super::support::{now_rfc3339_checked, sys_json};
 /// proxy reporting handles, and [`with_args`](Self::with_args) carrying a
 /// `call` call's args override into its contained chain.
 #[derive(Clone)]
-pub(crate) struct RunContext {
+pub(crate) struct RunState {
     /// The prompt this run executes.
     prompt: Arc<Prompt>,
     /// The untrusted-envelope nonce, minted once here so every wrap in the
@@ -97,7 +97,7 @@ pub(crate) struct RunContext {
     on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
 }
 
-impl RunContext {
+impl RunState {
     /// Builds the context for one run of `prompt`. The turn and id counters
     /// are minted here (both start at zero), as are the empty tool and model
     /// sets the live H1 pass fills through the concrete handles; `when`
@@ -108,7 +108,7 @@ impl RunContext {
         args: &str,
         vfs: &VfsRef,
         shared: LuaProgram,
-        config: &RunConfig,
+        ctx: &RunContext,
     ) -> Self {
         let tool_set = Arc::new(Mutex::new(ToolSet::default()));
         let model_set = Arc::new(Mutex::new(ModelSet::default()));
@@ -116,11 +116,11 @@ impl RunContext {
             prompt: Arc::new(prompt.clone()),
             nonce: GuardNonce::fresh(),
             vfs: vfs.clone(),
-            execution: Arc::from(config.execution.as_str()),
+            execution: Arc::from(ctx.name.as_str()),
             args: Arc::from(args),
-            limits: config.limits,
-            observer: Arc::clone(&config.observer),
-            debug: config.debug.clone(),
+            limits: ctx.limits,
+            observer: Arc::clone(&ctx.observer),
+            debug: ctx.debug.clone(),
             turns: Arc::new(AtomicU32::new(0)),
             ids: Arc::new(AtomicU64::new(0)),
             shared: Arc::new(shared),
@@ -129,9 +129,9 @@ impl RunContext {
             models: model_set.clone(),
             model_set,
             when: Arc::from(""),
-            input: config.input.clone(),
-            ui: config.ui.clone(),
-            on_delta: config.on_delta.clone(),
+            input: ctx.input.clone(),
+            ui: ctx.ui.clone(),
+            on_delta: ctx.on_delta.clone(),
         }
     }
 
@@ -353,9 +353,9 @@ impl RunContext {
     }
 }
 
-impl fmt::Debug for RunContext {
+impl fmt::Debug for RunState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunContext")
+        f.debug_struct("RunState")
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)
             .field("vfs", &"<VfsRef>")
@@ -393,13 +393,13 @@ mod tests {
             .expect("the test prompt parses")
     }
 
-    fn test_context(prompt: &Prompt) -> RunContext {
-        RunContext::new(
+    fn test_context(prompt: &Prompt) -> RunState {
+        RunState::new(
             prompt,
             "",
             &promptforge_vfs::empty(),
             LuaProgram::empty().expect("the empty chunk compiles"),
-            &RunConfig::new("run-context-test"),
+            &RunContext::new("run-context-test"),
         )
     }
 

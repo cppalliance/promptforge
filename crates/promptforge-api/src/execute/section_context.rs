@@ -17,7 +17,7 @@
 //!
 //! The run-scoped inputs
 //! (bindings, models, limits, the shared tools) arrive through the
-//! [`RunContext`].
+//! [`RunState`].
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -32,7 +32,7 @@ use crate::parser::Section;
 use crate::store::Access;
 use crate::{Error, Result, subst};
 
-use super::context::RunContext;
+use super::context::RunState;
 use super::engine::{list_items_from_visible, visible_sections};
 use super::section_vm::{VmSeed, setup_section_vm};
 use super::support::{next_id, now_rfc3339_checked, sys_json};
@@ -115,7 +115,7 @@ impl SectionContext {
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
     pub(crate) fn new(
-        ctx: &RunContext,
+        ctx: &RunState,
         access: &Arc<Access>,
         section: &Section,
         siblings: &[Section],
@@ -196,7 +196,7 @@ impl SectionContext {
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
-    pub(crate) fn new_live_h1(ctx: &RunContext, access: &Arc<Access>) -> Result<Self> {
+    pub(crate) fn new_live_h1(ctx: &RunState, access: &Arc<Access>) -> Result<Self> {
         let title = ctx.prompt().title();
         let now = now_rfc3339_checked()?;
         let sys = sys_json(
@@ -262,7 +262,7 @@ impl SectionContext {
     /// construction phase keeps its own and every path tears down exactly
     /// once.
     pub(crate) fn new_fanout_arm(
-        ctx: &RunContext,
+        ctx: &RunState,
         access: &Arc<Access>,
         worker: &Section,
         home: &[Section],
@@ -390,7 +390,7 @@ impl SectionContext {
     /// # Errors
     /// Returns [`Error::Lua`] if the guard cannot be installed, or
     /// [`Error::Internal`] if the VM is gone.
-    pub(crate) fn install_lazy_prose(&self, ctx: &RunContext, template: &str) -> Result<()> {
+    pub(crate) fn install_lazy_prose(&self, ctx: &RunState, template: &str) -> Result<()> {
         let template = template.to_owned();
         let args = ctx.args().to_owned();
         let item = self.item.clone();
@@ -434,7 +434,7 @@ impl SectionContext {
     /// alias seeding.
     pub(crate) fn script_call_counts(
         &mut self,
-        ctx: &RunContext,
+        ctx: &RunState,
         effective: &[ToolBinding],
     ) -> Result<ToolCallCounts> {
         let Self {
@@ -468,7 +468,7 @@ impl SectionContext {
 /// the `sys` re-seal.
 fn install_section_scope(
     vm: &SectionVm,
-    ctx: &RunContext,
+    ctx: &RunState,
     sys: &mut serde_json::Value,
     counts: &mut Option<ToolCallCounts>,
     effective_bindings: &[ToolBinding],
@@ -495,7 +495,7 @@ fn install_section_scope(
 /// Returns the [`Error`](crate::Error) of whichever step failed.
 fn setup_live_h1(
     vm: &mut SectionVm,
-    ctx: &RunContext,
+    ctx: &RunState,
     access: &Arc<Access>,
     sys: &serde_json::Value,
     title: &str,

@@ -5,11 +5,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use promptforge_api::execute::{ResolutionContext, RunConfig, RunError, run as run_core};
+use promptforge_api::execute::{Environment, RunContext, RunError, RunResult};
 use promptforge_api::parser::Prompt;
 use promptforge_store::{StoreError, StoreExt};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
-use shared_promptforge_api::models::ModelCatalog;
 use shared_promptforge_api::observe::{Observation, Observer};
 use shared_promptforge_api::tools::{Tool, ToolCatalog};
 use shared_vfs::{Origin, VfsRef};
@@ -34,8 +33,8 @@ impl Record {
     }
 }
 
-/// Owned run inputs a fixture supplies: the execution id and an `Arc` observer
-/// so the offline `run` helper can build a [`RunConfig`]. These fixtures never
+/// Owned run inputs a fixture supplies: the run name and an `Arc` observer
+/// so the offline `run` helper can build a [`RunContext`]. These fixtures never
 /// reach a model, so no client or debug sink is configured.
 pub(super) struct RunOptions {
     pub(super) execution: &'static str,
@@ -56,17 +55,16 @@ pub(super) async fn run(
         None,
     )
     .expect("empty fixture picker must build");
-    let models = ModelCatalog::empty();
     let tools = ToolCatalog::new(tools).expect("fixture tools are unique");
-    run_core(
-        prompt,
-        args,
-        ResolutionContext::new(Some(&picker), &models, &tools),
-        RunConfig::new(opts.execution)
-            .observer(opts.observer)
-            .vfs(vfs.clone()),
-    )
-    .await
+    let env = Environment::new().picker(picker).tools(tools);
+    let ctx = RunContext::new(opts.execution)
+        .observer(opts.observer)
+        .vfs(vfs.clone());
+    match env.run(prompt, args, ctx).await {
+        RunResult::Ok(text) => Ok(text),
+        RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),
+        RunResult::Failure(error) => Err(error),
+    }
 }
 
 /// A synchronized observer shared by concurrent fixture runs.
