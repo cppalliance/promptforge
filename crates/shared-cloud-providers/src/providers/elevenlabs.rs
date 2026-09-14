@@ -160,6 +160,9 @@ mod tests {
         );
         assert_eq!(entry.kind, ModelKind::Transcription);
         assert!(!entry.images && !entry.tool_calling);
-        assert!(entry.pricing.is_none(), "character rates are not token pricing");
+        assert!(
+            entry.pricing.is_none(),
+            "character rates are not token pricing"
+        );
     }
 }

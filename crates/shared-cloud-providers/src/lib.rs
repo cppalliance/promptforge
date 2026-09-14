@@ -9,6 +9,9 @@
 use shared_gateway_api::{ModelEntry, Tier};
 
 pub mod providers;
+mod sheet;
+
+pub use sheet::{build_sheet, fetch_sheet};
 
 /// The public descriptor for one provider. Everything else about the
 /// provider - auth header shape, pagination, response mapping - is
@@ -58,6 +61,14 @@ pub enum FetchError {
     /// The HTTP request to the provider failed.
     #[error("provider request failed: {0}")]
     Http(#[from] reqwest::Error),
+    /// The provider's API key is not available in the environment.
+    #[error("missing API key for provider `{name}`: environment variable `{key_env}` is not set")]
+    MissingKey {
+        /// The provider registry key.
+        name: String,
+        /// The environment variable that would carry the key.
+        key_env: &'static str,
+    },
 }
 
 /// Fetch and normalize one provider's model list; the per-provider
@@ -148,8 +159,7 @@ mod tests {
 
     #[test]
     fn all_prime_providers_are_registered() {
-        let registered: BTreeSet<&str> =
-            providers().iter().map(|provider| provider.name).collect();
+        let registered: BTreeSet<&str> = providers().iter().map(|provider| provider.name).collect();
         for &(name, ..) in PRIME {
             assert!(
                 registered.contains(name),

@@ -78,7 +78,9 @@ struct WireModel {
 /// The token for the next page. An absent or empty `nextPageToken` ends
 /// traversal, so a malformed page can never loop the fetch forever.
 fn next_token(page: &Page) -> Option<String> {
-    page.next_page_token.clone().filter(|token| !token.is_empty())
+    page.next_page_token
+        .clone()
+        .filter(|token| !token.is_empty())
 }
 
 /// The upstream model slug: the wire `name` carries a `models/` prefix
@@ -238,7 +240,10 @@ mod tests {
         assert!(!entry.images && !entry.pdf_input);
         assert!(!entry.video_input && !entry.audio_input);
         assert!(!entry.citations && !entry.code_execution && !entry.structured_outputs);
-        assert_eq!(entry.released_at, None, "the endpoint reports no release date");
+        assert_eq!(
+            entry.released_at, None,
+            "the endpoint reports no release date"
+        );
         assert!(entry.effort_levels.is_empty());
         assert_eq!(entry.default_effort, None);
         assert!(entry.pricing.is_none());

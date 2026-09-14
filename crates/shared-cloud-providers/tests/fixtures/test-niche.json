@@ -1,0 +1,24 @@
+[
+  {
+    "id": "curated-m1",
+    "display_name": "Curated M1",
+    "kind": "chat",
+    "released_at": "2026-01-15",
+    "context_window": 64000,
+    "max_output": 4096,
+    "images": false,
+    "pdf_input": false,
+    "video_input": false,
+    "audio_input": false,
+    "batch": false,
+    "citations": false,
+    "code_execution": false,
+    "structured_outputs": false,
+    "tool_calling": false,
+    "thinking": { "supported": false, "enabled": false, "adaptive": false },
+    "effort_levels": [],
+    "default_effort": null,
+    "pricing": null,
+    "deprecation": null
+  }
+]

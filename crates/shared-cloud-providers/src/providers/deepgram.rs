@@ -140,10 +140,7 @@ mod tests {
     fn stt_batch_flag_maps_to_batch_capability() {
         let entries = entries(LIST);
         assert!(entries[0].batch, "the wire batch flag maps to batch");
-        assert!(
-            !entries[1].batch,
-            "TTS entries report no batch capability"
-        );
+        assert!(!entries[1].batch, "TTS entries report no batch capability");
     }
 
     #[test]
