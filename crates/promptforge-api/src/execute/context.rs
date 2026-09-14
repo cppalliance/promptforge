@@ -116,6 +116,22 @@ fn bound_model_set(prompt: &Prompt, ctx: &RunContext) -> ModelSet {
     set
 }
 
+/// Derives a section's `argv` from the args string under the prompt's
+/// declaration: a default-declared prompt wraps the interface prose into
+/// the default shape (`argv.prose`, with the empty string present, not
+/// absent); a structured declaration parses the string as JSON, and a parse
+/// failure or a JSON `null` reads as nil (`if argv then` is the malformed
+/// check). The executor never hard-errors on shape.
+fn derive_argv(prompt: &Prompt, args: &str) -> Option<serde_json::Value> {
+    if prompt.frontmatter().args().is_default() {
+        return Some(serde_json::json!({ "prose": args }));
+    }
+    match serde_json::from_str(args) {
+        Ok(serde_json::Value::Null) | Err(_) => None,
+        Ok(value) => Some(value),
+    }
+}
+
 /// The ambient state one run shares across the execute subtree.
 ///
 /// Immutable for the run's lifetime and cheap to clone: every field is
@@ -140,6 +156,11 @@ pub(crate) struct RunState {
     execution: Arc<str>,
     /// The run's argument string for `{{ args }}` substitution.
     args: Arc<str>,
+    /// The run's `argv`: the parsed form of `args` (`None` installs nil).
+    /// At construction this is the derived value the H1 pass starts from;
+    /// the walk's fork carries the value H1 left behind at the freeze, so
+    /// an H1 repair reaches every downstream section.
+    argv: Option<Arc<serde_json::Value>>,
     /// The run's resource limits.
     limits: RunLimits,
     /// The run's observer handle.
@@ -211,6 +232,7 @@ impl RunState {
             vfs: vfs.clone(),
             execution: Arc::from(ctx.name.as_str()),
             args: Arc::from(args),
+            argv: derive_argv(prompt, args).map(Arc::from),
             limits: ctx.limits,
             observer: Arc::clone(&ctx.observer),
             debug: ctx.debug.clone(),
@@ -251,6 +273,13 @@ impl RunState {
     /// The run's argument string.
     pub(crate) fn args(&self) -> &str {
         &self.args
+    }
+
+    /// The run's `argv`: the parsed form of the args string, or `None`
+    /// (nil) when it did not parse. On the walk this is the value H1 left
+    /// behind at the freeze.
+    pub(crate) fn argv(&self) -> Option<&serde_json::Value> {
+        self.argv.as_deref()
     }
 
     /// The run's resource limits.
@@ -345,24 +374,28 @@ impl RunState {
         self.on_delta.as_ref()
     }
 
-    /// The H1-to-walk handoff: the walk's start timestamp, set on a cheap
-    /// clone so the context H1 saw stays untouched. The tool and model sets
+    /// The H1-to-walk handoff: the walk's start timestamp and the `argv`
+    /// H1 left behind at the freeze, set on a cheap clone so the context
+    /// H1 saw stays untouched. The tool and model sets
     /// need no delta: they were built from the prepared bindings at
     /// construction, and H1's prompt-wide records (`tools.always`,
     /// `models.default`) landed in the same shared sets the views read.
     #[must_use]
-    pub(crate) fn with_walk_state(&self, when: &str) -> Self {
+    pub(crate) fn with_walk_state(&self, when: &str, argv: Option<serde_json::Value>) -> Self {
         let mut ctx = self.clone();
         ctx.when = Arc::from(when);
+        ctx.argv = argv.map(Arc::from);
         ctx
     }
 
     /// The context a contained chain runs under: `args` in place of the
     /// run's own, because a `call` call's explicit input overrides the
-    /// run's args for the chain.
+    /// run's args for the chain - and `argv` re-derives from the chain's
+    /// args, so the chain sees the parsed form of what it was passed.
     #[must_use]
     pub(crate) fn with_args(&self, args: &str) -> Self {
         let mut ctx = self.clone();
+        ctx.argv = derive_argv(&self.prompt, args).map(Arc::from);
         ctx.args = Arc::from(args);
         ctx
     }
@@ -400,6 +433,8 @@ impl RunState {
     ) -> SectionVmSetup<'a> {
         SectionVmSetup {
             args: &self.args,
+            argv: self.argv(),
+            argv_writable: false,
             sys,
             access,
             seed,
@@ -438,6 +473,7 @@ impl fmt::Debug for RunState {
             .field("vfs", &"<VfsRef>")
             .field("execution", &self.execution)
             .field("args", &self.args)
+            .field("argv", &self.argv)
             .field("limits", &self.limits)
             .field("observer", &"<dyn Observer>")
             .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))

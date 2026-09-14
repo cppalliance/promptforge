@@ -307,6 +307,42 @@ fn an_arg_name_must_match_the_alias_grammar() {
 }
 
 #[test]
+fn an_absent_args_key_marks_the_default_declaration() {
+    // No `args:` key: the implicit default declaration, whose interface
+    // prose wraps into `argv.prose`.
+    let prompt = parse("name: x\ndescription: d\n").expect("no args key parses");
+    assert!(
+        prompt.frontmatter().args().is_default(),
+        "an absent args key yields the default declaration"
+    );
+
+    // An explicit `args:` key is a structured declaration, which never
+    // wraps.
+    let prompt = parse("name: x\ndescription: d\nargs:\n  query:\n    type: string\n")
+        .expect("explicit args parse");
+    assert!(!prompt.frontmatter().args().is_default());
+
+    // Even an explicit declaration identical to the default shape is
+    // structured: declared is not defaulted.
+    let prompt = parse(concat!(
+        "name: x\ndescription: d\n",
+        "args:\n",
+        "  prose:\n",
+        "    type: string\n",
+        "    optional: true\n",
+        "    description: Freeform input for this prompt\n",
+    ))
+    .expect("a default-shaped explicit declaration parses");
+    let args = prompt.frontmatter().args();
+    assert!(!args.is_default());
+    assert_ne!(
+        *args,
+        super::ArgsDecl::default(),
+        "an explicit declaration never equals the implicit default"
+    );
+}
+
+#[test]
 fn an_unknown_arg_type_is_rejected() {
     let yaml = "name: x\ndescription: d\nargs:\n  flag:\n    type: text\n";
     let error = parse(yaml).expect_err("an unknown arg type must be rejected");

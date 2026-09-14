@@ -851,7 +851,8 @@ impl<'a> Scheduler<'a> {
     /// result is the shared generic completion.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when the final `var` read-back fails,
+    /// Returns [`Error::Lua`] when the final `var` read-back fails or H1
+    /// left `argv` as non-JSON data,
     /// [`Error::TimestampFormat`] when the walk's `when` fails to format,
     /// [`Error::Store`] when the backend refuses the walk's acquisition,
     /// or [`Error::Internal`] when the chain holds no frame.
@@ -866,6 +867,9 @@ impl<'a> Scheduler<'a> {
             return Err(Error::internal("the H1 pass ends with a live frame"));
         };
         let var = frame.read_var()?;
+        // The freeze: whatever `argv` H1 leaves behind - the derived parse
+        // or its repair - is what every walked section inherits, frozen.
+        let argv = frame.read_argv()?;
         drop(frame);
         // The pass's chain ends here: release its capability (and with it
         // the identity's claims) before the walk acquires its own.
@@ -875,11 +879,11 @@ impl<'a> Scheduler<'a> {
             *root_result = Some(Ok(GENERIC_COMPLETION.to_owned()));
             return Ok(());
         }
-        // The H1-to-walk handoff: the walk's context takes its live `when`;
-        // H1's prompt-wide records already landed in the shared sets the
-        // views read.
+        // The H1-to-walk handoff: the walk's context takes its live `when`
+        // and the frozen `argv`; H1's prompt-wide records already landed in
+        // the shared sets the views read.
         let when = now_rfc3339_checked()?;
-        let walk_ctx = self.ctx.with_walk_state(&when);
+        let walk_ctx = self.ctx.with_walk_state(&when, argv);
         let root = self.start_chain(walk_ctx, sections, start, None, &var, 0, None)?;
         self.install_root_slots(root)?;
         self.ready.push_back(root);
@@ -2028,8 +2032,14 @@ impl<'a> Scheduler<'a> {
                 "call recursion exceeded cap of {MAX_CALL_DEPTH}"
             )));
         }
-        let args = input.unwrap_or_else(|| chain.ctx.args()).to_owned();
-        let child_ctx = chain.ctx.with_args(&args);
+        // An explicit input forks the chain's args (and `argv` re-derives
+        // from them); a no-input call inherits the caller's context whole,
+        // so the run's frozen `argv` - H1's repair included - carries into
+        // the chain rather than re-deriving from the unchanged args.
+        let child_ctx = match input {
+            Some(input) => chain.ctx.with_args(input),
+            None => chain.ctx.clone(),
+        };
         let client = chain.client.clone();
         // A call chain is a blocking child: it borrows the caller's access
         // capability (the same serial thread of execution), so the caller's

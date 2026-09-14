@@ -1944,6 +1944,7 @@ impl RecordingCapture {
     }
 }
 
+mod args_surface;
 mod debug_and_counts;
 mod exec_flow;
 mod exit_rules;

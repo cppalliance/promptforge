@@ -223,7 +223,11 @@ impl SectionContext {
         // excludes nothing and has no children.
         let visible = ctx.prompt().sections().to_vec();
         let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
-        let setup = ctx.vm_setup(&sys, VmSeed::default(), access, title);
+        // H1's one privilege: `argv` installs writable, so the repair
+        // pattern can assign it; the executor reads the value back at the
+        // freeze (see the scheduler's H1-to-walk handoff).
+        let mut setup = ctx.vm_setup(&sys, VmSeed::default(), access, title);
+        setup.argv_writable = true;
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
@@ -366,6 +370,17 @@ impl SectionContext {
         Ok(self.var.clone())
     }
 
+    /// Reads the H1 pass's `argv` back as JSON while the frame is live: the
+    /// value the walk's sections inherit frozen - the derived parse, or H1's
+    /// repair. `None` reads as nil.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`](crate::Error::Lua) when H1 left `argv` as
+    /// non-JSON data, or [`Error::Internal`] if the VM is gone.
+    pub(crate) fn read_argv(&self) -> Result<Option<serde_json::Value>> {
+        self.vm()?.argv_json().map_err(Error::from)
+    }
+
     /// Arms the completion flag: the block walk completed (a jump or
     /// return included) and the final `var` is read back, so the frame's
     /// drop fires `SECTION_FINISHED` after the teardown pair. No error
@@ -397,20 +412,21 @@ impl SectionContext {
     /// [`Error::Internal`] if the VM is gone.
     pub(crate) fn install_lazy_prose(&self, ctx: &RunState, template: &str) -> Result<()> {
         let template = template.to_owned();
-        let args = ctx.args().to_owned();
+        let raw_args = ctx.args().to_owned();
+        let argv = ctx.argv().cloned();
         let item = self.item.clone();
         self.vm()?
             .install_lazy_prose(move |state: ProseState| -> mlua::Result<String> {
                 let globals = |name: &str| (state.globals)(name).map_err(Error::from);
-                subst::substitute(
-                    &template,
-                    &args,
-                    item.as_ref(),
-                    &state.var,
-                    &state.sys,
-                    &globals,
-                )
-                .map_err(mlua::Error::external)
+                let sources = subst::Sources {
+                    args: &raw_args,
+                    argv: argv.as_ref(),
+                    item: item.as_ref(),
+                    var: &state.var,
+                    sys: &state.sys,
+                    globals: &globals,
+                };
+                subst::substitute(&template, &sources).map_err(mlua::Error::external)
             })?;
         Ok(())
     }

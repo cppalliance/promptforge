@@ -51,6 +51,11 @@ pub(crate) struct VmSeed<'a> {
 pub(crate) struct SectionVmSetup<'a> {
     /// The run's argument string, installed as the `args` global.
     pub(crate) args: &'a str,
+    /// The run's `argv` (the parsed form of `args`; `None` installs nil).
+    pub(crate) argv: Option<&'a serde_json::Value>,
+    /// H1 only: `argv` installs writable, so the repair pattern can assign
+    /// it; every other section gets the frozen value.
+    pub(crate) argv_writable: bool,
     /// The `sys` JSON the driver built for this section or arm.
     pub(crate) sys: &'a serde_json::Value,
     /// The chain step's VFS access capability backing the Lua `store`
@@ -107,7 +112,12 @@ where
     if setup.ui.is_some() {
         vm.allow_raw_model_ids();
     }
-    vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var)?;
+    let argv = if setup.argv_writable {
+        crate::lua::Argv::Writable(setup.argv)
+    } else {
+        crate::lua::Argv::Frozen(setup.argv)
+    };
+    vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
     vm.install_host_apis(setup.observer_arc, setup.section_name)?;
     if let Some(provider) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(provider))?;

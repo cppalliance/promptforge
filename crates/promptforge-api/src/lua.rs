@@ -12,7 +12,7 @@
 //! here unchanged, so existing `promptforge_api::lua::*` paths keep working.
 
 pub(crate) use promptforge_lua::{
-    CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageContent, MessageRecord,
+    Argv, CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageContent, MessageRecord,
     MessageRole, OverflowReason, ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts,
     ToolCallRecord, ToolOutputKind, ToolSet, ToolView, UserInputOutcome, append_message_record,
     current_tool_bindings, dispatch_tool, enrich_sys_model, install_section_loop_shim,

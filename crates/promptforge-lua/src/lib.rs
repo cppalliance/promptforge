@@ -83,6 +83,7 @@ pub(crate) fn log_byte_budget(log_events: u32) -> usize {
 }
 
 mod alias;
+mod argv;
 mod collection;
 mod compactors;
 mod error;
@@ -115,6 +116,8 @@ mod runtime_events;
 // The executor-facing surface: every item `promptforge-api` names crosses
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
 // `LuaProgram` is the documented exception.
+#[doc(hidden)]
+pub use crate::argv::Argv;
 #[doc(hidden)]
 pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_overflow, precheck};
 #[doc(hidden)]

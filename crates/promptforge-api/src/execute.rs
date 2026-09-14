@@ -128,9 +128,10 @@ pub enum RunResult {
 /// Executes a parsed prompt and returns its final text.
 ///
 /// H1 is section 0: its Lua and prose blocks run once in source order with
-/// the same surface every section gets (its only privilege, `argv`
-/// writability, arrives with the args/argv step). If H1 does not return,
-/// the H2 section walk runs and its final text is returned.
+/// the same surface every section gets; its only privilege is `argv`
+/// writability - every other section reads the value H1 left behind, frozen.
+/// If H1 does not return, the H2 section walk runs and its final text is
+/// returned.
 ///
 /// The free `run` receives an already-prepared [`RunContext`] and has
 /// nothing to prepare from: a context that never passed through

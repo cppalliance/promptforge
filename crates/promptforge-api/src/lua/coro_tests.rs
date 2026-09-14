@@ -121,6 +121,8 @@ fn scheduler_vm_with_tools(
     );
     let setup = SectionVmSetup {
         args: "",
+        argv: None,
+        argv_writable: false,
         sys: &sys,
         access: &access,
         seed: VmSeed { var, item: None },

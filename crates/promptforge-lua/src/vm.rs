@@ -1,5 +1,5 @@
 use super::{
-    Access, Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
+    Access, Arc, Argv, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
     DEFAULT_LUA_MEMORY_BYTES, Error, Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json,
     Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
     ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer,
@@ -443,7 +443,7 @@ impl SectionVm {
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
     pub fn inject_host(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
-        self.inject_host_with_var(args, sys, access, None)
+        self.inject_host_with_var(args, sys, access, None, Argv::Frozen(None))
     }
 
     /// Installs host values while seeding `var` from an earlier VM.
@@ -456,15 +456,25 @@ impl SectionVm {
     /// spawned identity and a conflicting second live identity surfaces as
     /// a write race.
     ///
+    /// `argv` is the parsed form of the args string, installed per its
+    /// [`Argv`] mode: writable for the H1 pass (whose repaired value the
+    /// executor reads back with [`argv_json`](Self::argv_json)), frozen for
+    /// every other section.
+    ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or were already
     /// injected.
+    #[expect(
+        clippy::similar_names,
+        reason = "args and argv are the spec'd global names; the pair is intentional"
+    )]
     pub fn inject_host_with_var(
         &mut self,
         args: &str,
         sys: &Json,
         access: &Arc<Access>,
         initial_var: Option<&Json>,
+        argv: Argv<'_>,
     ) -> Result<()> {
         if self.host_injected {
             return Err(Error::Lua(
@@ -474,6 +484,10 @@ impl SectionVm {
 
         let globals = self.lua.globals();
         globals.raw_set("args", args).map_err(Error::lua)?;
+        match argv {
+            Argv::Writable(value) => crate::argv::install_writable(&self.lua, value)?,
+            Argv::Frozen(value) => crate::argv::install_frozen(&self.lua, value)?,
+        }
         let sys_table = seal_sys(&self.lua, sys)?;
         globals.raw_set("sys", sys_table).map_err(Error::lua)?;
         {
@@ -816,6 +830,26 @@ impl SectionVm {
             Value::Nil => Ok(None),
             Value::Function(_) | Value::UserData(_) | Value::Thread(_) => Err(Error::Lua(format!(
                 "global `{name}` is a {}; bare globals in prose must be JSON data",
+                value.type_name()
+            ))),
+            other => Ok(Some(self.lua.from_value(other).map_err(Error::lua)?)),
+        }
+    }
+
+    /// Reads the `argv` global back as JSON at the H1 freeze: `None` when
+    /// nil, its JSON form otherwise. Call this on the H1 VM only - a frozen
+    /// section's `argv` sits behind the guard proxy, which is not the
+    /// read-back path.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when H1 left `argv` as a function, userdata,
+    /// or thread, or when its value cannot be represented as JSON.
+    pub fn argv_json(&self) -> Result<Option<Json>> {
+        let value: Value = self.lua.globals().get("argv").map_err(Error::lua)?;
+        match value {
+            Value::Nil => Ok(None),
+            Value::Function(_) | Value::UserData(_) | Value::Thread(_) => Err(Error::Lua(format!(
+                "argv must be JSON data, got {}",
                 value.type_name()
             ))),
             other => Ok(Some(self.lua.from_value(other).map_err(Error::lua)?)),

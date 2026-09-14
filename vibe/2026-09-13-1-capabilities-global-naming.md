@@ -996,7 +996,7 @@ In `promptforge-lua`: `tools.bind` removed entirely (binding is frontmatter), `m
 
 <step-14>
 
-### Step 14: args/argv surface and substitution
+### Step 14: args/argv surface and substitution [completed]
 
 - Component: binding
 

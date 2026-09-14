@@ -135,9 +135,21 @@ impl<'de> Deserialize<'de> for ArgDecl {
 #[non_exhaustive]
 pub struct ArgsDecl {
     fields: BTreeMap<String, ArgDecl>,
+    /// True only when the declaration is the implicit default (the `args:`
+    /// key was absent): interface prose wraps into `argv.prose`. An
+    /// explicit `args:` key - even one identical to the default shape - is
+    /// a structured declaration and never wraps.
+    implicit: bool,
 }
 
 impl ArgsDecl {
+    /// Returns whether this declaration is the implicit default (no `args:`
+    /// key), whose interface prose wraps into `argv.prose`.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.implicit
+    }
+
     /// Returns the declaration of the arg named `name`, when present.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&ArgDecl> {
@@ -175,7 +187,10 @@ impl Default for ArgsDecl {
                 description: Some("Freeform input for this prompt".to_owned()),
             },
         );
-        ArgsDecl { fields }
+        ArgsDecl {
+            fields,
+            implicit: true,
+        }
     }
 }
 
@@ -185,6 +200,9 @@ impl<'de> Deserialize<'de> for ArgsDecl {
         D: serde::Deserializer<'de>,
     {
         let fields = deserialize_contract_map(deserializer, "arg name", None)?;
-        Ok(ArgsDecl { fields })
+        Ok(ArgsDecl {
+            fields,
+            implicit: false,
+        })
     }
 }
