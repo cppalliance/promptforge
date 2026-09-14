@@ -600,7 +600,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 <step-4>
 
-### Step 4: anthropic provider file
+### Step 4: anthropic provider file [completed]
 
 - Component: shared-cloud-providers
 - Add `src/providers/anthropic.rs`: public `Provider` descriptor plus private variance - `x-api-key` and required `anthropic-version` headers, cursor pagination, and normalization of the verified response shape (`id`, `display_name`, `created_at`, `max_input_tokens`, `max_tokens`, `capabilities`) into `ModelEntry`.

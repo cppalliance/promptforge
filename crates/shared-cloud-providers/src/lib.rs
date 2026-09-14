@@ -8,6 +8,8 @@
 
 use shared_gateway_api::{ModelEntry, Tier};
 
+pub mod providers;
+
 /// The public descriptor for one provider. Everything else about the
 /// provider - auth header shape, pagination, response mapping - is
 /// private to its file.
@@ -29,7 +31,7 @@ pub struct Provider {
 /// Every known provider.
 #[must_use]
 pub fn providers() -> &'static [Provider] {
-    &[]
+    &[providers::anthropic::PROVIDER]
 }
 
 /// A failed provider fetch or sheet download. Never fatal to a sheet
@@ -56,18 +58,17 @@ pub enum FetchError {
 /// Returns [`FetchError::UnsupportedProvider`] when the registry has no
 /// fetch implementation for the provider, and [`FetchError::Http`] when
 /// the provider request fails.
-// The async signature is the contract seam; the provider files added by
-// later steps supply the awaits.
-#[allow(clippy::unused_async)]
 pub async fn fetch_models(
     client: &reqwest::Client,
     provider: &Provider,
     key: &str,
 ) -> Result<Vec<ModelEntry>, FetchError> {
-    let _ = (client, key);
-    Err(FetchError::UnsupportedProvider {
-        name: provider.name.to_owned(),
-    })
+    match provider.name {
+        "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
+        _ => Err(FetchError::UnsupportedProvider {
+            name: provider.name.to_owned(),
+        }),
+    }
 }
 
 #[cfg(test)]
