@@ -5,7 +5,7 @@ use shared_promptforge_api::untrusted::GuardNonce;
 
 use super::decode::{add_local_params_schema, collect_tools_add_entries, tool_alias};
 use super::userdata::LuaToolHandle;
-use super::{install_h2_tools, install_tool_call_counts};
+use super::{install_tool_call_counts, install_tools};
 use crate::handles::{LuaFanoutResult, ToolSet};
 use crate::scope::ToolRuntime;
 use crate::{SectionVm, ToolBinding};
@@ -144,51 +144,48 @@ fn add_local_params_schema_rejects_an_unsupported_type() {
     );
 }
 
-/// Installs the H2 namespace on a fresh VM and returns it.
-fn lua_with_h2_tools() -> Lua {
+/// Installs the tools namespace on a fresh VM and returns it.
+fn lua_with_tools() -> Lua {
     let lua = Lua::new();
     let globals = lua.globals();
     let runtime = Arc::new(Mutex::new(ToolRuntime {
         added: Vec::new(),
         description_overrides: std::collections::BTreeMap::default(),
     }));
-    install_h2_tools(
+    install_tools(
         &lua,
         &globals,
-        &ToolSet::default(),
+        &Arc::new(Mutex::new(ToolSet::default())),
         &runtime,
         &crate::vm::LocalTools::default(),
     )
-    .expect("the H2 tools install cannot fail on a fresh VM");
+    .expect("the tools install cannot fail on a fresh VM");
     lua
 }
 
 #[test]
-fn the_h2_namespace_carries_declaration_scoping_and_no_call_yet() {
+fn the_tools_namespace_carries_scoping_and_no_bind_or_call() {
     // `call` is absent here on purpose: it suspends, so the coroutine shim
     // prelude installs it - this table carries exactly the non-suspending
-    // operations.
-    let lua = lua_with_h2_tools();
-    let (has_add, has_add_local, call_is_nil): (bool, bool, bool) = lua
+    // operations. `bind` is gone entirely: binding is the frontmatter's.
+    let lua = lua_with_tools();
+    let (has_add, has_add_local, has_always, call_is_nil, bind_is_nil): (
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+    ) = lua
         .load(
             "return type(tools.add) == 'function', \
                     type(tools.add_local) == 'function', \
-                    tools.call == nil",
+                    type(tools.always) == 'function', \
+                    tools.call == nil, \
+                    tools.bind == nil",
         )
         .eval()
         .expect("the namespace probe evaluates");
-    assert!(has_add && has_add_local && call_is_nil);
-    let bind_error = lua
-        .load("local ok, err = pcall(tools.bind, 'x', 'y'); return not ok, tostring(err)")
-        .eval::<(bool, String)>()
-        .expect("the bind stub raises");
-    assert!(bind_error.0);
-    assert!(
-        bind_error
-            .1
-            .contains("tools.bind is only available during live H1 execution"),
-        "the H1-only operations stay forbidden in a section: {bind_error:?}"
-    );
+    assert!(has_add && has_add_local && has_always && call_is_nil && bind_is_nil);
 }
 
 #[test]
@@ -212,7 +209,7 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
 
 #[test]
 fn tool_call_counts_seed_read_and_reject_unknown_keys() {
-    let lua = lua_with_h2_tools();
+    let lua = lua_with_tools();
     let bound = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "echo",

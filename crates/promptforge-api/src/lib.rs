@@ -80,7 +80,6 @@ pub(crate) mod lua;
 pub(crate) mod model;
 pub(crate) mod observe;
 pub mod parser;
-mod resolve;
 pub(crate) mod store;
 pub(crate) mod subst;
 #[cfg(test)]

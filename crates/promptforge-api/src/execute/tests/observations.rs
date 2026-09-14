@@ -18,14 +18,6 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
         events(&records),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
-            (
-                "Test prompt".to_string(),
-                detail::LUA_TEARDOWN_STARTED.to_string(),
-            ),
-            (
-                "Test prompt".to_string(),
-                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
-            ),
             ("First".to_string(), detail::SECTION_STARTED.to_string()),
             (
                 "First".to_string(),
@@ -161,14 +153,6 @@ async fn a_failing_run_still_reports_run_finished() {
         events(&records),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
-            (
-                "Test prompt".to_string(),
-                detail::LUA_TEARDOWN_STARTED.to_string(),
-            ),
-            (
-                "Test prompt".to_string(),
-                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
-            ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             (
                 "Only".to_string(),
@@ -243,8 +227,8 @@ async fn an_erroring_section_tears_down_exactly_once_without_finishing() {
 #[tokio::test]
 async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
     // mlua accepts the one-byte ceiling itself, then the first host allocation
-    // fails. Host injection is inside the H1 teardown boundary, unlike the
-    // preceding bare apply_lua_limits call.
+    // fails. Host injection is inside the section's teardown boundary, unlike
+    // the preceding bare apply_lua_limits call.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());
@@ -262,13 +246,11 @@ async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
 
     let observed = events(&recorder.records());
     assert!(
-        observed.contains(&(
-            "Test prompt".to_owned(),
-            detail::LUA_TEARDOWN_STARTED.to_string()
-        )) && observed.contains(&(
-            "Test prompt".to_owned(),
-            detail::LUA_TEARDOWN_SUCCEEDED.to_string()
-        )),
+        observed.contains(&("Only".to_owned(), detail::LUA_TEARDOWN_STARTED.to_string()))
+            && observed.contains(&(
+                "Only".to_owned(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string()
+            )),
         "host injection failure must fire both teardown observations: {observed:?}"
     );
 }
@@ -282,36 +264,26 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         "canonical_echo",
         "Echo a test value.",
     ));
-    let descriptor = ToolDescriptor::new(
-        PickerToolId::parse("tests/tools/echo").expect("fixture id is valid"),
-        tool.description(),
-        tool.parameters_schema(),
-    );
-    let capability =
-        serde_json::to_string(&capability_for(&descriptor)).expect("serialize fixture capability");
-    let source = format!(
-        "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\n---\n\n\
+    let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Lifecycle\n\n```lua\n\
-         tools.bind('echo', {capability})\n\
          tools.always('echo')\n\
-         models.default('writer', 'A general model for tests')\n```\n\n\
+         models.default('writer')\n```\n\n\
          ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\
          Use the echo tool.\n\n\
          ```lua\n\
          local text = models.infer(prose)\n\
-         local _ = tools.call('echo', {{ value = 'hi' }})\n\
+         local _ = tools.call('echo', { value = 'hi' })\n\
          store.append('state.txt', '\\nafter')\n\
          return text\n\
-         ```\n"
-    );
+         ```\n";
     let recorder = Arc::new(Recorder::default());
-    let prompt = Prompt::parse(&source, EXECUTION, recorder.as_ref())
+    let prompt = Prompt::parse(source, EXECUTION, recorder.as_ref())
         .expect("the lifecycle fixture must parse");
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
     let prompt = TestPrompt {
         prompt,
         models: test_model_catalog(),
-        picker_catalog: Some(Catalog::new(vec![descriptor])),
+        picker_catalog: None,
     };
     let store = TestStore::new();
 

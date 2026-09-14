@@ -33,9 +33,8 @@ pub use models::{ModelKeyword, ModelRole, ModelRoles};
 ///
 /// Aliases are the only names a model ever sees - tool slot aliases, model
 /// labels, and args field names are all prompt-local and never global
-/// names. (The same rule lives in `promptforge-lua`'s live binding and
-/// model decode paths; the survey's consolidation note applies when those
-/// files are touched.)
+/// names. (The same rule lives in `promptforge-lua`'s `alias` module, the
+/// run-time counterpart to this parse-time check.)
 fn is_valid_alias(alias: &str) -> bool {
     let bytes = alias.as_bytes();
     (1..=64).contains(&bytes.len())

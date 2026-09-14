@@ -15,6 +15,7 @@
 )]
 
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_lua::{
@@ -34,8 +35,8 @@ const SECTION: &str = "Bench";
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        &ToolSet::default(),
-        &ModelSet::default(),
+        &Arc::new(Mutex::new(ToolSet::default())),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         SECTION,

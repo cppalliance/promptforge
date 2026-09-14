@@ -31,10 +31,6 @@ const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
 /// this stash there.
 const CHAT_REGISTRY: &str = "promptforge.impl_coro.chat";
 
-/// The registry key for the shim's `infer`, stashed by the live H1 base
-/// install so each H1 block's fresh live models table can receive it.
-const INFER_REGISTRY: &str = "promptforge.impl_coro.infer";
-
 /// The registry key for the shim's `loop`, stashed by the prelude install so
 /// a section VM's host can install it as `models.loop`. The registry is
 /// host-side only: an agent VM's `models.loop` stays nil because nothing
@@ -48,8 +44,8 @@ const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 const USER_INPUT_REGISTRY: &str = "promptforge.impl_coro.user_input";
 
 /// The registry key for the shim's store function table, stashed by the
-/// prelude and the live H1 base install so the executor can install the
-/// store yield shims onto a VM's `store` table. The registry is host-side
+/// prelude install so the executor can install the store yield shims onto a
+/// VM's `store` table. The registry is host-side
 /// only: an agent VM never installs them, so its store table keeps the
 /// direct closures - the agent driver is a single-identity loop with no
 /// interleaving for the claims model to govern.
@@ -177,45 +173,6 @@ pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
     models.raw_set("chat", chat).map_err(Error::lua)
 }
 
-/// Installs the live H1 shim base: the coroutine standard library for the
-/// yield capture, and the shim prelude's `infer` stashed in the registry so
-/// each H1 block's fresh live models table can receive it through
-/// [`shim_live_h1_models`].
-///
-/// The H1 control stubs are untouched: `call`/`fanout`/`jump`/
-/// `list_from_section` keep raising before anything can yield. H1's live
-/// models table does not exist at construction (the capability resolvers
-/// install it per block), so the prelude runs with nil namespace tables and
-/// only its captures are taken.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
-/// install step fails.
-pub fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
-    lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
-    let globals = lua.globals();
-    let coroutine: Table = globals.raw_get("coroutine").map_err(Error::lua)?;
-    let yield_fn: Function = coroutine.raw_get("yield").map_err(Error::lua)?;
-    let var_snapshot = lua
-        .create_function(|lua, ()| var_snapshot_table(lua).map_err(mlua::Error::external))
-        .map_err(Error::lua)?;
-    let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
-    let shims: Table = program
-        .load(lua)?
-        .call((yield_fn, var_snapshot, Value::Nil, Value::Nil))
-        .map_err(Error::lua)?;
-    let infer: Function = shims.raw_get("infer").map_err(Error::lua)?;
-    lua.set_named_registry_value(INFER_REGISTRY, infer)
-        .map_err(Error::lua)?;
-    let store: Table = shims.raw_get("store").map_err(Error::lua)?;
-    lua.set_named_registry_value(STORE_REGISTRY, store)
-        .map_err(Error::lua)?;
-    globals
-        .raw_set("coroutine", Value::Nil)
-        .map_err(Error::lua)?;
-    Ok(())
-}
-
 /// Installs the store yield shims onto a VM's `store` table, replacing the
 /// direct closures the host API install put there. Every store operation
 /// then suspends the block as a leaf yield the driver answers against the
@@ -229,9 +186,8 @@ pub fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
 /// store table keeps the direct closures.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the shim prelude (or the live H1 base
-/// install) never ran on this VM, the `store` table is absent, or the
-/// install fails.
+/// Returns [`Error::Lua`] if the shim prelude never ran on this VM, the
+/// `store` table is absent, or the install fails.
 pub fn install_store_shims(lua: &Lua) -> Result<()> {
     let shims: Table = lua
         .named_registry_value(STORE_REGISTRY)
@@ -242,24 +198,4 @@ pub fn install_store_shims(lua: &Lua) -> Result<()> {
         store.raw_set(name, function).map_err(Error::lua)?;
     }
     Ok(())
-}
-
-/// Gives one live H1 block's freshly installed live models table the yield
-/// shim as its `models.infer`.
-///
-/// Reapplied on every H1 coroutine step: the capability resolvers install
-/// a fresh live models table per step's scope, so each resume re-installs
-/// the shim on the fresh table before the thread runs again. The handles
-/// `models.bind`/`models.default` return are plain userdata: invocation is
-/// namespace-only, `models.infer(handle?, prompt)`.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the base install never ran on this VM or the
-/// live models table is absent.
-pub fn shim_live_h1_models(lua: &Lua) -> Result<()> {
-    let infer: Function = lua
-        .named_registry_value(INFER_REGISTRY)
-        .map_err(Error::lua)?;
-    let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
-    models.raw_set("infer", infer).map_err(Error::lua)
 }

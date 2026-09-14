@@ -3,7 +3,7 @@
 //! A capability is the activation unit: code that runs at run setup and
 //! makes services available to the run. Capabilities are delivered in packs
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
-//! [`GlobalName`](crate::names::GlobalName) - kind is encoded by arity, so a
+//! [`GlobalName`] - kind is encoded by arity, so a
 //! capability id is `namespace/pack` and every tool it contributes lives
 //! under `namespace/pack/name`. At prepare time the executor activates each
 //! declared capability by calling [`Capability::create`] with the run's

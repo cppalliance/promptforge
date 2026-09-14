@@ -115,8 +115,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     );
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        &bindings,
-        &ModelSet::default(),
+        &Arc::new(Mutex::new(bindings)),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         "Only",
@@ -140,7 +140,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     .expect("the add chunk must compile");
     vm.run_chunk(&add, &NullObserver::default(), "Only")
         .expect("tools.add must succeed");
-    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, dispatch) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");

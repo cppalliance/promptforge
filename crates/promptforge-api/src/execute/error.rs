@@ -114,23 +114,13 @@ impl RunError {
             Error::Internal { .. } | Error::TimestampFormat(_) => RunErrorKind::Internal,
             Error::Store(_) => RunErrorKind::Store,
             Error::Determinism(_) => RunErrorKind::Determinism,
-            Error::Bind { .. }
-            | Error::BindSchema { .. }
-            | Error::BindQuery { .. }
-            | Error::Absent { .. }
-            | Error::Duplicate { .. }
-            | Error::Ambiguous { .. }
-            | Error::DuplicateAlias { .. }
-            | Error::ToolIdSelectedTwice { .. }
-            | Error::PickedToolNotLive { .. }
-            | Error::ToolScopeAnalysisSource { .. }
+            Error::BindSchema { .. }
             | Error::NearDuplicateTools { .. }
             | Error::ModelBind { .. }
             | Error::ModelBindQuery { .. }
             | Error::ModelAbsent { .. }
             | Error::ModelDuplicate { .. }
             | Error::ModelAmbiguous { .. }
-            | Error::DuplicateModelAlias { .. }
             | Error::ModelRequired { .. } => RunErrorKind::Binding,
         }
     }

@@ -11,7 +11,6 @@
 
 use promptforge_model_client::Error as GatewayClientError;
 use promptforge_model_client::model::ModelId;
-use shared_promptforge_api::tools::ToolId;
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -153,102 +152,6 @@ pub enum Error {
     /// successful fall-through.
     #[error("internal invariant violated: {0}")]
     Internal(&'static str),
-
-    /// One prompt-local alias was declared more than once.
-    #[error("tool alias {alias:?} was declared more than once")]
-    DuplicateAlias {
-        /// The exact case-sensitive alias declared by the prompt.
-        alias: String,
-    },
-
-    /// A picker-selected stable identity is not callable in the live tool
-    /// catalog.
-    #[error(
-        "alias {alias:?} selected tool identity {id:?}, which is absent from the live tool catalog"
-    )]
-    PickedToolNotLive {
-        /// The prompt-local alias whose selection cannot be fulfilled.
-        alias: String,
-        /// The selected stable identity absent from the catalog.
-        id: ToolId,
-    },
-
-    /// Two prompt-local aliases selected the same stable tool identity.
-    #[error(
-        "tool identity {id:?} was selected by both aliases {first_alias:?} and {second_alias:?}"
-    )]
-    ToolIdSelectedTwice {
-        /// The stable identity selected more than once.
-        id: ToolId,
-        /// The first alias in declaration order.
-        first_alias: String,
-        /// The later conflicting alias.
-        second_alias: String,
-    },
-
-    /// The concrete picker failed while resolving a capability declaration.
-    #[error("tool capability binding failure for {capability:?}: {detail}")]
-    Bind {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The picker failure without exposing its concrete error type.
-        detail: String,
-    },
-
-    /// The picker's query failed while resolving a capability, retaining the
-    /// picker's own typed error as the private `#[source]` cause (resolve F4)
-    /// so the failure chain survives the resolution cache instead of being
-    /// flattened to a string.
-    #[error("tool capability binding failure for {capability:?}: {source}")]
-    BindQuery {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The picker's typed query failure, kept as a shareable cause.
-        #[source]
-        source: SharedSource,
-    },
-
-    /// No picker catalog entry matched a declared capability.
-    #[error("no tool matches capability {capability:?}")]
-    Absent {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-    },
-
-    /// One server published duplicate matches for a declared capability.
-    #[error("duplicate tools match capability {capability:?}: {candidates:?}")]
-    Duplicate {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<ToolId>,
-    },
-
-    /// The picker could not choose uniquely among capability matches.
-    #[error("ambiguous tools match capability {capability:?}: {candidates:?}")]
-    Ambiguous {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<ToolId>,
-    },
-
-    /// The picker's near-duplicate analysis of the selected tool scope failed,
-    /// retaining the picker's typed selection error as the private `#[source]`
-    /// cause (F5) rather than flattening it into `detail`.
-    #[error("selected tool-scope analysis failure")]
-    ToolScopeAnalysisSource {
-        /// The picker's typed selection failure, kept as the cause.
-        #[source]
-        source: BoxedSource,
-    },
-
-    /// One prompt-local model alias was declared more than once.
-    #[error("model alias {alias:?} was declared more than once")]
-    DuplicateModelAlias {
-        /// The exact case-sensitive alias declared by the prompt.
-        alias: String,
-    },
 
     /// The concrete picker failed while resolving a model capability declaration.
     #[error("model capability binding failure for {capability:?}: {detail}")]

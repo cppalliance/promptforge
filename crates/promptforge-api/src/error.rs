@@ -239,16 +239,6 @@ pub(crate) enum Error {
         source: BoxedSource,
     },
 
-    /// The concrete picker failed while resolving a capability declaration.
-    #[error("tool capability binding failure for {capability:?}: {detail}")]
-    #[non_exhaustive]
-    Bind {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The picker failure without exposing its concrete error type.
-        detail: String,
-    },
-
     /// Building a model-facing tool schema for a bound alias failed, retaining
     /// the schema validation error as the private `#[source]` cause (F5) rather
     /// than flattening it into `detail`.
@@ -261,94 +251,6 @@ pub(crate) enum Error {
         /// The prompt-local alias whose schema could not be built.
         alias: String,
         /// The originating schema validation failure, kept as the cause.
-        #[source]
-        source: BoxedSource,
-    },
-
-    /// The picker's query failed while resolving a capability, retaining the
-    /// picker's own typed error as the private `#[source]` cause (resolve F4)
-    /// so the failure chain survives the resolution cache instead of being
-    /// flattened to a string.
-    #[error("tool capability binding failure for {capability:?}: {source}")]
-    #[non_exhaustive]
-    BindQuery {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The picker's typed query failure, kept as a shareable cause.
-        #[source]
-        source: SharedSource,
-    },
-
-    /// No picker catalog entry matched a declared capability.
-    #[error("no tool matches capability {capability:?}")]
-    #[non_exhaustive]
-    Absent {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-    },
-
-    /// One server published duplicate matches for a declared capability.
-    #[error("duplicate tools match capability {capability:?}: {candidates:?}")]
-    #[non_exhaustive]
-    Duplicate {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<crate::tools::ToolId>,
-    },
-
-    /// The picker could not choose uniquely among capability matches.
-    #[error("ambiguous tools match capability {capability:?}: {candidates:?}")]
-    #[non_exhaustive]
-    Ambiguous {
-        /// The exact capability description passed to `tools.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<crate::tools::ToolId>,
-    },
-
-    /// One prompt-local alias was declared more than once.
-    #[error("tool alias {alias:?} was declared more than once")]
-    #[non_exhaustive]
-    DuplicateAlias {
-        /// The exact case-sensitive alias declared by the prompt.
-        alias: String,
-    },
-
-    /// Two prompt-local aliases selected the same stable tool identity.
-    #[error(
-        "tool identity {id:?} was selected by both aliases {first_alias:?} and {second_alias:?}"
-    )]
-    #[non_exhaustive]
-    ToolIdSelectedTwice {
-        /// The stable identity selected more than once.
-        id: crate::tools::ToolId,
-        /// The first alias in declaration order.
-        first_alias: String,
-        /// The later conflicting alias.
-        second_alias: String,
-    },
-
-    /// A picker-selected stable identity is not callable in the live tool
-    /// catalog.
-    #[error(
-        "alias {alias:?} selected tool identity {id:?}, which is absent from the live tool catalog"
-    )]
-    #[non_exhaustive]
-    PickedToolNotLive {
-        /// The prompt-local alias whose selection cannot be fulfilled.
-        alias: String,
-        /// The selected stable identity absent from the catalog.
-        id: crate::tools::ToolId,
-    },
-
-    /// The picker's near-duplicate analysis of the selected tool scope failed,
-    /// retaining the picker's typed selection error as the private `#[source]`
-    /// cause (F5) rather than flattening it into a string.
-    #[error("selected tool-scope analysis failure")]
-    #[non_exhaustive]
-    ToolScopeAnalysisSource {
-        /// The picker's typed selection failure, kept as the cause.
         #[source]
         source: BoxedSource,
     },
@@ -421,14 +323,6 @@ pub(crate) enum Error {
         candidates: Vec<crate::model::ModelId>,
     },
 
-    /// One prompt-local model alias was declared more than once.
-    #[error("model alias {alias:?} was declared more than once")]
-    #[non_exhaustive]
-    DuplicateModelAlias {
-        /// The exact case-sensitive alias declared by the prompt.
-        alias: String,
-    },
-
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     ///
     /// Carries a typed [`crate::subst::SubstitutionError`] with a stable kind,
@@ -446,7 +340,7 @@ pub(crate) enum Error {
     /// This is the model tool loop's error alone: a script `tools.call`
     /// resolves against the run's full bound catalog and fails with
     /// [`Error::UnboundToolCall`] instead.
-    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.bind but not added to this section's scope)" } else { "" })]
+    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias is a bound tool slot but was not added to this section's scope)" } else { "" })]
     #[non_exhaustive]
     OutOfScopeToolCall {
         /// The alias or identifier the model tried to use.
@@ -631,6 +525,7 @@ impl Error {
 
     /// Wrap an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
     /// `#[source]` cause (F4) rather than flattening it to a string.
+    #[cfg(test)]
     pub(crate) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
             message: source.to_string(),
@@ -782,38 +677,6 @@ impl From<LuaError> for Error {
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
             LuaError::Internal(message) => Error::internal(message),
-            LuaError::DuplicateAlias { alias } => Error::DuplicateAlias { alias },
-            LuaError::PickedToolNotLive { alias, id } => Error::PickedToolNotLive { alias, id },
-            LuaError::ToolIdSelectedTwice {
-                id,
-                first_alias,
-                second_alias,
-            } => Error::ToolIdSelectedTwice {
-                id,
-                first_alias,
-                second_alias,
-            },
-            LuaError::Bind { capability, detail } => Error::Bind { capability, detail },
-            LuaError::BindQuery { capability, source } => Error::BindQuery { capability, source },
-            LuaError::Absent { capability } => Error::Absent { capability },
-            LuaError::Duplicate {
-                capability,
-                candidates,
-            } => Error::Duplicate {
-                capability,
-                candidates,
-            },
-            LuaError::Ambiguous {
-                capability,
-                candidates,
-            } => Error::Ambiguous {
-                capability,
-                candidates,
-            },
-            LuaError::ToolScopeAnalysisSource { source } => {
-                Error::ToolScopeAnalysisSource { source }
-            }
-            LuaError::DuplicateModelAlias { alias } => Error::DuplicateModelAlias { alias },
             LuaError::ModelBind { capability, detail } => Error::ModelBind { capability, detail },
             LuaError::ModelBindQuery { capability, source } => {
                 Error::ModelBindQuery { capability, source }
@@ -907,11 +770,6 @@ mod tests {
             "model-facing schema build failure for tool alias \"echo\""
         );
         assert_source_survives_run_error(bind);
-
-        let analysis = Error::ToolScopeAnalysisSource {
-            source: Box::new(std::io::Error::other("picker selection failed")),
-        };
-        assert_source_survives_run_error(analysis);
     }
 
     #[test]

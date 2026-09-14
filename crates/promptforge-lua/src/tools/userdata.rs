@@ -1,19 +1,19 @@
-//! Inspectable Tool object returned by Lua `tools.bind`.
+//! Inspectable Tool object for a bound slot.
 //!
 //! Presentation only: the userdata exposes a bound tool's fields to Lua and
 //! serves as the leading handle argument to `tools.call`. Authors read
 //! `.name`, `.description`, `.parameters`, `.wire_name`, and `.untrusted`.
 //! The object is frozen and methodless (A9): model-facing description
-//! overrides are positional arguments to `tools.bind` / `tools.always` /
-//! `tools.add`, never assignments on this handle, and invocation is
-//! namespace-only through `tools.call(alias_or_tool, arguments)`. Existing
+//! overrides are positional arguments to `tools.always` / `tools.add`,
+//! never assignments on this handle, and invocation is namespace-only
+//! through `tools.call(alias_or_tool, arguments)`. Existing
 //! callers that ignore the return value keep working.
 
 use mlua::{LuaSerdeExt, MetaMethod, UserData, UserDataFields, UserDataMethods, Value};
 use serde_json::{Value as Json, json};
-use shared_promptforge_api::tools::{Tool, ToolId};
+use shared_promptforge_api::tools::ToolId;
 
-/// Inspectable Tool object returned by Lua `tools.bind`.
+/// Inspectable Tool object for a bound slot.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LuaToolHandle {
     name: String,
@@ -39,23 +39,6 @@ impl LuaToolHandle {
             description: description.into(),
             parameters: json!({}),
             wire_name: id.name().to_owned(),
-            untrusted: false,
-        }
-    }
-
-    /// Builds a handle from a live tool and its prompt-local binding metadata.
-    pub(crate) fn from_live_binding(
-        alias: impl Into<String>,
-        description: impl Into<String>,
-        tool: &dyn Tool,
-    ) -> Self {
-        Self {
-            name: alias.into(),
-            description: description.into(),
-            parameters: tool.parameters_schema(),
-            wire_name: tool.wire_name().to_owned(),
-            // Trust is now carried per-call in `ToolOutput`, not a static
-            // per-tool flag; the executor wraps untrusted results at dispatch.
             untrusted: false,
         }
     }

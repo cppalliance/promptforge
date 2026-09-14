@@ -16,11 +16,10 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     .await;
     let addr = gateway.addr();
 
-    let source = "---\nname: unified\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: unified\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
         # Unified\n\n\
         ```lua\n\
-        tools.bind('echo', 'echo capability')\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         ```\n\n\
         ## Draft\n\n\
         Summarize in one word: {{ args }}\n\n\

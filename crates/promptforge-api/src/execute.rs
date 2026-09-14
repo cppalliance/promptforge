@@ -29,8 +29,9 @@
 //! a decision, so passing [`NullObserver`](shared_promptforge_api::observe::NullObserver) changes nothing but
 //! the silence.
 //!
-//! Rust installs tool bindings captured from live H1 into each section VM.
-//! Prompt-wide aliases and H2 additions form the effective model-visible scope,
+//! Rust installs the run's filled tool and model slots - bound at prepare
+//! from the frontmatter - into each section VM. Prompt-wide aliases and
+//! section additions form the effective model-visible scope,
 //! which is checked for semantic near-duplicates before concrete tools are
 //! advertised under their local aliases and dispatched through the
 //! implementation each binding carries.
@@ -98,7 +99,6 @@ pub use bindings::{ModelBindings, ToolBindings};
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
-pub(crate) use gateway::ResolutionContext;
 pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
 
 use context::RunState;
@@ -127,14 +127,15 @@ pub enum RunResult {
 
 /// Executes a parsed prompt and returns its final text.
 ///
-/// H1 Lua and prose blocks run once in source order with full host access;
-/// capability calls resolve when executed. If H1 does not return, the H2 section
-/// walk runs and its final text is returned.
+/// H1 is section 0: its Lua and prose blocks run once in source order with
+/// the same surface every section gets (its only privilege, `argv`
+/// writability, arrives with the args/argv step). If H1 does not return,
+/// the H2 section walk runs and its final text is returned.
 ///
 /// The free `run` receives an already-prepared [`RunContext`] and has
 /// nothing to prepare from: a context that never passed through
-/// [`Environment::prepare`] runs capability-free (no picker, empty
-/// catalogs). Hosts normally go through [`Environment::run`], the
+/// [`Environment::prepare`] runs capability-free (empty tool and model
+/// sets). Hosts normally go through [`Environment::run`], the
 /// zero-burden path.
 ///
 /// # Outcomes
@@ -256,31 +257,16 @@ pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
         client,
         cancel,
         limits,
-        resolution,
         ..
     } = ctx;
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
     observer.observe(&name, prompt.title(), detail::RUN_STARTED);
 
-    // A context that never passed through `Environment::run` carries no
-    // resolution inputs and runs capability-free: no picker, empty catalogs.
-    let resolution = resolution.unwrap_or_default();
-    let live = ResolutionContext::new(
-        resolution.picker.as_deref(),
-        &resolution.models,
-        &resolution.tools,
-    );
-
     // Boxed: the driver future carries the whole scheduler step machinery,
     // and `run`'s own future must stay small for its callers (the
     // workspace's large-futures lint gates every one of them).
-    let run_body = Box::pin(async {
-        Scheduler::new(&state, client)
-            .with_live_h1(live)
-            .drive()
-            .await
-    });
+    let run_body = Box::pin(async { Scheduler::new(&state, client).drive().await });
 
     // Explicit cancellation: when the caller supplies a handle it is installed
     // for the run so cooperative cancel checks observe it; without one the run

@@ -1065,6 +1065,25 @@ const DECLARES_OPTIONAL_FUZZY: &str = concat!(
     "Done.\n",
 );
 
+/// A prompt declaring two twin capabilities and two exact slots bound
+/// to their same-named, same-described tools.
+const DECLARES_TWIN_EXACT_SLOTS: &str = concat!(
+    "---\n",
+    "name: declares-twin-slots\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/web\n",
+    "  - promptforge/web-mirror\n",
+    "tools:\n",
+    "  fetch: promptforge/web/fetch\n",
+    "  getter: promptforge/web-mirror/fetch\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
 /// The one loaded picker model for this test binary: the fuzzy fill
 /// rebuilds the environment picker's model over the run's assembled
 /// catalog, so the picker must carry real weights.
@@ -1150,10 +1169,7 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
         .register(Arc::new(ToolFixture::new(
             "promptforge/web",
             &[],
-            vec![described_tool(
-                "promptforge/web/search",
-                "Search the web",
-            )],
+            vec![described_tool("promptforge/web/search", "Search the web")],
         )))
         .expect("web registers");
     let env = Environment::new().registry(registry);
@@ -1211,4 +1227,61 @@ fn an_optional_fuzzy_slot_with_no_match_is_skipped_and_logged() {
         logs.contains("email"),
         "the skip log line names the alias: {logs}"
     );
+}
+
+#[test]
+fn filled_slots_record_near_duplicate_conflicts_symmetrically() {
+    // The bind-time conflict scan lives at prepare's slot fill: two
+    // filled slots whose tools are near-verbatim copies record the clash
+    // on both aliases, so the scope check fires when both halves enter
+    // one model-visible scope. The twins share name segment and
+    // description, so their enriched texts - and vectors - are
+    // identical: a similarity of 1.0 against the 0.98 twin threshold.
+    let tools = [
+        described_tool("promptforge/web/fetch", "Fetch a web page over HTTP"),
+        described_tool("promptforge/web-mirror/fetch", "Fetch a web page over HTTP"),
+    ];
+    let catalog = Catalog::new(
+        tools
+            .iter()
+            .map(|tool| {
+                ToolDescriptor::new(
+                    tool.id(),
+                    tool.description().to_owned(),
+                    tool.parameters_schema(),
+                )
+            })
+            .collect(),
+    );
+    let picker = ToolPicker::build_with_model(picker_model(), catalog, Config::default(), None)
+        .expect("the test picker builds");
+    let mut registry = CapabilityRegistry::new();
+    for (capability, tool) in [("promptforge/web", 0), ("promptforge/web-mirror", 1)] {
+        registry
+            .register(Arc::new(ToolFixture::new(
+                capability,
+                &[],
+                vec![Arc::clone(&tools[tool])],
+            )))
+            .expect("the twin capability registers");
+    }
+    let prompt = parse(DECLARES_TWIN_EXACT_SLOTS, "declares-twin-slots");
+    let env = Environment::new().registry(registry).picker(picker);
+    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-twins"));
+    assert!(requirements.is_satisfied());
+    let bindings = ctx.tool_bindings();
+    for (alias, other) in [("fetch", "getter"), ("getter", "fetch")] {
+        let conflicts = bindings.conflicts(alias);
+        assert_eq!(
+            conflicts.len(),
+            1,
+            "{alias} records one clash, with {other}"
+        );
+        assert_eq!(conflicts[0].alias, other);
+        assert!(
+            conflicts[0].similarity >= 0.98,
+            "the recorded score is the picker's similarity: {}",
+            conflicts[0].similarity
+        );
+    }
 }

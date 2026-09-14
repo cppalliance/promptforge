@@ -5,44 +5,39 @@ use super::*;
 #[tokio::test]
 async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     // models.use -> completion_options -> GatewayClient::complete must carry
-    // the binding's model and sampling fields on the chat body.
+    // the binding's model and the hard-keyword thinking switch on the chat
+    // body. (v1 roles declare no sampling fields; the thinking switch is the
+    // one invocation parameter with a frontmatter source.)
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let catalog = ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("analyst").expect("the test model alias is valid"),
-        "A careful analysis model",
-        NonZeroU32::new(131_072).expect("131072 is non-zero"),
-        ThinkingMode::Switchable,
-    )])
-    .expect("the test catalog has a single unique model");
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst:\n    keywords: [no-thinking]\n---\n\n\
 # T\n\n\
-```lua\n\
-models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
-```\n\n\
 ## Only\n\n\
 ```lua\nmodels.use('analyst')\n```\n\n\
 Ask the model.\n\n\
 ```lua\nreturn models.infer(prose)\n```\n";
     let prompt =
         Prompt::parse(md, EXECUTION, &NullObserver::default()).expect("fixture must parse");
-    let prompt = TestPrompt {
-        prompt,
-        models: catalog,
-        picker_catalog: None,
+    let mut ctx = RunContext::new(EXECUTION).client(gateway_client(addr));
+    ctx.model_bindings.bind(
+        "analyst",
+        ModelDescriptor::new(
+            ModelId::gateway("analyst").expect("the test model alias is valid"),
+            "A careful analysis model",
+            NonZeroU32::new(131_072).expect("131072 is non-zero"),
+            ThinkingMode::Switchable,
+        ),
+    );
+    let out = match crate::execute::run(&prompt, "", ctx).await {
+        RunResult::Ok(out) => out,
+        other => panic!("the run must succeed: {other:?}"),
     };
-
-    let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(addr))
-        .await
-        .unwrap();
     assert_eq!(out, "hello from the mock");
 
     let body = gateway
         .last_request()
         .expect("complete must reach the gateway");
     assert_eq!(body["model"], "analyst");
-    assert_eq!(body["temperature"], 0.25);
-    assert_eq!(body["max_tokens"], 64);
     assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
 }
 
@@ -76,6 +71,14 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         recorder.events(),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
+            ),
             (
                 "Test prompt".to_string(),
                 detail::LUA_CHUNK_STARTED.to_string(),
@@ -156,6 +159,14 @@ return 'epilog result'\n\
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_string(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
                 detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
@@ -209,8 +220,8 @@ async fn add_without_h1_bindings_fails_the_run_loudly() {
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
-        error.to_string().contains("not declared by tools.bind"),
-        "the error must report the missing declaration: {error}"
+        error.to_string().contains("is not a bound tool slot"),
+        "the error must report the missing slot: {error}"
     );
 }
 
@@ -226,8 +237,8 @@ async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
-        error.to_string().contains("not declared by tools.bind"),
-        "the error must report the missing declaration: {error}"
+        error.to_string().contains("is not a bound tool slot"),
+        "the error must report the missing slot: {error}"
     );
 }
 
@@ -276,6 +287,14 @@ Ask using {{ var.question }}.\n\n\
         recorder.events(),
         [
             ("Test prompt".to_owned(), detail::RUN_STARTED.to_string()),
+            (
+                "Test prompt".to_owned(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_owned(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
+            ),
             (
                 "Test prompt".to_owned(),
                 detail::LUA_CHUNK_STARTED.to_string(),
@@ -401,10 +420,9 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
     // The first script dispatch runs the one-time scope install, which
     // enriches `sys.model` with the bound catalog id; a prose read after it
     // substitutes the catalog id, not the alias.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
-tools.bind('echo', 'echo tool')\n\
-models.default('writer', 'A general model for tests')\n```\n\n\
+models.default('writer')\n```\n\n\
 ## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\nModel id is {{ sys.model }}.\n\n\
 ```lua\nreturn prose\n```\n";
     let prompt = bound_with_tools(md, Vec::new());
@@ -422,10 +440,9 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 
 #[tokio::test]
 async fn epilog_sees_model_catalog_id_not_alias_after_the_scope_install() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
-tools.bind('echo', 'echo tool')\n\
-models.default('writer', 'A general model for tests')\n```\n\n\
+models.default('writer')\n```\n\n\
 ## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\n```lua\nreturn sys.model\n```\n";
     let prompt = bound_with_tools(md, Vec::new());
     let out = run(
@@ -442,10 +459,9 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_sees_sys_model_catalog_id_after_the_scope_install() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
 # Test prompt\n\n```lua shared\n\
-tools.bind('echo', 'echo tool')\n\
-models.default('writer', 'A general model for tests')\n```\n\n\
+models.default('writer')\n```\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', list_from_section('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
 ### Worker\n\n```lua\ntools.call('echo', { value = item })\n```\n\n\
 ```lua\nreturn sys.model .. ':' .. item\n```\n\n\
@@ -525,37 +541,6 @@ async fn reply_substitution_is_an_unknown_global_error() {
 
 // --- models.get / models.infer with a leading handle ---
 
-/// A two-model catalog: `writer` resolves to `writer-model`, `analyst` to
-/// `analyst-model`, so a test can tell which model a request used.
-fn writer_and_analyst_catalog() -> ModelCatalog {
-    let context = NonZeroU32::new(131_072).expect("131072 is non-zero");
-    ModelCatalog::new([
-        ModelDescriptor::new(
-            ModelId::gateway("writer-model").expect("the writer model id is valid"),
-            "A general model for tests",
-            context,
-            ThinkingMode::Switchable,
-        ),
-        ModelDescriptor::new(
-            ModelId::gateway("analyst-model").expect("the analyst model id is valid"),
-            "A careful analysis model",
-            context,
-            ThinkingMode::Switchable,
-        ),
-    ])
-    .expect("the test catalog has two unique models")
-}
-
-fn analyst_only_catalog() -> ModelCatalog {
-    ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("analyst-model").expect("the analyst model id is valid"),
-        "A careful analysis model",
-        NonZeroU32::new(131_072).expect("131072 is non-zero"),
-        ThinkingMode::Switchable,
-    )])
-    .expect("the test catalog has a single unique model")
-}
-
 /// Run a parsed prompt against a scripted gateway with no external tools.
 async fn run_with_gateway(
     test: &TestPrompt,
@@ -565,27 +550,61 @@ async fn run_with_gateway(
     run(test, "", &[], store, gatewayed(addr)).await
 }
 
+/// Runs a prompt with hand-filled model bindings and no prepare pass: the
+/// multi-model shape v1's trivial fill cannot produce (every role bound to
+/// the one current model), exercising the runtime's label resolution
+/// directly. `bindings` pairs a declared role label with the gateway model
+/// id it resolves to.
+async fn run_with_bindings(
+    md: &str,
+    bindings: &[(&str, &str)],
+    addr: SocketAddr,
+    store: &TestStore,
+) -> Result<String> {
+    let prompt = parse(md);
+    let mut ctx = RunContext::new(EXECUTION)
+        .client(gateway_client(addr))
+        .vfs(store.vfs());
+    for (label, model) in bindings {
+        ctx.model_bindings.bind(
+            label,
+            ModelDescriptor::new(
+                ModelId::gateway(*model).expect("the test model id is valid"),
+                "A test model",
+                NonZeroU32::new(131_072).expect("131072 is non-zero"),
+                ThinkingMode::Switchable,
+            ),
+        );
+    }
+    match crate::execute::run(&prompt, "", ctx).await {
+        RunResult::Ok(out) => Ok(out),
+        RunResult::Cancelled => Err(Error::Interrupted),
+        RunResult::Failure(error) => Err(Error::from(error)),
+    }
+}
+
 #[tokio::test]
 async fn models_get_returns_a_handle_without_changing_the_section_model() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
 # T\n\n\
 ```lua\n\
-models.default('writer', 'A general model for tests')\n\
-models.bind('analyst', 'A careful analysis model')\n\
+models.default('writer')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nstore.write('handle.txt', models.get('analyst').name)\n```\n\n\
 Ask the model.\n\n\
 ```lua\nreturn models.infer(prose)\n```\n";
-    let prompt = TestPrompt {
-        prompt: parse(md),
-        models: writer_and_analyst_catalog(),
-        picker_catalog: None,
-    };
     let store = TestStore::new();
-    let out = run_with_gateway(&prompt, addr, &store).await.unwrap();
+    let out = run_with_bindings(
+        md,
+        &[("writer", "writer-model"), ("analyst", "analyst-model")],
+        addr,
+        &store,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(out, "hello from the mock");
     assert_eq!(
@@ -637,22 +656,21 @@ async fn models_infer_uses_the_section_model_without_touching_reply() {
 async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
 # T\n\n\
 ```lua\n\
-models.default('writer', 'A general model for tests')\n\
-models.bind('analyst', 'A careful analysis model')\n\
+models.default('writer')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
-    let prompt = TestPrompt {
-        prompt: parse(md),
-        models: writer_and_analyst_catalog(),
-        picker_catalog: None,
-    };
-    let out = run_with_gateway(&prompt, addr, &TestStore::new())
-        .await
-        .unwrap();
+    let out = run_with_bindings(
+        md,
+        &[("writer", "writer-model"), ("analyst", "analyst-model")],
+        addr,
+        &TestStore::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!(out, "pong");
     let body = gateway
         .last_request()
@@ -667,11 +685,10 @@ models.bind('analyst', 'A careful analysis model')\n\
 async fn models_use_reselection_steers_the_next_round() {
     let gateway = ScriptedGateway::start(vec![resp_text("first"), resp_text("second")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
 # T\n\n\
 ```lua\n\
-models.default('writer', 'A general model for tests')\n\
-models.bind('analyst', 'A careful analysis model')\n\
+models.default('writer')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\n\
@@ -680,14 +697,14 @@ models.infer('ping')\n\
 models.use('analyst')\n\
 return models.infer('ping')\n\
 ```\n";
-    let prompt = TestPrompt {
-        prompt: parse(md),
-        models: writer_and_analyst_catalog(),
-        picker_catalog: None,
-    };
-    let out = run_with_gateway(&prompt, addr, &TestStore::new())
-        .await
-        .expect("re-selection within a section must succeed");
+    let out = run_with_bindings(
+        md,
+        &[("writer", "writer-model"), ("analyst", "analyst-model")],
+        addr,
+        &TestStore::new(),
+    )
+    .await
+    .expect("re-selection within a section must succeed");
     assert_eq!(out, "second");
     let requests = gateway.requests();
     assert_eq!(
@@ -707,19 +724,25 @@ return models.infer('ping')\n\
 
 #[tokio::test]
 async fn models_infer_without_use_or_default_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst: {}\n---\n\n\
 # T\n\n\
-```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\
 ```lua\nreturn models.infer('ping')\n```\n";
-    let prompt = TestPrompt {
-        prompt: parse(md),
-        models: analyst_only_catalog(),
-        picker_catalog: None,
+    let prompt = parse(md);
+    let mut ctx = RunContext::new(EXECUTION);
+    ctx.model_bindings.bind(
+        "analyst",
+        ModelDescriptor::new(
+            ModelId::gateway("analyst-model").expect("the analyst model id is valid"),
+            "A careful analysis model",
+            NonZeroU32::new(131_072).expect("131072 is non-zero"),
+            ThinkingMode::Switchable,
+        ),
+    );
+    let error = match crate::execute::run(&prompt, "", ctx).await {
+        RunResult::Failure(error) => error,
+        other => panic!("models.infer with no current model must fail: {other:?}"),
     };
-    let error = run(&prompt, "", &[], &TestStore::new(), silent())
-        .await
-        .expect_err("models.infer with no current model must fail");
     assert!(
         error
             .to_string()
@@ -732,17 +755,11 @@ async fn models_infer_without_use_or_default_errors() {
 async fn models_get_infer_works_without_any_section_model() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst: {}\n---\n\n\
 # T\n\n\
-```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\
 ```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
-    let prompt = TestPrompt {
-        prompt: parse(md),
-        models: analyst_only_catalog(),
-        picker_catalog: None,
-    };
-    let out = run_with_gateway(&prompt, addr, &TestStore::new())
+    let out = run_with_bindings(md, &[("analyst", "analyst-model")], addr, &TestStore::new())
         .await
         .unwrap();
     assert_eq!(out, "pong");

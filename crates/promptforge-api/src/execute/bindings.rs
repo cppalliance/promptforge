@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use promptforge_lua::Conflict;
 use shared_promptforge_api::tools::Tool;
 
 use crate::model::{ModelDescriptor, ModelId};
@@ -84,6 +85,11 @@ pub struct ToolBindings {
     aliases: BTreeMap<String, ToolId>,
     /// What this run may dispatch: identity to tool.
     tools: BTreeMap<ToolId, Arc<dyn Tool>>,
+    /// Near-duplicate clashes per alias, recorded by the fill's conflict
+    /// scan: the alias's bound tool is a near-verbatim copy of the named
+    /// sibling alias's tool. Binding records, never fails: a clash errors
+    /// only when both halves enter one model-visible scope.
+    conflicts: BTreeMap<String, Vec<Conflict>>,
 }
 
 impl ToolBindings {
@@ -113,6 +119,53 @@ impl ToolBindings {
         self.tools.get(id)
     }
 
+    /// The distinct identities the fill bound, for the conflict scan.
+    pub(crate) fn bound_ids(&self) -> Vec<ToolId> {
+        self.tools.keys().cloned().collect()
+    }
+
+    /// Records one near-duplicate pair symmetrically: every alias bound
+    /// to `first` clashes with every alias bound to `second`, and back.
+    /// The score is the picker's cosine similarity, widened once at the
+    /// scan.
+    pub(crate) fn record_conflict(&mut self, first: &ToolId, second: &ToolId, similarity: f64) {
+        let aliases_of = |id: &ToolId| -> Vec<String> {
+            self.aliases
+                .iter()
+                .filter(|(_, bound)| *bound == id)
+                .map(|(alias, _)| alias.clone())
+                .collect()
+        };
+        let firsts = aliases_of(first);
+        let seconds = aliases_of(second);
+        for first_alias in &firsts {
+            for second_alias in &seconds {
+                self.conflicts
+                    .entry(first_alias.clone())
+                    .or_default()
+                    .push(Conflict {
+                        alias: second_alias.clone(),
+                        similarity,
+                    });
+                self.conflicts
+                    .entry(second_alias.clone())
+                    .or_default()
+                    .push(Conflict {
+                        alias: first_alias.clone(),
+                        similarity,
+                    });
+            }
+        }
+    }
+
+    /// The near-duplicate clashes recorded against `alias` at the fill,
+    /// empty when the conflict scan found none. Journaled with the
+    /// bindings so hosts and evals see what the scan recorded.
+    #[must_use]
+    pub fn conflicts(&self, alias: &str) -> &[Conflict] {
+        self.conflicts.get(alias).map_or(&[], Vec::as_slice)
+    }
+
     /// Returns the number of bound aliases.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -129,10 +182,12 @@ impl ToolBindings {
 impl fmt::Debug for ToolBindings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The tools are trait objects; their identities stand in, and
-        // the journaled decision (alias to identity) is the content.
+        // the journaled decision (alias to identity, recorded clashes)
+        // is the content.
         f.debug_struct("ToolBindings")
             .field("aliases", &self.aliases)
             .field("tools", &self.tools.keys().collect::<Vec<_>>())
+            .field("conflicts", &self.conflicts)
             .finish()
     }
 }
@@ -257,5 +312,27 @@ mod tests {
                 .tool(&ToolId::parse("promptforge/web/search").expect("valid"))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_recorded_conflict_lands_on_both_aliases_symmetrically() {
+        // The fill's conflict scan records a near-duplicate pair on every
+        // alias bound to each half, so the scope check fires whichever
+        // alias pair enters one model-visible scope.
+        let first = ToolId::parse("promptforge/web/fetch").expect("the test id is valid");
+        let second = ToolId::parse("promptforge/web/getter").expect("the test id is valid");
+        let mut bindings = ToolBindings::default();
+        bindings.bind("fetch", Arc::new(FixtureTool { id: first.clone() }));
+        bindings.bind("getter", Arc::new(FixtureTool { id: second.clone() }));
+        assert!(bindings.conflicts("fetch").is_empty());
+        bindings.record_conflict(&first, &second, 0.97);
+        let fetch_conflicts = bindings.conflicts("fetch");
+        assert_eq!(fetch_conflicts.len(), 1);
+        assert_eq!(fetch_conflicts[0].alias, "getter");
+        assert!((fetch_conflicts[0].similarity - 0.97).abs() < f64::EPSILON);
+        let getter_conflicts = bindings.conflicts("getter");
+        assert_eq!(getter_conflicts.len(), 1);
+        assert_eq!(getter_conflicts[0].alias, "fetch");
+        assert!(bindings.conflicts("unbound").is_empty());
     }
 }

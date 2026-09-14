@@ -3,46 +3,10 @@ use super::{
     UserDataFields, UserDataMethods, Value,
 };
 
-/// Resolves one plain-English capability description to one stable live tool.
+/// One near-duplicate clash recorded when the binding was filled.
 ///
-/// This is the deterministic seam used by live H1 resolution. It keeps core
-/// independent of any concrete picker implementation while allowing a caller
-/// to supply a fixed resolver in tests.
-pub trait ToolResolver: Send + Sync {
-    /// Resolves `description` to a stable tool identity.
-    ///
-    /// # Errors
-    /// Returns a core error when the capability cannot be resolved uniquely.
-    fn resolve(&self, description: &str) -> Result<ToolId>;
-
-    /// Reports the near-duplicate pairs among the bound `ids` as
-    /// `(first, second, similarity)` triples, for the bind-time conflict
-    /// scan.
-    ///
-    /// The default reports no pairs: a resolver without similarity
-    /// knowledge (a fixed test resolver) records no conflicts.
-    ///
-    /// # Errors
-    /// Returns a core error when the analysis backend fails.
-    fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<(ToolId, ToolId, f32)>> {
-        let _ = ids;
-        Ok(Vec::new())
-    }
-}
-
-impl<F> ToolResolver for F
-where
-    F: Fn(&str) -> Result<ToolId> + Send + Sync,
-{
-    fn resolve(&self, description: &str) -> Result<ToolId> {
-        self(description)
-    }
-}
-
-/// One near-duplicate clash recorded at bind time.
-///
-/// The picker is an H1-phase capability, so the score is copied onto the
-/// binding when the clash is recorded; it cannot be recomputed later.
+/// The similarity score is copied onto the binding when the clash is
+/// recorded; it cannot be recomputed later.
 #[derive(Debug, Clone)]
 pub struct Conflict {
     /// The alias of the other binding in the clashing pair.
@@ -79,31 +43,28 @@ pub enum ToolOutputKind {
 }
 
 /// One prompt-local alias bound to one stable live tool identity, carrying
-/// the resolved implementation attached at bind time.
+/// the resolved implementation attached when the slot was filled.
 ///
-/// The implementation rides with the binding so post-H1 execution (schema
-/// preparation, dispatch) never consults the implementation catalog again: a
-/// capability whose tool is unavailable fails at the `tools.bind` call, before
-/// any binding exists.
+/// The implementation rides with the binding so run-time execution (schema
+/// preparation, dispatch) never consults the assembled catalog again.
 #[derive(Clone)]
 pub struct ToolBinding {
     /// The exact prompt-local alias.
     pub alias: String,
-    /// The declared capability description.
+    /// The slot's description: the fuzzy `want` text or the tool's own.
     pub description: String,
     /// The selected stable live identity.
     pub id: ToolId,
     /// Author override for the model-facing schema description.
     ///
-    /// Capability text in [`Self::description`] stays the live H1 bind
-    /// string. When set, the executor advertises this instead of the
-    /// bound tool's default description.
+    /// When set, the executor advertises this instead of the bound tool's
+    /// default description.
     pub model_description: Option<String>,
-    /// The resolved implementation, attached at bind time.
+    /// The resolved implementation, attached at fill time.
     pub tool: Arc<dyn Tool>,
-    /// Near-duplicate clashes with sibling bindings, recorded at bind time.
-    /// Binding records, never fails: a clash errors only when both halves
-    /// enter one model-visible scope.
+    /// Near-duplicate clashes with sibling bindings, recorded when the slot
+    /// was filled. Binding records, never fails: a clash errors only when
+    /// both halves enter one model-visible scope.
     pub conflicts: Vec<Conflict>,
     /// How a script-initiated `tools.call` resumes this binding's output;
     /// the model tool loop ignores it.
@@ -272,8 +233,8 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
     }
 }
 
-/// The run's tool set: the prompt-level bindings produced by live H1
-/// execution plus the prompt-wide `always` aliases.
+/// The run's tool set: the frontmatter's filled tool slots plus the
+/// prompt-wide `always` aliases.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
     /// The prompt-level bindings in declaration order.
@@ -321,12 +282,11 @@ impl ToolSet {
 
 /// The read-only view over the run's [`ToolSet`].
 ///
-/// The run context shares the set as `Arc<dyn ToolView>`; the live H1 pass
-/// writes through its own concrete `Arc<Mutex<ToolSet>>` handle, and once
-/// that VM is dropped no write handle remains. The trait exposes no
-/// mutation, so post-H1 frozenness is structural. Every method locks
-/// briefly and returns an owned snapshot: a mutex guard cannot outlive the
-/// call.
+/// The run context shares the set as `Arc<dyn ToolView>`; section VMs share
+/// the same allocation through concrete `Arc<Mutex<ToolSet>>` handles, with
+/// `tools.always` the only writer (a prompt-wide fact). The trait exposes no
+/// mutation. Every method locks briefly and returns an owned snapshot: a
+/// mutex guard cannot outlive the call.
 pub trait ToolView: Send + Sync {
     /// Returns an owned snapshot of the bindings in declaration order.
     ///

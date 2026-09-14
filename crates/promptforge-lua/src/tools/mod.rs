@@ -1,11 +1,15 @@
-//! The `tools` namespace: declaration, scoping, invocation, and counts.
+//! The `tools` namespace: scoping, invocation, and counts.
 //!
 //! One Lua table carries every tool operation, mirroring the `models.*`
-//! namespacing of model operations: `bind` and `always` declare during
-//! live H1 (forbidden stubs here), `add` and `add_local` scope tools into
-//! the section, `call` dispatches a bound tool by alias or Tool object
-//! (installed by the coroutine shim prelude, since dispatch suspends), and
-//! `calls` is the read-only per-alias dispatch counter surface. The
+//! namespacing of model operations. Binding is the frontmatter's: the run's
+//! filled slots arrive in the shared [`ToolSet`], and the table scopes among
+//! them by alias - `add` scopes aliases into the section, `always` parks a
+//! prompt-wide alias (conventionally from H1, not privileged to it),
+//! `add_local` registers a prompt-author Lua function as a tool, `call`
+//! dispatches a bound tool by alias or Tool object (installed by the
+//! coroutine shim prelude, since dispatch suspends), and `calls` is the
+//! read-only per-alias dispatch counter surface. Only filled slots are
+//! visible: scoping or advertising an unfilled alias is a hard error. The
 //! installation logic lives here, out of the VM driver; the VM only calls
 //! the installers in setup order.
 
@@ -14,9 +18,9 @@ use std::sync::{Arc, Mutex};
 use mlua::{Function, Lua, MultiValue, Table, Value, Variadic};
 use promptforge_model_client::client::ToolSchema;
 
+use crate::alias::validate_alias;
 use crate::error::{Error, Result};
 use crate::handles::{ToolBinding, ToolSet};
-use crate::live::validate_alias;
 use crate::scope::{ToolCallCounts, ToolRuntime};
 use crate::vm::LocalTools;
 
@@ -28,6 +32,13 @@ pub(crate) use userdata::LuaToolHandle;
 pub(crate) use decode::tool_alias;
 
 use decode::{add_local_params_schema, collect_tools_add_entries};
+
+/// Locks the run's shared tool set, mapping a poisoned lock to the Lua
+/// boundary error every host callback uses.
+fn lock_tools(set: &Mutex<ToolSet>) -> mlua::Result<std::sync::MutexGuard<'_, ToolSet>> {
+    set.lock()
+        .map_err(|_| mlua::Error::external("tool set mutex was poisoned"))
+}
 
 /// Installs the read-only `tools.calls` counter table over `counts`;
 /// `declared` feeds the unknown-key diagnostic.
@@ -60,7 +71,7 @@ pub(crate) fn install_lua_tool_calls(
                     "tools.calls: {key:?} has no seeded count; \
                      seeded aliases: {seeded:?}{}",
                     if declared_unseeded {
-                        " (alias was declared by tools.bind but neither added to \
+                        " (alias is a bound tool slot but was neither added to \
                          this section's scope nor dispatched by tools.call)"
                     } else if seeded.is_empty() {
                         ""
@@ -89,7 +100,7 @@ pub(crate) fn install_lua_tool_calls(
 /// Installs `tools.calls` as a read-only Lua table backed by a fresh
 /// [`ToolCallCounts`]. Each seeded alias reads its live count; indexing an
 /// unseeded key is a hard error that names the bad key and lists the seeded
-/// set. When the key was declared by `tools.bind` but never seeded - neither
+/// set. When the key names a bound tool slot but was never seeded - neither
 /// scoped into the section nor dispatched by a script `tools.call` - the
 /// diagnostic says so.
 ///
@@ -113,7 +124,8 @@ pub(crate) fn install_tool_call_counts(
     Ok(counts)
 }
 
-/// Installs the H2 tool declaration and local-tool APIs into one section VM.
+/// Installs the tool scoping and local-tool APIs into one section VM (H1
+/// included: there is one install path for every section).
 ///
 /// The suspending `tools.call` is not installed here: yield cannot cross
 /// the Rust callback boundary, so the coroutine shim prelude installs it on
@@ -122,54 +134,43 @@ pub(crate) fn install_tool_call_counts(
 /// # Errors
 /// Returns [`Error::Lua`] if a Lua table or callback cannot be created or
 /// installed.
-pub(crate) fn install_h2_tools(
+pub(crate) fn install_tools(
     lua: &Lua,
     globals: &Table,
-    bindings: &ToolSet,
+    set: &Arc<Mutex<ToolSet>>,
     runtime: &Arc<Mutex<ToolRuntime>>,
     local_tools: &LocalTools,
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
-    for name in ["bind", "always"] {
-        let operation = name;
-        let forbidden = lua
-            .create_function(move |_, _: MultiValue| -> mlua::Result<()> {
-                Err(mlua::Error::external(format!(
-                    "tools.{operation} is only available during live H1 execution"
-                )))
-            })
-            .map_err(Error::lua)?;
-        tools.set(name, forbidden).map_err(Error::lua)?;
-    }
 
-    let frozen = bindings.clone();
+    let frozen = Arc::clone(set);
     let state = Arc::clone(runtime);
     let add = lua
         .create_function(move |_, args: Variadic<Value>| {
             let entries = collect_tools_add_entries(args)?;
+            {
+                let set = lock_tools(&frozen)?;
+                for entry in &entries {
+                    validate_alias(&entry.alias).map_err(mlua::Error::external)?;
+                    if set.binding(&entry.alias).is_none() {
+                        return Err(mlua::Error::external(format!(
+                            "tools.add alias {:?} is not a bound tool slot",
+                            entry.alias
+                        )));
+                    }
+                }
+            }
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-            for entry in &entries {
-                validate_alias(&entry.alias).map_err(mlua::Error::external)?;
-                if frozen.binding(&entry.alias).is_none() {
-                    return Err(mlua::Error::external(format!(
-                        "tools.add alias {:?} was not declared by tools.bind",
-                        entry.alias
-                    )));
-                }
-            }
+            let set = lock_tools(&frozen)?;
             for entry in entries {
                 if let Some(description) = entry.description_override {
                     state
                         .description_overrides
                         .insert(entry.alias.clone(), description);
                 }
-                if frozen
-                    .always
-                    .iter()
-                    .any(|existing| existing == &entry.alias)
-                {
+                if set.always.iter().any(|existing| existing == &entry.alias) {
                     continue;
                 }
                 if !state.added.iter().any(|existing| existing == &entry.alias) {
@@ -181,15 +182,45 @@ pub(crate) fn install_h2_tools(
         .map_err(Error::lua)?;
     tools.set("add", add).map_err(Error::lua)?;
 
-    let declared = bindings.clone();
+    let frozen = Arc::clone(set);
+    let always = lua
+        .create_function(
+            move |_, (alias, model_description): (String, Option<String>)| -> mlua::Result<()> {
+                validate_alias(&alias).map_err(mlua::Error::external)?;
+                let mut set = lock_tools(&frozen)?;
+                let Some(binding) = set
+                    .bindings
+                    .iter_mut()
+                    .find(|binding| binding.alias == alias)
+                else {
+                    return Err(mlua::Error::external(format!(
+                        "tools.always alias {alias:?} is not a bound tool slot"
+                    )));
+                };
+                if let Some(model_description) = model_description {
+                    binding.model_description = Some(model_description);
+                }
+                // Idempotent under the shared-library replay: every section
+                // re-runs the library, so naming the same alias again is a
+                // no-op.
+                if !set.always.iter().any(|existing| existing == &alias) {
+                    set.always.push(alias);
+                }
+                Ok(())
+            },
+        )
+        .map_err(Error::lua)?;
+    tools.set("always", always).map_err(Error::lua)?;
+
+    let declared = Arc::clone(set);
     let local = local_tools.clone();
     let add_local_fn = lua
         .create_function(
             move |lua, (alias, description, params, handler): (String, String, Table, Function)| {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                if declared.binding(&alias).is_some() {
+                if lock_tools(&declared)?.binding(&alias).is_some() {
                     return Err(mlua::Error::external(format!(
-                        "tools.add_local alias {alias:?} duplicates a declared tool alias"
+                        "tools.add_local alias {alias:?} duplicates a bound tool slot"
                     )));
                 }
                 if local.contains(&alias).map_err(mlua::Error::external)? {

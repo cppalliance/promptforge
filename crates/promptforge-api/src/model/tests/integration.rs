@@ -1,118 +1,113 @@
-//! Lua-driven `models.bind`/`models.use`/`models.default` integration tests.
+//! Lua-driven `models.use` integration tests over pre-filled role bindings.
 
 use super::*;
 
-/// Compiles and resolves one live H1 declaration fixture.
-fn resolve_shared(source: &str) -> Result<(ToolSet, ModelSet)> {
-    let shared = crate::lua::LuaProgram::compile(
+/// Compiles one Lua chunk for a section VM drive.
+fn chunk(source: &str) -> crate::lua::LuaProgram {
+    crate::lua::LuaProgram::compile(
         source,
-        "shared",
+        "chunk",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver::default(),
-        "Prompt",
-    )?;
-    let tool_resolver =
-        |_: &str| -> std::result::Result<crate::tools::ToolId, promptforge_lua::Error> {
-            unreachable!("no tools")
-        };
-    resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
+        "Section",
     )
+    .expect("test Lua must compile")
 }
 
 #[test]
-fn models_bind_resolves_and_use_selects_section_binding() {
-    let (tools, models) = resolve_shared(
-        r#"models.bind("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
-    )
-    .unwrap();
-    assert_eq!(models.bindings()[0].id().name(), "analyst");
-    assert_eq!(models.bindings()[0].invocation().thinking, Some(false));
-
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
+fn models_use_selects_a_bound_role_by_label() {
+    let models = shared_models(vec![bound_role(
+        "analyst",
+        "A careful analysis model",
+        "analyst",
+        131_072,
+        Some(true),
+        &["thinking", "frontier"],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let prologue = crate::lua::LuaProgram::compile(
-        r#"models.use("analyst")"#,
-        "prologue",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
+    vm.run_chunk(
+        &chunk(r#"models.use("analyst")"#),
         &NullObserver::default(),
         "Section",
     )
-    .unwrap();
-    vm.run_chunk(&prologue, &NullObserver::default(), "Section")
-        .unwrap();
-    let model = resolve_section_model(&vm).unwrap();
-    assert_eq!(model.unwrap().alias(), "analyst");
+    .expect("a bound label selects");
+    let model = resolve_section_model(&vm).expect("the resolution reads the selection");
+    let model = model.expect("a selection resolves");
+    assert_eq!(model.alias(), "analyst");
+    assert_eq!(model.invocation().thinking, Some(true));
+    assert_eq!(
+        model.capabilities(),
+        &["thinking".to_owned(), "frontier".to_owned()]
+    );
     vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn no_models_use_or_always_leaves_section_unbound() {
-    let (tools, models) = resolve_shared(r#"models.bind("analyst", "careful analysis")"#).unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
+fn no_use_or_default_leaves_the_section_unbound() {
+    let models = shared_models(vec![bound_role(
+        "analyst",
+        "A careful analysis model",
+        "analyst",
+        131_072,
+        None,
+        &[],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let model = resolve_section_model(&vm).unwrap();
+    let model = resolve_section_model(&vm).expect("the resolution reads the shared set");
     assert!(model.is_none());
     vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn constraint_filter_makes_bind_absent() {
-    let error =
-        resolve_shared(r#"models.bind("analyst", "careful analysis", { context = 200000 })"#)
-            .unwrap_err();
-    assert!(matches!(error, Error::ModelAbsent { .. }));
+fn models_use_rejects_an_unbound_label() {
+    let models = shared_models(vec![bound_role(
+        "analyst",
+        "A careful analysis model",
+        "analyst",
+        131_072,
+        None,
+        &[],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
+    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
+    let error = vm
+        .run_chunk(
+            &chunk(r#"models.use("missing")"#),
+            &NullObserver::default(),
+            "Section",
+        )
+        .expect_err("an unbound label must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("models.use label \"missing\" is not a bound model role"),
+        "the error must name the unbound label: {rendered}"
+    );
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn undeclared_models_use_fails_loudly() {
-    let (tools, models) = resolve_shared(r#"models.bind("analyst", "careful analysis")"#).unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
+fn models_bind_is_gone() {
+    let models = shared_models(vec![]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let prologue = crate::lua::LuaProgram::compile(
-        r#"models.use("missing")"#,
-        "prologue",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
-    let error = vm
-        .run_chunk(&prologue, &NullObserver::default(), "Section")
-        .expect_err("an undeclared model alias must fail");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("models.use alias \"missing\" was not declared by models.bind"),
-        "the error must name the undeclared alias and declaration requirement: {rendered}"
+    let gone = vm
+        .run_chunk(
+            &chunk("return tostring(models.bind)"),
+            &NullObserver::default(),
+            "Section",
+        )
+        .expect("the probe runs");
+    assert_eq!(
+        gone,
+        crate::lua::LuaBlockResult::Returned(Some("nil".to_owned())),
+        "models.bind is removed"
     );
     vm.teardown(&NullObserver::default(), "Section");
 }

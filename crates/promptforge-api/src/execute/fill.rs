@@ -91,6 +91,11 @@ pub(super) fn assemble_catalog(activated: &[(CapabilityId, Contribution)]) -> To
 /// fuzzy slot skips with a log line; an unfillable required fuzzy slot
 /// is warned and left unfilled, and advertising the unfilled alias fails
 /// at run time.
+///
+/// After the fills, the bind-time conflict scan records near-duplicate
+/// pairs among the filled tools symmetrically on the bindings, so the
+/// scope check errors when both halves of a clash enter one
+/// model-visible scope. Binding records, never fails.
 pub(super) fn fill_tool_bindings(
     prompt: &Prompt,
     catalog: &ToolCatalog,
@@ -177,7 +182,42 @@ pub(super) fn fill_tool_bindings(
             }
         }
     }
+    record_near_duplicate_conflicts(&mut bindings, run_picker.as_ref().or(picker));
     bindings
+}
+
+/// The bind-time conflict scan: near-duplicate pairs among the filled
+/// tools, recorded symmetrically on the bindings so the scope check
+/// errors when both halves of a clash enter one model-visible scope.
+/// The scan prefers the run's fuzzy-fill picker - indexed over exactly
+/// the run's catalog - and falls back to the environment picker's stored
+/// vectors when no fuzzy slot needed the re-index; a similarity is a
+/// property of the tools' descriptions, so both indexes agree on a pair
+/// they both carry. Binding records, never fails: an unanalyzable set
+/// (no picker, or a filled tool the picker never indexed) logs and
+/// records nothing.
+fn record_near_duplicate_conflicts(bindings: &mut ToolBindings, picker: Option<&ToolPicker>) {
+    let ids = bindings.bound_ids();
+    if ids.len() < 2 {
+        return;
+    }
+    let Some(picker) = picker else {
+        return;
+    };
+    match picker.near_duplicates(&ids) {
+        Ok(pairs) => {
+            for pair in &pairs {
+                bindings.record_conflict(
+                    pair.first().id(),
+                    pair.second().id(),
+                    f64::from(pair.similarity()),
+                );
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the near-duplicate conflict scan failed; none recorded");
+        }
+    }
 }
 
 /// Builds the run's fuzzy-fill picker: the environment picker's loaded

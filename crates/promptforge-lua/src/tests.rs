@@ -255,40 +255,43 @@ impl Tool for FixtureTool {
     }
 }
 
-fn execute_live_tool_binds(
-    source: &LuaProgram,
-    resolver: &dyn ToolResolver,
-    _execution: &str,
-    _observer: &dyn Observer,
-    _section: &str,
-) -> Result<ToolSet> {
-    let tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(FixtureTool("search")),
-        Arc::new(FixtureTool("fetch")),
-    ];
-    let catalog = ToolCatalog::new(&tools).expect("unique test catalog");
-    let models = |description: &str, _: &promptforge_model_client::model::ModelBindOpts| {
-        Err(promptforge_model_client::Error::ModelAbsent {
-            capability: description.to_owned(),
-        })
-    };
-    let producer = LiveBindingProducer::new(
-        Arc::new(Mutex::new(ToolSet::default())),
-        Arc::new(Mutex::new(ModelSet::default())),
-    );
-    let lua = Lua::new();
-    harden(&lua)?;
-    let result = lua.scope(|scope| {
-        producer
-            .install(&lua, scope, resolver, &catalog, &models)
-            .map_err(|error| mlua::Error::external(error.to_string()))?;
-        lua.load(source.bytecode.as_slice()).exec()
-    });
-    if let Some(error) = producer.take_callback_error()? {
-        return Err(error);
-    }
-    result.map_err(Error::lua)?;
-    producer.bindings().map(|(tools, _)| tools)
+/// Builds a fixture tool set directly: each `(alias, description, fixture)`
+/// triple is a bound slot, with `always` aliases parked prompt-wide. This is
+/// the shape prepare's filled slots arrive in; no Lua runs to produce it.
+fn fixture_set(bindings: &[(&str, &str, &'static str)], always: &[&str]) -> ToolSet {
+    ToolSet::for_test(
+        bindings
+            .iter()
+            .map(|(alias, description, fixture)| {
+                ToolBinding::for_test(alias, description, Arc::new(FixtureTool(fixture)))
+            })
+            .collect(),
+        always.iter().map(|alias| (*alias).to_owned()).collect(),
+    )
+}
+
+/// Shares a fixture set the way the run shares its own: one allocation every
+/// section VM clones.
+fn shared_set(bindings: ToolSet) -> Arc<Mutex<ToolSet>> {
+    Arc::new(Mutex::new(bindings))
+}
+
+fn section_vm_with_set(
+    tools: &Arc<Mutex<ToolSet>>,
+    execution: &str,
+    observer: &dyn Observer,
+    section: &str,
+) -> Result<SectionVm> {
+    let vm = SectionVm::new_for_section(
+        &test_nonce(),
+        tools,
+        &Arc::new(Mutex::new(ModelSet::default())),
+        execution,
+        observer,
+        section,
+    )?;
+    vm.install_captured_bindings()?;
+    Ok(vm)
 }
 
 fn section_vm_with_bindings(
@@ -297,16 +300,7 @@ fn section_vm_with_bindings(
     observer: &dyn Observer,
     section: &str,
 ) -> Result<SectionVm> {
-    let vm = SectionVm::new_for_section(
-        &test_nonce(),
-        bindings,
-        &ModelSet::default(),
-        execution,
-        observer,
-        section,
-    )?;
-    vm.install_captured_bindings()?;
-    Ok(vm)
+    section_vm_with_set(&shared_set(bindings.clone()), execution, observer, section)
 }
 
 /// Builds a section VM through the engine's startup order for a shared
@@ -327,29 +321,6 @@ fn section_vm_with_shared(
     Ok(vm)
 }
 
-fn fixture_bindings(source: &str) -> ToolSet {
-    let shared = program(source);
-    let resolver = |description: &str| {
-        Ok(ToolId::parse(&format!(
-            "fixtures/tools/{}",
-            if description == "search the web" {
-                "search"
-            } else {
-                "fetch"
-            },
-        ))
-        .expect("valid id"))
-    };
-    execute_live_tool_binds(
-        &shared,
-        &resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
-    )
-    .expect("fixture binds must resolve")
-}
-
 #[test]
 fn direct_output_is_absent_in_every_executable_lua_vm() {
     let library = program("assert(print == nil); assert(warn == nil); log('library load')");
@@ -358,20 +329,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
             .expect("library VM must not expose direct output");
     library_vm.teardown(&NullObserver::default(), "Section");
 
-    let shared = program(
-        "assert(print == nil)\n\
-             assert(warn == nil)\n\
-             tools.bind('search', 'search the web')",
-    );
-    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
-    let bindings = execute_live_tool_binds(
-        &shared,
-        &resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
-    )
-    .expect("live H1 VM must not expose direct output");
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("section VM must not expose direct output");
@@ -783,12 +741,28 @@ fn concurrent_logs_keep_execution_ids_and_local_order() {
 }
 
 #[test]
-fn binding_records_exact_aliases_descriptions_identities_and_always_scope() {
-    let source = "tools.bind('web_search', 'search the web')\n\
-                      tools.bind('web_fetch2', 'fetch a page')\n\
-                      tools.always('web_search')";
-    let bindings = fixture_bindings(source);
+fn filled_slots_record_exact_aliases_descriptions_identities_and_always_scope() {
+    let set = shared_set(fixture_set(
+        &[
+            ("web_search", "search the web", "search"),
+            ("web_fetch2", "fetch a page", "fetch"),
+        ],
+        &[],
+    ));
+    let mut vm = section_vm_with_set(&set, EXECUTION, &NullObserver::default(), "Section")
+        .expect("the section VM builds over the shared set");
+    vm.inject_host("", &json!({}), &fresh_access())
+        .expect("host must inject");
+    run_scalar(
+        &vm,
+        &program("tools.always('web_search')"),
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect("tools.always parks the prompt-wide alias");
+    vm.teardown(&NullObserver::default(), "Section");
 
+    let bindings = set.lock().expect("the shared set locks");
     assert_eq!(
         bindings
             .bindings()
@@ -804,18 +778,28 @@ fn binding_records_exact_aliases_descriptions_identities_and_always_scope() {
 }
 
 #[test]
-fn bind_and_always_record_model_description_overrides() {
-    let bindings = fixture_bindings(
-        "tools.bind('web_search', 'search the web', 'bind override')\n\
-             tools.bind('web_fetch2', 'fetch a page')\n\
-             tools.always('web_fetch2', 'always override')",
-    );
+fn always_records_a_model_description_override() {
+    let set = shared_set(fixture_set(
+        &[
+            ("web_search", "search the web", "search"),
+            ("web_fetch2", "fetch a page", "fetch"),
+        ],
+        &[],
+    ));
+    let mut vm = section_vm_with_set(&set, EXECUTION, &NullObserver::default(), "Section")
+        .expect("the section VM builds over the shared set");
+    vm.inject_host("", &json!({}), &fresh_access())
+        .expect("host must inject");
+    run_scalar(
+        &vm,
+        &program("tools.always('web_fetch2', 'always override')"),
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect("tools.always records the override");
+    vm.teardown(&NullObserver::default(), "Section");
 
-    assert_eq!(
-        bindings.bindings()[0].model_description(),
-        Some("bind override"),
-        "tools.bind's third argument records the model-facing override"
-    );
+    let bindings = set.lock().expect("the shared set locks");
     assert_eq!(
         bindings.bindings()[1].model_description(),
         Some("always override"),
@@ -825,7 +809,7 @@ fn bind_and_always_record_model_description_overrides() {
 
 #[test]
 fn tool_handles_are_frozen() {
-    let bindings = fixture_bindings("search = tools.bind('search', 'search the web')");
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
@@ -846,36 +830,31 @@ fn tool_handles_are_frozen() {
 }
 
 #[test]
-fn tool_bind_returns_inspectable_object() {
-    let shared = program(
-        "local tool = tools.bind('search', 'search the web')\n\
-             assert(tool.name == 'search')\n\
-             assert(tool.description == 'search the web')\n\
-             assert(type(tool.parameters) == 'table')\n\
-             assert(tool.wire_name == 'search')\n\
-             assert(tool.untrusted == false)\n\
-             tools.always('search')",
-    );
-    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
-    let bindings = execute_live_tool_binds(
-        &shared,
-        &resolver,
-        EXECUTION,
+fn bound_slot_globals_are_inspectable_tool_objects() {
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+    let mut vm =
+        section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
+            .expect("section install must expose the inspectable Tool object");
+    vm.inject_host("", &json!({}), &fresh_access())
+        .expect("host must inject");
+    run_scalar(
+        &vm,
+        &program(
+            "assert(search.name == 'search')\n\
+             assert(search.description == 'search the web')\n\
+             assert(type(search.parameters) == 'table')\n\
+             assert(search.wire_name == 'search')\n\
+             assert(search.untrusted == false)",
+        ),
         &NullObserver::default(),
-        "Prompt",
+        "Section",
     )
-    .expect("tools.bind must return an inspectable Tool object");
-    assert_eq!(bindings.bindings()[0].alias(), "search");
-
-    let vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
-        .expect("section install must expose the same inspectable Tool object");
+    .expect("the bound slot's global is an inspectable Tool object");
     vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn binding_validates_aliases_exactly() {
-    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
-
+fn scoping_validates_aliases_exactly() {
     for alias in [
         "",
         "_leading",
@@ -883,123 +862,120 @@ fn binding_validates_aliases_exactly() {
         "nonasciié",
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
     ] {
-        let bind = program(&format!("tools.bind({alias:?}, 'capability')"));
-        let error = execute_live_tool_binds(
-            &bind,
-            &resolver,
-            EXECUTION,
+        let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
+        let mut vm =
+            section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
+                .expect("captured bindings must install");
+        vm.inject_host("", &json!({}), &fresh_access())
+            .expect("host must inject");
+        let error = run_scalar(
+            &vm,
+            &program(&format!("tools.add({alias:?})")),
             &NullObserver::default(),
-            "Prompt",
+            "Section",
         )
         .expect_err("invalid aliases must be rejected");
         assert!(
-            error.to_string().contains("invalid tool alias"),
+            error.to_string().contains("invalid alias"),
             "wrong error for {alias:?}: {error}"
         );
+        vm.teardown(&NullObserver::default(), "Section");
     }
 
     for valid in ["Upper", "has-dash", &format!("A{}", "2".repeat(63))] {
-        let bind = program(&format!("tools.bind({valid:?}, 'capability')"));
-        execute_live_tool_binds(
-            &bind,
-            &resolver,
-            EXECUTION,
+        let bindings = fixture_set(&[(valid, "a capability", "search")], &[]);
+        let mut vm =
+            section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
+                .expect("captured bindings must install");
+        vm.inject_host("", &json!({}), &fresh_access())
+            .expect("host must inject");
+        run_scalar(
+            &vm,
+            &program(&format!("tools.add({valid:?})")),
             &NullObserver::default(),
-            "Prompt",
+            "Section",
         )
         .expect("planned alias forms must be valid");
+        vm.teardown(&NullObserver::default(), "Section");
     }
 }
 
 #[test]
-fn live_h1_rejects_duplicate_aliases() {
-    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
-    let error = execute_live_tool_binds(
-        &program("tools.bind('search', 'one'); tools.bind('search', 'two')"),
-        &resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
-    )
-    .expect_err("duplicate aliases must fail");
-    assert!(matches!(
-        error,
-        Error::DuplicateAlias { alias } if alias == "search"
-    ));
-}
-
-#[test]
-fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
-    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
-    let error = execute_live_tool_binds(
-        &program("tools.bind('search', 'one'); pcall(tools.bind, 'search', 'two')"),
-        &resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
-    )
-    .expect_err("a caught duplicate callback must still fail binding");
-    assert!(matches!(
-        error,
-        Error::DuplicateAlias { alias } if alias == "search"
-    ));
-}
-
-#[test]
-fn binding_rejects_unknown_and_duplicate_always_aliases() {
-    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
-    for (source, expected) in [
-        (
-            "tools.always('missing')",
-            "tools.always alias \"missing\" was not declared by tools.bind",
-        ),
-        (
-            "tools.bind('search', 'one'); tools.always('search'); tools.always('search')",
-            "tools.always alias \"search\" was recorded more than once",
-        ),
-    ] {
-        let error = execute_live_tool_binds(
-            &program(source),
-            &resolver,
-            EXECUTION,
-            &NullObserver::default(),
-            "Prompt",
-        )
-        .expect_err("invalid always declarations must fail");
-        assert!(
-            error.to_string().contains(expected),
-            "error must identify the rejected always declaration: {error}"
-        );
-    }
-}
-
-#[test]
-fn captured_bindings_do_not_execute_h1_source() {
-    let bindings = fixture_bindings(
-        "h1_was_executed = true; \
-         tools.bind('search', 'search the web'); \
-         tools.always('search')",
-    );
+fn tools_bind_is_gone_from_every_section() {
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
-            .expect("captured bindings must install without executing H1");
+            .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host must inject");
-    run_scalar(
+
+    let gone = run_scalar(
         &vm,
-        &program("assert(h1_was_executed == nil); tools.add('search')"),
+        &program("return tostring(tools.bind)"),
         &NullObserver::default(),
         "Section",
     )
-    .expect("captured binding must be available without H1 execution");
+    .expect("the probe runs");
+    assert_eq!(gone.as_deref(), Some("nil"), "tools.bind is removed");
+    let error = run_scalar(
+        &vm,
+        &program("tools.bind('other', 'fetch a page')"),
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect_err("calling the removed tools.bind fails");
+    assert!(
+        error.to_string().contains("nil"),
+        "a removed function fails as a nil call: {error}"
+    );
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn h2_recording_closes_to_always_then_added_scope() {
-    let bindings = fixture_bindings(
-        "tools.bind('search', 'search the web'); \
-             tools.bind('fetch', 'fetch a page'); \
-             tools.always('search')",
+fn always_rejects_an_unbound_alias_and_is_idempotent() {
+    let set = shared_set(fixture_set(&[("search", "search the web", "search")], &[]));
+    let mut vm = section_vm_with_set(&set, EXECUTION, &NullObserver::default(), "Section")
+        .expect("the section VM builds over the shared set");
+    vm.inject_host("", &json!({}), &fresh_access())
+        .expect("host must inject");
+    let error = run_scalar(
+        &vm,
+        &program("tools.always('missing')"),
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect_err("advertising an unfilled alias is an error");
+    assert!(
+        error
+            .to_string()
+            .contains("tools.always alias \"missing\" is not a bound tool slot"),
+        "the error must identify the unfilled alias: {error}"
+    );
+    // The shared library replays into every section, so re-parking the same
+    // alias is a no-op, not a duplicate error.
+    run_scalar(
+        &vm,
+        &program("tools.always('search'); tools.always('search')"),
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect("re-parking the same alias is idempotent");
+    assert_eq!(
+        set.lock().expect("the shared set locks").always(),
+        &["search".to_owned()],
+        "the alias is recorded exactly once"
+    );
+    vm.teardown(&NullObserver::default(), "Section");
+}
+
+#[test]
+fn section_scope_closes_to_always_then_added() {
+    let bindings = fixture_set(
+        &[
+            ("search", "search the web", "search"),
+            ("fetch", "fetch a page", "fetch"),
+        ],
+        &["search"],
     );
     let prologue = program("tools.add({'fetch', 'search'})");
     let mut vm =
@@ -1008,8 +984,8 @@ fn h2_recording_closes_to_always_then_added_scope() {
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
-        .expect("H2 additions must record");
-    let (bindings, runtime) = vm.tool_bag_handles();
+        .expect("section additions must record");
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -1019,39 +995,13 @@ fn h2_recording_closes_to_always_then_added_scope() {
 }
 
 #[test]
-fn h2_add_accepts_tool_objects_and_arrays() {
-    let resolver = |description: &str| {
-        Ok(ToolId::parse(&format!(
-            "fixtures/tools/{}",
-            if description == "search the web" {
-                "search"
-            } else {
-                "fetch"
-            },
-        ))
-        .expect("valid id"))
-    };
-    let h1_error = execute_live_tool_binds(
-        &program(
-            "local search = tools.bind('search', 'search the web'); \
-                 tools.add(search)",
-        ),
-        &resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
-    )
-    .expect_err("tools.add must stay H2-only even when passed a Tool object");
-    assert!(
-        h1_error
-            .to_string()
-            .contains("tools.add is only available during H2 recording"),
-        "H1 tools.add(Tool) must report the phase error, not a type error: {h1_error}"
-    );
-
-    let bindings = fixture_bindings(
-        "search = tools.bind('search', 'search the web'); \
-             fetch = tools.bind('fetch', 'fetch a page')",
+fn tools_add_accepts_tool_objects_and_arrays() {
+    let bindings = fixture_set(
+        &[
+            ("search", "search the web", "search"),
+            ("fetch", "fetch a page", "fetch"),
+        ],
+        &[],
     );
     let prologue = program(
         "tools.add(search); \
@@ -1065,7 +1015,7 @@ fn h2_add_accepts_tool_objects_and_arrays() {
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("tools.add must accept Tool objects, strings, and arrays");
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -1077,9 +1027,12 @@ fn h2_add_accepts_tool_objects_and_arrays() {
 
 #[test]
 fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
-    let bindings = fixture_bindings(
-        "tools.bind('search', 'search the web'); \
-             tools.bind('fetch', 'fetch a page')",
+    let bindings = fixture_set(
+        &[
+            ("search", "search the web", "search"),
+            ("fetch", "fetch a page", "fetch"),
+        ],
+        &[],
     );
     let prologue = program(
         "tools.add(); \
@@ -1094,7 +1047,7 @@ fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("caught failed add must not poison recording");
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -1106,7 +1059,7 @@ fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
 
 #[test]
 fn add_rejects_misshapen_override_arguments() {
-    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let prologue = program(
         "local ok, err = pcall(tools.add, {'search'}, 'bulk override'); \
          if ok or not string.find(tostring(err), 'array form takes no override') then \
@@ -1129,7 +1082,7 @@ fn add_rejects_misshapen_override_arguments() {
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver::default(), "Section")
         .expect("rejected override forms must not poison recording");
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
@@ -1146,31 +1099,8 @@ fn add_rejects_misshapen_override_arguments() {
 }
 
 #[test]
-fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
-    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
-    let mut vm =
-        section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
-            .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
-
-    let error = run_scalar(
-        &vm,
-        &program("tools.bind('other', 'fetch a page')"),
-        &NullObserver::default(),
-        "Section",
-    )
-    .expect_err("current H2 table must reject bind");
-    assert!(
-        error
-            .to_string()
-            .contains("only available during live H1 execution")
-    );
-}
-
-#[test]
-fn unknown_h2_alias_fails_before_scope_closure() {
-    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
+fn unknown_scoped_alias_fails_before_scope_closure() {
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm =
         section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Section")
             .expect("captured bindings must install");
@@ -1182,8 +1112,14 @@ fn unknown_h2_alias_fails_before_scope_closure() {
         &NullObserver::default(),
         "Section",
     )
-    .expect_err("only declared aliases may enter H2 scope");
-    assert!(error.to_string().contains("not declared"));
+    .expect_err("only bound aliases may enter the section scope");
+    assert!(
+        error
+            .to_string()
+            .contains("tools.add alias \"missing\" is not a bound tool slot"),
+        "the error names the unbound alias: {error}"
+    );
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
@@ -1313,8 +1249,8 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
     );
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
-        &bindings,
-        &ModelSet::default(),
+        &shared_set(bindings),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         "Test",
@@ -1600,8 +1536,8 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
     );
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
-        &bindings,
-        &ModelSet::default(),
+        &shared_set(bindings),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         "Test",
@@ -1628,7 +1564,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
         .as_deref(),
         Some("userdata")
     );
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
@@ -1658,8 +1594,8 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
     );
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
-        &bindings,
-        &ModelSet::default(),
+        &shared_set(bindings),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         "Test",
@@ -1686,7 +1622,7 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
         .as_deref(),
         Some("search")
     );
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
     assert_eq!(
         scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
@@ -2372,14 +2308,13 @@ async fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
 }
 
 #[test]
-fn add_without_declarations_fails_as_undeclared_in_a_chunk() {
-    let error =
-        run("tools.add('web_search')", "").expect_err("an undeclared alias must fail loudly");
+fn add_without_declarations_fails_as_unbound_in_a_chunk() {
+    let error = run("tools.add('web_search')", "").expect_err("an unbound alias must fail loudly");
     assert!(
         error
             .to_string()
-            .contains("tools.add alias \"web_search\" was not declared by tools.bind"),
-        "the error must name the undeclared alias: {error}"
+            .contains("tools.add alias \"web_search\" is not a bound tool slot"),
+        "the error must name the unbound alias: {error}"
     );
 }
 
@@ -2395,29 +2330,17 @@ fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
         &NullObserver::default(),
         "Test",
     )
-    .expect_err("an undeclared alias must fail loudly");
+    .expect_err("an unbound alias must fail loudly");
     assert!(
-        error.to_string().contains("not declared by tools.bind"),
-        "the error must report the missing declaration: {error}"
+        error.to_string().contains("is not a bound tool slot"),
+        "the error must report the missing slot: {error}"
     );
     vm.teardown(&NullObserver::default(), "Test");
 }
 
 #[test]
-fn add_with_empty_frozen_bindings_fails_as_undeclared() {
-    let shared = program("function helper() return 'no declarations' end");
-    let resolver = |description: &str| -> Result<ToolId> {
-        panic!("a declaration-free program must not resolve {description:?}")
-    };
-    let bindings = execute_live_tool_binds(
-        &shared,
-        &resolver,
-        EXECUTION,
-        &NullObserver::default(),
-        "Prompt",
-    )
-    .expect("a bind-free H1 program must execute");
-    assert!(bindings.bindings().is_empty());
+fn add_with_empty_frozen_bindings_fails_as_unbound() {
+    let bindings = ToolSet::default();
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Test")
         .expect("empty captured bindings must install");
     vm.inject_host("", &json!({}), &fresh_access())
@@ -2428,17 +2351,17 @@ fn add_with_empty_frozen_bindings_fails_as_undeclared() {
         &NullObserver::default(),
         "Test",
     )
-    .expect_err("an undeclared alias must fail loudly");
+    .expect_err("an unbound alias must fail loudly");
     assert!(
-        error.to_string().contains("not declared by tools.bind"),
-        "the error must report the missing declaration: {error}"
+        error.to_string().contains("is not a bound tool slot"),
+        "the error must report the missing slot: {error}"
     );
     vm.teardown(&NullObserver::default(), "Test");
 }
 
 #[test]
 fn add_with_an_override_argument_records_the_model_description() {
-    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
+    let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver::default(), "Test")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &fresh_access())
@@ -2450,7 +2373,7 @@ fn add_with_an_override_argument_records_the_model_description() {
         "Test",
     )
     .expect("a description passed to tools.add is the model-facing override");
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
     assert_eq!(
         scope[0].model_description(),
@@ -2466,7 +2389,7 @@ fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
         .expect("VM must build");
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host values must inject");
-    let (bindings, runtime) = vm.tool_bag_handles();
+    let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("an empty scope must snapshot");
     assert!(scope.is_empty());
     vm.teardown(&NullObserver::default(), "Test");

@@ -986,7 +986,7 @@ Prepare assembles contributed tools into the run's `ToolCatalog` in declaration 
 
 <step-13>
 
-### Step 13: Lua surface consolidation
+### Step 13: Lua surface consolidation [completed] [completed]
 
 - Component: binding
 

@@ -201,10 +201,9 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         "canonical_echo",
         "Echo a test value.",
     ));
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.bind('echo', 'echo tool')\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         tools.call('echo', { value = 'x' })\n\
@@ -288,11 +287,9 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     // The first script dispatch installs the counts seeded from the
     // effective scope, so an added but uncalled alias reads as 0 and an
     // author assert on it fails the run with its own message.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\n  other: tests/tools/other\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.bind('search', 'search tool')\n\
-        tools.bind('other', 'other tool')\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n```lua\n\
         tools.add('search')\n\
         local _ = tools.call('other', { value = 'x' })\n\
@@ -322,10 +319,9 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 
 #[tokio::test]
 async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.bind('search', 'search tool')\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n```lua\n\
         tools.add('search')\n\
         local _ = tools.call('search', { value = 'x' })\n\
@@ -425,7 +421,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             in_scope,
         } => {
             assert_eq!(name, "global_tool");
-            assert!(*global_exists, "the alias was declared by tools.bind");
+            assert!(*global_exists, "the alias is a bound tool slot");
             assert!(
                 in_scope.contains(&"scoped".to_string()),
                 "in_scope must list the scoped alias: {in_scope:?}"
@@ -439,7 +435,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     }
     let msg = error.to_string();
     assert!(
-        msg.contains("declared by tools.bind but not added"),
+        msg.contains("bound tool slot but was not added"),
         "error message must hint declared-but-unscoped: {msg}"
     );
 }
@@ -505,10 +501,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
             in_scope,
         } => {
             assert_eq!(name, "nonexistent");
-            assert!(
-                !*global_exists,
-                "the alias was never declared by tools.bind"
-            );
+            assert!(!*global_exists, "the alias was never a bound tool slot");
             assert!(
                 in_scope.contains(&"echo".to_string()),
                 "in_scope must list the scoped alias: {in_scope:?}"
@@ -518,7 +511,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
     }
     let msg = error.to_string();
     assert!(
-        !msg.contains("declared by tools.bind but not added"),
+        !msg.contains("bound tool slot but was not added"),
         "pure unknown must not hint declared-but-unscoped: {msg}"
     );
 }

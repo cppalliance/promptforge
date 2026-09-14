@@ -42,19 +42,17 @@ pub(crate) use mlua::{
 };
 pub(crate) use serde_json::Value as Json;
 
-pub(crate) use promptforge_model_client::model::{
-    ModelBinding, ModelResolver, ModelSet, ModelView,
-};
+pub(crate) use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
 pub(crate) use promptforge_store::{Access, Store};
 pub(crate) use shared_promptforge_api::observe::{Observation, Observer, detail};
-pub(crate) use shared_promptforge_api::tools::{Tool, ToolCatalog, ToolId};
+pub(crate) use shared_promptforge_api::tools::{Tool, ToolId};
 pub(crate) use shared_promptforge_api::untrusted::GuardNonce;
 
 pub(crate) use crate::compactors::install_compactors;
 pub(crate) use crate::error::Result;
 pub(crate) use crate::messages::install_messages;
+pub(crate) use crate::models::install_models;
 pub(crate) use crate::models::{LuaModelHandle, ModelsInferHook};
-pub(crate) use crate::models::{install_h2_models, install_live_models};
 
 #[doc(hidden)]
 pub use crate::error::{Error, SharedSource};
@@ -84,6 +82,7 @@ pub(crate) fn log_byte_budget(log_events: u32) -> usize {
     (log_events as usize).saturating_mul(LUA_LOG_CHARACTER_LIMIT)
 }
 
+mod alias;
 mod collection;
 mod compactors;
 mod error;
@@ -99,11 +98,10 @@ mod host;
 pub use host::install_ui;
 pub(crate) use host::{install_log, install_store_table, install_untrusted};
 mod tools;
-pub(crate) use tools::{LuaToolHandle, install_h2_tools, install_tool_call_counts};
+pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
 mod vm;
 pub(crate) use vm::pack_sequence;
 mod handles;
-mod live;
 mod messages;
 mod program;
 mod projection;
@@ -121,20 +119,17 @@ mod runtime_events;
 pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_overflow, precheck};
 #[doc(hidden)]
 pub use coro::{
-    install_agent_chat_shim, install_live_h1_shim_base, install_section_loop_shim,
-    install_section_user_input_shim, install_store_shims, shim_live_h1_models,
+    install_agent_chat_shim, install_section_loop_shim, install_section_user_input_shim,
+    install_store_shims,
 };
 #[doc(hidden)]
 pub use dispatch::{ScriptReport, ToolDispatch, dispatch_tool};
 #[doc(hidden)]
 pub use handles::{
-    Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolResolver, ToolSet,
-    ToolView,
+    Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolSet, ToolView,
 };
 #[doc(hidden)]
 pub use host::run_store_op;
-#[doc(hidden)]
-pub use live::LiveBindingProducer;
 #[doc(hidden)]
 pub use models::ModelRuntime;
 #[doc(hidden)]

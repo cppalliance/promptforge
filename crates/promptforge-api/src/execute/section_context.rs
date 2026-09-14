@@ -23,10 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use crate::debug::DebugCapture;
-use crate::lua::{
-    ProseState, SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base,
-    install_store_shims,
-};
+use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts};
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
 use crate::store::Access;
@@ -125,12 +122,10 @@ impl SectionContext {
         let sys = ctx.sys_json(section_id, section.name())?;
         ctx.observer()
             .observe(ctx.execution(), section.name(), detail::SECTION_STARTED);
-        let tool_set = ctx.tool_set_snapshot()?;
-        let model_set = ctx.model_set_snapshot()?;
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
-            &tool_set,
-            &model_set,
+            &ctx.tool_set(),
+            &ctx.model_set(),
             ctx.execution(),
             ctx.observer().as_ref(),
             section.name(),
@@ -180,16 +175,19 @@ impl SectionContext {
         })
     }
 
-    /// Constructs the frame for the live H1 pass and runs its setup
-    /// preamble: the `sys` JSON (id 0 under the prompt's title), VM
-    /// construction and limits, host injection, the host APIs, the H1
-    /// control-global stubs, and the live H1 shim base.
+    /// Constructs the frame for the H1 pass - section 0 - through the same
+    /// install path as any walked section: the `sys` JSON (id 0 under the
+    /// prompt's title, stamped with its own `now` because the walk's `when`
+    /// does not exist yet), VM construction over the run's shared sets,
+    /// limits, and the shared setup half (host injection, host APIs, the
+    /// control surface, the coroutine shims, the shared replay, the
+    /// captured alias bindings).
     ///
-    /// H1 is the level-1 section: it runs first and is never re-entered, so
-    /// the frame seeds an empty `var` and no item. The scheduler answers the pass's `models.infer` yields (with
-    /// or without a leading handle) through its driver, so the shim base
-    /// keeps the control stubs,
-    /// which raise before anything structural can yield.
+    /// H1's only deltas from a walked section: id 0, no `SECTION_STARTED`
+    /// observation (the pass is not a walked section), an empty `var` seed
+    /// (it runs first and is never re-entered), and a `list_from_section`
+    /// visible set spanning the whole top-level slice - section 0 excludes
+    /// nothing and has no children.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
@@ -207,19 +205,28 @@ impl SectionContext {
             ctx.execution(),
             ctx.prompt().sections().len(),
         );
-        let mut vm = SectionVm::new(ctx.nonce(), ctx.execution(), ctx.observer().as_ref(), title)?;
+        let mut vm = SectionVm::new_for_section(
+            ctx.nonce(),
+            &ctx.tool_set(),
+            &ctx.model_set(),
+            ctx.execution(),
+            ctx.observer().as_ref(),
+            title,
+        )?;
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
         vm.apply_lua_limits(
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
+        // H1's visible set is the whole top-level slice: section 0
+        // excludes nothing and has no children.
+        let visible = ctx.prompt().sections().to_vec();
+        let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
+        let setup = ctx.vm_setup(&sys, VmSeed::default(), access, title);
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_live_h1(&mut vm, ctx, access, &sys, title)
-            .and_then(|()| install_live_h1_shim_base(vm.lua()).map_err(Error::from))
-            .and_then(|()| install_store_shims(vm.lua()).map_err(Error::from))
-        {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
             vm.teardown(ctx.observer().as_ref(), title);
             return Err(error);
         }
@@ -270,12 +277,10 @@ impl SectionContext {
         item: serde_json::Value,
         var: &serde_json::Value,
     ) -> Result<Self> {
-        let tool_set = ctx.tool_set_snapshot()?;
-        let model_set = ctx.model_set_snapshot()?;
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
-            &tool_set,
-            &model_set,
+            &ctx.tool_set(),
+            &ctx.model_set(),
             ctx.execution(),
             ctx.observer().as_ref(),
             worker.name(),
@@ -485,24 +490,6 @@ fn install_section_scope(
         *sys = enriched;
     }
     Ok(())
-}
-
-/// The fallible setup half of the live H1 lifecycle: host injection, the
-/// host APIs, and the control-global stubs. One function, so the
-/// constructor's single teardown-on-error branch covers every step.
-///
-/// # Errors
-/// Returns the [`Error`](crate::Error) of whichever step failed.
-fn setup_live_h1(
-    vm: &mut SectionVm,
-    ctx: &RunState,
-    access: &Arc<Access>,
-    sys: &serde_json::Value,
-    title: &str,
-) -> Result<()> {
-    vm.inject_host(ctx.args(), sys, access)?;
-    vm.install_host_apis(ctx.observer(), title)?;
-    vm.install_h1_control_stubs().map_err(Error::from)
 }
 
 impl Drop for SectionContext {

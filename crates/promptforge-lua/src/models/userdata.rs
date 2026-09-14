@@ -1,4 +1,5 @@
-//! Inspectable Lua userdata returned by `models.bind` / `models.default`.
+//! Inspectable Lua userdata returned by `models.use` / `models.default` /
+//! `models.get`.
 //!
 //! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields
 //! to Lua. Invocation is namespace-only (A9): the handle carries no methods,
@@ -16,13 +17,13 @@ use promptforge_model_client::model::ModelBinding;
 ///
 /// Takes only the prompt: the hook resolves the section's current model
 /// binding itself, because the executor side knows the section name needed
-/// for a typed model-required failure and, on the live H1 path, the
-/// bindings are still being recorded into the run's producer.
+/// for a typed model-required failure.
 /// Installed as Lua app data; absent app data means `models.infer` is
 /// unavailable in that context.
 pub(crate) type ModelsInferHook = Arc<dyn Fn(&Lua, &str) -> mlua::Result<String> + Send + Sync>;
 
-/// Inspectable Lua userdata returned by `models.bind` / `models.default`.
+/// Inspectable Lua userdata returned by `models.use` / `models.default` /
+/// `models.get`.
 #[derive(Debug, Clone)]
 pub(crate) struct LuaModelHandle {
     binding: ModelBinding,
@@ -49,13 +50,26 @@ impl LuaModelHandle {
         self.binding.alias()
     }
 
+    /// Returns the role label the binding filled (the alias, under the
+    /// frontmatter's role vocabulary).
+    #[must_use]
+    pub(crate) fn label(&self) -> &str {
+        self.binding.alias()
+    }
+
+    /// Returns the bound role's full keyword set.
+    #[must_use]
+    pub(crate) fn capabilities(&self) -> &[String] {
+        self.binding.capabilities()
+    }
+
     /// Returns the caller-facing catalog model id.
     #[must_use]
     pub(crate) fn model_id(&self) -> &str {
         self.binding.id().name()
     }
 
-    /// Returns the capability description supplied to `models.bind`.
+    /// Returns the capability description of the bound role.
     #[must_use]
     pub(crate) fn description(&self) -> &str {
         self.binding.description()
@@ -70,13 +84,13 @@ impl LuaModelHandle {
         self.binding.context().get()
     }
 
-    /// Returns the frozen thinking switch, when the bind declared one.
+    /// Returns the frozen thinking switch, when the role declared one.
     #[must_use]
     pub(crate) fn thinking(&self) -> Option<bool> {
         self.binding.invocation().thinking
     }
 
-    /// Returns the frozen sampling temperature, when the bind declared one.
+    /// Returns the frozen sampling temperature, when the role declared one.
     ///
     /// The binding stores a validated
     /// [`Temperature`](promptforge_model_client::model::Temperature); the
@@ -89,7 +103,7 @@ impl LuaModelHandle {
             .map(promptforge_model_client::model::Temperature::get)
     }
 
-    /// Returns the frozen max generation tokens, when the bind declared one.
+    /// Returns the frozen max generation tokens, when the role declared one.
     ///
     /// The binding stores a [`NonZeroU32`](std::num::NonZeroU32); the raw `u32`
     /// is exposed only here, at the Lua presentation boundary.
@@ -105,6 +119,10 @@ impl LuaModelHandle {
 impl UserData for LuaModelHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("name", |_, this| Ok(this.name().to_owned()));
+        fields.add_field_method_get("label", |_, this| Ok(this.label().to_owned()));
+        fields.add_field_method_get("capabilities", |lua, this| {
+            lua.create_sequence_from(this.capabilities().to_vec())
+        });
         fields.add_field_method_get("model_id", |_, this| Ok(this.model_id().to_owned()));
         fields.add_field_method_get("description", |_, this| Ok(this.description().to_owned()));
         fields.add_field_method_get("context", |_, this| Ok(this.context()));

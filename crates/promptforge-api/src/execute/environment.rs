@@ -8,13 +8,11 @@ use shared_promptforge_api::capabilities::{Capability, CapabilityId, Contributio
 
 use crate::capabilities::CapabilityRegistry;
 use crate::client::GatewayClient;
-use crate::model::ModelCatalog;
 use crate::parser::Prompt;
 use crate::store::VfsRef;
-use crate::tools::ToolCatalog;
 
 use super::RunResult;
-use super::config::{RunContext, RunResolution};
+use super::config::RunContext;
 use super::fill::{assemble_catalog, fill_model_bindings, fill_tool_bindings};
 use super::requirements::{CapabilityConflict, Requirements};
 
@@ -25,26 +23,19 @@ use super::requirements::{CapabilityConflict, Requirements};
 /// change per run rides the [`RunContext`]. Model-free: the gateway's
 /// model list is a host-UI concern and never crosses this interface.
 ///
-/// Interim state (the interface consolidation step): the environment
-/// absorbs the retired resolution context's contents - the picker, the
-/// model catalog, and the tool catalog - as internal fields, and prose
-/// binding still works. [`prepare`](Environment::prepare) installs those
-/// inputs on the context, resolves the prompt's declared capabilities
-/// against the registry (rejecting co-activation conflicts), assembles
-/// the activated contributions into the run's tool catalog, builds the
-/// per-run router from `base_vfs`, and fills the model bindings from
-/// the context's current model; the `max_depth` guard lands with the
-/// sub-run adapter in the deferred prompt-pack work and is carried, not
-/// consulted, until then.
+/// [`prepare`](Environment::prepare) resolves the prompt's declared
+/// capabilities against the registry (rejecting co-activation conflicts),
+/// assembles the activated contributions into the run's tool catalog,
+/// builds the per-run router from `base_vfs`, fills the tool slots against
+/// the assembled catalog (fuzzy slots through the picker), and fills the
+/// model bindings from the context's current model; the `max_depth` guard
+/// lands with the sub-run adapter in the deferred prompt-pack work and is
+/// carried, not consulted, until then.
 #[non_exhaustive]
 pub struct Environment {
-    /// Semantic picker behind executed H1 binds (interim home, absorbed
-    /// from the retired resolution context).
+    /// Semantic picker behind prepare's fuzzy tool-slot fills; `None`
+    /// leaves fuzzy slots unfilled.
     picker: Option<Arc<ToolPicker>>,
-    /// Live model catalog behind executed H1 model calls (interim home).
-    models: ModelCatalog,
-    /// Tool catalog behind executed H1 `tools.bind` calls (interim home).
-    tools: ToolCatalog,
     /// The deployment's gateway client; a run's own client overrides it.
     client: Option<GatewayClient>,
     /// The explicit host-built set of installed capabilities a prompt's
@@ -59,14 +50,12 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Builds the default environment: no picker, empty model and tool
-    /// catalogs, no client, no host roots, and a nesting cap of 3.
+    /// Builds the default environment: no picker, no client, no registry,
+    /// no host roots, and a nesting cap of 3.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
             picker: None,
-            models: ModelCatalog::default(),
-            tools: ToolCatalog::default(),
             client: None,
             registry: None,
             base_vfs: VfsRef::builder().build(),
@@ -74,24 +63,11 @@ impl Environment {
         }
     }
 
-    /// Sets the semantic picker executed H1 binds resolve through.
+    /// Sets the semantic picker prepare's fuzzy tool-slot fills resolve
+    /// through.
     #[must_use]
     pub fn picker(mut self, picker: ToolPicker) -> Environment {
         self.picker = Some(Arc::new(picker));
-        self
-    }
-
-    /// Sets the live model catalog executed H1 model calls resolve against.
-    #[must_use]
-    pub fn models(mut self, models: ModelCatalog) -> Environment {
-        self.models = models;
-        self
-    }
-
-    /// Sets the tool catalog executed H1 `tools.bind` calls resolve against.
-    #[must_use]
-    pub fn tools(mut self, tools: ToolCatalog) -> Environment {
-        self.tools = tools;
         self
     }
 
@@ -133,10 +109,10 @@ impl Environment {
     }
 
     /// Enriches the caller-created context against the prompt's
-    /// declarations: installs the environment's live resolution inputs and
-    /// client default, builds the run's VFS, activates every declared
-    /// capability, and fills the model bindings - reporting what the
-    /// caller must still satisfy.
+    /// declarations: installs the environment's client default, builds the
+    /// run's VFS, activates every declared capability, assembles the run's
+    /// tool catalog, and fills the tool slots and model bindings -
+    /// reporting what the caller must still satisfy.
     ///
     /// The per-run VFS is a fresh router mounting the environment's
     /// [`base_vfs`](Environment::base_vfs) at `/` plus a fresh memory
@@ -171,8 +147,8 @@ impl Environment {
     /// against its descriptor - reported in
     /// [`Requirements::unmet_requirements`] with required versus actual,
     /// never shopped for. Soft keywords document author intent. With no
-    /// current model there is nothing to fill or check, and the interim
-    /// Lua-side catalog resolution carries the run.
+    /// current model there is nothing to fill or check, and declared
+    /// roles stay unbound.
     ///
     /// Tool slot filling follows catalog assembly: exact slots fill by
     /// identity against the run's catalog - an exact path's first two
@@ -188,16 +164,6 @@ impl Environment {
     /// unfilled (advertising an unfilled alias fails at run time).
     pub fn prepare(&self, prompt: &Prompt, ctx: RunContext) -> (RunContext, Requirements) {
         let mut ctx = ctx;
-        // The interim resolution inputs (picker, live catalogs) ride the
-        // environment until prose binding leaves the run path; prepare
-        // installs them so a prepared context is fully equipped whether
-        // the host drives the free run itself or goes through
-        // [`run`](Environment::run).
-        ctx.resolution = Some(RunResolution {
-            picker: self.picker.clone(),
-            models: self.models.clone(),
-            tools: self.tools.clone(),
-        });
         if ctx.client.is_none() {
             ctx.client.clone_from(&self.client);
         }
@@ -282,8 +248,7 @@ impl Environment {
             }
         }
         ctx.tools = assemble_catalog(&activated);
-        let activated_ids: Vec<CapabilityId> =
-            activated.iter().map(|(id, _)| id.clone()).collect();
+        let activated_ids: Vec<CapabilityId> = activated.iter().map(|(id, _)| id.clone()).collect();
         ctx.tool_bindings = fill_tool_bindings(
             prompt,
             &ctx.tools,
@@ -324,10 +289,8 @@ impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Environment")
             .field("picker", &self.picker.is_some())
-            .field("models", &self.models)
-            .field("tools", &"<ToolCatalog>")
             .field("client", &self.client)
-            .field("registry", &self.registry)
+            .field("registry", &self.registry.is_some())
             .field("base_vfs", &self.base_vfs)
             .field("max_depth", &self.max_depth)
             .finish()

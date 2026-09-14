@@ -5,13 +5,11 @@ use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use promptforge_tool_picker::ToolPicker;
-
 use crate::cancel::CancelHandle;
 use crate::client::{GatewayClient, StreamDelta};
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
-use crate::model::{ModelCatalog, ModelDescriptor};
+use crate::model::ModelDescriptor;
 use crate::observe::{NullObserver, Observer};
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
@@ -174,23 +172,6 @@ impl Default for RunLimits {
     }
 }
 
-/// The live resolution inputs
-/// [`Environment::prepare`](super::Environment::prepare) installs on a
-/// context before the free [`run`](super::run) drives it: the interim
-/// stand-in for the catalog-assembly step, absorbing what the retired
-/// borrowed resolution context carried (a picker, a model catalog, a tool
-/// catalog). A context without one runs capability-free.
-#[derive(Clone, Default)]
-pub(crate) struct RunResolution {
-    /// Semantic picker behind executed H1 binds; `None` fails a bind as a
-    /// binding error naming the missing picker.
-    pub(crate) picker: Option<Arc<ToolPicker>>,
-    /// Live model catalog behind executed H1 model calls.
-    pub(crate) models: ModelCatalog,
-    /// Tool catalog behind executed H1 `tools.bind` calls.
-    pub(crate) tools: ToolCatalog,
-}
-
 /// One run. Created by the host from the
 /// [`Environment`](super::Environment) carrying the per-run inputs,
 /// enriched at prepare, owned by the executor during
@@ -246,11 +227,6 @@ pub struct RunContext {
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fuzzy fill journaled.
     pub(crate) tool_bindings: ToolBindings,
-    /// The resolution inputs
-    /// [`Environment::prepare`](super::Environment::prepare) installs;
-    /// `None` on a caller-built context, which the free
-    /// [`run`](super::run) treats as capability-free.
-    pub(crate) resolution: Option<RunResolution>,
 }
 
 impl RunContext {
@@ -277,7 +253,6 @@ impl RunContext {
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
             tool_bindings: ToolBindings::default(),
-            resolution: None,
         }
     }
 
@@ -356,8 +331,8 @@ impl RunContext {
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function, which binds every declared role to it and checks the
     /// roles' hard keywords and context minimums against its descriptor.
-    /// The default (`None`) fills nothing: the interim Lua-side catalog
-    /// resolution carries the run.
+    /// The default (`None`) fills nothing: declared roles stay unbound and
+    /// selecting one at run time fails.
     #[must_use]
     pub fn model(mut self, model: ModelDescriptor) -> RunContext {
         self.model = Some(model);
@@ -469,7 +444,6 @@ impl fmt::Debug for RunContext {
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)
             .field("tool_bindings", &self.tool_bindings)
-            .field("resolution", &self.resolution.is_some())
             .finish()
     }
 }

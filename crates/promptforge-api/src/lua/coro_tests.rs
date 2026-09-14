@@ -6,7 +6,7 @@
 //! which stays with the executor to keep the dependency one-directional.
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mlua::{MultiValue, Thread};
 use serde_json::json;
@@ -105,8 +105,8 @@ fn scheduler_vm_with_tools(
     let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        tools,
-        models,
+        &Arc::new(Mutex::new(tools.clone())),
+        &Arc::new(Mutex::new(models.clone())),
         "test-run",
         &NullObserver::default(),
         "Test",

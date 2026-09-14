@@ -30,7 +30,6 @@ use promptforge_api::{Environment, Prompt, RunContext, RunResult};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 use shared_promptforge_api::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use shared_promptforge_api::observe::NullObserver;
-use shared_promptforge_api::tools::ToolCatalog;
 
 const EXECUTION: &str = "bench";
 
@@ -122,10 +121,10 @@ fn bench_catalog(context: u32) -> ModelCatalog {
 }
 
 /// One section driving `models.loop` over a builder-made list.
-const LOOP_PROMPT: &str = "---\nname: bench_loop\ndescription: d\npromptforge: 0\n---\n\n\
+const LOOP_PROMPT: &str = "---\nname: bench_loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
     # Bench\n\n\
     ```lua\n\
-    models.default('writer', 'A general model for benches')\n\
+    models.default('writer')\n\
     ```\n\n\
     ## Only\n\n\
     ```lua\n\
@@ -143,11 +142,8 @@ fn parse_loop_prompt() -> Prompt {
 
 /// The environment every bench run shares: an empty tool picker and no
 /// tools, so the loop is one terminal turn.
-fn bench_env(picker: ToolPicker, models: ModelCatalog) -> Environment {
-    Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::new(&[]).expect("the empty bench tool catalog builds"))
+fn bench_env(picker: ToolPicker) -> Environment {
+    Environment::new().picker(picker)
 }
 
 /// One `models.loop` turn end to end: parse is excluded, so the measurement
@@ -163,7 +159,7 @@ fn models_loop(c: &mut Criterion) {
     let prompt = parse_loop_prompt();
     let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())
         .expect("the empty bench picker builds");
-    let env = bench_env(picker, bench_catalog(131_072));
+    let env = bench_env(picker);
     c.bench_function("models_loop", |b| {
         b.iter(|| {
             let result = runtime.block_on(
@@ -172,6 +168,7 @@ fn models_loop(c: &mut Criterion) {
                     "",
                     RunContext::new(EXECUTION)
                         .observer(Arc::new(NullObserver::default()))
+                        .model(bench_catalog(131_072).models()[0].clone())
                         .client(gateway.client()),
                 ),
             );
@@ -200,7 +197,7 @@ fn compactors_fail(c: &mut Criterion) {
     let prompt = parse_loop_prompt();
     let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())
         .expect("the empty bench picker builds");
-    let env = bench_env(picker, bench_catalog(1));
+    let env = bench_env(picker);
     c.bench_function("compactors_fail", |b| {
         b.iter(|| {
             let result = runtime.block_on(
@@ -209,6 +206,7 @@ fn compactors_fail(c: &mut Criterion) {
                     "",
                     RunContext::new(EXECUTION)
                         .observer(Arc::new(NullObserver::default()))
+                        .model(bench_catalog(1).models()[0].clone())
                         .client(gateway.client()),
                 ),
             );

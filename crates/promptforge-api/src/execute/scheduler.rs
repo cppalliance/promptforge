@@ -31,12 +31,13 @@
 //! takes the next run-global id, and a jump transfers control - a sibling
 //! move within the chain's slice, or a descent into the jumper's child
 //! slice with the parent position suspended on the chain's own position
-//! stack until the child level exhausts. A drive armed with
-//! [`Scheduler::with_live_h1`] runs the live H1 pass first: the prompt's
-//! H1 blocks as the driver loop's first chain, under the live pass's rules
-//! (id 0, no section observations, a jump is an error, a scalar return
-//! short-circuits the run), with the root walk starting from the H1 `var`
-//! hand-off. A `fanout` request forks N arm chains (one per collection
+//! stack until the child level exhausts. A prompt with H1 blocks runs them
+//! first as section 0: the driver loop's first chain, under the walk's
+//! rules with three deltas - the frame keeps id 0, a scalar return
+//! short-circuits the run, and a Lua failure is the prompt's failed hard
+//! gate, mapped to [`Error::RequirementsUnmet`] - with the root walk
+//! starting from the H1 `var` hand-off. A `fanout` request forks N arm
+//! chains (one per collection
 //! member) interleaved by the driver: at most the run's
 //! `max_fanout_concurrency` arms are active at once, each arm runs the
 //! same walk machinery as any chain over the worker's blocks, and the join
@@ -69,15 +70,13 @@ use crate::fanout;
 use crate::fanout::ArmFinalizer;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
 use crate::lua::{
-    CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageRecord, OverflowReason,
-    ScriptReport, SectionVm, UserInputOutcome, append_message_record, current_tool_bindings,
-    dispatch_tool, invoke_selected, project_messages, resolve_model_binding, run_store_op,
-    shim_live_h1_models,
+    CoroStep, LuaBlockResult, LuaFanoutResult, MessageRecord, OverflowReason, ScriptReport,
+    UserInputOutcome, append_message_record, current_tool_bindings, dispatch_tool, invoke_selected,
+    project_messages, resolve_model_binding, run_store_op,
 };
 use crate::model::ModelBinding;
 use crate::observe::{Observation, detail};
 use crate::parser::{Block, Prompt, Section};
-use crate::resolve::RuntimeResolution;
 use crate::store::{Access, Store, StoreError};
 use crate::tools::ToolId;
 use crate::{Error, Result, cancel, subst};
@@ -86,7 +85,7 @@ use super::context::RunState;
 use super::engine::{
     JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
 };
-use super::gateway::{GatewaySource, ResolutionContext};
+use super::gateway::GatewaySource;
 use super::protocol::{Answer, Request, StoreOp, ToolCallOutcome, YieldParse};
 
 /// The most precise prompt-source line known for `blocks`: the first
@@ -376,16 +375,17 @@ struct Chain<'a> {
     /// the same walk machinery as any chain, and its finish writes its
     /// join's result slot instead of a call answer.
     arm: Option<ArmState<'a>>,
-    /// The live H1 pass marker: the prompt's H1 blocks under its title.
-    /// `Some` chains run the live pass's rules instead of the walk's: the
-    /// frame keeps id 0, no section observations fire, a recorded jump is
-    /// an error, a scalar return short-circuits the whole run, and the
-    /// pass's end starts the root walk with the H1 `var` hand-off. The
-    /// `slice`/`index` walk position stays empty and unused.
+    /// The H1 marker: the prompt's H1 blocks under its title - section 0.
+    /// `Some` chains run the walk's rules with three deltas: the frame
+    /// keeps id 0 (no section observations fire), a scalar return
+    /// short-circuits the whole run, and the pass's end starts the root
+    /// walk with the H1 `var` hand-off. The `slice`/`index` walk position
+    /// stays empty and unused until a jump out of H1 starts the walk at
+    /// the resolved target.
     h1: Option<&'a [Block]>,
 }
 
-impl Chain<'_> {
+impl<'a> Chain<'a> {
     /// The chain's access capability for section-VM installation. A live
     /// chain always holds one; `finish` and `abort_subtree` take it at
     /// chain end.
@@ -399,9 +399,9 @@ impl Chain<'_> {
             .ok_or(Error::internal("a live chain holds its access capability"))
     }
 
-    /// The chain's current block sequence: the live H1 pass's blocks, or
+    /// The chain's current block sequence: the H1 pass's blocks, or
     /// the current section's blocks on the walk.
-    fn blocks(&self) -> &[Block] {
+    fn blocks(&self) -> &'a [Block] {
         match &self.h1 {
             Some(blocks) => blocks,
             None => self.slice[self.index].blocks(),
@@ -510,12 +510,6 @@ pub(crate) struct Scheduler<'a> {
     /// The run's gateway source: chains resolve their client slot through
     /// it on first inference.
     client: GatewaySource,
-    /// The live H1 pass's run-scoped capability resolution: `Some` when the
-    /// scheduler runs the H1 pass before the walk (the run's shape),
-    /// `None` for a walk-only drive whose shared sets were filled another
-    /// way. One resolution serves the whole pass, so its decision cache
-    /// keeps the single-flight guarantee across blocks and resumes.
-    h1_resolution: Option<RuntimeResolution<'a>>,
 }
 
 /// Aborts every in-flight leaf task when the driver future is dropped
@@ -555,25 +549,7 @@ impl<'a> Scheduler<'a> {
             next_request: 0,
             next_fanout: 0,
             client: GatewaySource::from_optional(client, ctx.limits()),
-            h1_resolution: None,
         }
-    }
-
-    /// Arms the live H1 pass: the drive runs the prompt's H1 blocks as the
-    /// first chain, under the live pass's rules, before the root walk
-    /// starts from the H1 hand-off. `resolution` carries the run's live
-    /// picker and catalogs; the pass's binds write the run's shared sets,
-    /// which the walk reads through the context's views.
-    #[must_use]
-    pub(crate) fn with_live_h1(mut self, resolution: ResolutionContext<'a>) -> Self {
-        self.h1_resolution = Some(RuntimeResolution::new(
-            resolution.picker,
-            resolution.tools,
-            resolution.models,
-            self.ctx.tool_set(),
-            self.ctx.model_set(),
-        ));
-        self
     }
 
     /// Shrinks the chain-count bound so a test can drive the
@@ -592,10 +568,9 @@ impl<'a> Scheduler<'a> {
             .expect("the scheduler holds its own receiver");
     }
 
-    /// Drives the run until it ends and returns the run's result: the live
-    /// H1 pass first when the scheduler was armed with
-    /// [`with_live_h1`](Self::with_live_h1), then the root chain over the
-    /// prompt's sections.
+    /// Drives the run until it ends and returns the run's result: the H1
+    /// pass first when the prompt has H1 blocks, then the root chain over
+    /// the prompt's sections.
     ///
     /// Leaf dispatch spawns plain tasks (not `spawn_local`): an infer task
     /// touches no scheduler state and no Lua value - it awaits one gateway
@@ -638,15 +613,18 @@ impl<'a> Scheduler<'a> {
     }
 
     async fn drive_inner(&mut self) -> Result<String> {
-        if self.h1_resolution.is_some() {
-            let h1 = self.start_live_h1()?;
-            self.ready.push_back(h1);
-        } else {
+        // The H1 pass runs when the prompt has H1 blocks; an H1-less prompt
+        // goes straight to the walk, so its shared library never pays for a
+        // throwaway section-0 replay.
+        if self.ctx.prompt().h1_blocks().is_empty() {
             let sections = self.ctx.prompt().sections();
             if sections.is_empty() {
                 return Ok(GENERIC_COMPLETION.to_owned());
             }
             self.start_root_walk(sections, &serde_json::json!({}))?;
+        } else {
+            let h1 = self.start_live_h1()?;
+            self.ready.push_back(h1);
         }
         let mut root_result = None;
         loop {
@@ -820,9 +798,9 @@ impl<'a> Scheduler<'a> {
         Ok(())
     }
 
-    /// Starts the live H1 pass as the driver loop's first chain: the
-    /// prompt's H1 blocks under its title, driven through the same
-    /// coroutine machinery as any section under the live pass's rules.
+    /// Starts the H1 pass as the driver loop's first chain: the prompt's
+    /// H1 blocks under its title - section 0 - driven through the same
+    /// coroutine machinery as any section.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
@@ -864,22 +842,28 @@ impl<'a> Scheduler<'a> {
         Ok(id)
     }
 
-    /// Ends the live H1 pass at its fall-through: the final `var` read back
+    /// Ends the H1 pass at its fall-through: the final `var` read back
     /// while the VM is live, then the frame drops unarmed - the
     /// pass never arms completion, so `SECTION_FINISHED` never fires for
-    /// it. The root walk then starts from the `var` hand-off under the
-    /// walk's own context fork; with no sections the run's result is the
-    /// shared generic completion.
+    /// it. The root walk then starts from the `var` hand-off at section
+    /// `start` (0 on a fall-through, the resolved target on a jump out)
+    /// under the walk's own context fork; with no sections the run's
+    /// result is the shared generic completion.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the final `var` read-back fails,
     /// [`Error::TimestampFormat`] when the walk's `when` fails to format,
     /// [`Error::Store`] when the backend refuses the walk's acquisition,
     /// or [`Error::Internal`] when the chain holds no frame.
-    fn end_live_h1(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+    fn end_live_h1(
+        &mut self,
+        id: ChainId,
+        root_result: &mut Option<Result<String>>,
+        start: usize,
+    ) -> Result<()> {
         let chain = &mut self.chains[id.index()];
         let Some(mut frame) = chain.frame.take() else {
-            return Err(Error::internal("the live H1 pass ends with a live frame"));
+            return Err(Error::internal("the H1 pass ends with a live frame"));
         };
         let var = frame.read_var()?;
         drop(frame);
@@ -892,13 +876,37 @@ impl<'a> Scheduler<'a> {
             return Ok(());
         }
         // The H1-to-walk handoff: the walk's context takes its live `when`;
-        // H1's binds already landed in the shared sets the views read.
+        // H1's prompt-wide records already landed in the shared sets the
+        // views read.
         let when = now_rfc3339_checked()?;
         let walk_ctx = self.ctx.with_walk_state(&when);
-        let root = self.start_chain(walk_ctx, sections, 0, None, &var, 0, None)?;
+        let root = self.start_chain(walk_ctx, sections, start, None, &var, 0, None)?;
         self.install_root_slots(root)?;
         self.ready.push_back(root);
         Ok(())
+    }
+
+    /// Ends the H1 pass on a jump out: the heading resolves against the
+    /// top-level sections (H1's visible set - section 0 excludes nothing
+    /// and has no children), then the pass ends and the root walk starts
+    /// at the target.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the heading is malformed, matches no
+    /// top-level section, or matches more than one; the pass's own ending
+    /// can fail as [`end_live_h1`](Self::end_live_h1) documents.
+    fn end_live_h1_at_jump(
+        &mut self,
+        id: ChainId,
+        heading: &str,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
+        let sections = self.ctx.prompt().sections();
+        let target = fanout::resolve_sibling(heading, sections)?;
+        let start = section_position(sections, target).ok_or(Error::internal(
+            "a resolved H1 jump target is absent from the top-level slice",
+        ))?;
+        self.end_live_h1(id, root_result, start)
     }
 
     /// Enters the chain's next section and reports whether one was entered:
@@ -915,9 +923,10 @@ impl<'a> Scheduler<'a> {
         let chain = &mut self.chains[id.index()];
         chain.pending_prose = None;
         if chain.h1.is_some() {
-            // The live H1 pass enters its frame exactly once: id 0 under
-            // the prompt's title, the control-stub surface, the shim base,
-            // and no SECTION_STARTED - the pass is not a walked section.
+            // The H1 pass enters its frame exactly once: section 0 under
+            // the prompt's title, through the same install path as any
+            // section - and no SECTION_STARTED, the pass is not a walked
+            // section.
             let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?)?;
             chain.frame = Some(frame);
             chain.block = 0;
@@ -1070,7 +1079,7 @@ impl<'a> Scheduler<'a> {
             }
             Advance::SectionEnd => {
                 if self.chains[id.index()].h1.is_some() {
-                    self.end_live_h1(id, root_result)?;
+                    self.end_live_h1(id, root_result, 0)?;
                 } else {
                     self.end_section(id)?;
                     self.ready.push_back(id);
@@ -1080,9 +1089,7 @@ impl<'a> Scheduler<'a> {
         }
     }
 
-    /// Resumes a chain's suspended coroutine with its delivered answer: the
-    /// live H1 pass resumes inside a fresh resolver scope, a walked section
-    /// resumes directly.
+    /// Resumes a chain's suspended coroutine with its delivered answer.
     async fn resume_block(
         &mut self,
         id: ChainId,
@@ -1091,16 +1098,7 @@ impl<'a> Scheduler<'a> {
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
         let chain = &self.chains[id.index()];
-        if chain.h1.is_some() {
-            let (result, callback_error) = self.h1_scoped_step(id, |vm, program| {
-                vm.resume_block_coro_answer(program, thread, answer)
-            })?;
-            return self
-                .finish_h1_step(id, result, callback_error, root_result)
-                .await;
-        }
-        let slice = chain.slice;
-        let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
+        let Block::Lua(program) = &chain.blocks()[chain.block] else {
             return Err(Error::internal("a suspended coroutine's block is Lua"));
         };
         let frame = chain
@@ -1115,8 +1113,7 @@ impl<'a> Scheduler<'a> {
 
     /// Starts the chain's current Lua block as a fresh coroutine: the
     /// pending Markdown buffer installs as the block's fresh read-only
-    /// lazy `prose` template first, then the live H1 pass starts inside a
-    /// fresh resolver scope while a walked section starts directly. The
+    /// lazy `prose` template first. The
     /// driver owns the chunk observation
     /// boundaries: STARTED at the block's start, SUCCEEDED or FAILED when
     /// its coroutine finally returns or fails - a suspension is neither.
@@ -1139,22 +1136,9 @@ impl<'a> Scheduler<'a> {
             observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
             return Err(error);
         }
-        if chain.h1.is_some() {
-            let (result, callback_error) = self.h1_scoped_step(id, |vm, program| {
-                vm.start_block_coro(program).map_err(Error::from)
-            })?;
-            return self
-                .finish_h1_step(id, result, callback_error, root_result)
-                .await;
-        }
-        let slice = chain.slice;
-        let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
+        let Block::Lua(program) = &chain.blocks()[chain.block] else {
             return Err(Error::internal("the advance matched the block kind"));
         };
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
         let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
         self.handle_coro_result(id, result, root_result).await
     }
@@ -1281,6 +1265,21 @@ impl<'a> Scheduler<'a> {
     /// [`fanout::resolve_sibling`]).
     fn resolve_chain_target(&self, id: ChainId, heading: &str) -> Result<ChainTarget<'a>> {
         let chain = &self.chains[id.index()];
+        if chain.h1.is_some() {
+            // H1 is section 0: its visible set is the whole top-level
+            // slice - it excludes nothing and has no children, so every
+            // target is a flat index into that slice.
+            let sections = self.ctx.prompt().sections();
+            let target = fanout::resolve_sibling(heading, sections)?;
+            let index = section_position(sections, target).ok_or(Error::internal(
+                "a resolved H1 target is absent from the top-level slice",
+            ))?;
+            return Ok(ChainTarget {
+                slice: sections,
+                index,
+                child: false,
+            });
+        }
         if let Some(arm) = &chain.arm
             && arm.at_worker
         {
@@ -1334,6 +1333,26 @@ impl<'a> Scheduler<'a> {
             Ok(step) => step,
             Err(error) => {
                 observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
+                // A failed H1 assertion ends the run before the walk:
+                // H1's remaining job is the prompt's hard gates, so the
+                // prompt chunk's own Lua failure IS the failed assertion
+                // and its message is the failure notice. Only the chunk's
+                // error remaps: the machinery around it (the shared
+                // replay, the final `var` read-back, jump-target
+                // resolution) keeps its own kind - a prompt bug under
+                // `Error::Lua`, not an unsatisfiable environment. Fatal
+                // run conditions (cancellation, the claims violation)
+                // keep their own classification either way.
+                let error = if self.chains[id.index()].h1.is_some() {
+                    match error {
+                        Error::Lua(_) | Error::LuaRuntime { .. } => Error::RequirementsUnmet {
+                            notice: error.to_string(),
+                        },
+                        other => other,
+                    }
+                } else {
+                    error
+                };
                 return Err(error);
             }
         };
@@ -1368,16 +1387,11 @@ impl<'a> Scheduler<'a> {
             CoroStep::Done(LuaBlockResult::Jump(heading)) => {
                 // A jump is a control transfer, not a failure: the chunk
                 // boundary reports success and the walk moves to the
-                // resolved target.
+                // resolved target. A jump out of H1 ends the pass and
+                // starts the walk at the target.
                 observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
                 if self.chains[id.index()].h1.is_some() {
-                    // The H1 VM carries only the stub control globals, which
-                    // raise before anything is recorded; this arm stays
-                    // defensive against a recorded jump, exactly as the
-                    // legacy `run_live_h1_block` maps it.
-                    return Err(Error::Lua(format!(
-                        "jump({heading}) is not available in live H1 Lua"
-                    )));
+                    return self.end_live_h1_at_jump(id, &heading, root_result);
                 }
                 self.apply_jump(id, &heading)?;
                 self.ready.push_back(id);
@@ -1388,9 +1402,9 @@ impl<'a> Scheduler<'a> {
                 if self.chains[id.index()].h1.is_some() {
                     let chain = &mut self.chains[id.index()];
                     if let Some(value) = value {
-                        // A scalar return from the live H1 pass
+                        // A scalar return from the H1 pass
                         // short-circuits the whole run. The final `var`
-                        // read-back runs here exactly as the legacy pass
+                        // read-back runs here exactly as the walk
                         // reads it on every exit, so a reassigned `var`
                         // global fails the run instead of returning the
                         // value; the frame then drops unarmed - the pass
@@ -1404,7 +1418,7 @@ impl<'a> Scheduler<'a> {
                         *root_result = Some(Ok(value));
                         return Ok(());
                     }
-                    // Live H1 does not read the `reply` global back after a
+                    // H1 does not read the `reply` global back after a
                     // Lua block: the pass's reply slot rolls forward through
                     // prose alone.
                     chain.block += 1;
@@ -1421,92 +1435,6 @@ impl<'a> Scheduler<'a> {
                 self.ready.push_back(id);
                 Ok(())
             }
-        }
-    }
-
-    /// Runs one live H1 coroutine step (a block's start or a suspension's
-    /// resume) inside a fresh Lua scope with the capability resolvers and
-    /// the live models shim wrap installed. The step's outcome and the
-    /// captured resolver callback error return separately, so the caller
-    /// observes the chunk's own boundary first and then applies the legacy
-    /// `run_live_h1_block` contract: a typed resolver error captured by a
-    /// callback fails the block even when the chunk caught the Lua error
-    /// itself.
-    ///
-    /// The resolvers reinstall on every step because their callbacks are
-    /// scoped: a suspended coroutine outlives the scope it started in, so
-    /// each resume enters a fresh scope with fresh live tables before the
-    /// thread runs again. The resolution's decision cache is run-scoped, so
-    /// reinstalling never re-queries the picker. One legacy edge narrows
-    /// here: an author alias saved from the `tools`/`models` table (say
-    /// `local bind = models.bind`) dies with its scope, so calling it after
-    /// a suspension fails where the legacy block-scoped install allowed it
-    /// within one block.
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] when the chain is not the live H1 chain
-    /// or the step machinery fails; the step's own outcome and the
-    /// captured resolver callback error ride the `Ok` pair.
-    fn h1_scoped_step(
-        &self,
-        id: ChainId,
-        run: impl FnOnce(&SectionVm, &LuaProgram) -> Result<CoroStep>,
-    ) -> Result<(Result<CoroStep>, Option<Error>)> {
-        let chain = &self.chains[id.index()];
-        let Some(blocks) = chain.h1 else {
-            return Err(Error::internal(
-                "the scoped step belongs to the live H1 pass",
-            ));
-        };
-        let Block::Lua(program) = &blocks[chain.block] else {
-            return Err(Error::internal("a suspended coroutine's block is Lua"));
-        };
-        let resolution = self
-            .h1_resolution
-            .as_ref()
-            .ok_or(Error::internal("the live H1 pass holds its resolution"))?;
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let vm = frame.vm()?;
-        let mut outcome = None;
-        let scoped = vm.lua().scope(|scope| {
-            resolution
-                .install(vm.lua(), scope)
-                .map_err(mlua::Error::external)?;
-            shim_live_h1_models(vm.lua()).map_err(mlua::Error::external)?;
-            outcome = Some(run(vm, program));
-            Ok(())
-        });
-        let result = match scoped {
-            Ok(()) => outcome.ok_or(Error::internal("the scoped step records its outcome"))?,
-            Err(error) => Err(Error::lua(error)),
-        };
-        // The outcome and the captured callback error travel separately:
-        // the outcome decides the chunk's observation boundary, and the
-        // callback error is reported after it, with precedence.
-        Ok((result, resolution.take_callback_error()?))
-    }
-
-    /// Applies one live H1 step's outcome, then its captured resolver
-    /// callback error: the outcome drives the chunk's observation boundary
-    /// (a chunk that caught the resolver's Lua error itself still reports
-    /// `LUA_CHUNK_SUCCEEDED`), and the callback error fails the run
-    /// afterward, taking precedence over the outcome - the legacy
-    /// `run_live_h1_block` mapping, where the callback check follows the
-    /// chunk's own boundary.
-    async fn finish_h1_step(
-        &mut self,
-        id: ChainId,
-        result: Result<CoroStep>,
-        callback_error: Option<Error>,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let outcome = self.handle_coro_result(id, result, root_result).await;
-        match callback_error {
-            Some(error) => Err(error),
-            None => outcome,
         }
     }
 
@@ -1668,14 +1596,6 @@ impl<'a> Scheduler<'a> {
         args: serde_json::Value,
     ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
         let chain = &mut self.chains[id.index()];
-        if chain.h1.is_some() {
-            // Unreachable: section VMs alone install the `tools.call` shim,
-            // the H1 VM never does, and stripped coroutines make a
-            // hand-rolled yield impossible.
-            return Err(Error::internal(
-                "the live H1 pass cannot dispatch a tool_call request",
-            ));
-        }
         let tool_set = chain.ctx.tool_set_snapshot()?;
         let Some(binding) = tool_set.binding(alias).cloned() else {
             return Err(Error::UnboundToolCall {
@@ -1929,14 +1849,6 @@ impl<'a> Scheduler<'a> {
             on_delta,
         ) = {
             let chain = &mut self.chains[id.index()];
-            if chain.h1.is_some() {
-                // Unreachable: section VMs alone install the models.loop
-                // shim, the H1 VM never does, and stripped coroutines make a
-                // hand-rolled yield impossible.
-                return Err(Error::internal(
-                    "the live H1 pass cannot dispatch a loop request",
-                ));
-            }
             let execution = chain.ctx.execution().to_owned();
             let section = chain.section_name().to_owned();
             let binding = if let Some(binding) = binding {
@@ -2110,14 +2022,6 @@ impl<'a> Scheduler<'a> {
         var: &serde_json::Value,
     ) -> Result<ChainId> {
         let chain = &self.chains[id.index()];
-        if chain.h1.is_some() {
-            // Unreachable: the H1 control stubs raise before anything can
-            // yield. A panic on the empty walk slice would be worse than
-            // the typed invariant error.
-            return Err(Error::internal(
-                "the live H1 pass cannot dispatch a call request",
-            ));
-        }
         let depth = chain.call_depth + 1;
         if depth > MAX_CALL_DEPTH {
             return Err(Error::Lua(format!(
@@ -2186,14 +2090,6 @@ impl<'a> Scheduler<'a> {
         var: &serde_json::Value,
     ) -> Result<()> {
         let chain = &self.chains[id.index()];
-        if chain.h1.is_some() {
-            // Unreachable: the H1 control stubs raise before anything can
-            // yield. A panic on the empty walk slice would be worse than
-            // the typed invariant error.
-            return Err(Error::internal(
-                "the live H1 pass cannot dispatch a fanout request",
-            ));
-        }
         let depth = chain.call_depth + 1;
         if depth > MAX_CALL_DEPTH {
             return Err(Error::Lua(format!(
@@ -2211,7 +2107,16 @@ impl<'a> Scheduler<'a> {
         // An at-worker arm's fanout resolves over the worker's visible set
         // (handled inside `resolve_chain_target`); the new arms in turn
         // treat the worker as their caller.
+        //
+        // H1 has no position in the top-level slice: the worker's own
+        // position stands in as the caller's, so the arm's visible set
+        // comes out as the worker's siblings plus its children either way.
+        let h1_caller = chain.h1.is_some();
         let (caller_slice, caller_index) = match &chain.arm {
+            _ if h1_caller => {
+                let target = self.resolve_chain_target(id, worker_name)?;
+                (target.slice, target.index)
+            }
             Some(arm) if arm.at_worker => (arm.worker_slice, arm.worker_index),
             _ => (chain.slice, chain.index),
         };

@@ -127,6 +127,10 @@ pub struct ModelBinding {
     id: ModelId,
     invocation: ModelInvocation,
     context: NonZeroU32,
+    /// The bound role's full keyword set (the closed frontmatter
+    /// vocabulary, kebab-case), exposed on the Lua handle as
+    /// `capabilities`. Empty for bindings built outside a role fill.
+    capabilities: Vec<String>,
 }
 
 impl ModelBinding {
@@ -149,7 +153,21 @@ impl ModelBinding {
             id,
             invocation,
             context,
+            capabilities: Vec::new(),
         }
+    }
+
+    /// Records the bound role's keyword set, exposed on the Lua handle.
+    #[must_use]
+    pub fn with_capabilities(mut self, capabilities: Vec<String>) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    /// Returns the bound role's keyword set.
+    #[must_use]
+    pub fn capabilities(&self) -> &[String] {
+        &self.capabilities
     }
 
     /// Returns the exact prompt-local alias.

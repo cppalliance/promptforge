@@ -1,55 +1,9 @@
-//! Gateway client acquisition and the live capability resolution context.
-
-use std::fmt;
-
-use promptforge_tool_picker::ToolPicker;
+//! Gateway client acquisition.
 
 use crate::client::GatewayClient;
-use crate::model::ModelCatalog;
-use crate::tools::ToolCatalog;
 use crate::{Error, Result};
 
 use super::config::RunLimits;
-
-/// Live capability inputs for the parse-to-run execution path.
-///
-/// Crate-internal: the public interface carries these on the
-/// [`Environment`](super::Environment), which installs them on the
-/// [`RunContext`](super::RunContext) before the free [`run`](super::run)
-/// borrows them back into this borrowed shape for the live H1 pass.
-#[derive(Clone, Copy)]
-pub(crate) struct ResolutionContext<'a> {
-    /// Semantic picker used by executed H1 capability calls. `None` for
-    /// capability-free agents: a `tools.bind` or `models.bind` executed
-    /// without a picker fails as a binding error naming the missing picker.
-    pub(crate) picker: Option<&'a ToolPicker>,
-    /// Live model catalog used by executed H1 model calls.
-    pub(crate) models: &'a ModelCatalog,
-    /// Caller-provided tool catalog used by executed H1 `tools.bind` calls.
-    pub(crate) tools: &'a ToolCatalog,
-}
-
-impl<'a> ResolutionContext<'a> {
-    /// Builds a resolution context from an optional live picker, a model
-    /// catalog, and a tool catalog.
-    pub(crate) fn new(
-        picker: Option<&'a ToolPicker>,
-        models: &'a ModelCatalog,
-        tools: &'a ToolCatalog,
-    ) -> ResolutionContext<'a> {
-        ResolutionContext {
-            picker,
-            models,
-            tools,
-        }
-    }
-}
-
-impl fmt::Debug for ResolutionContext<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ResolutionContext").finish_non_exhaustive()
-    }
-}
 
 /// Builds a gateway client from the environment with the run's HTTP limits
 /// applied, so a lazily created client honors the same timeout and body cap as

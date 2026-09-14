@@ -5,10 +5,10 @@ use super::{
     ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer,
     Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
     ToolRuntime, ToolSet, Value, detail, guarded_var, harden, install_compactors,
-    install_h2_models, install_h2_tools, install_instruction_budget, install_log, install_messages,
+    install_instruction_budget, install_log, install_messages, install_models,
     install_shim_prelude, install_store_table,
-    install_tool_call_counts as install_tool_call_counts_impl, install_untrusted, log_byte_budget,
-    resolve_section_target, scalar_return, seal_sys, var_to_json,
+    install_tool_call_counts as install_tool_call_counts_impl, install_tools, install_untrusted,
+    log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -61,8 +61,13 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 pub struct SectionVm {
     execution: String,
     lua: Lua,
-    bound_tools: ToolSet,
-    bound_models: ModelSet,
+    /// The run's shared tool set: the frontmatter's filled slots plus the
+    /// prompt-wide `always` aliases. Shared with the run, not snapshotted:
+    /// `tools.always` is a prompt-wide fact that later sections must see.
+    bound_tools: Arc<Mutex<ToolSet>>,
+    /// The run's shared model set: the frontmatter's filled roles plus the
+    /// prompt-wide default. Shared for the same reason (`models.default`).
+    bound_models: Arc<Mutex<ModelSet>>,
     /// The section's tool-addition runtime, read by the executor's scope path.
     pub tool_runtime: Arc<Mutex<ToolRuntime>>,
     /// The section's model-selection runtime, read by the executor's scope path.
@@ -213,10 +218,10 @@ impl SectionVm {
     /// type-level docs). The VM retains `execution` for every later
     /// lifecycle report.
     ///
-    /// The VM carries no frozen tool bindings, so the validating `tools.add`
-    /// installed by [`inject_host`](Self::inject_host) rejects every alias as
-    /// undeclared: a prompt without `tools.bind` declarations cannot scope
-    /// tools.
+    /// The VM shares the run's (possibly empty) tool and model sets, so the
+    /// validating `tools.add` installed by
+    /// [`inject_host_with_var`](Self::inject_host_with_var) rejects every
+    /// alias as unbound until prepare's filled slots arrive with the sets.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
@@ -251,8 +256,8 @@ impl SectionVm {
         let mut vm = Self {
             execution: execution.to_owned(),
             lua,
-            bound_tools: ToolSet::default(),
-            bound_models: ModelSet::default(),
+            bound_tools: Arc::new(Mutex::new(ToolSet::default())),
+            bound_models: Arc::new(Mutex::new(ModelSet::default())),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
@@ -280,28 +285,30 @@ impl SectionVm {
         }
         Ok(vm)
     }
-    /// Creates a section VM carrying the prompt's frozen tool and model bindings.
+    /// Creates a section VM sharing the run's tool and model sets.
     ///
-    /// The bindings back the validating `tools`/`models` tables that
-    /// [`inject_host_with_var`](Self::inject_host_with_var) installs, and the
+    /// The sets are the run's own handles, not snapshots: the frontmatter's
+    /// filled slots back the validating `tools`/`models` tables that
+    /// [`inject_host_with_var`](Self::inject_host_with_var) installs and the
     /// bare alias globals that
     /// [`install_captured_bindings`](Self::install_captured_bindings)
-    /// installs after the shared replay. H1 code is never replayed into a
-    /// section VM.
+    /// installs after the shared replay, and the prompt-wide facts a section
+    /// records (`tools.always`, `models.default`) land where every later
+    /// section sees them. H1 is section 0 on this same path.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     pub fn new_for_section(
         nonce: &GuardNonce,
-        tools: &ToolSet,
-        models: &ModelSet,
+        tools: &Arc<Mutex<ToolSet>>,
+        models: &Arc<Mutex<ModelSet>>,
         execution: &str,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Self> {
         let mut vm = Self::new(nonce, execution, observer, section)?;
-        vm.bound_tools = tools.clone();
-        vm.bound_models = models.clone();
+        vm.bound_tools = Arc::clone(tools);
+        vm.bound_models = Arc::clone(models);
         Ok(vm)
     }
 
@@ -360,32 +367,48 @@ impl SectionVm {
 
     /// Installs the captured tool and model alias globals.
     ///
-    /// Each frozen binding becomes a bare global holding its handle userdata.
+    /// Each bound slot becomes a bare global holding its handle userdata.
     /// The engine calls this after [`replay_shared`](Self::replay_shared), so
     /// a declared alias wins over a same-named shared global; the raw install
     /// also bypasses any metatable the shared library set on `_G`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if a handle cannot be created or installed.
+    /// Returns [`Error::Lua`] if a handle cannot be created or installed, or
+    /// a shared set's mutex is poisoned.
     pub fn install_captured_bindings(&self) -> Result<()> {
         let globals = self.lua.globals();
-        for binding in self.bound_tools.bindings() {
-            let handle =
-                LuaToolHandle::from_binding(binding.alias(), binding.description(), binding.id());
-            let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
-            globals
-                .raw_set(binding.alias(), userdata)
-                .map_err(Error::lua)?;
+        {
+            let tools = self
+                .bound_tools
+                .lock()
+                .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?;
+            for binding in tools.bindings() {
+                let handle = LuaToolHandle::from_binding(
+                    binding.alias(),
+                    binding.description(),
+                    binding.id(),
+                );
+                let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
+                globals
+                    .raw_set(binding.alias(), userdata)
+                    .map_err(Error::lua)?;
+            }
         }
-        for binding in self.bound_models.bindings() {
-            // Handles are plain frozen userdata in every mode: invocation is
-            // namespace-only (`models.infer(handle, prompt)`), so no
-            // shim-wrapped proxy is needed.
-            let handle = LuaModelHandle::from_binding(binding);
-            let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
-            globals
-                .raw_set(binding.alias(), userdata)
-                .map_err(Error::lua)?;
+        {
+            let models = self
+                .bound_models
+                .lock()
+                .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))?;
+            for binding in models.bindings() {
+                // Handles are plain frozen userdata in every mode: invocation is
+                // namespace-only (`models.infer(handle, prompt)`), so no
+                // shim-wrapped proxy is needed.
+                let handle = LuaModelHandle::from_binding(binding);
+                let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
+                globals
+                    .raw_set(binding.alias(), userdata)
+                    .map_err(Error::lua)?;
+            }
         }
         Ok(())
     }
@@ -462,14 +485,14 @@ impl SectionVm {
         }
         let var = guarded_var(&self.lua, initial_var)?;
         globals.raw_set("var", var).map_err(Error::lua)?;
-        install_h2_tools(
+        install_tools(
             &self.lua,
             &globals,
             &self.bound_tools,
             &self.tool_runtime,
             &self.local_tools,
         )?;
-        install_h2_models(
+        install_models(
             &self.lua,
             &globals,
             &self.bound_models,
@@ -629,31 +652,6 @@ impl SectionVm {
         globals
             .raw_set("list_from_section", list_fn)
             .map_err(Error::lua)
-    }
-
-    /// Installs `call`, `jump`, `fanout`, and `list_from_section` as
-    /// stubs that fail with a clear error, for the live H1 VM only.
-    ///
-    /// H1 runs before any section exists, so the real control globals can
-    /// never operate there; without stubs a call dies with Lua's stock
-    /// nil-call error, which names no cause.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if any global cannot be installed.
-    pub fn install_h1_control_stubs(&self) -> Result<()> {
-        let globals = self.lua.globals();
-        for name in ["call", "jump", "fanout", "list_from_section"] {
-            let stub = self
-                .lua
-                .create_function(move |_, _: MultiValue| -> mlua::Result<()> {
-                    Err(mlua::Error::external(format!(
-                        "{name} is only available in sections (## headings); H1 runs before sections exist"
-                    )))
-                })
-                .map_err(Error::lua)?;
-            globals.raw_set(name, stub).map_err(Error::lua)?;
-        }
-        Ok(())
     }
 
     /// Replaces the sealed Lua `sys` global after scope close.
@@ -841,7 +839,7 @@ impl SectionVm {
     /// Installs `tools.calls` as a read-only Lua table backed by a fresh
     /// [`ToolCallCounts`]. Each seeded alias reads its live count; indexing
     /// an unseeded key is a hard error that names the bad key and lists the
-    /// seeded set. When the key was declared by `tools.bind` but never
+    /// seeded set. When the key names a bound tool slot but was never
     /// seeded - neither scoped into the section nor dispatched by a script
     /// `tools.call` - the diagnostic says so.
     ///
@@ -852,32 +850,54 @@ impl SectionVm {
     /// increment it.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
+    /// Returns [`Error::Lua`] when installing the `tools.calls` index fails
+    /// or the shared tool set's mutex is poisoned.
     pub fn install_tool_call_counts(&self, bindings: &[ToolBinding]) -> Result<ToolCallCounts> {
-        install_tool_call_counts_impl(&self.lua, &self.bound_tools, bindings)
+        let declared = self
+            .bound_tools
+            .lock()
+            .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?
+            .clone();
+        install_tool_call_counts_impl(&self.lua, &declared, bindings)
     }
 
-    /// Returns frozen tool bindings and the live H2 addition runtime.
+    /// Returns a snapshot of the shared tool set and the live section
+    /// addition runtime.
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api`'s executor
     /// tests, not host API.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the shared tool set's mutex is poisoned.
     #[doc(hidden)]
-    #[must_use]
-    pub fn tool_bag_handles(&self) -> (ToolSet, Arc<Mutex<ToolRuntime>>) {
-        (self.bound_tools.clone(), Arc::clone(&self.tool_runtime))
+    pub fn tool_bag_handles(&self) -> Result<(ToolSet, Arc<Mutex<ToolRuntime>>)> {
+        let tools = self
+            .bound_tools
+            .lock()
+            .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))?
+            .clone();
+        Ok((tools, Arc::clone(&self.tool_runtime)))
     }
 
-    /// Returns frozen model bindings and the live H2 selection runtime.
+    /// Returns a snapshot of the shared model set and the live section
+    /// selection runtime.
     ///
     /// Test-only: production reads the run's shared set through the model
     /// view; tests snapshot straight from the VM.
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api`'s tests,
     /// not host API.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the shared model set's mutex is poisoned.
     #[doc(hidden)]
-    #[must_use]
-    pub fn model_bag_handles(&self) -> (ModelSet, Arc<Mutex<ModelRuntime>>) {
-        (self.bound_models.clone(), Arc::clone(&self.model_runtime))
+    pub fn model_bag_handles(&self) -> Result<(ModelSet, Arc<Mutex<ModelRuntime>>)> {
+        let models = self
+            .bound_models
+            .lock()
+            .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))?
+            .clone();
+        Ok((models, Arc::clone(&self.model_runtime)))
     }
 
     /// Borrows the inner Lua state, so the shim installs and the
@@ -1201,8 +1221,8 @@ pub(crate) struct LuaOutcome {
 /// is always present (a host capability, not a scoped tool).
 ///
 /// The `tools` table is the same validating one every section VM installs,
-/// with no frozen bindings: a chunk that calls `tools.add(...)` fails loudly
-/// because no alias was declared by `tools.bind`.
+/// over an empty shared set: a chunk that calls `tools.add(...)` fails loudly
+/// because no alias is bound.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var`/`store`

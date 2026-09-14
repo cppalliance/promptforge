@@ -1,93 +1,8 @@
-use super::decode::{
-    decode_lua_number, parse_bind_args, parse_opts_table, parse_single_alias, validate_alias,
-    value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
-};
-use super::{ModelRuntime, record_default_binding};
-use mlua::Value;
-use mlua::{Lua, MultiValue};
-use promptforge_model_client::model::{ModelBindOpts, ModelId, ModelInvocation, ModelSet};
-
-#[test]
-fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
-    for good in [0.0, 0.7, 1.0, 2.0] {
-        let got = value_as_temperature(&Value::Number(good), "models.bind")
-            .expect("in-domain temperature")
-            .get();
-        assert!(
-            (got - good).abs() <= f64::EPSILON,
-            "temperature {good} must pass through unchanged, got {got}"
-        );
-    }
-    for bad in [-0.1, 2.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert!(
-            value_as_temperature(&Value::Number(bad), "models.bind").is_err(),
-            "temperature {bad} must be rejected"
-        );
-    }
-}
-
-#[test]
-fn integer_and_number_temperatures_share_one_decode_and_domain_check() {
-    // The Lua integer form is decoded through the same path as the number
-    // form (no separate i32 gate) and validated by the same domain check.
-    let from_integer = value_as_temperature(&Value::Integer(1), "models.bind")
-        .expect("integer 1 is in-domain")
-        .get();
-    let from_number = value_as_temperature(&Value::Number(1.0), "models.bind")
-        .expect("number 1.0 is in-domain")
-        .get();
-    assert!((from_integer - from_number).abs() <= f64::EPSILON);
-    assert!(
-        value_as_temperature(&Value::Integer(5), "models.bind").is_err(),
-        "an out-of-domain integer temperature must be rejected by the one domain check"
-    );
-}
-
-#[test]
-fn default_multi_arg_rolls_back_when_already_selected() {
-    // PF-LM-003: a second multi-arg `models.default` must be rejected WITHOUT
-    // leaving a half-recorded binding behind.
-    let resolver = |_: &str, _: &ModelBindOpts| {
-        Ok(promptforge_model_client::model::ResolvedModel {
-            id: ModelId::from_validated("gateway", "m1"),
-            invocation: ModelInvocation::from(&ModelBindOpts::default()),
-            context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
-        })
-    };
-    let mut set = ModelSet::default();
-    let errors = std::sync::Mutex::new(None);
-    record_default_binding(
-        &mut set,
-        &errors,
-        &resolver,
-        "a",
-        "desc",
-        &ModelBindOpts::default(),
-    )
-    .expect("the first models.default must succeed");
-    assert_eq!(set.bindings.len(), 1);
-    assert_eq!(set.default.as_deref(), Some("a"));
-
-    let err = record_default_binding(
-        &mut set,
-        &errors,
-        &resolver,
-        "b",
-        "desc",
-        &ModelBindOpts::default(),
-    )
-    .expect_err("a second models.default must be rejected");
-    assert!(
-        err.to_string().contains("at most once"),
-        "error must explain the at-most-once rule: {err}"
-    );
-    assert_eq!(
-        set.bindings.len(),
-        1,
-        "a rejected second models.default must not record a binding (rollback)"
-    );
-    assert_eq!(set.default.as_deref(), Some("a"));
-}
+use super::{ModelRuntime, install_models};
+use mlua::Lua;
+use promptforge_model_client::model::ModelBinding;
+use promptforge_model_client::model::{ModelId, ModelInvocation, ModelSet};
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn model_runtime_select_allows_reselection() {
@@ -105,221 +20,153 @@ fn model_runtime_select_allows_reselection() {
     );
 }
 
-// PF-LM-014: direct coverage of every parser branch and state transition.
-
-fn lua_string(lua: &Lua, value: &str) -> Value {
-    Value::String(lua.create_string(value).expect("create Lua string"))
-}
-
-#[test]
-fn parse_bind_args_covers_each_branch() {
-    let lua = Lua::new();
-    // Missing description.
-    let one: MultiValue = [lua_string(&lua, "writer")].into_iter().collect();
-    assert!(
-        parse_bind_args(one, "models.bind").is_err(),
-        "one argument is rejected"
-    );
-    // Non-string alias.
-    let bad_alias: MultiValue = [Value::Integer(1), lua_string(&lua, "desc")]
-        .into_iter()
-        .collect();
-    assert!(
-        parse_bind_args(bad_alias, "models.bind").is_err(),
-        "non-string alias fails"
-    );
-    // opts not a table.
-    let bad_opts: MultiValue = [
-        lua_string(&lua, "writer"),
-        lua_string(&lua, "desc"),
-        Value::Integer(3),
-    ]
-    .into_iter()
-    .collect();
-    assert!(
-        parse_bind_args(bad_opts, "models.bind").is_err(),
-        "non-table opts fails"
-    );
-    // Too many arguments.
-    let too_many: MultiValue = [
-        lua_string(&lua, "writer"),
-        lua_string(&lua, "desc"),
-        Value::Nil,
-        Value::Nil,
-    ]
-    .into_iter()
-    .collect();
-    assert!(
-        parse_bind_args(too_many, "models.bind").is_err(),
-        "four arguments fail"
-    );
-    // Valid two-argument form.
-    let ok: MultiValue = [lua_string(&lua, "writer"), lua_string(&lua, "desc")]
-        .into_iter()
-        .collect();
-    let (alias, description, opts) = parse_bind_args(ok, "models.bind").expect("valid bind args");
-    assert_eq!(alias, "writer");
-    assert_eq!(description, "desc");
-    assert_eq!(opts.temperature, None);
-}
-
-#[test]
-fn parse_opts_table_covers_each_key_and_rejects_unknown() {
-    let lua = Lua::new();
-    let table = lua.create_table().expect("table");
-    table.set("thinking", true).expect("set thinking");
-    table.set("context", 8192).expect("set context");
-    table.set("temperature", 0.5).expect("set temperature");
-    table.set("max_tokens", 256).expect("set max_tokens");
-    let opts = parse_opts_table(&table, "models.bind").expect("all known keys parse");
-    assert_eq!(opts.thinking, Some(true));
-    assert_eq!(opts.context.map(std::num::NonZeroU32::get), Some(8192));
-    assert_eq!(
-        opts.temperature
-            .map(promptforge_model_client::model::Temperature::get),
-        Some(0.5)
-    );
-    assert_eq!(opts.max_tokens.map(std::num::NonZeroU32::get), Some(256));
-
-    // MODEL-003: a zero count is rejected at the parse boundary, not stored.
-    let zero_context = lua.create_table().expect("table");
-    zero_context.set("context", 0).expect("set context");
-    assert!(
-        parse_opts_table(&zero_context, "models.bind").is_err(),
-        "a zero context minimum must be rejected"
-    );
-    let zero_max = lua.create_table().expect("table");
-    zero_max.set("max_tokens", 0).expect("set max_tokens");
-    assert!(
-        parse_opts_table(&zero_max, "models.bind").is_err(),
-        "a zero max_tokens cap must be rejected"
-    );
-
-    let unknown = lua.create_table().expect("table");
-    unknown.set("bogus", 1).expect("set bogus");
-    assert!(
-        parse_opts_table(&unknown, "models.bind").is_err(),
-        "an unknown opts key must be rejected"
-    );
-
-    let non_string_key = lua.create_table().expect("table");
-    non_string_key.set(1, "x").expect("set numeric key");
-    assert!(
-        parse_opts_table(&non_string_key, "models.bind").is_err(),
-        "a non-string opts key must be rejected"
-    );
-}
-
-#[test]
-fn scalar_decoders_cover_valid_and_invalid_inputs() {
-    assert!(value_as_bool(&Value::Boolean(false), "thinking", "models.bind").is_ok());
-    assert!(value_as_bool(&Value::Integer(1), "thinking", "models.bind").is_err());
-
-    assert_eq!(
-        value_as_u32(&Value::Integer(7), "context", "models.bind").expect("ok"),
-        7
-    );
-    assert_eq!(
-        value_as_u32(&Value::Number(9.0), "context", "models.bind").expect("whole number ok"),
-        9
-    );
-    assert!(value_as_u32(&Value::Integer(-1), "context", "models.bind").is_err());
-    assert!(value_as_u32(&Value::Number(1.5), "context", "models.bind").is_err());
-    assert!(value_as_u32(&Value::Boolean(true), "context", "models.bind").is_err());
-
-    // MODEL-003: the non-zero decoder accepts positive counts and rejects zero.
-    assert_eq!(
-        value_as_nonzero_u32(&Value::Integer(7), "context", "models.bind")
-            .expect("positive count")
-            .get(),
-        7
-    );
-    assert!(
-        value_as_nonzero_u32(&Value::Integer(0), "context", "models.bind").is_err(),
-        "a zero count must be rejected"
-    );
-
-    assert!(
-        (decode_lua_number(&Value::Integer(2), "t", "models.bind").expect("int") - 2.0).abs()
-            < f64::EPSILON
-    );
-    assert!(decode_lua_number(&Value::Boolean(true), "t", "models.bind").is_err());
-}
-
-#[test]
-fn parse_single_alias_and_validate_alias_branches() {
-    let lua = Lua::new();
-    let ok: MultiValue = [lua_string(&lua, "writer")].into_iter().collect();
-    assert_eq!(
-        parse_single_alias(&ok, "models.default").expect("string alias"),
-        "writer"
-    );
-    let bad: MultiValue = [Value::Integer(1)].into_iter().collect();
-    assert!(
-        parse_single_alias(&bad, "models.default").is_err(),
-        "a non-string alias must be rejected"
-    );
-
-    assert!(validate_alias("Writer_1-x").is_ok());
-    assert!(
-        validate_alias(&format!("A{}", "2".repeat(63))).is_ok(),
-        "a 64-character alias must be accepted"
-    );
-    assert!(
-        validate_alias(&format!("A{}", "2".repeat(64))).is_err(),
-        "a 65-character alias must be rejected"
-    );
-    assert!(validate_alias("").is_err(), "empty alias rejected");
-    assert!(validate_alias("1abc").is_err(), "leading digit rejected");
-    assert!(validate_alias("a b").is_err(), "space rejected");
-}
-
-#[test]
-fn live_model_apis_label_nested_decoder_errors_by_entry_point() {
-    let run = |source: &str| {
-        let lua = Lua::new();
-        let set = std::sync::Arc::new(std::sync::Mutex::new(ModelSet::default()));
-        let errors = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let resolver = |_: &str, _: &ModelBindOpts| {
-            Ok(promptforge_model_client::model::ResolvedModel {
-                id: ModelId::from_validated("gateway", "m1"),
-                invocation: ModelInvocation::from(&ModelBindOpts::default()),
-                context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
-            })
-        };
-        lua.scope(|scope| {
-            super::install_live_models(&lua, scope, &resolver, &set, &errors)
-                .map_err(mlua::Error::external)?;
-            lua.load(source).exec()
-        })
-        .expect_err("the invalid nested scalar must be rejected")
-        .to_string()
-    };
-
-    let bind = run("models.bind('writer', 'desc', { thinking = 1 })");
-    assert!(
-        bind.contains("models.bind opts.thinking must be a boolean"),
-        "models.bind wording must remain exact: {bind}"
-    );
-    let default = run("models.default('writer', 'desc', { thinking = 1 })");
-    assert!(
-        default.contains("models.default opts.thinking must be a boolean"),
-        "models.default must identify its own entry point: {default}"
-    );
-    assert!(
-        !default.contains("models.bind"),
-        "models.default errors must not be mislabelled: {default}"
-    );
-}
-
 #[test]
 fn model_runtime_starts_with_no_selection() {
     let runtime = ModelRuntime::new();
     assert!(runtime.used().is_none(), "fresh runtime has no selection");
 }
 
+/// A bound role for the shared set: `label`, with the keyword set recorded.
+fn bound_role(label: &str, capabilities: &[&str]) -> ModelBinding {
+    ModelBinding::new(
+        label,
+        "A general model for tests",
+        ModelId::from_validated("gateway", "m1"),
+        ModelInvocation {
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+        },
+        std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
+    )
+    .with_capabilities(capabilities.iter().map(|word| (*word).to_owned()).collect())
+}
+
+/// A fresh VM with the `models` table installed over a shared set holding
+/// the `writer` and `critic` roles.
+fn models_vm() -> (Lua, Arc<Mutex<ModelSet>>, Arc<Mutex<ModelRuntime>>) {
+    let lua = Lua::new();
+    let set = Arc::new(Mutex::new(ModelSet::from_parts(
+        vec![
+            bound_role("writer", &["frontier", "thinking"]),
+            bound_role("critic", &["fast"]),
+        ],
+        None,
+    )));
+    let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
+    install_models(&lua, &lua.globals(), &set, &runtime, false)
+        .expect("the models install cannot fail on a fresh VM");
+    (lua, set, runtime)
+}
+
+#[test]
+fn the_models_namespace_has_no_bind() {
+    let (lua, _, _) = models_vm();
+    let (bind_is_nil, has_use, has_default, has_get, has_infer): (bool, bool, bool, bool, bool) =
+        lua.load(
+            "return models.bind == nil, \
+                    type(models.use) == 'function', \
+                    type(models.default) == 'function', \
+                    type(models.get) == 'function', \
+                    type(models.infer) == 'function'",
+        )
+        .eval()
+        .expect("the namespace probe evaluates");
+    assert!(bind_is_nil && has_use && has_default && has_get && has_infer);
+}
+
+#[test]
+fn models_use_selects_a_bound_role_by_label() {
+    let (lua, _, runtime) = models_vm();
+    let handle: String = lua
+        .load("local h = models.use('writer'); return h.label .. '|' .. h.name")
+        .eval()
+        .expect("a bound label selects");
+    assert_eq!(handle, "writer|writer");
+    assert_eq!(runtime.lock().expect("runtime lock").used(), Some("writer"));
+}
+
+#[test]
+fn models_use_rejects_an_unbound_label() {
+    let (lua, _, _) = models_vm();
+    let error = lua
+        .load("models.use('ghost')")
+        .exec()
+        .expect_err("an unbound label is a hard error");
+    assert!(
+        error
+            .to_string()
+            .contains("models.use label \"ghost\" is not a bound model role"),
+        "the rejection names the label: {error}"
+    );
+}
+
+#[test]
+fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
+    let (lua, set, _) = models_vm();
+    lua.load("models.default('writer')")
+        .exec()
+        .expect("a bound label becomes the default");
+    assert_eq!(
+        set.lock().expect("set lock").default.as_deref(),
+        Some("writer")
+    );
+}
+
+#[test]
+fn models_default_is_idempotent_for_the_same_label_and_refuses_a_change() {
+    let (lua, set, _) = models_vm();
+    // The shared library replays into every section, so re-naming the same
+    // default must be a no-op.
+    lua.load("models.default('writer'); models.default('writer')")
+        .exec()
+        .expect("re-naming the same default is a no-op");
+    assert_eq!(
+        set.lock().expect("set lock").default.as_deref(),
+        Some("writer")
+    );
+    let error = lua
+        .load("models.default('critic')")
+        .exec()
+        .expect_err("the prompt-wide default cannot change mid-run");
+    assert!(
+        error
+            .to_string()
+            .contains("models.default is already \"writer\""),
+        "the refusal names the parked default: {error}"
+    );
+}
+
+#[test]
+fn models_default_rejects_an_unbound_label() {
+    let (lua, _, _) = models_vm();
+    let error = lua
+        .load("models.default('ghost')")
+        .exec()
+        .expect_err("an unbound label is a hard error");
+    assert!(
+        error
+            .to_string()
+            .contains("models.default label \"ghost\" is not a bound model role"),
+        "the rejection names the label: {error}"
+    );
+}
+
+#[test]
+fn the_handle_exposes_label_and_the_full_keyword_set() {
+    let (lua, _, _) = models_vm();
+    let inspected: String = lua
+        .load(
+            "local h = models.get('writer'); \
+             return h.label .. '|' .. h.model_id .. '|' .. table.concat(h.capabilities, ',')",
+        )
+        .eval()
+        .expect("the handle inspects");
+    assert_eq!(inspected, "writer|m1|frontier,thinking");
+}
+
 /// Builds a section VM with the Agent-window raw-id opt-in as `raw_ids`,
-/// host values injected (which installs the H2 `models` table).
+/// host values injected (which installs the `models` table).
 fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     let observer = shared_promptforge_api::observe::NullObserver::default();
     let mut vm = crate::SectionVm::new(
@@ -341,7 +188,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
                 .expect("the stock backend acquires"),
         ),
     )
-    .expect("host injection installs the H2 models table");
+    .expect("host injection installs the models table");
     vm
 }
 
@@ -365,10 +212,8 @@ fn models_get_resolves_an_undeclared_alias_as_a_raw_gateway_id_only_when_permitt
         .exec()
         .expect_err("without the opt-in an undeclared alias is an error");
     assert!(
-        error
-            .to_string()
-            .contains("was not declared by models.bind"),
-        "the strict path keeps its wording: {error}"
+        error.to_string().contains("is not a bound model role"),
+        "the strict path names the bound-role rule: {error}"
     );
 }
 

@@ -1561,7 +1561,7 @@ return models.infer(models.get('ghost'), 'ping')\n\
         .expect_err("an unknown model alias inside an arm must fail loudly");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("models.get alias \"ghost\" was not declared"),
+        rendered.contains("models.get alias \"ghost\" is not a bound model role"),
         "the unknown alias must be named: {rendered}"
     );
 }
@@ -1850,11 +1850,11 @@ async fn missing_bare_global_in_prose_errors() {
     );
 }
 
-/// The H1 VM's control globals are stubs: H1 runs before sections exist, so
-/// calling one fails the run with a message naming the cause instead of
-/// Lua's stock nil-call error.
+/// The control globals work in H1 (section 0): a `call` naming no
+/// top-level section fails the run with the resolution error naming the
+/// target.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn call_is_a_clear_error_on_the_h1() {
+async fn call_from_h1_to_an_unknown_section_fails_the_run() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
@@ -1864,18 +1864,18 @@ call('## Nope')\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("call from the H1 must fail with the stub error");
+        .expect_err("call from H1 to an unknown section must fail");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("only available in sections"),
-        "the stub error must name the cause: {rendered}"
+        rendered.contains("## Nope"),
+        "the resolution error names the missing section: {rendered}"
     );
 }
 
-/// `jump` from the H1 hits the same stub: the run fails with the clear
-/// message, never a recorded jump.
+/// `jump` out of H1 names a top-level section; an unknown target fails the
+/// run with the resolution error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_is_a_clear_error_on_the_h1() {
+async fn jump_from_h1_to_an_unknown_section_fails_the_run() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
@@ -1885,17 +1885,18 @@ jump('## Nope')\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("jump from the H1 must fail with the stub error");
+        .expect_err("jump from H1 to an unknown section must fail");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("only available in sections"),
-        "the stub error must name the cause: {rendered}"
+        rendered.contains("## Nope"),
+        "the resolution error names the missing section: {rendered}"
     );
 }
 
-/// `fanout` from the H1 hits the same stub.
+/// `fanout` from H1 resolves its worker against the top-level sections; an
+/// unknown worker fails the run with the resolution error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_is_a_clear_error_on_the_h1() {
+async fn fanout_from_h1_to_an_unknown_section_fails_the_run() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
@@ -1905,17 +1906,18 @@ fanout('## Nope', {'a'})\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("fanout from the H1 must fail with the stub error");
+        .expect_err("fanout from H1 to an unknown section must fail");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("only available in sections"),
-        "the stub error must name the cause: {rendered}"
+        rendered.contains("## Nope"),
+        "the resolution error names the missing section: {rendered}"
     );
 }
 
-/// `list_from_section` from the H1 hits the same stub.
+/// `list_from_section` from H1 resolves over the whole top-level slice; an
+/// unknown target fails the run with the resolution error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn list_from_section_is_a_clear_error_on_the_h1() {
+async fn list_from_section_from_h1_to_an_unknown_section_fails_the_run() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
@@ -1925,11 +1927,11 @@ list_from_section('## Nope')\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("list_from_section from the H1 must fail with the stub error");
+        .expect_err("list_from_section from H1 to an unknown section must fail");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("only available in sections"),
-        "the stub error must name the cause: {rendered}"
+        rendered.contains("## Nope"),
+        "the resolution error names the missing section: {rendered}"
     );
 }
 
@@ -2337,7 +2339,7 @@ async fn picker_less_context_runs_a_capability_free_prompt() {
         ## Only\n\n```lua\nreturn 'no capabilities'\n```\n"
     );
     let test = fixture(md);
-    let env = Environment::new().models(test.models.clone());
+    let env = Environment::new();
     let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
         panic!("a capability-free prompt runs without a picker");
     };
@@ -2354,7 +2356,7 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
         ## Second\n\n```lua\nreturn store.read('default.txt')\n```\n"
     );
     let test = fixture(md);
-    let env = Environment::new().models(test.models.clone());
+    let env = Environment::new();
     let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
         panic!("the default store handle carries the stock mount");
     };
@@ -2362,54 +2364,48 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
 }
 
 #[tokio::test]
-async fn picker_less_context_fails_a_tool_bind_as_a_binding_error() {
-    // A `tools.bind` under a picker-less context fails classified as a
-    // binding failure, naming the missing picker.
-    let md = flow_prompt!(
+async fn advertising_an_unfilled_slot_fails_at_run_time() {
+    // A fuzzy slot with no picker to fill it stays unfilled at prepare;
+    // advertising the alias in a section is the run-time error prepare
+    // promised.
+    let md = concat!(
+        "---\nname: t\ndescription: d\npromptforge: 0\ntools:\n  search:\n    want: search the web\n---\n\n",
         "# Test prompt\n\n\
-        ```lua\ntools.bind('search', 'search the web')\n```\n\n\
-        ## Only\n\n```lua\nreturn 'unreachable'\n```\n"
+        ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );
     let test = fixture(md);
-    let env = Environment::new().models(test.models.clone());
+    let env = Environment::new();
     let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
     else {
-        panic!("a tools.bind without a picker must fail");
+        panic!("advertising an unfilled alias must fail");
     };
-    assert_eq!(
-        error.kind(),
-        RunErrorKind::Binding,
-        "a picker-less tools.bind classifies as Binding: {error:?}"
-    );
     assert!(
-        error.to_string().contains("no tool picker"),
-        "the failure names the missing picker: {error}"
+        error
+            .to_string()
+            .contains("tools.add alias \"search\" is not a bound tool slot"),
+        "the failure names the unfilled alias: {error}"
     );
 }
 
 #[tokio::test]
-async fn picker_less_context_fails_a_model_bind_as_a_binding_error() {
-    // A non-empty catalog still cannot bind without the picker: the failure
-    // is the missing picker, not the empty-catalog absent shortcut.
+async fn models_bind_is_gone_from_the_lua_surface() {
+    // `models.bind` is removed: binding is the frontmatter's. The legacy
+    // call is a nil call, and the failed H1 gate classifies as
+    // RequirementsUnmet.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ```lua\nmodels.bind('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\nreturn 'unreachable'\n```\n"
     );
-    let mut test = fixture(md);
-    test.models = test_model_catalog();
-    let env = Environment::new().models(test.models.clone());
+    let test = fixture(md);
+    let env = Environment::new();
     let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
     else {
-        panic!("a models.bind without a picker must fail");
+        panic!("a models.bind call must fail");
     };
     assert_eq!(
         error.kind(),
-        RunErrorKind::Binding,
-        "a picker-less models.bind classifies as Binding: {error:?}"
-    );
-    assert!(
-        error.to_string().contains("no tool picker"),
-        "the failure names the missing picker: {error}"
+        RunErrorKind::RequirementsUnmet,
+        "the removed models.bind fails the H1 gate as RequirementsUnmet: {error:?}"
     );
 }

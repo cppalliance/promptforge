@@ -10,11 +10,13 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
+use promptforge_parser::{ModelKeyword, ToolSlot};
+
 use crate::Result;
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
-use crate::lua::{LuaProgram, ToolSet, ToolView};
-use crate::model::{ModelSet, ModelView};
+use crate::lua::{LuaProgram, ToolBinding, ToolSet, ToolView};
+use crate::model::{ModelBinding, ModelInvocation, ModelSet, ModelView};
 use crate::observe::Observer;
 use crate::parser::Prompt;
 use crate::store::{Access, VfsRef};
@@ -23,6 +25,96 @@ use crate::untrusted::GuardNonce;
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{now_rfc3339_checked, sys_json};
+
+/// Builds the run's shared tool set from the prepared bindings: every
+/// filled slot becomes a binding carrying its resolved implementation, so
+/// run-time execution never consults the assembled catalog again. Unfilled
+/// slots produce no binding: advertising or calling the alias fails at run
+/// time, exactly as prepare's report promised.
+fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
+    let mut set = ToolSet::default();
+    for (alias, slot) in prompt.frontmatter().tools().iter() {
+        let Some(tool) = ctx.tool_bindings.resolve(alias) else {
+            continue;
+        };
+        let description = match slot {
+            ToolSlot::Fuzzy(fuzzy) => fuzzy.want().to_owned(),
+            // The exact path says nothing prose-like; the tool's own
+            // catalog text stands in.
+            _ => tool.description().to_owned(),
+        };
+        set.bindings.push(ToolBinding {
+            alias: alias.to_owned(),
+            description,
+            id: tool.id(),
+            model_description: None,
+            tool: Arc::clone(tool),
+            conflicts: ctx.tool_bindings.conflicts(alias).to_vec(),
+            output_kind: crate::lua::ToolOutputKind::Plain,
+        });
+    }
+    set
+}
+
+/// The keyword's stable kebab-case spelling, journaled onto the binding as
+/// the role's capability set.
+fn keyword_name(keyword: ModelKeyword) -> &'static str {
+    match keyword {
+        ModelKeyword::Thinking => "thinking",
+        ModelKeyword::NoThinking => "no-thinking",
+        ModelKeyword::Frontier => "frontier",
+        ModelKeyword::Fast => "fast",
+        ModelKeyword::Small => "small",
+        ModelKeyword::Creative => "creative",
+        ModelKeyword::Chat => "chat",
+        // The vocabulary is closed today; a future keyword reports its
+        // debug spelling rather than breaking the fill.
+        _ => "unknown",
+    }
+}
+
+/// Builds the run's shared model set from the prepared bindings: every
+/// filled role becomes a binding under its label, carrying the role's
+/// keyword set (the handle's `capabilities`) and the hard-keyword thinking
+/// switch as the frozen invocation. Unfilled roles produce no binding:
+/// `models.use` on the label fails at run time.
+fn bound_model_set(prompt: &Prompt, ctx: &RunContext) -> ModelSet {
+    let mut set = ModelSet::default();
+    for (label, role) in prompt.frontmatter().models().iter() {
+        let Some(descriptor) = ctx.model_bindings.resolve(label) else {
+            continue;
+        };
+        let mut thinking = None;
+        for keyword in role.keywords() {
+            match keyword {
+                ModelKeyword::Thinking => thinking = Some(true),
+                ModelKeyword::NoThinking => thinking = Some(false),
+                _ => {}
+            }
+        }
+        let binding = ModelBinding::new(
+            label,
+            role.description()
+                .unwrap_or_else(|| descriptor.description()),
+            descriptor.id().clone(),
+            ModelInvocation {
+                temperature: None,
+                max_tokens: None,
+                thinking,
+            },
+            descriptor.context(),
+        )
+        .with_capabilities(
+            role.keywords()
+                .iter()
+                .map(|keyword| keyword_name(*keyword))
+                .map(str::to_owned)
+                .collect(),
+        );
+        set.bindings.push(binding);
+    }
+    set
+}
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -65,23 +157,21 @@ pub(crate) struct RunState {
     /// compiled chunk when the prompt declares no `lua shared` library, so
     /// the startup sequence carries no `Option` branch.
     shared: Arc<LuaProgram>,
-    /// The run's tool set as a read-only view: created empty here and
-    /// filled by the live H1 pass through the concrete `tool_set` handle.
-    /// The trait exposes no write methods, so once the H1 VM drops its
-    /// handle clones the set is structurally frozen.
+    /// The run's tool set as a read-only view: built from the prepared
+    /// bindings at construction. The trait exposes no write methods; the
+    /// only writer is `tools.always` (a prompt-wide fact) through the
+    /// concrete handle the section VMs share.
     tools: Arc<dyn ToolView>,
-    /// The concrete handle behind `tools`, handed to the live H1 binding
-    /// producer (its Lua host closures write through it). Readers never
-    /// touch it; they go through the view.
+    /// The concrete handle behind `tools`, shared with every section VM
+    /// (H1 included). Readers outside the VM layer go through the view.
     tool_set: Arc<Mutex<ToolSet>>,
-    /// The run's model set as a read-only view: created empty here and
-    /// filled by the live H1 pass through the concrete `model_set` handle.
-    /// The trait exposes no write methods, so once the H1 VM drops its
-    /// handle clones the set is structurally frozen.
+    /// The run's model set as a read-only view: built from the prepared
+    /// bindings at construction. The trait exposes no write methods; the
+    /// only writer is `models.default` (a prompt-wide fact) through the
+    /// concrete handle the section VMs share.
     models: Arc<dyn ModelView>,
-    /// The concrete handle behind `models`, handed to the live H1 binding
-    /// producer (its Lua host closures write through it). Readers never
-    /// touch it; they go through the view.
+    /// The concrete handle behind `models`, shared with every section VM
+    /// (H1 included). Readers outside the VM layer go through the view.
     model_set: Arc<Mutex<ModelSet>>,
     /// The walk's start timestamp, stamped into every section's `sys.when`;
     /// empty until the walk starts (H1 stamps its own `now`).
@@ -99,9 +189,12 @@ pub(crate) struct RunState {
 
 impl RunState {
     /// Builds the context for one run of `prompt`. The turn and id counters
-    /// are minted here (both start at zero), as are the empty tool and model
-    /// sets the live H1 pass fills through the concrete handles; `when`
-    /// starts empty and takes its live value at the H1-to-walk handoff.
+    /// are minted here (both start at zero), as are the run's shared tool
+    /// and model sets - built from the prepared bindings on `ctx` (empty on
+    /// a caller-built context that never passed through
+    /// [`Environment::prepare`](super::Environment::prepare), which runs
+    /// capability-free); `when` starts empty and takes its live value at the
+    /// H1-to-walk handoff.
     #[must_use]
     pub(crate) fn new(
         prompt: &Prompt,
@@ -110,8 +203,8 @@ impl RunState {
         shared: LuaProgram,
         ctx: &RunContext,
     ) -> Self {
-        let tool_set = Arc::new(Mutex::new(ToolSet::default()));
-        let model_set = Arc::new(Mutex::new(ModelSet::default()));
+        let tool_set = Arc::new(Mutex::new(bound_tool_set(prompt, ctx)));
+        let model_set = Arc::new(Mutex::new(bound_model_set(prompt, ctx)));
         Self {
             prompt: Arc::new(prompt.clone()),
             nonce: GuardNonce::fresh(),
@@ -196,16 +289,14 @@ impl RunState {
         &*self.tools
     }
 
-    /// The concrete handle behind the tools view, for the live H1 binding
-    /// producer; its clones die with the H1 VM, after which the set is
-    /// structurally frozen.
+    /// The concrete handle behind the tools view, shared with every
+    /// section VM the run constructs.
     pub(crate) fn tool_set(&self) -> Arc<Mutex<ToolSet>> {
         Arc::clone(&self.tool_set)
     }
 
     /// An owned snapshot of the run's tool set (bindings plus `always`),
-    /// read through the view. Post-H1 the set is frozen, so the two reads
-    /// always agree.
+    /// read through the view.
     ///
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
@@ -222,25 +313,10 @@ impl RunState {
         &*self.models
     }
 
-    /// The concrete handle behind the models view, for the live H1 binding
-    /// producer; its clones die with the H1 VM, after which the set is
-    /// structurally frozen.
+    /// The concrete handle behind the models view, shared with every
+    /// section VM the run constructs.
     pub(crate) fn model_set(&self) -> Arc<Mutex<ModelSet>> {
         Arc::clone(&self.model_set)
-    }
-
-    /// An owned snapshot of the run's model set (bindings plus `default`),
-    /// read through the view. Post-H1 the set is frozen, so the two reads
-    /// always agree.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
-    /// poisoned.
-    pub(crate) fn model_set_snapshot(&self) -> Result<ModelSet> {
-        Ok(ModelSet::from_parts(
-            self.models.bindings()?,
-            self.models.default()?,
-        ))
     }
 
     /// The resolved per-section tool-loop cap: the frontmatter's
@@ -271,8 +347,9 @@ impl RunState {
 
     /// The H1-to-walk handoff: the walk's start timestamp, set on a cheap
     /// clone so the context H1 saw stays untouched. The tool and model sets
-    /// need no delta: H1's binds already landed in the shared sets the views
-    /// read.
+    /// need no delta: they were built from the prepared bindings at
+    /// construction, and H1's prompt-wide records (`tools.always`,
+    /// `models.default`) landed in the same shared sets the views read.
     #[must_use]
     pub(crate) fn with_walk_state(&self, when: &str) -> Self {
         let mut ctx = self.clone();

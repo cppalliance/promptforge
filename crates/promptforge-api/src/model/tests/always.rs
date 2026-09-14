@@ -1,267 +1,171 @@
-//! `models.default` (single- and multi-arg) integration tests.
+//! `models.default` (label form) integration tests.
 
 use super::*;
 
-/// Compiles and resolves one live H1 declaration fixture.
-fn resolve_shared(source: &str) -> Result<(ToolSet, ModelSet)> {
-    let shared = crate::lua::LuaProgram::compile(
+/// Compiles one Lua chunk for a section VM drive.
+fn chunk(source: &str) -> crate::lua::LuaProgram {
+    crate::lua::LuaProgram::compile(
         source,
-        "shared",
+        "chunk",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver::default(),
-        "Prompt",
-    )?;
-    let tool_resolver =
-        |_: &str| -> std::result::Result<crate::tools::ToolId, promptforge_lua::Error> {
-            unreachable!("no tools")
-        };
-    resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
+        "Section",
+    )
+    .expect("test Lua must compile")
+}
+
+#[test]
+fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
+    let models = shared_models(vec![bound_role(
+        "writer",
+        "A tiny model",
+        "small",
+        8_192,
+        Some(false),
+        &["no-thinking"],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
+    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
+    vm.run_chunk(
+        &chunk(r#"models.default("writer")"#),
         &NullObserver::default(),
-        "Prompt",
+        "Section",
     )
+    .expect("a bound label becomes the default");
+    assert_eq!(
+        models.lock().expect("set lock").default.as_deref(),
+        Some("writer")
+    );
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn models_always_records_binding() {
-    let (_tools, models) = resolve_shared(
-        r#"models.bind("writer", "A tiny model", { thinking = false, temperature = 0 })
-               models.default("writer")"#,
-    )
-    .unwrap();
-    assert_eq!(models.default.as_deref(), Some("writer"));
-}
-
-#[test]
-fn models_always_returns_inspectable_object() {
-    let (tools, models) = resolve_shared(
-        r#"local bound = models.bind("writer", "A tiny model", {
-                   thinking = false, temperature = 0, max_tokens = 256
-               })
-               assert(bound.name == "writer")
-               assert(bound.model_id == "small")
-               assert(bound.description == "A tiny model")
-               assert(bound.context == 8192)
-               assert(bound.thinking == false)
-               assert(bound.temperature == 0)
-               assert(bound.max_tokens == 256)
-               local model = models.default("writer")
+fn models_default_returns_an_inspectable_handle() {
+    let models = shared_models(vec![bound_role(
+        "writer",
+        "A tiny model",
+        "small",
+        8_192,
+        Some(false),
+        &["no-thinking", "fast"],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
+    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
+    vm.run_chunk(
+        &chunk(
+            r#"local model = models.default("writer")
+               assert(model.label == "writer")
                assert(model.name == "writer")
                assert(model.model_id == "small")
                assert(model.description == "A tiny model")
                assert(model.context == 8192)
                assert(model.thinking == false)
-               assert(model.temperature == 0)
-               assert(model.max_tokens == 256)"#,
-    )
-    .unwrap();
-    assert_eq!(models.default.as_deref(), Some("writer"));
-    assert_eq!(models.bindings()[0].context().get(), 8_192);
-
-    let vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
+               assert(#model.capabilities == 2)
+               assert(model.capabilities[1] == "no-thinking")
+               assert(model.capabilities[2] == "fast")"#,
+        ),
         &NullObserver::default(),
         "Section",
     )
-    .expect("section install must expose the same inspectable Model object");
+    .expect("the handle exposes the role label and the full keyword set");
     vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn models_always_without_prior_bind_fails() {
-    let error = resolve_shared(r#"models.default("writer")"#).unwrap_err();
-    let msg = error.to_string();
-    assert!(msg.contains("not declared"), "unexpected error: {msg}");
-}
-
-#[test]
-fn models_always_duplicate_fails() {
-    let error = resolve_shared(
-        r#"models.bind("writer", "A tiny model")
-               models.default("writer")
-               models.default("writer")"#,
-    )
-    .unwrap_err();
-    let msg = error.to_string();
-    assert!(msg.contains("at most once"), "unexpected error: {msg}");
-}
-
-#[test]
-fn models_always_installs_exactly() {
-    let (tools, models) = resolve_shared(
-        r#"models.bind("writer", "A tiny model")
-               models.default("writer")"#,
-    )
-    .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
+fn models_default_rejects_an_unbound_label() {
+    let models = shared_models(vec![bound_role(
+        "writer",
+        "A tiny model",
+        "small",
+        8_192,
+        None,
+        &[],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let model = resolve_section_model(&vm).unwrap();
-    assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
-    vm.teardown(&NullObserver::default(), "Section");
-}
-
-#[test]
-fn models_always_provides_completion_options_without_use() {
-    let (tools, models) = resolve_shared(
-        r#"models.bind("writer", "A tiny model", { thinking = false, temperature = 0 })
-               models.default("writer")"#,
-    )
-    .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
-    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let model = resolve_section_model(&vm).unwrap();
-    let opts = model.as_ref().map(ModelBinding::completion_options);
-    let expected = CompletionOptions::new("small")
-        .with_temperature(0.0)
-        .expect("0.0 is valid")
-        .with_thinking(false);
-    assert_eq!(opts, Some(expected));
-    vm.teardown(&NullObserver::default(), "Section");
-}
-
-#[test]
-fn models_always_from_h2_prologue_fails() {
-    let (tools, models) = resolve_shared(r#"models.bind("writer", "A tiny model")"#).unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
-    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let prologue = crate::lua::LuaProgram::compile(
-        r#"models.default("writer")"#,
-        "prologue",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
-    let result = vm.run_chunk(&prologue, &NullObserver::default(), "Section");
-    assert!(result.is_err());
-    let msg = result.unwrap_err().to_string();
+    let error = vm
+        .run_chunk(
+            &chunk(r#"models.default("ghost")"#),
+            &NullObserver::default(),
+            "Section",
+        )
+        .expect_err("an unbound label is a hard error");
     assert!(
-        msg.contains("only available during live H1 execution"),
-        "unexpected error: {msg}"
+        error
+            .to_string()
+            .contains("models.default label \"ghost\" is not a bound model role"),
+        "the rejection names the label: {error}"
     );
     vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
-fn models_always_multi_arg_records_bind_and_always() {
-    let (_tools, models) = resolve_shared(
-        r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
-    )
-    .unwrap();
-    assert_eq!(models.default.as_deref(), Some("writer"));
-    assert!(models.binding("writer").is_some());
-}
-
-#[test]
-fn models_always_multi_arg_two_args() {
-    let (_tools, models) = resolve_shared(r#"models.default("writer", "A tiny model")"#).unwrap();
-    assert_eq!(models.default.as_deref(), Some("writer"));
-    assert!(models.binding("writer").is_some());
-}
-
-#[test]
-fn models_always_multi_arg_provides_completion_options() {
-    let (tools, models) = resolve_shared(
-        r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
-    )
-    .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
+fn models_default_is_idempotent_and_never_changes_mid_run() {
+    let models = shared_models(vec![
+        bound_role("writer", "A tiny model", "small", 8_192, None, &[]),
+        bound_role(
+            "critic",
+            "A careful analysis model",
+            "analyst",
+            131_072,
+            None,
+            &[],
+        ),
+    ]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
+    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
+    // The shared library replays into every section, so re-naming the same
+    // default is a no-op.
+    vm.run_chunk(
+        &chunk(r#"models.default("writer"); models.default("writer")"#),
         &NullObserver::default(),
         "Section",
     )
-    .unwrap();
+    .expect("re-naming the same default is a no-op");
+    let error = vm
+        .run_chunk(
+            &chunk(r#"models.default("critic")"#),
+            &NullObserver::default(),
+            "Section",
+        )
+        .expect_err("the prompt-wide default cannot change mid-run");
+    assert!(
+        error
+            .to_string()
+            .contains("models.default is already \"writer\""),
+        "the refusal names the parked default: {error}"
+    );
+    vm.teardown(&NullObserver::default(), "Section");
+}
+
+#[test]
+fn models_default_resolves_the_section_model_without_use() {
+    let models = shared_models(vec![bound_role(
+        "writer",
+        "A tiny model",
+        "small",
+        8_192,
+        Some(false),
+        &["no-thinking"],
+    )]);
+    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
+        .expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let model = resolve_section_model(&vm).unwrap();
+    vm.run_chunk(
+        &chunk(r#"models.default("writer")"#),
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect("the default parks");
+    let model = resolve_section_model(&vm).expect("the resolution reads the shared set");
+    assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     let opts = model.as_ref().map(ModelBinding::completion_options);
-    let expected = CompletionOptions::new("small")
-        .with_temperature(0.0)
-        .expect("0.0 is valid")
-        .with_thinking(false);
+    let expected = CompletionOptions::new("small").with_thinking(false);
     assert_eq!(opts, Some(expected));
     vm.teardown(&NullObserver::default(), "Section");
-}
-
-#[test]
-fn models_always_multi_arg_installs_exactly() {
-    let (tools, models) =
-        resolve_shared(r#"models.default("writer", "A tiny model", { thinking = false })"#)
-            .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver::default(),
-        "Section",
-    )
-    .unwrap();
-    vm.inject_host("", &json!({}), &fresh_access()).unwrap();
-    let model = resolve_section_model(&vm).unwrap();
-    assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
-    vm.teardown(&NullObserver::default(), "Section");
-}
-
-#[test]
-fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
-    let (_tools, models) = resolve_shared(
-        r#"models.bind("analyst", "careful analysis")
-               models.default("writer", "A tiny model")"#,
-    )
-    .unwrap();
-    assert_eq!(models.default.as_deref(), Some("writer"));
-
-    // Now verify that a second always (single-arg) after multi-arg always fails.
-    let error = resolve_shared(
-        r#"models.default("writer", "A tiny model")
-               models.default("writer")"#,
-    )
-    .unwrap_err();
-    let msg = error.to_string();
-    assert!(msg.contains("at most once"), "unexpected error: {msg}");
-}
-
-#[test]
-fn models_always_multi_arg_duplicate_alias_fails() {
-    let error = resolve_shared(
-        r#"models.bind("writer", "A tiny model")
-               models.default("writer", "A tiny model")"#,
-    )
-    .unwrap_err();
-    let msg = error.to_string();
-    assert!(
-        msg.contains("duplicate")
-            || msg.contains("Duplicate")
-            || msg.contains("declared more than once"),
-        "unexpected error: {msg}"
-    );
 }

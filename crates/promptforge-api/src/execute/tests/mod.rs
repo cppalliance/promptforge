@@ -11,9 +11,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
-use promptforge_tool_picker::{
-    Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
-};
+use promptforge_tool_picker::{Catalog, Config as PickerConfig, ToolDescriptor, ToolPicker};
 use serde_json::{Value, json};
 
 use super::gateway::{GatewaySource, env_client_with_limits};
@@ -22,16 +20,19 @@ use super::support::{advance_turn, now_rfc3339_checked};
 use super::tool_loop::{LocalDispatch, run_prose_inference};
 use super::*;
 use crate::Result;
+use crate::capabilities::CapabilityRegistry;
 use crate::client::{GatewayClient, GatewayEndpoint, SecretString, ToolSchema};
 use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, ToolCallCounts, current_tool_bindings};
-use crate::model::{
-    CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ModelSet, ThinkingMode,
-};
+use crate::model::{CompletionOptions, ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::observe::{NullObserver, Observation, Observer, detail};
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
-use crate::tools::{Tool, ToolCatalog, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
+use promptforge_model_client::model::ModelCatalog;
+use shared_promptforge_api::capabilities::{
+    Capability, CapabilityError, CapabilityId, Contribution, RunServices,
+};
 
 /// A fresh stock handle's access capability, for tests that inject host
 /// values into a standalone VM.
@@ -60,17 +61,32 @@ const fn _public_execution_types_are_send_sync_static() {
     assert_send_sync_static::<RunResult>();
     assert_send_sync_static::<RunError>();
     assert_send_sync_static::<RunErrorKind>();
-    // Borrowing resolution inputs: a fixed concrete lifetime still proves the
-    // auto traits hold for their owned shape.
-    assert_send_sync::<ResolutionContext<'static>>();
 }
 
 /// The runtime's default per-section tool-loop cap, mirrored for tests after the
 /// `DEFAULT_MAX_TOOL_ITERATIONS` constant was folded into `RunLimits`.
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
-const MODEL_ALWAYS_SHARED: &str =
-    "```lua shared\nmodels.default('writer', 'A general model for tests')\n```\n\n";
+/// The `writer` role declaration every model-facing fixture prompt carries:
+/// the frontmatter slot, filled by prepare's trivial fill from the
+/// context's current model.
+const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
+
+/// The H1 block parking the declared role as the prompt-wide default.
+const MODEL_DEFAULT_H1: &str = "```lua\nmodels.default('writer')\n```\n\n";
+
+/// Declares the `writer` role in the prompt's frontmatter, unless the
+/// frontmatter already declares roles.
+fn declare_writer(source: &str) -> String {
+    let frontmatter_end = source.find("\n---\n").expect("frontmatter closes");
+    let frontmatter = &source[..frontmatter_end];
+    if frontmatter.contains("\nmodels:") {
+        return source.to_string();
+    }
+    let mut out = source.to_string();
+    out.insert_str(frontmatter_end + 1, MODEL_ROLE_DECL);
+    out
+}
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
@@ -118,35 +134,43 @@ fn test_completion_options() -> CompletionOptions {
     CompletionOptions::new("claude-sonnet-4-6")
 }
 
+/// Declares the `writer` role and parks it as the prompt-wide default, so a
+/// model-facing fixture prompt runs its sections under a bound model. The
+/// canonical prose default rewrites to the label form over the declared
+/// role; prompts with their own richer `models.bind`/`models.default`
+/// shapes keep them (hand-migration cases).
 fn ensure_model_h1(md: &str) -> String {
-    let first_section = md.find("\n\n## ");
     let mut source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
-        source = source
-            .replace("```lua shared\nmodels.", "```lua\nmodels.")
-            .replace("```lua shared\n  models.", "```lua\n  models.");
-        return source;
+        // The canonical prose default becomes the label form over a
+        // declared role; richer bind shapes are hand-migration cases.
+        source = source.replace(
+            "models.default('writer', 'A general model for tests')",
+            "models.default('writer')",
+        );
+        return declare_writer(&source);
     }
+    let source = declare_writer(&source);
+    // Positions come from the post-declaration text: the declaration
+    // insertion shifts every later index.
+    let first_section = source.find("\n\n## ");
+    let mut source = source;
     if let Some(marker) = source.find("```lua\n")
         && first_section.is_none_or(|section| marker < section)
     {
         source.replace_range(marker..marker + "```lua".len(), "```lua shared");
         if let Some(pos) = source.find("\n\n## ") {
-            source.insert_str(pos + 2, &MODEL_ALWAYS_SHARED.replace("lua shared", "lua"));
+            source.insert_str(pos + 2, MODEL_DEFAULT_H1);
         }
         return source;
     }
     if let Some(pos) = first_section {
-        let mut out = source;
-        out.insert_str(pos + 2, &MODEL_ALWAYS_SHARED.replace("lua shared", "lua"));
-        return out;
+        source.insert_str(pos + 2, MODEL_DEFAULT_H1);
+        return source;
     }
     source.replacen(
         "---\n\n",
-        &format!(
-            "---\n\n# Test prompt\n\n{}",
-            MODEL_ALWAYS_SHARED.replace("lua shared", "lua")
-        ),
+        &format!("---\n\n# Test prompt\n\n{MODEL_DEFAULT_H1}"),
         1,
     )
 }
@@ -263,10 +287,13 @@ impl TestStore {
 }
 
 /// Builds a [`RunContext`] from the test-local [`RunOptions`], for the tests
-/// that call [`Environment::run`] directly with a custom picker and model
-/// catalog.
+/// that call [`Environment::run`] directly. The context carries the test
+/// model as the current selection, so prepare's trivial fill binds every
+/// declared role to it.
 fn to_context(opts: RunOptions) -> RunContext {
-    let mut ctx = RunContext::new(opts.execution).observer(opts.observer);
+    let mut ctx = RunContext::new(opts.execution)
+        .observer(opts.observer)
+        .model(test_model_catalog().models()[0].clone());
     if let Some(client) = opts.client {
         ctx = ctx.client(client);
     }
@@ -351,12 +378,18 @@ async fn run(
         .and_then(|config| config.with_margin(0.0))
         .expect("test thresholds are in the supported domain");
     let picker = build_test_picker(catalog, config);
-    let tool_catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
-    let env = Environment::new()
-        .picker(picker)
-        .models(test.models.clone())
-        .tools(tool_catalog);
+    let mut env = Environment::new().picker(picker);
+    if !tools.is_empty() {
+        // The fixture capability contributes the test's tools, so the
+        // prompt's declared slots fill against them at prepare.
+        env = env.registry(tools_registry(tools));
+    }
     let mut ctx = RunContext::new(opts.execution).observer(opts.observer);
+    // The host pattern: the context carries the current model, and
+    // prepare's trivial fill binds every declared role to it.
+    if let Some(model) = test.models.models().first() {
+        ctx = ctx.model(model.clone());
+    }
     if let Some(client) = opts.client {
         ctx = ctx.client(client);
     }
@@ -410,6 +443,47 @@ pub(super) fn shared_test_model() -> &'static promptforge_tool_picker::Model {
     MODEL.get_or_init(|| promptforge_tool_picker::Model::load().expect("the test model loads"))
 }
 
+/// The fixture capability: contributes the test's tools under
+/// `tests/tools`, so a prompt's frontmatter tool slots fill against them
+/// at prepare - the shape production tools arrive in.
+struct FixtureCapability {
+    id: CapabilityId,
+    tools: Vec<Arc<dyn Tool>>,
+}
+
+impl Capability for FixtureCapability {
+    fn id(&self) -> &CapabilityId {
+        &self.id
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Capability trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "The fixture tool capability."
+    }
+
+    fn create(&self, services: &RunServices) -> std::result::Result<Contribution, CapabilityError> {
+        let _ = services;
+        Ok(Contribution {
+            tools: self.tools.clone(),
+        })
+    }
+}
+
+/// Builds the registry holding one fixture capability contributing `tools`.
+fn tools_registry(tools: &[Arc<dyn Tool>]) -> CapabilityRegistry {
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(FixtureCapability {
+            id: CapabilityId::from_validated("tests/tools"),
+            tools: tools.to_vec(),
+        }))
+        .expect("the fixture capability registers");
+    registry
+}
+
 /// Runs a fixture offline through the real [`Environment::run`] entry point
 /// with a caller-customized [`RunContext`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
@@ -417,10 +491,13 @@ async fn run_with_context(
     test: &TestPrompt,
     configure: impl FnOnce(RunContext) -> RunContext,
 ) -> std::result::Result<String, RunError> {
-    let env = Environment::new()
-        .picker(empty_test_picker())
-        .models(test.models.clone());
-    let ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs());
+    let env = Environment::new().picker(empty_test_picker());
+    let mut ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs());
+    if ctx.model.is_none()
+        && let Some(model) = test.models.models().first()
+    {
+        ctx = ctx.model(model.clone());
+    }
     match env.run(&test.prompt, "", ctx).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
@@ -1160,8 +1237,8 @@ fn tool_description_override_appears_in_model_schema() {
     );
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        &bindings,
-        &ModelSet::default(),
+        &Arc::new(Mutex::new(bindings)),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         "Override",
@@ -1184,7 +1261,7 @@ fn tool_description_override_appears_in_model_schema() {
     .expect("prologue must compile");
     vm.run_chunk(&add_default, &NullObserver::default(), "Override")
         .expect("tools.add(echo) without override must succeed");
-    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
@@ -1234,8 +1311,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     );
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        &bindings,
-        &ModelSet::default(),
+        &Arc::new(Mutex::new(bindings)),
+        &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
         "Precedence",
@@ -1257,7 +1334,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     .expect("prologue must compile");
     vm.run_chunk(&add_plain, &NullObserver::default(), "Precedence")
         .expect("tools.add without override must succeed");
-    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
@@ -1751,10 +1828,9 @@ async fn untrusted_nonce_differs_across_runs() {
     // The nonce is minted once per run: two runs of the same prompt wrap the
     // same untrusted tool result under different nonces, so an envelope's tag
     // stays unguessable from one run to the next.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.bind('echo', 'echo tool')\n\
-        models.default('writer', 'A general model for tests')\n```\n\n\
+        models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
     let mut run_nonces = Vec::new();
@@ -1839,33 +1915,6 @@ const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\
 # Test prompt\n\n\
 ## First\n\n```lua\nstore.write('state.txt', 'first')\n```\n\n\
 ## Second\n\n```lua\nstore.append('state.txt', '\\nsecond')\nreturn \"second\"\n```\n";
-
-/// The picker's calibrated enriched text for a descriptor.
-///
-/// The engine's own derivation is crate-private, so this test mirror lets a
-/// need equal a tool's embedded text and bind it under any threshold.
-fn capability_for(descriptor: &ToolDescriptor) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    let name = descriptor.name().replace('_', " ");
-    if !name.is_empty() {
-        parts.push(name);
-    }
-    if !descriptor.description().is_empty() {
-        parts.push(descriptor.description().to_owned());
-    }
-    let mut params: Vec<&str> = descriptor
-        .input_schema()
-        .as_object()
-        .and_then(|schema| schema.get("properties"))
-        .and_then(serde_json::Value::as_object)
-        .map(|properties| properties.keys().map(String::as_str).collect())
-        .unwrap_or_default();
-    params.sort_unstable();
-    if !params.is_empty() {
-        parts.push(format!("parameters: {}", params.join(", ")));
-    }
-    parts.join(". ")
-}
 
 /// Records every [`DebugEvent`] so tests can assert capture wiring.
 #[derive(Default)]

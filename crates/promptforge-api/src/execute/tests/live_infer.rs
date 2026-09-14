@@ -6,21 +6,17 @@ async fn live_h1_infer_runs_once() {
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
     let addr = gateway.addr();
 
-    let source = "---\nname: live-h1\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: live-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
-        local writer = models.default('writer', 'A general model for tests')\n\
+        local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
         panic!("live H1 path must run");
     };
@@ -37,10 +33,10 @@ async fn the_environment_client_serves_a_run_when_the_context_carries_none() {
     let gateway = ScriptedGateway::start(vec![resp_text("env answer")]).await;
     let addr = gateway.addr();
 
-    let source = "---\nname: env-client\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: env-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Env Client\n\n\
         ```lua\n\
-        local writer = models.default('writer', 'A general model for tests')\n\
+        local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
         ```\n\n\
         ## Result\n\n\
@@ -48,8 +44,6 @@ async fn the_environment_client_serves_a_run_when_the_context_carries_none() {
     let prompt = parse(source);
     let env = Environment::new()
         .picker(empty_test_picker())
-        .models(test_model_catalog())
-        .tools(ToolCatalog::default())
         .client(gateway_client(addr));
     // The context deliberately carries no client: the defaulting in
     // `Environment::run` is the only path to the gateway.
@@ -71,7 +65,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
     // whose substitution would fail or stay empty - discards at the pass's
     // end without requiring a model. Only an explicit `models.infer` of the
     // prose requires a binding.
-    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 0\n---\n\n\
+    let unread = "---\nname: empty-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Empty H1\n\n\
         ```lua\nvar.omit = ''\n```\n\n\
         {{ var.omit }}\n\n\
@@ -82,7 +76,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         .expect("unread H1 prose must not require a model");
     assert_eq!(out, "ok");
 
-    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 0\n---\n\n\
+    let reading = "---\nname: read-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Read H1\n\n\
         ask\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
@@ -96,33 +90,8 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn caught_h1_callback_error_stops_before_a_later_block() {
-    let source = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
-        # Callback Drain\n\n\
-        ```lua\n\
-        local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
-        assert(not ok)\n\
-        ```\n\n\
-        ```lua\nstore.write('later.txt', 'ran')\n```\n\n\
-        ## Result\n\n\
-        ```lua\nreturn 'unexpected'\n```\n";
-    let store = TestStore::new();
-    let error = super::run(&fixture(source), "", &[], &store, silent())
-        .await
-        .expect_err("a caught resolver callback error must fail its own block");
-    assert!(
-        matches!(error, Error::ModelAbsent { .. }),
-        "the current block's typed callback error must surface: {error}"
-    );
-    assert!(
-        store.read("later.txt").is_err(),
-        "the later H1 block must not run after the callback error"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn shared_function_resolves_host_globals_when_called() {
-    let source = "---\nname: shared-host\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: shared-host\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Host\n\n\
         ```lua shared\n\
         function read_args() return args end\n\
@@ -131,11 +100,7 @@ async fn shared_function_resolves_host_globals_when_called() {
         ```lua\nreturn read_args()\n```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let RunResult::Ok(out) = env
         .run(&prompt, "later host value", to_context(silent()))
         .await
@@ -152,8 +117,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // host environment installed, so top-level shared code may use `store`,
     // `log`, and `args` at load.
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Host Load\n\n\
         ```lua shared\n\
         store.write('loaded.txt', args)\n\
@@ -162,10 +126,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
         ## Result\n\n\
         ```lua\nreturn store.read('loaded.txt')\n```\n";
     let prompt = parse(source);
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
@@ -191,20 +152,11 @@ async fn shared_library_calls_host_apis_at_load_time() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let echo = Arc::new(EchoTool);
-    let descriptor = ToolDescriptor::new(
-        PickerToolId::parse("tests/tools/echo").expect("fixture id is valid"),
-        echo.description(),
-        echo.parameters_schema(),
-    );
-    let capability =
-        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
-    let source = format!(
-        "---\nname: captured-bindings\ndescription: d\npromptforge: 0\n---\n\n\
+    // The bound slots arrive from the frontmatter: the capability installs
+    // the tool, the exact slot binds the alias, and the captured alias
+    // globals install in every section VM - H1 never runs a bind.
+    let source = "---\nname: captured-bindings\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/echo\nmodels:\n  writer: {}\n---\n\n\
          # Captured Bindings\n\n\
-         ```lua\n\
-         echo = tools.bind('echo', {capability})\n\
-         writer = models.bind('writer', 'A general model for tests')\n\
-         ```\n\n\
          ```lua shared\n\
          function binding_names() return echo.name .. ':' .. writer.name end\n\
          ```\n\n\
@@ -221,17 +173,10 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          - one\n\
          - two\n\n\
          ## Called\n\n\
-         ```lua\nreturn binding_names()\n```\n"
-    );
-    let prompt = parse(&source);
-    let picker = build_test_picker(Catalog::new(vec![descriptor]), PickerConfig::default());
-    let models = test_model_catalog();
+         ```lua\nreturn binding_names()\n```\n";
+    let prompt = parse(source);
     let tools: [Arc<dyn Tool>; 1] = [echo];
-    let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(catalog);
+    let env = Environment::new().registry(tools_registry(&tools));
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
         panic!("captured bindings must be installed in every section VM");
     };
@@ -248,10 +193,10 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     // producer's bindings-so-far and runs the one infer shape: a single
     // tool-free round on a fresh conversation that leaves `sys` untouched.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let source = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         var.answer = models.infer('answer once')\n\
         var.sys_untouched = not pcall(function() return sys.reply_finish_reason end)\n\
         ```\n\n\
@@ -259,11 +204,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let RunResult::Ok(out) = env
         .run(&prompt, "", to_context(gatewayed(gateway.addr())))
         .await
@@ -298,22 +239,18 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     // reaches the nested inference path.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Nested Infer Observations\n\n\
         ```lua\n\
-        local writer = models.default('writer', 'A general model for tests')\n\
+        local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'ping')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
     let recorder = Arc::new(Recorder::default());
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
 
     let RunResult::Ok(out) = env
         .run(
@@ -358,15 +295,14 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         std::time::Duration::from_secs(30),
     )])
     .await;
-    let source = "---\nname: cancelled-infer\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: cancelled-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Cancelled Infer\n\n\
         ```lua\n\
-        local writer = models.default('writer', 'A general model for tests')\n\
+        local writer = models.default('writer')\n\
         return models.infer(writer, 'must cancel')\n\
         ```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
     let recorder = Arc::new(Recorder::default());
     let cancel = crate::cancel::CancelHandle::new();
     let canceller = cancel.clone();
@@ -380,16 +316,14 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         .await;
         canceller.cancel();
     });
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let result = env
         .run(
             &prompt,
             "",
             RunContext::new(EXECUTION)
                 .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
+                .model(test_model_catalog().models()[0].clone())
                 .client(gateway_client(gateway.addr()))
                 .cancel(cancel),
         )
@@ -416,10 +350,10 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
     let gateway = ScriptedGateway::start(vec![resp_tool_call("call_1", "ghost", "{}")]).await;
-    let source = "---\nname: infer-tool-call\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: infer-tool-call\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Infer Tool Call\n\n\
         ```lua\n\
-        local writer = models.default('writer', 'A general model for tests')\n\
+        local writer = models.default('writer')\n\
         return models.infer(writer, 'answer without tools')\n\
         ```\n";
     let error = super::run(
@@ -448,10 +382,10 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // infer, and `var` writes accumulate across the pass into the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
-    let source = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         var.executions = (var.executions or 0) + 1\n\
         ```\n\n\
         Ask for one round.\n\n\
@@ -465,11 +399,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         ```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
         panic!("live H1 prose infers explicitly");
     };
@@ -483,10 +413,10 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // The live H1 pass and the H2 section each read their own pending
     // buffer into an explicit infer: two completions, in source order.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
-    let source = "---\nname: shared-loop\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: shared-loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         ```\n\n\
         h1 prose turn\n\n\
         ```lua\n\
@@ -499,11 +429,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         ```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let RunResult::Ok(out) = env
         .run(&prompt, "", to_context(gatewayed(gateway.addr())))
         .await
@@ -538,7 +464,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
 async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
     // The H1 driver holds id 0 off the run-global counter, so the first
     // walked section takes id 1.
-    let source = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
+    let source = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
         assert(sys.id == 0, 'the live H1 chunk keeps sys.id 0')\n\
@@ -550,11 +476,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
         ```\n";
     let prompt = parse(source);
     let picker = empty_test_picker();
-    let models = test_model_catalog();
-    let env = Environment::new()
-        .picker(picker)
-        .models(models)
-        .tools(ToolCatalog::default());
+    let env = Environment::new().picker(picker);
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
         panic!("the H1 chunk keeps id 0 and the first walked section takes id 1");
     };

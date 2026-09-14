@@ -1252,72 +1252,50 @@ fn h1_context(prompt: &Prompt) -> RunState {
 
 /// Builds the H1 run context on the given store and observer, so a pass
 /// test can inspect the store's contents and the observation stream
-/// afterward.
+/// afterward. The context's model bindings are filled the way prepare's
+/// trivial fill does: every declared role bound to the test model.
 fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>) -> RunState {
+    let mut ctx = RunContext::new(EXECUTION).observer(observer);
+    for (label, _) in prompt.frontmatter().models().iter() {
+        ctx.model_bindings.bind(
+            label,
+            ModelDescriptor::new(
+                ModelId::gateway("claude-sonnet-4-6").expect("the test model id is valid"),
+                "A general model for tests",
+                NonZeroU32::new(131_072).expect("131072 is non-zero"),
+                ThinkingMode::Switchable,
+            ),
+        );
+    }
     RunState::new(
         prompt,
         "",
         &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunContext::new(EXECUTION).observer(observer),
+        &ctx,
     )
-}
-
-/// The live H1 resolution inputs for a scheduler test, bundled so the
-/// borrows outlive the drive.
-struct H1Resolution {
-    picker: ToolPicker,
-    models: ModelCatalog,
-    tools: ToolCatalog,
-}
-
-impl H1Resolution {
-    /// An empty picker and tool catalog with the test model catalog: H1
-    /// model binds resolve, tool binds report absent.
-    fn models_only() -> Self {
-        Self {
-            picker: empty_test_picker(),
-            models: test_model_catalog(),
-            tools: ToolCatalog::default(),
-        }
-    }
-
-    /// Everything empty: model binds report absent.
-    fn empty() -> Self {
-        Self {
-            picker: empty_test_picker(),
-            models: ModelCatalog::empty(),
-            tools: ToolCatalog::default(),
-        }
-    }
-
-    fn context(&self) -> ResolutionContext<'_> {
-        ResolutionContext::new(Some(&self.picker), &self.models, &self.tools)
-    }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_h1_infer_runs_once() {
-    // Mirror of the legacy case of the same name: the H1 pass binds the
-    // default model, a handle's `infer` yields through the shim, and the
-    // H1 `var` hand-off seeds the walk.
+    // Mirror of the legacy case of the same name: the H1 pass selects the
+    // default model by label, a handle's `infer` yields through the shim,
+    // and the H1 `var` hand-off seeds the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let md = "---\nname: live-h1\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: live-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
-        local writer = models.default('writer', 'A general model for tests')\n\
+        local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::models_only();
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect("live H1 path must run on the scheduler");
+        .expect("the H1 pass must run on the scheduler");
 
     assert_eq!(out, "h1 answer");
     assert_eq!(gateway.call_count(), 1);
@@ -1325,15 +1303,15 @@ async fn live_h1_infer_runs_once() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() {
-    // Mirror of the legacy case of the same name: the live H1
+    // Mirror of the legacy case of the same name: the H1
     // `models.infer` (no handle) resolves the current model from the
-    // bindings-so-far and runs the one infer shape - a single tool-free
+    // shared set and runs the one infer shape - a single tool-free
     // round on a fresh conversation that leaves `sys` untouched.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
-    let md = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         var.answer = models.infer('answer once')\n\
         var.sys_untouched = not pcall(function() return sys.reply_finish_reason end)\n\
         ```\n\n\
@@ -1341,12 +1319,10 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::models_only();
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect("live H1 models.infer must run on the scheduler");
+        .expect("H1 models.infer must run on the scheduler");
 
     assert_eq!(out, "h1 answer:true");
     assert_eq!(gateway.call_count(), 1);
@@ -1375,7 +1351,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
     let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
-        assert(sys.id == 0, 'the live H1 chunk keeps sys.id 0')\n\
+        assert(sys.id == 0, 'the H1 chunk keeps sys.id 0')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\n\
@@ -1384,9 +1360,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("the H1 chunk keeps id 0 and the first walked section takes id 1");
@@ -1395,15 +1369,14 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn caught_h1_callback_error_stops_before_a_later_block() {
-    // Mirror of the legacy case of the same name: a pcall'd resolver
-    // failure is caught by the chunk but recorded by the callback, and the
-    // recorded typed error fails the run before the next H1 block runs.
-    let md = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
-        # Callback Drain\n\n\
+async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
+    // H1's remaining job is the prompt's hard gates: a failed `assert` is
+    // the failed assertion, ending the run before the walk with the
+    // RequirementsUnmet classification and the failure notice as content.
+    let md = "---\nname: h1-gate\ndescription: d\npromptforge: 0\n---\n\n\
+        # Gate\n\n\
         ```lua\n\
-        local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
-        assert(not ok)\n\
+        assert(false, 'the gate cannot hold')\n\
         ```\n\n\
         ```lua\nstore.write('later.txt', 'ran')\n```\n\n\
         ## Result\n\n\
@@ -1411,68 +1384,58 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
     let prompt = parse(md);
     let store = TestStore::new();
     let ctx = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect_err("a caught resolver callback error must fail its own block");
+        .expect_err("a failed H1 assertion must fail the run");
 
     assert!(
-        matches!(error, Error::ModelAbsent { .. }),
-        "the current block's typed callback error must surface: {error}"
+        matches!(error, Error::RequirementsUnmet { .. }),
+        "the failed assertion classifies as RequirementsUnmet: {error}"
+    );
+    assert!(
+        error.to_string().contains("the gate cannot hold"),
+        "the notice carries the assertion's message: {error}"
     );
     assert!(
         store.read("later.txt").is_err(),
-        "the later H1 block must not run after the callback error"
+        "the later H1 block must not run after the failed gate"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_caught_h1_callback_error_reports_the_chunk_succeeded() {
-    // The observation boundary of the callback-error rule: the chunk
-    // caught the resolver's Lua error itself and ran to completion, so it
-    // reports LUA_CHUNK_SUCCEEDED; the recorded typed error fails the run
-    // only afterward - the legacy `run_live_h1_block` mapping, where the
-    // callback check follows the chunk's own boundary.
+async fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
+    // The observation boundary of the H1 gate rule: an uncaught assertion
+    // failure is the chunk's own failure, so the chunk reports
+    // LUA_CHUNK_FAILED and the run ends as RequirementsUnmet.
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: callback-drain\ndescription: d\npromptforge: 0\n---\n\n\
         # Callback Drain\n\n\
         ```lua\n\
-        local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
-        assert(not ok)\n\
+        assert(false, 'the gate cannot hold')\n\
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect_err("the recorded callback error must fail the run");
+        .expect_err("the failed gate must fail the run");
 
     assert!(
-        matches!(error, Error::ModelAbsent { .. }),
-        "the typed callback error must surface: {error}"
+        matches!(error, Error::RequirementsUnmet { .. }),
+        "the failed gate classifies as RequirementsUnmet: {error}"
     );
     let observed = recorder.events();
     let title = "Callback Drain".to_string();
     assert!(
-        observed.contains(&(title.clone(), detail::LUA_CHUNK_SUCCEEDED.to_string())),
-        "the chunk that caught the error reports succeeded: {observed:?}"
-    );
-    assert!(
-        !observed
-            .iter()
-            .any(|(section, event)| section == &title
-                && event == &detail::LUA_CHUNK_FAILED.to_string()),
-        "the chunk must not report failed: {observed:?}"
+        observed.contains(&(title.clone(), detail::LUA_CHUNK_FAILED.to_string())),
+        "the chunk with the failed gate reports failed: {observed:?}"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_h1_scalar_return_still_reads_var_back() {
-    // The read-back half of the H1 return rule: the legacy pass reads the
+    // The read-back half of the H1 return rule: the pass reads the
     // final `var` back on every exit, so a reassigned `var` global fails
     // the run even when the block's scalar return would short-circuit it.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -1483,13 +1446,16 @@ async fn an_h1_scalar_return_still_reads_var_back() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect_err("a reassigned `var` global must fail the run");
 
+    assert!(
+        matches!(error, Error::Lua(_)),
+        "the read-back failure is machinery around the prompt's chunk, \
+         not the failed gate, so it keeps the Lua kind: {error}"
+    );
     assert!(
         error.to_string().contains("global was reassigned"),
         "the read-back failure must name the cause: {error}"
@@ -1497,94 +1463,216 @@ async fn an_h1_scalar_return_still_reads_var_back() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn call_is_a_clear_error_on_the_h1() {
-    // Mirror of the legacy case of the same name: the H1 VM's control
-    // globals are stubs - H1 runs before sections exist, so calling one
-    // fails the run with a message naming the cause. On the scheduler the
-    // stub must survive the shim base install.
+async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
+    // The other half of the remap's boundary: the shared replay is
+    // machinery around the prompt's chunk, not the chunk itself, so its
+    // failure is a prompt bug under the Lua kind, never the H1 gate's
+    // RequirementsUnmet. The context carries the prompt's real compiled
+    // shared library, not the empty stand-in the other H1 tests use.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # Test prompt\n\n\
-        ```lua\ncall('## Nope')\n```\n";
+        # Gate\n\n\
+        ```lua shared\n\
+        error('shared boom')\n\
+        ```\n\n\
+        ```lua\n\
+        var.ok = true\n\
+        ```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
+    let shared = prompt
+        .replay()
+        .cloned()
+        .expect("the prompt's shared chunk compiles at parse");
+    let ctx = RunState::new(
+        &prompt,
+        "",
+        &TestStore::new().vfs(),
+        shared,
+        &RunContext::new(EXECUTION),
+    );
     let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect_err("call from the H1 must fail with the stub error");
+        .expect_err("a failing shared replay must fail the run");
 
     assert!(
-        error.to_string().contains("only available in sections"),
-        "the stub error must name the cause: {error}"
+        matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }),
+        "the shared replay failure keeps its Lua kind: {error}"
+    );
+    assert!(
+        error.to_string().contains("shared boom"),
+        "the failure names the shared chunk's error: {error}"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn jump_is_a_clear_error_on_the_h1() {
-    // Mirror of the legacy case of the same name: `jump` from the H1 hits
-    // the stub - the run fails with the clear message, never a recorded
-    // jump.
+async fn call_from_h1_runs_the_target_as_a_contained_chain() {
+    // The control stubs are gone: H1 is section 0, so `call` resolves
+    // against the top-level sections exactly as in any section.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Test prompt\n\n\
+        ```lua\nvar.answer = call('## Answer')\n```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer\n```\n\n\
+        ## Answer\n\n\
+        ```lua\nreturn 'called from h1'\n```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("call from H1 runs the target section");
+
+    assert_eq!(out, "called from h1");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn call_from_h1_to_an_unknown_section_is_a_catchable_error() {
+    // A `call` naming no visible section fails as the call's answer: the
+    // shim raises it at the call site, where an author `pcall` catches it;
+    // uncaught, it ends the run as the H1 gate failure.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Test prompt\n\n\
+        ```lua\nlocal ok, err = pcall(call, '## Nope'); return tostring(ok) .. ':' .. tostring(err)\n```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the caught call failure is the run's result");
+
+    assert!(
+        out.starts_with("false:") && out.contains("## Nope"),
+        "the caught error names the missing section: {out}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn jump_from_h1_starts_the_walk_at_the_target() {
+    // A jump out of H1 ends the pass and starts the walk at the resolved
+    // top-level target, skipping the sections before it.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Test prompt\n\n\
+        ```lua\njump('## Target')\n```\n\n\
+        ## Skipped\n\n\
+        ```lua\nerror('the jump target must skip this section')\n```\n\n\
+        ## Target\n\n\
+        ```lua\nreturn 'jumped'\n```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("jump from H1 starts the walk at the target");
+
+    assert_eq!(out, "jumped");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn jump_from_h1_to_an_unknown_section_fails_the_run() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
         ```lua\njump('## Nope')\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect_err("jump from the H1 must fail with the stub error");
+        .expect_err("jump from H1 to an unknown section must fail");
 
     assert!(
-        error.to_string().contains("only available in sections"),
-        "the stub error must name the cause: {error}"
+        error.to_string().contains("## Nope"),
+        "the failure names the missing section: {error}"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fanout_is_a_clear_error_on_the_h1() {
-    // Mirror of the legacy case of the same name: `fanout` from the H1
-    // hits the same stub.
+async fn fanout_from_h1_runs_the_worker_over_the_collection() {
+    // `fanout` works in H1 as in any section: the worker resolves against
+    // the top-level sections and the arms join in collection order.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
-        ```lua\nfanout('## Nope', {'a'})\n```\n";
+        ```lua\n\
+        local r = fanout('## Worker', {'a', 'b'})\n\
+        var.answer = r[1].text .. '|' .. r[2].text\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer\n```\n\n\
+        ## Worker\n\n\
+        ```lua\nreturn 'item:' .. item\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
-    let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
+    let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect_err("fanout from the H1 must fail with the stub error");
+        .expect("fanout from H1 joins the arms");
 
-    assert!(
-        error.to_string().contains("only available in sections"),
-        "the stub error must name the cause: {error}"
+    assert_eq!(out, "item:a|item:b");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
+    // The decision-tool idiom in H1: a local tool with an enum parameter is
+    // the verdict channel - the model's loop call lands in the Lua handler,
+    // and the captured verdict drives the run's shape before the walk. This
+    // needs `tools.add_local` and `models.loop` in H1, both section-only
+    // before the one-install-path consolidation.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "decide", "{\"choice\":\"use_mcp\"}"),
+        resp_text("decided"),
+    ])
+    .await;
+    let md = "---\nname: h1-decision\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Decide\n\n\
+        ```lua\n\
+        models.default('writer')\n\
+        tools.add_local('decide', 'Record the verdict', { choice = 'string' }, function(args)\n\
+          var.verdict = args.choice\n\
+          return 'recorded'\n\
+        end)\n\
+        local msgs = messages.new()\n\
+        msgs:user('interpret the guidance')\n\
+        models.loop(msgs)\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.verdict\n```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the H1 decision-tool idiom runs");
+
+    assert_eq!(out, "use_mcp");
+    assert_eq!(
+        gateway.call_count(),
+        2,
+        "the loop runs the tool-call round and the terminal text round"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn list_from_section_is_a_clear_error_on_the_h1() {
-    // Mirror of the legacy case of the same name: `list_from_section` from
-    // the H1 hits the same stub.
+async fn list_from_section_works_on_the_h1() {
+    // `list_from_section` resolves over H1's visible set - the whole
+    // top-level slice.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Test prompt\n\n\
-        ```lua\nlist_from_section('## Nope')\n```\n";
+        ```lua\n\
+        local items = list_from_section('## Items')\n\
+        var.answer = table.concat(items, ',')\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer\n```\n\n\
+        ## Items\n\n\
+        - one\n\
+        - two\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
-    let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
+    let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect_err("list_from_section from the H1 must fail with the stub error");
+        .expect("list_from_section from H1 reads the target's items");
 
-    assert!(
-        error.to_string().contains("only available in sections"),
-        "the stub error must name the cause: {error}"
-    );
+    assert_eq!(out, "one,two");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1596,9 +1684,7 @@ async fn h1_only_lua_return() {
         ```lua\nreturn \"hello\"\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("the H1-only return runs");
@@ -1615,9 +1701,7 @@ async fn h1_only_lua_no_return() {
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("the H1-only fall-through runs");
@@ -1637,9 +1721,7 @@ async fn h1_scalar_return_short_circuits_the_walk() {
         ```lua\nerror('the walk must not start after an H1 return')\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("the H1 return short-circuits the run");
@@ -1653,10 +1735,10 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
     // infer ends the run with the inferred text: the scalar return
     // short-circuits the (empty) walk.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Only Prose\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         ```\n\n\
         say something\n\n\
         ```lua\n\
@@ -1664,9 +1746,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::models_only();
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("the H1 infer of its prose ends the run");
@@ -1682,10 +1762,10 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // pass and the H2 section each read their own pending buffer into an
     // explicit infer - two completions, in source order.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
-    let md = "---\nname: shared-loop\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: shared-loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         ```\n\n\
         h1 prose turn\n\n\
         ```lua\n\
@@ -1698,9 +1778,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::models_only();
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("H1 prose and H2 prose each infer explicitly");
@@ -1744,9 +1822,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ```lua\nreturn 'ok'\n```\n";
     let prompt = parse(unread);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("unread H1 prose must not require a model");
@@ -1758,9 +1834,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(reading);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect_err("an explicit infer of H1 prose with no binding must fail");
@@ -1777,10 +1851,10 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // the pass reads its pending buffer only through an explicit infer, and
     // `var` writes accumulate across the pass into the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
-    let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\n---\n\n\
+    let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\
-        models.default('writer', 'A general model for tests')\n\
+        models.default('writer')\n\
         var.executions = (var.executions or 0) + 1\n\
         ```\n\n\
         Ask for one round.\n\n\
@@ -1794,9 +1868,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let resolution = H1Resolution::models_only();
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("live H1 prose infers explicitly");
@@ -1818,9 +1890,7 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
         ```lua\nreturn 'done-now'\n```\n";
     let prompt = parse(md);
     let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let resolution = H1Resolution::empty();
     let out = Scheduler::new(&ctx, None)
-        .with_live_h1(resolution.context())
         .drive()
         .await
         .expect("the pass and the walk complete");
