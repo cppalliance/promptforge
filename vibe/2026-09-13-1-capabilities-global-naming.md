@@ -936,7 +936,7 @@ New `capabilities` module in `shared-promptforge-api` (the crate gains its `shar
 
 <step-8>
 
-### Step 8: CapabilityRegistry
+### Step 8: CapabilityRegistry [completed]
 
 - Component: capabilities
 

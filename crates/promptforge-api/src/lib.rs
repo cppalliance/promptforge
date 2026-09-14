@@ -69,6 +69,7 @@
 //! ```
 //!
 pub(crate) mod cancel;
+pub mod capabilities;
 pub mod client;
 pub mod debug;
 mod error;
@@ -90,6 +91,7 @@ pub(crate) mod untrusted;
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
+pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use crate::client::{CompletionError, CompletionErrorKind};
 pub use crate::execute::{
     Environment, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, run,
