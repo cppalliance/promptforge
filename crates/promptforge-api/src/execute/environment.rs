@@ -3,22 +3,20 @@
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_parser::ModelKeyword;
 use promptforge_tool_picker::ToolPicker;
 use shared_promptforge_api::capabilities::{Capability, CapabilityId, Contribution, RunServices};
-use shared_promptforge_api::tools::Tool;
 
 use crate::capabilities::CapabilityRegistry;
 use crate::client::GatewayClient;
-use crate::model::{ModelCatalog, ThinkingMode};
+use crate::model::ModelCatalog;
 use crate::parser::Prompt;
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
 
 use super::RunResult;
-use super::bindings::ModelBindings;
 use super::config::{RunContext, RunResolution};
-use super::requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
+use super::fill::{assemble_catalog, fill_model_bindings, fill_tool_bindings};
+use super::requirements::{CapabilityConflict, Requirements};
 
 /// What exists in this deployment and its standing policy.
 ///
@@ -175,6 +173,19 @@ impl Environment {
     /// never shopped for. Soft keywords document author intent. With no
     /// current model there is nothing to fill or check, and the interim
     /// Lua-side catalog resolution carries the run.
+    ///
+    /// Tool slot filling follows catalog assembly: exact slots fill by
+    /// identity against the run's catalog - an exact path's first two
+    /// segments name its capability, so a slot whose capability is
+    /// inactive lands in [`Requirements::missing_required`], while a
+    /// slot whose capability is active but contributed no such tool is
+    /// warned and left unfilled - and fuzzy
+    /// slots fill through the picker re-indexed over the run's catalog,
+    /// so the fuzz can never resolve to a tool whose capability is
+    /// inactive. Every fill is journaled into the context's tool
+    /// bindings; an unfillable optional fuzzy slot skips with a log
+    /// line, and an unfillable required fuzzy slot is warned and left
+    /// unfilled (advertising an unfilled alias fails at run time).
     pub fn prepare(&self, prompt: &Prompt, ctx: RunContext) -> (RunContext, Requirements) {
         let mut ctx = ctx;
         // The interim resolution inputs (picker, live catalogs) ride the
@@ -271,6 +282,15 @@ impl Environment {
             }
         }
         ctx.tools = assemble_catalog(&activated);
+        let activated_ids: Vec<CapabilityId> =
+            activated.iter().map(|(id, _)| id.clone()).collect();
+        ctx.tool_bindings = fill_tool_bindings(
+            prompt,
+            &ctx.tools,
+            &activated_ids,
+            self.picker.as_deref(),
+            &mut requirements,
+        );
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
     }
@@ -291,127 +311,6 @@ impl Environment {
             }));
         }
         super::run(prompt, args, ctx).await
-    }
-}
-
-/// Assembles the run's tool catalog from the activated capabilities'
-/// contributions in declaration order.
-///
-/// Containment is total and enforced here: every contributed tool's id
-/// must sit under its contributing capability's full id
-/// (`namespace/pack/name` for a `namespace/pack` capability). A
-/// violating tool - like a repeated id or a transport-illegal wire
-/// name - is rejected at assembly: logged and never admitted to the
-/// catalog.
-fn assemble_catalog(activated: &[(CapabilityId, Contribution)]) -> ToolCatalog {
-    let mut accepted: Vec<Arc<dyn Tool>> = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for (capability, contribution) in activated {
-        for tool in &contribution.tools {
-            let id = tool.id();
-            if !capability.contains(&id) {
-                tracing::warn!(
-                    capability = %capability,
-                    tool = %id,
-                    "contributed tool id escapes its capability's id; rejected at assembly"
-                );
-                continue;
-            }
-            if !seen.insert(id.clone()) {
-                tracing::warn!(
-                    capability = %capability,
-                    tool = %id,
-                    "contributed tool id repeats an earlier contribution; rejected at assembly"
-                );
-                continue;
-            }
-            // The catalog is the transport boundary: validate the wire
-            // name per tool so one bad tool costs only itself.
-            if let Err(error) = ToolCatalog::new(std::slice::from_ref(tool)) {
-                tracing::warn!(
-                    capability = %capability,
-                    tool = %id,
-                    %error,
-                    "contributed tool failed catalog validation; rejected at assembly"
-                );
-                continue;
-            }
-            accepted.push(Arc::clone(tool));
-        }
-    }
-    match ToolCatalog::new(&accepted) {
-        Ok(catalog) => catalog,
-        Err(error) => {
-            // Every accepted tool passed containment, uniqueness, and
-            // wire-name validation above, so this build cannot fail;
-            // the arm is defensive.
-            tracing::warn!(%error, "catalog assembly failed after per-tool validation");
-            ToolCatalog::default()
-        }
-    }
-}
-
-/// v1's deliberately trivial fill: binds every declared role to the
-/// context's current model and checks each role's hard keywords and
-/// context minimum against its descriptor, reporting required versus
-/// actual into [`Requirements::unmet_requirements`]. With no current
-/// model there is nothing to fill or check.
-fn fill_model_bindings(
-    prompt: &Prompt,
-    model: Option<&crate::model::ModelDescriptor>,
-    requirements: &mut Requirements,
-) -> ModelBindings {
-    let mut bindings = ModelBindings::default();
-    let Some(model) = model else {
-        return bindings;
-    };
-    for (label, role) in prompt.frontmatter().models().iter() {
-        if let Some(minimum) = role.min_context()
-            && model.context() < minimum
-        {
-            requirements.unmet_requirements.push(UnmetRequirement {
-                role: label.to_owned(),
-                check: RequirementCheck::ContextMinimum,
-                required: minimum.to_string(),
-                actual: model.context().to_string(),
-            });
-        }
-        for keyword in role.keywords() {
-            // Soft keywords document author intent; only the hard
-            // keywords have a descriptor property to check against.
-            let failed = match keyword {
-                ModelKeyword::Thinking if model.thinking() == ThinkingMode::Never => {
-                    Some("thinking")
-                }
-                ModelKeyword::NoThinking if model.thinking() != ThinkingMode::Never => {
-                    Some("no-thinking")
-                }
-                _ => None,
-            };
-            if let Some(required) = failed {
-                requirements.unmet_requirements.push(UnmetRequirement {
-                    role: label.to_owned(),
-                    check: RequirementCheck::HardKeyword,
-                    required: required.to_owned(),
-                    actual: thinking_name(model.thinking()).to_owned(),
-                });
-            }
-        }
-        bindings.bind(label, model.clone());
-    }
-    bindings
-}
-
-/// The thinking capability as a stable word for required-versus-actual
-/// reporting.
-fn thinking_name(thinking: ThinkingMode) -> &'static str {
-    match thinking {
-        ThinkingMode::Never => "Never",
-        ThinkingMode::Always => "Always",
-        ThinkingMode::Switchable => "Switchable",
-        // The vocabulary is closed today; a future mode reports as
-        // unknown rather than breaking the report.
-        _ => "unknown",
     }
 }
 

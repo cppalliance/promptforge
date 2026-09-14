@@ -81,6 +81,7 @@ mod context;
 mod engine;
 mod environment;
 mod error;
+mod fill;
 mod gateway;
 pub(crate) mod protocol;
 mod requirements;
@@ -93,7 +94,7 @@ mod tool_loop;
 mod tools;
 
 // Public API surface.
-pub use bindings::ModelBindings;
+pub use bindings::{ModelBindings, ToolBindings};
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};

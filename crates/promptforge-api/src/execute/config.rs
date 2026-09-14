@@ -16,7 +16,7 @@ use crate::observe::{NullObserver, Observer};
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
 
-use super::bindings::ModelBindings;
+use super::bindings::{ModelBindings, ToolBindings};
 
 /// Generates one `nz_*` constructor per `NonZero*` type: a `const fn`
 /// building the wrapper from a compile-time-known non-zero value.
@@ -241,6 +241,11 @@ pub struct RunContext {
     /// [`Environment::prepare`](super::Environment::prepare); the
     /// slot-filling step fills the prompt's tool slots against it.
     pub(crate) tools: ToolCatalog,
+    /// The run's tool bindings, written by
+    /// [`Environment::prepare`](super::Environment::prepare)'s slot
+    /// fill against the assembled catalog: which concrete tool each
+    /// declared alias is bound to, with every fuzzy fill journaled.
+    pub(crate) tool_bindings: ToolBindings,
     /// The resolution inputs
     /// [`Environment::prepare`](super::Environment::prepare) installs;
     /// `None` on a caller-built context, which the free
@@ -271,6 +276,7 @@ impl RunContext {
             model: None,
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
+            tool_bindings: ToolBindings::default(),
             resolution: None,
         }
     }
@@ -413,6 +419,16 @@ impl RunContext {
         &self.tools
     }
 
+    /// Returns the run's tool bindings, written by
+    /// [`Environment::prepare`](super::Environment::prepare)'s slot
+    /// fill: which concrete tool each declared alias is bound to, with
+    /// every fuzzy fill journaled. Handles resolve alias -> id -> tool.
+    /// Empty on a caller-built context that was never prepared.
+    #[must_use]
+    pub fn tool_bindings(&self) -> &ToolBindings {
+        &self.tool_bindings
+    }
+
     /// Returns the run identity shared by every report.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -452,6 +468,7 @@ impl fmt::Debug for RunContext {
             .field("model", &self.model)
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)
+            .field("tool_bindings", &self.tool_bindings)
             .field("resolution", &self.resolution.is_some())
             .finish()
     }

@@ -16,6 +16,7 @@ use promptforge_api::execute::{
     Environment, RequirementCheck, RunContext, RunErrorKind, RunResult,
 };
 use promptforge_api::parser::Prompt;
+use promptforge_tool_picker::{Catalog, Config, ToolDescriptor, ToolPicker};
 use shared_promptforge_api::cancel::CancelHandle;
 use shared_promptforge_api::capabilities::{
     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
@@ -628,10 +629,13 @@ const DECLARES_TWO: &str = concat!(
     "Done.\n",
 );
 
-/// A fixture tool: a static id, its name segment as the wire name, and
-/// an empty trusted output.
+/// A fixture tool: a static id and description, its name segment as the
+/// wire name, and an empty trusted output. The description matters: the
+/// fuzzy slot fill indexes it, so picker-backed tests need a tool whose
+/// description says what the tool does.
 struct FixtureTool {
     id: ToolId,
+    description: String,
 }
 
 #[async_trait::async_trait]
@@ -644,12 +648,8 @@ impl Tool for FixtureTool {
         self.id.name()
     }
 
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
     fn description(&self) -> &str {
-        "A fixture tool."
+        &self.description
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -713,6 +713,16 @@ impl Capability for ToolFixture {
 fn fixture_tool(id: &str) -> Arc<dyn Tool> {
     Arc::new(FixtureTool {
         id: ToolId::parse(id).expect("the fixture tool id is valid"),
+        description: "A fixture tool.".to_owned(),
+    })
+}
+
+/// Builds a fixture tool arc under `id` whose description says what the
+/// tool does, so the picker's fuzzy fill has real prose to index.
+fn described_tool(id: &str, description: &str) -> Arc<dyn Tool> {
+    Arc::new(FixtureTool {
+        id: ToolId::parse(id).expect("the fixture tool id is valid"),
+        description: description.to_owned(),
     })
 }
 
@@ -978,5 +988,227 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
     assert!(
         logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
         "the rejection log names the capability and the rejected tool: {logs}"
+    );
+}
+
+// ToolBindings and slot filling: exact slots fill by identity against
+// the assembled catalog (an exact path's first two segments name its
+// capability, so a slot whose capability is inactive is reported as
+// missing), fuzzy slots fill through the picker over the assembled
+// catalog with every fill journaled into the run's tool bindings, and
+// an unfillable optional fuzzy slot skips with a log line.
+
+/// A prompt declaring `promptforge/web` and one exact tool slot.
+const DECLARES_EXACT_SLOT: &str = concat!(
+    "---\n",
+    "name: declares-exact-slot\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/web\n",
+    "tools:\n",
+    "  fetch: promptforge/web/fetch\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
+/// A prompt declaring one exact tool slot whose capability is not
+/// declared at all.
+const DECLARES_ORPHAN_SLOT: &str = concat!(
+    "---\n",
+    "name: declares-orphan-slot\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "tools:\n",
+    "  fetch: promptforge/web/fetch\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
+/// A prompt declaring `promptforge/web` and one fuzzy tool slot.
+const DECLARES_FUZZY_SLOT: &str = concat!(
+    "---\n",
+    "name: declares-fuzzy-slot\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/web\n",
+    "tools:\n",
+    "  fetch:\n",
+    "    want: Fetch a web page over HTTP\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
+/// A prompt declaring `promptforge/web` and one optional fuzzy tool slot
+/// nothing in the assembled catalog matches.
+const DECLARES_OPTIONAL_FUZZY: &str = concat!(
+    "---\n",
+    "name: declares-optional-fuzzy\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/web\n",
+    "tools:\n",
+    "  email:\n",
+    "    want: Send an email to the team\n",
+    "    optional: true\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
+/// The one loaded picker model for this test binary: the fuzzy fill
+/// rebuilds the environment picker's model over the run's assembled
+/// catalog, so the picker must carry real weights.
+fn picker_model() -> &'static promptforge_tool_picker::Model {
+    static MODEL: std::sync::OnceLock<promptforge_tool_picker::Model> = std::sync::OnceLock::new();
+    MODEL.get_or_init(|| {
+        promptforge_tool_picker::Model::load().expect("the compiled-in model must load")
+    })
+}
+
+/// Builds the environment's deployment picker over the shared model. Its
+/// catalog content is irrelevant to the fill - prepare re-indexes the
+/// run's own assembled catalog - but the build needs one entry so the
+/// real model, not a dummy, rides along.
+fn test_picker() -> ToolPicker {
+    let catalog = Catalog::new(vec![ToolDescriptor::new(
+        ToolId::parse("promptforge/web/fetch").expect("the id is valid"),
+        "Fetch a web page over HTTP",
+        serde_json::json!({"type": "object", "properties": {}}),
+    )]);
+    ToolPicker::build_with_model(picker_model(), catalog, Config::default(), None)
+        .expect("the test picker builds")
+}
+
+/// Registers `promptforge/web` contributing one described fetch tool.
+fn web_registry() -> CapabilityRegistry {
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(ToolFixture::new(
+            "promptforge/web",
+            &[],
+            vec![described_tool(
+                "promptforge/web/fetch",
+                "Fetch a web page over HTTP",
+            )],
+        )))
+        .expect("web registers");
+    registry
+}
+
+#[test]
+fn an_exact_slot_fills_against_the_assembled_catalog() {
+    let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
+    let env = Environment::new().registry(web_registry());
+    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-exact"));
+    assert!(requirements.is_satisfied());
+    let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let bindings = ctx.tool_bindings();
+    assert_eq!(bindings.len(), 1);
+    // Handles resolve alias -> id -> tool.
+    assert_eq!(bindings.alias_id("fetch"), Some(&id));
+    assert_eq!(
+        bindings.resolve("fetch").map(|tool| tool.id()),
+        Some(id.clone())
+    );
+    assert!(bindings.tool(&id).is_some());
+    assert!(bindings.resolve("undeclared").is_none());
+}
+
+#[test]
+fn an_exact_slot_whose_capability_is_inactive_is_reported() {
+    let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
+    // No registry and no declaration: the slot's capability is inactive.
+    let env = Environment::new();
+    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-orphan"));
+    // The exact path's first two segments name its capability.
+    assert_eq!(
+        requirements.missing_required,
+        [CapabilityId::parse("promptforge/web").expect("the id is valid")]
+    );
+    assert!(!requirements.is_satisfied());
+    assert!(ctx.tool_bindings().is_empty());
+}
+
+#[test]
+fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
+    let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
+    // The capability activates but contributes a different tool: the
+    // slot's capability is not missing, so the run must not fail
+    // unsatisfiably - installing changes nothing.
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(ToolFixture::new(
+            "promptforge/web",
+            &[],
+            vec![described_tool(
+                "promptforge/web/search",
+                "Search the web",
+            )],
+        )))
+        .expect("web registers");
+    let env = Environment::new().registry(registry);
+    let logs = captured_logs(|| {
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-absent-tool"));
+        assert!(
+            requirements.missing_required.is_empty(),
+            "an active capability is never reported missing: {:?}",
+            requirements.missing_required
+        );
+        assert!(requirements.is_satisfied());
+        // The alias stays unbound; advertising it fails at run time.
+        assert!(ctx.tool_bindings().is_empty());
+    });
+    assert!(
+        logs.contains("fetch"),
+        "the warning names the unfilled alias: {logs}"
+    );
+}
+
+#[test]
+fn a_fuzzy_slot_fills_via_the_picker_and_the_fill_is_journaled() {
+    let prompt = parse(DECLARES_FUZZY_SLOT, "declares-fuzzy-slot");
+    let env = Environment::new()
+        .registry(web_registry())
+        .picker(test_picker());
+    let logs = captured_logs(|| {
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-fuzzy"));
+        assert!(requirements.is_satisfied());
+        let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+        let bindings = ctx.tool_bindings();
+        // The journaled fill: the alias resolves to the picked tool.
+        assert_eq!(bindings.alias_id("fetch"), Some(&id));
+        assert!(bindings.resolve("fetch").is_some());
+    });
+    assert!(
+        logs.contains("promptforge/web/fetch"),
+        "the journal records what the fuzz resolved to: {logs}"
+    );
+}
+
+#[test]
+fn an_optional_fuzzy_slot_with_no_match_is_skipped_and_logged() {
+    let prompt = parse(DECLARES_OPTIONAL_FUZZY, "declares-optional-fuzzy");
+    let env = Environment::new()
+        .registry(web_registry())
+        .picker(test_picker());
+    let logs = captured_logs(|| {
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-optional-fuzzy"));
+        // An unfillable optional slot is a log line, not a report field.
+        assert!(requirements.is_satisfied());
+        assert!(ctx.tool_bindings().is_empty());
+    });
+    assert!(
+        logs.contains("email"),
+        "the skip log line names the alias: {logs}"
     );
 }

@@ -1,8 +1,13 @@
-//! The run's model satisfaction: [`ModelBindings`].
+//! The run's journaled bindings: [`ModelBindings`] and [`ToolBindings`].
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
+
+use shared_promptforge_api::tools::Tool;
 
 use crate::model::{ModelDescriptor, ModelId};
+use crate::tools::ToolId;
 
 /// The run's model satisfaction: which concrete model each declared role
 /// is bound to, and the descriptors of every model this run may use.
@@ -62,9 +67,82 @@ impl ModelBindings {
     }
 }
 
+/// The run's tool bindings: which concrete tool each declared alias is
+/// bound to, and the tools this run may dispatch.
+///
+/// Written by [`prepare`](super::Environment::prepare)'s slot fill:
+/// exact slots fill by identity against the assembled catalog and fuzzy
+/// slots fill through the picker, and every fill is journaled here so
+/// hosts and evals see what the fuzz resolved to. The model only ever
+/// sees the prompt-local alias, never the global path. Handles resolve
+/// alias -> id -> tool.
+#[derive(Clone, Default)]
+#[non_exhaustive]
+pub struct ToolBindings {
+    /// The decision, journaled: prompt-local alias to the bound tool's
+    /// identity.
+    aliases: BTreeMap<String, ToolId>,
+    /// What this run may dispatch: identity to tool.
+    tools: BTreeMap<ToolId, Arc<dyn Tool>>,
+}
+
+impl ToolBindings {
+    /// Binds the prompt-local `alias` to `tool`, recording the tool under
+    /// its identity. The slot fill's only writer.
+    pub(crate) fn bind(&mut self, alias: &str, tool: Arc<dyn Tool>) {
+        self.aliases.insert(alias.to_owned(), tool.id());
+        self.tools.entry(tool.id()).or_insert(tool);
+    }
+
+    /// Returns the identity bound to `alias`, when the slot was filled.
+    #[must_use]
+    pub fn alias_id(&self, alias: &str) -> Option<&ToolId> {
+        self.aliases.get(alias)
+    }
+
+    /// Resolves a prompt-local alias all the way to its tool:
+    /// alias -> id -> tool.
+    #[must_use]
+    pub fn resolve(&self, alias: &str) -> Option<&Arc<dyn Tool>> {
+        self.aliases.get(alias).and_then(|id| self.tools.get(id))
+    }
+
+    /// Returns the tool bound under `id`, when this run may dispatch it.
+    #[must_use]
+    pub fn tool(&self, id: &ToolId) -> Option<&Arc<dyn Tool>> {
+        self.tools.get(id)
+    }
+
+    /// Returns the number of bound aliases.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.aliases.len()
+    }
+
+    /// Returns whether no aliases are bound.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.aliases.is_empty()
+    }
+}
+
+impl fmt::Debug for ToolBindings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The tools are trait objects; their identities stand in, and
+        // the journaled decision (alias to identity) is the content.
+        f.debug_struct("ToolBindings")
+            .field("aliases", &self.aliases)
+            .field("tools", &self.tools.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
+    use std::sync::Arc;
+
+    use shared_promptforge_api::tools::{ToolError, ToolOutput};
 
     use super::*;
     use crate::model::ThinkingMode;
@@ -105,6 +183,78 @@ mod tests {
         assert!(
             bindings
                 .model(&ModelId::gateway("other").expect("valid"))
+                .is_none()
+        );
+    }
+
+    /// A fixture tool: a static id and an empty trusted output.
+    struct FixtureTool {
+        id: ToolId,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for FixtureTool {
+        fn id(&self) -> ToolId {
+            self.id.clone()
+        }
+
+        fn wire_name(&self) -> &'static str {
+            "fixture"
+        }
+
+        #[expect(
+            clippy::unnecessary_literal_bound,
+            reason = "the Tool trait fixes this return type to &str"
+        )]
+        fn description(&self) -> &str {
+            "A fixture tool."
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+
+        async fn call(
+            &self,
+            _arguments: serde_json::Value,
+        ) -> std::result::Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::trusted(String::new()))
+        }
+    }
+
+    #[test]
+    fn an_empty_tool_binding_set_resolves_nothing() {
+        let bindings = ToolBindings::default();
+        assert!(bindings.is_empty());
+        assert_eq!(bindings.len(), 0);
+        assert!(bindings.alias_id("fetch").is_none());
+        assert!(bindings.resolve("fetch").is_none());
+    }
+
+    #[test]
+    fn two_aliases_bound_to_one_tool_share_one_tool_entry() {
+        // Two slots may fill to the same tool; the tool table holds it
+        // once and both aliases resolve alias -> id -> tool.
+        let id = ToolId::parse("promptforge/web/fetch").expect("the test id is valid");
+        let tool: Arc<dyn Tool> = Arc::new(FixtureTool { id: id.clone() });
+        let mut bindings = ToolBindings::default();
+        bindings.bind("fetch", Arc::clone(&tool));
+        bindings.bind("getter", Arc::clone(&tool));
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings.alias_id("fetch"), Some(&id));
+        assert_eq!(bindings.alias_id("getter"), Some(&id));
+        assert_eq!(
+            bindings.resolve("fetch").map(|tool| tool.id()),
+            Some(id.clone())
+        );
+        assert_eq!(
+            bindings.resolve("getter").map(|tool| tool.id()),
+            Some(id.clone())
+        );
+        assert!(bindings.tool(&id).is_some());
+        assert!(
+            bindings
+                .tool(&ToolId::parse("promptforge/web/search").expect("valid"))
                 .is_none()
         );
     }

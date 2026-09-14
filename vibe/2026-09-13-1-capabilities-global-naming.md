@@ -976,7 +976,7 @@ Prepare assembles contributed tools into the run's `ToolCatalog` in declaration 
 
 <step-12>
 
-### Step 12: ToolBindings and slot filling
+### Step 12: ToolBindings and slot filling [completed]
 
 - Component: binding
 
