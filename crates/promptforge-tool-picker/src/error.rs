@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn a_selection_error_reports_the_missing_identity() {
-        let missing = ToolId::new("files", "read_file");
+        let missing = ToolId::parse("tests/files/read_file").expect("test id is valid");
         let error = SelectionError::new(missing.clone());
         assert_eq!(error.missing_id(), &missing);
     }

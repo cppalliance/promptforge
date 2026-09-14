@@ -95,6 +95,33 @@ fn same_weights_different_invocation_compare_unequal() {
 }
 
 #[test]
+fn model_picker_ids_round_trip_through_the_global_name_grammar() {
+    for name in ["small", "analyst", "always-think"] {
+        let id = gateway_id(name);
+        let picker_id = model_to_picker_id(&id);
+        // The neutral name segment keeps vendor ids out of `enriched_text`.
+        assert_eq!(picker_id.name(), PICKER_MODEL_LABEL);
+        assert_eq!(model_from_picker_id(&picker_id), id);
+    }
+}
+
+#[test]
+fn model_picker_ids_escape_characters_outside_the_grammar() {
+    // Model id components are nearly arbitrary text: uppercase, `/`, and
+    // spaces are all legal there but illegal in a global-name segment.
+    let id = ModelId::new("Gateway.Local", "Qwen/Qwen3 32B").expect("a valid model id");
+    let picker_id = model_to_picker_id(&id);
+    let text = picker_id.to_string();
+    assert!(
+        text.bytes().all(|b| b.is_ascii_lowercase()
+            || b.is_ascii_digit()
+            || matches!(b, b'/' | b'-' | b'_' | b'.')),
+        "the encoded id must satisfy the global-name charset: {text}"
+    );
+    assert_eq!(model_from_picker_id(&picker_id), id);
+}
+
+#[test]
 fn binding_construction_is_atomic_with_context() {
     let binding = ModelBinding::new(
         "remote",

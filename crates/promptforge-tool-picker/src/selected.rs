@@ -174,18 +174,19 @@ mod tests {
     use crate::rank::Vectors;
     use serde_json::json;
 
-    fn tool(server: &str, name: &str) -> ToolDescriptor {
-        ToolDescriptor::new(ToolId::new(server, name), "does a thing", json!({}))
+    fn tool(pack: &str, name: &str) -> ToolDescriptor {
+        let id = ToolId::parse(&format!("tests/{pack}/{name}")).expect("test ids are valid");
+        ToolDescriptor::new(id, "does a thing", json!({}))
     }
 
     #[test]
     fn an_absent_id_rejects_the_whole_selected_set_naming_the_first_missing() {
         let tools = vec![tool("files", "read"), tool("files", "write")];
-        let missing = ToolId::new("missing", "tool");
+        let missing = tool("missing", "tool").id().clone();
         let ids = vec![
             tools[0].id().clone(),
             missing.clone(),
-            ToolId::new("also", "missing"),
+            tool("also", "missing").id().clone(),
         ];
         let error = near_duplicates(&tools, Vectors::new(&[1.0, 0.0, 1.0, 0.0], 2), 0.9, &ids)
             .expect_err("an absent identity rejects the set");
@@ -193,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_ids_are_idempotent_and_cross_server_pairs_follow_catalog_order() {
+    fn repeated_ids_are_idempotent_and_cross_capability_pairs_follow_catalog_order() {
         let tools = vec![
             tool("first", "read"),
             tool("second", "read"),

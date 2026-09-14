@@ -40,12 +40,13 @@ fn rows(data: &[f32]) -> Vectors<'_> {
     Vectors::new(data, STRIDE)
 }
 
-fn tool(server: &str, name: &str) -> ToolDescriptor {
-    ToolDescriptor::new(ToolId::new(server, name), "does a thing", json!({}))
+fn tool(pack: &str, name: &str) -> ToolDescriptor {
+    let id = ToolId::parse(&format!("tests/{pack}/{name}")).expect("test ids are valid");
+    ToolDescriptor::new(id, "does a thing", json!({}))
 }
 
-fn hinted(server: &str, name: &str, annotations: ToolAnnotations) -> ToolDescriptor {
-    tool(server, name).with_annotations(annotations)
+fn hinted(pack: &str, name: &str, annotations: ToolAnnotations) -> ToolDescriptor {
+    tool(pack, name).with_annotations(annotations)
 }
 
 fn ranking(scores: &[f32]) -> Vec<Candidate> {
@@ -56,11 +57,11 @@ fn ranking(scores: &[f32]) -> Vec<Candidate> {
         .collect()
 }
 
-fn one_server() -> Vec<ToolDescriptor> {
+fn one_capability() -> Vec<ToolDescriptor> {
     vec![tool("files", "read_file"), tool("files", "load_file")]
 }
 
-fn two_servers() -> Vec<ToolDescriptor> {
+fn two_capabilities() -> Vec<ToolDescriptor> {
     vec![tool("files", "read_file"), tool("blobs", "read_file")]
 }
 
@@ -83,7 +84,7 @@ fn group<'a>(tools: &'a [ToolDescriptor], indices: &[usize]) -> CandidateGroup<'
 
 #[test]
 fn nothing_above_the_floor_is_an_abstention() {
-    let tools = two_servers();
+    let tools = two_capabilities();
     let outcome = decide(
         &ranking(&[0.4, 0.3]),
         &tools,
@@ -95,7 +96,7 @@ fn nothing_above_the_floor_is_an_abstention() {
 
 #[test]
 fn an_empty_ranking_and_out_of_range_candidates_abstain() {
-    let tools = two_servers();
+    let tools = two_capabilities();
     assert_eq!(
         decide(&[], &tools, rows(distinct(2)), &Config::default()),
         Outcome::Absent
@@ -111,7 +112,7 @@ fn an_empty_ranking_and_out_of_range_candidates_abstain() {
 
 #[test]
 fn a_clear_leader_binds() {
-    let tools = two_servers();
+    let tools = two_capabilities();
     let outcome = decide(
         &ranking(&[0.95, 0.7]),
         &tools,
@@ -122,8 +123,8 @@ fn a_clear_leader_binds() {
 }
 
 #[test]
-fn twin_tools_on_one_server_are_a_duplicate() {
-    let tools = one_server();
+fn twin_tools_in_one_capability_are_a_duplicate() {
+    let tools = one_capability();
     let outcome = decide(
         &ranking(&[0.99, 0.985]),
         &tools,
@@ -134,8 +135,8 @@ fn twin_tools_on_one_server_are_a_duplicate() {
 }
 
 #[test]
-fn twin_tools_across_servers_are_a_shortlist() {
-    let tools = two_servers();
+fn twin_tools_across_capabilities_are_a_shortlist() {
+    let tools = two_capabilities();
     let outcome = decide(
         &ranking(&[0.99, 0.985]),
         &tools,
@@ -149,7 +150,7 @@ fn twin_tools_across_servers_are_a_shortlist() {
 fn twins_are_measured_between_the_tools_not_between_their_scores() {
     let config = Config::default();
     assert!(0.9 < config.duplicate_threshold());
-    let tools = one_server();
+    let tools = one_capability();
     assert_eq!(
         decide(&ranking(&[0.9, 0.9]), &tools, rows(twinned(2)), &config),
         Outcome::Duplicate(group(&tools, &[0, 1]))
@@ -159,7 +160,7 @@ fn twins_are_measured_between_the_tools_not_between_their_scores() {
 #[test]
 fn a_duplicate_is_reported_even_when_the_margin_would_separate_it() {
     let config = Config::default().with_margin(0.01).expect("valid margin");
-    let tools = one_server();
+    let tools = one_capability();
     let outcome = decide(&ranking(&[0.995, 0.98]), &tools, rows(twinned(2)), &config);
     assert_eq!(outcome, Outcome::Duplicate(group(&tools, &[0, 1])));
 }
@@ -167,7 +168,7 @@ fn a_duplicate_is_reported_even_when_the_margin_would_separate_it() {
 #[test]
 fn a_score_exactly_at_the_floor_is_considered() {
     let config = exact_config();
-    let tools = two_servers();
+    let tools = two_capabilities();
     assert_eq!(
         decide(
             &ranking(&[config.similarity_floor()]),
@@ -191,7 +192,7 @@ fn a_score_exactly_at_the_floor_is_considered() {
 #[test]
 fn a_gap_exactly_equal_to_the_margin_binds() {
     let config = exact_config();
-    let tools = two_servers();
+    let tools = two_capabilities();
     assert_eq!(
         decide(&ranking(&[0.875, 0.75]), &tools, rows(distinct(2)), &config),
         Outcome::Bind(&tools[0])
@@ -210,7 +211,7 @@ fn a_gap_exactly_equal_to_the_margin_binds() {
 #[test]
 fn a_pair_exactly_at_the_duplicate_threshold_is_a_twin() {
     let config = exact_config();
-    let tools = one_server();
+    let tools = one_capability();
     let threshold = config.duplicate_threshold();
     assert_eq!(
         decide(
@@ -366,7 +367,7 @@ fn the_solo_candidate_rule_holds_at_its_boundaries() {
         .with_similarity_floor(0.8)
         .and_then(|config| config.with_solo_floor(0.5))
         .expect("valid floors");
-    let tools = two_servers();
+    let tools = two_capabilities();
 
     // One leader between the floors binds.
     assert_eq!(
@@ -397,7 +398,7 @@ fn the_solo_candidate_rule_holds_at_its_boundaries() {
 #[test]
 fn shortlist_offers_only_above_floor_candidates() {
     let config = Config::default();
-    let tools = two_servers();
+    let tools = two_capabilities();
     let listed = shortlist(&ranking(&[0.9, 0.4]), &tools, &config);
     assert_eq!(listed.len(), 1);
     assert_eq!(listed.first(), Some(&tools[0]));
@@ -409,7 +410,7 @@ fn shortlist_returns_the_lone_solo_candidate_and_empties_on_two_peers() {
         .with_similarity_floor(0.8)
         .and_then(|config| config.with_solo_floor(0.5))
         .expect("valid floors");
-    let tools = two_servers();
+    let tools = two_capabilities();
 
     let solo = shortlist(&ranking(&[0.7]), &tools, &config);
     assert_eq!(solo.first(), Some(&tools[0]), "one leader between floors");

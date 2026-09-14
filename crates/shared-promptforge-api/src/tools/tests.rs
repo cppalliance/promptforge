@@ -325,6 +325,23 @@ fn the_migrated_built_in_ids_parse() {
 }
 
 #[test]
+fn a_tool_id_serializes_as_its_global_name_string() {
+    let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
+    assert_eq!(
+        serde_json::to_string(&id).expect("serialize"),
+        "\"promptforge/web/fetch\""
+    );
+    let parsed: ToolId = serde_json::from_str("\"promptforge/web/fetch\"").expect("deserialize");
+    assert_eq!(parsed, id);
+}
+
+#[test]
+fn deserializing_an_invalid_tool_id_is_a_data_error() {
+    assert!(serde_json::from_str::<ToolId>("\"promptforge/web_fetch\"").is_err());
+    assert!(serde_json::from_str::<ToolId>("\"promptforge/web/fetch/extra\"").is_err());
+}
+
+#[test]
 fn catalog_rejects_illegal_wire_name() {
     struct BadWire;
 

@@ -3,7 +3,7 @@
 //! This crate is a pure, deterministic, embedding-based tool-resolution engine.
 //! It takes a [`Catalog`] of [`ToolDescriptor`] values, embeds each one locally
 //! on the CPU with a reusable [`Model`], and answers a need with one of four
-//! borrowing outcomes: a single bound tool, a group of one server's own
+//! borrowing outcomes: a single bound tool, a group of one capability's own
 //! duplicate tools to fail loudly on, a shortlist of candidates it could not
 //! separate, or an abstention when nothing fits.
 //!
@@ -27,7 +27,7 @@
 //! use serde_json::json;
 //!
 //! let catalog = Catalog::new(vec![ToolDescriptor::new(
-//!     ToolId::new("files", "read_file"),
+//!     ToolId::parse("files/fs/read_file")?,
 //!     "Read a file from disk",
 //!     json!({"properties": {"path": {"type": "string"}}}),
 //! )]);

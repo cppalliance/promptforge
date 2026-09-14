@@ -20,16 +20,24 @@ fn model() -> &'static Model {
     })
 }
 
+/// Parses a test identity: every test id is a valid global tool name.
+fn tid(pack: &str, name: &str) -> ToolId {
+    match ToolId::parse(&format!("tests/{pack}/{name}")) {
+        Ok(id) => id,
+        Err(error) => panic!("test ids are valid global names: {error}"),
+    }
+}
+
 /// Two plainly unrelated tools: enough to bind one and to miss both.
 fn catalog() -> Catalog {
     Catalog::new(vec![
         ToolDescriptor::new(
-            ToolId::new("files", "read_file"),
+            tid("files", "read_file"),
             "Read a file from disk",
             json!({"properties": {"path": {"type": "string"}}}),
         ),
         ToolDescriptor::new(
-            ToolId::new("net", "fetch_url"),
+            tid("net", "fetch_url"),
             "Fetch a web page over HTTP",
             json!({"properties": {"url": {"type": "string"}}}),
         ),
@@ -57,7 +65,7 @@ fn a_caller_builds_resolves_and_shortlists_through_the_public_api() {
     assert_eq!(picker.iter().count(), 2);
 
     match picker.resolve("read a file from disk").expect("resolve") {
-        Outcome::Bind(tool) => assert_eq!(tool.id(), &ToolId::new("files", "read_file")),
+        Outcome::Bind(tool) => assert_eq!(tool.id(), &tid("files", "read_file")),
         outcome => panic!("expected a binding, got {outcome:?}"),
     }
 
@@ -73,15 +81,12 @@ fn a_caller_builds_resolves_and_shortlists_through_the_public_api() {
         .expect("shortlist");
     assert_eq!(
         listed.first().map(ToolDescriptor::id),
-        Some(&ToolId::new("net", "fetch_url"))
+        Some(&tid("net", "fetch_url"))
     );
     assert!(listed.len() <= 2);
 
     let pairs = picker
-        .near_duplicates(&[
-            ToolId::new("net", "fetch_url"),
-            ToolId::new("files", "read_file"),
-        ])
+        .near_duplicates(&[tid("net", "fetch_url"), tid("files", "read_file")])
         .expect("selected analysis");
     assert!(pairs.is_empty());
 }
@@ -90,9 +95,9 @@ fn a_caller_builds_resolves_and_shortlists_through_the_public_api() {
 fn a_selection_error_names_the_first_missing_identity() {
     let picker = ToolPicker::build_with_model(model(), catalog(), Config::default(), None)
         .expect("index the catalog");
-    let missing = ToolId::new("missing", "tool");
+    let missing = tid("missing", "tool");
     let error = picker
-        .near_duplicates(&[ToolId::new("files", "read_file"), missing.clone()])
+        .near_duplicates(&[tid("files", "read_file"), missing.clone()])
         .expect_err("an absent identity rejects the selected set");
     assert_eq!(error.missing_id(), &missing);
 }
@@ -102,7 +107,7 @@ fn one_model_builds_a_picker_per_catalog_and_rebuild_reuses_it() {
     let files = ToolPicker::build_with_model(model(), catalog(), Config::default(), None)
         .expect("index the catalog");
     let weather = Catalog::new(vec![ToolDescriptor::new(
-        ToolId::new("weather", "get_forecast"),
+        tid("weather", "get_forecast"),
         "Get the weather forecast for a city",
         json!({"properties": {"city": {"type": "string"}}}),
     )]);
@@ -113,7 +118,7 @@ fn one_model_builds_a_picker_per_catalog_and_rebuild_reuses_it() {
         .resolve("get the weather forecast for a city")
         .expect("resolve")
     {
-        Outcome::Bind(tool) => assert_eq!(tool.id(), &ToolId::new("weather", "get_forecast")),
+        Outcome::Bind(tool) => assert_eq!(tool.id(), &tid("weather", "get_forecast")),
         outcome => panic!("expected a binding, got {outcome:?}"),
     }
     assert_eq!(

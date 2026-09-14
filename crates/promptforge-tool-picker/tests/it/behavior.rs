@@ -11,12 +11,20 @@ use promptforge_tool_picker::{Catalog, Config, Outcome, ToolId, ToolPicker};
 /// The fixture catalog, as it is committed.
 const MIXED_SERVERS: &str = include_str!("../fixtures/mixed-servers.json");
 
-/// A need only `weather/get_forecast` covers.
+/// Parses a fixture identity: every fixture id is a valid global tool name.
+fn tid(id: &str) -> ToolId {
+    match ToolId::parse(id) {
+        Ok(id) => id,
+        Err(error) => panic!("the fixture ids are valid global names: {error}"),
+    }
+}
+
+/// A need only `tests/weather/get_forecast` covers.
 const BIND_NEED: &str = "get the weather forecast for a city";
-/// A need both of one server's copy-pasted calendar tools cover.
+/// A need both of one capability's copy-pasted calendar tools cover.
 const DUPLICATE_NEED: &str =
     "create a new calendar event with a title, a start time and an end time";
-/// A need two servers cover equally well.
+/// A need two capabilities cover equally well.
 const AMBIGUOUS_NEED: &str = "read the contents of a file from the local disk";
 /// A need no tool in the catalog covers at all.
 const ABSENT_NEED: &str = "translate this paragraph into Japanese";
@@ -45,19 +53,19 @@ fn picker() -> &'static ToolPicker {
 #[test]
 fn a_need_only_one_tool_covers_binds_that_tool() {
     match picker().resolve(BIND_NEED).expect("resolve") {
-        Outcome::Bind(tool) => assert_eq!(tool.id(), &ToolId::new("weather", "get_forecast")),
+        Outcome::Bind(tool) => assert_eq!(tool.id(), &tid("tests/weather/get_forecast")),
         other => panic!("a need with one plain answer must bind, got {other:?}"),
     }
 }
 
 #[test]
-fn one_servers_copy_pasted_pair_is_reported_as_a_duplicate() {
+fn one_capabilitys_copy_pasted_pair_is_reported_as_a_duplicate() {
     let outcome = picker().resolve(DUPLICATE_NEED).expect("resolve");
     let Outcome::Duplicate(group) = &outcome else {
-        panic!("one server's two names for one tool must be a duplicate, got {outcome:?}");
+        panic!("one capability's two names for one tool must be a duplicate, got {outcome:?}");
     };
-    assert_eq!(group.first().id(), &ToolId::new("calendar", "create_event"));
-    assert_eq!(group.second().id(), &ToolId::new("calendar", "add_event"));
+    assert_eq!(group.first().id(), &tid("tests/calendar/create_event"));
+    assert_eq!(group.second().id(), &tid("tests/calendar/add_event"));
 }
 
 #[test]
@@ -65,8 +73,8 @@ fn a_duplicate_is_decided_between_the_tools_and_not_between_their_scores() {
     let picker = picker();
     let calendar = picker
         .near_duplicates(&[
-            ToolId::new("calendar", "create_event"),
-            ToolId::new("calendar", "add_event"),
+            tid("tests/calendar/create_event"),
+            tid("tests/calendar/add_event"),
         ])
         .expect("selected analysis");
     assert_eq!(
@@ -77,8 +85,8 @@ fn a_duplicate_is_decided_between_the_tools_and_not_between_their_scores() {
 
     let files = picker
         .near_duplicates(&[
-            ToolId::new("files", "read_file"),
-            ToolId::new("blobs", "read_text_file"),
+            tid("tests/files/read_file"),
+            tid("tests/blobs/read_text_file"),
         ])
         .expect("selected analysis");
     assert!(
@@ -88,14 +96,17 @@ fn a_duplicate_is_decided_between_the_tools_and_not_between_their_scores() {
 }
 
 #[test]
-fn two_servers_publishing_one_capability_are_ambiguous() {
+fn two_capabilities_publishing_equivalent_tools_are_ambiguous() {
     let outcome = picker().resolve(AMBIGUOUS_NEED).expect("resolve");
     let Outcome::Ambiguous(group) = &outcome else {
         panic!("a near-tie the margin cannot separate must be a shortlist, got {outcome:?}");
     };
-    assert_eq!(group.first().id(), &ToolId::new("files", "read_file"));
-    assert_eq!(group.second().id(), &ToolId::new("blobs", "read_text_file"));
-    assert_ne!(group.first().server(), group.second().server());
+    assert_eq!(group.first().id(), &tid("tests/files/read_file"));
+    assert_eq!(group.second().id(), &tid("tests/blobs/read_text_file"));
+    assert_ne!(
+        group.first().id().capability(),
+        group.second().id().capability()
+    );
 }
 
 #[test]
@@ -133,7 +144,7 @@ fn a_shortlist_offers_exactly_the_tools_the_decision_weighed() {
     assert_eq!(bind.len(), 1);
     assert_eq!(
         bind.first().map(|tool| tool.id().clone()),
-        Some(ToolId::new("weather", "get_forecast"))
+        Some(tid("tests/weather/get_forecast"))
     );
 }
 

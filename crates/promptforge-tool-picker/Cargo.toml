@@ -16,6 +16,9 @@ documentation = "https://cppalliance.github.io/promptforge/"
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 candle-transformers = { workspace = true }
+# The global naming grammar (GlobalName, the canonical ToolId) the picker's
+# catalog identities speak.
+shared-promptforge-api.workspace = true
 shared-progress.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true }

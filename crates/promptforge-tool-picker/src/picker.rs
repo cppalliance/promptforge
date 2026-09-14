@@ -60,13 +60,13 @@ impl ToolPicker {
     /// use serde_json::json;
     ///
     /// let catalog = Catalog::new(vec![ToolDescriptor::new(
-    ///     ToolId::new("files", "read_file"),
+    ///     ToolId::parse("files/fs/read_file")?,
     ///     "Read a file from disk",
     ///     json!({"properties": {"path": {"type": "string"}}}),
     /// )]);
     /// let picker = ToolPicker::build(catalog, Config::default())?;
     /// assert_eq!(picker.len(), 1);
-    /// # Ok::<(), promptforge_tool_picker::BuildError>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use = "a picker that is built and dropped did its costly work for nothing"]
     pub fn build(catalog: Catalog, config: Config) -> Result<Self, BuildError> {

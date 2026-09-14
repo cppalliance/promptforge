@@ -331,12 +331,7 @@ async fn run(
             tools
                 .iter()
                 .map(|tool| {
-                    let id = tool.id();
-                    ToolDescriptor::new(
-                        PickerToolId::new(id.capability().to_string(), id.name()),
-                        tool.description(),
-                        tool.parameters_schema(),
-                    )
+                    ToolDescriptor::new(tool.id(), tool.description(), tool.parameters_schema())
                 })
                 .collect(),
         )

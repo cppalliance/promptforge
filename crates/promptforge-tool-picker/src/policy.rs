@@ -20,9 +20,10 @@ use crate::rank::{Candidate, Vectors, comparable};
 /// [`Outcome::Absent`] is a successful abstention: nothing cleared the floor.
 /// [`Outcome::Bind`] is a single tool that cleared the floor and left the
 /// runner-up behind by at least the margin. [`Outcome::Duplicate`] reports a
-/// group of at least two same-server twins - a fault in one server's catalog.
-/// [`Outcome::Ambiguous`] reports every other near-tie the margin could not
-/// separate, most often one tool republished across two servers.
+/// group of at least two same-capability twins - a fault in one capability's
+/// catalog. [`Outcome::Ambiguous`] reports every other near-tie the margin
+/// could not separate, most often one tool republished across two
+/// capabilities.
 ///
 /// # The solo-candidate rule
 ///
@@ -44,7 +45,7 @@ use crate::rank::{Candidate, Vectors, comparable};
 /// let picker = ToolPicker::build(Catalog::default(), Config::default())?;
 /// match picker.resolve("read a file from disk")? {
 ///     Outcome::Bind(tool) => println!("call {}", tool.name()),
-///     Outcome::Duplicate(group) => println!("{} publishes twins", group.first().server()),
+///     Outcome::Duplicate(group) => println!("{} publishes twins", group.first().id().capability()),
 ///     Outcome::Ambiguous(group) => println!("{} tools fit", group.len()),
 ///     Outcome::Absent => println!("no tool covers this need"),
 ///     _ => {}
@@ -56,7 +57,7 @@ use crate::rank::{Candidate, Vectors, comparable};
 pub enum Outcome<'a> {
     /// One tool matched clearly enough to be used without asking.
     Bind(&'a ToolDescriptor),
-    /// One server publishes tools that are copies of each other.
+    /// One capability publishes tools that are copies of each other.
     Duplicate(CandidateGroup<'a>),
     /// Several tools match well enough that the margin could not separate them.
     Ambiguous(CandidateGroup<'a>),
@@ -242,7 +243,7 @@ pub(crate) fn decide<'a>(
 
     let twins: Vec<Ranked<'a>> = std::iter::once(leader)
         .chain(ranked[1..].iter().copied().filter(|candidate| {
-            candidate.tool.server() == leader.tool.server()
+            candidate.tool.id().capability() == leader.tool.id().capability()
                 && vectors
                     .similarity(leader.index, candidate.index)
                     .is_some_and(|similarity| similarity >= config.duplicate_threshold())

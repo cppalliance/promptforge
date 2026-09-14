@@ -103,6 +103,30 @@ impl ToolId {
     }
 }
 
+impl std::fmt::Display for ToolId {
+    /// The canonical `namespace/pack/name` string form.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl serde::Serialize for ToolId {
+    /// Serializes the identity as its one `namespace/pack/name` string.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ToolId {
+    /// Deserializes the identity from its string form, validating it as a
+    /// 3-segment global name: an invalid string is a data error, never a
+    /// silently accepted identity.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = <String as serde::Deserialize>::deserialize(deserializer)?;
+        ToolId::parse(&text).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A stable, matchable classification of a [`ToolIdError`].
 ///
 /// Every public error exposes a `kind()` classifier so callers can branch on the

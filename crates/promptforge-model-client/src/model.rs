@@ -65,10 +65,10 @@ impl ModelCatalogFiltered for ModelCatalog {
 ///
 /// The picker's `enriched_text` prefixes the tool name, so vendor model ids
 /// must not ride in that name or they drown the capability description.
-/// Identity is encoded in the picker id's server field; every entry uses a
-/// single neutral, crate-private label. Accepting borrowed descriptors lets a
-/// filtered view build a picker without first cloning matches into an owned
-/// catalog (MODEL-017).
+/// Identity is escaped into the picker id's first two segments; every entry
+/// uses a single neutral, crate-private label as its name. Accepting borrowed
+/// descriptors lets a filtered view build a picker without first cloning
+/// matches into an owned catalog (MODEL-017).
 pub(crate) fn picker_catalog_from<'a>(
     models: impl IntoIterator<Item = &'a ModelDescriptor>,
 ) -> Catalog {
@@ -89,23 +89,82 @@ pub(crate) fn picker_catalog_from<'a>(
 /// Neutral picker name so `enriched_text` does not inject vendor model ids.
 const PICKER_MODEL_LABEL: &str = "model";
 
-/// Separates server and model name inside the picker's server field.
-const PICKER_ID_SEPARATOR: char = '\u{1e}';
-
+/// Encodes a model identity as a picker id in the global naming grammar.
+///
+/// A picker id is a 3-segment global name (`namespace/pack/name`) over a
+/// lowercase ASCII charset, while a model id component is nearly arbitrary
+/// text, so each component rides in one of the first two segments escaped
+/// byte-wise: charset bytes pass through and every other byte - including the
+/// escape introducer `-` itself - is emitted as `-` plus two lowercase hex
+/// digits. The name segment is the neutral label.
 fn model_to_picker_id(id: &ModelId) -> PickerToolId {
-    PickerToolId::new(
-        format!("{}{}{}", id.server(), PICKER_ID_SEPARATOR, id.name()),
-        PICKER_MODEL_LABEL,
-    )
+    PickerToolId::from_validated(&format!(
+        "{}/{}/{}",
+        escape_segment(id.server()),
+        escape_segment(id.name()),
+        PICKER_MODEL_LABEL
+    ))
 }
 
+/// Recovers the model identity encoded by [`model_to_picker_id`].
+///
+/// The escape is total, so a self-produced id always decodes; a foreign id
+/// that does not decode falls back to its raw first two segments, mirroring
+/// the pre-migration defensive path.
 pub(crate) fn model_from_picker_id(id: &PickerToolId) -> ModelId {
-    match id.server().split_once(PICKER_ID_SEPARATOR) {
-        Some((server, name)) if !server.is_empty() && !name.is_empty() => {
-            ModelId::from_validated(server, name)
-        }
-        _ => ModelId::from_validated(id.server(), id.name()),
+    let capability = id.capability();
+    match (
+        unescape_segment(capability.namespace()),
+        unescape_segment(capability.pack()),
+    ) {
+        (Some(server), Some(name)) => ModelId::from_validated(server, name),
+        _ => ModelId::from_validated(capability.namespace(), capability.pack()),
     }
+}
+
+/// Encodes one model id component into a global-name segment; see
+/// [`model_to_picker_id`] for the scheme.
+fn escape_segment(component: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(component.len());
+    for byte in component.bytes() {
+        if matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.') {
+            out.push(char::from(byte));
+        } else {
+            out.push('-');
+            out.push(char::from(HEX[(byte >> 4) as usize]));
+            out.push(char::from(HEX[(byte & 0x0f) as usize]));
+        }
+    }
+    out
+}
+
+/// Decodes one segment produced by [`escape_segment`]. Returns `None` for a
+/// segment that is not escape output (a dangling `-` or non-UTF-8 bytes).
+fn unescape_segment(segment: &str) -> Option<String> {
+    fn hex_digit(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        }
+    }
+
+    let bytes = segment.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'-' {
+            let high = hex_digit(*bytes.get(index + 1)?)?;
+            let low = hex_digit(*bytes.get(index + 2)?)?;
+            out.push(high << 4 | low);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 /// Resolves one `models.bind` description under optional hard constraints.

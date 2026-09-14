@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use mlua::{Lua, Scope};
 use promptforge_model_client::Error as GatewayClientError;
-use promptforge_tool_picker::ToolId as PickerToolId;
-use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
+use promptforge_tool_picker::{Outcome, ToolPicker};
 
 use crate::error::SharedSource;
 use crate::lua::{LiveBindingProducer, ToolResolver, ToolSet};
@@ -119,12 +118,13 @@ impl ModelResolver for RuntimeResolution<'_> {
     }
 }
 
-/// A resolved capability outcome, normalized once into core-owned identities.
+/// A resolved capability outcome, normalized once into owned identities.
 ///
-/// Picker [`ToolDescriptor`]s are converted to core [`ToolId`]s at decision
-/// time (F4), so a cached decision holds only the stable identities the caller
-/// needs; a cache hit produces its typed result from these borrowed ids without
-/// re-cloning full descriptors on every resolve.
+/// Picker descriptor ids are cloned into owned [`ToolId`]s at decision
+/// time (F4) - the picker and the executor speak one id type, so no
+/// translation is needed - so a cached decision holds only the stable
+/// identities the caller needs; a cache hit produces its typed result from
+/// these owned ids without re-cloning full descriptors on every resolve.
 #[derive(Debug)]
 enum CachedDecision {
     Bind(ToolId),
@@ -144,29 +144,18 @@ enum CachedDecision {
     NoPicker,
 }
 
-/// Converts a borrowed picker descriptor to a core-owned [`ToolId`].
-///
-/// The picker still speaks 2-part ids (its own migration onto the global
-/// grammar is a later step): a core id rides through the picker as server =
-/// the capability prefix (`namespace/pack`, which the picker's server part
-/// accepts verbatim, separators included) and name = the tool name, so the
-/// round trip is lossless.
-fn tool_id_of(tool: &ToolDescriptor) -> ToolId {
-    ToolId::from_validated(&format!("{}/{}", tool.id().server(), tool.id().name()))
-}
-
 impl CachedDecision {
     fn from_picker(
         outcome: std::result::Result<Outcome<'_>, promptforge_tool_picker::QueryError>,
     ) -> Self {
         match outcome {
-            Ok(Outcome::Bind(tool)) => Self::Bind(tool_id_of(tool)),
+            Ok(Outcome::Bind(tool)) => Self::Bind(tool.id().clone()),
             Ok(Outcome::Absent) => Self::Absent,
             Ok(Outcome::Duplicate(group)) => {
-                Self::Duplicate(group.iter().map(tool_id_of).collect())
+                Self::Duplicate(group.iter().map(|tool| tool.id().clone()).collect())
             }
             Ok(Outcome::Ambiguous(group)) => {
-                Self::Ambiguous(group.iter().map(tool_id_of).collect())
+                Self::Ambiguous(group.iter().map(|tool| tool.id().clone()).collect())
             }
             Ok(_) => Self::Unrecognized,
             Err(error) => Self::QueryFailed(SharedSource::new(error)),
@@ -211,8 +200,8 @@ trait DecisionSource: Send + Sync {
     /// source (F4).
     fn near_duplicates(
         &self,
-        ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource>;
+        ids: &[ToolId],
+    ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, SharedSource>;
 }
 
 impl DecisionSource for ToolPicker {
@@ -222,8 +211,8 @@ impl DecisionSource for ToolPicker {
 
     fn near_duplicates(
         &self,
-        ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
+        ids: &[ToolId],
+    ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, SharedSource> {
         ToolPicker::near_duplicates(self, ids)
             .map(|pairs| {
                 pairs
@@ -253,8 +242,8 @@ impl DecisionSource for NoPicker {
 
     fn near_duplicates(
         &self,
-        _ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
+        _ids: &[ToolId],
+    ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, SharedSource> {
         Ok(Vec::new())
     }
 }
@@ -326,31 +315,14 @@ where
         &self,
         ids: &[ToolId],
     ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, promptforge_lua::Error> {
-        let picker_ids = ids
-            .iter()
-            .map(|id| PickerToolId::new(id.capability().to_string(), id.name()))
-            .collect::<Vec<_>>();
-        self.source
-            .near_duplicates(&picker_ids)
-            .map(|pairs| {
-                pairs
-                    .into_iter()
-                    .map(|(first, second, similarity)| {
-                        (
-                            ToolId::from_validated(&format!("{}/{}", first.server(), first.name())),
-                            ToolId::from_validated(&format!(
-                                "{}/{}",
-                                second.server(),
-                                second.name()
-                            )),
-                            similarity,
-                        )
-                    })
-                    .collect()
-            })
-            .map_err(|source| promptforge_lua::Error::ToolScopeAnalysisSource {
+        // One id type on both sides of the picker boundary: the selected
+        // identities forward verbatim and the reported pairs need no
+        // reconstruction.
+        self.source.near_duplicates(ids).map_err(|source| {
+            promptforge_lua::Error::ToolScopeAnalysisSource {
                 source: Box::new(source),
-            })
+            }
+        })
     }
 }
 
@@ -388,8 +360,8 @@ mod tests {
 
         fn near_duplicates(
             &self,
-            ids: &[PickerToolId],
-        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
+            ids: &[ToolId],
+        ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, SharedSource> {
             Ok(vec![(ids[0].clone(), ids[1].clone(), 0.97)])
         }
     }
@@ -415,9 +387,8 @@ mod tests {
 
             fn near_duplicates(
                 &self,
-                ids: &[PickerToolId],
-            ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource>
-            {
+                ids: &[ToolId],
+            ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, SharedSource> {
                 Ok(vec![(ids[0].clone(), ids[1].clone(), 0.0)])
             }
         }
@@ -646,10 +617,7 @@ mod tests {
 
     #[test]
     fn near_duplicates_are_forwarded_from_the_source() {
-        let ids = [
-            PickerToolId::new("tests", "first"),
-            PickerToolId::new("tests", "second"),
-        ];
+        let ids = [tid("first"), tid("second")];
         let pairs = FixtureSource
             .near_duplicates(&ids)
             .expect("analysis succeeds");
@@ -696,8 +664,8 @@ mod tests {
 
         fn near_duplicates(
             &self,
-            _ids: &[PickerToolId],
-        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
+            _ids: &[ToolId],
+        ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, SharedSource> {
             Ok(Vec::new())
         }
     }

@@ -77,17 +77,11 @@ impl ModelId {
         }
     }
 
-    /// The `RS` (U+001E) record separator the model picker uses to delimit
-    /// encoded identities. Accepting it inside a component would let an id
-    /// collide or corrupt that encoding, so it is rejected explicitly.
-    pub(crate) const PICKER_SEPARATOR: char = '\u{001e}';
-
     /// Validates one identity component, naming the field in any error.
     ///
     /// Rejection is by Unicode scalar, not raw byte (MODEL-004): every control
     /// character is refused, including C1 controls such as U+0085 (NEL) whose
-    /// UTF-8 encoding a byte-range scan would miss, and the picker separator
-    /// U+001E in particular.
+    /// UTF-8 encoding a byte-range scan would miss.
     fn validate(field: &'static str, value: &str) -> std::result::Result<(), ModelIdError> {
         if value.is_empty() {
             return Err(ModelIdError {
@@ -95,10 +89,7 @@ impl ModelId {
                 reason: "must not be empty",
             });
         }
-        if value
-            .chars()
-            .any(|c| c.is_control() || c == Self::PICKER_SEPARATOR)
-        {
+        if value.chars().any(char::is_control) {
             return Err(ModelIdError {
                 field,
                 reason: "must not contain a control character",
@@ -342,8 +333,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_c0_c1_and_picker_separator_controls() {
-        // The picker record separator (U+001E) must never survive into an id.
+    fn rejects_c0_c1_and_other_control_scalars() {
+        // The C0 record separator (U+001E) must never survive into an id.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{001e}b").is_err());
         // A C1 control (NEL, U+0085) whose UTF-8 bytes (0xC2 0x85) a byte-range
         // scan would miss but a scalar `is_control` scan rejects (MODEL-004).

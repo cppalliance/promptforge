@@ -886,7 +886,7 @@ New `names` module in `shared-promptforge-api`: `GlobalName` (private segments, 
 
 <step-3>
 
-### Step 3: Picker ToolId migration
+### Step 3: Picker ToolId migration [completed]
 
 - Component: global-names
 

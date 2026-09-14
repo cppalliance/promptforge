@@ -23,30 +23,35 @@ fn picker(catalog: Catalog, config: Config) -> ToolPicker {
     ToolPicker::build_with_model(model(), catalog, config, None).expect("the shared model indexes")
 }
 
+/// Parses a test identity: every test id is a valid global tool name.
+fn tid(pack: &str, name: &str) -> ToolId {
+    ToolId::parse(&format!("tests/{pack}/{name}")).expect("test ids are valid global names")
+}
+
 fn tiny_catalog() -> Catalog {
     Catalog::new(vec![
         ToolDescriptor::new(
-            ToolId::new("files", "read_file"),
+            tid("files", "read_file"),
             "Read a file from disk",
             json!({"properties": {"path": {"type": "string"}}}),
         ),
         ToolDescriptor::new(
-            ToolId::new("net", "fetch_url"),
+            tid("net", "fetch_url"),
             "Fetch a web page over HTTP",
             json!({"properties": {"url": {"type": "string"}}}),
         ),
     ])
 }
 
-/// The same tool published twice, under the given servers.
+/// The same tool published twice, under the given packs.
 fn republished(first: &str, second: &str) -> Catalog {
     let tool = ToolDescriptor::new(
-        ToolId::new(first, "read_file"),
+        tid(first, "read_file"),
         "Read a file from disk",
         json!({"properties": {"path": {"type": "string"}}}),
     );
     let twin = ToolDescriptor::new(
-        ToolId::new(second, "read_file"),
+        tid(second, "read_file"),
         "Read a file from disk",
         json!({"properties": {"path": {"type": "string"}}}),
     );
@@ -195,7 +200,7 @@ fn a_need_no_tool_covers_abstains_and_shortlists_nothing() {
 }
 
 #[test]
-fn a_tool_republished_on_one_server_is_a_duplicate_and_across_two_is_ambiguous() {
+fn a_tool_republished_in_one_capability_is_a_duplicate_and_across_two_is_ambiguous() {
     let same = picker(republished("files", "files"), Config::default());
     let need = "read a file from disk";
     assert!(matches!(
@@ -233,15 +238,15 @@ fn near_duplicates_reuses_the_indexed_vectors_inclusively() {
     let pairs = picker.near_duplicates(&ids).expect("analysis");
     assert_eq!(pairs.len(), 1);
     let pair = pairs.get(0).expect("one pair");
-    assert_eq!(pair.first().server(), "files");
-    assert_eq!(pair.second().server(), "blobs");
+    assert_eq!(pair.first().id().capability().to_string(), "tests/files");
+    assert_eq!(pair.second().id().capability().to_string(), "tests/blobs");
     assert!(pair.similarity() >= picker.config().duplicate_threshold());
 }
 
 #[test]
 fn near_duplicates_rejects_an_absent_identity() {
     let picker = picker(tiny_catalog(), Config::default());
-    let missing = ToolId::new("missing", "tool");
+    let missing = tid("missing", "tool");
     let error = picker
         .near_duplicates(std::slice::from_ref(&missing))
         .expect_err("absent");
@@ -253,11 +258,11 @@ fn get_returns_the_first_matching_descriptor() {
     let picker = picker(tiny_catalog(), Config::default());
     assert_eq!(
         picker
-            .get(&ToolId::new("net", "fetch_url"))
+            .get(&tid("net", "fetch_url"))
             .map(ToolDescriptor::name),
         Some("fetch_url")
     );
-    assert_eq!(picker.get(&ToolId::new("net", "absent")), None);
+    assert_eq!(picker.get(&tid("net", "absent")), None);
 }
 
 #[test]
