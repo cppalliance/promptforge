@@ -11,11 +11,16 @@
 //! callback observes. [`tools`] is the runtime-agnostic tool contract:
 //! the [`Tool`](tools::Tool) trait, the caller-provided
 //! [`ToolCatalog`](tools::ToolCatalog), trusted output, and the model-safe
-//! tool error. This
-//! crate depends on no other promptforge crate, so every promptforge crate
-//! may depend on it.
+//! tool error, and [`capabilities`] is the capability activation contract:
+//! the [`Capability`](capabilities::Capability) trait, the
+//! [`RunServices`](capabilities::RunServices) a capability is given at
+//! activation, and the [`Contribution`](capabilities::Contribution) it
+//! returns. This
+//! crate's only workspace dependency is the std-only `shared-vfs`, so every
+//! promptforge crate may depend on it.
 
 pub mod cancel;
+pub mod capabilities;
 pub mod events;
 pub mod models;
 pub mod names;

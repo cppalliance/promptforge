@@ -17,6 +17,7 @@ async-trait.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shared-vfs.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-util.workspace = true

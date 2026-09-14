@@ -926,7 +926,7 @@ Surface the retained `serde_yaml_ng` location into parse errors and add `SourceL
 
 <step-7>
 
-### Step 7: Capability trait and activation types
+### Step 7: Capability trait and activation types [completed]
 
 - Component: capabilities
 
