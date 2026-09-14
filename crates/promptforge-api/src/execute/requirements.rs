@@ -21,14 +21,24 @@ pub struct Requirements {
     /// environment's registry, or present but failed to activate. The
     /// run fails until every one is satisfied.
     pub missing_required: Vec<CapabilityId>,
+    /// The declared co-activation conflicts: pairs of present
+    /// capabilities that cannot activate in one run (bashkit vs
+    /// terminal - two filesystem realities, and a context gets one or
+    /// the other, never both). Neither member of a conflicting pair
+    /// activates; the run fails until the prompt declares one or the
+    /// other.
+    pub conflicts: Vec<CapabilityConflict>,
 }
 
 impl Requirements {
-    /// Returns whether nothing blocks the run: no unmet model requirements
-    /// and no missing required capabilities.
+    /// Returns whether nothing blocks the run: no unmet model
+    /// requirements, no missing required capabilities, and no
+    /// co-activation conflicts.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
-        self.unmet_requirements.is_empty() && self.missing_required.is_empty()
+        self.unmet_requirements.is_empty()
+            && self.missing_required.is_empty()
+            && self.conflicts.is_empty()
     }
 
     /// The refusal notice [`Environment::run`](super::Environment::run)
@@ -48,6 +58,14 @@ impl Requirements {
         for id in &self.missing_required {
             let _ = write!(notice, "\n- missing required capability: {id}");
         }
+        for conflict in &self.conflicts {
+            let _ = write!(
+                notice,
+                "\n- conflicting capabilities: {} and {} cannot be activated \
+                 together; declare one or the other",
+                conflict.first, conflict.second
+            );
+        }
         for unmet in &self.unmet_requirements {
             let line = match unmet.check {
                 RequirementCheck::ContextMinimum => format!(
@@ -65,6 +83,17 @@ impl Requirements {
         }
         notice
     }
+}
+
+/// One declared co-activation conflict: two present capabilities that
+/// cannot activate in one run, named in declaration order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CapabilityConflict {
+    /// The earlier-declared capability.
+    pub first: CapabilityId,
+    /// The later-declared capability.
+    pub second: CapabilityId,
 }
 
 /// One failed model requirement: the role, which check failed, and what

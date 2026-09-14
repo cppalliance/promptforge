@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use promptforge_parser::ModelKeyword;
 use promptforge_tool_picker::ToolPicker;
-use shared_promptforge_api::capabilities::{CapabilityId, RunServices};
+use shared_promptforge_api::capabilities::{Capability, CapabilityId, Contribution, RunServices};
+use shared_promptforge_api::tools::Tool;
 
 use crate::capabilities::CapabilityRegistry;
 use crate::client::GatewayClient;
@@ -17,7 +18,7 @@ use crate::tools::ToolCatalog;
 use super::RunResult;
 use super::bindings::ModelBindings;
 use super::config::{RunContext, RunResolution};
-use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
+use super::requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
 
 /// What exists in this deployment and its standing policy.
 ///
@@ -31,10 +32,12 @@ use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 /// model catalog, and the tool catalog - as internal fields, and prose
 /// binding still works. [`prepare`](Environment::prepare) installs those
 /// inputs on the context, resolves the prompt's declared capabilities
-/// against the registry, builds the per-run router from `base_vfs`, and
-/// fills the model bindings from the context's current model; the
-/// `max_depth` guard lands with the sub-run adapter in the deferred
-/// prompt-pack work and is carried, not consulted, until then.
+/// against the registry (rejecting co-activation conflicts), assembles
+/// the activated contributions into the run's tool catalog, builds the
+/// per-run router from `base_vfs`, and fills the model bindings from
+/// the context's current model; the `max_depth` guard lands with the
+/// sub-run adapter in the deferred prompt-pack work and is carried, not
+/// consulted, until then.
 #[non_exhaustive]
 pub struct Environment {
     /// Semantic picker behind executed H1 binds (interim home, absorbed
@@ -148,13 +151,20 @@ impl Environment {
     /// Declared capabilities resolve against the registry in declaration
     /// order. A missing required capability lands in
     /// [`Requirements::missing_required`]; an absent optional capability
-    /// is skipped with a log line. Each present capability is activated
-    /// with the run's services (its VFS and cancellation handle); an
-    /// activation failure is logged and the capability contributes
-    /// nothing to the run - and when the failed capability is required,
-    /// it also lands in [`Requirements::missing_required`], since the
-    /// run cannot have what the prompt declared. The contributions ride
-    /// the context for the catalog-assembly step.
+    /// is skipped with a log line. Present capabilities are checked for
+    /// co-activation conflicts (bashkit vs terminal: two filesystem
+    /// realities, and a context gets one or the other, never both); a
+    /// conflicting pair activates neither member and lands in
+    /// [`Requirements::conflicts`] naming both. Each remaining capability
+    /// is activated with the run's services (its VFS and cancellation
+    /// handle); an activation failure is logged and the capability
+    /// contributes nothing to the run - and when the failed capability
+    /// is required, it also lands in [`Requirements::missing_required`],
+    /// since the run cannot have what the prompt declared. The activated
+    /// contributions are assembled into the run's tool catalog in
+    /// declaration order, with tool prefix-containment enforced at
+    /// assembly: a contributed tool whose id escapes its capability's id
+    /// is rejected - logged and never admitted to the catalog.
     ///
     /// Model satisfaction is a fill function over the declared roles, and
     /// v1's fill is deliberately trivial: every role binds to the
@@ -189,6 +199,9 @@ impl Environment {
             .build();
         let services = RunServices::new(ctx.vfs.clone(), ctx.cancel.clone().unwrap_or_default());
         let mut requirements = Requirements::default();
+        // Resolve the declarations against the registry, preserving
+        // declaration order.
+        let mut present: Vec<(CapabilityId, Arc<dyn Capability>, bool)> = Vec::new();
         for declaration in prompt.frontmatter().capabilities() {
             // The parser validated the id's arity and charset at parse
             // time, so the checked constructor's validation cannot fail.
@@ -205,10 +218,41 @@ impl Environment {
                 }
                 continue;
             };
+            present.push((id, Arc::clone(capability), declaration.is_optional()));
+        }
+        // Co-activation conflicts are declared by the capabilities
+        // themselves; the check is symmetric, so only one member of a
+        // pair needs to name the other. A conflicting pair activates
+        // neither member and fails preparation naming both.
+        let mut conflicted = vec![false; present.len()];
+        for (i, (first_id, first, _)) in present.iter().enumerate() {
+            for (j, (second_id, second, _)) in present.iter().enumerate().skip(i + 1) {
+                if first.conflicts().contains(second_id) || second.conflicts().contains(first_id) {
+                    tracing::warn!(
+                        first = %first_id,
+                        second = %second_id,
+                        "conflicting capabilities declared; neither activates"
+                    );
+                    requirements.conflicts.push(CapabilityConflict {
+                        first: first_id.clone(),
+                        second: second_id.clone(),
+                    });
+                    conflicted[i] = true;
+                    conflicted[j] = true;
+                }
+            }
+        }
+        let mut activated: Vec<(CapabilityId, Contribution)> = Vec::new();
+        for ((id, capability, optional), is_conflicted) in
+            present.iter().zip(conflicted.iter().copied())
+        {
+            if is_conflicted {
+                continue;
+            }
             match capability.create(&services) {
                 Ok(contribution) => {
                     tracing::info!(capability = %id, "capability activated");
-                    ctx.contributions.push(contribution);
+                    activated.push((id.clone(), contribution));
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -220,12 +264,13 @@ impl Environment {
                     // the run without something the prompt declared:
                     // report it like an absent one so the run fails
                     // until satisfied.
-                    if !declaration.is_optional() {
-                        requirements.missing_required.push(id);
+                    if !*optional {
+                        requirements.missing_required.push(id.clone());
                     }
                 }
             }
         }
+        ctx.tools = assemble_catalog(&activated);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
     }
@@ -246,6 +291,63 @@ impl Environment {
             }));
         }
         super::run(prompt, args, ctx).await
+    }
+}
+
+/// Assembles the run's tool catalog from the activated capabilities'
+/// contributions in declaration order.
+///
+/// Containment is total and enforced here: every contributed tool's id
+/// must sit under its contributing capability's full id
+/// (`namespace/pack/name` for a `namespace/pack` capability). A
+/// violating tool - like a repeated id or a transport-illegal wire
+/// name - is rejected at assembly: logged and never admitted to the
+/// catalog.
+fn assemble_catalog(activated: &[(CapabilityId, Contribution)]) -> ToolCatalog {
+    let mut accepted: Vec<Arc<dyn Tool>> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (capability, contribution) in activated {
+        for tool in &contribution.tools {
+            let id = tool.id();
+            if !capability.contains(&id) {
+                tracing::warn!(
+                    capability = %capability,
+                    tool = %id,
+                    "contributed tool id escapes its capability's id; rejected at assembly"
+                );
+                continue;
+            }
+            if !seen.insert(id.clone()) {
+                tracing::warn!(
+                    capability = %capability,
+                    tool = %id,
+                    "contributed tool id repeats an earlier contribution; rejected at assembly"
+                );
+                continue;
+            }
+            // The catalog is the transport boundary: validate the wire
+            // name per tool so one bad tool costs only itself.
+            if let Err(error) = ToolCatalog::new(std::slice::from_ref(tool)) {
+                tracing::warn!(
+                    capability = %capability,
+                    tool = %id,
+                    %error,
+                    "contributed tool failed catalog validation; rejected at assembly"
+                );
+                continue;
+            }
+            accepted.push(Arc::clone(tool));
+        }
+    }
+    match ToolCatalog::new(&accepted) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            // Every accepted tool passed containment, uniqueness, and
+            // wire-name validation above, so this build cannot fail;
+            // the arm is defensive.
+            tracing::warn!(%error, "catalog assembly failed after per-tool validation");
+            ToolCatalog::default()
+        }
     }
 }
 

@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use promptforge_tool_picker::ToolPicker;
-use shared_promptforge_api::capabilities::Contribution;
 
 use crate::cancel::CancelHandle;
 use crate::client::{GatewayClient, StreamDelta};
@@ -236,11 +235,12 @@ pub struct RunContext {
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function: which concrete model each declared role is bound to.
     pub(crate) model_bindings: ModelBindings,
-    /// The activated capabilities' contributions, in declaration order.
-    /// Written by [`Environment::prepare`](super::Environment::prepare);
-    /// the catalog-assembly step consumes them into the run's tool
-    /// catalog.
-    pub(crate) contributions: Vec<Contribution>,
+    /// The run's assembled tool catalog: the activated capabilities'
+    /// contributed tools in declaration order, with tool
+    /// prefix-containment enforced at assembly. Written by
+    /// [`Environment::prepare`](super::Environment::prepare); the
+    /// slot-filling step fills the prompt's tool slots against it.
+    pub(crate) tools: ToolCatalog,
     /// The resolution inputs
     /// [`Environment::prepare`](super::Environment::prepare) installs;
     /// `None` on a caller-built context, which the free
@@ -270,7 +270,7 @@ impl RunContext {
             vfs: promptforge_vfs::empty(),
             model: None,
             model_bindings: ModelBindings::default(),
-            contributions: Vec::new(),
+            tools: ToolCatalog::default(),
             resolution: None,
         }
     }
@@ -404,6 +404,15 @@ impl RunContext {
         &self.model_bindings
     }
 
+    /// Returns the run's assembled tool catalog, written by
+    /// [`Environment::prepare`](super::Environment::prepare) from the
+    /// activated capabilities' contributions in declaration order. Empty
+    /// on a caller-built context that was never prepared.
+    #[must_use]
+    pub fn tools(&self) -> &ToolCatalog {
+        &self.tools
+    }
+
     /// Returns the run identity shared by every report.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -442,7 +451,7 @@ impl fmt::Debug for RunContext {
             .field("vfs", &self.vfs)
             .field("model", &self.model)
             .field("model_bindings", &self.model_bindings)
-            .field("contributions", &self.contributions)
+            .field("tools", &self.tools)
             .field("resolution", &self.resolution.is_some())
             .finish()
     }

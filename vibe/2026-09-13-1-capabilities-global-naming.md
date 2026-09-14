@@ -966,7 +966,7 @@ New `capabilities` module in `shared-promptforge-api` (the crate gains its `shar
 
 <step-11>
 
-### Step 11: Catalog assembly and conflict checks
+### Step 11: Catalog assembly and conflict checks [completed]
 
 - Component: binding
 

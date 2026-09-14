@@ -98,7 +98,7 @@ pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub(crate) use gateway::ResolutionContext;
-pub use requirements::{RequirementCheck, Requirements, UnmetRequirement};
+pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
 
 use context::RunState;
 use scheduler::Scheduler;

@@ -22,6 +22,7 @@ use shared_promptforge_api::capabilities::{
 };
 use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
 use shared_promptforge_api::observe::NullObserver;
+use shared_promptforge_api::tools::{Tool, ToolError, ToolId, ToolOutput};
 use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
 
 /// A prompt declaring `promptforge/web` as a required capability.
@@ -557,7 +558,9 @@ async fn env_run_refuses_a_missing_required_capability_with_a_notice_naming_it()
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     // No registry: the declared required capability is absent.
     let env = Environment::new();
-    let result = env.run(&prompt, "", RunContext::new("refuse-missing")).await;
+    let result = env
+        .run(&prompt, "", RunContext::new("refuse-missing"))
+        .await;
     let RunResult::Failure(error) = result else {
         panic!("a prompt missing a required capability is refused: {result:?}");
     };
@@ -586,4 +589,394 @@ async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
         panic!("a satisfiable prompt runs through implicit prepare: {result:?}");
     };
     assert_eq!(text, "done");
+}
+
+// Catalog assembly and conflict checks: prepare assembles the activated
+// capabilities' contributed tools into the run's catalog in declaration
+// order, enforcing tool prefix-containment at assembly, and rejects
+// capability co-activation conflicts naming both.
+
+/// A prompt declaring `promptforge/bashkit` and `promptforge/terminal`,
+/// in that order.
+const DECLARES_CONFLICTING: &str = concat!(
+    "---\n",
+    "name: declares-conflicting\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/bashkit\n",
+    "  - promptforge/terminal\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
+/// A prompt declaring `promptforge/web` and `promptforge/fs`, in that
+/// order.
+const DECLARES_TWO: &str = concat!(
+    "---\n",
+    "name: declares-two\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/web\n",
+    "  - promptforge/fs\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "Done.\n",
+);
+
+/// A fixture tool: a static id, its name segment as the wire name, and
+/// an empty trusted output.
+struct FixtureTool {
+    id: ToolId,
+}
+
+#[async_trait::async_trait]
+impl Tool for FixtureTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &str {
+        self.id.name()
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "A fixture tool."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted(String::new()))
+    }
+}
+
+/// A fixture capability contributing tools and declaring co-activation
+/// conflicts.
+struct ToolFixture {
+    id: CapabilityId,
+    conflicts: Vec<CapabilityId>,
+    tools: Vec<Arc<dyn Tool>>,
+}
+
+impl ToolFixture {
+    /// Builds a fixture registered under `id`, contributing `tools` and
+    /// conflicting with each id in `conflicts`.
+    fn new(id: &str, conflicts: &[&str], tools: Vec<Arc<dyn Tool>>) -> ToolFixture {
+        ToolFixture {
+            id: CapabilityId::parse(id).expect("the fixture id is valid"),
+            conflicts: conflicts
+                .iter()
+                .map(|id| CapabilityId::parse(id).expect("the conflict id is valid"))
+                .collect(),
+            tools,
+        }
+    }
+}
+
+impl Capability for ToolFixture {
+    fn id(&self) -> &CapabilityId {
+        &self.id
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Capability trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "A tool-contributing fixture capability."
+    }
+
+    fn conflicts(&self) -> &[CapabilityId] {
+        &self.conflicts
+    }
+
+    fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
+        let _ = services;
+        Ok(Contribution {
+            tools: self.tools.clone(),
+        })
+    }
+}
+
+/// Builds a fixture tool arc under `id`.
+fn fixture_tool(id: &str) -> Arc<dyn Tool> {
+    Arc::new(FixtureTool {
+        id: ToolId::parse(id).expect("the fixture tool id is valid"),
+    })
+}
+
+#[test]
+fn a_co_activation_conflict_fails_preparation_naming_both() {
+    let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
+    // The check is symmetric: the conflict is found whether the earlier-
+    // or the later-declared capability declares it.
+    for (bashkit_conflicts, terminal_conflicts) in [
+        (vec!["promptforge/terminal"], vec![]),
+        (vec![], vec!["promptforge/bashkit"]),
+    ] {
+        let mut registry = CapabilityRegistry::new();
+        registry
+            .register(Arc::new(ToolFixture::new(
+                "promptforge/bashkit",
+                &bashkit_conflicts,
+                vec![fixture_tool("promptforge/bashkit/run")],
+            )))
+            .expect("bashkit registers");
+        registry
+            .register(Arc::new(ToolFixture::new(
+                "promptforge/terminal",
+                &terminal_conflicts,
+                vec![fixture_tool("promptforge/terminal/run")],
+            )))
+            .expect("terminal registers");
+        let env = Environment::new().registry(registry);
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-conflict"));
+        assert!(!requirements.is_satisfied());
+        let [conflict] = requirements.conflicts.as_slice() else {
+            panic!(
+                "exactly one conflict is reported: {:?}",
+                requirements.conflicts
+            );
+        };
+        // Both capabilities are named, in declaration order.
+        assert_eq!(conflict.first.to_string(), "promptforge/bashkit");
+        assert_eq!(conflict.second.to_string(), "promptforge/terminal");
+        // A context gets one filesystem reality or the other, never
+        // both: neither member of the conflicting pair activated, so
+        // neither tool reached the catalog.
+        assert!(ctx.tools().tools().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn env_run_refuses_a_conflicting_pair_with_a_notice_naming_both() {
+    let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(ToolFixture::new(
+            "promptforge/bashkit",
+            &["promptforge/terminal"],
+            vec![],
+        )))
+        .expect("bashkit registers");
+    registry
+        .register(Arc::new(ToolFixture::new(
+            "promptforge/terminal",
+            &[],
+            vec![],
+        )))
+        .expect("terminal registers");
+    let env = Environment::new().registry(registry);
+    let result = env
+        .run(&prompt, "", RunContext::new("refuse-conflict"))
+        .await;
+    let RunResult::Failure(error) = result else {
+        panic!("a conflicting pair is refused: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
+    assert!(
+        notice.contains("promptforge/bashkit") && notice.contains("promptforge/terminal"),
+        "the notice names both conflicting capabilities: {notice}"
+    );
+}
+
+#[test]
+fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
+    let prompt = parse(DECLARES_REQUIRED, "declares-required");
+    let good = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let stray = ToolId::parse("promptforge/other/fetch").expect("the id is valid");
+    let fixture = ToolFixture::new(
+        "promptforge/web",
+        &[],
+        vec![
+            fixture_tool("promptforge/web/fetch"),
+            fixture_tool("promptforge/other/fetch"),
+        ],
+    );
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(fixture))
+        .expect("the fixture registers");
+    let env = Environment::new().registry(registry);
+    let logs = captured_logs(|| {
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-containment"));
+        // Containment is enforced at assembly, not reported: the run is
+        // satisfiable and the stray tool simply never enters the catalog.
+        assert!(requirements.is_satisfied());
+        let catalog = ctx.tools();
+        assert!(
+            catalog.get(&good).is_some(),
+            "the contained tool is assembled"
+        );
+        assert!(
+            catalog.get(&stray).is_none(),
+            "the containment violation is rejected at assembly"
+        );
+        assert_eq!(catalog.tools().len(), 1);
+    });
+    assert!(
+        logs.contains("promptforge/other/fetch") && logs.contains("promptforge/web"),
+        "the rejection log names the capability and the tool: {logs}"
+    );
+}
+
+#[test]
+fn the_catalog_assembles_contributed_tools_in_declaration_order() {
+    let prompt = parse(DECLARES_TWO, "declares-two");
+    let web = ToolFixture::new(
+        "promptforge/web",
+        &[],
+        vec![
+            fixture_tool("promptforge/web/fetch"),
+            fixture_tool("promptforge/web/search"),
+        ],
+    );
+    let fs = ToolFixture::new(
+        "promptforge/fs",
+        &[],
+        vec![fixture_tool("promptforge/fs/read")],
+    );
+    let mut registry = CapabilityRegistry::new();
+    registry.register(Arc::new(web)).expect("web registers");
+    registry.register(Arc::new(fs)).expect("fs registers");
+    let env = Environment::new().registry(registry);
+    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-order"));
+    assert!(requirements.is_satisfied());
+    let ids: Vec<String> = ctx
+        .tools()
+        .tools()
+        .iter()
+        .map(|tool| tool.id().to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "promptforge/web/fetch",
+            "promptforge/web/search",
+            "promptforge/fs/read"
+        ],
+        "declaration order, then contribution order within each capability"
+    );
+}
+
+/// A fixture tool whose wire name is transport-illegal: identity is a
+/// valid contained id, but the advertised name carries a `/` separator.
+struct BadWireTool {
+    id: ToolId,
+    wire: String,
+}
+
+#[async_trait::async_trait]
+impl Tool for BadWireTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &str {
+        &self.wire
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "A fixture tool with an illegal wire name."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted(String::new()))
+    }
+}
+
+#[test]
+fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
+    let prompt = parse(DECLARES_REQUIRED, "declares-required");
+    let repeated = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let fixture = ToolFixture::new(
+        "promptforge/web",
+        &[],
+        vec![
+            fixture_tool("promptforge/web/fetch"),
+            fixture_tool("promptforge/web/search"),
+            // The repeat: one capability contributes the same id twice.
+            fixture_tool("promptforge/web/fetch"),
+        ],
+    );
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(fixture))
+        .expect("the fixture registers");
+    let env = Environment::new().registry(registry);
+    let logs = captured_logs(|| {
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-duplicate"));
+        // The repeat is rejected at assembly, not reported: the first
+        // contribution stands and the run is satisfiable.
+        assert!(requirements.is_satisfied());
+        let catalog = ctx.tools();
+        assert!(catalog.get(&repeated).is_some());
+        assert_eq!(
+            catalog.tools().len(),
+            2,
+            "the repeated id enters the catalog exactly once"
+        );
+    });
+    assert!(
+        logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
+        "the rejection log names the capability and the repeated tool: {logs}"
+    );
+}
+
+#[test]
+fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
+    let prompt = parse(DECLARES_REQUIRED, "declares-required");
+    let bad = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let fixture = ToolFixture::new(
+        "promptforge/web",
+        &[],
+        vec![
+            Arc::new(BadWireTool {
+                id: bad.clone(),
+                wire: "fetch/v2".to_owned(),
+            }),
+            fixture_tool("promptforge/web/search"),
+        ],
+    );
+    let mut registry = CapabilityRegistry::new();
+    registry
+        .register(Arc::new(fixture))
+        .expect("the fixture registers");
+    let env = Environment::new().registry(registry);
+    let logs = captured_logs(|| {
+        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-wire-name"));
+        // One bad tool costs only itself: the run is satisfiable and
+        // the well-formed tool still assembles.
+        assert!(requirements.is_satisfied());
+        let catalog = ctx.tools();
+        assert!(
+            catalog.get(&bad).is_none(),
+            "the illegal wire name is rejected at assembly"
+        );
+        assert_eq!(catalog.tools().len(), 1);
+    });
+    assert!(
+        logs.contains("promptforge/web/fetch") && logs.contains("promptforge/web"),
+        "the rejection log names the capability and the rejected tool: {logs}"
+    );
 }

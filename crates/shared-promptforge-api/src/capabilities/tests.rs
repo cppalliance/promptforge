@@ -7,6 +7,7 @@ use super::{
     Contribution, RunServices,
 };
 use crate::cancel::CancelHandle;
+use crate::tools::ToolId;
 
 /// A minimal in-process capability: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
@@ -84,6 +85,25 @@ fn capability_id_exposes_namespace_and_pack() {
     let id = CapabilityId::parse("org.rustalliance/core").expect("a reverse-DNS namespace parses");
     assert_eq!(id.namespace(), "org.rustalliance");
     assert_eq!(id.pack(), "core");
+}
+
+#[test]
+fn capability_id_contains_exactly_the_tools_under_it() {
+    let web = CapabilityId::parse("promptforge/web").expect("a static valid id");
+    let fetch = ToolId::parse("promptforge/web/fetch").expect("a static valid id");
+    assert!(web.contains(&fetch));
+    let stray = ToolId::parse("promptforge/other/fetch").expect("a static valid id");
+    assert!(!web.contains(&stray));
+    // Containment is by identity, not by prefix text: a pack whose name
+    // merely extends this one is not contained.
+    let extended = ToolId::parse("promptforge/web2/fetch").expect("a static valid id");
+    assert!(!web.contains(&extended));
+}
+
+#[test]
+fn a_capability_declares_no_conflicts_by_default() {
+    let capability = StubCapability::web();
+    assert!(capability.conflicts().is_empty());
 }
 
 #[test]

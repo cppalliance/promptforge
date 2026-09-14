@@ -18,7 +18,7 @@ use shared_vfs::VfsRef;
 
 use crate::cancel::CancelHandle;
 use crate::names::{GlobalName, GlobalNameErrorKind};
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolId};
 
 #[cfg(test)]
 mod tests;
@@ -112,6 +112,32 @@ impl CapabilityId {
     #[must_use]
     pub fn pack(&self) -> &str {
         self.0.pack()
+    }
+
+    /// Returns whether `tool` lives under this capability's id.
+    ///
+    /// Containment is total: a contributed tool's id is always its
+    /// contributing capability's id plus one name segment
+    /// (`namespace/pack/name` for a `namespace/pack` capability), so
+    /// dropping the tool's last segment must yield exactly this id.
+    /// Prepare enforces containment when the run's catalog is assembled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use shared_promptforge_api::capabilities::CapabilityId;
+    /// use shared_promptforge_api::tools::ToolId;
+    ///
+    /// let web = CapabilityId::parse("promptforge/web")?;
+    /// let fetch = ToolId::parse("promptforge/web/fetch")?;
+    /// let stray = ToolId::parse("promptforge/other/fetch")?;
+    /// assert!(web.contains(&fetch));
+    /// assert!(!web.contains(&stray));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn contains(&self, tool: &ToolId) -> bool {
+        tool.capability() == self.0
     }
 }
 
@@ -248,6 +274,19 @@ pub trait Capability: Send + Sync {
     /// A one-sentence description, surfaced to hosts and to the
     /// registration-time near-duplicate lint.
     fn description(&self) -> &str;
+
+    /// Returns the capabilities this one cannot be activated with in one
+    /// run.
+    ///
+    /// Co-activation rules attach at the capability level: bashkit and a
+    /// terminal are two filesystem realities, and a context gets one or
+    /// the other, never both. The default is no conflicts. Prepare checks
+    /// the declared present capabilities pairwise - the check is
+    /// symmetric, so only one member of a pair needs to name the other -
+    /// and fails preparation naming both members of a conflicting pair.
+    fn conflicts(&self) -> &[CapabilityId] {
+        &[]
+    }
 
     /// Activates the capability for one run.
     ///
