@@ -12,12 +12,16 @@ use shared_gateway_api::{ModelEntry, Tier};
 use crate::providers::openai_shape::{base_entry, fetch_list};
 use crate::{FetchError, Provider};
 
+/// Environment variable the API key arrives under; matches the GitHub
+/// secret name.
+const KEY_ENV: &str = "META_API_KEY";
+
 /// The Meta provider descriptor.
 pub const PROVIDER: Provider = Provider {
     name: "meta",
     display_name: "Meta",
     tier: Tier::Prime,
-    key_env: "META_API_KEY",
+    key_env: Some(KEY_ENV),
     base_url: "https://api.meta.ai/v1",
 };
 
@@ -28,8 +32,14 @@ const MODELS_PATH: &str = "/models";
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
-    key: &str,
+    key: Option<&str>,
 ) -> Result<Vec<ModelEntry>, FetchError> {
+    let Some(key) = key else {
+        return Err(FetchError::MissingKey {
+            name: PROVIDER.name.to_owned(),
+            key_env: KEY_ENV,
+        });
+    };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
     Ok(models.iter().map(normalize_model).collect())

@@ -105,7 +105,9 @@ fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
     let mut command = Command::new(BIN);
     command.arg(output);
     for provider in providers() {
-        command.env_remove(provider.key_env);
+        if let Some(key_env) = provider.key_env {
+            command.env_remove(key_env);
+        }
     }
     match previous_url {
         Some(url) => command.env(PREVIOUS_SHEET_URL_ENV, url),

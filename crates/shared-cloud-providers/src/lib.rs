@@ -25,8 +25,10 @@ pub struct Provider {
     /// Curated product opinion, not a vendor fact.
     pub tier: Tier,
     /// Environment variable the API key arrives under; matches the
-    /// GitHub secret name.
-    pub key_env: &'static str,
+    /// GitHub secret name. `None` marks a keyless provider: it is
+    /// fetched with no credential and never produces
+    /// [`FetchError::MissingKey`].
+    pub key_env: Option<&'static str>,
     /// Default base URL for the model-list endpoint.
     pub base_url: &'static str,
 }
@@ -85,12 +87,13 @@ pub enum FetchError {
 /// # Errors
 ///
 /// Returns [`FetchError::UnsupportedProvider`] when the registry has no
-/// fetch implementation for the provider, and [`FetchError::Http`] when
-/// the provider request fails.
+/// fetch implementation for the provider, [`FetchError::MissingKey`]
+/// when a keyed provider is fetched with no key, and
+/// [`FetchError::Http`] when the provider request fails.
 pub async fn fetch_models(
     client: &reqwest::Client,
     provider: &Provider,
-    key: &str,
+    key: Option<&str>,
 ) -> Result<Vec<ModelEntry>, FetchError> {
     match provider.name {
         "anthropic" => providers::anthropic::fetch(client, provider.base_url, key).await,
@@ -156,10 +159,12 @@ mod tests {
     fn registry_key_envs_are_unique() {
         let mut seen = BTreeSet::new();
         for provider in providers() {
+            let Some(key_env) = provider.key_env else {
+                continue;
+            };
             assert!(
-                seen.insert(provider.key_env),
-                "duplicate key env in the registry: {}",
-                provider.key_env
+                seen.insert(key_env),
+                "duplicate key env in the registry: {key_env}"
             );
         }
     }
@@ -209,7 +214,7 @@ mod tests {
                 provider.name
             );
             assert!(
-                !provider.key_env.is_empty(),
+                provider.key_env.is_some_and(|key_env| !key_env.is_empty()),
                 "prime provider `{}` must name its key env var",
                 provider.name
             );
@@ -222,11 +227,11 @@ mod tests {
             name: "no-such-provider",
             display_name: "No Such Provider",
             tier: Tier::Niche,
-            key_env: "NO_SUCH_PROVIDER_API_KEY",
+            key_env: Some("NO_SUCH_PROVIDER_API_KEY"),
             base_url: "https://example.invalid",
         };
         let client = reqwest::Client::new();
-        let Err(err) = fetch_models(&client, &provider, "test-key").await else {
+        let Err(err) = fetch_models(&client, &provider, Some("test-key")).await else {
             panic!("a provider with no fetch implementation must not succeed");
         };
         assert!(

@@ -46,7 +46,11 @@ async fn run() -> Result<String, Box<dyn std::error::Error>> {
         PreviousSheet::FirstRun => None,
         PreviousSheet::Fetched(sheet) => Some(sheet),
     };
-    let keys = |provider: &shared_cloud_providers::Provider| std::env::var(provider.key_env).ok();
+    let keys = |provider: &shared_cloud_providers::Provider| {
+        provider
+            .key_env
+            .and_then(|key_env| std::env::var(key_env).ok())
+    };
     let sheet = shared_cloud_providers::build_sheet(&client, previous, &keys).await;
     let mut json = serde_json::to_string_pretty(&sheet)?;
     json.push('\n');

@@ -11,12 +11,16 @@ use shared_gateway_api::{ModelEntry, ModelKind, Thinking, Tier};
 
 use crate::{FetchError, Provider};
 
+/// Environment variable the API key arrives under; matches the GitHub
+/// secret name.
+const KEY_ENV: &str = "GEMINI_API_KEY";
+
 /// The Gemini provider descriptor.
 pub const PROVIDER: Provider = Provider {
     name: "gemini",
     display_name: "Google Gemini",
     tier: Tier::Prime,
-    key_env: "GEMINI_API_KEY",
+    key_env: Some(KEY_ENV),
     base_url: "https://generativelanguage.googleapis.com",
 };
 
@@ -29,8 +33,14 @@ const PAGE_SIZE: u32 = 1000;
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
-    key: &str,
+    key: Option<&str>,
 ) -> Result<Vec<ModelEntry>, FetchError> {
+    let Some(key) = key else {
+        return Err(FetchError::MissingKey {
+            name: PROVIDER.name.to_owned(),
+            key_env: KEY_ENV,
+        });
+    };
     let mut entries = Vec::new();
     let mut token: Option<String> = None;
     loop {

@@ -13,12 +13,16 @@ use shared_gateway_api::{ModelEntry, Tier};
 use crate::providers::openai_shape::{base_entry, fetch_list};
 use crate::{FetchError, Provider};
 
+/// Environment variable the API key arrives under; matches the GitHub
+/// secret name.
+const KEY_ENV: &str = "DASHSCOPE_API_KEY";
+
 /// The Alibaba Qwen provider descriptor.
 pub const PROVIDER: Provider = Provider {
     name: "qwen",
     display_name: "Alibaba Qwen",
     tier: Tier::Prime,
-    key_env: "DASHSCOPE_API_KEY",
+    key_env: Some(KEY_ENV),
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 };
 
@@ -29,8 +33,14 @@ const MODELS_PATH: &str = "/models";
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
-    key: &str,
+    key: Option<&str>,
 ) -> Result<Vec<ModelEntry>, FetchError> {
+    let Some(key) = key else {
+        return Err(FetchError::MissingKey {
+            name: PROVIDER.name.to_owned(),
+            key_env: KEY_ENV,
+        });
+    };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
     Ok(models.iter().map(normalize_model).collect())

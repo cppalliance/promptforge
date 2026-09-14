@@ -40,12 +40,12 @@ pub async fn build_sheet(
         keys,
         &|client: reqwest::Client, provider: Provider, key: Option<String>| {
             Box::pin(async move {
-                match key {
-                    Some(key) => crate::fetch_models(&client, &provider, &key).await,
-                    None => Err(FetchError::MissingKey {
+                match (provider.key_env, key) {
+                    (Some(key_env), None) => Err(FetchError::MissingKey {
                         name: provider.name.to_owned(),
-                        key_env: provider.key_env,
+                        key_env,
                     }),
+                    (_, key) => crate::fetch_models(&client, &provider, key.as_deref()).await,
                 }
             })
         },
@@ -173,7 +173,7 @@ mod tests {
             name,
             display_name,
             tier,
-            key_env: "TEST_PROVIDER_API_KEY",
+            key_env: Some("TEST_PROVIDER_API_KEY"),
             base_url: "https://example.invalid",
         }
     }
@@ -391,7 +391,7 @@ mod tests {
                         ("test-ok", Some(_)) => Ok(vec![entry("m1")]),
                         ("test-nokey", None) => Err(FetchError::MissingKey {
                             name: provider.name.to_owned(),
-                            key_env: provider.key_env,
+                            key_env: "TEST_PROVIDER_API_KEY",
                         }),
                         _ => Err(FetchError::UnsupportedProvider {
                             name: provider.name.to_owned(),
@@ -421,6 +421,34 @@ mod tests {
             nokey.models[0].id, "kept-m1",
             "a failed fetch never drops data"
         );
+    }
+
+    #[tokio::test]
+    async fn keyless_provider_fetches_without_a_credential() {
+        let registry = [Provider {
+            key_env: None,
+            ..provider("test-keyless", "Test Keyless", Tier::Prime)
+        }];
+        let keys = |_provider: &Provider| None;
+        let fetch =
+            |_client: reqwest::Client, provider: Provider, key: Option<String>| -> BoxFetch {
+                Box::pin(async move {
+                    assert!(
+                        key.is_none(),
+                        "a keyless provider must be fetched with no key"
+                    );
+                    Ok(vec![entry(&format!("{}-m1", provider.name))])
+                })
+            };
+        let client = reqwest::Client::new();
+        let sheet = build_sheet_with(&registry, None, &keys, &fetch, &client).await;
+        let slice = &sheet.providers["test-keyless"];
+        assert_eq!(
+            slice.status,
+            SliceStatus::Ok,
+            "a keyless provider with no credential must fetch, not record MissingKey"
+        );
+        assert_eq!(slice.models[0].id, "test-keyless-m1");
     }
 
     #[tokio::test]

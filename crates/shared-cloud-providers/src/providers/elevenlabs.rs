@@ -12,12 +12,16 @@ use shared_gateway_api::{ModelEntry, ModelKind, Tier};
 use crate::providers::openai_shape::base_entry;
 use crate::{FetchError, Provider};
 
+/// Environment variable the API key arrives under; matches the GitHub
+/// secret name.
+const KEY_ENV: &str = "ELEVENLABS_API_KEY";
+
 /// The ElevenLabs provider descriptor.
 pub const PROVIDER: Provider = Provider {
     name: "elevenlabs",
     display_name: "ElevenLabs",
     tier: Tier::Prime,
-    key_env: "ELEVENLABS_API_KEY",
+    key_env: Some(KEY_ENV),
     base_url: "https://api.elevenlabs.io",
 };
 
@@ -28,8 +32,14 @@ const MODELS_PATH: &str = "/v1/models";
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
-    key: &str,
+    key: Option<&str>,
 ) -> Result<Vec<ModelEntry>, FetchError> {
+    let Some(key) = key else {
+        return Err(FetchError::MissingKey {
+            name: PROVIDER.name.to_owned(),
+            key_env: KEY_ENV,
+        });
+    };
     let models: Vec<WireModel> = client
         .get(format!("{base_url}{MODELS_PATH}"))
         .header("xi-api-key", key)

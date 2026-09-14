@@ -13,12 +13,16 @@ use time::{Date, OffsetDateTime};
 
 use crate::{FetchError, Provider};
 
+/// Environment variable the API key arrives under; matches the GitHub
+/// secret name.
+const KEY_ENV: &str = "ANTHROPIC_API_KEY";
+
 /// The Anthropic provider descriptor.
 pub const PROVIDER: Provider = Provider {
     name: "anthropic",
     display_name: "Anthropic",
     tier: Tier::Prime,
-    key_env: "ANTHROPIC_API_KEY",
+    key_env: Some(KEY_ENV),
     base_url: "https://api.anthropic.com",
 };
 
@@ -35,8 +39,14 @@ const PAGE_LIMIT: u32 = 1000;
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
-    key: &str,
+    key: Option<&str>,
 ) -> Result<Vec<ModelEntry>, FetchError> {
+    let Some(key) = key else {
+        return Err(FetchError::MissingKey {
+            name: PROVIDER.name.to_owned(),
+            key_env: KEY_ENV,
+        });
+    };
     let mut entries = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
