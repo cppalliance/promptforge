@@ -353,7 +353,7 @@ impl SectionContext {
     /// failing in practice).
     pub(crate) fn read_var(&mut self) -> Result<serde_json::Value> {
         let Some(vm) = self.vm.as_mut() else {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "the section frame's VM lives until the frame's own drop",
             ));
         };
@@ -376,7 +376,7 @@ impl SectionContext {
     /// Returns [`Error::Internal`] if the VM is gone, which only the frame's
     /// own drop does - a live frame always holds it.
     pub(crate) fn vm(&self) -> Result<&SectionVm> {
-        self.vm.as_ref().ok_or(Error::Internal(
+        self.vm.as_ref().ok_or(Error::internal(
             "the section frame's VM lives until the frame's own drop",
         ))
     }
@@ -441,14 +441,14 @@ impl SectionContext {
             vm, sys, counts, ..
         } = self;
         let Some(vm) = vm.as_ref() else {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "the section frame's VM lives until the frame's own drop",
             ));
         };
         install_section_scope(vm, ctx, sys, counts, effective)?;
         let counts = counts
             .as_ref()
-            .ok_or(Error::Internal("the scope install seeds the counts"))?;
+            .ok_or(Error::internal("the scope install seeds the counts"))?;
         for binding in effective {
             counts.ensure(binding.alias())?;
         }

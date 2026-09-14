@@ -296,7 +296,7 @@ fn resolve_arm_target<'a>(
             });
         }
     }
-    Err(Error::Internal(
+    Err(Error::internal(
         "a resolved arm target is absent from its home slices",
     ))
 }
@@ -396,7 +396,7 @@ impl Chain<'_> {
     fn access(&self) -> Result<&Arc<Access>> {
         self.access
             .as_ref()
-            .ok_or(Error::Internal("a live chain holds its access capability"))
+            .ok_or(Error::internal("a live chain holds its access capability"))
     }
 
     /// The chain's current block sequence: the live H1 pass's blocks, or
@@ -672,7 +672,7 @@ impl<'a> Scheduler<'a> {
             // chain, so an empty ready queue with an empty pending table can
             // only be a driver bug - fail loudly rather than hang.
             if self.pending.is_empty() {
-                return Err(Error::Internal(
+                return Err(Error::internal(
                     "the scheduler stalled with no ready chain and no in-flight request",
                 ));
             }
@@ -693,7 +693,7 @@ impl<'a> Scheduler<'a> {
                 }
                 answer = self.answers.recv() => {
                     let Some((request_id, answer)) = answer else {
-                        return Err(Error::Internal(
+                        return Err(Error::internal(
                             "the answer channel cannot close while the scheduler holds its sender",
                         ));
                     };
@@ -709,7 +709,7 @@ impl<'a> Scheduler<'a> {
                         if self.aborted_requests.remove(&request_id) {
                             continue;
                         }
-                        return Err(Error::Internal(
+                        return Err(Error::internal(
                             "an answer arrived for a request with no pending entry and no recorded abort",
                         ));
                     };
@@ -754,11 +754,11 @@ impl<'a> Scheduler<'a> {
         arm: Option<ArmState<'a>>,
     ) -> Result<ChainId> {
         if self.chains.len() >= self.max_chains {
-            return Err(Error::Internal("a run's chain count cannot exceed u32"));
+            return Err(Error::internal("a run's chain count cannot exceed u32"));
         }
         let id = ChainId(
             u32::try_from(self.chains.len())
-                .map_err(|_| Error::Internal("a run's chain count cannot exceed u32"))?,
+                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
         );
         self.chains.push(Chain {
             ctx,
@@ -830,7 +830,7 @@ impl<'a> Scheduler<'a> {
     fn start_live_h1(&mut self) -> Result<ChainId> {
         let id = ChainId(
             u32::try_from(self.chains.len())
-                .map_err(|_| Error::Internal("a run's chain count cannot exceed u32"))?,
+                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
         );
         // The pass owns its client slot, seeded from the run's configured
         // client, exactly as the legacy pass seeds its own.
@@ -879,7 +879,7 @@ impl<'a> Scheduler<'a> {
     fn end_live_h1(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
         let chain = &mut self.chains[id.index()];
         let Some(mut frame) = chain.frame.take() else {
-            return Err(Error::Internal("the live H1 pass ends with a live frame"));
+            return Err(Error::internal("the live H1 pass ends with a live frame"));
         };
         let var = frame.read_var()?;
         drop(frame);
@@ -1019,13 +1019,13 @@ impl<'a> Scheduler<'a> {
             let chain = &mut self.chains[id.index()];
             if let Some(answer) = chain.incoming.take() {
                 let Some(thread) = chain.coroutine.take() else {
-                    return Err(Error::Internal(
+                    return Err(Error::internal(
                         "a delivered answer implies a suspended coroutine",
                     ));
                 };
                 Advance::Resume(thread, answer)
             } else if chain.coroutine.is_some() {
-                return Err(Error::Internal(
+                return Err(Error::internal(
                     "a ready chain's suspended coroutine waits on its answer",
                 ));
             } else if chain.frame.is_none() {
@@ -1039,7 +1039,7 @@ impl<'a> Scheduler<'a> {
                     // `Block` is `#[non_exhaustive]` across the crate seam; a
                     // future variant has no advance rule yet.
                     _ => {
-                        return Err(Error::Internal("an unrecognized block kind cannot advance"));
+                        return Err(Error::internal("an unrecognized block kind cannot advance"));
                     }
                 }
             }
@@ -1055,7 +1055,7 @@ impl<'a> Scheduler<'a> {
                 let text = match &chain.blocks()[chain.block] {
                     Block::Prose { text, .. } => text.clone(),
                     _ => {
-                        return Err(Error::Internal("the advance matched the block kind"));
+                        return Err(Error::internal("the advance matched the block kind"));
                     }
                 };
                 // The parser emits one prose block per inter-fence gap,
@@ -1101,12 +1101,12 @@ impl<'a> Scheduler<'a> {
         }
         let slice = chain.slice;
         let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
-            return Err(Error::Internal("a suspended coroutine's block is Lua"));
+            return Err(Error::internal("a suspended coroutine's block is Lua"));
         };
         let frame = chain
             .frame
             .as_ref()
-            .ok_or(Error::Internal("a live chain holds its frame"))?;
+            .ok_or(Error::internal("a live chain holds its frame"))?;
         let result = frame
             .vm()?
             .resume_block_coro_answer(program, thread, answer);
@@ -1134,7 +1134,7 @@ impl<'a> Scheduler<'a> {
         let frame = chain
             .frame
             .as_ref()
-            .ok_or(Error::Internal("a live chain holds its frame"))?;
+            .ok_or(Error::internal("a live chain holds its frame"))?;
         if let Err(error) = frame.install_lazy_prose(&chain.ctx, pending.as_deref().unwrap_or("")) {
             observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
             return Err(error);
@@ -1149,12 +1149,12 @@ impl<'a> Scheduler<'a> {
         }
         let slice = chain.slice;
         let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
-            return Err(Error::Internal("the advance matched the block kind"));
+            return Err(Error::internal("the advance matched the block kind"));
         };
         let frame = chain
             .frame
             .as_ref()
-            .ok_or(Error::Internal("a live chain holds its frame"))?;
+            .ok_or(Error::internal("a live chain holds its frame"))?;
         let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
         self.handle_coro_result(id, result, root_result).await
     }
@@ -1211,7 +1211,7 @@ impl<'a> Scheduler<'a> {
     fn end_section(&mut self, id: ChainId) -> Result<()> {
         let chain = &mut self.chains[id.index()];
         let Some(mut frame) = chain.frame.take() else {
-            return Err(Error::Internal("a section end implies a live frame"));
+            return Err(Error::internal("a section end implies a live frame"));
         };
         chain.var = frame.read_var()?;
         frame.mark_completed();
@@ -1244,7 +1244,7 @@ impl<'a> Scheduler<'a> {
         let (slice, index) = {
             let chain = &mut self.chains[id.index()];
             let Some(mut frame) = chain.frame.take() else {
-                return Err(Error::Internal("a jump implies a live frame"));
+                return Err(Error::internal("a jump implies a live frame"));
             };
             chain.var = frame.read_var()?;
             frame.mark_completed();
@@ -1343,7 +1343,7 @@ impl<'a> Scheduler<'a> {
                 let frame = chain
                     .frame
                     .as_ref()
-                    .ok_or(Error::Internal("a live chain holds its frame"))?;
+                    .ok_or(Error::internal("a live chain holds its frame"))?;
                 match frame.vm()?.request_from_yield(&values) {
                     YieldParse::Request(request) => {
                         chain.coroutine = Some(thread);
@@ -1398,7 +1398,7 @@ impl<'a> Scheduler<'a> {
                         let mut frame = chain
                             .frame
                             .take()
-                            .ok_or(Error::Internal("a live chain holds its frame"))?;
+                            .ok_or(Error::internal("a live chain holds its frame"))?;
                         frame.read_var()?;
                         drop(frame);
                         *root_result = Some(Ok(value));
@@ -1454,21 +1454,21 @@ impl<'a> Scheduler<'a> {
     ) -> Result<(Result<CoroStep>, Option<Error>)> {
         let chain = &self.chains[id.index()];
         let Some(blocks) = chain.h1 else {
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "the scoped step belongs to the live H1 pass",
             ));
         };
         let Block::Lua(program) = &blocks[chain.block] else {
-            return Err(Error::Internal("a suspended coroutine's block is Lua"));
+            return Err(Error::internal("a suspended coroutine's block is Lua"));
         };
         let resolution = self
             .h1_resolution
             .as_ref()
-            .ok_or(Error::Internal("the live H1 pass holds its resolution"))?;
+            .ok_or(Error::internal("the live H1 pass holds its resolution"))?;
         let frame = chain
             .frame
             .as_ref()
-            .ok_or(Error::Internal("a live chain holds its frame"))?;
+            .ok_or(Error::internal("a live chain holds its frame"))?;
         let vm = frame.vm()?;
         let mut outcome = None;
         let scoped = vm.lua().scope(|scope| {
@@ -1480,7 +1480,7 @@ impl<'a> Scheduler<'a> {
             Ok(())
         });
         let result = match scoped {
-            Ok(()) => outcome.ok_or(Error::Internal("the scoped step records its outcome"))?,
+            Ok(()) => outcome.ok_or(Error::internal("the scoped step records its outcome"))?,
             Err(error) => Err(Error::lua(error)),
         };
         // The outcome and the captured callback error travel separately:
@@ -1552,7 +1552,7 @@ impl<'a> Scheduler<'a> {
             // stripped coroutines make a hand-rolled yield fail validation
             // before dispatch - the mirror of the agent driver's guards for
             // the section-only requests.
-            Request::Chat { .. } => Err(Error::Internal(
+            Request::Chat { .. } => Err(Error::internal(
                 "a section VM cannot yield a chat request: the models.chat shim is never installed",
             )),
             Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
@@ -1593,7 +1593,7 @@ impl<'a> Scheduler<'a> {
             let frame = chain
                 .frame
                 .as_ref()
-                .ok_or(Error::Internal("a live chain holds its frame"))?;
+                .ok_or(Error::internal("a live chain holds its frame"))?;
             resolve_model_binding(chain.ctx.models(), &frame.vm()?.model_runtime)?.ok_or_else(
                 || Error::ModelRequired {
                     section: chain.section_name().to_owned(),
@@ -1606,7 +1606,7 @@ impl<'a> Scheduler<'a> {
         let client = chain
             .client
             .as_ref()
-            .ok_or(Error::Internal("the client slot was just resolved"))?
+            .ok_or(Error::internal("the client slot was just resolved"))?
             .clone();
         let observer = Arc::clone(chain.ctx.observer());
         let debug = chain.ctx.debug().cloned();
@@ -1672,7 +1672,7 @@ impl<'a> Scheduler<'a> {
             // Unreachable: section VMs alone install the `tools.call` shim,
             // the H1 VM never does, and stripped coroutines make a
             // hand-rolled yield impossible.
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "the live H1 pass cannot dispatch a tool_call request",
             ));
         }
@@ -1692,7 +1692,7 @@ impl<'a> Scheduler<'a> {
             let frame = chain
                 .frame
                 .as_mut()
-                .ok_or(Error::Internal("a live chain holds its frame"))?;
+                .ok_or(Error::internal("a live chain holds its frame"))?;
             let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
             frame.script_call_counts(&ctx, &effective)?
         };
@@ -1933,7 +1933,7 @@ impl<'a> Scheduler<'a> {
                 // Unreachable: section VMs alone install the models.loop
                 // shim, the H1 VM never does, and stripped coroutines make a
                 // hand-rolled yield impossible.
-                return Err(Error::Internal(
+                return Err(Error::internal(
                     "the live H1 pass cannot dispatch a loop request",
                 ));
             }
@@ -1945,7 +1945,7 @@ impl<'a> Scheduler<'a> {
                 let frame = chain
                     .frame
                     .as_ref()
-                    .ok_or(Error::Internal("a live chain holds its frame"))?;
+                    .ok_or(Error::internal("a live chain holds its frame"))?;
                 resolve_model_binding(chain.ctx.models(), &frame.vm()?.model_runtime)?.ok_or_else(
                     || Error::ModelRequired {
                         section: section.clone(),
@@ -1958,7 +1958,7 @@ impl<'a> Scheduler<'a> {
             let client = chain
                 .client
                 .as_ref()
-                .ok_or(Error::Internal("the client slot was just resolved"))?
+                .ok_or(Error::internal("the client slot was just resolved"))?
                 .clone();
             let tool_set = chain.ctx.tool_set_snapshot()?;
             let max_iterations = chain.ctx.max_tool_iterations();
@@ -1967,7 +1967,7 @@ impl<'a> Scheduler<'a> {
             let frame = chain
                 .frame
                 .as_mut()
-                .ok_or(Error::Internal("a live chain holds its frame"))?;
+                .ok_or(Error::internal("a live chain holds its frame"))?;
             // The scope is read at call time: `tools.add` and
             // `tools.add_local` calls since the last model operation shape
             // this call's advertised set.
@@ -2030,7 +2030,7 @@ impl<'a> Scheduler<'a> {
         let frame = chain
             .frame
             .as_ref()
-            .ok_or(Error::Internal("a live chain holds its frame"))?;
+            .ok_or(Error::internal("a live chain holds its frame"))?;
         let vm = frame.vm()?;
         // The append sink: every assistant message and correlated tool
         // result lands in the author's own message list as its round
@@ -2114,7 +2114,7 @@ impl<'a> Scheduler<'a> {
             // Unreachable: the H1 control stubs raise before anything can
             // yield. A panic on the empty walk slice would be worse than
             // the typed invariant error.
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "the live H1 pass cannot dispatch a call request",
             ));
         }
@@ -2190,7 +2190,7 @@ impl<'a> Scheduler<'a> {
             // Unreachable: the H1 control stubs raise before anything can
             // yield. A panic on the empty walk slice would be worse than
             // the typed invariant error.
-            return Err(Error::Internal(
+            return Err(Error::internal(
                 "the live H1 pass cannot dispatch a fanout request",
             ));
         }
@@ -2222,7 +2222,7 @@ impl<'a> Scheduler<'a> {
         let access = chain
             .access
             .clone()
-            .ok_or(Error::Internal("a live chain holds its access capability"))?;
+            .ok_or(Error::internal("a live chain holds its access capability"))?;
         // `chain`'s arena borrow ends here; the resolution borrows the
         // prompt tree, so the worker's slice outlives it.
         let target = self.resolve_chain_target(id, worker_name)?;
@@ -2299,7 +2299,7 @@ impl<'a> Scheduler<'a> {
         loop {
             let (index, item, template) = {
                 let Some(join) = self.joins.get_mut(&fanout) else {
-                    return Err(Error::Internal("a window refill implies a live join"));
+                    return Err(Error::internal("a window refill implies a live join"));
                 };
                 if join.next >= join.items.len() || join.active >= join.window {
                     return Ok(());

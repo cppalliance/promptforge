@@ -1,6 +1,7 @@
 //! The public run-error surface: [`RunError`] and its stable [`RunErrorKind`].
 
 use std::fmt;
+use std::ops::Range;
 
 use crate::Error;
 
@@ -46,6 +47,26 @@ pub enum RunErrorKind {
     RequirementsUnmet,
 }
 
+/// Where a failure lives: a prompt source position or a Rust code position.
+///
+/// One generic shape - the [`RunErrorKind`] says which world the fault is in,
+/// and the path's extension says it again. Kinds are for code, messages for
+/// reading, locations for navigation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceLocation {
+    /// The prompt's frontmatter name when parse got that far, or the Rust
+    /// source file (from `file!()`) for an internal fault. A frontmatter
+    /// YAML failure predates the name, so its path is a placeholder the
+    /// host replaces with its own label for the source.
+    pub path: String,
+    /// The 1-based line, when known.
+    pub line: Option<u32>,
+    /// The 1-based column, when known.
+    pub column: Option<u32>,
+    /// The byte span of the offending region, as today, when known.
+    pub span: Option<Range<usize>>,
+}
+
 /// The error returned by [`run`](super::run), the orchestration boundary of a
 /// prompt run.
 ///
@@ -89,7 +110,7 @@ impl RunError {
             | Error::OutOfScopeToolCall { .. }
             | Error::UnboundToolCall { .. }
             | Error::Tool { .. } => RunErrorKind::Tool,
-            Error::Internal(_) | Error::TimestampFormat(_) => RunErrorKind::Internal,
+            Error::Internal { .. } | Error::TimestampFormat(_) => RunErrorKind::Internal,
             Error::Store(_) => RunErrorKind::Store,
             Error::Determinism(_) => RunErrorKind::Determinism,
             Error::Bind { .. }
@@ -130,6 +151,44 @@ impl RunError {
             | Error::BackendBodyRead { .. } => true,
             Error::Backend { status, .. } => *status >= 500,
             _ => false,
+        }
+    }
+
+    /// Returns where the failure lives, when it has a location.
+    ///
+    /// Parse-kind failures carry the prompt source position (the frontmatter
+    /// name as the path when parse got that far, plus the surfaced YAML
+    /// line/column or the span-derived position); internal faults carry the
+    /// Rust source file and line of the broken invariant. Other kinds have
+    /// no source position to navigate to and return `None`.
+    #[must_use]
+    pub fn location(&self) -> Option<SourceLocation> {
+        match &self.inner {
+            Error::ParseFrontmatter { line, column, .. } => Some(SourceLocation {
+                path: "<prompt>".to_owned(),
+                line: *line,
+                column: *column,
+                span: None,
+            }),
+            Error::ParseStructured {
+                name,
+                line,
+                column,
+                span,
+                ..
+            } => Some(SourceLocation {
+                path: name.clone().unwrap_or_else(|| "<prompt>".to_owned()),
+                line: *line,
+                column: *column,
+                span: span.map(|(start, end)| start..end),
+            }),
+            Error::Internal { file, line, .. } => Some(SourceLocation {
+                path: (*file).to_owned(),
+                line: Some(*line),
+                column: None,
+                span: None,
+            }),
+            _ => None,
         }
     }
 }

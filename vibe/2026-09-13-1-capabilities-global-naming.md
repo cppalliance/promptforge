@@ -916,7 +916,7 @@ Pure refactor, no behavior change: merge `ResolutionContext` and `RunConfig` int
 
 <step-6>
 
-### Step 6: Structured parse error locations
+### Step 6: Structured parse error locations [completed]
 
 - Component: frontmatter
 

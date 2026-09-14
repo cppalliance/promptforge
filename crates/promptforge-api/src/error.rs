@@ -52,6 +52,11 @@ pub(crate) enum Error {
         /// The originating YAML parse failure, kept as the cause.
         #[source]
         source: BoxedSource,
+        /// The 1-based file line of the YAML failure, surfaced from the
+        /// retained cause's location when it carries one.
+        line: Option<u32>,
+        /// The 1-based file column of the YAML failure, when known.
+        column: Option<u32>,
     },
 
     /// A structurally-classified parse failure carrying a stable kind and an
@@ -67,6 +72,13 @@ pub(crate) enum Error {
         span: Option<(usize, usize)>,
         /// The human-readable diagnostic.
         message: String,
+        /// The prompt's frontmatter name, when the failure postdates the
+        /// frontmatter (a frontmatter failure predates the name).
+        name: Option<String>,
+        /// The 1-based file line of the span's start, when a span is known.
+        line: Option<u32>,
+        /// The 1-based byte column of the span's start, when a span is known.
+        column: Option<u32>,
     },
 
     /// A required environment variable was missing.
@@ -493,8 +505,20 @@ pub(crate) enum Error {
     /// has already guaranteed cannot occur). Surfaced as a concrete error rather
     /// than silently skipping work, so an impossible state cannot masquerade as a
     /// successful fall-through.
-    #[error("internal invariant violated: {0}")]
-    Internal(&'static str),
+    ///
+    /// The Rust source position of the construction site is captured (via
+    /// [`Error::internal`], which is `#[track_caller]`) so
+    /// [`crate::RunError::location`] can point at the broken invariant.
+    #[error("internal invariant violated: {message}")]
+    #[non_exhaustive]
+    Internal {
+        /// The violated invariant, as a noun phrase.
+        message: &'static str,
+        /// The Rust source file of the construction site (from `file!()`).
+        file: &'static str,
+        /// The 1-based line of the construction site (from `line!()`).
+        line: u32,
+    },
 
     /// A Lua host resource quota (log events, log bytes, or instructions) was
     /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
@@ -562,6 +586,33 @@ impl Error {
             kind,
             span: None,
             message: message.into(),
+            name: None,
+            line: None,
+            column: None,
+        }
+    }
+
+    /// Stamps the prompt's frontmatter name onto a parse failure raised by
+    /// `run` itself: the prompt is already parsed at that point, so the
+    /// name is known and the location can name it. Any other variant passes
+    /// through unchanged.
+    pub(crate) fn with_prompt_name(mut self, name: &str) -> Error {
+        if let Error::ParseStructured { name: slot, .. } = &mut self {
+            *slot = Some(name.to_owned());
+        }
+        self
+    }
+
+    /// Builds an internal-invariant failure, capturing the Rust source
+    /// position of the call site so [`crate::RunError::location`] can point
+    /// at the broken invariant.
+    #[track_caller]
+    pub(crate) fn internal(message: &'static str) -> Error {
+        let location = std::panic::Location::caller();
+        Error::Internal {
+            message,
+            file: location.file(),
+            line: location.line(),
         }
     }
 
@@ -658,20 +709,34 @@ impl From<crate::client::CompletionError> for Error {
 impl From<crate::parser::ParseError> for Error {
     fn from(error: crate::parser::ParseError) -> Self {
         match error.into_inner() {
-            ParserError::ParseFrontmatter { message, source } => {
-                Error::ParseFrontmatter { message, source }
-            }
+            ParserError::ParseFrontmatter {
+                message,
+                source,
+                line,
+                column,
+            } => Error::ParseFrontmatter {
+                message,
+                source,
+                line,
+                column,
+            },
             ParserError::ParseStructured {
                 kind,
                 span,
                 message,
+                name,
+                line,
+                column,
             } => Error::ParseStructured {
                 kind,
                 span,
                 message,
+                name,
+                line,
+                column,
             },
             ParserError::Lua(lua) => Error::from(lua),
-            ParserError::Internal(message) => Error::Internal(message),
+            ParserError::Internal(message) => Error::internal(message),
         }
     }
 }
@@ -703,7 +768,7 @@ impl From<LuaError> for Error {
             LuaError::ContextExhausted { reason } => Error::ContextExhausted { reason },
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
-            LuaError::Internal(message) => Error::Internal(message),
+            LuaError::Internal(message) => Error::internal(message),
             LuaError::DuplicateAlias { alias } => Error::DuplicateAlias { alias },
             LuaError::PickedToolNotLive { alias, id } => Error::PickedToolNotLive { alias, id },
             LuaError::ToolIdSelectedTwice {
@@ -764,7 +829,10 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
+    use shared_promptforge_api::observe::NullObserver;
+
     use super::*;
+    use crate::parser::Prompt;
 
     fn assert_source_survives_run_error(error: Error) {
         assert!(
@@ -910,5 +978,76 @@ mod tests {
             source: SharedSource::new(std::io::Error::other("picker rebuild failed")),
         };
         assert_source_survives_run_error(bind);
+    }
+
+    #[test]
+    fn frontmatter_locations_surface_through_the_run_error() {
+        // Step 6: the parser's surfaced YAML position crosses the substrate
+        // bridge and lands on `RunError::location` for navigation. A
+        // frontmatter failure predates the prompt's name, so the path is
+        // the placeholder a host replaces with its own label for the source.
+        let source = concat!(
+            "---\n",
+            "name: x\n",
+            "description: d\n",
+            "capabilities:\n",
+            "  - not a capability id\n",
+            "---\n",
+            "\n# T\n\n## S\n\np\n",
+        );
+        let parse = Prompt::parse(source, "test", &NullObserver::default())
+            .expect_err("a capability id with spaces must be rejected");
+        let run_error = crate::RunError::from(Error::from(parse));
+        assert_eq!(run_error.kind(), crate::RunErrorKind::Parse);
+        let location = run_error
+            .location()
+            .expect("a parse failure carries a location");
+        assert_eq!(location.line, Some(5));
+        assert_eq!(location.column, Some(5));
+        assert_eq!(location.span, None);
+    }
+
+    #[test]
+    fn structured_locations_carry_the_prompt_name_through_the_run_error() {
+        // Step 6: a post-frontmatter parse failure carries the prompt's
+        // frontmatter name as the location's path, plus the offending
+        // span's line and column.
+        let source = "---\nname: dup\ndescription: d\n---\n\n# T\n\n## S\n\np\n\n## S\n\nq\n";
+        let parse = Prompt::parse(source, "test", &NullObserver::default())
+            .expect_err("duplicate sibling sections must be rejected");
+        let run_error = crate::RunError::from(Error::from(parse));
+        let location = run_error
+            .location()
+            .expect("a structured parse failure carries a location");
+        assert_eq!(location.path, "dup");
+        assert_eq!(location.line, Some(12));
+        assert_eq!(location.column, Some(1));
+        assert!(location.span.is_some());
+    }
+
+    #[test]
+    fn internal_faults_carry_the_rust_file_and_line() {
+        // Step 6: an internal invariant failure locates itself in the Rust
+        // source, captured at the construction site.
+        let expected_line = line!() + 1;
+        let run_error = crate::RunError::from(Error::internal("a test invariant"));
+        let location = run_error
+            .location()
+            .expect("an internal fault carries a location");
+        assert!(
+            location.path.ends_with("error.rs"),
+            "the path is the Rust source file: {}",
+            location.path
+        );
+        assert_eq!(location.line, Some(expected_line));
+        assert_eq!(location.column, None);
+    }
+
+    #[test]
+    fn errors_without_a_location_return_none() {
+        // Cancellation and the other non-positional kinds have no source
+        // position to navigate to.
+        let run_error = crate::RunError::from(Error::Interrupted);
+        assert!(run_error.location().is_none());
     }
 }

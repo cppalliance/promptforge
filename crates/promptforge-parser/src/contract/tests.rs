@@ -365,3 +365,37 @@ fn a_zero_min_context_is_rejected() {
         .expect_err("a zero context minimum must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
 }
+
+#[test]
+fn contract_errors_carry_their_frontmatter_line_and_column() {
+    // Step 6: the retained serde_yaml_ng location surfaces on the parse
+    // error, so a rejection inside a contract key points at its own line
+    // and column instead of being a bare message.
+    let src = concat!(
+        "---\n",                     // line 1
+        "name: x\n",                 // line 2
+        "description: d\n",          // line 3
+        "capabilities:\n",           // line 4
+        "  - not a capability id\n", // line 5: the offending scalar
+        "---\n",
+        "\n# T\n\n## S\n\np\n",
+    );
+    let error = Prompt::parse(src, "test", &NullObserver::default())
+        .expect_err("a capability id with spaces must be rejected");
+    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
+    assert_eq!(
+        error.line(),
+        Some(5),
+        "the offending scalar's line: {error}"
+    );
+    assert_eq!(
+        error.column(),
+        Some(5),
+        "the offending scalar's column: {error}"
+    );
+    assert_eq!(
+        error.name(),
+        None,
+        "a frontmatter failure predates the prompt's name"
+    );
+}

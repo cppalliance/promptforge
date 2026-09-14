@@ -540,6 +540,9 @@ pub(crate) fn build_sections(
                 message: format!(
                     "duplicate sibling section name `{name}`: first declared at line {first_line}, again at line {heading_abs_line}; sibling section names must be unique"
                 ),
+                name: None,
+                line: None,
+                column: None,
             });
         }
         sibling_lines.push((name.clone(), heading_abs_line));

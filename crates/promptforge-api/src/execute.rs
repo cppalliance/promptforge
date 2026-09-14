@@ -92,7 +92,7 @@ mod tools;
 // Public API surface.
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
-pub use error::{RunError, RunErrorKind};
+pub use error::{RunError, RunErrorKind, SourceLocation};
 pub(crate) use gateway::ResolutionContext;
 
 use context::RunState;
@@ -206,10 +206,13 @@ pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
             return RunResult::Failure(RunError::from(Error::UnsupportedVersion(other)));
         }
         None => {
-            return RunResult::Failure(RunError::from(Error::parse(
-                ParseErrorKind::Structure,
-                "not a promptforge prompt: no promptforge version",
-            )));
+            return RunResult::Failure(RunError::from(
+                Error::parse(
+                    ParseErrorKind::Structure,
+                    "not a promptforge prompt: no promptforge version",
+                )
+                .with_prompt_name(prompt.frontmatter().name()),
+            ));
         }
     }
 

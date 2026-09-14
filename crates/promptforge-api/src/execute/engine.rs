@@ -102,7 +102,7 @@ pub(super) fn resolve_jump_target(
     // user-facing Lua error.
     section_position(siblings, target)
         .map(JumpTarget::Sibling)
-        .ok_or(Error::Internal(
+        .ok_or(Error::internal(
             "resolved jump target is absent from the jumper's sibling slice",
         ))
 }

@@ -3135,7 +3135,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         .expect_err("an answer no pending entry explains must fail the run");
 
     assert!(
-        matches!(error, Error::Internal(message) if message.contains("no pending entry")),
+        matches!(error, Error::Internal { message, .. } if message.contains("no pending entry")),
         "the unknown answer is a loud invariant failure: {error}"
     );
 }

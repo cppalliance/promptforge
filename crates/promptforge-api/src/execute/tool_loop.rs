@@ -327,7 +327,7 @@ pub(crate) async fn run_models_loop(
                             // they carry no attached implementation.
                             let Some(local) = local_dispatch else {
                                 observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                                return Err(Error::Internal(
+                                return Err(Error::internal(
                                     "a local tool call reached the loop with no local dispatcher",
                                 ));
                             };
@@ -427,7 +427,7 @@ pub(crate) async fn run_models_loop(
             // `CompletionResult` is `#[non_exhaustive]` across the crate
             // boundary: an outcome this build does not recognize can be neither
             // dispatched nor promoted to an answer.
-            _ => return Err(Error::Internal("unrecognized completion outcome")),
+            _ => return Err(Error::internal("unrecognized completion outcome")),
         }
     }
 
@@ -512,12 +512,12 @@ pub(crate) async fn run_prose_inference(
     )
     .await?;
     let Some(record) = terminal else {
-        return Err(Error::Internal(
+        return Err(Error::internal(
             "a completed loop appended no terminal record",
         ));
     };
     let MessageContent::Text(text) = record.content else {
-        return Err(Error::Internal("the terminal record is always plain text"));
+        return Err(Error::internal("the terminal record is always plain text"));
     };
     Ok(ProseInferenceResult {
         text: Some(text),

@@ -39,6 +39,52 @@ fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
 }
 
 #[test]
+fn frontmatter_syntax_errors_carry_a_position_and_no_name() {
+    // Step 6: a malformed-YAML frontmatter surfaces the retained
+    // serde_yaml_ng position (1-based, file-absolute); the failure predates
+    // the prompt's name, so none is reported.
+    let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
+    let error = Prompt::parse(src, "test", &NullObserver::default())
+        .expect_err("malformed YAML frontmatter must fail to parse");
+    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
+    assert_eq!(error.line(), Some(4), "the malformed line: {error}");
+    assert!(
+        error.column().is_some(),
+        "a column accompanies the line: {error}"
+    );
+    assert_eq!(error.name(), None);
+}
+
+#[test]
+fn structured_errors_carry_the_prompt_name_and_source_position() {
+    // Step 6: a structured failure postdates the frontmatter, so the parse
+    // error carries the prompt's frontmatter name plus the offending
+    // span's 1-based line and column, computed against the source.
+    let src = concat!(
+        "---\nname: dup\ndescription: d\n---\n", // lines 1-4
+        "\n# T\n\n## S\n\np\n\n## S\n\nq\n",     // the second `## S` heads line 12
+    );
+    let error = Prompt::parse(src, "test", &NullObserver::default())
+        .expect_err("duplicate sibling sections must be rejected");
+    assert_eq!(error.kind(), ParseErrorKind::Structure);
+    assert_eq!(error.name(), Some("dup"));
+    assert_eq!(
+        error.line(),
+        Some(12),
+        "the duplicate heading's line: {error}"
+    );
+    assert_eq!(
+        error.column(),
+        Some(1),
+        "the duplicate heading's column: {error}"
+    );
+    assert!(
+        error.span().is_some(),
+        "the byte span is preserved alongside the line/column"
+    );
+}
+
+#[test]
 fn mixed_prose_with_one_bullet_is_not_a_list() {
     // PF-PARSER-005: an incidental bullet line in ordinary prose must not
     // force strict list parsing; the section stays prose.
