@@ -11,6 +11,7 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use shared_promptforge_api::observe::Observer;
 
+use super::contract::{ArgsDecl, CapabilityDecl, ModelRoles, ToolSlots};
 use super::fence::{RawBlock, lua_block_location, split_section_blocks};
 use super::list::{is_all_list_markers, parse_bullet_items};
 use super::{Block, LuaProgram, ParseErrorKind, Section};
@@ -74,6 +75,19 @@ pub struct Frontmatter {
     /// A file the prompt will leave in the store when it finishes.
     #[serde(default)]
     pub(crate) output: Option<FileDecl>,
+    /// Capabilities the prompt activates at prepare, in declaration order.
+    #[serde(default)]
+    pub(crate) capabilities: Vec<CapabilityDecl>,
+    /// Declared tool slots: alias to exact path or fuzzy `want`.
+    #[serde(default)]
+    pub(crate) tools: ToolSlots,
+    /// The typed args declaration; an absent `args:` key yields the default
+    /// declaration (one optional string field named `prose`).
+    #[serde(default)]
+    pub(crate) args: ArgsDecl,
+    /// Declared model roles: label to keywords, minimum, and description.
+    #[serde(default)]
+    pub(crate) models: ModelRoles,
 }
 
 /// The largest explicit `max_tool_iterations` a prompt may declare.
@@ -199,6 +213,32 @@ impl Frontmatter {
     #[must_use]
     pub fn output(&self) -> Option<&FileDecl> {
         self.output.as_ref()
+    }
+
+    /// Returns the declared capabilities, in declaration order.
+    #[must_use]
+    pub fn capabilities(&self) -> &[CapabilityDecl] {
+        &self.capabilities
+    }
+
+    /// Returns the declared tool slots (alias to exact path or fuzzy `want`).
+    #[must_use]
+    pub fn tools(&self) -> &ToolSlots {
+        &self.tools
+    }
+
+    /// Returns the typed args declaration. A prompt with no `args:` key
+    /// yields the default declaration (one optional string field named
+    /// `prose`).
+    #[must_use]
+    pub fn args(&self) -> &ArgsDecl {
+        &self.args
+    }
+
+    /// Returns the declared model roles (label to role).
+    #[must_use]
+    pub fn models(&self) -> &ModelRoles {
+        &self.models
     }
 }
 /// A heading with its title and the prose/Lua that follows it (before the next

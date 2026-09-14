@@ -906,7 +906,7 @@ Pure refactor, no behavior change: merge `ResolutionContext` and `RunConfig` int
 
 <step-5>
 
-### Step 5: Frontmatter contract keys
+### Step 5: Frontmatter contract keys [completed]
 
 - Component: frontmatter
 
