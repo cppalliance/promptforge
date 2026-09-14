@@ -6051,6 +6051,7 @@ dependencies = [
 name = "shared-cloud-providers"
 version = "0.3.0"
 dependencies = [
+ "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

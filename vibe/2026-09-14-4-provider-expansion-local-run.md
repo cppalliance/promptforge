@@ -176,7 +176,7 @@ In `crates/shared-cloud-providers/src/lib.rs`, change `Provider.key_env` to `Opt
 
 <step-2>
 
-### Step 2: Concurrent provider fan-out
+### Step 2: Concurrent provider fan-out [completed]
 
 - Component: sheet-core
 

@@ -20,6 +20,7 @@ name = "shared-cloud-providers"
 path = "src/main.rs"
 
 [dependencies]
+futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use shared_gateway_api::{ModelEntry, ProviderSlice, Sheet, SliceStatus, Tier};
 use time::OffsetDateTime;
 
@@ -83,21 +84,35 @@ async fn build_sheet_with(
     let mut previous = previous.map_or_else(BTreeMap::new, |sheet| sheet.providers);
     let now = OffsetDateTime::now_utc();
     let mut slices = BTreeMap::new();
+    // Fan the provider fetches out on the current task: no `tokio::spawn`,
+    // so the `&dyn Fn` seams need no `Send`/`Sync` bound. Niche providers
+    // are never fetched and take their static slice immediately.
+    let mut fetches = FuturesUnordered::new();
     for provider in registry {
         let prior = previous.remove(provider.name);
-        let slice = if provider.tier == Tier::Niche {
-            static_slice(provider)
+        if provider.tier == Tier::Niche {
+            slices.insert(provider.name.to_owned(), static_slice(provider));
         } else {
-            match fetch(client.clone(), *provider, keys(provider)).await {
-                Ok(models) => ProviderSlice {
-                    display_name: provider.display_name.to_owned(),
-                    tier: provider.tier,
-                    status: SliceStatus::Ok,
-                    fetched_at: Some(now),
-                    models,
-                },
-                Err(_) => stale_or_unavailable(provider, prior),
-            }
+            let provider = *provider;
+            fetches.push(async move {
+                let outcome = fetch(client.clone(), provider, keys(&provider)).await;
+                (provider, prior, outcome)
+            });
+        }
+    }
+    // Completion order is irrelevant: slices collect into a `BTreeMap`, so
+    // the emitted sheet stays byte-deterministic regardless of which fetch
+    // finishes first.
+    while let Some((provider, prior, outcome)) = fetches.next().await {
+        let slice = match outcome {
+            Ok(models) => ProviderSlice {
+                display_name: provider.display_name.to_owned(),
+                tier: provider.tier,
+                status: SliceStatus::Ok,
+                fetched_at: Some(now),
+                models,
+            },
+            Err(_) => stale_or_unavailable(&provider, prior),
         };
         slices.insert(provider.name.to_owned(), slice);
     }
@@ -449,6 +464,50 @@ mod tests {
             "a keyless provider with no credential must fetch, not record MissingKey"
         );
         assert_eq!(slice.models[0].id, "test-keyless-m1");
+    }
+
+    #[tokio::test]
+    async fn provider_fetches_overlap() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use tokio::sync::Barrier;
+
+        let registry = [
+            provider("test-a", "Test A", Tier::Prime),
+            provider("test-b", "Test B", Tier::Prime),
+        ];
+        let keys = |_provider: &Provider| Some("test-key".to_owned());
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(2));
+        let fetch = move |_client: reqwest::Client,
+                          provider: Provider,
+                          _key: Option<String>|
+              -> BoxFetch {
+            let in_flight = Arc::clone(&in_flight);
+            let barrier = Arc::clone(&barrier);
+            Box::pin(async move {
+                in_flight.fetch_add(1, Ordering::SeqCst);
+                // Park until both fetches are in flight: both sides
+                // passing the barrier proves the fetches overlap, with
+                // no timing assertion. A serial loop deadlocks here, so
+                // the timeout below is a hang guard, not a clock check.
+                barrier.wait().await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(vec![entry(&format!("{}-m1", provider.name))])
+            })
+        };
+        let client = reqwest::Client::new();
+        let sheet = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            build_sheet_with(&registry, None, &keys, &fetch, &client),
+        )
+        .await
+        .expect("provider fetches must overlap: a serial loop deadlocks on the barrier");
+        assert_eq!(sheet.providers["test-a"].status, SliceStatus::Ok);
+        assert_eq!(sheet.providers["test-b"].status, SliceStatus::Ok);
+        assert_eq!(sheet.providers["test-a"].models[0].id, "test-a-m1");
+        assert_eq!(sheet.providers["test-b"].models[0].id, "test-b-m1");
     }
 
     #[tokio::test]
