@@ -25,7 +25,7 @@ fn echo_handle() -> LuaToolHandle {
     LuaToolHandle::from_binding(
         "echo",
         "echo tool",
-        &ToolId::new("tests", "echo").expect("id"),
+        &ToolId::parse("tests/tools/echo").expect("id"),
     )
 }
 
@@ -242,7 +242,7 @@ struct EchoTool;
 #[async_trait::async_trait]
 impl shared_promptforge_api::tools::Tool for EchoTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "echo").expect("valid id")
+        ToolId::parse("tests/tools/echo").expect("valid id")
     }
 
     #[expect(

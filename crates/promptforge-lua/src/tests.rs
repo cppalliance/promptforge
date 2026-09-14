@@ -235,7 +235,7 @@ struct FixtureTool(&'static str);
 #[async_trait::async_trait]
 impl Tool for FixtureTool {
     fn id(&self) -> ToolId {
-        ToolId::new("fixtures", self.0).expect("valid id")
+        ToolId::parse(&format!("fixtures/tools/{}", self.0)).expect("valid id")
     }
 
     fn wire_name(&self) -> &'static str {
@@ -330,14 +330,14 @@ fn section_vm_with_shared(
 fn fixture_bindings(source: &str) -> ToolSet {
     let shared = program(source);
     let resolver = |description: &str| {
-        Ok(ToolId::new(
-            "fixtures",
+        Ok(ToolId::parse(&format!(
+            "fixtures/tools/{}",
             if description == "search the web" {
                 "search"
             } else {
                 "fetch"
             },
-        )
+        ))
         .expect("valid id"))
     };
     execute_live_tool_binds(
@@ -363,7 +363,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
              assert(warn == nil)\n\
              tools.bind('search', 'search the web')",
     );
-    let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
+    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
     let bindings = execute_live_tool_binds(
         &shared,
         &resolver,
@@ -856,7 +856,7 @@ fn tool_bind_returns_inspectable_object() {
              assert(tool.untrusted == false)\n\
              tools.always('search')",
     );
-    let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
+    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
     let bindings = execute_live_tool_binds(
         &shared,
         &resolver,
@@ -874,7 +874,7 @@ fn tool_bind_returns_inspectable_object() {
 
 #[test]
 fn binding_validates_aliases_exactly() {
-    let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
+    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
 
     for alias in [
         "",
@@ -913,7 +913,7 @@ fn binding_validates_aliases_exactly() {
 
 #[test]
 fn live_h1_rejects_duplicate_aliases() {
-    let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
+    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
     let error = execute_live_tool_binds(
         &program("tools.bind('search', 'one'); tools.bind('search', 'two')"),
         &resolver,
@@ -930,7 +930,7 @@ fn live_h1_rejects_duplicate_aliases() {
 
 #[test]
 fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
-    let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
+    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
     let error = execute_live_tool_binds(
         &program("tools.bind('search', 'one'); pcall(tools.bind, 'search', 'two')"),
         &resolver,
@@ -947,7 +947,7 @@ fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
 
 #[test]
 fn binding_rejects_unknown_and_duplicate_always_aliases() {
-    let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
+    let resolver = |_: &str| Ok(ToolId::parse("fixtures/tools/search").expect("valid id"));
     for (source, expected) in [
         (
             "tools.always('missing')",
@@ -1021,14 +1021,14 @@ fn h2_recording_closes_to_always_then_added_scope() {
 #[test]
 fn h2_add_accepts_tool_objects_and_arrays() {
     let resolver = |description: &str| {
-        Ok(ToolId::new(
-            "fixtures",
+        Ok(ToolId::parse(&format!(
+            "fixtures/tools/{}",
             if description == "search the web" {
                 "search"
             } else {
                 "fetch"
             },
-        )
+        ))
         .expect("valid id"))
     };
     let h1_error = execute_live_tool_binds(

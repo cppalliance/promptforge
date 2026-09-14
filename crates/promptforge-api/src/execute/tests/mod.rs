@@ -333,7 +333,7 @@ async fn run(
                 .map(|tool| {
                     let id = tool.id();
                     ToolDescriptor::new(
-                        PickerToolId::new(id.server(), id.name()),
+                        PickerToolId::new(id.capability().to_string(), id.name()),
                         tool.description(),
                         tool.parameters_schema(),
                     )
@@ -482,7 +482,7 @@ struct EchoTool;
 #[async_trait::async_trait]
 impl Tool for EchoTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "echo").expect("valid id")
+        ToolId::parse("tests/tools/echo").expect("valid id")
     }
 
     #[expect(
@@ -535,7 +535,7 @@ struct UntrustedEchoTool;
 #[async_trait::async_trait]
 impl Tool for UntrustedEchoTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "untrusted_echo").expect("valid id")
+        ToolId::parse("tests/tools/untrusted_echo").expect("valid id")
     }
 
     #[expect(
@@ -584,7 +584,7 @@ struct StructuredFixtureTool {
 #[async_trait::async_trait]
 impl Tool for StructuredFixtureTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "structured").expect("valid id")
+        ToolId::parse("tests/tools/structured").expect("valid id")
     }
 
     #[expect(
@@ -623,7 +623,7 @@ struct FailingTool;
 #[async_trait::async_trait]
 impl Tool for FailingTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "failing").expect("valid id")
+        ToolId::parse("tests/tools/failing").expect("valid id")
     }
 
     #[expect(
@@ -667,7 +667,7 @@ struct ScopedFixtureTool {
 impl ScopedFixtureTool {
     fn new(name: &str, wire_name: &'static str, description: &'static str) -> Self {
         Self {
-            id: ToolId::new("tests", name).expect("valid id"),
+            id: ToolId::parse(&format!("tests/tools/{name}")).expect("valid id"),
             wire_name,
             description,
             calls: Arc::new(AtomicUsize::new(0)),
@@ -1207,7 +1207,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         vec![crate::lua::ToolBinding {
             alias: "echo".to_owned(),
             description: "echo capability for live matching".to_owned(),
-            id: ToolId::new("tests", "echo").expect("valid id"),
+            id: ToolId::parse("tests/tools/echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
             tool: Arc::new(EchoTool),
             conflicts: Vec::new(),
@@ -1319,7 +1319,7 @@ struct SlowTool;
 #[async_trait::async_trait]
 impl Tool for SlowTool {
     fn id(&self) -> ToolId {
-        ToolId::new("test", "slow").expect("valid slow tool id")
+        ToolId::parse("test/tools/slow").expect("valid slow tool id")
     }
 
     #[expect(

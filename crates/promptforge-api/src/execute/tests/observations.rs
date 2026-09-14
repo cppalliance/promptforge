@@ -284,7 +284,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         "Echo a test value.",
     ));
     let descriptor = ToolDescriptor::new(
-        PickerToolId::new("tests", "echo"),
+        PickerToolId::new("tests/tools", "echo"),
         tool.description(),
         tool.parameters_schema(),
     );

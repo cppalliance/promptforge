@@ -1647,7 +1647,7 @@ mod tests {
         let handle = crate::LuaToolHandle::from_binding(
             "echo",
             "echo tool",
-            &shared_promptforge_api::tools::ToolId::new("tests", "echo").expect("valid id"),
+            &shared_promptforge_api::tools::ToolId::parse("tests/tools/echo").expect("valid id"),
         );
         let userdata = lua.create_userdata(handle).expect("userdata");
         table.raw_set("alias", userdata).expect("raw_set");

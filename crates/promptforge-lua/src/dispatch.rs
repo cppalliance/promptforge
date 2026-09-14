@@ -169,7 +169,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Tool for EchoTool {
         fn id(&self) -> ToolId {
-            ToolId::new("tests", "echo").expect("valid id")
+            ToolId::parse("tests/tools/echo").expect("valid id")
         }
 
         #[expect(
@@ -211,7 +211,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Tool for FailingTool {
         fn id(&self) -> ToolId {
-            ToolId::new("tests", "failing").expect("valid id")
+            ToolId::parse("tests/tools/failing").expect("valid id")
         }
 
         #[expect(
@@ -252,7 +252,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Tool for SlowTool {
         fn id(&self) -> ToolId {
-            ToolId::new("tests", "slow").expect("valid id")
+            ToolId::parse("tests/tools/slow").expect("valid id")
         }
 
         #[expect(

@@ -3299,7 +3299,7 @@ struct SignallingSlowTool {
 #[async_trait::async_trait]
 impl Tool for SignallingSlowTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "slow").expect("valid id")
+        ToolId::parse("tests/tools/slow").expect("valid id")
     }
 
     #[expect(

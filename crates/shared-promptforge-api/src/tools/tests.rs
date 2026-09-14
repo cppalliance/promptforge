@@ -3,9 +3,10 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolCatalog, ToolCatalogErrorKind, ToolError, ToolId, ToolOutput};
+use crate::names::GlobalName;
 
 fn inspect_id() -> ToolId {
-    ToolId::new("fixtures", "inspect").expect("fixture id is valid")
+    ToolId::parse("fixtures/tools/inspect").expect("fixture id is valid")
 }
 
 struct FixtureTool;
@@ -53,7 +54,7 @@ struct CatalogFixtureTool {
 #[async_trait::async_trait]
 impl Tool for CatalogFixtureTool {
     fn id(&self) -> ToolId {
-        ToolId::new("fixtures", self.id_name).expect("fixture id is valid")
+        ToolId::parse(&format!("fixtures/tools/{}", self.id_name)).expect("fixture id is valid")
     }
 
     fn wire_name(&self) -> &str {
@@ -160,7 +161,7 @@ fn catalog_lookup_uses_stable_identity_not_wire_name() {
     assert_eq!(found.wire_name(), "inspect_wire");
     assert!(
         catalog
-            .get(&ToolId::new("fixtures", "inspect_wire").expect("valid id"))
+            .get(&ToolId::parse("fixtures/tools/inspect_wire").expect("valid id"))
             .is_none(),
         "the transport name must not become identity"
     );
@@ -220,45 +221,107 @@ fn catalog_rejects_duplicate_tool_ids() {
     );
 }
 
-#[test]
-fn tool_id_new_rejects_empty_separator_and_control() {
-    use super::ToolIdErrorKind;
+fn tool_id_error_kind(input: &str) -> super::ToolIdErrorKind {
+    ToolId::parse(input)
+        .expect_err("the input must be rejected")
+        .kind()
+}
 
+#[test]
+fn a_three_segment_tool_id_parses_and_exposes_its_name() {
+    let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
+    assert_eq!(id.name(), "fetch");
+}
+
+#[test]
+fn a_tool_ids_capability_is_always_its_two_segment_prefix() {
+    let id = ToolId::parse("promptforge/web/fetch").expect("a valid tool id");
     assert_eq!(
-        ToolId::new("", "name").expect_err("empty server").kind(),
+        id.capability(),
+        GlobalName::parse("promptforge/web").expect("a valid capability name"),
+        "dropping the last segment must yield the contributing capability's id"
+    );
+}
+
+#[test]
+fn containment_holds_for_a_reverse_dns_namespace() {
+    let id = ToolId::parse("org.rustalliance/core/search").expect("a valid tool id");
+    assert_eq!(id.name(), "search");
+    assert_eq!(id.capability().to_string(), "org.rustalliance/core");
+}
+
+#[test]
+fn a_two_segment_capability_name_is_rejected_as_a_tool_id() {
+    use super::ToolIdErrorKind;
+    assert_eq!(
+        tool_id_error_kind("promptforge/web"),
+        ToolIdErrorKind::SegmentCount
+    );
+}
+
+#[test]
+fn a_single_segment_is_rejected_as_a_tool_id() {
+    use super::ToolIdErrorKind;
+    assert_eq!(
+        tool_id_error_kind("promptforge"),
+        ToolIdErrorKind::SegmentCount
+    );
+}
+
+#[test]
+fn four_segments_are_rejected_as_a_tool_id() {
+    use super::ToolIdErrorKind;
+    assert_eq!(
+        tool_id_error_kind("promptforge/web/fetch/extra"),
+        ToolIdErrorKind::SegmentCount
+    );
+}
+
+#[test]
+fn an_empty_segment_is_rejected_as_an_empty_error() {
+    use super::ToolIdErrorKind;
+    assert_eq!(
+        tool_id_error_kind("promptforge//fetch"),
         ToolIdErrorKind::Empty
     );
+}
+
+#[test]
+fn a_control_character_is_rejected_as_a_control_error() {
+    use super::ToolIdErrorKind;
     assert_eq!(
-        ToolId::new("server", "").expect_err("empty name").kind(),
-        ToolIdErrorKind::Empty
-    );
-    assert_eq!(
-        ToolId::new("a/b", "name")
-            .expect_err("separator in server")
-            .kind(),
-        ToolIdErrorKind::Separator
-    );
-    assert_eq!(
-        ToolId::new("server", "a/b")
-            .expect_err("separator in name")
-            .kind(),
-        ToolIdErrorKind::Separator
-    );
-    assert_eq!(
-        ToolId::new("server", "na\u{7f}me")
-            .expect_err("DEL control in name")
-            .kind(),
+        tool_id_error_kind("promptforge/we\tb/fetch"),
         ToolIdErrorKind::Control
     );
     assert_eq!(
-        ToolId::new("ser\tver", "name")
-            .expect_err("tab control in server")
-            .kind(),
+        tool_id_error_kind("promptforge/web/fe\u{7f}tch"),
         ToolIdErrorKind::Control
     );
-    // A provider-invalid but structurally legal identity is accepted here;
-    // provider acceptance is a runtime concern, not an identity invariant.
-    assert!(ToolId::new("promptforge", "web_search").is_ok());
+}
+
+#[test]
+fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
+    use super::ToolIdErrorKind;
+    assert_eq!(
+        tool_id_error_kind("Promptforge/web/fetch"),
+        ToolIdErrorKind::Control
+    );
+}
+
+#[test]
+fn from_validated_builds_a_static_id_without_revalidating() {
+    let id = ToolId::from_validated("promptforge/web/search");
+    assert_eq!(id.name(), "search");
+    assert_eq!(id.capability().to_string(), "promptforge/web");
+}
+
+#[test]
+fn the_migrated_built_in_ids_parse() {
+    // The built-ins moved from 2-part server/name onto the global grammar:
+    // promptforge/web_fetch -> promptforge/web/fetch and
+    // promptforge/web_search -> promptforge/web/search.
+    assert!(ToolId::parse("promptforge/web/fetch").is_ok());
+    assert!(ToolId::parse("promptforge/web/search").is_ok());
 }
 
 #[test]
@@ -268,7 +331,7 @@ fn catalog_rejects_illegal_wire_name() {
     #[async_trait::async_trait]
     impl Tool for BadWire {
         fn id(&self) -> ToolId {
-            ToolId::new("fixtures", "bad_wire").expect("valid id")
+            ToolId::parse("fixtures/tools/bad_wire").expect("valid id")
         }
         #[expect(
             clippy::unnecessary_literal_bound,

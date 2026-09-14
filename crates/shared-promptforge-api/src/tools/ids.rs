@@ -1,94 +1,108 @@
 //! Stable tool identity and its validation errors.
 
+use crate::names::{GlobalName, GlobalNameErrorKind};
+
 /// The stable identity of a live tool.
 ///
-/// Identity is structural over the server and tool name. The wire name used
-/// in a model request is deliberately not identity: later capability binding
-/// can advertise a selected tool under a prompt-local alias without changing
-/// the live tool it dispatches.
+/// Identity is a 3-segment [`GlobalName`] (`namespace/pack/name`): the global
+/// naming grammar encodes kind by arity, and a tool's first two segments name
+/// the capability that contributed it, so dropping the last segment of any
+/// tool id always yields the contributing capability's id
+/// (`promptforge/web/fetch` comes from `promptforge/web`, no exceptions). The
+/// wire name used in a model request is deliberately not identity: capability
+/// binding can advertise a selected tool under a prompt-local alias without
+/// changing the live tool it dispatches.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
-pub struct ToolId {
-    server: String,
-    name: String,
-}
+pub struct ToolId(GlobalName);
 
 impl ToolId {
-    /// Builds an identity from its server and stable tool name.
+    /// Parses a tool identity, requiring exactly 3 segments
+    /// (`namespace/pack/name`).
     ///
     /// # Errors
-    /// Returns [`ToolIdError`] if `server` or `name` is empty or contains the
-    /// `/` namespace separator or a control character.
+    /// Returns [`ToolIdError`] when the segment count is not exactly 3
+    /// ([`ToolIdErrorKind::SegmentCount`]), a segment is empty
+    /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character outside
+    /// the global-name charset ([`ToolIdErrorKind::Control`]).
     ///
     /// # Examples
     ///
     /// ```
     /// use shared_promptforge_api::tools::ToolId;
     ///
-    /// let id = ToolId::new("promptforge", "web_fetch")?;
-    /// assert_eq!(id.server(), "promptforge");
-    /// assert_eq!(id.name(), "web_fetch");
+    /// let id = ToolId::parse("promptforge/web/fetch")?;
+    /// assert_eq!(id.name(), "fetch");
+    /// assert_eq!(id.capability().to_string(), "promptforge/web");
     /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
     /// ```
-    pub fn new(server: impl Into<String>, name: impl Into<String>) -> Result<ToolId, ToolIdError> {
-        let server = server.into();
-        let name = name.into();
-        Self::validate("server", &server)?;
-        Self::validate("name", &name)?;
-        Ok(Self { server, name })
+    pub fn parse(id: &str) -> Result<ToolId, ToolIdError> {
+        let name =
+            GlobalName::parse(id).map_err(|e| ToolIdError::from_global_name_kind(e.kind()))?;
+        if name.segments().len() != 3 {
+            return Err(ToolIdError {
+                field: "id",
+                kind: ToolIdErrorKind::SegmentCount,
+                reason: "a tool id must have exactly 3 segments (namespace/pack/name)",
+            });
+        }
+        Ok(ToolId(name))
     }
 
-    /// Builds an identity from components already known to be valid.
+    /// Builds an identity from a string already known to be valid.
     ///
-    /// For internal callers whose inputs are static tool names or come from an
-    /// existing [`ToolId`], so the validation in [`ToolId::new`] is redundant.
-    /// Hidden from the public API: downstream callers use [`ToolId::new`].
+    /// For internal callers whose inputs are static tool ids, so the
+    /// validation in [`ToolId::parse`] is redundant. Hidden from the public
+    /// API: downstream callers use [`ToolId::parse`].
     #[doc(hidden)]
     #[must_use]
-    pub fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ToolId {
-        ToolId {
-            server: server.into(),
-            name: name.into(),
-        }
+    pub fn from_validated(id: &str) -> ToolId {
+        let name = GlobalName::from_validated(id);
+        debug_assert!(
+            name.segments().len() == 3,
+            "a static tool id must have exactly 3 segments (namespace/pack/name): {id}"
+        );
+        ToolId(name)
     }
 
-    /// Validates one identity component, naming the field in any error.
-    fn validate(field: &'static str, value: &str) -> Result<(), ToolIdError> {
-        validate_identifier(field, value)
-    }
-
-    /// Returns the server that owns this identity namespace.
+    /// Returns the tool's name segment (the last of the three).
     ///
     /// # Examples
     ///
     /// ```
     /// use shared_promptforge_api::tools::ToolId;
     ///
-    /// let id = ToolId::new("promptforge", "web_fetch")?;
-    /// assert_eq!(id.server(), "promptforge");
-    /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
-    /// ```
-    #[must_use]
-    pub fn server(&self) -> &str {
-        &self.server
-    }
-
-    /// Returns the stable name within the publisher's namespace.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use shared_promptforge_api::tools::ToolId;
-    ///
-    /// let id = ToolId::new("promptforge", "web_fetch")?;
-    /// assert_eq!(id.name(), "web_fetch");
+    /// let id = ToolId::parse("promptforge/web/fetch")?;
+    /// assert_eq!(id.name(), "fetch");
     /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
     /// ```
     #[must_use]
     pub fn name(&self) -> &str {
-        &self.name
+        &self.0.segments()[2]
+    }
+
+    /// Returns the contributing capability's id: the first two segments.
+    ///
+    /// Containment is total - dropping the last segment of any tool id always
+    /// yields the id of the capability that contributed it. The return type
+    /// re-types to the capabilities module's `CapabilityId` when that module
+    /// lands; the value is already exactly that id.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use shared_promptforge_api::tools::ToolId;
+    ///
+    /// let id = ToolId::parse("promptforge/web/fetch")?;
+    /// assert_eq!(id.capability().to_string(), "promptforge/web");
+    /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
+    /// ```
+    #[must_use]
+    pub fn capability(&self) -> GlobalName {
+        self.0.capability_prefix()
     }
 }
+
 /// A stable, matchable classification of a [`ToolIdError`].
 ///
 /// Every public error exposes a `kind()` classifier so callers can branch on the
@@ -96,11 +110,14 @@ impl ToolId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolIdErrorKind {
-    /// A component was empty.
+    /// The id did not have exactly 3 segments (`namespace/pack/name`).
+    SegmentCount,
+    /// A segment (or a wire name) was empty.
     Empty,
-    /// A component contained the `/` namespace separator.
+    /// A wire name contained the `/` namespace separator.
     Separator,
-    /// A component contained a control character.
+    /// A segment (or a wire name) contained a character outside the allowed
+    /// set.
     Control,
 }
 
@@ -109,7 +126,7 @@ pub enum ToolIdErrorKind {
 #[error("invalid tool {field}: {reason}")]
 #[non_exhaustive]
 pub struct ToolIdError {
-    /// Which component was rejected (`server`, `name`, or `wire name`).
+    /// What was rejected (`id` for a parse failure, or `wire name`).
     field: &'static str,
     /// A stable classification of why it was rejected.
     kind: ToolIdErrorKind,
@@ -124,7 +141,7 @@ impl ToolIdError {
         self.kind
     }
 
-    /// Returns which component was rejected (`server`, `name`, or `wire name`).
+    /// Returns what was rejected (`id` for a parse failure, or `wire name`).
     #[must_use]
     pub fn field(&self) -> &str {
         self.field
@@ -135,13 +152,34 @@ impl ToolIdError {
     pub(crate) fn reason(&self) -> &'static str {
         self.reason
     }
+
+    /// Maps a global-name rejection onto the tool-id error vocabulary.
+    fn from_global_name_kind(global_kind: GlobalNameErrorKind) -> ToolIdError {
+        let (kind, reason) = match global_kind {
+            GlobalNameErrorKind::SegmentCount => (
+                ToolIdErrorKind::SegmentCount,
+                "a tool id must have exactly 3 segments (namespace/pack/name)",
+            ),
+            GlobalNameErrorKind::Empty => (ToolIdErrorKind::Empty, "segments must not be empty"),
+            GlobalNameErrorKind::Control => (
+                ToolIdErrorKind::Control,
+                "segments may contain only lowercase ASCII letters, digits, '-', '_', '.'",
+            ),
+        };
+        ToolIdError {
+            field: "id",
+            kind,
+            reason,
+        }
+    }
 }
 
-/// Validates one identity-shaped component (server/name/wire name).
+/// Validates one identity-shaped component (wire name).
 ///
 /// A component must be non-empty and free of the `/` namespace separator and any
-/// control character. Shared so [`ToolId`] components and tool wire names are
-/// held to one rule set (tools.rs F4).
+/// control character. Tool identity itself is the 3-segment global grammar
+/// ([`ToolId`]); this rule set remains for tool wire names, which are
+/// single-segment transport tokens (tools.rs F4).
 pub(crate) fn validate_identifier(field: &'static str, value: &str) -> Result<(), ToolIdError> {
     if value.is_empty() {
         return Err(ToolIdError {

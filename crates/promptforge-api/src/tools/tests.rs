@@ -20,7 +20,7 @@ struct ReexportFixture;
 #[async_trait::async_trait]
 impl ContractTool for ReexportFixture {
     fn id(&self) -> ToolId {
-        ToolId::new("fixtures", "reexport").expect("fixture id is valid")
+        ToolId::parse("fixtures/tools/reexport").expect("fixture id is valid")
     }
 
     #[expect(
@@ -53,14 +53,14 @@ fn reexported_identity_looks_up_in_reexported_catalog() {
     let tool: Arc<dyn Tool> = Arc::new(ReexportFixture);
     let catalog = ToolCatalog::new(std::slice::from_ref(&tool)).expect("unique catalog");
 
-    let id = crate::tools::ToolId::new("fixtures", "reexport").expect("valid id");
+    let id = crate::tools::ToolId::parse("fixtures/tools/reexport").expect("valid id");
     let found = catalog
         .get(&id)
         .expect("the stable identity should resolve");
     assert_eq!(found.wire_name(), "reexport_wire");
     assert!(
         catalog
-            .get(&crate::tools::ToolId::new("fixtures", "reexport_wire").expect("valid id"))
+            .get(&crate::tools::ToolId::parse("fixtures/tools/reexport_wire").expect("valid id"))
             .is_none(),
         "the transport name must not become identity through the re-export either"
     );
@@ -78,7 +78,7 @@ fn reexported_types_are_the_contract_types() {
         catalog.tools().len()
     }
 
-    let id = crate::tools::ToolId::new("fixtures", "reexport").expect("valid id");
+    let id = crate::tools::ToolId::parse("fixtures/tools/reexport").expect("valid id");
     assert_eq!(takes_contract_id(&id), "reexport");
 
     let tool: Arc<dyn Tool> = Arc::new(ReexportFixture);

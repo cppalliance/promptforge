@@ -357,7 +357,7 @@ async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<St
 #[async_trait::async_trait]
 impl Tool for WebSearch {
     fn id(&self) -> ToolId {
-        ToolId::from_validated("promptforge", "web_search")
+        ToolId::from_validated("promptforge/web/search")
     }
 
     #[expect(

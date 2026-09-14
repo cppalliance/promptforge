@@ -88,7 +88,7 @@ fn descriptor_is_stable_and_faithful() {
 
     assert_eq!(
         tool.id(),
-        ToolId::new("promptforge", "web_search").expect("valid id")
+        ToolId::parse("promptforge/web/search").expect("valid id")
     );
     assert_eq!(tool.wire_name(), "web_search");
     assert_eq!(
@@ -149,6 +149,16 @@ fn descriptor_is_stable_and_faithful() {
             "required": ["query"]
         })
     );
+}
+
+#[test]
+fn the_migrated_id_names_its_contributing_capability() {
+    // promptforge/web_search migrated to promptforge/web/search: dropping the
+    // last segment must yield the contributing capability's id.
+    let tool = WebSearch::new("http://localhost", "test").expect("valid web search configuration");
+    let id = tool.id();
+    assert_eq!(id.name(), "search");
+    assert_eq!(id.capability().to_string(), "promptforge/web");
 }
 
 #[tokio::test]

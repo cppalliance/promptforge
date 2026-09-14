@@ -148,7 +148,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
 async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let echo = Arc::new(EchoTool);
     let descriptor = ToolDescriptor::new(
-        PickerToolId::new("tests", "echo"),
+        PickerToolId::new("tests/tools", "echo"),
         echo.description(),
         echo.parameters_schema(),
     );

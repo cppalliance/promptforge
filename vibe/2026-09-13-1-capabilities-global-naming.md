@@ -876,7 +876,7 @@ New `names` module in `shared-promptforge-api`: `GlobalName` (private segments, 
 
 <step-2>
 
-### Step 2: ToolId re-base and built-in id migration
+### Step 2: ToolId re-base and built-in id migration [completed]
 
 - Component: global-names
 

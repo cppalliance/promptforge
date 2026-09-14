@@ -300,9 +300,9 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
         Error::NearDuplicateTools {
             diagnostic,
         } if diagnostic.first_alias == "first_local"
-            && diagnostic.first_id == ToolId::new("tests", "first").expect("valid id")
+            && diagnostic.first_id == ToolId::parse("tests/tools/first").expect("valid id")
             && diagnostic.second_alias == "second_local"
-            && diagnostic.second_id == ToolId::new("tests", "second").expect("valid id")
+            && diagnostic.second_id == ToolId::parse("tests/tools/second").expect("valid id")
             && (diagnostic.similarity - 0.98).abs() < f64::EPSILON
     ));
     let events = recorder.events();

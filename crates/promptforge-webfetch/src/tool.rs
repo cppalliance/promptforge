@@ -206,13 +206,8 @@ fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> CallResult {
 
 #[async_trait::async_trait]
 impl Tool for WebFetch {
-    #[expect(
-        clippy::expect_used,
-        reason = "the id components are compile-time constants that satisfy ToolId's validation"
-    )]
     fn id(&self) -> ToolId {
-        ToolId::new("promptforge", "web_fetch")
-            .expect("`promptforge`/`web_fetch` is a valid tool id")
+        ToolId::from_validated("promptforge/web/fetch")
     }
 
     #[expect(
@@ -494,7 +489,7 @@ mod tests {
 
         assert_eq!(
             tool.id(),
-            ToolId::new("promptforge", "web_fetch").expect("valid id")
+            ToolId::parse("promptforge/web/fetch").expect("valid id")
         );
         assert_eq!(tool.wire_name(), "web_fetch");
         assert_eq!(
@@ -505,6 +500,15 @@ mod tests {
         assert_eq!(schema["properties"]["max_chars"]["maximum"], 40_000);
         assert_eq!(schema["required"], serde_json::json!(["url"]));
         assert_eq!(schema["properties"]["url"]["type"], "string");
+    }
+
+    #[test]
+    fn the_migrated_id_names_its_contributing_capability() {
+        // promptforge/web_fetch migrated to promptforge/web/fetch: dropping the
+        // last segment must yield the contributing capability's id.
+        let id = WebFetch::new().id();
+        assert_eq!(id.name(), "fetch");
+        assert_eq!(id.capability().to_string(), "promptforge/web");
     }
 
     #[derive(Clone)]

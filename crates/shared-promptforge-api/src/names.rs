@@ -72,6 +72,33 @@ impl GlobalName {
     pub fn pack(&self) -> &str {
         &self.segments[1]
     }
+
+    /// Builds a name from a string already known to satisfy the grammar,
+    /// skipping validation.
+    ///
+    /// Crate-internal: backs [`crate::tools::ToolId::from_validated`] for
+    /// static first-party ids.
+    pub(crate) fn from_validated(s: &str) -> GlobalName {
+        GlobalName {
+            segments: s.split('/').map(str::to_owned).collect(),
+        }
+    }
+
+    /// Returns the segments (exactly 2 or 3 by construction).
+    ///
+    /// Crate-internal: the id newtypes in [`crate::tools`] index segments.
+    pub(crate) fn segments(&self) -> &[String] {
+        &self.segments
+    }
+
+    /// Returns the 2-segment capability prefix of a 3-segment (tool) name.
+    ///
+    /// Crate-internal: backs [`crate::tools::ToolId::capability`].
+    pub(crate) fn capability_prefix(&self) -> GlobalName {
+        GlobalName {
+            segments: self.segments[..2].to_vec(),
+        }
+    }
 }
 
 impl fmt::Display for GlobalName {

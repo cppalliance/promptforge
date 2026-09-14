@@ -145,8 +145,14 @@ enum CachedDecision {
 }
 
 /// Converts a borrowed picker descriptor to a core-owned [`ToolId`].
+///
+/// The picker still speaks 2-part ids (its own migration onto the global
+/// grammar is a later step): a core id rides through the picker as server =
+/// the capability prefix (`namespace/pack`, which the picker's server part
+/// accepts verbatim, separators included) and name = the tool name, so the
+/// round trip is lossless.
 fn tool_id_of(tool: &ToolDescriptor) -> ToolId {
-    ToolId::from_validated(tool.id().server(), tool.id().name())
+    ToolId::from_validated(&format!("{}/{}", tool.id().server(), tool.id().name()))
 }
 
 impl CachedDecision {
@@ -322,7 +328,7 @@ where
     ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, promptforge_lua::Error> {
         let picker_ids = ids
             .iter()
-            .map(|id| PickerToolId::new(id.server(), id.name()))
+            .map(|id| PickerToolId::new(id.capability().to_string(), id.name()))
             .collect::<Vec<_>>();
         self.source
             .near_duplicates(&picker_ids)
@@ -331,8 +337,12 @@ where
                     .into_iter()
                     .map(|(first, second, similarity)| {
                         (
-                            ToolId::from_validated(first.server(), first.name()),
-                            ToolId::from_validated(second.server(), second.name()),
+                            ToolId::from_validated(&format!("{}/{}", first.server(), first.name())),
+                            ToolId::from_validated(&format!(
+                                "{}/{}",
+                                second.server(),
+                                second.name()
+                            )),
                             similarity,
                         )
                     })
@@ -357,7 +367,7 @@ mod tests {
     use crate::tools::{Tool, ToolError, ToolOutput};
 
     fn tid(name: &str) -> ToolId {
-        ToolId::from_validated("tests", name)
+        ToolId::from_validated(&format!("tests/tools/{name}"))
     }
 
     struct FixtureSource;
@@ -497,10 +507,7 @@ mod tests {
             duplicate,
             Error::Duplicate { capability, candidates }
                 if capability == "duplicate"
-                    && candidates == [
-                        ToolId::new("tests", "first").expect("valid id"),
-                        ToolId::new("tests", "second").expect("valid id")
-                    ]
+                    && candidates == [tid("first"), tid("second")]
         ));
         assert!(matches!(
             CachedDecision::Absent.result("absent").map_err(Error::from),
@@ -559,15 +566,13 @@ mod tests {
                 "tools.bind('missing', 'first')"
             ),
             Error::PickedToolNotLive { alias, id }
-                if alias == "missing" && id == ToolId::new("tests", "first").expect("valid id")
+                if alias == "missing" && id == tid("first")
         ));
     }
 
     #[test]
     fn live_callbacks_reject_duplicate_aliases_and_identities() {
-        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(FixtureTool {
-            id: ToolId::new("tests", "first").expect("valid id"),
-        })];
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(FixtureTool { id: tid("first") })];
         assert!(matches!(
             callback_error(
                 &FixtureSource,
@@ -583,7 +588,7 @@ mod tests {
                 "tools.bind('one', 'same-one'); tools.bind('two', 'same-two')"
             ),
             Error::ToolIdSelectedTwice { id, first_alias, second_alias }
-                if id == ToolId::new("tests", "first").expect("valid id")
+                if id == tid("first")
                     && first_alias == "one"
                     && second_alias == "two"
         ));
@@ -592,12 +597,8 @@ mod tests {
     #[test]
     fn bind_records_near_duplicate_conflicts_symmetrically() {
         let tools: Vec<Arc<dyn Tool>> = vec![
-            Arc::new(FixtureTool {
-                id: ToolId::new("tests", "first").expect("valid id"),
-            }),
-            Arc::new(FixtureTool {
-                id: ToolId::new("tests", "second").expect("valid id"),
-            }),
+            Arc::new(FixtureTool { id: tid("first") }),
+            Arc::new(FixtureTool { id: tid("second") }),
         ];
         let resolver = PickerResolver::new(&FixtureSource);
         let catalog = ToolCatalog::new(&tools).expect("fixture tools are unique");
@@ -635,19 +636,12 @@ mod tests {
     #[test]
     fn catalog_rejects_duplicate_live_ids() {
         let tools: Vec<Arc<dyn Tool>> = vec![
-            Arc::new(FixtureTool {
-                id: ToolId::new("tests", "same").expect("valid id"),
-            }),
-            Arc::new(FixtureTool {
-                id: ToolId::new("tests", "same").expect("valid id"),
-            }),
+            Arc::new(FixtureTool { id: tid("same") }),
+            Arc::new(FixtureTool { id: tid("same") }),
         ];
         let error = ToolCatalog::new(&tools)
             .expect_err("a repeated live identity must be rejected at catalog construction");
-        assert_eq!(
-            error.duplicate_id(),
-            Some(&ToolId::new("tests", "same").expect("valid id"))
-        );
+        assert_eq!(error.duplicate_id(), Some(&tid("same")));
     }
 
     #[test]
@@ -718,7 +712,7 @@ mod tests {
         let first_a = resolver.resolve("first").expect("first resolves");
         let first_b = resolver.resolve("first").expect("first resolves again");
         assert_eq!(first_a, first_b);
-        assert_eq!(first_a, ToolId::new("tests", "first").expect("valid id"));
+        assert_eq!(first_a, tid("first"));
         assert_eq!(source.count("first"), 1, "a hit must not re-decide");
 
         // A failing capability is likewise cached: decided once, stable error.

@@ -48,7 +48,7 @@ struct StubTool;
 #[async_trait::async_trait]
 impl Tool for StubTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "echo").expect("valid id")
+        ToolId::parse("tests/tools/echo").expect("valid id")
     }
 
     #[expect(

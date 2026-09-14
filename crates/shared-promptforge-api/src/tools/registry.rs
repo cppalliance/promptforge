@@ -89,7 +89,7 @@ impl ToolCatalog {
     /// use shared_promptforge_api::tools::{ToolCatalog, ToolId};
     ///
     /// let catalog = ToolCatalog::new(&[])?;
-    /// let missing = ToolId::new("promptforge", "missing")?;
+    /// let missing = ToolId::parse("promptforge/tools/missing")?;
     /// assert!(catalog.get(&missing).is_none());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -224,9 +224,9 @@ impl ToolCatalogError {
 ///     }
 /// }
 ///
-/// let echo = Echo { id: ToolId::new("example", "echo")? };
+/// let echo = Echo { id: ToolId::parse("example/echo/echo")? };
 /// assert_eq!(echo.wire_name(), "echo");
-/// assert_eq!(echo.id().server(), "example");
+/// assert_eq!(echo.id().name(), "echo");
 /// # let _ = OutputTrust::Trusted;
 /// # Ok::<(), shared_promptforge_api::tools::ToolIdError>(())
 /// ```
