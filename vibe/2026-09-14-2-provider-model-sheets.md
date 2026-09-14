@@ -1,6 +1,6 @@
 ---
 name: Provider Model Sheets
-overview: "Phase 1 infrastructure for provider model sheets: two new shared crates - shared-gateway-api (the normalized sheet schema, plus the hoisted Capabilities/ModelInfo/ModelKind/ThinkingMode at their canonical home) and shared-cloud-providers (tiered per-provider descriptors for chat, image, STT, and TTS providers, fetch/normalize logic, and the sheet-building binary) - plus a scheduled GitHub workflow in the promptforge repo that aggregates vendor model-list endpoints into a models.json release artifact with last-known-good propagation. Phase 2 (deferred): the Gateway's sheet-consumption path and config-UI integration."
+overview: "Phase 1 infrastructure for provider model sheets: two new shared crates - shared-gateway-api (the normalized sheet schema, plus the hoisted Capabilities/ModelInfo/ModelKind/ThinkingMode at their canonical home) and shared-cloud-providers (tiered per-provider descriptors for chat, image, STT, and TTS providers, fetch/normalize logic, and the sheet-building binary) - plus a scheduled GitHub workflow in a separate aggregation repo that aggregates vendor model-list endpoints into a models.json release artifact with last-known-good propagation. Phase 2 (deferred): the Gateway's sheet-consumption path and config-UI integration."
 todos:
   - id: settle-open-questions
     content: Settle remaining open questions (raw payload embedding, v1 scope confirmation, cadence)
@@ -12,7 +12,7 @@ todos:
     content: Create shared-cloud-providers (lib + bin) with Provider descriptor (name, display_name, tier, key_env, base_url), provider registry, per-provider files, fetch/normalize behind an injected reqwest::Client, build_sheet/fetch_sheet
     status: pending
   - id: aggregation-workflow
-    content: Build the GitHub workflow (manual + cron) that compiles the binary, runs it with secrets as env vars, and publishes models.json as a release artifact
+    content: Build the GitHub workflow (manual + cron) that compiles the binary, runs it with secrets as env vars, and publishes models.json as a release artifact - DEFERRED 2026-09-14 to a separate aggregation repo, not this plan's scope
     status: pending
 isProject: false
 ---
@@ -30,7 +30,7 @@ The Gateway today knows a remote model only through hand-written `[[model]]` ent
   - A types-only crate `shared-gateway-api` holding the normalized sheet schema structs, consumed by the provider crate, the Gateway, and Workshop server (UI elements such as the model dropdown).
   - A crate `shared-cloud-providers` with one Rust file per provider (`anthropic.rs`, `openai.rs`, `gemini.rs`, `moonshot.rs`, and so on), each defining a public `Provider` descriptor, plus the fetch/normalize logic and the sheet-building binary.
   - A GitHub workflow, triggerable manually and on a schedule, that calls every provider's model-list endpoint with keys held in GitHub secrets and builds the models sheet.
-  - The sheet published as a release artifact in the promptforge repo, so any Gateway downloads it for free with no provider key of its own.
+  - The sheet published as a release artifact in a separate aggregation repo, so any Gateway downloads it for free with no provider key of its own.
   - (Phase 2) The Gateway consumes the sheet and normalizes provider models into choices for the config UI; hosts consume the normalized models through the Gateway as usual.
 - Non-goals: the Agent Harness and CLI themselves; local (GGUF) model metadata; changes to the Gateway's routing or `[[model]]` resolution semantics. Phase 1 is infrastructure only: no UI changes and no Gateway sheet-consumption - the user's words: "I don't want anything changed in the UI yet. First I want to get the infrastructure in place and reliable to build the table." The type hoist IS in phase 1 scope: the user's words: "I still want to relocate the gateway types to shared-gateway-api."
 - Success criteria: the workflow produces a current, schema-valid sheet on demand and on schedule; a failed provider fetch propagates last-known-good data; adding a new provider is one new Rust file plus one GitHub secret. (Phase 2 criterion, not phase 1: a Gateway with no provider keys boots against the release artifact and presents normalized provider models in the config UI.)
@@ -216,7 +216,7 @@ Two pipelines share one vocabulary. The build pipeline (workflow) turns provider
 - States and validation: each provider entry has a `status` of `ok` (fetched fresh this run), `stale` (fetch failed; the previous sheet's slice was propagated verbatim with its original `fetched_at`), `unavailable` (fetch failed and no previous sheet existed; `models` is empty), or `static` (Niche provider with no list endpoint; a hand-maintained model list compiled into the binary, no fetch attempted).
 - Errors and recovery: a failed provider fetch never fails the workflow run and never drops data: the previous sheet's slice for that provider is propagated with `status: "stale"`, preserving its original `fetched_at` so consumers can see the age of the data. A first-ever run with a failed fetch records `unavailable` with an empty model list.
 - Security and privacy behavior: keys exist only as GitHub secrets injected into the workflow environment; the sheet and the crate contain no secrets.
-- Acceptance criteria (phase 1): `cargo run -p shared-cloud-providers` locally with keys in the environment produces a schema-valid `models.json`; the workflow does the same on manual dispatch and publishes it as a release artifact; a provider with a missing key or failed fetch appears as `stale` (with its previous slice) or `unavailable`, never as a build failure; a Niche provider emits its static list with `status: "static"`; the hoisted types compile at their old paths via re-export with no downstream call-site changes.
+- Acceptance criteria (phase 1): `cargo run -p shared-cloud-providers` locally with keys in the environment produces a schema-valid `models.json`; a provider with a missing key or failed fetch appears as `stale` (with its previous slice) or `unavailable`, never as a build failure; a Niche provider emits its static list with `status: "static"`; the hoisted types compile at their old paths via re-export with no downstream call-site changes. (The workflow dispatch and release-publication criteria move with the workflow to the separate aggregation repo.)
 
 </product-contract>
 <implementation-contract>
@@ -463,8 +463,8 @@ pub async fn fetch_sheet(
     release_url: &str,
 ) -> Result<shared_gateway_api::Sheet, FetchError>;
 ```
-- File and public API changes (phase 1): two new crates (`shared-gateway-api`, `shared-cloud-providers`); the hoist moves `Capabilities`, `ModelInfo`, `ModelKind`, and `ThinkingMode` from `gateway-config`/`gateway-protocol` into `shared-gateway-api`, with re-exports at the old paths so downstream call sites compile unchanged; one new workflow file under `.github/workflows/`. Nothing else in the existing crates is modified. (Phase 2, deferred: the Gateway's sheet-consumption path and the config-UI integration; `ModelConfig`/`Routing`/catalog-wire questions get settled then.)
-- Data, persistence, failure, security, and privacy constraints: the sheet is a versioned JSON artifact on a GitHub release in the promptforge repo; `BTreeMap` key ordering makes the emitted file byte-deterministic for clean diffs between runs. (Phase 2, unsettled: the Gateway's fetch-and-cache behavior - startup fetch, TTL, offline fallback to a vendored copy.)
+- File and public API changes (phase 1): two new crates (`shared-gateway-api`, `shared-cloud-providers`); the hoist moves `Capabilities`, `ModelInfo`, `ModelKind`, and `ThinkingMode` from `gateway-config`/`gateway-protocol` into `shared-gateway-api`, with re-exports at the old paths so downstream call sites compile unchanged. Nothing else in the existing crates is modified; the workflow file lives in a separate aggregation repo and is not this plan's execution scope. (Phase 2, deferred: the Gateway's sheet-consumption path and the config-UI integration; `ModelConfig`/`Routing`/catalog-wire questions get settled then.)
+- Data, persistence, failure, security, and privacy constraints: the sheet is a versioned JSON artifact on a GitHub release in a separate aggregation repo; `BTreeMap` key ordering makes the emitted file byte-deterministic for clean diffs between runs. (Phase 2, unsettled: the Gateway's fetch-and-cache behavior - startup fetch, TTL, offline fallback to a vendored copy.)
 
 </implementation-contract>
 <verification-contract>
@@ -474,9 +474,9 @@ pub async fn fetch_sheet(
 The fetch and normalization logic lives in the `shared-cloud-providers` lib precisely so it is testable offline; live endpoints are exercised only by manual or scheduled binary runs.
 
 - Unit: each provider file's normalization is tested against recorded fixture JSON (the three live payloads captured 2026-09-14 - Anthropic, OpenRouter, NVIDIA - seed the fixture set; documented example responses from official docs cover the rest); sheet schema round-trip tests (serialize, parse, compare); propagation tests (failed fetch with a previous sheet yields `stale` with preserved `fetched_at`; failed fetch without one yields `unavailable`; Niche providers yield `static`); the hoist is proven by the workspace compiling with re-exports and no call-site changes.
-- Integration and end-to-end: a local run of the binary against recorded fixtures produces a schema-valid `models.json`; a manual workflow dispatch in GitHub produces and publishes the real artifact.
+- Integration and end-to-end: a local run of the binary against recorded fixtures produces a schema-valid `models.json`. (A manual workflow dispatch producing and publishing the real artifact is verified in the separate aggregation repo.)
 - Regression, security, and performance: no keys in the artifact or the crate (CI check: the sheet contains no secret material); existing gateway and workshop suites stay green through the hoist.
-- Exit criteria: workspace nextest, doctests, clippy `-D warnings`, and `cargo fmt --all --check` green; a published release artifact exists and parses as a valid `Sheet`.
+- Exit criteria: workspace nextest, doctests, clippy `-D warnings`, and `cargo fmt --all --check` green; a locally built `models.json` parses as a valid `Sheet`. (The published-artifact criterion moves with the workflow to the separate repo.)
 
 </verification-contract>
 <decision-record>
@@ -489,7 +489,7 @@ The fetch and normalization logic lives in the `shared-cloud-providers` lib prec
   - The descriptor is public while the variances are private: the user's words - "the descriptor is public, while the variances are private - the variances are the little bullshit things that differ between providers."
   - The crate links into the Gateway and exists so the Gateway understands provider offerings and normalizes them into config-UI choices: the user's words - "the rust crate is to link into the gateway so the gateway can understand what each provider offers, and normalize its models into a set of chocies for the config ui."
   - Downstream consumers are Workshop, the PromptForge Agent Harness (not yet written), and the PromptForge CLI (not yet written), consuming models through the Gateway normally.
-  - Aggregation runs in a GitHub workflow with provider keys in GitHub secrets, manually triggerable and scheduled, publishing the sheet as a release artifact: the user's original framing. The workflow and the release artifact live in the promptforge repo itself: the user's words - "downloads the metadata file from github as a release artifact in the promptforge repo."
+  - Aggregation runs in a GitHub workflow with provider keys in GitHub secrets, manually triggerable and scheduled, publishing the sheet as a release artifact: the user's original framing. The workflow and the release artifact live in a separate aggregation repo, not the promptforge repo: the operator's words - "leave the github part of step 10 out, we are going to use a separate repo" (2026-09-14). This supersedes the earlier decision to place both in the promptforge repo. This plan still delivers the binary the workflow compiles and runs, and the `key_env` contract its secrets must match.
   - The sheet is a single `models.json` holding everything, wrapped in an envelope with `schema_version`, `generated_at` (RFC 3339), and a `providers` map: the payload is tiny (~8 KB for Anthropic's 11 models; well under 1 MB at full provider coverage), every consumer wants the whole catalog, and one file gives one atomic snapshot with no version skew between provider slices.
   - A failed provider fetch propagates the previous sheet's data for that provider rather than degrading to a marker alone: the user's words - "what happens on a failed fetch? it should propagate the previous file's data." The propagated slice is marked `stale` and keeps its original `fetched_at`.
   - The sheet schema's field names mirror the Gateway's existing `Capabilities` vocabulary where concepts overlap, so sheet-to-`ModelConfig` normalization is mechanical rather than a second mapping layer.
@@ -527,6 +527,7 @@ The fetch and normalization logic lives in the `shared-cloud-providers` lib prec
 
 ### Deferred and Out of Scope
 
+- Deferred: the aggregation workflow and release publication. They live in a separate aggregation repo, not the promptforge repo: the operator's words - "leave the github part of step 10 out, we are going to use a separate repo" (2026-09-14). This plan delivers everything the workflow needs: the `shared-cloud-providers` binary it compiles and runs, the `key_env` environment-variable contract its secrets must match, and the `models.json` output shape it publishes. Revisit when the separate repo is created.
 - Deferred: the Gateway's sheet-consumption path (`fetch_sheet`, cache, config-UI model choices) and all UI integration. The user's words: "I don't want anything changed in the UI yet. First I want to get the infrastructure in place and reliable to build the table." Revisit when the workflow has produced reliable sheets. Phase 2 should name a gateway route that re-serves the normalized catalog, so hosts consume it from the Gateway rather than fetching from GitHub themselves.
 - Deferred: an LLM-assisted curation bot that reads provider docs and opens PRs proposing updates to the static lists - LLM leverage with a human gate, keeping the published artifact deterministic. Revisit when the static lists need their first refresh.
 - Deferred: Workshop server linking `shared-gateway-api` directly for the model dropdown. The dropdown already works through the Gateway's catalog; the direct link only matters when the UI wants richer per-provider data than the catalog carries. Revisit when the dropdown needs tier or per-provider metadata.
@@ -557,11 +558,10 @@ The fetch and normalization logic lives in the `shared-cloud-providers` lib prec
 
 ## Execution Instructions
 
-Decomposition (Path: FULL), three components in dependency order:
+Decomposition (Path: FULL), two components in dependency order:
 
-1. `shared-gateway-api` first: both other components depend on its schema types, and the hoist must land before `shared-cloud-providers` can reference the canonical `ModelKind`.
-2. `shared-cloud-providers` second: the workflow compiles its `bin` target, so the crate must exist and be green first.
-3. `aggregation-workflow` last: it only wires the binary into GitHub Actions and cannot be verified before the binary exists.
+1. `shared-gateway-api` first: `shared-cloud-providers` depends on its schema types, and the hoist must land before `shared-cloud-providers` can reference the canonical `ModelKind`.
+2. `shared-cloud-providers` second: it delivers the binary the aggregation workflow compiles and runs. The workflow itself lives in a separate aggregation repo (operator decision 2026-09-14) and is not execution scope here; the original third component (`aggregation-workflow`) was removed from this plan.
 
 Pieces build sequentially within each component: the schema precedes the hoist so each commit compiles on its own (the schema is purely additive; the hoist touches existing crates); the fetch seam precedes the provider files that plug into it; `build_sheet` follows the provider files it aggregates; the binary follows the lib it wraps.
 
@@ -664,16 +664,7 @@ Pieces build sequentially within each component: the schema precedes the hoist s
 
 </step-9>
 
-<step-10>
-
-### Step 10: aggregation workflow
-
-- Component: aggregation-workflow
-- Add one workflow file under `.github/workflows/`: triggers on `workflow_dispatch` and a weekly cron; compiles the `shared-cloud-providers` binary; runs it with provider keys injected from GitHub secrets as environment variables matching each descriptor's `key_env`; publishes the resulting `models.json` as a release artifact in the promptforge repo, replacing the previous release's asset so `fetch_sheet` has a stable URL.
-- Include a check that the emitted sheet contains no secret material.
-- Verification: a manual dispatch produces and publishes a schema-valid artifact; last-known-good propagation is exercised by a provider with a missing key appearing as `stale` or `unavailable`, never as a build failure.
-
-</step-10>
+The aggregation workflow (originally Step 10) is removed from this plan's scope: it lives in a separate aggregation repo per the operator's decision of 2026-09-14. This plan's final step is Step 9; the binary it delivers is what the separate repo's workflow compiles and runs.
 
 Phase 2 (the Gateway's sheet-consumption path and config-UI integration) is deferred and is not execution scope for this plan.
 
