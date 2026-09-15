@@ -261,7 +261,7 @@ The media files under `crates/shared-cloud-providers/src/providers/`: `deepgram.
 
 <step-5>
 
-### Step 5: Local verification, push, and release rebuild
+### Step 5: Local verification, push, and release rebuild [completed]
 
 - Component: sheet-release
 
