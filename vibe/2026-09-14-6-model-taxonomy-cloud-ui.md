@@ -251,7 +251,7 @@ The remaining chat providers under `crates/shared-cloud-providers/src/providers/
 
 <step-4>
 
-### Step 4: Media provider taxonomy and languages
+### Step 4: Media provider taxonomy and languages [completed]
 
 - Component: provider-taxonomy
 

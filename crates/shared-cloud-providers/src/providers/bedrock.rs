@@ -21,7 +21,7 @@ use crate::providers::openai_shape::base_entry;
 use crate::{EnvVarSpec, FetchError, Provider};
 
 mod sigv4;
-mod taxonomy;
+pub(crate) mod taxonomy;
 
 /// Environment variable the access key id arrives under; matches the
 /// GitHub secret name.

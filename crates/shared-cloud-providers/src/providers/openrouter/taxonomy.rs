@@ -1,10 +1,11 @@
 //! OpenRouter taxonomy: the vendor prefix of the `vendor/model` id is
 //! the family, and `:free`/`:batch`-style SKU suffixes collapse onto
-//! their canonical entry when the base id is in the same list.
-//! OpenRouter's rules live in this sibling module so the provider file
-//! stays under the workspace's 500-line ceiling.
+//! their canonical entry when the base id is in the same list. The
+//! output-modality kind rule lives here too. OpenRouter's rules live in
+//! this sibling module so the provider file stays under the workspace's
+//! 500-line ceiling.
 
-use shared_gateway_api::ModelEntry;
+use shared_gateway_api::{ModelEntry, ModelKind};
 
 use crate::taxonomy::{collapse_variants, sku_suffix, vendor_prefix};
 
@@ -14,9 +15,26 @@ fn family_of(id: &str) -> String {
     vendor_prefix(id).map_or_else(|| id.to_owned(), |(vendor, _)| vendor.to_owned())
 }
 
+/// The workload, from the output modalities: the first non-text output
+/// is the model's product; a text-only model is chat.
+pub(crate) fn model_kind(output_modalities: &[String]) -> ModelKind {
+    for modality in output_modalities {
+        match modality.as_str() {
+            "embeddings" => return ModelKind::Embedding,
+            "image" => return ModelKind::Image,
+            "video" => return ModelKind::Video,
+            "audio" | "speech" => return ModelKind::Speech,
+            "transcription" => return ModelKind::Transcription,
+            "rerank" => return ModelKind::Classifier,
+            _ => {}
+        }
+    }
+    ModelKind::Chat
+}
+
 /// Set every entry's family, then collapse `:free`/`:batch` SKU
 /// suffixes onto their canonical entries.
-pub(super) fn apply(entries: &mut [ModelEntry]) {
+pub(crate) fn apply(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);
     }
@@ -27,9 +45,9 @@ pub(super) fn apply(entries: &mut [ModelEntry]) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use shared_gateway_api::ModelEntry;
+    use shared_gateway_api::{ModelEntry, ModelKind};
 
-    use super::apply;
+    use super::{apply, model_kind};
 
     /// Trimmed 2026-09-14 sheet excerpt: real OpenRouter ids, SKU
     /// variants included.
@@ -93,6 +111,24 @@ mod tests {
                 entry.family, by_id[base].family,
                 "{id} inherits its canonical's family"
             );
+        }
+    }
+
+    #[test]
+    fn every_output_modality_maps_to_its_kind() {
+        let cases: &[(&[&str], ModelKind)] = &[
+            (&["embeddings"], ModelKind::Embedding),
+            (&["image"], ModelKind::Image),
+            (&["video"], ModelKind::Video),
+            (&["audio"], ModelKind::Speech),
+            (&["speech"], ModelKind::Speech),
+            (&["transcription"], ModelKind::Transcription),
+            (&["rerank"], ModelKind::Classifier),
+            (&["text"], ModelKind::Chat),
+        ];
+        for (modalities, kind) in cases {
+            let owned: Vec<String> = modalities.iter().map(|m| (*m).to_owned()).collect();
+            assert_eq!(model_kind(&owned), *kind, "{modalities:?}");
         }
     }
 

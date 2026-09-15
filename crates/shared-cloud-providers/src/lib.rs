@@ -167,9 +167,118 @@ pub async fn fetch_models(
 mod tests {
     use std::collections::BTreeSet;
 
-    use shared_gateway_api::Tier;
+    use shared_gateway_api::{ModelEntry, Tier};
 
     use super::{FetchError, Provider, fetch_models, providers};
+
+    /// Apply one provider's private taxonomy rules to a list of
+    /// entries, by registry name. The production path applies the rules
+    /// inside each provider's fetch; this dispatch lets the registry
+    /// tests apply them to fixture entries.
+    fn apply_provider_taxonomy(name: &str, entries: &mut [ModelEntry]) -> bool {
+        match name {
+            "anthropic" => crate::providers::anthropic::taxonomy::apply(entries),
+            "azure_speech" => crate::providers::azure_speech::apply_taxonomy(entries),
+            "baidu" => crate::providers::baidu::apply_taxonomy(entries),
+            "bedrock" => crate::providers::bedrock::taxonomy::apply(entries),
+            "cohere" => crate::providers::cohere::apply_taxonomy(entries),
+            "deepgram" => crate::providers::deepgram::apply_taxonomy(entries),
+            "deepseek" => crate::providers::deepseek::apply_taxonomy(entries),
+            "elevenlabs" => crate::providers::elevenlabs::apply_taxonomy(entries),
+            "foundry" => crate::providers::foundry::apply_taxonomy(entries),
+            "gemini" => crate::providers::gemini::apply_taxonomy(entries),
+            "groq" => crate::providers::groq::apply_taxonomy(entries),
+            "leonardo" => crate::providers::leonardo::apply_taxonomy(entries),
+            "meta" => crate::providers::meta::apply_taxonomy(entries),
+            "minimax" => crate::providers::minimax::apply_taxonomy(entries),
+            "mistral" => crate::providers::mistral::taxonomy::apply(entries),
+            "moonshot" => crate::providers::moonshot::apply_taxonomy(entries),
+            "nvidia" => crate::providers::nvidia::apply_taxonomy(entries),
+            "openai" => crate::providers::openai::apply_taxonomy(entries),
+            "openrouter" => crate::providers::openrouter::taxonomy::apply(entries),
+            "qwen" => crate::providers::qwen::apply_taxonomy(entries),
+            "soniox" => crate::providers::soniox::apply_taxonomy(entries),
+            "stepfun" => crate::providers::stepfun::apply_taxonomy(entries),
+            "xai" => crate::providers::xai::apply_taxonomy(entries),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The 2026-09-14 fixture excerpts, one per provider that has one.
+    const FIXTURES: &[(&str, &str)] = &[
+        (
+            "anthropic",
+            include_str!("../tests/fixtures/2026-09-14-anthropic.json"),
+        ),
+        (
+            "cohere",
+            include_str!("../tests/fixtures/2026-09-14-cohere.json"),
+        ),
+        (
+            "deepgram",
+            include_str!("../tests/fixtures/2026-09-14-deepgram.json"),
+        ),
+        (
+            "deepseek",
+            include_str!("../tests/fixtures/2026-09-14-deepseek.json"),
+        ),
+        (
+            "gemini",
+            include_str!("../tests/fixtures/2026-09-14-gemini.json"),
+        ),
+        (
+            "meta",
+            include_str!("../tests/fixtures/2026-09-14-meta.json"),
+        ),
+        (
+            "mistral",
+            include_str!("../tests/fixtures/2026-09-14-mistral.json"),
+        ),
+        (
+            "moonshot",
+            include_str!("../tests/fixtures/2026-09-14-moonshot.json"),
+        ),
+        (
+            "nvidia",
+            include_str!("../tests/fixtures/2026-09-14-nvidia.json"),
+        ),
+        (
+            "openai",
+            include_str!("../tests/fixtures/2026-09-14-openai.json"),
+        ),
+        (
+            "openrouter",
+            include_str!("../tests/fixtures/2026-09-14-openrouter.json"),
+        ),
+        (
+            "qwen",
+            include_str!("../tests/fixtures/2026-09-14-qwen.json"),
+        ),
+        ("xai", include_str!("../tests/fixtures/2026-09-14-xai.json")),
+    ];
+
+    #[test]
+    fn every_fixture_entry_has_a_family() {
+        for &(name, json) in FIXTURES {
+            assert!(
+                providers().iter().any(|provider| provider.name == name),
+                "fixture provider `{name}` is not registered"
+            );
+            let mut entries = crate::taxonomy::fixture::entries(json);
+            assert!(
+                apply_provider_taxonomy(name, &mut entries),
+                "fixture provider `{name}` is not in the taxonomy dispatch"
+            );
+            for entry in &entries {
+                assert!(
+                    !entry.family.is_empty(),
+                    "{name}: {} has an empty family",
+                    entry.id
+                );
+            }
+        }
+    }
 
     /// The Prime tier settled in the decision record (2026-09-14):
     /// `(name, display_name, base_url)`.

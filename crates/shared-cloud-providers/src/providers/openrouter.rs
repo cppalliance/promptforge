@@ -11,13 +11,13 @@
 //! Docs: <https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties>
 
 use serde::Deserialize;
-use shared_gateway_api::{Deprecation, ModelEntry, ModelKind, Pricing, Tier};
+use shared_gateway_api::{Deprecation, ModelEntry, Pricing, Tier};
 use time::{Date, Month};
 
 use crate::providers::openai_shape::{ListResponse, base_entry};
 use crate::{FetchError, Provider};
 
-mod taxonomy;
+pub(crate) mod taxonomy;
 
 /// The OpenRouter provider descriptor: keyless - the model-list
 /// endpoint needs no credential.
@@ -95,23 +95,6 @@ struct WireTopProvider {
     max_completion_tokens: Option<u32>,
 }
 
-/// The workload, from the output modalities: the first non-text output
-/// is the model's product; a text-only model is chat.
-fn model_kind(output_modalities: &[String]) -> ModelKind {
-    for modality in output_modalities {
-        match modality.as_str() {
-            "embeddings" => return ModelKind::Embedding,
-            "image" => return ModelKind::Image,
-            "video" => return ModelKind::Video,
-            "audio" | "speech" => return ModelKind::Speech,
-            "transcription" => return ModelKind::Transcription,
-            "rerank" => return ModelKind::Classifier,
-            _ => {}
-        }
-    }
-    ModelKind::Chat
-}
-
 /// One price in USD per million tokens: the wire reports USD per token
 /// as a string, so the value scales by a million. An unparseable price
 /// drops the whole pricing object rather than publishing a wrong number.
@@ -152,7 +135,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
         .as_ref()
         .and_then(|a| a.output_modalities.as_deref())
         .unwrap_or_default();
-    entry.kind = model_kind(outputs);
+    entry.kind = taxonomy::model_kind(outputs);
     entry.context_window = model.context_length;
     entry.max_output = model
         .top_provider
@@ -190,6 +173,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 
 #[cfg(test)]
 mod tests {
+    use shared_gateway_api::ModelKind;
     use time::{Date, Month};
 
     use super::*;
@@ -358,24 +342,6 @@ mod tests {
             0.0f64.to_bits(),
             "a zero completion price stays zero"
         );
-    }
-
-    #[test]
-    fn every_output_modality_maps_to_its_kind() {
-        let cases: &[(&[&str], ModelKind)] = &[
-            (&["embeddings"], ModelKind::Embedding),
-            (&["image"], ModelKind::Image),
-            (&["video"], ModelKind::Video),
-            (&["audio"], ModelKind::Speech),
-            (&["speech"], ModelKind::Speech),
-            (&["transcription"], ModelKind::Transcription),
-            (&["rerank"], ModelKind::Classifier),
-            (&["text"], ModelKind::Chat),
-        ];
-        for (modalities, kind) in cases {
-            let owned: Vec<String> = modalities.iter().map(|m| (*m).to_owned()).collect();
-            assert_eq!(model_kind(&owned), *kind, "{modalities:?}");
-        }
     }
 
     #[test]

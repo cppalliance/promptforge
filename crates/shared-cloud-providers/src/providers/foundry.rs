@@ -108,7 +108,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 /// deployments (`gpt-4o`, `Phi-4`), whose names are operator-chosen;
 /// there is no cross-deployment naming convention to group on, and no
 /// snapshot suffixes to collapse.
-fn apply_taxonomy(entries: &mut [ModelEntry]) {
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = entry.id.clone();
     }

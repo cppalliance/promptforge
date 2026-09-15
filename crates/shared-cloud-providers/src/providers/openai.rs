@@ -131,7 +131,7 @@ fn family_of(id: &str) -> String {
 
 /// Set every entry's family, then collapse `-YYYY-MM-DD` and `-MMDD`
 /// dated snapshots onto their canonical entries.
-fn apply_taxonomy(entries: &mut [ModelEntry]) {
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);
     }

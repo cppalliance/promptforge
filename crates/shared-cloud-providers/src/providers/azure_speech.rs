@@ -5,7 +5,8 @@
 //! normalization of the per-locale base models: the trailing UUID of
 //! `self` as the id, `displayName`, `createdDateTime`, and
 //! `properties.deprecationDates.transcription` into `Deprecation`. The
-//! locale and the feature flags carry no sheet meaning and drop out.
+//! locale populates `languages` and the family; the feature flags carry
+//! no sheet meaning and drop out.
 //!
 //! Extra environment variables beyond the descriptor's
 //! `AZURE_SPEECH_KEY`: `AZURE_SPEECH_REGION` (required - the endpoint
@@ -14,12 +15,12 @@
 //! Docs: <https://learn.microsoft.com/en-us/rest/api/speechtotext/models/list-base-models>
 
 use serde::Deserialize;
-use shared_gateway_api::{Deprecation, ModelEntry, ModelKind, Tier};
+use shared_gateway_api::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};
 
 use crate::providers::openai_shape::base_entry;
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -37,7 +38,18 @@ pub const PROVIDER: Provider = Provider {
     key_env: Some(KEY_ENV),
     base_url: "https://{region}.cognitiveservices.azure.com",
     openai_base_url: None,
-    env_vars: &[],
+    env_vars: &[
+        EnvVarSpec {
+            name: KEY_ENV,
+            role: EnvRole::Key,
+            default: None,
+        },
+        EnvVarSpec {
+            name: REGION_ENV,
+            role: EnvRole::Config,
+            default: None,
+        },
+    ],
 };
 
 /// The list path under the base URL.
@@ -97,6 +109,7 @@ async fn fetch_all(
         };
         url = next;
     }
+    apply_taxonomy(&mut entries);
     Ok(entries)
 }
 
@@ -114,9 +127,9 @@ struct Page {
     next_link: Option<String>,
 }
 
-/// One base model as the wire reports it. `locale`, `description`,
-/// `kind`, `status`, `lastActionDateTime`, `features`, and
-/// `customProperties` carry no sheet meaning and are not parsed.
+/// One base model as the wire reports it. `description`, `kind`,
+/// `status`, `lastActionDateTime`, `features`, and `customProperties`
+/// carry no sheet meaning and are not parsed.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireModel {
@@ -124,6 +137,7 @@ struct WireModel {
     #[serde(rename = "self")]
     self_url: String,
     display_name: Option<String>,
+    locale: Option<String>,
     created_date_time: Option<String>,
     properties: Option<WireProperties>,
 }
@@ -150,6 +164,9 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     if let Some(name) = &model.display_name {
         entry.display_name.clone_from(name);
     }
+    if let Some(locale) = &model.locale {
+        entry.languages = vec![locale.clone()];
+    }
     entry.released_at = model.created_date_time.as_deref().and_then(parse_wire_date);
     let sunset = model
         .properties
@@ -172,6 +189,20 @@ fn parse_wire_date(value: &str) -> Option<Date> {
     OffsetDateTime::parse(value, &Rfc3339)
         .ok()
         .map(OffsetDateTime::date)
+}
+
+/// Set every entry's family: the catalog is per-locale base models, so
+/// the locale is the family; a model with no locale is its own family
+/// (its id is a UUID). There is no snapshot collapse - the ids carry no
+/// suffixes.
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = entry
+            .languages
+            .first()
+            .cloned()
+            .unwrap_or_else(|| entry.id.clone());
+    }
 }
 
 #[cfg(test)]
@@ -343,6 +374,62 @@ mod tests {
             None,
             "an empty link must not loop the fetch forever"
         );
+    }
+
+    #[test]
+    fn locale_maps_to_languages_and_family() {
+        let mut entries = entries(PAGE_1);
+        assert_eq!(
+            entries[0].languages,
+            ["en-US"],
+            "the per-locale base model carries its locale as its language"
+        );
+        apply_taxonomy(&mut entries);
+        assert_eq!(entries[0].family, "en-US", "the locale is the family");
+        assert_eq!(entries[1].family, "de-DE");
+    }
+
+    #[test]
+    fn second_page_locale_maps_the_same_way() {
+        let mut entries = entries(PAGE_2);
+        assert_eq!(entries[0].languages, ["ja-JP"]);
+        apply_taxonomy(&mut entries);
+        assert_eq!(entries[0].family, "ja-JP");
+    }
+
+    #[test]
+    fn absent_locale_falls_back_to_the_id() {
+        let mut entries = entries(
+            r#"{
+  "values": [
+    {
+      "self": "https://westus.cognitiveservices.azure.com/speechtotext/v3.2/models/base/9f8e7d6c-5b4a-3c2d-1e0f-9a8b7c6d5e4f",
+      "displayName": "Unlocalized 20241001"
+    }
+  ]
+}"#,
+        );
+        assert!(entries[0].languages.is_empty());
+        apply_taxonomy(&mut entries);
+        assert_eq!(
+            entries[0].family, entries[0].id,
+            "a model with no locale is its own family"
+        );
+    }
+
+    #[test]
+    fn descriptor_publishes_key_and_region_and_no_chat_base() {
+        assert_eq!(PROVIDER.openai_base_url, None);
+        assert_eq!(PROVIDER.env_vars.len(), 2);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
+        assert_eq!(PROVIDER.env_vars[1].name, REGION_ENV);
+        assert_eq!(
+            PROVIDER.env_vars[1].role,
+            shared_gateway_api::EnvRole::Config
+        );
+        assert_eq!(PROVIDER.env_vars[1].default, None);
     }
 
     #[tokio::test]

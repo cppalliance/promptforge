@@ -10,10 +10,10 @@
 //! Docs: <https://docs.leonardo.ai/v1.0/reference/listplatformmodels>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, ModelKind, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
 
 use crate::providers::openai_shape::base_entry;
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -27,7 +27,11 @@ pub const PROVIDER: Provider = Provider {
     key_env: Some(KEY_ENV),
     base_url: "https://cloud.leonardo.ai/api/rest/v1",
     openai_base_url: None,
-    env_vars: &[],
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -54,7 +58,9 @@ pub(crate) async fn fetch(
         .error_for_status()?
         .json()
         .await?;
-    Ok(response.custom_models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = response.custom_models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// The list envelope: platform models arrive under the (documented)
@@ -80,6 +86,16 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     }
     entry.kind = ModelKind::Image;
     entry
+}
+
+/// Set every entry's family: platform model ids are UUIDs, so the
+/// display name - the catalog's only stable label - is the family,
+/// falling back to the id when the wire reports no name. There is no
+/// snapshot collapse.
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = entry.display_name.clone();
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +159,28 @@ mod tests {
             entry.display_name, entry.id,
             "a null name falls back to the id"
         );
+    }
+
+    #[test]
+    fn display_name_is_the_family() {
+        let mut entries = entries();
+        apply_taxonomy(&mut entries);
+        assert_eq!(
+            entries[0].family, "Leonardo Phoenix",
+            "platform model ids are UUIDs; the name is the stable label"
+        );
+        assert_eq!(
+            entries[1].family, entries[1].id,
+            "a nameless model falls back to its id"
+        );
+    }
+
+    #[test]
+    fn descriptor_publishes_the_key_and_no_chat_base() {
+        assert_eq!(PROVIDER.openai_base_url, None);
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

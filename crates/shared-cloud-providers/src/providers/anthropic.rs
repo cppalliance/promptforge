@@ -13,7 +13,7 @@ use time::{Date, OffsetDateTime};
 
 use crate::{EnvVarSpec, FetchError, Provider};
 
-mod taxonomy;
+pub(crate) mod taxonomy;
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.

@@ -131,7 +131,7 @@ fn family_of(id: &str) -> String {
 /// canonical entries. DashScope uses `-YYYY-MM-DD`, `-MMDD`, and
 /// `-YYMM` suffixes; the four-digit ambiguity resolves as month-day
 /// first, then year-month.
-fn apply_taxonomy(entries: &mut [ModelEntry]) {
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);
     }

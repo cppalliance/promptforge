@@ -115,7 +115,7 @@ fn family_of(id: &str) -> String {
 /// Set every entry's family, then collapse `-MMDD` snapshot suffixes
 /// onto their canonical entries. Ids carrying the date as an infix
 /// (`grok-4.20-0309-reasoning`) are not suffixes and stay canonical.
-fn apply_taxonomy(entries: &mut [ModelEntry]) {
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);
     }

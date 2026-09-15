@@ -1,0 +1,85 @@
+{
+  "models": [
+    {
+      "id": "nova-3-general"
+    },
+    {
+      "id": "nova-3-medical"
+    },
+    {
+      "id": "nova-2-general"
+    },
+    {
+      "id": "nova-2-meeting"
+    },
+    {
+      "id": "nova-2-phonecall"
+    },
+    {
+      "id": "nova-2-finance"
+    },
+    {
+      "id": "nova-2-conversationalai"
+    },
+    {
+      "id": "nova-2-voicemail"
+    },
+    {
+      "id": "nova-2-video"
+    },
+    {
+      "id": "nova-2-medical"
+    },
+    {
+      "id": "enhanced-general"
+    },
+    {
+      "id": "enhanced-meeting"
+    },
+    {
+      "id": "enhanced-phonecall"
+    },
+    {
+      "id": "base-general"
+    },
+    {
+      "id": "base-meeting"
+    },
+    {
+      "id": "base-phonecall"
+    },
+    {
+      "id": "base-conversationalai"
+    },
+    {
+      "id": "base-voicemail"
+    },
+    {
+      "id": "base-video"
+    },
+    {
+      "id": "phoneme-general"
+    },
+    {
+      "id": "whisper-large"
+    },
+    {
+      "id": "flux-general"
+    },
+    {
+      "id": "aura-2-thalia-en"
+    },
+    {
+      "id": "aura-2-zeus-en"
+    },
+    {
+      "id": "aura-asteria-en"
+    },
+    {
+      "id": "aura-luna-en"
+    },
+    {
+      "id": "general"
+    }
+  ]
+}

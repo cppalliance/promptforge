@@ -84,7 +84,7 @@ fn family_of(id: &str) -> String {
 }
 
 /// Set every entry's family.
-fn apply_taxonomy(entries: &mut [ModelEntry]) {
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);
     }

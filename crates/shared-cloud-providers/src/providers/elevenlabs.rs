@@ -1,16 +1,17 @@
 //! ElevenLabs provider: the public descriptor plus the private variance
 //! of `GET /v1/models` - the `xi-api-key` header over a rich list
 //! response (per-model languages, capability flags, character rates). No
-//! pagination. Languages and character-cost rates have no sheet field and
-//! are dropped; the capability flags select the entry kind.
+//! pagination. The per-model languages collect into the entry;
+//! character-cost rates have no sheet field and are dropped; the
+//! capability flags select the entry kind.
 //!
 //! Docs: <https://elevenlabs.io/docs/api-reference/models/list>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, ModelKind, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
 
 use crate::providers::openai_shape::base_entry;
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -24,7 +25,11 @@ pub const PROVIDER: Provider = Provider {
     key_env: Some(KEY_ENV),
     base_url: "https://api.elevenlabs.io",
     openai_base_url: None,
-    env_vars: &[],
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -50,16 +55,27 @@ pub(crate) async fn fetch(
         .error_for_status()?
         .json()
         .await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it. The response is a bare array, not
-/// an envelope; languages, rates, and fine-tuning flags are dropped.
+/// an envelope; rates and fine-tuning flags are dropped.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     model_id: String,
     name: Option<String>,
     can_do_text_to_speech: Option<bool>,
+    #[serde(default)]
+    languages: Vec<WireLanguage>,
+}
+
+/// One language as the wire reports it; only the code has sheet
+/// meaning, the display name is dropped.
+#[derive(Debug, Deserialize)]
+struct WireLanguage {
+    language_id: String,
 }
 
 /// Normalize one wire model into a sheet entry.
@@ -73,7 +89,40 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     } else {
         ModelKind::Transcription
     };
+    entry.languages = model
+        .languages
+        .iter()
+        .map(|language| language.language_id.clone())
+        .collect();
     entry
+}
+
+/// The entry's family: the id without its trailing `_v<version>` run
+/// (`eleven_multilingual_v2` -> `eleven_multilingual`,
+/// `eleven_turbo_v2_5` -> `eleven_turbo`), and the whole id when it
+/// carries no version suffix.
+fn family_of(id: &str) -> String {
+    let segments: Vec<&str> = id.split('_').collect();
+    for (index, segment) in segments.iter().enumerate().skip(1) {
+        let versioned = segment.len() > 1
+            && segment.starts_with('v')
+            && segment[1..].bytes().all(|b| b.is_ascii_digit())
+            && segments[index + 1..]
+                .iter()
+                .all(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()));
+        if versioned {
+            return segments[..index].join("_");
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family. ElevenLabs' catalog carries no snapshot
+/// suffixes, so there is no collapse pass.
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
 }
 
 #[cfg(test)]
@@ -173,8 +222,56 @@ mod tests {
         assert_eq!(entry.kind, ModelKind::Transcription);
         assert!(!entry.images && !entry.tool_calling);
         assert!(
+            entry.languages.is_empty(),
+            "absent languages default to empty"
+        );
+        assert!(
             entry.pricing.is_none(),
             "character rates are not token pricing"
         );
+    }
+
+    #[test]
+    fn wire_languages_survive_normalization() {
+        let entries = entries(LIST);
+        assert_eq!(
+            entries[0].languages,
+            ["en", "ja"],
+            "the per-model language ids collect into the entry"
+        );
+        assert_eq!(entries[1].languages, ["en"]);
+    }
+
+    #[test]
+    fn family_drops_the_trailing_version_run() {
+        let table: &[(&str, &str)] = &[
+            ("eleven_multilingual_v2", "eleven_multilingual"),
+            ("eleven_turbo_v2_5", "eleven_turbo"),
+            ("eleven_flash_v2_5", "eleven_flash"),
+            ("eleven_v3", "eleven"),
+            ("scribe_v1", "scribe"),
+            ("scribe_v2", "scribe"),
+            ("eleven_legacy", "eleven_legacy"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(family_of(id), family, "{id}");
+        }
+    }
+
+    #[test]
+    fn taxonomy_sets_every_family() {
+        let mut entries = entries(LIST);
+        apply_taxonomy(&mut entries);
+        assert_eq!(entries[0].family, "eleven_multilingual");
+        assert_eq!(entries[1].family, "scribe");
+    }
+
+    #[test]
+    fn descriptor_publishes_the_key_and_no_chat_base() {
+        assert_eq!(PROVIDER.openai_base_url, None);
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

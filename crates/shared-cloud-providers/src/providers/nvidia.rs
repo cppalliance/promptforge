@@ -67,7 +67,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 /// `vendor/model` id (`meta`, `nvidia`, `google`, ...), and to the
 /// whole id when there is no slash. There is no snapshot or SKU
 /// collapse: the catalog carries neither.
-fn apply_taxonomy(entries: &mut [ModelEntry]) {
+pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = crate::taxonomy::vendor_prefix(&entry.id)
             .map_or_else(|| entry.id.clone(), |(vendor, _)| vendor.to_owned());
