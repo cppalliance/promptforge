@@ -1,0 +1,103 @@
+{
+  "models": [
+    {
+      "id": "c4ai-aya-expanse-32b"
+    },
+    {
+      "id": "c4ai-aya-vision-32b"
+    },
+    {
+      "id": "cohere-transcribe-03-2026"
+    },
+    {
+      "id": "command-a-03-2025"
+    },
+    {
+      "id": "command-a-plus-05-2026"
+    },
+    {
+      "id": "command-a-reasoning-08-2025"
+    },
+    {
+      "id": "command-a-translate-08-2025"
+    },
+    {
+      "id": "command-a-vision-07-2025"
+    },
+    {
+      "id": "command-r-08-2024"
+    },
+    {
+      "id": "command-r-plus-08-2024"
+    },
+    {
+      "id": "command-r7b-12-2024"
+    },
+    {
+      "id": "command-r7b-arabic-02-2025"
+    },
+    {
+      "id": "embed-english-light-v3.0"
+    },
+    {
+      "id": "embed-english-light-v3.0-image"
+    },
+    {
+      "id": "embed-english-v3.0"
+    },
+    {
+      "id": "embed-english-v3.0-image"
+    },
+    {
+      "id": "embed-multilingual-light-v3.0"
+    },
+    {
+      "id": "embed-multilingual-light-v3.0-image"
+    },
+    {
+      "id": "embed-multilingual-v3.0"
+    },
+    {
+      "id": "embed-multilingual-v3.0-image"
+    },
+    {
+      "id": "embed-v4.0"
+    },
+    {
+      "id": "north-mini-code-1-0"
+    },
+    {
+      "id": "north-small-translate-09-2026"
+    },
+    {
+      "id": "parse-v5.0"
+    },
+    {
+      "id": "rerank-english-v3.0"
+    },
+    {
+      "id": "rerank-multilingual-v3.0"
+    },
+    {
+      "id": "rerank-v3.5"
+    },
+    {
+      "id": "rerank-v4.0-fast"
+    },
+    {
+      "id": "rerank-v4.0-pro"
+    },
+    {
+      "id": "tiny-aya-earth"
+    },
+    {
+      "id": "tiny-aya-fire"
+    },
+    {
+      "id": "tiny-aya-global"
+    },
+    {
+      "id": "tiny-aya-water"
+    }
+  ]
+}

@@ -17,6 +17,8 @@ use time::{Date, Month};
 use crate::providers::openai_shape::{ListResponse, base_entry};
 use crate::{FetchError, Provider};
 
+mod taxonomy;
+
 /// The OpenRouter provider descriptor: keyless - the model-list
 /// endpoint needs no credential.
 pub const PROVIDER: Provider = Provider {
@@ -25,7 +27,7 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Aggregator,
     key_env: None,
     base_url: "https://openrouter.ai",
-    openai_base_url: None,
+    openai_base_url: Some("https://openrouter.ai/api/v1"),
     env_vars: &[],
 };
 
@@ -46,7 +48,9 @@ pub(crate) async fn fetch(
         .error_for_status()?
         .json()
         .await?;
-    Ok(response.data.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = response.data.iter().map(normalize_model).collect();
+    taxonomy::apply(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it. `canonical_slug`, `description`,
@@ -453,6 +457,18 @@ mod tests {
             parse_expiration_date("eventually"),
             None,
             "an unparseable expiration value keeps no date"
+        );
+    }
+
+    #[test]
+    fn descriptor_publishes_the_chat_base_and_stays_keyless() {
+        assert_eq!(
+            PROVIDER.openai_base_url,
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert!(
+            PROVIDER.env_vars.is_empty(),
+            "the keyless provider declares no variables"
         );
     }
 

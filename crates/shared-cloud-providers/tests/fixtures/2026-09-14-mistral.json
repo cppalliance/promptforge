@@ -1,0 +1,142 @@
+{
+  "models": [
+    {
+      "id": "codestral-2508"
+    },
+    {
+      "id": "codestral-embed"
+    },
+    {
+      "id": "codestral-embed-2505"
+    },
+    {
+      "id": "codestral-latest"
+    },
+    {
+      "id": "labs-leanstral-1-5"
+    },
+    {
+      "id": "labs-leanstral-1-5-1"
+    },
+    {
+      "id": "magistral-medium-latest"
+    },
+    {
+      "id": "magistral-small-latest"
+    },
+    {
+      "id": "ministral-14b-2512"
+    },
+    {
+      "id": "ministral-14b-latest"
+    },
+    {
+      "id": "ministral-3b-2512"
+    },
+    {
+      "id": "ministral-3b-latest"
+    },
+    {
+      "id": "ministral-8b-2512"
+    },
+    {
+      "id": "ministral-8b-latest"
+    },
+    {
+      "id": "mistral-code-fim-latest"
+    },
+    {
+      "id": "mistral-code-latest"
+    },
+    {
+      "id": "mistral-embed"
+    },
+    {
+      "id": "mistral-embed-2312"
+    },
+    {
+      "id": "mistral-medium"
+    },
+    {
+      "id": "mistral-medium-2604"
+    },
+    {
+      "id": "mistral-medium-3"
+    },
+    {
+      "id": "mistral-medium-3-5"
+    },
+    {
+      "id": "mistral-medium-3.5"
+    },
+    {
+      "id": "mistral-medium-latest"
+    },
+    {
+      "id": "mistral-moderation-2603"
+    },
+    {
+      "id": "mistral-ocr-2512"
+    },
+    {
+      "id": "mistral-ocr-3"
+    },
+    {
+      "id": "mistral-ocr-3-0"
+    },
+    {
+      "id": "mistral-ocr-4"
+    },
+    {
+      "id": "mistral-ocr-4-0"
+    },
+    {
+      "id": "mistral-ocr-4-1"
+    },
+    {
+      "id": "mistral-ocr-latest"
+    },
+    {
+      "id": "mistral-small-2603"
+    },
+    {
+      "id": "mistral-small-latest"
+    },
+    {
+      "id": "mistral-vibe-cli-fast"
+    },
+    {
+      "id": "mistral-vibe-cli-latest"
+    },
+    {
+      "id": "mistral-vibe-cli-with-tools"
+    },
+    {
+      "id": "voxtral-mini-2602"
+    },
+    {
+      "id": "voxtral-mini-latest"
+    },
+    {
+      "id": "voxtral-mini-realtime-2602"
+    },
+    {
+      "id": "voxtral-mini-realtime-latest"
+    },
+    {
+      "id": "voxtral-mini-transcribe-realtime-2602"
+    },
+    {
+      "id": "voxtral-mini-tts-2603"
+    },
+    {
+      "id": "voxtral-mini-tts-latest"
+    },
+    {
+      "id": "voxtral-small-2507"
+    },
+    {
+      "id": "voxtral-small-latest"
+    }
+  ]
+}

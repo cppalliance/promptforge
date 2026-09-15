@@ -22,7 +22,7 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: None,
     base_url: "https://integrate.api.nvidia.com/v1",
-    openai_base_url: None,
+    openai_base_url: Some("https://integrate.api.nvidia.com/v1"),
     env_vars: &[],
 };
 
@@ -43,7 +43,9 @@ pub(crate) async fn fetch(
         .error_for_status()?
         .json()
         .await?;
-    Ok(response.data.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = response.data.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it. Only the id carries sheet meaning:
@@ -59,6 +61,17 @@ struct WireModel {
 /// the conservative base with no release date.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, None)
+}
+
+/// Set every entry's family to the vendor prefix of its
+/// `vendor/model` id (`meta`, `nvidia`, `google`, ...), and to the
+/// whole id when there is no slash. There is no snapshot or SKU
+/// collapse: the catalog carries neither.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = crate::taxonomy::vendor_prefix(&entry.id)
+            .map_or_else(|| entry.id.clone(), |(vendor, _)| vendor.to_owned());
+    }
 }
 
 #[cfg(test)]
@@ -125,6 +138,55 @@ mod tests {
                 entry.id
             );
         }
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: real NVIDIA ids across vendors.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-nvidia.json");
+
+    #[test]
+    fn fixture_ids_classify_into_vendor_families() {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        let by_id: std::collections::BTreeMap<String, ModelEntry> = entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+        let table: &[(&str, &str)] = &[
+            ("meta/llama-3.2-11b-vision-instruct", "meta"),
+            ("nvidia/llama-3.1-nemotron-70b-instruct", "nvidia"),
+            ("nvidia/nvclip", "nvidia"),
+            ("google/gemma-3-12b-it", "google"),
+            ("deepseek-ai/deepseek-v4-flash-0731", "deepseek-ai"),
+            ("moonshotai/kimi-k3", "moonshotai"),
+            ("openai/gpt-oss-20b", "openai"),
+            ("mistralai/mistral-large", "mistralai"),
+            ("z-ai/glm-5.3-flash", "z-ai"),
+            ("01-ai/yi-large", "01-ai"),
+            ("snowflake/arctic-embed-l", "snowflake"),
+            ("writer/palmyra-med-70b", "writer"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "no variant collapse for the aggregator: {}",
+                entry.id
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_publishes_the_chat_base_and_stays_keyless() {
+        assert_eq!(
+            PROVIDER.openai_base_url,
+            Some("https://integrate.api.nvidia.com/v1")
+        );
+        assert!(
+            PROVIDER.env_vars.is_empty(),
+            "the keyless provider declares no variables"
+        );
     }
 
     #[tokio::test]

@@ -11,12 +11,12 @@
 //! Docs: <https://docs.mistral.ai/api/endpoint/models>
 
 use serde::Deserialize;
-use shared_gateway_api::{Deprecation, ModelEntry, Tier};
+use shared_gateway_api::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
 use time::format_description::well_known::Rfc3339;
 use time::{Date, Month, OffsetDateTime};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -29,8 +29,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.mistral.ai",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.mistral.ai/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -50,7 +54,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it. `owned_by`, `description`,
@@ -83,6 +89,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     if let Some(name) = &model.name {
         entry.display_name.clone_from(name);
     }
+    entry.kind = kind_of(&model.id);
     entry.context_window = model.max_context_length;
     entry.tool_calling = model
         .capabilities
@@ -118,6 +125,67 @@ fn parse_deprecation_date(value: &str) -> Option<Date> {
         return None;
     };
     Date::from_calendar_date(year, Month::try_from(month).ok()?, day).ok()
+}
+
+/// The workload, inferred from the name: the card's capability booleans
+/// report no endpoint kind. Segment matches keep `embed` and `ocr` from
+/// matching inside unrelated words. The OCR line serves Mistral's
+/// document-parsing endpoint, not chat completions; it maps to
+/// `classifier`, the bucket for non-chat text-processing endpoints
+/// (the OpenAI moderation precedent), so the view never offers it as a
+/// chat model.
+fn kind_of(id: &str) -> ModelKind {
+    let segments: Vec<&str> = id.split('-').collect();
+    let has = |names: &[&str]| segments.iter().any(|segment| names.contains(segment));
+    if has(&["tts"]) {
+        ModelKind::Speech
+    } else if has(&["transcribe"]) {
+        ModelKind::Transcription
+    } else if has(&["embed"]) {
+        ModelKind::Embedding
+    } else if has(&["ocr"]) {
+        ModelKind::Classifier
+    } else {
+        ModelKind::Chat
+    }
+}
+
+/// The entry's family: the product line for a known prefix, and the
+/// whole id otherwise. Longer prefixes come first so `codestral-embed`
+/// and `mistral-embed` land in `embed` rather than `codestral`.
+fn family_of(id: &str) -> String {
+    const LINES: &[(&str, &str)] = &[
+        ("mistral-embed", "embed"),
+        ("codestral-embed", "embed"),
+        ("mistral-ocr", "ocr"),
+        ("mistral-moderation", "moderation"),
+        ("mistral-medium", "mistral-medium"),
+        ("mistral-small", "mistral-small"),
+        ("mistral-code", "mistral-code"),
+        ("mistral-vibe-cli", "mistral-vibe-cli"),
+        ("codestral", "codestral"),
+        ("ministral", "ministral"),
+        ("magistral", "magistral"),
+        ("voxtral", "voxtral"),
+        ("labs-leanstral", "labs-leanstral"),
+    ];
+    for (prefix, family) in LINES {
+        if id == *prefix || id.starts_with(&format!("{prefix}-")) {
+            return (*family).to_owned();
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family, then collapse `-YYMM` snapshot suffixes
+/// onto their canonical entries.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
+    crate::taxonomy::collapse_variants(entries, |id| {
+        crate::taxonomy::strip_snapshot(id, crate::taxonomy::SnapshotStyle::YearMonth)
+    });
 }
 
 #[cfg(test)]
@@ -304,5 +372,146 @@ mod tests {
             None,
             "an unparseable deprecation value keeps no date"
         );
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: the real Mistral ids.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-mistral.json");
+
+    /// The fixture ids with the provider's taxonomy applied, by id.
+    fn classified() -> std::collections::BTreeMap<String, ModelEntry> {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect()
+    }
+
+    #[test]
+    fn fixture_ids_classify_into_product_line_families() {
+        let by_id = classified();
+        let table: &[(&str, &str)] = &[
+            ("codestral-latest", "codestral"),
+            ("codestral-2508", "codestral"),
+            ("mistral-small-latest", "mistral-small"),
+            ("mistral-small-2603", "mistral-small"),
+            ("mistral-medium", "mistral-medium"),
+            ("mistral-medium-3.5", "mistral-medium"),
+            ("mistral-medium-3-5", "mistral-medium"),
+            ("mistral-code-latest", "mistral-code"),
+            ("mistral-code-fim-latest", "mistral-code"),
+            ("mistral-vibe-cli-fast", "mistral-vibe-cli"),
+            ("mistral-embed", "embed"),
+            ("codestral-embed", "embed"),
+            ("mistral-ocr-latest", "ocr"),
+            ("mistral-ocr-4-1", "ocr"),
+            ("mistral-moderation-2603", "moderation"),
+            ("voxtral-mini-2602", "voxtral"),
+            ("voxtral-small-latest", "voxtral"),
+            ("magistral-small-latest", "magistral"),
+            ("ministral-3b-2512", "ministral"),
+            ("labs-leanstral-1-5", "labs-leanstral"),
+            ("labs-leanstral-1-5-1", "labs-leanstral"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+    }
+
+    #[test]
+    fn year_month_snapshots_collapse_onto_present_aliases() {
+        let by_id = classified();
+        let table: &[(&str, &str, &str)] = &[
+            ("mistral-medium-2604", "mistral-medium", "2604"),
+            ("mistral-embed-2312", "mistral-embed", "2312"),
+            ("codestral-embed-2505", "codestral-embed", "2505"),
+        ];
+        for &(id, base, suffix) in table {
+            let entry = &by_id[id];
+            assert_eq!(entry.variant_of.as_deref(), Some(base), "{id}");
+            assert_eq!(entry.variant.as_deref(), Some(suffix), "{id}");
+            assert_eq!(
+                entry.family, by_id[base].family,
+                "{id} inherits its canonical's family"
+            );
+        }
+    }
+
+    #[test]
+    fn year_month_snapshots_without_a_canonical_stay_canonical() {
+        let by_id = classified();
+        // `codestral-2508`, `ministral-3b-2512`, and the other dated ids
+        // whose base is absent (only `-latest` aliases exist) stay canonical.
+        for id in ["codestral-2508", "ministral-3b-2512", "voxtral-mini-2602"] {
+            assert!(
+                by_id[id].variant_of.is_none(),
+                "{id} must stay canonical: its base id is not in the list"
+            );
+        }
+        for entry in by_id.values() {
+            assert!(!entry.family.is_empty(), "{} has an empty family", entry.id);
+        }
+    }
+
+    #[test]
+    fn name_patterns_infer_the_kind() {
+        let table: &[(&str, shared_gateway_api::ModelKind)] = &[
+            (
+                "voxtral-mini-tts-latest",
+                shared_gateway_api::ModelKind::Speech,
+            ),
+            (
+                "voxtral-mini-tts-2603",
+                shared_gateway_api::ModelKind::Speech,
+            ),
+            (
+                "voxtral-mini-transcribe-realtime-2602",
+                shared_gateway_api::ModelKind::Transcription,
+            ),
+            ("mistral-embed", shared_gateway_api::ModelKind::Embedding),
+            (
+                "codestral-embed-2505",
+                shared_gateway_api::ModelKind::Embedding,
+            ),
+            (
+                "mistral-ocr-latest",
+                shared_gateway_api::ModelKind::Classifier,
+            ),
+            ("mistral-small-latest", shared_gateway_api::ModelKind::Chat),
+            ("codestral-latest", shared_gateway_api::ModelKind::Chat),
+        ];
+        for &(id, kind) in table {
+            assert_eq!(kind_of(id), kind, "{id}");
+        }
+    }
+
+    #[test]
+    fn normalization_applies_the_inferred_kind() {
+        let page: ListResponse<WireModel> = serde_json::from_str(
+            r#"{
+              "object": "list",
+              "data": [
+                { "id": "voxtral-mini-tts-latest", "created": null, "name": null,
+                  "capabilities": null, "max_context_length": null,
+                  "deprecation": null, "deprecation_replacement_model": null }
+              ]
+            }"#,
+        )
+        .expect("fixture must parse as a list");
+        let entry = normalize_model(&page.data[0]);
+        assert_eq!(
+            entry.kind,
+            shared_gateway_api::ModelKind::Speech,
+            "the wire card carries no kind; the name rule supplies it"
+        );
+    }
+
+    #[test]
+    fn descriptor_publishes_the_chat_base_and_key() {
+        assert_eq!(PROVIDER.openai_base_url, Some("https://api.mistral.ai/v1"));
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

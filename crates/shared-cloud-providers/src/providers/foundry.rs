@@ -13,10 +13,10 @@
 //! Docs: <https://learn.microsoft.com/en-us/rest/api/aifoundry/azureopenai/models>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, Tier};
 
 use crate::providers::openai_shape::{ListResponse, base_entry};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -34,7 +34,18 @@ pub const PROVIDER: Provider = Provider {
     key_env: Some(KEY_ENV),
     base_url: "",
     openai_base_url: None,
-    env_vars: &[],
+    env_vars: &[
+        EnvVarSpec {
+            name: KEY_ENV,
+            role: EnvRole::Key,
+            default: None,
+        },
+        EnvVarSpec {
+            name: ENDPOINT_ENV,
+            role: EnvRole::Config,
+            default: None,
+        },
+    ],
 };
 
 /// The list path under the endpoint origin.
@@ -61,7 +72,9 @@ pub(crate) async fn fetch(
         .error_for_status()?
         .json()
         .await?;
-    Ok(response.data.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = response.data.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// The per-resource endpoint origin from the environment, trailing
@@ -89,6 +102,16 @@ struct WireModel {
 /// Normalize one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, model.created)
+}
+
+/// Set every entry's family to its own id: the catalog is per-resource
+/// deployments (`gpt-4o`, `Phi-4`), whose names are operator-chosen;
+/// there is no cross-deployment naming convention to group on, and no
+/// snapshot suffixes to collapse.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = entry.id.clone();
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +191,46 @@ mod tests {
         assert!(!entry.images && !entry.tool_calling);
         assert!(entry.pricing.is_none());
         assert!(entry.deprecation.is_none());
+    }
+
+    #[test]
+    fn deployment_ids_are_their_own_families() {
+        // Foundry's catalog is per-resource deployments; there is no
+        // cross-deployment naming convention to group on.
+        let mut entries: Vec<ModelEntry> = ["gpt-4o", "Phi-4", "llama-3.3-70b"]
+            .iter()
+            .map(|id| crate::taxonomy::fixture::entry(id))
+            .collect();
+        apply_taxonomy(&mut entries);
+        for entry in &entries {
+            assert_eq!(entry.family, entry.id, "the whole id is the family");
+            assert!(entry.variant_of.is_none());
+        }
+    }
+
+    #[test]
+    fn descriptor_declares_the_azure_variables_and_no_chat_base() {
+        assert_eq!(
+            PROVIDER.openai_base_url, None,
+            "the endpoint is per-resource, not a fixed URL"
+        );
+        let vars: &[(&str, shared_gateway_api::EnvRole, Option<&str>)] = &[
+            (
+                "AZURE_FOUNDRY_API_KEY",
+                shared_gateway_api::EnvRole::Key,
+                None,
+            ),
+            (
+                "AZURE_FOUNDRY_ENDPOINT",
+                shared_gateway_api::EnvRole::Config,
+                None,
+            ),
+        ];
+        assert_eq!(PROVIDER.env_vars.len(), vars.len());
+        for (spec, &(name, role, default)) in PROVIDER.env_vars.iter().zip(vars) {
+            assert_eq!(spec.name, name);
+            assert_eq!(spec.role, role);
+            assert_eq!(spec.default, default);
+        }
     }
 }

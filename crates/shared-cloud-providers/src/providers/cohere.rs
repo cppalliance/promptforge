@@ -9,10 +9,10 @@
 //! Docs: <https://docs.cohere.com/reference/list-models>
 
 use serde::Deserialize;
-use shared_gateway_api::{Deprecation, ModelEntry, ModelKind, Tier};
+use shared_gateway_api::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
 
 use crate::providers::openai_shape::base_entry;
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -25,8 +25,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.cohere.com",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.cohere.com/compatibility/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// Page size for the list request: the endpoint maximum, so the full
@@ -64,6 +68,7 @@ pub(crate) async fn fetch(
         };
         token = Some(next);
     }
+    apply_taxonomy(&mut entries);
     Ok(entries)
 }
 
@@ -131,6 +136,33 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
         });
     }
     entry
+}
+
+/// The entry's family: the `command-a` and `command-r` lines by prefix
+/// (`command-r7b` belongs to the `command-r` line), `aya` for any id
+/// carrying the segment (the `c4ai-aya-*` and `tiny-aya-*` spellings),
+/// and the whole id otherwise.
+fn family_of(id: &str) -> String {
+    for line in ["command-a", "command-r"] {
+        if id.starts_with(line) {
+            return (*line).to_owned();
+        }
+    }
+    if id.split('-').any(|segment| segment == "aya") {
+        return "aya".to_owned();
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family, then collapse `-MM-YYYY` snapshot suffixes
+/// onto their canonical entries.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
+    crate::taxonomy::collapse_variants(entries, |id| {
+        crate::taxonomy::strip_snapshot(id, crate::taxonomy::SnapshotStyle::MonthYear)
+    });
 }
 
 #[cfg(test)]
@@ -274,5 +306,88 @@ mod tests {
             None,
             "an empty token must not loop the fetch forever"
         );
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: the real Cohere ids.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-cohere.json");
+
+    /// The fixture ids with the provider's taxonomy applied, by id.
+    fn classified() -> std::collections::BTreeMap<String, ModelEntry> {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect()
+    }
+
+    #[test]
+    fn fixture_ids_classify_into_line_families() {
+        let by_id = classified();
+        let table: &[(&str, &str)] = &[
+            ("command-a-03-2025", "command-a"),
+            ("command-a-plus-05-2026", "command-a"),
+            ("command-a-reasoning-08-2025", "command-a"),
+            ("command-a-translate-08-2025", "command-a"),
+            ("command-r-08-2024", "command-r"),
+            ("command-r-plus-08-2024", "command-r"),
+            ("command-r7b-12-2024", "command-r"),
+            ("command-r7b-arabic-02-2025", "command-r"),
+            ("c4ai-aya-expanse-32b", "aya"),
+            ("c4ai-aya-vision-32b", "aya"),
+            ("tiny-aya-earth", "aya"),
+            ("tiny-aya-global", "aya"),
+            ("embed-v4.0", "embed-v4.0"),
+            ("rerank-v3.5", "rerank-v3.5"),
+            ("parse-v5.0", "parse-v5.0"),
+            ("north-mini-code-1-0", "north-mini-code-1-0"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+    }
+
+    #[test]
+    fn month_year_snapshots_without_a_canonical_stay_canonical() {
+        let by_id = classified();
+        // Every `-MM-YYYY` suffix in the 2026-09-14 sheet (command-a-03-2025,
+        // cohere-transcribe-03-2026, ...) lacks its base id in the list, so
+        // nothing collapses and every id keeps a non-empty family.
+        for entry in by_id.values() {
+            assert!(!entry.family.is_empty(), "{} has an empty family", entry.id);
+            assert!(
+                entry.variant_of.is_none(),
+                "{} must stay canonical: its base id is not in the list",
+                entry.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_month_year_snapshot_collapses_onto_its_canonical() {
+        let mut entries = vec![
+            crate::taxonomy::fixture::entry("command-a"),
+            crate::taxonomy::fixture::entry("command-a-03-2025"),
+        ];
+        apply_taxonomy(&mut entries);
+        let variant = &entries[1];
+        assert_eq!(variant.variant_of.as_deref(), Some("command-a"));
+        assert_eq!(variant.variant.as_deref(), Some("03-2025"));
+        assert_eq!(
+            variant.family, "command-a",
+            "the variant inherits the canonical's family"
+        );
+    }
+
+    #[test]
+    fn descriptor_publishes_the_compatibility_base_and_key() {
+        assert_eq!(
+            PROVIDER.openai_base_url,
+            Some("https://api.cohere.com/compatibility/v1")
+        );
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

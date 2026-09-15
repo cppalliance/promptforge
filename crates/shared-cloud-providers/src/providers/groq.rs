@@ -8,10 +8,10 @@
 //! Docs: <https://console.groq.com/docs/models>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, ModelKind, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -24,8 +24,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.groq.com/openai/v1",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.groq.com/openai/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -45,7 +49,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it.
@@ -63,6 +69,34 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
         entry.kind = ModelKind::Transcription;
     }
     entry
+}
+
+/// The entry's family: the vendor for slash-namespaced resold ids
+/// (`meta-llama/...`, `qwen/...`), the `whisper` line, the
+/// `llama-<version>` prefix for the bare Llama ids, and the whole id
+/// otherwise. The catalog carries no snapshot suffixes, so there is no
+/// collapse pass.
+fn family_of(id: &str) -> String {
+    if let Some((vendor, _)) = crate::taxonomy::vendor_prefix(id) {
+        return vendor.to_owned();
+    }
+    if id == "whisper" || id.starts_with("whisper-") {
+        return "whisper".to_owned();
+    }
+    if let Some(rest) = id.strip_prefix("llama-") {
+        let token = rest.split('-').next().unwrap_or(rest);
+        if crate::taxonomy::is_version_token(token) {
+            return format!("llama-{token}");
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
 }
 
 #[cfg(test)]
@@ -127,5 +161,60 @@ mod tests {
             ModelKind::Transcription,
             "whisper-large-v3-turbo is speech-to-text"
         );
+    }
+
+    #[test]
+    fn catalog_ids_classify_into_vendor_and_line_families() {
+        // Groq was unprovisioned for the 2026-09-14 sheet, so the table
+        // follows the documented catalog: namespaced ids family by
+        // vendor, bare ids by line.
+        let mut entries: Vec<ModelEntry> = [
+            "llama-3.3-70b-versatile",
+            "whisper-large-v3",
+            "whisper-large-v3-turbo",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "qwen/qwen3-32b",
+            "moonshotai/kimi-k2-instruct",
+            "openai/gpt-oss-120b",
+        ]
+        .iter()
+        .map(|id| crate::taxonomy::fixture::entry(id))
+        .collect();
+        apply_taxonomy(&mut entries);
+        let by_id: std::collections::BTreeMap<String, ModelEntry> = entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+        let table: &[(&str, &str)] = &[
+            ("llama-3.3-70b-versatile", "llama-3.3"),
+            ("whisper-large-v3", "whisper"),
+            ("whisper-large-v3-turbo", "whisper"),
+            ("meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama"),
+            ("qwen/qwen3-32b", "qwen"),
+            ("moonshotai/kimi-k2-instruct", "moonshotai"),
+            ("openai/gpt-oss-120b", "openai"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "the catalog carries no snapshot suffixes: {}",
+                entry.id
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_publishes_the_chat_base_and_key() {
+        assert_eq!(
+            PROVIDER.openai_base_url,
+            Some("https://api.groq.com/openai/v1")
+        );
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

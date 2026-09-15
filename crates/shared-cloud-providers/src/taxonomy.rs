@@ -17,8 +17,6 @@ pub(crate) enum SnapshotStyle {
     /// `-MMDD`, e.g. `grok-4.20-multi-agent-0309`.
     MonthDay,
     /// `-YYMM`, e.g. `mistral-large-2508`.
-    // Consumed by the Subprime pass; constructed only in tests today.
-    #[allow(dead_code)]
     YearMonth,
     /// `-MM-YYYY`, e.g. `deep-research-pro-preview-12-2025`.
     MonthYear,
@@ -111,8 +109,6 @@ pub(crate) fn strip_snapshot(id: &str, style: SnapshotStyle) -> Option<(&str, &s
 /// Split a `vendor/model` id into its vendor prefix and model id, on the
 /// first slash. Returns `None` when there is no slash or either side is
 /// empty.
-// Consumed by the aggregator pass; called only in tests today.
-#[allow(dead_code)]
 pub(crate) fn vendor_prefix(id: &str) -> Option<(&str, &str)> {
     let (vendor, model) = id.split_once('/')?;
     (!vendor.is_empty() && !model.is_empty()).then_some((vendor, model))
@@ -121,8 +117,6 @@ pub(crate) fn vendor_prefix(id: &str) -> Option<(&str, &str)> {
 /// Split a `:free`/`:batch`-style SKU suffix off `id`, on the last colon,
 /// returning the base id and the SKU text. Returns `None` when there is
 /// no colon or either side is empty.
-// Consumed by the aggregator pass; called only in tests today.
-#[allow(dead_code)]
 pub(crate) fn sku_suffix(id: &str) -> Option<(&str, &str)> {
     let (base, sku) = id.rsplit_once(':')?;
     (!base.is_empty() && !sku.is_empty()).then_some((base, sku))
@@ -239,7 +233,10 @@ mod tests {
         assert!(is_version_token_o("4o"), "the gpt-4o naming style");
         assert!(is_version_token_o("5.1"));
         assert!(!is_version_token_o("o"), "the o alone carries no digit");
-        assert!(!is_version_token_o("4o5"), "the o is a suffix, not an infix");
+        assert!(
+            !is_version_token_o("4o5"),
+            "the o is a suffix, not an infix"
+        );
     }
 
     #[test]

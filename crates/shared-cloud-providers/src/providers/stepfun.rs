@@ -9,10 +9,10 @@
 //! Docs: <https://platform.stepfun.ai/docs/en/api-reference/models/list>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, Tier};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -25,8 +25,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.stepfun.ai/v1",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.stepfun.ai/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -46,7 +50,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it.
@@ -60,6 +66,28 @@ struct WireModel {
 /// the conservative base.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, model.created)
+}
+
+/// The entry's family: the `step-<version>` prefix for the numbered
+/// lines (`step-3.7-flash`, `step-1o-turbo-vision`), and the whole id
+/// otherwise. No snapshot collapse: the one observed four-digit suffix
+/// (`step-3.5-flash-2603`) is a single ambiguous example, not a
+/// verified convention.
+fn family_of(id: &str) -> String {
+    if let Some(rest) = id.strip_prefix("step-") {
+        let token = rest.split('-').next().unwrap_or(rest);
+        if crate::taxonomy::is_version_token_o(token) {
+            return format!("step-{token}");
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
 }
 
 #[cfg(test)]
@@ -120,5 +148,58 @@ mod tests {
             !entry.images,
             "the `-vision` id suffix is not a reported field and must not set images"
         );
+    }
+
+    #[test]
+    fn catalog_ids_classify_into_version_families() {
+        // StepFun was unprovisioned for the 2026-09-14 sheet, so the
+        // table follows the documented catalog.
+        let mut entries: Vec<ModelEntry> = [
+            "step-3.7-flash",
+            "step-3.5-flash",
+            "step-3.5-flash-2603",
+            "step-1o-turbo-vision",
+            "step-2-16k",
+            "step-1-8k",
+            "step-r1-v-mini",
+        ]
+        .iter()
+        .map(|id| crate::taxonomy::fixture::entry(id))
+        .collect();
+        apply_taxonomy(&mut entries);
+        let by_id: std::collections::BTreeMap<String, ModelEntry> = entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+        let table: &[(&str, &str)] = &[
+            ("step-3.7-flash", "step-3.7"),
+            ("step-3.5-flash", "step-3.5"),
+            ("step-3.5-flash-2603", "step-3.5"),
+            ("step-1o-turbo-vision", "step-1o"),
+            ("step-2-16k", "step-2"),
+            ("step-1-8k", "step-1"),
+            ("step-r1-v-mini", "step-r1-v-mini"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+        for entry in by_id.values() {
+            // `-2603` is deliberately not collapsed: one ambiguous
+            // four-digit example is not a verified snapshot convention.
+            assert!(
+                entry.variant_of.is_none(),
+                "no snapshot style is verified for StepFun: {}",
+                entry.id
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_publishes_the_chat_base_and_key() {
+        assert_eq!(PROVIDER.openai_base_url, Some("https://api.stepfun.ai/v1"));
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

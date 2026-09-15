@@ -241,7 +241,7 @@ First act: commit trimmed per-provider excerpts of the saved 2026-09-14 sheet co
 
 <step-3>
 
-### Step 3: Subprime and aggregator taxonomy pass
+### Step 3: Subprime and aggregator taxonomy pass [completed]
 
 - Component: provider-taxonomy
 

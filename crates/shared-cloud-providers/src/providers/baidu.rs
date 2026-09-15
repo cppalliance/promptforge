@@ -12,10 +12,10 @@
 //! Docs: <https://cloud.baidu.com/doc/qianfan-api/s/Dmba8k71y>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, ModelKind, Pricing, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, ModelKind, Pricing, Tier};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -28,8 +28,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://qianfan.baidubce.com",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://qianfan.baidubce.com/v2"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -49,7 +53,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it. Every field is documented as
@@ -156,6 +162,34 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
             });
     }
     entry
+}
+
+/// The entry's family: the `ernie-<version>` prefix for the numbered
+/// lines (`ernie-5.0`, `ernie-4.5-turbo-128k`, the `x`-prefixed
+/// `ernie-x1.1`), and the whole id otherwise. The catalog carries no
+/// snapshot suffixes, so there is no collapse pass.
+fn family_of(id: &str) -> String {
+    if let Some(rest) = id.strip_prefix("ernie-") {
+        let (x, rest) = match rest.strip_prefix('x') {
+            Some(rest) => ("x", rest),
+            None => ("", rest),
+        };
+        let token: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        if token.bytes().any(|b| b.is_ascii_digit()) {
+            return format!("ernie-{x}{token}");
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
 }
 
 #[cfg(test)]
@@ -329,5 +363,64 @@ mod tests {
             entry.pricing.is_none(),
             "an unparseable price must not publish a wrong number"
         );
+    }
+
+    /// The documented catalog ids with the provider's taxonomy applied,
+    /// by id. Baidu was unprovisioned for the 2026-09-14 sheet, so the
+    /// table follows the documented catalog.
+    fn classified(ids: &[&str]) -> std::collections::BTreeMap<String, ModelEntry> {
+        let mut entries: Vec<ModelEntry> = ids
+            .iter()
+            .map(|id| crate::taxonomy::fixture::entry(id))
+            .collect();
+        apply_taxonomy(&mut entries);
+        entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect()
+    }
+
+    #[test]
+    fn catalog_ids_classify_into_version_and_fallback_families() {
+        let by_id = classified(&[
+            "ernie-5.0",
+            "ernie-4.5-turbo-128k",
+            "ernie-x1.1",
+            "ernie-embedding-v2",
+            "ernie-irag",
+            "ernie-novel-8k",
+            "deepseek-r1",
+        ]);
+        let table: &[(&str, &str)] = &[
+            ("ernie-5.0", "ernie-5.0"),
+            ("ernie-4.5-turbo-128k", "ernie-4.5"),
+            ("ernie-x1.1", "ernie-x1.1"),
+            ("ernie-embedding-v2", "ernie-embedding-v2"),
+            ("ernie-irag", "ernie-irag"),
+            ("ernie-novel-8k", "ernie-novel-8k"),
+            ("deepseek-r1", "deepseek-r1"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "the catalog carries no snapshot suffixes: {}",
+                entry.id
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_publishes_the_v2_base_and_key() {
+        assert_eq!(
+            PROVIDER.openai_base_url,
+            Some("https://qianfan.baidubce.com/v2")
+        );
+        assert_eq!(PROVIDER.env_vars.len(), 1);
+        assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
+        assert_eq!(PROVIDER.env_vars[0].role, shared_gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }
