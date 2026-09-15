@@ -291,7 +291,7 @@ New `crates/gateway-config-ui/ui/src/services/sheet-store.ts`: a subscribable st
 
 <step-8>
 
-### Step 8: Provider accessor and Secrets dropdown
+### Step 8: Provider accessor and Secrets dropdown [completed]
 
 - Component: secrets-provider-dropdown
 

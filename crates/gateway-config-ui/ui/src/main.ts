@@ -416,7 +416,7 @@ function mountLiveShell(
     store,
     toasts,
   });
-  const secretsView = createSecretsView({ store, api, toasts });
+  const secretsView = createSecretsView({ store, api, toasts, sheets });
   const cloudView = createCloudModelsView({ store, sheets, api, toasts });
   const profilesView = createProfilesView({
     store,

@@ -9,7 +9,11 @@
 // carried in the GET /admin/env reply, because the config views arrive
 // interpolated with secrets redacted. Values arrive in plaintext (the
 // route is loopback-and-bearer-guarded); the view masks them by default
-// and never logs them.
+// and never logs them. When the cloud provider sheet is loaded, the
+// add-variable row gains a tier-grouped provider dropdown that fills
+// NAME with the provider's first key-role variable and appends a row
+// per further `env_vars` entry; the view subscribes to the sheet store,
+// so the dropdown appears in place when the sheet lands.
 
 import { Eye, EyeOff, Trash2, createElement as lucideElement } from "lucide";
 
@@ -17,6 +21,11 @@ import { fileName } from "../format";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
 import type { EnvFiles, EnvScope, GatewayApi } from "../services/gateway-api";
 import type { ConfigStore } from "../services/config-store";
+import {
+  secretProviderSelection,
+  secretProvidersByTier,
+} from "../services/providers";
+import type { SheetStore } from "../services/sheet-store";
 import type { ToastStack } from "shared-ui/toast";
 
 /** Construction dependencies for the Secrets view. */
@@ -25,6 +34,8 @@ export interface SecretsViewDeps {
   store: ConfigStore;
   /** The admin API: env read/stage and the HF connectivity probe. */
   api: GatewayApi;
+  /** The cloud sheet store driving the provider dropdown. */
+  sheets: SheetStore;
   /** Outcome surfacing. */
   toasts: ToastStack;
 }
@@ -49,13 +60,17 @@ const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Builds the Secrets view (fetches fresh env state on every mount). */
 export function createSecretsView(deps: SecretsViewDeps): SecretsView {
-  const { store, api, toasts } = deps;
+  const { store, api, sheets, toasts } = deps;
 
   /** Working rows per scope, rebuilt from the gateway on each mount. */
   const rows = new Map<EnvScope, EnvRow[]>();
   /** Row keys whose value input is currently revealed, `scope:key`. */
   const revealed = new Set<string>();
+  /** A provider dropdown's NAME fill, per scope, surviving re-renders. */
+  const addKeys = new Map<EnvScope, string>();
   let env: EnvFiles | null = null;
+  /** True once the env load has completed, gating sheet-driven repaints. */
+  let envLoaded = false;
   let hfStatus = "";
   let main: HTMLElement | null = null;
   let loadController: AbortController | null = null;
@@ -82,6 +97,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       "global",
       Object.entries(env.global?.vars ?? {}).map(([key, value]) => ({ key, value })),
     );
+    envLoaded = true;
   };
 
   /** One masked value input with its reveal toggle. */
@@ -305,6 +321,55 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
 
     const add = document.createElement("div");
     add.className = "env-add-row";
+    const sheet = sheets.sheet;
+    if (sheet !== null) {
+      // The provider dropdown: one optgroup per non-empty tier, every
+      // slice listed regardless of status, keyless and already-present
+      // providers greyed. A selection fills NAME with the slice's first
+      // key-role variable and appends a row per further env_vars entry.
+      const presentKeys = new Set(scopeRows(scope).map((row) => row.key));
+      const groups = secretProvidersByTier(sheet, presentKeys);
+      const providerLabel = document.createElement("label");
+      providerLabel.className = "visually-hidden";
+      providerLabel.htmlFor = `env-add-provider-${scope}`;
+      providerLabel.textContent = "Add from provider";
+      const providerSelect = document.createElement("select");
+      providerSelect.className = "select env-provider-select";
+      providerSelect.id = `env-add-provider-${scope}`;
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Add from provider…";
+      providerSelect.append(placeholder);
+      for (const group of groups) {
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = group.tier[0]?.toUpperCase() + group.tier.slice(1);
+        for (const option of group.providers) {
+          const item = document.createElement("option");
+          item.value = option.name;
+          item.textContent = option.displayName;
+          item.disabled = option.disabled;
+          optgroup.append(item);
+        }
+        providerSelect.append(optgroup);
+      }
+      providerSelect.addEventListener("change", () => {
+        const selected = groups
+          .flatMap((group) => group.providers)
+          .find((option) => option.name === providerSelect.value);
+        if (!selected || selected.disabled) {
+          return;
+        }
+        const fill = secretProviderSelection(selected.slice, presentKeys);
+        for (const row of fill.rows) {
+          scopeRows(scope).push(row);
+        }
+        if (fill.name !== null) {
+          addKeys.set(scope, fill.name);
+        }
+        renderSection();
+      });
+      add.append(providerLabel, providerSelect);
+    }
     const keyLabel = document.createElement("label");
     keyLabel.className = "visually-hidden";
     keyLabel.htmlFor = `env-add-key-${scope}`;
@@ -315,6 +380,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     keyInput.className = "input env-add-key";
     keyInput.placeholder = "NAME";
     keyInput.autocomplete = "off";
+    keyInput.value = addKeys.get(scope) ?? "";
     const valueLabel = document.createElement("label");
     valueLabel.className = "visually-hidden";
     valueLabel.htmlFor = `env-add-value-${scope}`;
@@ -343,6 +409,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
         return;
       }
       scopeRows(scope).push({ key: name, value: valueInput.value });
+      addKeys.delete(scope);
       renderSection();
     });
     add.append(keyLabel, keyInput, valueLabel, valueInput, addButton);
@@ -423,6 +490,17 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
   return {
     mount(target: HTMLElement): () => void {
       main = target;
+      envLoaded = false;
+      // Rows rebuild from the gateway on every mount, so a provider
+      // dropdown's NAME fill from a previous mount is stale.
+      addKeys.clear();
+      // The provider dropdown appears in place when the sheet lands;
+      // before that, the free-text row works as today.
+      const unsubscribe = sheets.subscribe(() => {
+        if (envLoaded && main !== null && main.isConnected) {
+          render();
+        }
+      });
       loadController?.abort();
       const controller = new AbortController();
       loadController = controller;
@@ -452,6 +530,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
           target.replaceChildren(title, failed);
         });
       return () => {
+        unsubscribe();
         controller.abort();
         probeController?.abort();
         probeController = null;
