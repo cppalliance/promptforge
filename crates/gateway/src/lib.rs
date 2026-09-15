@@ -57,7 +57,7 @@
 //! host OS file manager at a path confined to the artifact cache, a
 //! bearer-authed `GET /admin/cloud-models` readout of the cached cloud
 //! provider model sheet (with `POST /admin/cloud-models/refresh` forcing
-//! a background re-download), a loopback-only, bearer-authed
+//! a re-download and answering with the fresh sheet), a loopback-only, bearer-authed
 //! `POST /shutdown` driving the same
 //! graceful shutdown Ctrl-C drives - and
 //! `GET /health`. The whole admin config surface (config read/write, env,

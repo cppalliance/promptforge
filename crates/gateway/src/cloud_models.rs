@@ -17,16 +17,16 @@
 //! truncated cache and a failed download keeps the old one. `GET
 //! /admin/cloud-models` serves the in-memory sheet, a 503 loading
 //! indication while none has arrived, or the last download error; `POST
-//! /admin/cloud-models/refresh` forces a background re-download
-//! regardless of age. Both routes sit behind the shared loopback wall
-//! with the rest of the admin config surface.
+//! /admin/cloud-models/refresh` forces a re-download regardless of age
+//! and answers with the fresh sheet once the download it started or
+//! joined lands, or with the download's error. Both routes sit behind
+//! the shared loopback wall with the rest of the admin config surface.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
 use shared_gateway_api::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
@@ -59,7 +59,7 @@ pub(crate) struct CloudModels {
     inner: Arc<Mutex<Inner>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Inner {
     /// The launched cache location; `None` until [`CloudModels::launch`].
     cache_path: Option<PathBuf>,
@@ -72,6 +72,30 @@ struct Inner {
     last_error: Option<String>,
     /// One download at a time, across launch and every refresh.
     download_in_flight: bool,
+    /// The generation of the latest download, bumped per spawn so a
+    /// refresh awaits exactly the download it started or joined.
+    generation: u64,
+    /// The latest completed download's generation and outcome; the
+    /// refresh route's answer.
+    last_outcome: Option<(u64, Result<(), String>)>,
+    /// Announces each completed download's generation to awaiting
+    /// refreshes.
+    completion: tokio::sync::watch::Sender<u64>,
+}
+
+impl Default for Inner {
+    fn default() -> Self {
+        Self {
+            cache_path: None,
+            url: None,
+            sheet: None,
+            last_error: None,
+            download_in_flight: false,
+            generation: 0,
+            last_outcome: None,
+            completion: tokio::sync::watch::channel(0).0,
+        }
+    }
 }
 
 /// The outcome of asking for a background download.
@@ -175,9 +199,36 @@ impl CloudModels {
             self.spawn_download().started()
         }
     }
-    /// Force a background re-download regardless of cache age.
-    pub(crate) fn refresh(&self) -> Download {
-        self.spawn_download()
+    /// Force a re-download regardless of cache age and await its
+    /// outcome: the fresh sheet on success, the download's error on
+    /// failure. A refresh asked during an in-flight download joins it
+    /// and awaits the same result instead of starting a second one.
+    pub(crate) async fn refresh(&self) -> Result<Arc<Sheet>, GatewayError> {
+        let (generation, mut completion) = {
+            let mut inner = self.lock();
+            match self.spawn_download_locked(&mut inner) {
+                Download::Started(_) | Download::InFlight => {
+                    (inner.generation, inner.completion.subscribe())
+                }
+                Download::Unavailable => return Err(GatewayError::CloudModelsLoading),
+            }
+        };
+        let waited = completion.wait_for(|done| *done >= generation).await;
+        let inner = self.lock();
+        match (waited, &inner.last_outcome) {
+            (Ok(_), Some((done, Ok(())))) if *done >= generation => match &inner.sheet {
+                Some(sheet) => Ok(Arc::clone(sheet)),
+                None => Err(GatewayError::CloudModelsUnavailable(
+                    "cloud provider sheet download finished without installing a sheet".to_owned(),
+                )),
+            },
+            (Ok(_), Some((done, Err(error)))) if *done >= generation => {
+                Err(GatewayError::CloudModelsUnavailable(error.clone()))
+            }
+            _ => Err(GatewayError::CloudModelsUnavailable(
+                "cloud provider sheet download outcome was lost".to_owned(),
+            )),
+        }
     }
 
     /// The in-memory sheet, when one has loaded or downloaded.
@@ -193,33 +244,44 @@ impl CloudModels {
 
     /// Spawn the one background download, or report why none started.
     fn spawn_download(&self) -> Download {
-        let (cache_path, url) = {
-            let mut inner = self.lock();
-            if inner.download_in_flight {
-                return Download::InFlight;
-            }
-            let (Some(cache_path), Some(url)) = (inner.cache_path.clone(), inner.url.clone())
-            else {
-                return Download::Unavailable;
-            };
-            inner.download_in_flight = true;
-            (cache_path, url)
+        let mut inner = self.lock();
+        self.spawn_download_locked(&mut inner)
+    }
+
+    /// The spawn half of [`CloudModels::spawn_download`] with the lock
+    /// already held, so a refresh spawns or joins and subscribes to the
+    /// completion signal atomically.
+    fn spawn_download_locked(&self, inner: &mut Inner) -> Download {
+        if inner.download_in_flight {
+            return Download::InFlight;
+        }
+        let (Some(cache_path), Some(url)) = (inner.cache_path.clone(), inner.url.clone())
+        else {
+            return Download::Unavailable;
         };
+        inner.download_in_flight = true;
+        inner.generation += 1;
+        let generation = inner.generation;
         let this = self.clone();
         Download::Started(tokio::spawn(async move {
             let outcome = download_once(&cache_path, &url).await;
             let mut inner = this.lock();
-            match outcome {
+            let result = match outcome {
                 Ok(sheet) => {
                     inner.sheet = Some(Arc::new(sheet));
                     inner.last_error = None;
+                    Ok(())
                 }
                 Err(error) => {
                     tracing::warn!("{error}");
-                    inner.last_error = Some(error.to_string());
+                    let message = error.to_string();
+                    inner.last_error = Some(message.clone());
+                    Err(message)
                 }
-            }
+            };
             inner.download_in_flight = false;
+            inner.last_outcome = Some((generation, result));
+            let _ignored = inner.completion.send(generation);
         }))
     }
 }
@@ -336,21 +398,17 @@ pub(crate) async fn admin_cloud_models(
 }
 
 /// The `POST /admin/cloud-models/refresh` route: bearer-authed and
-/// loopback-walled, forces a background re-download regardless of cache
-/// age; 202 whether this call spawned the download or one was already
-/// running.
+/// loopback-walled, forces a re-download regardless of cache age and
+/// answers 200 with the fresh sheet once the download it started or
+/// joined lands, or the download's 502 error; a concurrent refresh
+/// awaits the same download rather than starting a second one.
 pub(crate) async fn admin_cloud_models_refresh(
     State(state): State<AppState>,
     caller: Caller,
-) -> Result<(StatusCode, Json<serde_json::Value>), GatewayError> {
+) -> Result<Json<Sheet>, GatewayError> {
     check_auth(&state, &caller).await?;
-    match state.cloud_models.refresh() {
-        Download::Started(_) | Download::InFlight => Ok((
-            StatusCode::ACCEPTED,
-            Json(serde_json::json!({ "status": "downloading" })),
-        )),
-        Download::Unavailable => Err(GatewayError::CloudModelsLoading),
-    }
+    let sheet = state.cloud_models.refresh().await?;
+    Ok(Json(Sheet::clone(&sheet)))
 }
 
 #[cfg(test)]

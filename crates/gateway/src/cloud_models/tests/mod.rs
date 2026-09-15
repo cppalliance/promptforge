@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::header::AUTHORIZATION;
-use axum::http::{Method, Request};
+use axum::http::{Method, Request, StatusCode};
 use gateway_config::Config;
 use gateway_protocol::http_util::MAX_JSON_BODY;
 use shared_gateway_api::{ModelEntry, ModelKind, ProviderSlice, SliceStatus, Thinking, Tier};
@@ -15,6 +15,7 @@ use tower::ServiceExt as _;
 
 use super::*;
 
+mod refresh;
 mod version_gate;
 
 /// A one-provider sheet stamped `generated_at`, carrying one model
@@ -68,46 +69,31 @@ fn model_id(sheet: &Sheet) -> &str {
     &sheet.providers["test"].models[0].id
 }
 
-type StubState = (
-    Arc<AtomicUsize>,
-    Option<Arc<Notify>>,
-    Arc<Notify>,
-    StatusCode,
-    String,
-);
+type StubState = (Arc<AtomicUsize>, Option<Arc<Notify>>, StatusCode, String);
 
 /// A loopback stub for the release URL: counts requests, parks each
-/// response on the gate when gated, signals `answered` per response,
-/// and answers with a fixed status and body.
+/// response on the gate when gated, and answers with a fixed status and
+/// body.
 struct Stub {
     url: String,
     requests: Arc<AtomicUsize>,
     gate: Option<Arc<Notify>>,
-    answered: Arc<Notify>,
 }
 
 async fn stub_handler(
-    State((requests, gate, answered, status, body)): State<StubState>,
+    State((requests, gate, status, body)): State<StubState>,
 ) -> (StatusCode, String) {
     requests.fetch_add(1, Ordering::AcqRel);
     if let Some(gate) = gate {
         gate.notified().await;
     }
-    answered.notify_one();
     (status, body)
 }
 
 async fn stub(status: StatusCode, body: String, gated: bool) -> Stub {
     let requests = Arc::new(AtomicUsize::new(0));
     let gate = gated.then(|| Arc::new(Notify::new()));
-    let answered = Arc::new(Notify::new());
-    let state: StubState = (
-        Arc::clone(&requests),
-        gate.clone(),
-        Arc::clone(&answered),
-        status,
-        body,
-    );
+    let state: StubState = (Arc::clone(&requests), gate.clone(), status, body);
     let app = axum::Router::new()
         .route("/sheet.json", axum::routing::get(stub_handler))
         .with_state(state);
@@ -122,7 +108,6 @@ async fn stub(status: StatusCode, body: String, gated: bool) -> Stub {
         url: format!("http://{addr}/sheet.json"),
         requests,
         gate,
-        answered,
     }
 }
 
@@ -277,36 +262,6 @@ async fn a_failed_download_keeps_the_old_cache() {
 }
 
 #[tokio::test]
-async fn concurrent_refreshes_never_start_a_second_download() {
-    let temp = tempfile::TempDir::new().expect("tempdir");
-    let cache = temp.path().join(CACHE_FILE_NAME);
-    let sheet = test_sheet(OffsetDateTime::now_utc(), "downloaded-model");
-    let stub = stub(
-        StatusCode::OK,
-        serde_json::to_string(&sheet).expect("the sheet serializes"),
-        true,
-    )
-    .await;
-    let cloud = CloudModels::default();
-    let download = cloud.launch(cache, stub.url.clone()).await;
-    assert!(cloud.sheet().is_none(), "a missing cache loads nothing");
-    let download = download.expect("a missing cache spawns a download");
-    // The in-flight guard is set before the task starts, so both
-    // refreshes observe it regardless of where the download sits.
-    assert!(
-        matches!(cloud.refresh(), Download::InFlight),
-        "a refresh during a download never starts a second one"
-    );
-    assert!(
-        matches!(cloud.refresh(), Download::InFlight),
-        "every concurrent refresh shares the one download"
-    );
-    stub.gate.as_ref().expect("the stub is gated").notify_one();
-    download.await.expect("the download task joins");
-    assert_eq!(stub.requests.load(Ordering::Acquire), 1);
-}
-
-#[tokio::test]
 async fn the_cache_write_replaces_the_old_file_and_leaves_no_temp() {
     let stale = test_sheet(
         OffsetDateTime::now_utc() - time::Duration::days(8),
@@ -432,33 +387,4 @@ async fn the_route_reports_the_download_error() {
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let body = body_json(response).await;
     assert_eq!(body["error"]["code"], "cloud_models_unavailable");
-}
-
-#[tokio::test]
-async fn the_refresh_route_forces_a_redownload_regardless_of_age() {
-    let sheet = test_sheet(OffsetDateTime::now_utc(), "cached-model");
-    let (_temp, cache) = cache_dir_with(&sheet);
-    let fresh = test_sheet(OffsetDateTime::now_utc(), "refreshed-model");
-    let stub = stub(
-        StatusCode::OK,
-        serde_json::to_string(&fresh).expect("the sheet serializes"),
-        false,
-    )
-    .await;
-    let state = route_state();
-    let download = state.cloud_models.launch(cache, stub.url.clone()).await;
-    assert!(
-        download.is_none(),
-        "a fresh cache spawns no launch download"
-    );
-    let response = request(state, Method::POST, "/admin/cloud-models/refresh").await;
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-    tokio::time::timeout(std::time::Duration::from_secs(10), stub.answered.notified())
-        .await
-        .expect("the forced download answers");
-    assert_eq!(
-        stub.requests.load(Ordering::Acquire),
-        1,
-        "refresh downloads even though the cache is fresh"
-    );
 }

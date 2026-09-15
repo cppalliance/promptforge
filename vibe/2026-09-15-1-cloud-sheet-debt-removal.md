@@ -204,7 +204,7 @@ Check `sheet.schema_version` against the shared constant after every successful 
 
 <step-5>
 
-### Step 5: Refresh POST awaits and answers
+### Step 5: Refresh POST awaits and answers [completed]
 
 - Component: refresh-delivery
 
