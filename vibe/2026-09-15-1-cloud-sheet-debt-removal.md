@@ -184,7 +184,7 @@ Add `pub const ACCEPTED_SHEET_SCHEMA_VERSION` (value 1) beside `Sheet` in `crate
 
 <step-3>
 
-### Step 3: Cap the sheet download body
+### Step 3: Cap the sheet download body [completed]
 
 - Component: gateway-reader
 

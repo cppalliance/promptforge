@@ -238,6 +238,18 @@ pub(crate) enum GatewayError {
     #[error("cloud provider model sheet is still downloading")]
     CloudModelsLoading,
 
+    /// The cloud provider model sheet download announced a body over the
+    /// gateway's JSON body cap, so the read was refused before the body
+    /// allocated. Maps to 502 like every other sheet download failure.
+    #[non_exhaustive]
+    #[error("cloud provider model sheet announced a {announced} byte body over the {cap} byte cap")]
+    CloudModelsBodyTooLarge {
+        /// The body size the response's `Content-Length` announced.
+        announced: u64,
+        /// The cap the download refused to exceed, in bytes.
+        cap: usize,
+    },
+
     /// No cloud provider model sheet is available and the last download
     /// or cache write failed; the message carries the failure.
     #[non_exhaustive]
@@ -495,6 +507,11 @@ impl GatewayError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "cloud_models_loading",
+            ),
+            GatewayError::CloudModelsBodyTooLarge { .. } => (
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                "cloud_models_body_too_large",
             ),
             GatewayError::CloudModelsUnavailable(_) => (
                 StatusCode::BAD_GATEWAY,
@@ -768,6 +785,17 @@ mod tests {
                     StatusCode::BAD_GATEWAY,
                     "server_error",
                     "cloud_models_unavailable",
+                ),
+            ),
+            (
+                GatewayError::CloudModelsBodyTooLarge {
+                    announced: 5_000_000,
+                    cap: 4_194_304,
+                },
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "server_error",
+                    "cloud_models_body_too_large",
                 ),
             ),
         ];

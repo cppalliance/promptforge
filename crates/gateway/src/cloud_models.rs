@@ -27,6 +27,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
 use shared_gateway_api::Sheet;
 use time::OffsetDateTime;
 
@@ -200,7 +201,7 @@ impl CloudModels {
                 }
                 Err(error) => {
                     tracing::warn!("{error}");
-                    inner.last_error = Some(error);
+                    inner.last_error = Some(error.to_string());
                 }
             }
             inner.download_in_flight = false;
@@ -210,20 +211,60 @@ impl CloudModels {
 
 /// Fetch the sheet and persist it, returning the sheet only after the
 /// cache write lands: the in-memory copy never runs ahead of the disk.
-async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, String> {
-    let sheet =
-        shared_cloud_providers::fetch_sheet(&gateway_protocol::http_util::bounded_client(), url)
-            .await
-            .map_err(|error| format!("cloud provider sheet download from {url} failed: {error}"))?;
-    let bytes = serde_json::to_vec(&sheet)
-        .map_err(|error| format!("cloud provider sheet serialization failed: {error}"))?;
+///
+/// The body read is capped at [`MAX_JSON_BODY`] like every other gateway
+/// outbound read; a response announcing an over-cap `Content-Length` is
+/// refused before the read so the failure names the cap rather than a
+/// truncated parse.
+async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, GatewayError> {
+    let response = bounded_client()
+        .get(url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|error| {
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet download from {url} failed: {error}"
+            ))
+        })?;
+    if let Some(announced) = response.content_length()
+        && announced > MAX_JSON_BODY as u64
+    {
+        return Err(GatewayError::CloudModelsBodyTooLarge {
+            announced,
+            cap: MAX_JSON_BODY,
+        });
+    }
+    let bytes = read_bytes_capped(response, MAX_JSON_BODY)
+        .await
+        .map_err(|error| {
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet download from {url} failed: {error}"
+            ))
+        })?;
+    let sheet: Sheet = serde_json::from_slice(&bytes).map_err(|error| {
+        GatewayError::CloudModelsUnavailable(format!(
+            "cloud provider sheet from {url} failed to parse: {error}"
+        ))
+    })?;
+    let bytes = serde_json::to_vec(&sheet).map_err(|error| {
+        GatewayError::CloudModelsUnavailable(format!(
+            "cloud provider sheet serialization failed: {error}"
+        ))
+    })?;
     let display = cache_path.display().to_string();
     let path = cache_path.to_path_buf();
     tokio::task::spawn_blocking(move || write_cache_atomic(&path, &bytes))
         .await
-        .map_err(|join| format!("cloud provider sheet cache write to {display} failed: {join}"))?
+        .map_err(|join| {
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet cache write to {display} failed: {join}"
+            ))
+        })?
         .map_err(|error| {
-            format!("cloud provider sheet cache write to {display} failed: {error}")
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet cache write to {display} failed: {error}"
+            ))
         })?;
     Ok(sheet)
 }

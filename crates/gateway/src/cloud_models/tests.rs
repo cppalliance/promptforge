@@ -8,6 +8,7 @@ use axum::extract::ConnectInfo;
 use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request};
 use gateway_config::Config;
+use gateway_protocol::http_util::MAX_JSON_BODY;
 use shared_gateway_api::{ModelEntry, ModelKind, ProviderSlice, SliceStatus, Thinking, Tier};
 use tokio::sync::Notify;
 use tower::ServiceExt as _;
@@ -336,6 +337,52 @@ async fn the_cache_write_replaces_the_old_file_and_leaves_no_temp() {
     assert!(
         !cache.with_extension("tmp").exists(),
         "the temp file is gone after the atomic replace"
+    );
+}
+
+#[tokio::test]
+async fn an_over_cap_download_records_the_cap_error_without_swapping_the_sheet() {
+    let stale = test_sheet(
+        OffsetDateTime::now_utc() - time::Duration::days(8),
+        "stale-model",
+    );
+    let (_temp, cache) = cache_dir_with(&stale);
+    let original = std::fs::read(&cache).expect("the cache reads");
+    let over_cap = "x".repeat(MAX_JSON_BODY + 1);
+    let stub = stub(StatusCode::OK, over_cap, false).await;
+    let state = route_state();
+    let download = state.cloud_models.launch(cache.clone(), stub.url.clone()).await;
+    download
+        .expect("a week-old cache spawns a download")
+        .await
+        .expect("the download task joins");
+    assert_eq!(stub.requests.load(Ordering::Acquire), 1);
+    let error = state
+        .cloud_models
+        .last_error()
+        .expect("the over-cap download records an error");
+    assert!(
+        error.contains(MAX_JSON_BODY.to_string().as_str()),
+        "the recorded error names the {MAX_JSON_BODY} byte cap: {error}"
+    );
+    let served = state.cloud_models.sheet().expect("the old sheet survives");
+    assert_eq!(
+        model_id(&served),
+        "stale-model",
+        "an over-cap body never swaps the sheet"
+    );
+    assert_eq!(
+        std::fs::read(&cache).expect("the cache reads"),
+        original,
+        "an over-cap download never touches the cache file"
+    );
+    let response = request(state, Method::GET, "/admin/cloud-models").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(
+        body["providers"]["test"]["models"][0]["id"],
+        "stale-model",
+        "the route keeps serving the pre-download sheet"
     );
 }
 
