@@ -22,6 +22,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://generativelanguage.googleapis.com",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// Page size for the list request: generous, so the full catalog arrives
@@ -121,6 +123,10 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
             .display_name
             .clone()
             .unwrap_or_else(|| model_id(&model.name).to_owned()),
+        family: String::new(),
+        variant_of: None,
+        variant: None,
+        languages: Vec::new(),
         kind: model_kind(methods),
         released_at: None,
         context_window: model.input_token_limit,

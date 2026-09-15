@@ -40,8 +40,36 @@ pub struct ProviderSlice {
     /// Last fresh fetch; absent for `static` slices.
     #[serde(with = "time::serde::rfc3339::option")]
     pub fetched_at: Option<OffsetDateTime>,
+    /// The base URL of the provider's OpenAI-compatible chat API - the
+    /// value an `[[endpoint]]` needs - or `None` when the provider has
+    /// no such API.
+    pub openai_base_url: Option<String>,
+    /// The provider's environment variables, copied from the descriptor
+    /// at build time so a consumer can render from the sheet alone.
+    pub env_vars: Vec<EnvVar>,
     /// The provider's normalized model entries.
     pub models: Vec<ModelEntry>,
+}
+
+/// One environment variable a provider reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvVar {
+    /// The variable name, e.g. "ANTHROPIC_API_KEY".
+    pub name: String,
+    /// How the variable is used.
+    pub role: EnvRole,
+    /// The value the provider assumes when the variable is unset.
+    pub default: Option<String>,
+}
+
+/// How a provider uses an environment variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EnvRole {
+    /// A credential: the variable carries API key material.
+    Key,
+    /// Configuration: the variable selects a region, endpoint, or similar.
+    Config,
 }
 
 /// Curated product opinion, not a vendor fact.
@@ -82,6 +110,17 @@ pub struct ModelEntry {
     pub id: String,
     /// UI-facing name.
     pub display_name: String,
+    /// The UI's first grouping level, e.g. "claude-opus", "gpt-5.4".
+    pub family: String,
+    /// The canonical alias this entry is a dated snapshot or SKU variant
+    /// of; set only when that alias exists in the same provider's list.
+    pub variant_of: Option<String>,
+    /// The stripped suffix, e.g. `2026-03-05`, `free`, `batch`, for the
+    /// UI's expander label.
+    pub variant: Option<String>,
+    /// The provider's own language codes, passed through as reported;
+    /// empty when unknown or not applicable.
+    pub languages: Vec<String>,
     /// The workload: chat, embedding, classifier, speech (TTS),
     /// transcription (STT), image, video.
     #[serde(default)]
@@ -175,10 +214,18 @@ mod tests {
       "tier": "prime",
       "status": "ok",
       "fetched_at": "2026-09-14T13:00:00Z",
+      "openai_base_url": "https://api.anthropic.com/v1",
+      "env_vars": [
+        { "name": "ANTHROPIC_API_KEY", "role": "key", "default": null }
+      ],
       "models": [
         {
           "id": "claude-opus-5",
           "display_name": "Claude Opus 5",
+          "family": "claude-opus",
+          "variant_of": null,
+          "variant": null,
+          "languages": [],
           "released_at": "2026-07-24",
           "context_window": 1000000,
           "max_output": 128000,
@@ -206,6 +253,10 @@ mod tests {
         ModelEntry {
             id: id.to_owned(),
             display_name: id.to_owned(),
+            family: "test-family".to_owned(),
+            variant_of: None,
+            variant: None,
+            languages: Vec::new(),
             kind: ModelKind::Chat,
             released_at: None,
             context_window: Some(200_000),
@@ -233,6 +284,8 @@ mod tests {
             tier: Tier::Prime,
             status: SliceStatus::Ok,
             fetched_at: None,
+            openai_base_url: None,
+            env_vars: Vec::new(),
             models,
         }
     }
@@ -283,6 +336,80 @@ mod tests {
         assert!(
             line.contains("\"generated_at\":\"2026-09-14T13:00:00Z\""),
             "generated_at must be RFC 3339 with a literal Z: {line}"
+        );
+    }
+
+    #[test]
+    fn new_fields_round_trip_losslessly() {
+        let mut model = entry("claude-fable-5-1-2026-09-01");
+        model.family = "claude-fable".to_owned();
+        model.variant_of = Some("claude-fable-5-1".to_owned());
+        model.variant = Some("2026-09-01".to_owned());
+        model.languages = vec!["en".to_owned(), "fr".to_owned()];
+        let mut slice = slice("anthropic", vec![model]);
+        slice.openai_base_url = Some("https://api.anthropic.com/v1".to_owned());
+        slice.env_vars = vec![
+            EnvVar {
+                name: "ANTHROPIC_API_KEY".to_owned(),
+                role: EnvRole::Key,
+                default: None,
+            },
+            EnvVar {
+                name: "ANTHROPIC_REGION".to_owned(),
+                role: EnvRole::Config,
+                default: Some("us-east-1".to_owned()),
+            },
+        ];
+        let sheet = Sheet {
+            schema_version: 1,
+            generated_at: OffsetDateTime::parse("2026-09-14T13:00:00Z", &Rfc3339)
+                .expect("pinned timestamp must parse"),
+            providers: BTreeMap::from([("anthropic".to_owned(), slice)]),
+        };
+        let line = serde_json::to_string(&sheet).expect("sheet must serialize");
+        let back: Sheet = serde_json::from_str(&line).expect("its own output must parse");
+        let slice = &back.providers["anthropic"];
+        assert_eq!(
+            slice.openai_base_url.as_deref(),
+            Some("https://api.anthropic.com/v1"),
+            "openai_base_url must survive the round trip"
+        );
+        assert_eq!(slice.env_vars.len(), 2);
+        assert_eq!(slice.env_vars[0].name, "ANTHROPIC_API_KEY");
+        assert_eq!(slice.env_vars[0].role, EnvRole::Key);
+        assert_eq!(slice.env_vars[0].default, None);
+        assert_eq!(slice.env_vars[1].name, "ANTHROPIC_REGION");
+        assert_eq!(slice.env_vars[1].role, EnvRole::Config);
+        assert_eq!(slice.env_vars[1].default.as_deref(), Some("us-east-1"));
+        let model = &slice.models[0];
+        assert_eq!(model.family, "claude-fable");
+        assert_eq!(model.variant_of.as_deref(), Some("claude-fable-5-1"));
+        assert_eq!(model.variant.as_deref(), Some("2026-09-01"));
+        assert_eq!(model.languages, ["en", "fr"]);
+    }
+
+    #[test]
+    fn missing_new_fields_fail_to_parse() {
+        // The new fields are required: no serde defaults, so an old-shape
+        // document must be rejected rather than silently defaulted.
+        let mut value = serde_json::to_value(entry("m1")).expect("entry must serialize");
+        value
+            .as_object_mut()
+            .expect("an entry serializes as an object")
+            .remove("family");
+        assert!(
+            serde_json::from_value::<ModelEntry>(value).is_err(),
+            "an entry without `family` must fail to parse"
+        );
+        let mut value =
+            serde_json::to_value(slice("anthropic", vec![])).expect("slice must serialize");
+        value
+            .as_object_mut()
+            .expect("a slice serializes as an object")
+            .remove("env_vars");
+        assert!(
+            serde_json::from_value::<ProviderSlice>(value).is_err(),
+            "a slice without `env_vars` must fail to parse"
         );
     }
 

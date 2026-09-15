@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use shared_gateway_api::{ModelEntry, ProviderSlice, Sheet, SliceStatus, Tier};
+use shared_gateway_api::{EnvVar, ModelEntry, ProviderSlice, Sheet, SliceStatus, Tier};
 use time::OffsetDateTime;
 
 use crate::{FetchError, Provider};
@@ -110,6 +110,8 @@ async fn build_sheet_with(
                 tier: provider.tier,
                 status: SliceStatus::Ok,
                 fetched_at: Some(now),
+                openai_base_url: provider.openai_base_url.map(str::to_owned),
+                env_vars: env_vars(&provider),
                 models,
             },
             Err(err) => {
@@ -148,9 +150,25 @@ fn stale_or_unavailable(provider: &Provider, prior: Option<ProviderSlice>) -> Pr
             tier: provider.tier,
             status: SliceStatus::Unavailable,
             fetched_at: None,
+            openai_base_url: provider.openai_base_url.map(str::to_owned),
+            env_vars: env_vars(provider),
             models: Vec::new(),
         },
     }
+}
+
+/// Convert the descriptor's const-friendly env var specs into the
+/// schema's owned form for the slice.
+fn env_vars(provider: &Provider) -> Vec<EnvVar> {
+    provider
+        .env_vars
+        .iter()
+        .map(|spec| EnvVar {
+            name: spec.name.to_owned(),
+            role: spec.role,
+            default: spec.default.map(str::to_owned),
+        })
+        .collect()
 }
 
 /// The compiled-in model list for a Niche provider: one JSON file per
@@ -183,16 +201,34 @@ fn static_slice(provider: &Provider) -> ProviderSlice {
         tier: provider.tier,
         status: SliceStatus::Static,
         fetched_at: None,
+        openai_base_url: provider.openai_base_url.map(str::to_owned),
+        env_vars: env_vars(provider),
         models,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use shared_gateway_api::{ModelKind, Thinking};
+    use shared_gateway_api::{EnvRole, ModelKind, Thinking};
     use time::format_description::well_known::Rfc3339;
 
     use super::*;
+    use crate::EnvVarSpec;
+
+    /// The descriptor env vars every test provider carries: one key-role
+    /// entry and one config-role entry with a default.
+    const TEST_ENV_VARS: &[EnvVarSpec] = &[
+        EnvVarSpec {
+            name: "TEST_PROVIDER_API_KEY",
+            role: EnvRole::Key,
+            default: None,
+        },
+        EnvVarSpec {
+            name: "TEST_PROVIDER_REGION",
+            role: EnvRole::Config,
+            default: Some("us-east-1"),
+        },
+    ];
 
     fn provider(name: &'static str, display_name: &'static str, tier: Tier) -> Provider {
         Provider {
@@ -201,6 +237,8 @@ mod tests {
             tier,
             key_env: Some("TEST_PROVIDER_API_KEY"),
             base_url: "https://example.invalid",
+            openai_base_url: Some("https://example.invalid/v1"),
+            env_vars: TEST_ENV_VARS,
         }
     }
 
@@ -208,6 +246,10 @@ mod tests {
         ModelEntry {
             id: id.to_owned(),
             display_name: id.to_owned(),
+            family: "test-family".to_owned(),
+            variant_of: None,
+            variant: None,
+            languages: Vec::new(),
             kind: ModelKind::Chat,
             released_at: None,
             context_window: Some(200_000),
@@ -282,6 +324,8 @@ mod tests {
                 tier: Tier::Subprime,
                 status: SliceStatus::Ok,
                 fetched_at: Some(fetched_at),
+                openai_base_url: None,
+                env_vars: Vec::new(),
                 models: vec![entry("old-m1")],
             },
         );
@@ -350,6 +394,8 @@ mod tests {
                 tier: Tier::Niche,
                 status: SliceStatus::Static,
                 fetched_at: None,
+                openai_base_url: None,
+                env_vars: Vec::new(),
                 models: vec![entry("old-m1")],
             },
         );
@@ -405,6 +451,8 @@ mod tests {
                 tier: Tier::Prime,
                 status: SliceStatus::Ok,
                 fetched_at: Some(pinned("2026-06-01T00:00:00Z")),
+                openai_base_url: None,
+                env_vars: Vec::new(),
                 models: vec![entry("kept-m1")],
             },
         );
@@ -520,6 +568,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slice_construction_copies_descriptor_fields_for_every_status() {
+        let assert_copied = |slice: &ProviderSlice, status: SliceStatus| {
+            assert_eq!(slice.status, status);
+            assert_eq!(
+                slice.openai_base_url.as_deref(),
+                Some("https://example.invalid/v1"),
+                "a {status:?} slice must copy the descriptor's openai_base_url"
+            );
+            assert_eq!(slice.env_vars.len(), 2);
+            assert_eq!(slice.env_vars[0].name, "TEST_PROVIDER_API_KEY");
+            assert_eq!(slice.env_vars[0].role, EnvRole::Key);
+            assert_eq!(slice.env_vars[0].default, None);
+            assert_eq!(slice.env_vars[1].name, "TEST_PROVIDER_REGION");
+            assert_eq!(slice.env_vars[1].role, EnvRole::Config);
+            assert_eq!(slice.env_vars[1].default.as_deref(), Some("us-east-1"));
+        };
+        let registry = [
+            provider("test-ok", "Test OK", Tier::Prime),
+            provider("test-down", "Test Down", Tier::Prime),
+            provider("test-niche", "Test Niche", Tier::Niche),
+        ];
+        let keys = |_provider: &Provider| Some("test-key".to_owned());
+        let fetch =
+            |_client: reqwest::Client, provider: Provider, _key: Option<String>| -> BoxFetch {
+                Box::pin(async move {
+                    match provider.name {
+                        "test-ok" => Ok(vec![entry("m1")]),
+                        _ => Err(FetchError::UnsupportedProvider {
+                            name: provider.name.to_owned(),
+                        }),
+                    }
+                })
+            };
+        let client = reqwest::Client::new();
+        let sheet = build_sheet_with(&registry, None, &keys, &fetch, &client).await;
+        assert_copied(&sheet.providers["test-ok"], SliceStatus::Ok);
+        assert_copied(&sheet.providers["test-down"], SliceStatus::Unavailable);
+        assert_copied(&sheet.providers["test-niche"], SliceStatus::Static);
+    }
+
+    #[tokio::test]
     async fn fetch_sheet_reports_http_errors() {
         let client = reqwest::Client::new();
         let result = fetch_sheet(&client, "http://127.0.0.1:1/models.json").await;
@@ -547,6 +636,8 @@ mod tests {
                     tier: Tier::Prime,
                     status: SliceStatus::Ok,
                     fetched_at: Some(fetched_at),
+                    openai_base_url: None,
+                    env_vars: Vec::new(),
                     models: vec![entry("m1")],
                 },
             )]),

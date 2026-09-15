@@ -48,6 +48,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://bedrock.us-east-1.amazonaws.com",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// Fetch and normalize Bedrock's foundation-model list with a

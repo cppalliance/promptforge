@@ -25,6 +25,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.stepfun.ai/v1",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// The list path under the base URL.

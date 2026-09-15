@@ -25,6 +25,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.cohere.com",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// Page size for the list request: the endpoint maximum, so the full

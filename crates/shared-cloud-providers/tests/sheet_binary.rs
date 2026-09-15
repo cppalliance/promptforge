@@ -27,10 +27,18 @@ const PREVIOUS_SHEET_JSON: &str = r#"{
       "tier": "prime",
       "status": "ok",
       "fetched_at": "2026-09-01T00:00:00Z",
+      "openai_base_url": "https://api.anthropic.com/v1",
+      "env_vars": [
+        { "name": "ANTHROPIC_API_KEY", "role": "key", "default": null }
+      ],
       "models": [
         {
           "id": "recorded-m1",
           "display_name": "Recorded M1",
+          "family": "recorded",
+          "variant_of": null,
+          "variant": null,
+          "languages": [],
           "kind": "chat",
           "released_at": null,
           "context_window": 200000,

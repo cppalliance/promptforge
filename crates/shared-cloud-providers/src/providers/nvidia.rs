@@ -22,6 +22,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Subprime,
     key_env: None,
     base_url: "https://integrate.api.nvidia.com/v1",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// The list path under the base URL.

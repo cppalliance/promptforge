@@ -25,6 +25,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Aggregator,
     key_env: None,
     base_url: "https://openrouter.ai",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// The list path under the base URL.

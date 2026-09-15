@@ -23,6 +23,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.elevenlabs.io",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// The list path under the base URL.

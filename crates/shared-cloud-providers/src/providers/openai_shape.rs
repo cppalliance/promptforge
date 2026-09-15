@@ -45,6 +45,10 @@ pub(crate) fn base_entry(id: &str, created: Option<i64>) -> ModelEntry {
     ModelEntry {
         id: id.to_owned(),
         display_name: id.to_owned(),
+        family: String::new(),
+        variant_of: None,
+        variant: None,
+        languages: Vec::new(),
         kind: ModelKind::Chat,
         released_at: created
             .and_then(|unix| OffsetDateTime::from_unix_timestamp(unix).ok())

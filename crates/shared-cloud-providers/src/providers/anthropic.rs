@@ -24,6 +24,8 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.anthropic.com",
+    openai_base_url: None,
+    env_vars: &[],
 };
 
 /// The API version the endpoint requires on every request.
@@ -185,6 +187,10 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     ModelEntry {
         id: model.id.clone(),
         display_name: model.display_name.clone(),
+        family: String::new(),
+        variant_of: None,
+        variant: None,
+        languages: Vec::new(),
         kind: ModelKind::Chat,
         released_at: parse_release_date(&model.created_at),
         context_window: model.max_input_tokens,

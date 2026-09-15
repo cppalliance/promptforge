@@ -6,12 +6,25 @@
 //! file. The crate does double duty: a library linked into the Gateway, and
 //! a binary the aggregation workflow compiles and runs.
 
-use shared_gateway_api::{ModelEntry, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, Tier};
 
 pub mod providers;
 mod sheet;
 
 pub use sheet::{build_sheet, fetch_sheet};
+
+/// The const-friendly twin of the schema's `EnvVar`: the schema type
+/// holds `String`s and cannot sit in a `const` descriptor, so the
+/// descriptor carries `&'static str` and slice construction converts.
+#[derive(Debug, Clone, Copy)]
+pub struct EnvVarSpec {
+    /// The variable name, e.g. "ANTHROPIC_API_KEY".
+    pub name: &'static str,
+    /// How the variable is used.
+    pub role: EnvRole,
+    /// The value the provider assumes when the variable is unset.
+    pub default: Option<&'static str>,
+}
 
 /// The public descriptor for one provider. Everything else about the
 /// provider - auth header shape, pagination, response mapping - is
@@ -31,6 +44,17 @@ pub struct Provider {
     pub key_env: Option<&'static str>,
     /// Default base URL for the model-list endpoint.
     pub base_url: &'static str,
+    /// The base URL of the provider's OpenAI-compatible chat API - the
+    /// value an `[[endpoint]]` needs - or `None` when the provider has
+    /// no such API. Distinct from `base_url`, which is the model-list
+    /// endpoint's base and stays private to the fetch.
+    pub openai_base_url: Option<&'static str>,
+    /// Every environment variable the provider reads, key-role and
+    /// config-role; copied into the provider's slice at build time.
+    /// `key_env` stays the single key-role entry the binary passes to
+    /// `fetch_models`; the provider file reads any further entries
+    /// privately.
+    pub env_vars: &'static [EnvVarSpec],
 }
 
 /// Every known provider.
@@ -314,6 +338,8 @@ mod tests {
             tier: Tier::Niche,
             key_env: Some("NO_SUCH_PROVIDER_API_KEY"),
             base_url: "https://example.invalid",
+            openai_base_url: None,
+            env_vars: &[],
         };
         let client = reqwest::Client::new();
         let Err(err) = fetch_models(&client, &provider, Some("test-key")).await else {

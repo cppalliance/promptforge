@@ -2,6 +2,10 @@
   {
     "id": "curated-m1",
     "display_name": "Curated M1",
+    "family": "curated",
+    "variant_of": null,
+    "variant": null,
+    "languages": [],
     "kind": "chat",
     "released_at": "2026-01-15",
     "context_window": 64000,
