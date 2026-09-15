@@ -1,7 +1,7 @@
 use super::*;
 
 const CONFIG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -32,7 +32,7 @@ fn write_config() -> (tempfile::TempDir, PathBuf) {
 #[test]
 fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
     let (_temp, path) = write_config();
-    write_shadow(&path, "config-version = 2\n").expect("stage shadow");
+    write_shadow(&path, "config-version = 0\n").expect("stage shadow");
 
     write_atomic(&path, "config-version = 3\n").expect("atomic write");
 
@@ -43,7 +43,7 @@ fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
     );
     assert_eq!(
         fs::read_to_string(shadow_path(&path)).expect("read shadow"),
-        "config-version = 2\n",
+        "config-version = 0\n",
         "the shadow is not consumed by a direct write"
     );
     let leftovers: Vec<_> = fs::read_dir(path.parent().expect("parent"))

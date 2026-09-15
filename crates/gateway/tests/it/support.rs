@@ -439,7 +439,7 @@ pub(crate) async fn recording_backend() -> (SocketAddr, Recorder) {
 pub(crate) fn gateway_config(backend: SocketAddr) -> Config {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -494,7 +494,7 @@ pub(crate) async fn fake_brave() -> SocketAddr {
 pub(crate) async fn gateway_with_web_search(brave: SocketAddr) -> TestServer {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -560,7 +560,7 @@ pub(crate) async fn gateway_with_queue(
 ) -> TestServer {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

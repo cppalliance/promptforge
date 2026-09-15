@@ -20,9 +20,9 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
     /// )?;
-    /// assert_eq!(config.config_version(), 2);
+    /// assert_eq!(config.config_version(), 0);
     /// # Ok::<(), gateway_config::ConfigError>(())
     /// ```
     #[must_use]
@@ -36,7 +36,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -57,7 +57,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -80,7 +80,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -105,7 +105,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -132,7 +132,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -166,7 +166,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -192,7 +192,7 @@ impl Config {
     /// ```
     /// # use gateway_config::{Config, ProfileName};
     /// let catalog = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n\
     ///      [[profile]]\nname = \"work\"\nmodels = [\"speech\"]\n",
     /// )?;
@@ -211,7 +211,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
     /// )?;
     /// assert!(config.catalog_models().is_empty());
     /// # Ok::<(), gateway_config::ConfigError>(())
@@ -227,7 +227,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
     /// )?;
     /// assert!(config.catalog_local_models().is_empty());
     /// # Ok::<(), gateway_config::ConfigError>(())
@@ -243,7 +243,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
     /// )?;
     /// assert!(config.catalog_stt_models().is_empty());
     /// # Ok::<(), gateway_config::ConfigError>(())
@@ -259,7 +259,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
     /// assert_eq!(config.profiles()[0].name(), "work");
@@ -277,7 +277,7 @@ impl Config {
     /// ```
     /// # use gateway_config::{Config, ProfileName};
     /// let catalog = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
     /// assert!(catalog.active_profile().is_none());
@@ -300,7 +300,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -331,7 +331,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -356,7 +356,7 @@ impl ProfileConfig {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
     /// assert_eq!(config.profiles()[0].name(), "work");
@@ -373,7 +373,7 @@ impl ProfileConfig {
     /// ```
     /// # use gateway_config::Config;
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
     /// assert!(config.profiles()[0].models().is_empty());
@@ -392,7 +392,7 @@ impl ServerConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -412,7 +412,7 @@ impl ServerConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -434,7 +434,7 @@ impl ServerConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -462,7 +462,7 @@ impl ServerConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "0.0.0.0:8081"
     /// # api_key = "secret"
@@ -497,7 +497,7 @@ impl LocalConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -536,7 +536,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -560,7 +560,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::{Config, DominionKind};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -585,7 +585,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -610,7 +610,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -635,7 +635,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::{Config, QueuePolicy};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -660,7 +660,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -686,7 +686,7 @@ impl DominionConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -714,7 +714,7 @@ impl EndpointConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -740,7 +740,7 @@ impl EndpointConfig {
     /// ```
     /// # use gateway_config::{Config, Protocol};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -766,7 +766,7 @@ impl EndpointConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -792,7 +792,7 @@ impl EndpointConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -820,7 +820,7 @@ impl EndpointConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -852,7 +852,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -886,7 +886,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::{Config, ModelKind};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -921,7 +921,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -954,7 +954,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -988,7 +988,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::{Config, ThinkingMode};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1022,7 +1022,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1055,7 +1055,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1088,7 +1088,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1124,7 +1124,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::{Config, ToolDialect};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1158,7 +1158,7 @@ impl ModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1200,7 +1200,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1227,7 +1227,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::{Config, ModelKind};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1255,7 +1255,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1282,7 +1282,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1310,7 +1310,7 @@ impl LocalModelConfig {
     /// # use gateway_config::Config;
     /// # let digest = "a".repeat(64);
     /// # let toml = format!(r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1338,7 +1338,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1371,7 +1371,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1399,7 +1399,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1426,7 +1426,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1453,7 +1453,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::{Config, ThinkingMode};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1480,7 +1480,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1507,7 +1507,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1534,7 +1534,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1561,7 +1561,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1588,7 +1588,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1616,7 +1616,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1643,7 +1643,7 @@ impl LocalModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1676,7 +1676,7 @@ impl ToolsConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1703,7 +1703,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::{Config, SearchProvider};
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1728,7 +1728,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1753,7 +1753,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1779,7 +1779,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1805,7 +1805,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1831,7 +1831,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1858,7 +1858,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1885,7 +1885,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1912,7 +1912,7 @@ impl WebSearchConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"

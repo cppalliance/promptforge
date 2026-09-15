@@ -37,7 +37,7 @@ impl WorkshopConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -61,7 +61,7 @@ impl WorkshopConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let toml = r#"
-    /// # config-version = 2
+    /// # config-version = 0
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -85,7 +85,7 @@ mod tests {
     use crate::config::Config;
 
     /// A minimal valid `[server]` to prefix workshop fixtures with.
-    const BASE: &str = "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n";
+    const BASE: &str = "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n";
 
     fn parse(extra: &str) -> Config {
         Config::from_toml_str(&format!("{BASE}{extra}")).expect("fixture parses")
@@ -131,7 +131,7 @@ open_browser = true
     fn workshop_client_url_swaps_unspecified_bind_for_loopback() {
         let url = |bind: &str| {
             Config::from_toml_str(&format!(
-                "config-version = 2\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
+                "config-version = 0\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
             ))
             .expect("fixture parses")
             .server()
@@ -145,7 +145,7 @@ open_browser = true
     fn workshop_client_url_keeps_reachable_binds() {
         let url = |bind: &str| {
             Config::from_toml_str(&format!(
-                "config-version = 2\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
+                "config-version = 0\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
             ))
             .expect("fixture parses")
             .server()

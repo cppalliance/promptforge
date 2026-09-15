@@ -34,7 +34,7 @@ See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for
 
 ## Profiles
 
-One `gateway.toml` holds the entire catalog, opened by `config-version = 2`: global sections once (`[server]`, `[local]`, `[tools]`, `[[endpoint]]`, `[[dominion]]`), remote models as `[[model]]`, local models as `[[local_model]]`, and speech-to-text models as `[[stt_model]]`. Profiles are named checklists over that catalog:
+One `gateway.toml` holds the entire catalog, opened by `config-version = 0`: global sections once (`[server]`, `[local]`, `[tools]`, `[[endpoint]]`, `[[dominion]]`), remote models as `[[model]]`, local models as `[[local_model]]`, and speech-to-text models as `[[stt_model]]`. Profiles are named checklists over that catalog:
 
 ```toml
 [[profile]]

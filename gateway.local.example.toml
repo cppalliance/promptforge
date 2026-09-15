@@ -1,7 +1,7 @@
 # PromptForge gateway configuration, schema version 2.
 # The Config UI writes this file. The ordering below is canonical so equivalent
 # edits do not create avoidable merge noise.
-config-version = 2
+config-version = 0
 
 # Gateway API listener and shared bearer credential.
 [server]

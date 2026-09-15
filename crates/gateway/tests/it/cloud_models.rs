@@ -115,7 +115,7 @@ fn write_config(temp: &tempfile::TempDir) -> PathBuf {
     let path = temp.path().join("gateway.toml");
     std::fs::write(
         &path,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n",
     )
     .expect("write config");

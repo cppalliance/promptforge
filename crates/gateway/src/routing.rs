@@ -244,7 +244,7 @@ mod tests {
         let document = if toml.contains("config-version") {
             toml.to_owned()
         } else {
-            format!("config-version = 2\n{toml}")
+            format!("config-version = 0\n{toml}")
         };
         let config = Config::from_toml_str(&document).unwrap();
         Routing::from_config(&config).unwrap()
@@ -252,7 +252,7 @@ mod tests {
 
     fn routing() -> Routing {
         let toml = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -344,7 +344,7 @@ endpoints = ["e"]
     #[test]
     fn from_config_carries_model_kinds() {
         let toml = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -379,7 +379,7 @@ endpoints = ["e"]
     #[test]
     fn from_config_carries_tool_dialect() {
         let toml = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -416,7 +416,7 @@ endpoints = ["e"]
     #[test]
     fn remote_model_defaults_to_openai_dialect() {
         let toml = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -481,7 +481,7 @@ endpoints = ["e"]
         // dominion compete for a single pool of slots. Filling the queue
         // through one endpoint blocks the other.
         let toml = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -546,7 +546,7 @@ endpoints = ["b"]
         // bound max_queue and reject policy have no full in-flight set to
         // act on.
         let toml = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"

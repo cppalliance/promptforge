@@ -23,7 +23,7 @@ type Socket = WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
 
 fn config(strict: bool) -> Config {
     Config::from_toml_str(&format!(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\n\
          bind = \"127.0.0.1:0\"\n\
          api_key = \"test-token\"\n\
@@ -230,7 +230,7 @@ fn native_speech_service() -> SpeechService {
         let cache = tempfile::tempdir().expect("native test cache creates");
         let cache = cache.path().display().to_string().replace('\\', "/");
         let catalog = Config::from_toml_str(&format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [local]\ncache_dir = {cache:?}\n\
              [stt]\nwindow_seconds = 4\ninterval_ms = 500\n\

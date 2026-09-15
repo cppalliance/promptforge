@@ -2056,7 +2056,7 @@ mod transcription_auth_tests {
 
     fn state() -> crate::AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [workshop]\n",
         )
@@ -2210,7 +2210,7 @@ mod speech_auth_tests {
 
     fn state() -> crate::AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [workshop]\n",
         )
@@ -2275,7 +2275,7 @@ mod tray_status_tests {
     )]
     fn the_tray_status_counts_routed_models_and_sums_declared_vram() {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"fake\"]\n\
@@ -2314,7 +2314,7 @@ mod provisioning_tests {
     /// stays configured-but-unloaded for the test's whole run.
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[local_model]]\nname = \"slow-model\"\ndescription = \"d\"\n\
              source = \"/models/slow.gguf\"\ncontext = 4096\n\
@@ -2465,7 +2465,7 @@ mod provisioning_tests {
     /// `beta` each select one remote model on an endpoint nothing listens
     /// on, and the harness state starts with `alpha` live.
     fn two_remote_catalog() -> &'static str {
-        "config-version = 2\n\
+        "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
              base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
@@ -2509,7 +2509,7 @@ mod provisioning_tests {
     #[cfg(feature = "test-fixtures")]
     fn local_runtime_fixture(upstream_name: &str) -> crate::local::LocalRuntime {
         let config = Config::from_toml_str(&format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"local-fixture\"\nprotocol = \"openai\"\n\
              base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
@@ -2536,7 +2536,7 @@ mod provisioning_tests {
             .to_string()
             .replace('\\', "/");
         let catalog = format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
              base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
@@ -3063,7 +3063,7 @@ mod provisioning_tests {
         std::fs::write(&model_file, b"not a gguf").expect("write model");
         let slash = |path: &std::path::Path| path.display().to_string().replace('\\', "/");
         Config::from_toml_str(&format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [local]\ncache_dir = '{}'\nllama_server_path = '{}'\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
@@ -3466,7 +3466,7 @@ mod boot_speech_tests {
     /// A catalog with one remote model per profile on the fake backend.
     fn catalog(backend: std::net::SocketAddr) -> String {
         format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [stt]\nwindow_seconds = 8\ninterval_ms = 250\nvocabulary = [\"alpha-words\"]\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://{backend}\"\napi_key = \"\"\n\
@@ -4582,7 +4582,7 @@ mod loopback_wall_tests {
         std::fs::write(&boot, "").expect("write boot");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -4983,7 +4983,7 @@ mod status_surface_tests {
     /// test pins that a missing key is refused from the loopback listener.
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              trust_loopback = false\n\
              [[local_model]]\nname = \"slow-model\"\ndescription = \"d\"\n\

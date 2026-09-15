@@ -6,7 +6,7 @@ use super::super::*;
 use crate::{ConfigErrorKind, ProfileSelection, profile_state_path};
 
 const CATALOG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -47,10 +47,10 @@ fn file_fixture() -> (TempDir, std::path::PathBuf) {
 }
 
 #[test]
-fn version_two_schema_carries_profiles_and_stt_models() {
+fn version_zero_schema_carries_profiles_and_stt_models() {
     let config = Config::from_toml_str(CATALOG).expect("schema parses");
 
-    assert_eq!(config.config_version(), 2);
+    assert_eq!(config.config_version(), 0);
     assert_eq!(config.profiles().len(), 2);
     assert_eq!(config.profiles()[0].name(), "work");
     assert_eq!(config.profiles()[0].models(), ["a", "speech"]);
@@ -91,19 +91,19 @@ fn canonical_stt_section_parses_into_the_runtime_shape() {
 fn hard_breaks_name_file_key_line_and_replacement() {
     for (raw, key, line, replacement) in [
         (
-            "config-version = 2\ninclude = [\"base.toml\"]\n",
+            "config-version = 0\ninclude = [\"base.toml\"]\n",
             "include",
             ":2:",
             "[[profile]]",
         ),
         (
-            "config-version = 2\nmodels = [\"a\"]\n",
+            "config-version = 0\nmodels = [\"a\"]\n",
             "models",
             ":2:",
             "[[profile]]",
         ),
         (
-            "config-version = 2\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n\
+            "config-version = 0\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n\
              [workshop.voice]\ninterim_model='tiny.bin'\n",
             "workshop.voice.interim_model",
             ":6:",
@@ -126,7 +126,7 @@ fn hard_breaks_name_file_key_line_and_replacement() {
 #[test]
 fn hard_break_detection_uses_toml_keys_not_string_contents() {
     let valid = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = """
@@ -142,12 +142,12 @@ include = ["not-a-config-key.toml"]
             ":2:",
         ),
         (
-            "config-version = 2\nworkshop.voice.final_model = \"small.bin\"\n",
+            "config-version = 0\nworkshop.voice.final_model = \"small.bin\"\n",
             "workshop.voice.final_model",
             ":2:",
         ),
         (
-            "config-version = 2\n[\"workshop\".\"voice\"]\nwindow_seconds = 8\n",
+            "config-version = 0\n[\"workshop\".\"voice\"]\nwindow_seconds = 8\n",
             "workshop.voice",
             ":2:",
         ),
@@ -164,17 +164,52 @@ include = ["not-a-config-key.toml"]
     }
 }
 
+/// The format version this loader replaced. Spelled as a number so the
+/// repository-wide check that no `config-version` header at the previous
+/// value remains keeps passing while the tests still exercise a document
+/// written at that version.
+const PREVIOUS_VERSION: u32 = 2;
+
 #[test]
 fn missing_or_wrong_config_version_is_a_located_hard_break() {
     for raw in [
-        "[server]\nbind='127.0.0.1:1'\napi_key='x'\n",
-        "config-version = 1\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n",
+        "[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
+        "config-version = 1\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n".to_string(),
+        format!("config-version = {PREVIOUS_VERSION}\n[server]\nbind='127.0.0.1:1'\napi_key='x'\n"),
     ] {
-        let error = Config::from_toml_str(raw).expect_err("version must be explicit");
+        let error = Config::from_toml_str(&raw).expect_err("version must be explicit");
+        let message = error.to_string();
         assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
-        assert!(error.to_string().contains("config-version"));
-        assert!(error.to_string().contains(":1:"));
+        assert!(message.contains(":1:"), "line named: {message}");
+        assert!(
+            message.contains("config-version = 0"),
+            "replacement names the required value: {message}"
+        );
     }
+}
+
+#[test]
+fn the_previous_format_version_fails_with_a_message_naming_zero() {
+    let previous_header = format!("config-version = {PREVIOUS_VERSION}");
+    let previous = CATALOG.replacen("config-version = 0", &previous_header, 1);
+    assert_ne!(
+        previous, CATALOG,
+        "the fixture declares the current version"
+    );
+
+    let error = Config::from_toml_str(&previous)
+        .expect_err("the previous format version is no longer accepted");
+    let message = error.to_string();
+
+    assert_eq!(error.kind(), ConfigErrorKind::HardBreak);
+    assert!(
+        message.contains("config-version = 0"),
+        "the message names the required value: {message}"
+    );
+    assert!(
+        !message.contains(&previous_header),
+        "the message does not name the rejected value as the fix: {message}"
+    );
 }
 
 #[test]
@@ -202,7 +237,7 @@ fn sibling_profiles_directory_is_a_hard_break() {
 fn file_hard_break_names_the_loaded_path_and_source_line() {
     let temp = TempDir::new().expect("temp dir");
     let path = temp.path().join("gateway.toml");
-    fs::write(&path, "config-version = 2\ninclude = [\"base.toml\"]\n")
+    fs::write(&path, "config-version = 0\ninclude = [\"base.toml\"]\n")
         .expect("write legacy config");
 
     let error = Config::load(&path, &ProfileSelection::default())

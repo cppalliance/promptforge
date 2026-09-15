@@ -182,7 +182,7 @@ policy = "{policy}"
     };
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -327,7 +327,7 @@ async fn non_speech_kinds_are_rejected_on_the_speech_route() {
     let (backend, recorder) = recording_speech_backend(Some("audio/mpeg")).await;
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -847,7 +847,7 @@ async fn models_catalog_shows_the_speech_kind_and_voices() {
 async fn catalog_gateway(backend: SocketAddr, models: &str) -> TestServer {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -1812,7 +1812,7 @@ async fn speech_profile_gateway(backend: SocketAddr) -> (tempfile::TempDir, Test
     let catalog = |backend: SocketAddr| {
         format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

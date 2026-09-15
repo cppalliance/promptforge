@@ -257,7 +257,7 @@ impl TryFrom<RawConfig> for Config {
 /// use gateway_config::Config;
 ///
 /// let config = Config::from_toml_str(
-///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
 ///      [[profile]]\nname = \"work\"\nmodels = []\n",
 /// )?;
 /// assert_eq!(config.profiles()[0].name(), "work");

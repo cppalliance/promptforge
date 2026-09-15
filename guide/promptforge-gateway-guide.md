@@ -111,7 +111,7 @@ This chapter teaches you the shape of the one file that configures the whole gat
 You configure the gateway in a single version-2 `gateway.toml` file. The file owns the global settings, the complete model catalog, and the profiles. The file must declare its version on the first line:
 
 ````
-config-version = 2
+config-version = 0
 ````
 
 Any other version fails to load. There is no silent upgrade path.
@@ -121,7 +121,7 @@ Any other version fails to load. There is no silent upgrade path.
 A minimal configuration has one `[server]` section, one or more `[[endpoint]]` backends, and one or more `[[model]]` entries that map public names to upstream aliases:
 
 ````
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"

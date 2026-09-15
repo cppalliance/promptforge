@@ -80,7 +80,7 @@ const ARTIFACTS: [PinnedArtifact; 3] = [
 fn live_config_toml(cache: &Path) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

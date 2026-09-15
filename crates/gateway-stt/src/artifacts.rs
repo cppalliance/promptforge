@@ -257,7 +257,7 @@ mod tests {
     fn selected(source: &str, sha256: Option<&str>) -> Config {
         let pin = sha256.map_or_else(String::new, |pin| format!("sha256 = \"{pin}\"\n"));
         let catalog = Config::from_toml_str(&format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
              [workshop]\n\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {source:?}\n\

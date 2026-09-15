@@ -56,9 +56,9 @@ impl Config {
     /// dominion's `vram_gb` budget exceeded by the bound models' estimates,
     /// or a bound model with no estimate).
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
-        if self.version != 2 {
+        if self.version != 0 {
             return Err(ConfigError::Validation(format!(
-                "config-version must be 2, got {}",
+                "config-version must be 0, got {}",
                 self.version
             )));
         }

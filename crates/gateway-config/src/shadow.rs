@@ -26,7 +26,7 @@ mod tests;
 /// use gateway_config::save_config_shadow;
 /// use std::path::Path;
 ///
-/// let document = toml::from_str("config-version = 2")?;
+/// let document = toml::from_str("config-version = 0")?;
 /// let shadows = save_config_shadow(Path::new("gateway.toml"), document)?;
 /// assert!(shadows.config.ends_with("gateway.toml.next"));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -94,7 +94,7 @@ pub fn shadow_path(path: &Path) -> PathBuf {
 /// use gateway_config::write_shadow;
 /// use std::path::Path;
 ///
-/// let path = write_shadow(Path::new("gateway.toml"), "config-version = 2\n")?;
+/// let path = write_shadow(Path::new("gateway.toml"), "config-version = 0\n")?;
 /// assert!(path.ends_with("gateway.toml.next"));
 /// # Ok::<(), gateway_config::ConfigError>(())
 /// ```
@@ -122,7 +122,7 @@ fn write_shadow_repr(target: &Path, contents: &str) -> Result<PathBuf, Repr> {
 /// use gateway_config::write_atomic;
 /// use std::path::Path;
 ///
-/// write_atomic(Path::new("gateway.toml"), "config-version = 2\n")?;
+/// write_atomic(Path::new("gateway.toml"), "config-version = 0\n")?;
 /// # Ok::<(), gateway_config::ConfigError>(())
 /// ```
 pub fn write_atomic(target: &Path, contents: &str) -> Result<(), crate::ConfigError> {
@@ -276,7 +276,7 @@ pub fn persist_profile_state(
 /// use gateway_config::save_config_shadow;
 /// use std::path::Path;
 ///
-/// let document = toml::from_str("config-version = 2")?;
+/// let document = toml::from_str("config-version = 0")?;
 /// let shadows = save_config_shadow(Path::new("gateway.toml"), document)?;
 /// assert!(shadows.config.ends_with("gateway.toml.next"));
 /// # Ok::<(), Box<dyn std::error::Error>>(())

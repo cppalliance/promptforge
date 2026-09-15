@@ -200,7 +200,7 @@ mod tests {
     use crate::test_support::{AdminPaths, serve_with_paths};
 
     const PROFILE_CONFIG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -221,14 +221,14 @@ models = []
         let config = temp.path().join("gateway.toml");
         std::fs::write(
             &config,
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n",
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n",
         )
         .expect("write config");
         let state = profile_state_path(&config);
         std::fs::write(&state, "active_profile = \"alpha\"\n").expect("write state");
         write_shadow(
             &config,
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"changed\"\n",
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"changed\"\n",
         )
         .expect("write config shadow");
         write_shadow(&state, "active_profile = \"beta\"\n").expect("write state shadow");

@@ -308,7 +308,7 @@ async fn drive_no_alignment() {
     )
     .expect("scripted speech starts");
     let config = Config::from_toml_str(&format!(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\n\
          bind = \"127.0.0.1:0\"\n\
          api_key = \"{BEARER_SENTINEL}\"\n\

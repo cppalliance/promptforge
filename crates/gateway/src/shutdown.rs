@@ -84,7 +84,7 @@ mod tests {
     /// case below is refused from the planted loopback peer.
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              trust_loopback = false\n",
         )

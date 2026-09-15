@@ -127,7 +127,7 @@ fn cache_dir_with(sheet: &Sheet) -> (tempfile::TempDir, PathBuf) {
 /// A bearer-authed state with no filesystem context, for route tests.
 fn route_state() -> AppState {
     let config = Config::from_toml_str(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
     )
     .expect("the config parses");

@@ -116,7 +116,7 @@ impl Config {
     /// ```
     /// # use gateway_config::Config;
     /// let toml = r#"
-    /// config-version = 2
+    /// config-version = 0
     /// [server]
     /// bind = "127.0.0.1:8080"
     /// api_key = "secret"
@@ -145,7 +145,7 @@ impl Config {
     /// use gateway_config::Config;
     ///
     /// let toml = r#"
-    /// config-version = 2
+    /// config-version = 0
     /// [server]
     /// bind = "127.0.0.1:8080"
     /// api_key = "secret"
@@ -185,7 +185,7 @@ impl Config {
     /// use gateway_config::{Config, ProfileName};
     ///
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n\
+    ///     "config-version = 0\n\
     ///      [server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
@@ -334,18 +334,18 @@ fn reject_removed_layout(raw: &str, path: Option<&Path>) -> Result<(), ConfigErr
     }
 
     match probe.config_version {
-        Some(version) if version.get_ref().as_integer() == Some(2) => Ok(()),
+        Some(version) if version.get_ref().as_integer() == Some(0) => Ok(()),
         Some(version) => Err(hard_break(
             path,
             line_for_span(raw, version.span()),
             "config-version",
-            "set config-version = 2 and use the single-file profile layout",
+            "set config-version = 0 and use the single-file profile layout",
         )),
         None => Err(hard_break(
             path,
             1,
             "config-version",
-            "add config-version = 2 before the first table",
+            "add config-version = 0 before the first table",
         )),
     }
 }

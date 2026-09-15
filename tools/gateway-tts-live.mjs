@@ -57,7 +57,7 @@ function sleep(ms) {
 
 export function renderConfig({ port }) {
   const voices = VOICES.map((voice) => JSON.stringify(voice)).join(", ");
-  return `config-version = 2
+  return `config-version = 0
 
 [server]
 bind = "127.0.0.1:${port}"

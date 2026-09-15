@@ -22,7 +22,7 @@ fn write_config(temp: &tempfile::TempDir, body: String) -> std::path::PathBuf {
 fn race_config(temp: &tempfile::TempDir) -> std::path::PathBuf {
     write_config(
         temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     )
@@ -197,7 +197,7 @@ async fn the_boot_command_loads_the_active_profile_into_an_empty_table() {
         &temp,
         format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -252,7 +252,7 @@ async fn spawn_leaves_provisioning_to_the_boot_command() {
     std::fs::write(&fake_server, b"not a server").expect("write fake server");
     let body = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -351,7 +351,7 @@ fn headless_serve_bookends_the_log_file() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
@@ -537,7 +537,7 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
@@ -902,7 +902,7 @@ fn diagnostics_reports_without_serving_or_mutating() {
     std::fs::create_dir_all(&logs).expect("create the logs dir");
     std::fs::write(logs.join("gateway.log"), "the running gateway's log").expect("seed the log");
     let config = temp.path().join(".promptforge").join("gateway.toml");
-    std::fs::write(&config, "config-version = 2\n").expect("seed the profile config");
+    std::fs::write(&config, "config-version = 0\n").expect("seed the profile config");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
         .arg("diagnostics")
@@ -975,7 +975,7 @@ fn diagnostics_reports_a_running_gateway_without_rotating_its_log() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
@@ -1112,7 +1112,7 @@ fn a_fatal_boot_error_lands_in_the_log_with_its_chain() {
 fn two_profile_config(backend: std::net::SocketAddr) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

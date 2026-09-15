@@ -344,7 +344,7 @@ mod tests {
     fn hf_config() -> Config {
         Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

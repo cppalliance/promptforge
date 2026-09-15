@@ -29,7 +29,7 @@ fn chat_model_config(name: &str, chat_template_file: Option<&str>) -> Config {
     });
     Config::from_toml_str(&format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"

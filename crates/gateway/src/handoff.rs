@@ -219,7 +219,7 @@ mod tests {
 
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
         )
         .expect("config parses");
@@ -383,7 +383,7 @@ mod cookie_tests {
     /// A state whose configured bearer key is `test-token`.
     fn test_token_state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
         )
         .expect("config parses");

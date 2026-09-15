@@ -1028,7 +1028,7 @@ mod tests {
     /// stub executors never read the snapshot.
     fn apply() -> Command {
         let config = Config::from_toml_str(
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"t\"\n\
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"t\"\n\
              [[profile]]\nname = \"alpha\"\nmodels = []\n",
         )
         .expect("config parses");
@@ -1046,7 +1046,7 @@ mod tests {
     /// An `AppState` over a minimal config; the stub executors never read it.
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"t\"\n",
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"t\"\n",
         )
         .expect("config parses");
         app_state(config, None)
@@ -1746,7 +1746,7 @@ mod tests {
     #[cfg(feature = "stt")]
     fn speech_state() -> AppState {
         let catalog = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"e\"]\n\

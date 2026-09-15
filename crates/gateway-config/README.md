@@ -7,7 +7,7 @@ Typed, validated configuration for the PromptForge gateway. Tooling can read and
 Version 2 is a hard break from profile files and include chains. One file owns global settings, the complete model catalog, and pure-checklist profiles:
 
 ```toml
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"

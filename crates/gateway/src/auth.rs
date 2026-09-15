@@ -145,7 +145,7 @@ mod keyless_loopback_tests {
         let trust =
             trust_loopback.map_or(String::new(), |trust| format!("trust_loopback = {trust}\n"));
         let config = Config::from_toml_str(&format!(
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n{trust}"
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n{trust}"
         ))
         .expect("config parses");
         app_state(config, None)

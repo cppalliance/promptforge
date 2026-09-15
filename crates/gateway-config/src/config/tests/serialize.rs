@@ -3,7 +3,7 @@ use super::super::*;
 /// A fixture exercising every config struct, every enum spelling, and all
 /// three `Secret` fields.
 const FULL: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -115,7 +115,7 @@ models = ["gpt", "gemma", "whisper-base-en"]
 "#;
 
 const MINIMAL: &str = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "k"
@@ -170,7 +170,7 @@ fn serialized_shape_uses_the_toml_key_names() {
 #[test]
 fn canonical_stt_input_round_trips_as_canonical_stt() {
     let config = Config::from_toml_str(
-        "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\
+        "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\
          [stt]\nwindow_seconds = 8\n",
     )
     .expect("canonical STT input parses");

@@ -242,7 +242,7 @@ mod tests {
         const TRANSCRIPT: &str = "gateway scripted route sentinel";
 
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
         )
         .expect("config parses");
@@ -288,7 +288,7 @@ mod tests {
     #[tokio::test]
     async fn batch_inference_preserves_the_gateway_error_message_contract() {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
         )
         .expect("config parses");
@@ -353,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn ready_scripted_pair_is_published_through_gateway_surfaces() {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
         )
         .expect("config parses");

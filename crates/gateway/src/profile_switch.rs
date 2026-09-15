@@ -1556,7 +1556,7 @@ mod tests {
 
     fn state() -> crate::AppState {
         let catalog = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha-model\"\ndescription = \"alpha\"\ncontext = 1024\nupstream = \"alpha\"\nendpoints = [\"fake\"]\n\

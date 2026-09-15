@@ -89,7 +89,7 @@ fn fixture_service_with_models_on_dedicated_thread(
         "[\"speech\", \"speech-final\"]"
     };
     let catalog = gateway_config::Config::from_toml_str(&format!(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
          [local]\ncache_dir = {cache_path:?}\n\
          [stt]\nwindow_seconds = 8\ninterval_ms = 400\n\

@@ -121,7 +121,7 @@ mod tests {
         std::fs::write(state_dir.join("logs/gateway.log"), "current").expect("seed log");
         std::fs::write(state_dir.join("logs/gateway.log.1"), "previous").expect("seed rotation");
         let config = state_dir.join("gateway.toml");
-        std::fs::write(&config, "config-version = 2\n").expect("seed config");
+        std::fs::write(&config, "config-version = 0\n").expect("seed config");
 
         let rendered = render(Some(&state_dir), Some(&config), Some(&run_dir), false);
         let report = parse(&rendered);

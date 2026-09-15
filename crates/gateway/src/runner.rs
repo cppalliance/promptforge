@@ -152,7 +152,7 @@ impl Gateway {
     /// use gateway::{Config, Gateway, ProfilesContext};
     ///
     /// let toml = r#"
-    /// config-version = 2
+    /// config-version = 0
     ///
     /// [server]
     /// bind = "127.0.0.1:0"
@@ -231,7 +231,7 @@ impl Gateway {
     /// use gateway::{Config, Gateway, ProfilesContext};
     ///
     /// let toml = r#"
-    /// config-version = 2
+    /// config-version = 0
     ///
     /// [server]
     /// bind = "127.0.0.1:0"
@@ -503,7 +503,7 @@ mod stt_tests {
     #[test]
     fn a_headless_gateway_refuses_an_active_stt_model() {
         let catalog = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\n\
              source = \"missing.bin\"\nvram_gb = 1.0\n\
@@ -567,7 +567,7 @@ mod drain_tests {
     async fn serve_abandons_a_stalled_request_after_the_drain_bound() {
         let (backend, mut arrivals) = silent_backend().await;
         let config = Config::from_toml_str(&format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[endpoint]]\nid = \"silent\"\nprotocol = \"openai\"\n\
              base_url = \"http://{backend}\"\napi_key = \"\"\n\
@@ -625,7 +625,7 @@ mod drain_tests {
     #[tokio::test]
     async fn serve_abandons_a_worker_that_ignores_cancellation_after_the_join_bound() {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
         )
         .expect("config parses");
@@ -1267,7 +1267,7 @@ mod tests {
     use super::*;
 
     const CATALOG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
