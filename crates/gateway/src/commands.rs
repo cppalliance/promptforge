@@ -123,6 +123,13 @@ pub(crate) enum Command {
 impl Command {
     /// A `LoadProfile` command for `name`; `persist` controls whether a
     /// successful load writes the active-profile selection.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the switch route persists the selection instead of enqueueing a load; the boot-only load replaces this in the next step"
+        )
+    )]
     pub(crate) fn load_profile(
         name: ProfileName,
         persist: bool,
@@ -306,6 +313,13 @@ pub(crate) struct CommandSummary {
 #[derive(Debug)]
 pub(crate) struct Enqueued {
     /// The progress operation the command reports under.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read only by tests since the switch route stopped streaming a command's stages; the boot-only queue in the next step decides its fate"
+        )
+    )]
     pub(crate) operation: OperationId,
     /// Resolves when the command settles.
     pub(crate) outcome: oneshot::Receiver<SharedOutcome>,

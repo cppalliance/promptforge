@@ -110,7 +110,8 @@ pub(crate) enum GatewayError {
     #[error("command cancelled: {0}")]
     CommandCancelled(String),
 
-    /// `POST /admin/switch-profile` named a profile that is not on disk.
+    /// `POST /admin/switch-profile` named a profile the live catalog does
+    /// not define; the message names the profiles it does.
     #[non_exhaustive]
     #[error("profile not found: {0}")]
     ProfileNotFound(String),

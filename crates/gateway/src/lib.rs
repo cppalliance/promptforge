@@ -14,8 +14,8 @@
 //! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
 //! gateway-owned local generative inference via a managed `llama-server`
 //! subprocess (`[[local_model]]`), named profile checklists from one loaded
-//! catalog with bounded-drain `POST /admin/switch-profile` streaming its
-//! existing stages over SSE, a bearer-authed `GET /admin/status` readout
+//! catalog with `POST /admin/switch-profile` persisting the selection and
+//! reporting `restart_required`, a bearer-authed `GET /admin/status` readout
 //! carrying the command queue's active and pending commands plus one
 //! readiness entry per capability endpoint, bearer-authed
 //! `POST /admin/queue/cancel` and `POST /admin/queue/cancel-pending`
@@ -178,7 +178,7 @@ use gateway_protocol::ProtocolError;
 use gateway_stt::SpeechService;
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
-use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
+use shared_progress::{EventState, ProgressEvent, ProgressHub, ProgressTree};
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -1348,9 +1348,11 @@ async fn list_models(
     }))
 }
 
+/// The `POST /admin/switch-profile` body: a profile name, or `null` (or
+/// absent) to select no profile.
 #[derive(Debug, Deserialize)]
 struct SwitchProfileRequest {
-    name: String,
+    name: Option<String>,
 }
 
 /// Lists profile names from the loaded global catalog.
@@ -1704,61 +1706,74 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
     }
 }
 
-/// Immediately switches to another named profile, streaming its progress.
+/// Persists the profile selection and reports whether a restart is needed.
 ///
-/// The reply is `text/event-stream`: a `{"stage": ...}` event opens each
-/// phase in execution order - `loading-profile` around config load and
-/// validation, `downloading-models` while the new local models' weights
-/// stage into the cache (only when the profile names local models),
-/// `stopping-models` before the old local children shut
-/// down (only when there are any to stop), `starting-models` before the new
-/// children load their weights into VRAM (the long pole) - and the stream
-/// ends with exactly one terminal event, `{"status": "ready", "profile":
-/// ...}` or `{"status": "error", "message": ...}`. The download precedes
-/// the stop when old children exist, so they serve through it, and follows
-/// the cut-over otherwise, so the remote models serve through it; see
-/// [`run_switch_with_config`]. The bounded drain has no stage of its own,
-/// preserving the existing stage vocabulary. A refusal before the switch
-/// starts (bad auth or a malformed name) stays a buffered JSON error
-/// envelope. Builds without the `local` feature emit no
-/// `downloading-models`/`stopping-models`/`starting-models` stages, and
-/// refuse a profile declaring `[[local_model]]` with a terminal error event
-/// instead of starting children. Speech never participates: the runner's
-/// boot command alone appends a `loading-speech` stage for the process's
-/// one initial STT load, after its switch settles.
+/// The local runtime is fixed for the process lifetime, so a switch never
+/// starts or stops anything. A defined name is written to
+/// `gateway.state.toml`; `null` deletes the file, the persisted form of
+/// "no profile". The reply is `{"profile": Option<String>,
+/// "restart_required": bool}`, where `restart_required` is whether the
+/// selection differs from the running profile. The check against the live
+/// catalog and the state write run under the apply lock, so
+/// `GET /admin/config-pending` never reads a half-written selection.
 ///
-/// The switch runs as a `LoadProfile` command on the gateway's command
-/// queue: serialized with every other command, debounced so a burst of
-/// switches runs only the latest, and cancellable through the command's
-/// token. A client disconnect drops only the response body and its hub
-/// subscription, never the half-finished command.
+/// A malformed name fails at the `parse-name` stage; an undefined one is
+/// [`GatewayError::ProfileNotFound`] naming the defined profiles; a failed
+/// state write is the config-write error. Every refusal changes nothing.
 async fn admin_switch_profile(
     State(state): State<AppState>,
     caller: Caller,
     Json(request): Json<SwitchProfileRequest>,
-) -> Result<Response, GatewayError> {
+) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
-    let name = ProfileName::parse(&request.name)
+    let selected = request
+        .name
+        .as_deref()
+        .map(ProfileName::parse)
+        .transpose()
         .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
-    // Subscribe before enqueueing so no event of this switch is missed; the
-    // response filters the hub stream to this command's operation.
-    let rx = state.hub.subscribe();
-    let enqueued = state.commands.enqueue(commands::Command::load_profile(
-        name,
-        true,
-        tokio_util::sync::CancellationToken::new(),
-    ));
-    let switch = tokio::spawn(async move {
-        enqueued.outcome.await.unwrap_or_else(|_| {
-            // The worker settles every command it begins, so a dropped
-            // sender means the worker task itself died.
-            Arc::new(Err(GatewayError::switch_failed(
-                "queue",
-                std::io::Error::other("the command queue dropped the command without settling it"),
-            )))
-        })
-    });
-    Ok(switch_sse_response(rx, enqueued.operation, switch))
+    let _publication = state.apply.lock().await;
+    let config_path = config_path(&state)?.to_path_buf();
+    let restart_required = {
+        let live = state.live.read().await;
+        if let Some(name) = &selected {
+            let defined: Vec<&str> = live
+                .config
+                .profiles()
+                .iter()
+                .map(gateway_config::ProfileConfig::name)
+                .collect();
+            if !defined.contains(&name.as_str()) {
+                return Err(GatewayError::ProfileNotFound(undefined_profile_message(
+                    name, &defined,
+                )));
+            }
+        }
+        selected.as_ref().map(ProfileName::as_str) != live.profile_name.as_deref()
+    };
+    let persisted = selected.clone();
+    tokio::task::spawn_blocking(move || match &persisted {
+        Some(name) => gateway_config::persist_profile_state(&config_path, name),
+        None => gateway_config::clear_profile_state(&config_path),
+    })
+    .await
+    .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+    .map_err(config_write::config_write_error)?;
+    Ok(Json(serde_json::json!({
+        "profile": selected.as_ref().map(ProfileName::as_str),
+        "restart_required": restart_required,
+    })))
+}
+
+/// The `profile not found` detail for a switch to a name the live catalog
+/// does not define: the name, then every defined profile so the operator
+/// can pick one without a second request.
+fn undefined_profile_message(name: &ProfileName, defined: &[&str]) -> String {
+    if defined.is_empty() {
+        format!("{name} (no profiles are defined)")
+    } else {
+        format!("{name} (defined profiles: {})", defined.join(", "))
+    }
 }
 
 /// Executes a switch using an optional catalog parsed by Apply.
@@ -1825,148 +1840,6 @@ async fn run_switch_with_config(
     token: &tokio_util::sync::CancellationToken,
 ) -> Result<String, GatewayError> {
     profile_switch::run(&state, name, tree, candidate, persistence, token).await
-}
-
-/// Builds the switch-profile SSE response: the hub's event stream filtered
-/// to this switch's operation, each leaf's `Begun` re-emitted as the
-/// `{"stage": ...}` event the route has always carried, then the terminal
-/// event from the command's settled outcome, so the outcome can never be
-/// lost to broadcast lag.
-///
-/// The queue worker broadcasts every stage event before settling the
-/// command, so once the outcome resolves the remaining stages are already
-/// queued on the receiver and are drained ahead of the terminal event.
-fn switch_sse_response(
-    rx: tokio::sync::broadcast::Receiver<ProgressEvent>,
-    operation: OperationId,
-    switch: tokio::task::JoinHandle<commands::SharedOutcome>,
-) -> Response {
-    let stream = futures_util::stream::unfold(
-        (rx, switch, std::collections::VecDeque::new(), false),
-        move |(mut rx, mut switch, mut pending, mut done)| async move {
-            loop {
-                if let Some(line) = pending.pop_front() {
-                    return Some((
-                        Ok::<_, std::convert::Infallible>(line),
-                        (rx, switch, pending, done),
-                    ));
-                }
-                if done {
-                    return None;
-                }
-                let result = loop {
-                    tokio::select! {
-                        received = rx.recv() => match received {
-                            Ok(event) => {
-                                if event.operation == operation
-                                    && matches!(event.state, EventState::Begun { .. })
-                                {
-                                    return Some((
-                                        Ok(stage_line(&event)),
-                                        (rx, switch, pending, done),
-                                    ));
-                                }
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                tracing::debug!(skipped, "switch stage subscriber lagged; events dropped");
-                            }
-                            // The hub lives in `AppState` for the process
-                            // lifetime, so its sender never closes first; the
-                            // join result still carries the outcome if it did.
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                break (&mut switch).await;
-                            }
-                        },
-                        result = &mut switch => break result,
-                    }
-                };
-                drain_switch_stages(&mut rx, operation, &mut pending);
-                done = true;
-                pending.push_back(terminal_line(result));
-            }
-        },
-    );
-    let mut response = Response::new(Body::from_stream(stream));
-    let headers = response.headers_mut();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    response
-}
-
-/// Drains stage events already queued when the switch task completes.
-///
-/// A lag marker describes dropped older events, not an empty receiver, so
-/// catch-up continues after it and preserves every retained stage.
-fn drain_switch_stages(
-    rx: &mut tokio::sync::broadcast::Receiver<ProgressEvent>,
-    operation: OperationId,
-    pending: &mut std::collections::VecDeque<String>,
-) {
-    loop {
-        match rx.try_recv() {
-            Ok(event)
-                if event.operation == operation
-                    && matches!(event.state, EventState::Begun { .. }) =>
-            {
-                pending.push_back(stage_line(&event));
-            }
-            Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
-            Err(
-                tokio::sync::broadcast::error::TryRecvError::Empty
-                | tokio::sync::broadcast::error::TryRecvError::Closed,
-            ) => break,
-        }
-    }
-}
-
-/// Maps a leaf's `Begun` to the switch stream's stage event.
-fn stage_line(event: &ProgressEvent) -> String {
-    format!("data: {}\n\n", serde_json::json!({ "stage": event.label }))
-}
-
-/// Maps the switch command's settled outcome to the stream's terminal event.
-fn terminal_line(result: Result<commands::SharedOutcome, tokio::task::JoinError>) -> String {
-    let payload = match result {
-        Ok(outcome) => match &*outcome {
-            Ok(profile) => serde_json::json!({ "status": "ready", "profile": profile }),
-            #[cfg(feature = "local")]
-            Err(GatewayError::PartialStart {
-                profile,
-                loaded,
-                failed,
-            }) => serde_json::json!({
-                "status": "error",
-                "profile": profile,
-                "loaded": loaded,
-                "failed": failed,
-            }),
-            Err(error) => serde_json::json!({
-                "status": "error",
-                "message": error_chain(error),
-            }),
-        },
-        Err(join_error) => serde_json::json!({
-            "status": "error",
-            "message": format!("switch task failed: {join_error}"),
-        }),
-    };
-    format!("data: {payload}\n\n")
-}
-
-/// Renders `error` with its full source chain for the terminal SSE error
-/// event: the stream has a single `message` field where the JSON envelope
-/// had `message` plus `code`, and a bare `switch profile failed at
-/// load-profile` without its cause tells the operator nothing.
-fn error_chain(error: &GatewayError) -> String {
-    use std::fmt::Write as _;
-
-    let mut message = error.to_string();
-    let mut source = std::error::Error::source(error);
-    while let Some(cause) = source {
-        let _ = write!(message, ": {cause}");
-        source = cause.source();
-    }
-    message
 }
 
 fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
@@ -4016,9 +3889,9 @@ mod boot_speech_tests {
             .expect("the worker task joins");
     }
 
-    /// Boot speech A keeps serving after a later switch persists B, with no
-    /// speech stage on the switch's stream; a fresh process state over the
-    /// persisted selection loads B.
+    /// Boot speech A keeps serving after a later switch persists B and
+    /// reports a restart; a fresh process state over the persisted
+    /// selection loads B.
     #[tokio::test]
     async fn a_later_switch_persists_b_while_boot_speech_a_keeps_serving() {
         let backend = fake_chat_backend().await;
@@ -4042,9 +3915,9 @@ mod boot_speech_tests {
         assert!(outcome.is_ok(), "boot A loads: {outcome:?}");
         assert_eq!(speech_models(&state), ["scripted-interim"]);
 
-        // Switch to beta through the admin route, reading its stage stream
-        // to the terminal event.
-        let mut switching = reqwest::Client::new()
+        // Select beta through the admin route: the selection persists and
+        // the reply asks for a restart; nothing running changes.
+        let switching = reqwest::Client::new()
             .post(format!("http://{addr}/admin/switch-profile"))
             .bearer_auth("test-token")
             .json(&serde_json::json!({ "name": "beta" }))
@@ -4052,22 +3925,11 @@ mod boot_speech_tests {
             .await
             .expect("the switch request sends");
         assert_eq!(switching.status(), reqwest::StatusCode::OK);
-        let mut body = String::new();
-        while !body.contains("\"status\"") {
-            let chunk = tokio::time::timeout(WAIT, switching.chunk())
-                .await
-                .expect("the switch stream answers")
-                .expect("the switch stream reads");
-            let Some(chunk) = chunk else { break };
-            body.push_str(std::str::from_utf8(&chunk).expect("SSE frames are UTF-8"));
-        }
-        assert!(
-            body.contains("\"ready\""),
-            "the switch to beta succeeds: {body}"
-        );
-        assert!(
-            !body.contains("loading-speech"),
-            "the switch emits no speech stage: {body}"
+        let body: serde_json::Value = switching.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": "beta", "restart_required": true }),
+            "the switch to beta persists and reports a restart"
         );
 
         assert_eq!(
@@ -4493,143 +4355,257 @@ mod progress_tests {
 }
 
 #[cfg(test)]
-mod switch_tests {
-    use std::collections::VecDeque;
+mod switch_route_tests {
+    //! `POST /admin/switch-profile` persists the selection and reports
+    //! whether a restart is needed; it never touches the live state.
+
     use std::sync::Arc;
 
-    use futures_util::StreamExt as _;
-    use shared_progress::ProgressHub;
+    use gateway_config::{Config, ProfileSelection, profile_state_path};
 
-    use super::{GatewayError, drain_switch_stages, switch_sse_response};
+    use crate::AppState;
+    use crate::test_support::{AdminPaths, app_state, serve_state};
 
-    /// Collects the finite switch stream's full body text.
-    async fn body_text(response: axum::response::Response) -> String {
-        let mut frames = response.into_body().into_data_stream();
-        let mut text = String::new();
-        while let Some(frame) = frames.next().await {
-            let frame = frame.expect("the switch stream errored");
-            text.push_str(std::str::from_utf8(&frame).expect("SSE frames are UTF-8"));
+    const TWO_PROFILES: &str = "config-version = 0\n\
+         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+         [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
+         base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+         [[model]]\nname = \"m\"\ndescription = \"d\"\n\
+         context = 8192\nupstream = \"u\"\nendpoints = [\"e\"]\n\
+         [[profile]]\nname = \"alpha\"\nmodels = []\n\
+         [[profile]]\nname = \"beta\"\nmodels = []\n";
+
+    /// Writes the two-profile catalog into `temp` with no state file and
+    /// builds the state `alpha` runs under, as a `--profile alpha` boot
+    /// would leave it. Returns the state and the state file's path.
+    fn running_alpha(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
+        let config_path = temp.path().join("gateway.toml");
+        std::fs::write(&config_path, TWO_PROFILES).expect("write catalog");
+        let config = Config::load(&config_path, &ProfileSelection::new(Some("alpha"), None))
+            .expect("alpha loads");
+        let state = app_state(
+            config,
+            Some(AdminPaths {
+                fixture_dir: temp.path().to_path_buf(),
+                active: "alpha".to_owned(),
+                config_path: config_path.clone(),
+            }),
+        );
+        (state, profile_state_path(&config_path))
+    }
+
+    /// What a switch must leave alone: the routing table, the running
+    /// profile, and the local children.
+    struct LiveSnapshot {
+        routing: Arc<crate::routing::Routing>,
+        profile_name: Option<String>,
+        #[cfg(feature = "local")]
+        local_models: Vec<String>,
+    }
+
+    async fn snapshot(state: &AppState) -> LiveSnapshot {
+        let live = state.live.read().await;
+        LiveSnapshot {
+            routing: Arc::clone(&live.routing),
+            profile_name: live.profile_name.clone(),
+            #[cfg(feature = "local")]
+            local_models: live
+                .local
+                .models()
+                .iter()
+                .map(|model| model.name.clone())
+                .collect(),
         }
-        text
     }
 
-    #[tokio::test]
-    async fn the_switch_stream_shows_only_its_own_operations_stages() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let other = hub.operation();
-        let _unrelated = other.register("download", 1.0);
-        let _leaf = tree.register("loading-profile", 1.0);
-        let switch = tokio::spawn(async { Arc::new(Ok::<_, GatewayError>("beta".to_owned())) });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
+    async fn assert_live_unchanged(state: &AppState, before: &LiveSnapshot) {
+        let after = snapshot(state).await;
         assert!(
-            text.contains("\"stage\":\"loading-profile\""),
-            "body: {text}"
+            Arc::ptr_eq(&before.routing, &after.routing),
+            "a switch never swaps the routing table"
         );
-        assert!(
-            !text.contains("download"),
-            "another operation's leaf must not leak into the switch stream: {text}"
-        );
-        assert!(
-            text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
-            "the terminal event comes from the join result: {text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_switch_stream_ends_with_the_terminal_error_from_the_join_result() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let switch = tokio::spawn(async {
-            Arc::new(Err::<String, _>(GatewayError::ProfileNotFound(
-                "ghost".to_owned(),
-            )))
-        });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
-        assert!(text.contains("\"status\":\"error\""), "body: {text}");
-        assert!(text.contains("profile not found: ghost"), "body: {text}");
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "local")]
-    async fn partial_start_terminal_reports_every_ready_and_failed_model() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let switch = tokio::spawn(async {
-            Arc::new(Err::<String, _>(GatewayError::PartialStart {
-                profile: "beta".to_owned(),
-                loaded: vec!["ready".to_owned()],
-                failed: vec!["broken: startup error".to_owned()],
-            }))
-        });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
-
-        assert!(text.contains("\"profile\":\"beta\""), "body: {text}");
-        assert!(text.contains("\"loaded\":[\"ready\"]"), "body: {text}");
-        assert!(
-            text.contains("\"failed\":[\"broken: startup error\"]"),
-            "body: {text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_switch_stream_survives_broadcast_lag() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-
-        // Overflow the hub's 1024-event ring before the stream's first poll,
-        // so the receiver lags: the Lagged arm must drop the skipped events
-        // and carry on rather than ending the stream.
-        let noise = hub.operation();
-        let _noise_leaves: Vec<_> = (0..1100)
-            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
-            .collect();
-        let _leaf = tree.register("loading-profile", 1.0);
-        let switch = tokio::spawn(async { Arc::new(Ok::<_, GatewayError>("beta".to_owned())) });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
-        assert!(
-            text.contains("\"stage\":\"loading-profile\""),
-            "the stage event survives the lag: {text}"
-        );
-        assert!(
-            text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
-            "the terminal event comes from the join result: {text}"
-        );
-    }
-
-    #[test]
-    fn completed_switch_catch_up_continues_after_a_lag_marker() {
-        let hub = Arc::new(ProgressHub::new());
-        let mut rx = hub.subscribe();
-        let noise = hub.operation();
-        let _noise_leaves: Vec<_> = (0..1100)
-            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
-            .collect();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let _loading = tree.register("loading-profile", 1.0);
-        let mut pending = VecDeque::new();
-
-        drain_switch_stages(&mut rx, operation, &mut pending);
-
         assert_eq!(
-            pending,
-            [r#"data: {"stage":"loading-profile"}
-
-"#]
+            before.profile_name, after.profile_name,
+            "a switch never changes the running profile"
         );
+        #[cfg(feature = "local")]
+        assert_eq!(
+            before.local_models, after.local_models,
+            "a switch never starts or stops local children"
+        );
+    }
+
+    async fn switch(addr: std::net::SocketAddr, body: serde_json::Value) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("http://{addr}/admin/switch-profile"))
+            .bearer_auth("test-token")
+            .json(&body)
+            .send()
+            .await
+            .expect("the switch request sends")
+    }
+
+    async fn get_json(addr: std::net::SocketAddr, path: &str) -> serde_json::Value {
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}{path}"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::OK, "{path}");
+        response.json().await.expect("the body is JSON")
+    }
+
+    #[tokio::test]
+    async fn switching_to_a_different_defined_profile_persists_it_and_requires_a_restart() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "beta" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": "beta", "restart_required": true })
+        );
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("the state file is written"),
+            "active_profile = \"beta\"\n"
+        );
+        assert_live_unchanged(&state, &before).await;
+        assert_eq!(
+            get_json(addr, "/admin/config-pending").await["profile"]["active_profile"],
+            "beta",
+            "the pending view reports the persisted selection"
+        );
+        assert_eq!(
+            get_json(addr, "/admin/status").await["profile"],
+            "alpha",
+            "the status readout reports the running profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_to_the_running_profile_persists_it_without_a_restart() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "alpha" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": "alpha", "restart_required": false })
+        );
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("the state file is written"),
+            "active_profile = \"alpha\"\n",
+            "an ephemeral --profile boot becomes persisted by selecting it"
+        );
+        assert_live_unchanged(&state, &before).await;
+    }
+
+    #[tokio::test]
+    async fn switching_to_an_undefined_profile_names_the_defined_ones_and_writes_nothing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "ghost" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+        let body: serde_json::Value = response.json().await.expect("the error is JSON");
+        assert_eq!(body["error"]["code"], "profile_not_found");
+        let message = body["error"]["message"]
+            .as_str()
+            .expect("the message is a string");
+        assert!(
+            message.contains("ghost"),
+            "names the refused profile: {message}"
+        );
+        assert!(
+            message.contains("alpha, beta"),
+            "names the defined profiles: {message}"
+        );
+        assert!(!state_path.exists(), "a refused switch writes no state");
+        assert_live_unchanged(&state, &before).await;
+        assert!(
+            get_json(addr, "/admin/config-pending").await["profile"]["active_profile"].is_null(),
+            "nothing is persisted"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_name_is_refused_before_anything_is_written() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let addr = serve_state(state).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "../escape" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json().await.expect("the error is JSON");
+        assert_eq!(body["error"]["code"], "switch_failed");
+        assert!(!state_path.exists(), "a malformed name writes no state");
+    }
+
+    #[tokio::test]
+    async fn switching_to_null_deletes_the_state_file_and_requires_a_restart_when_a_profile_runs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": null })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": null, "restart_required": true })
+        );
+        assert!(
+            !state_path.exists(),
+            "an absent state file is the persisted form of no profile"
+        );
+        assert_live_unchanged(&state, &before).await;
+        assert!(
+            get_json(addr, "/admin/config-pending").await["profile"]["active_profile"].is_null(),
+            "the pending view reports no persisted selection"
+        );
+        assert_eq!(
+            get_json(addr, "/admin/status").await["profile"],
+            "alpha",
+            "the running profile is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_to_null_with_no_running_profile_needs_no_restart() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        state.live.write().await.profile_name = None;
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": null })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": null, "restart_required": false })
+        );
+        assert!(!state_path.exists(), "no state file was ever written");
+        assert_live_unchanged(&state, &before).await;
     }
 }
 

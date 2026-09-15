@@ -16,14 +16,14 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::post;
 use futures_util::StreamExt as _;
-use gateway::{Config, Gateway, ProfileName, ProfilesContext};
+use gateway::{Config, Gateway, ProfilesContext};
 use serde_json::Value;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 
 use crate::support::{
     PHASE_TIMEOUT, RecordedRequest, Recorder, ReleaseTx, TestServer, join_within, json_within,
-    next_arrival, parse_sse, send_within, spawn_backend, text_within,
+    next_arrival, send_within, spawn_backend,
 };
 
 /// Canned audio bytes with non-UTF8 content, so a text-handling mistake on
@@ -1801,145 +1801,5 @@ async fn relay_releases_the_permit_after_an_upstream_body_error() {
     );
 
     assert_permit_released_by_admission(&client, &url, &mut receiver).await;
-    gateway.shutdown().await;
-}
-
-/// Start a gateway with two profiles (`alpha` active, `beta` idle) that both
-/// route the same speech model through a one-slot dominion, so a switch
-/// cancels the open stream and the new profile's admission of a later
-/// request proves the permit went back.
-async fn speech_profile_gateway(backend: SocketAddr) -> (tempfile::TempDir, TestServer) {
-    let catalog = |backend: SocketAddr| {
-        format!(
-            r#"
-config-version = 0
-
-[server]
-bind = "127.0.0.1:0"
-api_key = "test-token"
-trust_loopback = false
-
-[[dominion]]
-id = "pool"
-kind = "remote"
-max_concurrency = 1
-max_queue = 10
-policy = "queue"
-
-[[endpoint]]
-id = "fake"
-protocol = "openai"
-base_url = "http://{backend}"
-api_key = ""
-dominion = "pool"
-
-[[model]]
-name = "tts-model"
-kind = "speech"
-description = "a speech model for integration"
-context = 8192
-upstream = "backend-tts"
-endpoints = ["fake"]
-voices = ["alloy"]
-
-[[profile]]
-name = "alpha"
-models = []
-
-[[profile]]
-name = "beta"
-models = []
-"#
-        )
-    };
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let path = temp.path().join("gateway.toml");
-    std::fs::write(&path, catalog(backend)).expect("write config");
-    std::fs::write(
-        gateway_config::profile_state_path(&path),
-        "active_profile = \"alpha\"\n",
-    )
-    .expect("write state");
-    let alpha = ProfileName::parse("alpha").expect("name");
-    let config = Config::from_toml_str(&catalog(backend))
-        .expect("catalog parses")
-        .select_profile(Some(&alpha))
-        .expect("alpha selects");
-    let context = ProfilesContext::new(Some(path), Some(alpha));
-    let server =
-        TestServer::start(Gateway::from_config(&config, context).expect("gateway builds")).await;
-    (temp, server)
-}
-
-/// Drives a profile switch to completion over its SSE stream and returns
-/// the events.
-async fn switch_to(http: &reqwest::Client, addr: SocketAddr, name: &str) -> Vec<Value> {
-    let response = send_within(
-        http.post(format!("http://{addr}/admin/switch-profile"))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": name })),
-    )
-    .await;
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    parse_sse(&text_within(response).await)
-}
-
-/// A profile switch cancels an open speech stream: the relay emits one
-/// terminal error item, so the client's next read fails rather than seeing
-/// a clean EOF (the `relay_sse` RequestCancelled envelope is the precedent
-/// for failing rather than truncating). The switch's drain only completes
-/// once the request's guard is dropped, and the guard and the dominion
-/// permit live and die together in the relay task, so a completed switch
-/// proves the permit went back; the new profile then admits and answers a
-/// later request.
-#[tokio::test]
-async fn profile_switch_cancels_the_stream_and_releases_the_permit() {
-    let (backend, mut arrivals) = gated_audio_backend().await;
-    let (_temp, gateway) = speech_profile_gateway(backend).await;
-    let client = reqwest::Client::new();
-    let url = format!("http://{}/v1/audio/speech", gateway.addr);
-
-    let first = spawn_speech(&client, &url);
-    // Held, never fired: the stream stays mid-flight until the switch
-    // cancels it. Consuming the arrival also keeps the second request's
-    // handle next in the channel.
-    let _release_first = next_arrival(&mut arrivals).await;
-    let mut first = join_within(first).await.unwrap();
-    assert_eq!(first.status().as_u16(), 200);
-    let chunk = tokio::time::timeout(PHASE_TIMEOUT, first.chunk())
-        .await
-        .expect("first chunk read exceeded the phase timeout")
-        .expect("first chunk read failed");
-    assert!(chunk.is_some(), "the stream is mid-flight");
-
-    let addr = gateway.addr;
-    let switch =
-        tokio::spawn(async move { switch_to(&reqwest::Client::new(), addr, "beta").await });
-
-    // The switch's (test-scaled) drain deadline passes, the cancellation
-    // fires, and the client's next read fails on the synthesized error item.
-    // The relay's own total deadline is 2 s against the drain's 1 s, so the
-    // cancellation is the only bound that can end this stream.
-    let (_rest, failed) = read_to_end_or_error(first).await;
-    assert!(
-        failed,
-        "a profile switch fails the open body read, never a clean EOF"
-    );
-
-    let events = join_within(switch).await;
-    assert_eq!(
-        events.last(),
-        Some(&serde_json::json!({"status": "ready", "profile": "beta"})),
-        "the switch completed, so the cancelled request's guard is gone"
-    );
-
-    // The permit went back with the guard: the new profile admits and
-    // answers a speech request on the one-slot dominion.
-    let second = spawn_speech(&client, &url);
-    let release_second = next_arrival(&mut arrivals).await;
-    release_second.send(()).unwrap();
-    let second = join_within(second).await.unwrap();
-    assert_eq!(second.status().as_u16(), 200);
-    assert_eq!(bytes_within(second).await, b"audio-chunk-1;audio-chunk-2;");
     gateway.shutdown().await;
 }

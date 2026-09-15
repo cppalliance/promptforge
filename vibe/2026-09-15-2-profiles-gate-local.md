@@ -317,7 +317,7 @@ Exclusions: no change to the cloud sheet `schema_version` (stays 1) or to `[[pro
 
 <step-4>
 
-### Step 4: Switch route persists the selection and reports restart_required
+### Step 4: Switch route persists the selection and reports restart_required [completed]
 
 - Component: gateway
 - Piece: profile selection. Sequential after Step 3 (uses `state.apply` and the state-file-backed pending envelope) and before Steps 6-7, which consume the JSON reply.
