@@ -1362,7 +1362,7 @@ async fn admin_status(
             .any(|model| model.kind() == kind)
             || live
                 .config
-                .local_models()
+                .catalog_local_models()
                 .iter()
                 .any(|model| model.kind() == kind)
     };
