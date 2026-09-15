@@ -185,7 +185,7 @@ mod tests {
             "deepgram" => crate::providers::deepgram::apply_taxonomy(entries),
             "deepseek" => crate::providers::deepseek::apply_taxonomy(entries),
             "elevenlabs" => crate::providers::elevenlabs::apply_taxonomy(entries),
-            "foundry" => crate::providers::foundry::apply_taxonomy(entries),
+            "foundry" => crate::providers::foundry::taxonomy::apply(entries),
             "gemini" => crate::providers::gemini::apply_taxonomy(entries),
             "groq" => crate::providers::groq::apply_taxonomy(entries),
             "leonardo" => crate::providers::leonardo::apply_taxonomy(entries),
@@ -316,7 +316,11 @@ mod tests {
             "Amazon Bedrock",
             "https://bedrock.us-east-1.amazonaws.com",
         ),
-        ("foundry", "Azure AI Foundry", ""),
+        (
+            "foundry",
+            "Azure AI Foundry",
+            "https://api.catalog.azureml.ms",
+        ),
         ("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1"),
         ("groq", "Groq", "https://api.groq.com/openai/v1"),
         ("soniox", "Soniox", "https://api.soniox.com"),
@@ -338,8 +342,10 @@ mod tests {
         &[("openrouter", "OpenRouter", "https://openrouter.ai")];
 
     /// The keyless providers settled in the decision record: fetched
-    /// with no credential, so `key_env` must be `None`.
-    const KEYLESS: &[&str] = &["nvidia", "openrouter"];
+    /// with no credential, so `key_env` must be `None`. Foundry joined
+    /// them when its slice moved from the per-resource deployment list
+    /// to the global catalog endpoint.
+    const KEYLESS: &[&str] = &["foundry", "nvidia", "openrouter"];
 
     /// The full decision record: `(name, display_name, base_url, tier)`.
     fn decision_record() -> impl Iterator<Item = (&'static str, &'static str, &'static str, Tier)> {
