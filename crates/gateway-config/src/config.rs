@@ -157,22 +157,25 @@ pub struct Config {
     dominions: Vec<DominionConfig>,
     /// The configured backends.
     endpoints: Vec<EndpointConfig>,
-    /// The active profile's remote routing table.
+    /// The remote routing table: every `[[model]]`, served regardless of the
+    /// selected profile.
     models: Vec<ModelConfig>,
     /// The active profile's local generative models.
     local_models: Vec<LocalModelConfig>,
     /// The active profile's speech-to-text models.
     stt_models: Vec<SttModelConfig>,
-    /// Every remote model in the global catalog.
-    catalog_models: Vec<ModelConfig>,
     /// Every local chat model in the global catalog.
     catalog_local_models: Vec<LocalModelConfig>,
     /// Every speech-to-text model in the global catalog.
     catalog_stt_models: Vec<SttModelConfig>,
     /// Pure-checklist profiles over the global catalog.
     profiles: Vec<ProfileConfig>,
-    /// Selected profile index, absent for an unselected in-memory document.
+    /// Selected profile index, absent when no profile is selected.
     active_profile: Option<usize>,
+    /// The state file's profile name when it names no defined profile. The
+    /// load degrades to no profile and keeps the name for the boot warning
+    /// and the UI.
+    stale_state_selection: Option<String>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     tools: Option<ToolsConfig>,
@@ -218,7 +221,6 @@ impl TryFrom<RawConfig> for Config {
     type Error = ConfigError;
 
     fn try_from(raw: RawConfig) -> Result<Config, Self::Error> {
-        let models = raw.models.clone();
         let local_models = raw.local_models.clone();
         let stt_models = raw.stt_models.clone();
         let stt = raw
@@ -232,14 +234,14 @@ impl TryFrom<RawConfig> for Config {
             local: raw.local,
             dominions: raw.dominions,
             endpoints: raw.endpoints,
-            models,
+            models: raw.models,
             local_models,
             stt_models,
-            catalog_models: raw.models,
             catalog_local_models: raw.local_models,
             catalog_stt_models: raw.stt_models,
             profiles: raw.profiles,
             active_profile: None,
+            stale_state_selection: None,
             tools: raw.tools,
             stt,
             workshop: raw.workshop,
@@ -250,7 +252,8 @@ impl TryFrom<RawConfig> for Config {
 /// One pure-checklist profile declared as `[[profile]]`.
 ///
 /// A profile owns no settings. Its `models` list selects entries from the
-/// global `[[model]]`, `[[local_model]]`, and `[[stt_model]]` catalog.
+/// global `[[local_model]]` and `[[stt_model]]` catalog; remote `[[model]]`
+/// entries are always served and may not be listed.
 ///
 /// # Examples
 /// ```

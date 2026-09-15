@@ -722,7 +722,7 @@ async fn resolve_routed_model(
             }
             let configured = live
                 .config
-                .catalog_models()
+                .models()
                 .iter()
                 .any(|model| model.name() == name)
                 || live
@@ -2480,7 +2480,7 @@ mod provisioning_tests {
     fn two_remote_profiles() -> AppState {
         let catalog = Config::from_toml_str(two_remote_catalog()).expect("config parses");
         let config = catalog
-            .select_profile(&ProfileName::parse("alpha").expect("profile name"))
+            .select_profile(Some(&ProfileName::parse("alpha").expect("profile name")))
             .expect("alpha profile selects");
         app_state(config, None)
     }

@@ -128,6 +128,9 @@ impl Config {
     /// Returns the `[[model]]` routing table from model name to remote
     /// backend.
     ///
+    /// Every remote model in the file is served regardless of the selected
+    /// profile, so this is the whole remote catalog under any selection.
+    ///
     /// # Examples
     /// ```
     /// # use gateway_config::Config;
@@ -159,8 +162,11 @@ impl Config {
         &self.models
     }
 
-    /// Returns the `[[local_model]]` entries served by managed
-    /// `llama-server` children.
+    /// Returns the active profile's `[[local_model]]` entries, the ones
+    /// served by managed `llama-server` children.
+    ///
+    /// Empty when no profile is selected. An unselected in-memory document
+    /// from [`Config::from_toml_str`] reports the whole local catalog.
     ///
     /// # Examples
     /// ```
@@ -188,6 +194,10 @@ impl Config {
 
     /// Returns the active profile's speech-to-text models.
     ///
+    /// Empty when no profile is selected. An unselected in-memory document
+    /// from [`Config::from_toml_str`] reports the whole speech-to-text
+    /// catalog.
+    ///
     /// # Examples
     /// ```
     /// # use gateway_config::{Config, ProfileName};
@@ -196,8 +206,9 @@ impl Config {
     ///      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n\
     ///      [[profile]]\nname = \"work\"\nmodels = [\"speech\"]\n",
     /// )?;
-    /// let config = catalog.select_profile(&ProfileName::parse("work")?)?;
+    /// let config = catalog.select_profile(Some(&ProfileName::parse("work")?))?;
     /// assert_eq!(config.stt_models()[0].name(), "speech");
+    /// assert!(catalog.select_profile(None)?.stt_models().is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
@@ -205,23 +216,8 @@ impl Config {
         &self.stt_models
     }
 
-    /// Returns every remote model in the global catalog.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// let config = Config::from_toml_str(
-    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
-    /// )?;
-    /// assert!(config.catalog_models().is_empty());
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn catalog_models(&self) -> &[ModelConfig] {
-        &self.catalog_models
-    }
-
-    /// Returns every local chat model in the global catalog.
+    /// Returns every local chat model in the global catalog, whether or not
+    /// the selected profile lists it.
     ///
     /// # Examples
     /// ```
@@ -237,7 +233,8 @@ impl Config {
         &self.catalog_local_models
     }
 
-    /// Returns every speech-to-text model in the global catalog.
+    /// Returns every speech-to-text model in the global catalog, whether or
+    /// not the selected profile lists it.
     ///
     /// # Examples
     /// ```
@@ -270,8 +267,7 @@ impl Config {
         &self.profiles
     }
 
-    /// Returns the active profile, or `None` for an unselected in-memory
-    /// document.
+    /// Returns the active profile, or `None` when no profile is selected.
     ///
     /// # Examples
     /// ```
@@ -281,7 +277,7 @@ impl Config {
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
     /// assert!(catalog.active_profile().is_none());
-    /// let config = catalog.select_profile(&ProfileName::parse("work")?)?;
+    /// let config = catalog.select_profile(Some(&ProfileName::parse("work")?))?;
     /// assert_eq!(
     ///     config.active_profile().map(|profile| profile.name()),
     ///     Some("work")
@@ -291,6 +287,27 @@ impl Config {
     #[must_use]
     pub fn active_profile(&self) -> Option<&ProfileConfig> {
         self.active_profile.map(|index| &self.profiles[index])
+    }
+
+    /// Returns the profile name the sibling state file selected when that
+    /// name is not defined in the configuration.
+    ///
+    /// [`Config::load`] degrades such a load to no profile instead of
+    /// failing, so a boot can warn and a UI can show the stale selection.
+    /// `None` for every other selection and for an in-memory document.
+    ///
+    /// # Examples
+    /// ```
+    /// # use gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    /// )?;
+    /// assert_eq!(config.stale_state_selection(), None);
+    /// # Ok::<(), gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn stale_state_selection(&self) -> Option<&str> {
+        self.stale_state_selection.as_deref()
     }
 
     /// Returns the `[tools]` configuration, or `None` when the section is
@@ -367,7 +384,8 @@ impl ProfileConfig {
         &self.name
     }
 
-    /// Returns the selected global catalog names in declaration order.
+    /// Returns the selected local and speech-to-text catalog names in
+    /// declaration order.
     ///
     /// # Examples
     /// ```

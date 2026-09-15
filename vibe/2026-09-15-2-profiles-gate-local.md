@@ -291,7 +291,7 @@ Exclusions: no change to the cloud sheet `schema_version` (stays 1) or to `[[pro
 
 <step-2>
 
-### Step 2: Profiles select local and STT only; selection is optional; stale state degrades
+### Step 2: Profiles select local and STT only; selection is optional; stale state degrades [completed]
 
 - Component: gateway-config
 - Piece: profile semantics. Sequential after Step 1 (its fixtures already read 0) and before every gateway step.

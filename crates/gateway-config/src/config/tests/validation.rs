@@ -1067,9 +1067,10 @@ vram_gb = 14
     assert!(Config::parse_toml(toml).is_ok());
 }
 
-#[test]
-fn selected_profile_filters_each_catalog_kind() {
-    let toml = r#"
+/// One remote, one local, and one STT model, plus a profile over `models`.
+fn mixed_catalog_with_profile(models: &str) -> String {
+    format!(
+        r#"
 config-version = 0
 
 [server]
@@ -1103,16 +1104,61 @@ vram_gb = 1.0
 
 [[profile]]
 name = "work"
-models = ["remote", "interim"]
-"#;
-    let catalog = Config::from_toml_str(toml).expect("catalog parses");
+models = {models}
+"#
+    )
+}
+
+#[test]
+fn selected_profile_narrows_local_and_stt_and_serves_every_remote_model() {
+    let toml = mixed_catalog_with_profile("[\"interim\"]");
+    let catalog = Config::from_toml_str(&toml).expect("catalog parses");
     let selected = catalog
-        .select_profile(&crate::ProfileName::parse("work").expect("profile name"))
+        .select_profile(Some(
+            &crate::ProfileName::parse("work").expect("profile name"),
+        ))
         .expect("profile selects");
+    assert_eq!(selected.models().len(), catalog.models().len());
     assert_eq!(selected.models()[0].name(), "remote");
     assert!(selected.local_models().is_empty());
     assert_eq!(selected.stt_models()[0].name(), "interim");
     assert_eq!(selected.catalog_local_models()[0].name(), "local");
+    assert_eq!(selected.catalog_stt_models()[0].name(), "interim");
+}
+
+#[test]
+fn selecting_no_profile_serves_remote_models_and_nothing_local() {
+    let toml = mixed_catalog_with_profile("[\"local\", \"interim\"]");
+    let catalog = Config::from_toml_str(&toml).expect("catalog parses");
+    let selected = catalog.select_profile(None).expect("no profile selects");
+    assert!(selected.active_profile().is_none());
+    assert_eq!(selected.models()[0].name(), "remote");
+    assert!(selected.local_models().is_empty());
+    assert!(selected.stt_models().is_empty());
+    assert_eq!(selected.catalog_local_models()[0].name(), "local");
+    assert_eq!(selected.catalog_stt_models()[0].name(), "interim");
+}
+
+#[test]
+fn profile_listing_a_remote_model_names_the_profile_and_model() {
+    let toml = mixed_catalog_with_profile("[\"remote\", \"local\"]");
+    match Config::parse_toml(&toml) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(
+                message.contains("profile \"work\""),
+                "profile named: {message}"
+            );
+            assert!(
+                message.contains("remote model \"remote\""),
+                "remote model named: {message}"
+            );
+            assert!(
+                message.contains("remote models are always served"),
+                "boundary explained: {message}"
+            );
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1122,6 +1168,10 @@ fn every_profile_reference_must_exist() {
         Err(ConfigError::Validation(message)) => {
             assert!(message.contains("unused"), "profile named: {message}");
             assert!(message.contains("ghost"), "missing model named: {message}");
+            assert!(
+                message.contains("undefined catalog model"),
+                "unknown names keep the undefined-model error: {message}"
+            );
         }
         other => panic!("expected a validation error, got {other:?}"),
     }
@@ -1133,7 +1183,7 @@ fn unselected_catalog_entries_still_validate_references() {
         "{SAMPLE}\n\
          [[model]]\nname = \"dangling\"\ndescription = \"prose\"\ncontext = 1\n\
          upstream = \"u\"\nendpoints = [\"ghost\"]\n\
-         [[profile]]\nname = \"work\"\nmodels = [\"m1\"]\n"
+         [[profile]]\nname = \"work\"\nmodels = []\n"
     );
     assert!(matches!(
         Config::parse_toml(&toml),
@@ -1236,11 +1286,15 @@ fn profile_names_and_membership_are_unique() {
         Err(ConfigError::Validation(message)) if message.contains("../work")
     ));
 
-    let duplicate_member =
-        format!("{SAMPLE}\n[[profile]]\nname = \"work\"\nmodels = [\"m1\", \"m1\"]\n");
+    let duplicate_member = format!(
+        "{SAMPLE}\n\
+         [[local_model]]\nname = \"q\"\ndescription = \"prose\"\n\
+         source = \"/models/q.gguf\"\ncontext = 4096\n\
+         [[profile]]\nname = \"work\"\nmodels = [\"q\", \"q\"]\n"
+    );
     assert!(matches!(
         Config::parse_toml(&duplicate_member),
-        Err(ConfigError::Validation(message)) if message.contains("duplicate model m1")
+        Err(ConfigError::Validation(message)) if message.contains("duplicate model q")
     ));
 }
 

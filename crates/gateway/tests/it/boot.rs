@@ -218,7 +218,7 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "main"
-models = ["test-model"]
+models = []
 "#
         ),
     );
@@ -1140,11 +1140,11 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "main"
-models = ["main-model"]
+models = []
 
 [[profile]]
 name = "other"
-models = ["other-model"]
+models = []
 "#
     )
 }
@@ -1169,7 +1169,7 @@ async fn quit_during_an_active_command_cancels_it_and_exits_promptly() {
     let http = reqwest::Client::new();
 
     // Wait for the boot command to land main-model in the routing table.
-    wait_for_catalog(&url, &http, &["main-model"]).await;
+    wait_for_catalog(&url, &http, &["main-model", "other-model"]).await;
 
     // Hold a chat request in flight, so the switch command parks in its
     // bounded drain with the request still registered.
@@ -1244,7 +1244,7 @@ async fn a_save_completes_while_a_switch_command_is_parked() {
     let handle = gateway::spawn(&options).expect("gateway spawns");
     let url = handle.url().to_owned();
     let http = reqwest::Client::new();
-    wait_for_catalog(&url, &http, &["main-model"]).await;
+    wait_for_catalog(&url, &http, &["main-model", "other-model"]).await;
 
     // Hold a chat request in flight, so the switch command parks in its
     // bounded drain with the request still registered.

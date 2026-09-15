@@ -13,20 +13,27 @@ use serde::Deserialize;
 
 use super::{Config, RawConfig, RawSttPipelineConfig, Secret, WebSearchConfig, interpolate_value};
 use crate::error::ConfigError;
-use crate::profile::{ProfileName, ProfileSelection, resolve_selection};
+use crate::profile::{ProfileName, ProfileSelection, SelectionSource, resolve_selection};
 
 impl Config {
-    /// Loads one version-2 configuration file and selects its startup profile.
+    /// Loads one configuration file and selects its startup profile.
     ///
     /// `${VAR}` interpolation reads the process environment as the caller left
     /// it. The caller supplies command-line and environment profile values in
     /// [`ProfileSelection`]; those values outrank the sibling state file.
     ///
+    /// Selecting no profile is a supported startup state: the result serves
+    /// every remote model and no local or speech-to-text model. When the
+    /// state file wins and names a profile the file no longer defines, the
+    /// load also degrades to no profile and reports the stale name through
+    /// [`Config::stale_state_selection`]; a command-line or environment value
+    /// naming an undefined profile is an error.
+    ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) when the file or state
     /// cannot be read, the TOML or interpolation is invalid, a removed layout
-    /// feature is present, no profile is selected, or semantic validation
-    /// fails.
+    /// feature is present, a selected name is malformed, an ephemeral
+    /// selection names an undefined profile, or semantic validation fails.
     ///
     /// # Examples
     /// ```no_run
@@ -51,16 +58,24 @@ impl Config {
             source,
         })?;
         let mut config = Self::parse_toml_at(&raw, Some(path))?;
-        let Some(selected) = resolve_selection(path, inputs)? else {
-            return Err(ConfigError::Validation(format!(
-                "no active profile selected; define one with --profile, \
-                 PROMPTFORGE_PROFILE, or {} (defined profiles: {})",
-                crate::profile_state_path(path).display(),
-                config.defined_profile_names()
-            )));
-        };
-        config.activate_profile(&selected)?;
+        match resolve_selection(path, inputs)? {
+            None => config.activate_profile(None)?,
+            Some((SelectionSource::StateFile, name)) if !config.defines_profile(&name) => {
+                // A persisted preference can outlive its profile (the operator
+                // deleted it from the file). Refusing to boot would leave no
+                // running gateway to fix it through; the caller warns instead.
+                config.activate_profile(None)?;
+                config.stale_state_selection = Some(name.as_str().to_owned());
+            }
+            Some((_, name)) => config.activate_profile(Some(&name))?,
+        }
         Ok(config)
+    }
+
+    fn defines_profile(&self, name: &ProfileName) -> bool {
+        self.profiles
+            .iter()
+            .any(|profile| profile.name == name.as_str())
     }
 
     /// The server bind address.
@@ -91,7 +106,7 @@ impl Config {
             local: self.local.clone(),
             dominions: self.dominions.clone(),
             endpoints: self.endpoints.clone(),
-            models: self.catalog_models.clone(),
+            models: self.models.clone(),
             local_models: self.catalog_local_models.clone(),
             stt_models: self.catalog_stt_models.clone(),
             profiles: self.profiles.clone(),
@@ -171,11 +186,14 @@ impl Config {
         Self::parse_toml(raw).map_err(crate::api_error::ConfigError::from)
     }
 
-    /// Returns a clone with `name` selected from the already-loaded catalog.
+    /// Returns a clone with `name` selected from the already-loaded catalog,
+    /// or with no profile selected when `name` is `None`.
     ///
     /// This operation performs no file or environment read. Every profile was
-    /// validated when the catalog loaded, so selection only derives the three
-    /// active model subsets.
+    /// validated when the catalog loaded, so selection only derives the
+    /// active local and speech-to-text subsets; the remote routing table is
+    /// the same for every selection. Selecting `None` leaves both subsets
+    /// empty.
     ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) when `name` is not defined.
@@ -189,13 +207,15 @@ impl Config {
     ///      [server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     ///      [[profile]]\nname = \"work\"\nmodels = []\n",
     /// )?;
-    /// let selected = config.select_profile(&ProfileName::parse("work")?)?;
+    /// let selected = config.select_profile(Some(&ProfileName::parse("work")?))?;
     /// assert_eq!(selected.active_profile().map(|profile| profile.name()), Some("work"));
+    /// let unselected = config.select_profile(None)?;
+    /// assert!(unselected.active_profile().is_none());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn select_profile(
         &self,
-        name: &ProfileName,
+        name: Option<&ProfileName>,
     ) -> Result<Config, crate::api_error::ConfigError> {
         let mut selected = self.clone();
         selected

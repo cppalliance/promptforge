@@ -258,6 +258,40 @@ pub fn persist_profile_state(
         .map_err(crate::ConfigError::from)
 }
 
+/// Deletes the sibling state file, the persisted form of "no profile".
+///
+/// The inverse of [`persist_profile_state`]. An already absent state file is
+/// success: the persisted selection is "none" either way.
+///
+/// # Errors
+/// Returns [`ConfigError`](crate::ConfigError) when the state file exists
+/// and cannot be removed.
+///
+/// # Examples
+/// ```no_run
+/// use gateway_config::clear_profile_state;
+/// use std::path::Path;
+///
+/// clear_profile_state(Path::new("gateway.toml"))?;
+/// # Ok::<(), gateway_config::ConfigError>(())
+/// ```
+pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError> {
+    let path = crate::profile_state_path(config_path);
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // `Repr::Write` displays as a shadow write; the wrapped source names
+        // the operation that failed so the operator reads a removal error.
+        Err(source) => Err(crate::ConfigError::from(Repr::Write {
+            source: std::io::Error::new(
+                source.kind(),
+                format!("remove state file {}: {source}", path.display()),
+            ),
+            path,
+        })),
+    }
+}
+
 /// Validates and stages one pending admin document.
 ///
 /// The document contains the global version-2 config plus an optional
@@ -305,7 +339,7 @@ pub fn save_config_shadow(
             if let Some(selected) =
                 pending_selected_name(config_path, &ProfileSelection::default())?
             {
-                config.select_profile(&selected)?;
+                config.select_profile(Some(&selected))?;
             }
             None
         }
@@ -315,7 +349,7 @@ pub fn save_config_shadow(
                     "pending active_profile is invalid: {error}"
                 ))
             })?;
-            config.select_profile(&name)?;
+            config.select_profile(Some(&name))?;
             Some(ProfileState::new(&name))
         }
         Some(_) => {
@@ -415,7 +449,7 @@ pub fn load_pending_config(
             config.defined_profile_names()
         )));
     };
-    config.select_profile(&selected)
+    config.select_profile(Some(&selected))
 }
 
 fn pending_selected_name(

@@ -455,7 +455,7 @@ models = ["q"]
         )
         .unwrap();
         let selected = config
-            .select_profile(&crate::ProfileName::parse("work").unwrap())
+            .select_profile(Some(&crate::ProfileName::parse("work").unwrap()))
             .unwrap();
         assert!(selected.local_models()[0].capabilities().images());
     }

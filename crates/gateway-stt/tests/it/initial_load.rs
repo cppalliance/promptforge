@@ -31,7 +31,7 @@ fn speech_config(models: &str, selected: &str) -> Config {
          [[profile]]\nname = \"speech\"\nmodels = {selected}\n"
     ))
     .expect("speech catalog parses")
-    .select_profile(&ProfileName::parse("speech").expect("profile name"))
+    .select_profile(Some(&ProfileName::parse("speech").expect("profile name")))
     .expect("speech profile selects")
 }
 

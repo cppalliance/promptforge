@@ -511,7 +511,7 @@ mod stt_tests {
         )
         .expect("catalog parses");
         let config = catalog
-            .select_profile(&ProfileName::parse("work").expect("profile name"))
+            .select_profile(Some(&ProfileName::parse("work").expect("profile name")))
             .expect("profile selects");
         let error = Gateway::from_config(&config, ProfilesContext::default())
             .expect_err("STT without the runtime feature must be refused");

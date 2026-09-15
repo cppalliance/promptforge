@@ -29,7 +29,7 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "alpha"
-models = ["alpha-model"]
+models = []
 "#;
 
 #[test]

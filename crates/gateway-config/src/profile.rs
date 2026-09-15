@@ -198,21 +198,39 @@ pub fn profile_state_path(config_path: &Path) -> PathBuf {
     config_path.with_file_name(name)
 }
 
+/// Which startup input supplied the selected profile name.
+///
+/// The command line and environment are ephemeral overrides the operator
+/// typed for this process; the state file is a persisted preference that may
+/// have outlived the profile it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SelectionSource {
+    CommandLine,
+    Environment,
+    StateFile,
+}
+
+/// Resolves the startup selection in precedence order, naming the source
+/// that won so the loader can treat a stale state file more leniently than
+/// a typo on the command line.
 pub(crate) fn resolve_selection(
     config_path: &Path,
     inputs: &ProfileSelection,
-) -> Result<Option<ProfileName>, ConfigError> {
+) -> Result<Option<(SelectionSource, ProfileName)>, ConfigError> {
     if let Some(value) = inputs.command_line() {
-        return parse_selected_name(value, "command-line --profile").map(Some);
+        return parse_selected_name(value, "command-line --profile")
+            .map(|name| Some((SelectionSource::CommandLine, name)));
     }
     if let Some(value) = inputs.environment() {
-        return parse_selected_name(value, "PROMPTFORGE_PROFILE").map(Some);
+        return parse_selected_name(value, "PROMPTFORGE_PROFILE")
+            .map(|name| Some((SelectionSource::Environment, name)));
     }
     let state_path = profile_state_path(config_path);
     let Some(state) = load_state(&state_path)? else {
         return Ok(None);
     };
-    parse_selected_name(state.active_profile(), &state_path.display().to_string()).map(Some)
+    parse_selected_name(state.active_profile(), &state_path.display().to_string())
+        .map(|name| Some((SelectionSource::StateFile, name)))
 }
 
 fn parse_selected_name(value: &str, source: &str) -> Result<ProfileName, ConfigError> {

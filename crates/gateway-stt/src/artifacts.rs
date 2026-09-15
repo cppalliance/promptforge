@@ -266,7 +266,9 @@ mod tests {
         ))
         .expect("catalog parses");
         catalog
-            .select_profile(&gateway_config::ProfileName::parse("work").expect("name"))
+            .select_profile(Some(
+                &gateway_config::ProfileName::parse("work").expect("name"),
+            ))
             .expect("profile selects")
     }
 

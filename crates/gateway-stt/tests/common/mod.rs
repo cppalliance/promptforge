@@ -98,7 +98,9 @@ fn fixture_service_with_models_on_dedicated_thread(
     ))
     .expect("fixture catalog parses");
     let config = catalog
-        .select_profile(&gateway_config::ProfileName::parse("work").expect("profile name"))
+        .select_profile(Some(
+            &gateway_config::ProfileName::parse("work").expect("profile name"),
+        ))
         .expect("fixture profile selects");
     let service = SpeechService::new();
     service

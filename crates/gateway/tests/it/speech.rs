@@ -1844,11 +1844,11 @@ voices = ["alloy"]
 
 [[profile]]
 name = "alpha"
-models = ["tts-model"]
+models = []
 
 [[profile]]
 name = "beta"
-models = ["tts-model"]
+models = []
 "#
         )
     };
@@ -1863,7 +1863,7 @@ models = ["tts-model"]
     let alpha = ProfileName::parse("alpha").expect("name");
     let config = Config::from_toml_str(&catalog(backend))
         .expect("catalog parses")
-        .select_profile(&alpha)
+        .select_profile(Some(&alpha))
         .expect("alpha selects");
     let context = ProfilesContext::new(Some(path), Some(alpha));
     let server =

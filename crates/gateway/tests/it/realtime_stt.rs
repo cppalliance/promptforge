@@ -240,7 +240,9 @@ fn native_speech_service() -> SpeechService {
         ))
         .expect("native fixture catalog parses");
         let config = catalog
-            .select_profile(&gateway_config::ProfileName::parse("native").expect("profile name"))
+            .select_profile(Some(
+                &gateway_config::ProfileName::parse("native").expect("profile name"),
+            ))
             .expect("native fixture profile selects");
         let service = SpeechService::new();
         service

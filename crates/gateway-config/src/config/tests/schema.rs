@@ -3,7 +3,7 @@ use std::fs;
 use tempfile::TempDir;
 
 use super::super::*;
-use crate::{ConfigErrorKind, ProfileSelection, profile_state_path};
+use crate::{ConfigErrorKind, ProfileSelection, clear_profile_state, profile_state_path};
 
 const CATALOG: &str = r#"
 config-version = 0
@@ -11,6 +11,19 @@ config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "cloud"
+description = "a remote model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
 
 [[local_model]]
 name = "a"
@@ -67,7 +80,9 @@ fn canonical_example_uses_the_validated_section_layout() {
     ));
     let catalog = Config::from_toml_str(example).expect("canonical example validates");
     let selected = catalog
-        .select_profile(&crate::ProfileName::parse("work").expect("profile name"))
+        .select_profile(Some(
+            &crate::ProfileName::parse("work").expect("profile name"),
+        ))
         .expect("work profile selects");
 
     assert_eq!(selected.local_models()[0].name(), "qwen-local");
@@ -259,6 +274,8 @@ fn selection_precedence_is_cli_then_env_then_state() {
     assert_eq!(state.active_profile().expect("active").name(), "work");
     assert_eq!(state.local_models()[0].name(), "a");
     assert_eq!(state.stt_models()[0].name(), "speech");
+    assert_eq!(state.models()[0].name(), "cloud");
+    assert_eq!(state.stale_state_selection(), None);
 
     let environment =
         Config::load(&path, &ProfileSelection::new(None, Some("travel"))).expect("env selects");
@@ -277,32 +294,127 @@ fn selection_precedence_is_cli_then_env_then_state() {
 }
 
 #[test]
-fn stale_state_names_value_and_defined_profiles() {
+fn stale_state_file_loads_with_no_profile_and_records_the_name() {
     let (_temp, path) = file_fixture();
     fs::write(profile_state_path(&path), "active_profile = \"deleted\"\n").expect("write state");
 
-    let error =
-        Config::load(&path, &ProfileSelection::default()).expect_err("stale state must fail");
-    let message = error.to_string();
+    let config = Config::load(&path, &ProfileSelection::default())
+        .expect("a stale state file degrades instead of refusing");
+
+    assert!(config.active_profile().is_none());
+    assert_eq!(config.stale_state_selection(), Some("deleted"));
+    assert!(config.local_models().is_empty());
+    assert!(config.stt_models().is_empty());
+    assert_eq!(config.models()[0].name(), "cloud");
+}
+
+#[test]
+fn undefined_command_line_or_environment_profile_still_refuses() {
+    let (_temp, path) = file_fixture();
+
+    for inputs in [
+        ProfileSelection::new(Some("x"), None),
+        ProfileSelection::new(None, Some("x")),
+    ] {
+        let error = Config::load(&path, &inputs).expect_err("an ephemeral selection must exist");
+        let message = error.to_string();
+        assert_eq!(error.kind(), ConfigErrorKind::Validation);
+        assert!(
+            message.contains("active profile x is not defined"),
+            "undefined name named: {message}"
+        );
+        assert!(
+            message.contains("work, travel"),
+            "defined profiles named: {message}"
+        );
+    }
+}
+
+#[test]
+fn malformed_state_selection_still_refuses() {
+    let (_temp, path) = file_fixture();
+    fs::write(profile_state_path(&path), "active_profile = \"../work\"\n").expect("write state");
+
+    let error = Config::load(&path, &ProfileSelection::default())
+        .expect_err("a malformed state name is not a stale selection");
 
     assert_eq!(error.kind(), ConfigErrorKind::Validation);
-    assert!(message.contains("deleted"), "stale value named: {message}");
+    assert!(error.to_string().contains("../work"));
+}
+
+#[test]
+fn absent_selection_loads_with_no_profile_and_every_remote_model() {
+    let (_temp, path) = file_fixture();
+
+    let config = Config::load(&path, &ProfileSelection::default())
+        .expect("no selection is a supported startup state");
+
+    assert!(config.active_profile().is_none());
+    assert_eq!(config.stale_state_selection(), None);
+    assert!(config.local_models().is_empty());
+    assert!(config.stt_models().is_empty());
+    assert_eq!(config.models().len(), 1);
+    assert_eq!(config.models()[0].name(), "cloud");
+    assert_eq!(config.catalog_local_models().len(), 2);
+    assert_eq!(config.catalog_stt_models().len(), 1);
+}
+
+#[test]
+fn clear_profile_state_deletes_the_state_file_and_tolerates_absence() {
+    let (_temp, path) = file_fixture();
+    let state_path = profile_state_path(&path);
+    fs::write(&state_path, "active_profile = \"work\"\n").expect("write state");
+
+    clear_profile_state(&path).expect("present state clears");
+    assert!(!state_path.exists(), "the state file is deleted");
+
+    clear_profile_state(&path).expect("absent state is already clear");
+    assert!(!state_path.exists());
+}
+
+#[test]
+fn clear_profile_state_reports_a_failed_removal_as_a_removal() {
+    let (_temp, path) = file_fixture();
+    let state_path = profile_state_path(&path);
+    fs::create_dir(&state_path).expect("occupy the state path with a directory");
+
+    let error = clear_profile_state(&path).expect_err("a directory is not removable as a file");
+
+    assert_eq!(error.kind(), ConfigErrorKind::Write);
+    let mut chain = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(inner) = source {
+        chain.push_str(": ");
+        chain.push_str(&inner.to_string());
+        source = inner.source();
+    }
     assert!(
-        message.contains("work, travel"),
-        "defined profiles named: {message}"
+        chain.contains("remove state file"),
+        "the operator reads a removal, not a write: {chain}"
+    );
+    assert!(
+        chain.contains(&state_path.display().to_string()),
+        "the failing path is named: {chain}"
     );
 }
 
 #[test]
-fn absent_selection_refuses_with_defined_profile_list() {
+fn selecting_a_profile_clears_a_stale_state_selection() {
     let (_temp, path) = file_fixture();
+    fs::write(profile_state_path(&path), "active_profile = \"deleted\"\n").expect("write state");
+    let stale = Config::load(&path, &ProfileSelection::default()).expect("stale load degrades");
+    assert_eq!(stale.stale_state_selection(), Some("deleted"));
 
-    let error =
-        Config::load(&path, &ProfileSelection::default()).expect_err("selection is required");
-    let message = error.to_string();
+    let work = crate::ProfileName::parse("work").expect("profile name");
+    let selected = stale.select_profile(Some(&work)).expect("work selects");
+    assert_eq!(selected.active_profile().expect("active").name(), "work");
+    assert_eq!(
+        selected.stale_state_selection(),
+        None,
+        "a fresh selection supersedes the stale name"
+    );
 
-    assert_eq!(error.kind(), ConfigErrorKind::Validation);
-    assert!(message.contains("--profile"));
-    assert!(message.contains("PROMPTFORGE_PROFILE"));
-    assert!(message.contains("work, travel"));
+    let unselected = stale.select_profile(None).expect("no profile selects");
+    assert!(unselected.active_profile().is_none());
+    assert_eq!(unselected.stale_state_selection(), None);
 }

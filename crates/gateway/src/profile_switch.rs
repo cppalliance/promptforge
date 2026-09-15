@@ -1079,7 +1079,7 @@ fn select_target(
         loading.fail();
         return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
-    let config = match catalog.select_profile(name) {
+    let config = match catalog.select_profile(Some(name)) {
         Ok(config) => config,
         Err(error) => {
             loading.fail();
@@ -1566,7 +1566,7 @@ mod tests {
         )
         .expect("catalog parses");
         let config = catalog
-            .select_profile(&ProfileName::parse("alpha").expect("profile name"))
+            .select_profile(Some(&ProfileName::parse("alpha").expect("profile name")))
             .expect("alpha profile selects");
         app_state(config, None)
     }

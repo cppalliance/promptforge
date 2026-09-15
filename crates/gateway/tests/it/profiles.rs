@@ -44,11 +44,11 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "alpha"
-models = ["test-model"]
+models = []
 
 [[profile]]
 name = "beta"
-models = ["beta-model"]
+models = []
 "#
     )
 }
@@ -65,7 +65,7 @@ async fn profile_server(backend: std::net::SocketAddr) -> (tempfile::TempDir, Te
     let alpha = ProfileName::parse("alpha").expect("name");
     let config = Config::from_toml_str(&catalog(backend))
         .expect("catalog parses")
-        .select_profile(&alpha)
+        .select_profile(Some(&alpha))
         .expect("alpha selects");
     let context = ProfilesContext::new(Some(path), Some(alpha));
     let server =
@@ -101,7 +101,11 @@ async fn switch_uses_loaded_catalog_without_disk_reload() {
         events.last(),
         Some(&serde_json::json!({"status": "ready", "profile": "beta"}))
     );
-    assert_eq!(catalog_ids(&http, server.addr).await, ["beta-model"]);
+    assert_eq!(
+        catalog_ids(&http, server.addr).await,
+        ["test-model", "beta-model"],
+        "every remote model is served under any profile"
+    );
     assert!(
         arrivals.try_recv().is_err(),
         "switching performs no inference request"
@@ -127,7 +131,10 @@ async fn unknown_profile_is_refused_from_the_loaded_catalog() {
             }),
         ]
     );
-    assert_eq!(catalog_ids(&http, server.addr).await, ["test-model"]);
+    assert_eq!(
+        catalog_ids(&http, server.addr).await,
+        ["test-model", "beta-model"]
+    );
     server.shutdown().await;
 }
 
@@ -170,7 +177,10 @@ async fn ready_switch_is_durable_for_immediate_restart_readers() {
         events.last(),
         Some(&serde_json::json!({"status": "ready", "profile": "beta"}))
     );
-    assert_eq!(catalog_ids(&http, server.addr).await, ["beta-model"]);
+    assert_eq!(
+        catalog_ids(&http, server.addr).await,
+        ["test-model", "beta-model"]
+    );
     let restarted = Config::load(
         &temp.path().join("gateway.toml"),
         &ProfileSelection::default(),
@@ -189,7 +199,7 @@ async fn ready_switch_is_durable_for_immediate_restart_readers() {
             .iter()
             .map(gateway_config::ModelConfig::name)
             .collect::<Vec<_>>(),
-        ["beta-model"]
+        ["test-model", "beta-model"]
     );
     server.shutdown().await;
 }
