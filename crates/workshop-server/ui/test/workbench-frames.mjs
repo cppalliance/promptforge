@@ -82,6 +82,7 @@ function workbenchFrame(overrides = {}) {
     profiles: ["main", "coding"],
     active: "main",
     switching: null,
+    switch_in_flight: false,
     selected: "test-model",
     chat_ready: true,
     ...overrides,
@@ -115,8 +116,16 @@ await assertNoLeaks(lifecycle, async () => {
     snapshots[0]?.active === "main" &&
       snapshots[0]?.selected === "test-model" &&
       snapshots[0]?.switching === null &&
+      snapshots[0]?.switch_in_flight === false &&
       snapshots[0]?.chat_ready === true &&
       snapshots[0]?.profiles.join(",") === "main,coding",
+  );
+  fakeSockets[0].message(workbenchFrame({ switch_in_flight: true, chat_ready: false }));
+  check(
+    "a no-profile switch in flight carries switch_in_flight beside a null switching",
+    snapshots.length === 2 &&
+      snapshots[1]?.switching === null &&
+      snapshots[1]?.switch_in_flight === true,
   );
 
   // --- Send methods put the documented event frames on the wire -------------

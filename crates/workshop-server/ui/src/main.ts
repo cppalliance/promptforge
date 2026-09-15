@@ -160,6 +160,9 @@ const profileMenu: ProfileMenuService = {
   get switching() {
     return workbenchService.snapshot.switching ?? "";
   },
+  get switchInFlight() {
+    return workbenchService.snapshot.switchInFlight;
+  },
   onDidChange: workbenchService.onDidChangeSnapshot,
   switchTo(name: string | null): void {
     if (!workshopSocket.switchProfile(name)) {

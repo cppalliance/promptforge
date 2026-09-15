@@ -38,12 +38,9 @@ export interface ModelsFrame {
  * Absent options are `null`, never omitted keys - every push is the
  * complete menu state. The server computes `chat_ready` (catalog
  * non-empty, a model selected, no switch in flight, gateway reachable);
- * the UI never derives it.
- *
- * Known gap: a switch to no profile is in flight only as `chat_ready:
- * false`; `switching` is `null` for it, the same as no switch at all, so
- * the menu shows no pending mark and keeps its rows enabled while it
- * runs. A second selection during that window is refused by the server.
+ * the UI never derives it. `switching` names the target when it is a
+ * profile; `switch_in_flight` is true for any in-flight target,
+ * including no profile.
  */
 export interface WorkbenchFrame {
   type: "workbench";
@@ -54,6 +51,8 @@ export interface WorkbenchFrame {
    * and when the in-flight switch selects no profile.
    */
   switching: string | null;
+  /** Whether a switch is in flight, whatever its target. */
+  switch_in_flight: boolean;
   selected: string | null;
   chat_ready: boolean;
 }

@@ -47,6 +47,7 @@ function workbenchFrame(overrides = {}) {
     profiles: ["main", "coding"],
     active: "main",
     switching: null,
+    switch_in_flight: false,
     selected: "test-model",
     chat_ready: true,
     ...overrides,
@@ -64,6 +65,7 @@ await assertNoLeaks(lifecycle, () => {
       snapshot.profiles.length === 0 &&
         snapshot.active === null &&
         snapshot.switching === null &&
+        snapshot.switchInFlight === false &&
         snapshot.selected === null &&
         snapshot.chatReady === false,
     );
@@ -87,6 +89,7 @@ await assertNoLeaks(lifecycle, () => {
       service.snapshot.profiles.join(",") === "main,coding" &&
         service.snapshot.active === "main" &&
         service.snapshot.switching === null &&
+        service.snapshot.switchInFlight === false &&
         service.snapshot.selected === "test-model" &&
         service.snapshot.chatReady === true,
     );
@@ -96,13 +99,24 @@ await assertNoLeaks(lifecycle, () => {
       emitted.length === 2,
     );
     service.applySnapshot(
-      workbenchFrame({ switching: "coding", selected: null, chat_ready: false }),
+      workbenchFrame({
+        switching: "coding",
+        switch_in_flight: true,
+        selected: null,
+        chat_ready: false,
+      }),
     );
     check(
       "a later frame replaces the held snapshot",
       service.snapshot.switching === "coding" &&
+        service.snapshot.switchInFlight === true &&
         service.snapshot.selected === null &&
         service.snapshot.chatReady === false,
+    );
+    service.applySnapshot(workbenchFrame({ switch_in_flight: true, chat_ready: false }));
+    check(
+      "a no-profile switch lands as switchInFlight true beside a null switching",
+      service.snapshot.switching === null && service.snapshot.switchInFlight === true,
     );
     service.dispose();
   }

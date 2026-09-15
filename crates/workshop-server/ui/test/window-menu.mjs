@@ -521,6 +521,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     profiles: ["main", "qwen38"],
     active: "main",
     switching: "qwen38",
+    switchInFlight: true,
     switchTo: (name) => switches.push(name),
   };
   const { menus, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
@@ -558,6 +559,80 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   check("clicking disabled rows keeps the menu open", isOpen("model"));
 }
 
+// --- Model menu: a switch to no profile in flight -----------------------------
+
+{
+  // The frame reports switching: null for a no-profile switch, so the
+  // view's switching reads "" - the same as no switch. Idleness comes from
+  // switchInFlight alone; the "No profile" row is the pending target.
+  const selections = [];
+  const modelMenu = new ModelService((id) => (selections.push(id), true));
+  modelMenu.setModels([{ id: "alpha" }]);
+  modelMenu.applySelected("alpha");
+  const switches = [];
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "main",
+    switching: "",
+    switchInFlight: true,
+    switchTo: (name) => switches.push(name),
+  };
+  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
+  check(
+    "a no-profile switch in flight disables every model and profile row",
+    rows.every((row) => row.getAttribute("aria-disabled") === "true"),
+  );
+  check(
+    "the No profile row shows the pending mark during a no-profile switch",
+    markOf(rows[2]).textContent === "…" &&
+      markOf(rows[2]).classList.contains("ws-window-titlebar__item-check--pending") &&
+      rows[2].getAttribute("aria-busy") === "true",
+  );
+  check(
+    "no named profile row is pending during a no-profile switch",
+    rows.filter((row) => row.getAttribute("aria-busy") === "true").length === 1 &&
+      markOf(rows[3]).textContent === "✓" &&
+      rows[4].getAttribute("aria-busy") === null,
+  );
+  rows[2].click();
+  rows[3].click();
+  check("disabled profile rows cannot dispatch during a no-profile switch", switches.length === 0);
+  rows[0].click();
+  check("disabled model rows cannot select during a no-profile switch", selections.length === 0);
+}
+
+{
+  // With no switch in flight and switching empty, nothing is pending and
+  // every row is live.
+  const modelMenu = new ModelService(() => true);
+  modelMenu.setModels([{ id: "alpha" }]);
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "main",
+    switching: "",
+    switchInFlight: false,
+    switchTo: () => {},
+  };
+  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
+  check(
+    "with no switch in flight every model and profile radio is enabled",
+    [rows[0], rows[2], rows[3], rows[4]].every(
+      (row) => row.getAttribute("aria-disabled") === "false",
+    ),
+  );
+  check(
+    "with no switch in flight no row is pending",
+    rows.every((row) => row.getAttribute("aria-busy") === null) &&
+      rows.every((row) => markOf(row)?.textContent !== "…"),
+  );
+}
+
 // --- Model menu: live rebuild while the popover is open -----------------------
 
 {
@@ -568,6 +643,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     profiles: ["main", "qwen38"],
     active: "main",
     switching: "",
+    switchInFlight: false,
     onDidChange: (listener) => {
       listeners.add(listener);
       return { dispose: () => listeners.delete(listener) };
@@ -580,6 +656,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   // The server starts the switch: a switching=<target> snapshot arrives
   // while the popover is open.
   profileMenu.switching = "qwen38";
+  profileMenu.switchInFlight = true;
   for (const listener of listeners) listener();
   let rows = itemsOf("model");
   const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
@@ -595,6 +672,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   // The switch completes: the final snapshot restores truth, including
   // the server-owned model selection.
   profileMenu.switching = "";
+  profileMenu.switchInFlight = false;
   profileMenu.active = "qwen38";
   modelMenu.applySelected("alpha");
   for (const listener of listeners) listener();
@@ -635,6 +713,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     profiles: ["main", "qwen38"],
     active: "main",
     switching: "",
+    switchInFlight: false,
     onDidChange: (listener) => {
       listeners.add(listener);
       return { dispose: () => listeners.delete(listener) };

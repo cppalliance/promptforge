@@ -212,7 +212,7 @@ Base: `95116424` on `master`, clean worktree. `95116424` is the rebased twin of 
 
 <step-4>
 
-### Step 4: Model menu idleness from `switchInFlight` (DEBT-PGL-003, UI) and regression gate
+### Step 4: Model menu idleness from `switchInFlight` (DEBT-PGL-003, UI) and regression gate [completed]
 
 - Component: workshop
 - Piece: Workshop UI consumers of the frame field

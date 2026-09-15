@@ -367,6 +367,7 @@ export async function bootWorkbench(name, run) {
         profiles: [],
         active: null,
         switching: null,
+        switch_in_flight: false,
         selected: "test-model",
         chat_ready: true,
         ...overrides,

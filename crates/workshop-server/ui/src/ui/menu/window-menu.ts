@@ -106,11 +106,12 @@ export interface ProfileMenuService {
   /** The active profile's name, or "" when no profile is active. */
   readonly active: string;
   /**
-   * The profile a switch is loading, or "" when no switch is running. A
-   * switch to no profile also reads "": the rows stay enabled and show no
-   * pending mark while it runs, and the server refuses a second selection.
+   * The profile a switch is loading, or "" both when no switch is running
+   * and when the in-flight switch selects no profile.
    */
   readonly switching: string;
+  /** Whether a switch is in flight, whatever its target. */
+  readonly switchInFlight: boolean;
   /**
    * Fires when the state behind this view changes; the open Model
    * popover rebuilds its rows on each firing. Absent on a static view.
@@ -150,7 +151,7 @@ function modelMenuItems(
   service: ModelMenuService | undefined,
   profileService: ProfileMenuService | undefined,
 ): readonly ResolvedMenuItem[] {
-  const isIdle = (): boolean => !profileService?.switching;
+  const isIdle = (): boolean => !profileService?.switchInFlight;
   const items: ResolvedMenuItem[] = [];
   const radio = (
     key: string,
@@ -207,7 +208,7 @@ function modelMenuItems(
         "profile:",
         "No profile",
         profileService.active === "",
-        false,
+        !isIdle() && !profileService.switching,
         "Serve remote models only; load no local models",
         () => profileService.switchTo(null),
       ),

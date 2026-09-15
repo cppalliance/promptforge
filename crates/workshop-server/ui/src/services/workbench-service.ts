@@ -18,8 +18,13 @@ export interface WorkbenchSnapshot {
   readonly profiles: readonly string[];
   /** The active profile's name, or null when unknown. */
   readonly active: string | null;
-  /** The profile a switch is loading, or null when none is in flight. */
+  /**
+   * The profile a switch is loading, or null both when no switch runs
+   * and when the in-flight switch selects no profile.
+   */
   readonly switching: string | null;
+  /** Whether a switch is in flight, whatever its target. */
+  readonly switchInFlight: boolean;
   /** The selected model's id, or null when no model is selected. */
   readonly selected: string | null;
   /** Whether the server considers chat usable; the UI never derives it. */
@@ -31,6 +36,7 @@ const EMPTY_SNAPSHOT: WorkbenchSnapshot = {
   profiles: [],
   active: null,
   switching: null,
+  switchInFlight: false,
   selected: null,
   chatReady: false,
 };
@@ -62,6 +68,7 @@ export class WorkbenchService extends Disposable {
       profiles: frame.profiles,
       active: frame.active,
       switching: frame.switching,
+      switchInFlight: frame.switch_in_flight,
       selected: frame.selected,
       chatReady: frame.chat_ready,
     };
