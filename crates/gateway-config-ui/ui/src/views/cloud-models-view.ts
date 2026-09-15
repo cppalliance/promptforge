@@ -11,6 +11,7 @@
 
 import type { ToastStack } from "shared-ui/toast";
 
+import { createDropdownControl } from "../components/dropdown-control";
 import {
   canonicalRows,
   displayRule,
@@ -153,59 +154,52 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
     wrap.append(lozenges);
 
     const groups = sheet ? providersByTier(sheet, kind) : [];
-    const providerSelect = document.createElement("select");
-    providerSelect.className = "select cloud-provider-select";
+    const selected = selectedProvider();
     const providerLabel = document.createElement("label");
     providerLabel.className = "visually-hidden";
     providerLabel.textContent = "Provider";
     providerLabel.htmlFor = "cloud-provider";
-    providerSelect.id = "cloud-provider";
-    for (const group of groups) {
-      const optgroup = document.createElement("optgroup");
-      optgroup.label = group.tier[0]?.toUpperCase() + group.tier.slice(1);
-      for (const option of group.providers) {
-        const item = document.createElement("option");
-        item.value = option.name;
-        item.textContent = option.displayName;
-        item.disabled = option.disabled;
-        optgroup.append(item);
-      }
-      providerSelect.append(optgroup);
-    }
-    const selected = selectedProvider();
-    if (selected) {
-      providerSelect.value = selected.name;
-    }
-    providerSelect.addEventListener("change", () => {
-      provider = providerSelect.value;
-      family = null;
-      render();
+    const providerSelect = createDropdownControl({
+      id: "cloud-provider",
+      options: groups.flatMap((group) =>
+        group.providers.map((option) => ({
+          value: option.name,
+          label: option.displayName,
+          disabled: option.disabled,
+          group: group.tier[0]?.toUpperCase() + group.tier.slice(1),
+        })),
+      ),
+      value: selected?.name ?? "",
+      onChange: (value) => {
+        provider = value;
+        family = null;
+        render();
+      },
     });
-    wrap.append(providerLabel, providerSelect);
+    providerSelect.element.classList.add("cloud-provider-select");
+    wrap.append(providerLabel, providerSelect.element);
 
-    const familySelect = document.createElement("select");
-    familySelect.className = "select cloud-family-select";
     const familyLabel = document.createElement("label");
     familyLabel.className = "visually-hidden";
     familyLabel.textContent = "Family";
     familyLabel.htmlFor = "cloud-family";
-    familySelect.id = "cloud-family";
-    const all = document.createElement("option");
-    all.value = "";
-    all.textContent = "All families";
-    familySelect.append(all);
-    for (const name of selected ? familiesFor(selected.slice, kind) : []) {
-      const item = document.createElement("option");
-      item.value = name;
-      item.textContent = name;
-      familySelect.append(item);
-    }
-    familySelect.value = family ?? "";
-    familySelect.addEventListener("change", () => {
-      family = familySelect.value === "" ? null : familySelect.value;
-      render();
+    const familySelect = createDropdownControl({
+      id: "cloud-family",
+      options: [
+        { value: "", label: "All families" },
+        ...(selected ? familiesFor(selected.slice, kind) : []).map((name) => ({
+          value: name,
+          label: name,
+        })),
+      ],
+      value: family ?? "",
+      onChange: (value) => {
+        family = value === "" ? null : value;
+        render();
+      },
     });
-    wrap.append(familyLabel, familySelect);
+    familySelect.element.classList.add("cloud-family-select");
+    wrap.append(familyLabel, familySelect.element);
 
     const meta = document.createElement("span");
     meta.className = "field-help cloud-generated";

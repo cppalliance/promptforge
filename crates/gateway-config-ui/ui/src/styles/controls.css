@@ -24,6 +24,25 @@
 	.dropdown-menu[hidden] {
 		display: none;
 	}
+	/* The listbox group header: a muted uppercase caption above the
+	   first row of each group, on the menu-item inline inset; not a
+	   row, so no hover wash and no pointer. */
+	.menu-group-label {
+		padding: var(--space-2) var(--space-2) var(--space-1);
+		color: var(--text-secondary);
+		font-size: var(--font-size-xs);
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		user-select: none;
+	}
+	.menu-item[aria-disabled="true"] {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.menu-item[aria-disabled="true"]:hover {
+		background: transparent;
+	}
 
 	/* Switch: 32x18.4 track with a 16px thumb (.switch-sm: 24x14 with
 	   12px); checked = accent. Applied to a <button role="switch">; the

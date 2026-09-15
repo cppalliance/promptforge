@@ -60,11 +60,10 @@ async function openSecrets(stubOptions = {}) {
   return { dom, root, stub };
 }
 
-/** Selects a provider in the Secrets view's dropdown. */
+/** Selects a provider in the Secrets view's dropdown: opens the trigger, clicks the row. */
 function chooseProvider(dom, root, name) {
-  const select = root.querySelector(".env-provider-select");
-  select.value = name;
-  select.dispatchEvent(new dom.window.Event("change"));
+  root.querySelector(".env-provider-select .select").click();
+  root.querySelector(`.env-provider-select .menu-item[data-value='${name}']`).click();
 }
 
 test("Secrets edits the single global environment file", async () => {
@@ -142,6 +141,10 @@ test("selecting a single-key provider fills the new-variable NAME", async () => 
     null,
     "a single-entry provider appends no further rows",
   );
+  const trigger = root.querySelector(".env-provider-select .select");
+  assert.equal(trigger.id, "env-add-provider-global", "the hidden label points at the trigger");
+  assert.equal(trigger.value, "", "the picker resets to the placeholder after a selection");
+  assert.equal(trigger.textContent, "Add from provider…");
 });
 
 test("selecting Bedrock appends its secret and region rows with the default prefilled", async () => {
@@ -161,26 +164,54 @@ test("selecting Bedrock appends its secret and region rows with the default pref
 });
 
 test("keyless and already-present providers are greyed in the dropdown", async () => {
-  const { root } = await openSecrets({ cloudModels: secretsSheetFixture() });
-  const option = (name) => root.querySelector(`.env-provider-select option[value='${name}']`);
+  const { dom, root } = await openSecrets({ cloudModels: secretsSheetFixture() });
+  const option = (name) =>
+    root.querySelector(`.env-provider-select .menu-item[data-value='${name}']`);
   assert.equal(option("acme").disabled, true, "a keyless provider greys");
+  assert.equal(option("acme").getAttribute("aria-disabled"), "true");
   assert.equal(
     option("legacy").disabled,
     true,
     "a provider whose key is already in gateway.env greys",
   );
+  assert.equal(option("legacy").getAttribute("aria-disabled"), "true");
   assert.equal(option("anthropic").disabled, false);
+  assert.equal(option("anthropic").hasAttribute("aria-disabled"), false);
   assert.equal(option("bedrock").disabled, false);
+  chooseProvider(dom, root, "acme");
+  assert.equal(root.querySelector(".env-add-key").value, "", "a greyed row fills nothing");
+  assert.equal(root.querySelector(".env-row[data-key='OPENAI_KEY']").isConnected, true);
+  chooseProvider(dom, root, "legacy");
+  assert.equal(
+    root.querySelectorAll(".env-row[data-key='OPENAI_KEY']").length,
+    1,
+    "a greyed present-key provider appends no duplicate row",
+  );
 });
 
 test("every provider slice appears in the dropdown regardless of status", async () => {
   const { root } = await openSecrets({ cloudModels: secretsSheetFixture() });
-  const values = [...root.querySelectorAll(".env-provider-select option")].map((o) => o.value);
+  const control = root.querySelector(".env-provider-select");
+  assert.equal(control.querySelector("select"), null, "no native select remains");
+  const rows = [...control.querySelectorAll(".menu-item")];
+  assert.equal(rows[0].dataset.value, "", "the placeholder row leads");
+  assert.equal(rows[0].textContent, "Add from provider…");
+  const values = rows.map((row) => row.dataset.value);
   for (const name of ["anthropic", "openai", "bedrock", "acme", "deepgram", "legacy"]) {
     assert.ok(values.includes(name), `${name} is listed`);
   }
-  const groups = [...root.querySelectorAll(".env-provider-select optgroup")].map((g) => g.label);
-  assert.deepEqual(groups, ["Prime", "Subprime", "Niche"], "one optgroup per non-empty tier");
+  const groups = [...control.querySelectorAll(".menu-group-label")].map((g) => g.textContent);
+  assert.deepEqual(groups, ["Prime", "Subprime", "Niche"], "one group header per non-empty tier");
+  const children = [...control.querySelector(".menu").children];
+  assert.equal(
+    children.indexOf(control.querySelector(".menu-group-label")),
+    1,
+    "the first tier header sits right after the placeholder row",
+  );
+  for (const header of control.querySelectorAll(".menu-group-label")) {
+    assert.equal(header.getAttribute("role"), "presentation");
+    assert.equal(header.tabIndex, -1, "headers are not focusable");
+  }
 });
 
 test("remounting Secrets clears a stale provider NAME fill", async () => {

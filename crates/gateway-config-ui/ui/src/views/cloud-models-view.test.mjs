@@ -26,11 +26,10 @@ async function openCloud(stubOptions = {}) {
   return { dom, root, stub };
 }
 
-/** Selects a provider in the view's dropdown. */
+/** Selects a provider in the view's dropdown: opens the trigger, clicks the row. */
 function chooseProvider(dom, root, name) {
-  const select = root.querySelector(".cloud-provider-select");
-  select.value = name;
-  select.dispatchEvent(new dom.window.Event("change"));
+  root.querySelector(".cloud-provider-select .select").click();
+  root.querySelector(`.cloud-provider-select .menu-item[data-value='${name}']`).click();
 }
 
 test("canonical rows render with the id beneath the name and a snapshot disclosure", async () => {
@@ -55,13 +54,54 @@ test("canonical rows render with the id beneath the name and a snapshot disclosu
   assert.match(variants[0].textContent, /2026-09-01/);
 });
 
+test("the provider and family dropdowns are the app's own listboxes, tier-grouped", async () => {
+  const { dom, root } = await openCloud({ cloudModels: cloudSheetFixture() });
+  const provider = root.querySelector(".cloud-provider-select");
+  assert.equal(provider.querySelector("select"), null, "no native select remains");
+  assert.equal(
+    provider.querySelector(".menu.dropdown-menu[role='listbox']").getAttribute("aria-labelledby"),
+    "cloud-provider",
+  );
+  const labels = [...provider.querySelectorAll(".menu-group-label")].map((el) => el.textContent);
+  assert.ok(labels.length >= 2, "at least two tiers render as group headers");
+  assert.deepEqual(labels, [...new Set(labels)], "each tier header renders once");
+  assert.ok(labels.includes("Prime"), "tier names capitalize");
+  const family = root.querySelector(".cloud-family-select");
+  assert.equal(family.querySelector(".select").id, "cloud-family");
+  const familyRows = [...family.querySelectorAll(".menu-item")];
+  assert.equal(familyRows[0].dataset.value, "");
+  assert.equal(familyRows[0].textContent, "All families");
+  assert.ok(familyRows.length > 1, "the selected provider's families follow");
+  family.querySelector(".select").click();
+  familyRows[1].click();
+  await settle();
+  assert.equal(
+    root.querySelector(".cloud-family-select .select").value,
+    familyRows[1].dataset.value,
+    "choosing a family re-renders with it selected",
+  );
+  chooseProvider(dom, root, "acme");
+  await settle();
+  assert.equal(root.querySelector(".cloud-provider-select .select").value, "acme");
+  assert.equal(
+    root.querySelector(".cloud-family-select .select").value,
+    "",
+    "a provider change resets the family filter",
+  );
+});
+
 test("providers without an OpenAI-compatible endpoint render the disabled add and reason", async () => {
   const { dom, root } = await openCloud({ cloudModels: cloudSheetFixture() });
   const stt = [...root.querySelectorAll(".cloud-kind")].find((chip) => chip.dataset.kind === "transcription");
   stt.click();
   await settle();
-  const select = root.querySelector(".cloud-provider-select");
-  assert.equal(select.value, "deepgram", "the only STT provider selects itself");
+  const trigger = root.querySelector(".cloud-provider-select .select");
+  assert.equal(trigger.id, "cloud-provider", "the hidden label points at the trigger");
+  assert.equal(trigger.value, "deepgram", "the only STT provider selects itself");
+  assert.equal(
+    root.querySelector(".cloud-provider-select .menu-item[aria-selected='true']").dataset.value,
+    "deepgram",
+  );
   const row = root.querySelector(".cloud-table tbody tr.cloud-row");
   assert.match(row.querySelector(".cloud-name-primary").textContent, /Nova 3/);
   const add = row.querySelector(".cloud-add");

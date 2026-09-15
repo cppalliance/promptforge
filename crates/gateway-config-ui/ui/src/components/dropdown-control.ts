@@ -1,5 +1,8 @@
 // Styled disclosure select [Unsloth]: a button trigger opens an ARIA
-// listbox built from the shared menu surface and menu-item rows.
+// listbox built from the shared menu surface and menu-item rows. Rows
+// may be greyed (`disabled`: skipped by navigation and typeahead, never
+// chosen) and grouped (`group`: a presentational header renders before
+// the first row of each run sharing a group name).
 
 /** One option row. */
 export interface DropdownOption {
@@ -7,6 +10,10 @@ export interface DropdownOption {
   value: string;
   /** The visible text. */
   label: string;
+  /** Greyed and unchoosable; keyboard navigation skips it. */
+  disabled?: boolean;
+  /** The header shown above this row when it differs from the previous row's. */
+  group?: string;
 }
 
 /** Construction options for {@link createDropdownControl}. */
@@ -58,9 +65,27 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
   let typeahead = "";
   let typeaheadTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const enabled = (index: number): boolean => options.options[index]?.disabled !== true;
+
+  /** The first enabled index at or after `from` (wrapping), or -1. */
+  const enabledFrom = (from: number, delta: 1 | -1): number => {
+    const count = rows.length;
+    for (let step = 0; step < count; step += 1) {
+      const index = (((from + delta * step) % count) + count) % count;
+      if (enabled(index)) {
+        return index;
+      }
+    }
+    return -1;
+  };
+
+  /** The selected row's index, or the first enabled row when it is greyed or absent. */
   const currentIndex = (): number => {
     const index = options.options.findIndex((option) => option.value === current);
-    return index >= 0 ? index : 0;
+    if (index >= 0 && enabled(index)) {
+      return index;
+    }
+    return Math.max(enabledFrom(0, 1), 0);
   };
 
   const renderValue = (): void => {
@@ -97,7 +122,7 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
 
   const choose = (index: number): void => {
     const option = options.options[index];
-    if (!option) {
+    if (!option || option.disabled === true) {
       return;
     }
     current = option.value;
@@ -115,16 +140,16 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
   const moveFocus = (event: KeyboardEvent, index: number): void => {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusIndex((index + 1) % rows.length);
+      focusIndex(enabledFrom(index + 1, 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      focusIndex((index - 1 + rows.length) % rows.length);
+      focusIndex(enabledFrom(index - 1, -1));
     } else if (event.key === "Home") {
       event.preventDefault();
-      focusIndex(0);
+      focusIndex(enabledFrom(0, 1));
     } else if (event.key === "End") {
       event.preventDefault();
-      focusIndex(rows.length - 1);
+      focusIndex(enabledFrom(rows.length - 1, -1));
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       choose(index);
@@ -142,8 +167,9 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
         typeahead = "";
         typeaheadTimer = null;
       }, 500);
-      const match = options.options.findIndex((option) =>
-        option.label.toLocaleLowerCase().startsWith(typeahead),
+      const match = options.options.findIndex(
+        (option) =>
+          option.disabled !== true && option.label.toLocaleLowerCase().startsWith(typeahead),
       );
       if (match >= 0) {
         focusIndex(match);
@@ -152,6 +178,13 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
   };
 
   options.options.forEach((option, index) => {
+    if (option.group !== undefined && option.group !== options.options[index - 1]?.group) {
+      const header = document.createElement("div");
+      header.className = "menu-group-label";
+      header.setAttribute("role", "presentation");
+      header.textContent = option.group;
+      menu.append(header);
+    }
     const row = document.createElement("button");
     row.type = "button";
     row.id = `${menu.id}-option-${index}`;
@@ -160,6 +193,10 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
     row.setAttribute("role", "option");
     row.tabIndex = -1;
     row.textContent = option.label;
+    if (option.disabled === true) {
+      row.disabled = true;
+      row.setAttribute("aria-disabled", "true");
+    }
     row.addEventListener("click", () => choose(index));
     row.addEventListener("keydown", (event) => moveFocus(event, index));
     rows.push(row);
@@ -177,9 +214,9 @@ export function createDropdownControl(options: DropdownControlOptions): Dropdown
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
       event.preventDefault();
       if (event.key === "ArrowUp" || event.key === "End") {
-        open(rows.length - 1);
+        open(enabledFrom(rows.length - 1, -1));
       } else if (event.key === "Home") {
-        open(0);
+        open(enabledFrom(0, 1));
       } else {
         open();
       }

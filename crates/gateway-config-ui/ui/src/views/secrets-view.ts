@@ -17,6 +17,7 @@
 
 import { Eye, EyeOff, Trash2, createElement as lucideElement } from "lucide";
 
+import { createDropdownControl } from "../components/dropdown-control";
 import { fileName } from "../format";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
 import type { EnvFiles, EnvScope, GatewayApi } from "../services/gateway-api";
@@ -323,52 +324,52 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     add.className = "env-add-row";
     const sheet = sheets.sheet;
     if (sheet !== null) {
-      // The provider dropdown: one optgroup per non-empty tier, every
-      // slice listed regardless of status, keyless and already-present
-      // providers greyed. A selection fills NAME with the slice's first
-      // key-role variable and appends a row per further env_vars entry.
+      // The provider dropdown: one group header per non-empty tier,
+      // every slice listed regardless of status, keyless and
+      // already-present providers greyed. A selection fills NAME with
+      // the slice's first key-role variable and appends a row per
+      // further env_vars entry, then the control resets to the
+      // placeholder so it reads as a picker again.
       const presentKeys = new Set(scopeRows(scope).map((row) => row.key));
       const groups = secretProvidersByTier(sheet, presentKeys);
       const providerLabel = document.createElement("label");
       providerLabel.className = "visually-hidden";
       providerLabel.htmlFor = `env-add-provider-${scope}`;
       providerLabel.textContent = "Add from provider";
-      const providerSelect = document.createElement("select");
-      providerSelect.className = "select env-provider-select";
-      providerSelect.id = `env-add-provider-${scope}`;
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.textContent = "Add from provider…";
-      providerSelect.append(placeholder);
-      for (const group of groups) {
-        const optgroup = document.createElement("optgroup");
-        optgroup.label = group.tier[0]?.toUpperCase() + group.tier.slice(1);
-        for (const option of group.providers) {
-          const item = document.createElement("option");
-          item.value = option.name;
-          item.textContent = option.displayName;
-          item.disabled = option.disabled;
-          optgroup.append(item);
-        }
-        providerSelect.append(optgroup);
-      }
-      providerSelect.addEventListener("change", () => {
-        const selected = groups
-          .flatMap((group) => group.providers)
-          .find((option) => option.name === providerSelect.value);
-        if (!selected || selected.disabled) {
-          return;
-        }
-        const fill = secretProviderSelection(selected.slice, presentKeys);
-        for (const row of fill.rows) {
-          scopeRows(scope).push(row);
-        }
-        if (fill.name !== null) {
-          addKeys.set(scope, fill.name);
-        }
-        renderSection();
+      const providerSelect = createDropdownControl({
+        id: `env-add-provider-${scope}`,
+        options: [
+          { value: "", label: "Add from provider…" },
+          ...groups.flatMap((group) =>
+            group.providers.map((option) => ({
+              value: option.name,
+              label: option.displayName,
+              disabled: option.disabled,
+              group: group.tier[0]?.toUpperCase() + group.tier.slice(1),
+            })),
+          ),
+        ],
+        value: "",
+        onChange: (value) => {
+          const selected = groups
+            .flatMap((group) => group.providers)
+            .find((option) => option.name === value);
+          if (!selected || selected.disabled) {
+            return;
+          }
+          const fill = secretProviderSelection(selected.slice, presentKeys);
+          for (const row of fill.rows) {
+            scopeRows(scope).push(row);
+          }
+          if (fill.name !== null) {
+            addKeys.set(scope, fill.name);
+          }
+          providerSelect.setValue("");
+          renderSection();
+        },
       });
-      add.append(providerLabel, providerSelect);
+      providerSelect.element.classList.add("env-provider-select");
+      add.append(providerLabel, providerSelect.element);
     }
     const keyLabel = document.createElement("label");
     keyLabel.className = "visually-hidden";

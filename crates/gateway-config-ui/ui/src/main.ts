@@ -49,6 +49,7 @@ export {
   providersByTier,
 } from "./services/cloud-cascade";
 export { mergeCloudModel } from "./services/cloud-merge";
+export { createDropdownControl } from "./components/dropdown-control";
 export { matchRoute } from "./router";
 
 /** The toast for an apply the user (or a revert) cancelled before its commit. */
