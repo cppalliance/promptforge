@@ -55,11 +55,14 @@
 //! `POST /admin/config-revert` (delete every shadow, touching nothing
 //! else), a loopback-only, bearer-authed `POST /admin/reveal` opening the
 //! host OS file manager at a path confined to the artifact cache, a
-//! loopback-only, bearer-authed `POST /shutdown` driving the same
+//! bearer-authed `GET /admin/cloud-models` readout of the cached cloud
+//! provider model sheet (with `POST /admin/cloud-models/refresh` forcing
+//! a background re-download), a loopback-only, bearer-authed
+//! `POST /shutdown` driving the same
 //! graceful shutdown Ctrl-C drives - and
 //! `GET /health`. The whole admin config surface (config read/write, env,
 //! pending state, apply/revert, orphans, system, model-info, the HF
-//! proxy, reveal, shutdown) sits behind the shared loopback
+//! proxy, cloud-models, reveal, shutdown) sits behind the shared loopback
 //! wall from `shared-loopback` in every build; with the
 //! default-on `stt` feature, `WS /v1/realtime?intent=transcription`
 //! serves Gateway-owned Realtime transcription beside the batch route;
@@ -84,6 +87,7 @@ mod boot;
 mod cache;
 #[cfg(feature = "local")]
 mod chat_templates;
+mod cloud_models;
 mod commands;
 mod config_apply;
 mod config_pending;
@@ -284,6 +288,10 @@ pub(crate) struct AppState {
     /// Shared Hugging Face hub client for the `GET /admin/hf/*` proxy
     /// routes: one reqwest client plus the boot-time `HF_TOKEN`.
     hf: Arc<hf::HfProxy>,
+    /// The cloud provider model sheet cache behind
+    /// `GET /admin/cloud-models`: loaded from the profile directory at
+    /// launch and refreshed by one bounded background download at a time.
+    cloud_models: cloud_models::CloudModels,
     /// Launches the OS file manager for `POST /admin/reveal`; injectable
     /// so tests assert the constructed command without spawning anything.
     reveal: Arc<dyn reveal::RevealLauncher>,
@@ -435,6 +443,7 @@ impl AppState {
             hub,
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
             hf: Arc::new(hf::HfProxy::from_env()),
+            cloud_models: cloud_models::CloudModels::default(),
             reveal: Arc::new(reveal::SpawnLauncher),
             shutdown: shutdown::ShutdownSignal::default(),
             handoff_salt: {
@@ -559,6 +568,11 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
         .route(
             "/admin/env",
             get(env_file::admin_get_env).put(env_file::admin_put_env),
+        )
+        .route("/admin/cloud-models", get(cloud_models::admin_cloud_models))
+        .route(
+            "/admin/cloud-models/refresh",
+            post(cloud_models::admin_cloud_models_refresh),
         )
         .route("/admin/reveal", post(reveal::admin_reveal))
         .route("/admin/hf/search", get(hf::admin_hf_search))
@@ -4609,6 +4623,8 @@ cache_dir = '{cache}'
             (Method::POST, "/admin/config-apply"),
             (Method::POST, "/admin/config-revert"),
             (Method::GET, "/admin/system"),
+            (Method::GET, "/admin/cloud-models"),
+            (Method::POST, "/admin/cloud-models/refresh"),
             (Method::GET, "/admin/hf/search?q=a&q=b"),
             (Method::GET, "/admin/hf/model/owner/na%20me"),
             (Method::POST, "/admin/reveal"),

@@ -2067,6 +2067,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "shared-cloud-providers",
+ "shared-gateway-api",
  "shared-loopback",
  "shared-progress",
  "shared-sidecar",

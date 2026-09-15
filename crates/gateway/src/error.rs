@@ -230,6 +230,19 @@ pub(crate) enum GatewayError {
     #[non_exhaustive]
     #[error("model info unavailable")]
     ModelInfo(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// The cloud provider model sheet has not arrived: no usable cache
+    /// existed at launch and the background download is still running.
+    /// Maps to 503 so the config UI keeps polling until the sheet lands.
+    #[non_exhaustive]
+    #[error("cloud provider model sheet is still downloading")]
+    CloudModelsLoading,
+
+    /// No cloud provider model sheet is available and the last download
+    /// or cache write failed; the message carries the failure.
+    #[non_exhaustive]
+    #[error("cloud provider model sheet unavailable: {0}")]
+    CloudModelsUnavailable(String),
 }
 
 impl From<crate::queue::AdmitError> for GatewayError {
@@ -477,6 +490,16 @@ impl GatewayError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_request_error",
                 "model_info_error",
+            ),
+            GatewayError::CloudModelsLoading => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "cloud_models_loading",
+            ),
+            GatewayError::CloudModelsUnavailable(_) => (
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                "cloud_models_unavailable",
             ),
         }
     }
@@ -729,6 +752,22 @@ mod tests {
                     StatusCode::SERVICE_UNAVAILABLE,
                     "server_error",
                     "apply_cancelled",
+                ),
+            ),
+            (
+                GatewayError::CloudModelsLoading,
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server_error",
+                    "cloud_models_loading",
+                ),
+            ),
+            (
+                GatewayError::CloudModelsUnavailable("offline".to_owned()),
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "server_error",
+                    "cloud_models_unavailable",
                 ),
             ),
         ];

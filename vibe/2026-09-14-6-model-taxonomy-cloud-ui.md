@@ -271,7 +271,7 @@ Run the binary against the operator's real secrets file (never read, printed, co
 
 <step-6>
 
-### Step 6: Gateway sheet cache and admin route
+### Step 6: Gateway sheet cache and admin route [completed]
 
 - Component: gateway-sheet-cache
 

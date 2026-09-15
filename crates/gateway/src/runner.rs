@@ -973,11 +973,47 @@ fn serve_thread(
                 tokio_util::sync::CancellationToken::new(),
             ));
     }
+    // The cloud provider model sheet loads off the serving path: one
+    // bounded background task on the runtime, spawned after boot, with
+    // failure contained to the feature. The cache lives in the profile
+    // directory beside the other runtime state.
+    if let Some(cache_path) = cloud_models_cache_path(options) {
+        let cloud_models = gateway.state.cloud_models.clone();
+        runtime.spawn(async move {
+            cloud_models
+                .launch(cache_path, cloud_models_sheet_url())
+                .await;
+        });
+    } else {
+        tracing::warn!(
+            "no user profile directory found; the cloud provider model sheet is unavailable"
+        );
+    }
     let result = runtime
         .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
         .map_err(StartupError::serve);
     runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     result
+}
+
+/// The sheet download URL: the `PROMPTFORGE_MODELS_SHEET_URL` override
+/// when set and non-empty, else the published release artifact.
+fn cloud_models_sheet_url() -> String {
+    std::env::var(crate::cloud_models::SHEET_URL_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| crate::cloud_models::DEFAULT_SHEET_URL.to_owned())
+}
+
+/// The sheet cache path in the profile directory: the run directory's
+/// parent, which holds `gateway.toml`, `run/`, and `models/`.
+fn cloud_models_cache_path(options: &ServeOptions) -> Option<PathBuf> {
+    options
+        .run_dir
+        .clone()
+        .or_else(shared_sidecar::default_run_dir)
+        .and_then(|run_dir| run_dir.parent().map(Path::to_path_buf))
+        .map(|state_dir| state_dir.join(crate::cloud_models::CACHE_FILE_NAME))
 }
 
 /// Removes the gateway discovery file on drop when it still belongs to this
