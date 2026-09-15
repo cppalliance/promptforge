@@ -16,6 +16,8 @@ fn the_allowlist_admits_the_config_surface_and_refuses_the_rest() {
     for (method, path) in [
         (Method::GET, "/admin/config"),
         (Method::GET, "/admin/chat-templates"),
+        (Method::GET, "/admin/cloud-models"),
+        (Method::POST, "/admin/cloud-models/refresh"),
         (Method::PUT, "/admin/config"),
         (Method::POST, "/admin/config-apply"),
         (Method::POST, "/admin/config-revert"),

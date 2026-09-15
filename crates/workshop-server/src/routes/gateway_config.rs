@@ -63,6 +63,7 @@ fn forward_allowed(method: &Method, path: &str) -> bool {
                 path,
                 "/admin/config"
                     | "/admin/chat-templates"
+                    | "/admin/cloud-models"
                     | "/admin/config-dirty"
                     | "/admin/config-pending"
                     | "/admin/env"
@@ -78,6 +79,7 @@ fn forward_allowed(method: &Method, path: &str) -> bool {
             path,
             "/admin/config-apply"
                 | "/admin/config-revert"
+                | "/admin/cloud-models/refresh"
                 | "/admin/reveal"
                 | "/admin/queue/cancel"
                 | "/admin/queue/cancel-pending"
