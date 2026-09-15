@@ -218,6 +218,7 @@ async fn a_new_session_receives_the_retained_workbench_snapshot() {
             "profiles": ["main", "coding"],
             "active": "main",
             "switching": null,
+            "switch_in_flight": false,
             "selected": null,
             "chat_ready": false,
         }),

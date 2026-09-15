@@ -237,9 +237,7 @@ impl MenuBus {
     /// as in flight and publishes a fresh snapshot; `chat_ready` is false
     /// until the switch finishes. The wire snapshot names the target
     /// profile while one is being selected and carries `null` for a
-    /// switch to no profile, the same as no switch at all: the workbench
-    /// frame's shape is unchanged, and `chat_ready` still reports the
-    /// switch.
+    /// switch to no profile; `switch_in_flight` is true for either.
     ///
     /// # Errors
     /// Returns [`MenuRefusal::SwitchInProgress`] while another switch
@@ -391,6 +389,7 @@ impl MenuBus {
                 .switching
                 .as_ref()
                 .and_then(|target| target.name().map(str::to_owned)),
+            switch_in_flight: state.switching.is_some(),
             selected_model: state.selected_model.clone(),
             chat_ready: catalog_has_chat
                 && state.selected_model.is_some()

@@ -8,12 +8,8 @@ use serde::Serialize;
 /// selected, no switch in flight, gateway reachable - and the UI never
 /// derives it.
 ///
-/// Known gap: a switch to no profile is in flight only as `chat_ready:
-/// false`. `switching` is `null` for it, the same as no switch at all, so
-/// a UI reading `switching` alone shows no pending mark and leaves the
-/// profile rows enabled; a second selection while it runs is refused by
-/// the server. The frame keeps its shape deliberately; the server-side
-/// refusal is the guard.
+/// `switching` names the target when it is a profile; `switch_in_flight`
+/// is true for any in-flight target, including no profile.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkbenchSnapshot {
     /// Every gateway profile name, in gateway order.
@@ -21,9 +17,11 @@ pub struct WorkbenchSnapshot {
     /// The profile the gateway is serving, once known.
     pub active: Option<String>,
     /// The profile a switch is loading, while one is in flight. `None`
-    /// both when no switch runs and when the in-flight switch selects no
-    /// profile; only `chat_ready` distinguishes the two.
+    /// when no switch runs and when the in-flight switch selects no
+    /// profile.
     pub switching: Option<String>,
+    /// Whether a switch is in flight, whatever its target.
+    pub switch_in_flight: bool,
     /// The model chat requests go to, once one is selected.
     pub selected_model: Option<String>,
     /// Whether a chat can be submitted right now.
@@ -40,6 +38,7 @@ impl WorkbenchSnapshot {
             profiles: &self.profiles,
             active: self.active.as_deref(),
             switching: self.switching.as_deref(),
+            switch_in_flight: self.switch_in_flight,
             selected: self.selected_model.as_deref(),
             chat_ready: self.chat_ready,
         }
@@ -60,6 +59,7 @@ pub struct WorkbenchFrame<'a> {
     profiles: &'a [String],
     active: Option<&'a str>,
     switching: Option<&'a str>,
+    switch_in_flight: bool,
     selected: Option<&'a str>,
     chat_ready: bool,
 }

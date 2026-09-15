@@ -201,6 +201,14 @@ async fn a_sidecar_restart_climbs_the_ladder_and_refreshes_through_the_replaceme
         frame["type"] == "status" && frame["label"] == "Restarting gateway..."
     })
     .await;
+    let pending = frames
+        .iter()
+        .find(|frame| frame["type"] == "workbench" && frame["switching"] == "beta")
+        .expect("the pending snapshot was pushed before the restart step");
+    assert_eq!(
+        pending["switch_in_flight"], true,
+        "the switch is marked in flight while the ladder climbs: {pending}"
+    );
 
     let (_gateway, shutdown_hit) = observe_shutdown(gateway).await;
     assert!(
@@ -250,6 +258,10 @@ async fn a_sidecar_restart_climbs_the_ladder_and_refreshes_through_the_replaceme
         "the settled snapshot selects from the replacement's catalog"
     );
     assert_eq!(settled["chat_ready"], true);
+    assert_eq!(
+        settled["switch_in_flight"], false,
+        "the completed switch clears the in-flight mark"
+    );
     if !frames
         .iter()
         .any(|frame| frame["type"] == "status" && frame["label"] == "Ready")

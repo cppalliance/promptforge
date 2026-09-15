@@ -189,6 +189,10 @@ async fn a_selection_served_without_a_restart_completes_after_one_step() {
         "a switch in flight blocks chat: {pending}"
     );
     assert_eq!(
+        pending["switch_in_flight"], true,
+        "the pending snapshot marks the switch in flight: {pending}"
+    );
+    assert_eq!(
         progress_ladder(&frames),
         [("Selecting profile...".to_string(), 1, 3)],
         "a selection the gateway already serves climbs no restart steps"
@@ -214,6 +218,10 @@ async fn a_selection_served_without_a_restart_completes_after_one_step() {
     assert_eq!(
         settled["chat_ready"], true,
         "readiness recomputes once the switch settles"
+    );
+    assert_eq!(
+        settled["switch_in_flight"], false,
+        "the settled snapshot clears the in-flight mark"
     );
     assert_eq!(
         settled["profiles"],
@@ -257,12 +265,22 @@ async fn a_null_name_selects_no_profile_and_converges_on_a_null_active_profile()
         .send(tungstenite::Message::Text(switch.into()))
         .await
         .expect("the switch frame is sent");
-    // The pending snapshot names no target for a switch to no profile,
-    // so readiness is the visible sign of the switch in flight.
-    frames_until(&mut socket, |frame| {
-        frame["type"] == "workbench" && frame["chat_ready"] == false
+    // The pending snapshot names no target for a switch to no profile;
+    // `switch_in_flight` is what marks it as running.
+    let pending = frames_until(&mut socket, |frame| {
+        frame["type"] == "workbench" && frame["switch_in_flight"] == true
     })
     .await;
+    let pending = pending.last().expect("the pending snapshot is last");
+    assert_eq!(
+        pending["switching"],
+        serde_json::Value::Null,
+        "a switch to no profile names no target: {pending}"
+    );
+    assert_eq!(
+        pending["chat_ready"], false,
+        "a switch in flight blocks chat: {pending}"
+    );
     let frames = frames_until(&mut socket, |frame| {
         frame["type"] == "workbench" && frame["active"].is_null() && frame["chat_ready"] == true
     })
@@ -280,6 +298,10 @@ async fn a_null_name_selects_no_profile_and_converges_on_a_null_active_profile()
     assert_eq!(
         settled["selected"], "test-model",
         "chat stays usable on the remote catalog with no profile"
+    );
+    assert_eq!(
+        settled["switch_in_flight"], false,
+        "the settled snapshot clears the in-flight mark"
     );
     socket.close(None).await.expect("close the socket");
 }

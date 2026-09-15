@@ -91,6 +91,7 @@ fn a_workbench_snapshot_serializes_as_a_workbench_frame() {
         profiles: vec!["main".to_string(), "coding".to_string()],
         active: Some("main".to_string()),
         switching: None,
+        switch_in_flight: false,
         selected_model: Some("claude-sonnet-4-6".to_string()),
         chat_ready: true,
     };
@@ -102,10 +103,33 @@ fn a_workbench_snapshot_serializes_as_a_workbench_frame() {
             "profiles": ["main", "coding"],
             "active": "main",
             "switching": null,
+            "switch_in_flight": false,
             "selected": "claude-sonnet-4-6",
             "chat_ready": true,
         }),
         "the wire shape matches the workshop protocol's frame taxonomy"
+    );
+}
+
+#[test]
+fn a_switch_to_no_profile_is_visible_on_the_workbench_frame() {
+    let snapshot = WorkbenchSnapshot {
+        profiles: vec!["main".to_string()],
+        active: Some("main".to_string()),
+        switching: None,
+        switch_in_flight: true,
+        selected_model: Some("claude-sonnet-4-6".to_string()),
+        chat_ready: false,
+    };
+    let frame = serde_json::to_value(snapshot.frame()).expect("the frame serializes");
+    assert_eq!(
+        frame["switching"],
+        serde_json::Value::Null,
+        "a switch to no profile names no target"
+    );
+    assert_eq!(
+        frame["switch_in_flight"], true,
+        "the frame still reports the switch in flight, independent of the target name"
     );
 }
 

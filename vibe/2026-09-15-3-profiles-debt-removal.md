@@ -193,7 +193,7 @@ Base: `95116424` on `master`, clean worktree. `95116424` is the rebased twin of 
 
 <step-3>
 
-### Step 3: `switch_in_flight` on the workbench frame (DEBT-PGL-003, Rust)
+### Step 3: `switch_in_flight` on the workbench frame (DEBT-PGL-003, Rust) [completed]
 
 - Component: workshop
 - Piece: protocol and menu snapshot (sequential; Step 4 consumes this field)

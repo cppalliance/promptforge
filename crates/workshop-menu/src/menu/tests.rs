@@ -67,11 +67,16 @@ fn a_switch_publishes_its_begin_and_its_finish() {
         .expect("no switch is running");
     let during = snapshot(&menu);
     assert_eq!(during.switching.as_deref(), Some("coding"));
+    assert!(during.switch_in_flight, "a named switch is in flight");
     assert!(!during.chat_ready, "a switch in flight blocks chat");
     menu.finish_switch(SwitchOutcome::Completed);
     let after = snapshot(&menu);
     assert_eq!(after.active.as_deref(), Some("coding"));
     assert_eq!(after.switching, None);
+    assert!(
+        !after.switch_in_flight,
+        "the finish clears the in-flight mark"
+    );
     assert_eq!(
         after.selected_model.as_deref(),
         Some("model-a"),
@@ -131,6 +136,10 @@ fn a_switch_to_no_profile_blocks_chat_and_settles_with_no_active_profile() {
         during.switching, None,
         "the wire frame names no target while no profile is being selected"
     );
+    assert!(
+        during.switch_in_flight,
+        "the frame still reports a switch to no profile as in flight"
+    );
     assert!(!during.chat_ready, "a switch in flight blocks chat");
     assert_eq!(
         during.active.as_deref(),
@@ -149,6 +158,10 @@ fn a_switch_to_no_profile_blocks_chat_and_settles_with_no_active_profile() {
     let after = snapshot(&menu);
     assert_eq!(after.active, None, "no profile is active once it settles");
     assert_eq!(after.switching, None);
+    assert!(
+        !after.switch_in_flight,
+        "the finish clears the in-flight mark"
+    );
     assert_eq!(
         after.selected_model.as_deref(),
         Some("model-a"),
