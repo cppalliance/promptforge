@@ -5,7 +5,8 @@
 // answers its 503 loading indication (no cache yet, download in
 // flight), polls at a short interval until the sheet arrives or the
 // gateway reports the download error, then notifies. `refresh` forces
-// a background re-download and notifies again when the sheet lands.
+// a re-download whose POST answer carries the fresh sheet, stored and
+// notified directly.
 
 import { GatewayHttpError } from "./gateway-api";
 import type { CloudSheet, GatewayApi } from "./gateway-api";
@@ -59,15 +60,22 @@ export class SheetStore {
   }
 
   /**
-   * Forces a background re-download regardless of cache age, then polls
-   * until the fresh sheet lands. A loaded sheet stays visible while the
-   * download runs. A failed re-download request records the error state,
-   * notifies, and rejects so the caller can surface the failure.
+   * Forces a re-download regardless of cache age; the POST answer
+   * carries the fresh sheet, which is stored and notified directly. A
+   * failed re-download request records the error state, notifies, and
+   * rejects so the caller can surface the failure.
    */
   async refresh(): Promise<void> {
     const generation = ++this.generation;
     try {
-      await this.api.refreshCloudModels();
+      const sheet = await this.api.refreshCloudModels();
+      if (generation !== this.generation) {
+        return;
+      }
+      this.sheet = sheet;
+      this.status = "loaded";
+      this.error = null;
+      this.notify();
     } catch (error) {
       if (generation !== this.generation) {
         return;
@@ -77,7 +85,6 @@ export class SheetStore {
       this.notify();
       throw error;
     }
-    void this.poll(generation);
   }
 
   /** Stops polling; the shell's teardown calls this. */

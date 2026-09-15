@@ -255,8 +255,7 @@ impl CloudModels {
         if inner.download_in_flight {
             return Download::InFlight;
         }
-        let (Some(cache_path), Some(url)) = (inner.cache_path.clone(), inner.url.clone())
-        else {
+        let (Some(cache_path), Some(url)) = (inner.cache_path.clone(), inner.url.clone()) else {
             return Download::Unavailable;
         };
         inner.download_in_flight = true;

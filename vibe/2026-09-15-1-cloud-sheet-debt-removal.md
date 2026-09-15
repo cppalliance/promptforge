@@ -214,7 +214,7 @@ Change `admin_cloud_models_refresh` in `crates/gateway/src/cloud_models.rs` to a
 
 <step-6>
 
-### Step 6: Sheet store consumes the POST answer
+### Step 6: Sheet store consumes the POST answer [completed]
 
 - Component: refresh-delivery
 

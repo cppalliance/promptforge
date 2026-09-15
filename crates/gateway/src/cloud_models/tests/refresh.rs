@@ -107,12 +107,7 @@ async fn the_refresh_route_answers_with_the_sheet_it_downloaded() {
         .expect("a missing cache spawns a launch download")
         .await
         .expect("the launch download joins");
-    let response = request(
-        state.clone(),
-        Method::POST,
-        "/admin/cloud-models/refresh",
-    )
-    .await;
+    let response = request(state.clone(), Method::POST, "/admin/cloud-models/refresh").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(
@@ -150,12 +145,7 @@ async fn the_refresh_route_answers_502_and_keeps_the_serving_sheet() {
         .expect("a missing cache spawns a launch download")
         .await
         .expect("the launch download joins");
-    let response = request(
-        state.clone(),
-        Method::POST,
-        "/admin/cloud-models/refresh",
-    )
-    .await;
+    let response = request(state.clone(), Method::POST, "/admin/cloud-models/refresh").await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let body = body_json(response).await;
     assert_eq!(

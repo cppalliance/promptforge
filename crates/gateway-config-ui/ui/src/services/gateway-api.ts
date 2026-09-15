@@ -724,15 +724,17 @@ export class GatewayApi {
   }
 
   /**
-   * Forces a background re-download of the cloud model sheet via
-   * `POST /admin/cloud-models/refresh`; the gateway answers 202 and the
-   * new sheet arrives on a later `GET`.
+   * Forces a re-download of the cloud model sheet via
+   * `POST /admin/cloud-models/refresh`; the gateway awaits the download
+   * and answers 200 with the fresh sheet, or a refusal envelope when the
+   * download fails.
    */
-  async refreshCloudModels(): Promise<void> {
+  async refreshCloudModels(): Promise<CloudSheet> {
     const response = await this.send("/admin/cloud-models/refresh", { method: "POST" });
     if (!response.ok) {
       throw await refusalError(response);
     }
+    return parseCloudSheet(await response.json());
   }
 
   /** Lists the cached blobs via `GET /v1/cache`. */
