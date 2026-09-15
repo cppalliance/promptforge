@@ -264,7 +264,7 @@ fn init_logging_for_state(state_dir: Option<PathBuf>) -> Option<LogRuntime> {
 }
 
 #[cfg(test)]
-#[path = "main/logging_tests.rs"]
+#[path = "main-logging-tests.rs"]
 mod logging_tests;
 
 /// Log the error and its full `source()` chain through the subscriber, so

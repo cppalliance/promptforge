@@ -1,6 +1,7 @@
 use super::*;
 use crate::{DecodeRequest, EnginePolicy, SttEngine};
 
+#[path = "tests-scenario-cleanup.rs"]
 mod scenario_cleanup;
 
 fn policy() -> EnginePolicy {

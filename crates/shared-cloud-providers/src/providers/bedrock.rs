@@ -20,7 +20,9 @@ use time::OffsetDateTime;
 use crate::providers::openai_shape::base_entry;
 use crate::{EnvVarSpec, FetchError, Provider};
 
+#[path = "bedrock-sigv4.rs"]
 mod sigv4;
+#[path = "bedrock-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
 /// Environment variable the access key id arrives under; matches the

@@ -108,4 +108,5 @@ fn envelope(status: StatusCode, message: String) -> Response {
 }
 
 #[cfg(test)]
+#[path = "relay-tests.rs"]
 mod tests;

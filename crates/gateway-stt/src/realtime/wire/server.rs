@@ -10,6 +10,7 @@ use super::shared::{
     RequiredNullable, SESSION_OBJECT, SESSION_TYPE, deserialize_required_nullable,
 };
 
+#[path = "server-events.rs"]
 mod events;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]

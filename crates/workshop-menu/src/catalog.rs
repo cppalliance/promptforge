@@ -16,6 +16,7 @@ use tokio::sync::{broadcast, watch};
 use workshop_protocol::CatalogPush;
 use workshop_support::RetainedBus;
 
+#[path = "catalog-chat.rs"]
 mod chat;
 pub use chat::ChatCatalog;
 use chat::ChatCatalogBus;
@@ -86,4 +87,5 @@ impl Default for CatalogBus {
 }
 
 #[cfg(test)]
+#[path = "catalog-tests.rs"]
 mod tests;

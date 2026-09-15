@@ -37,7 +37,9 @@
 //! ([`SessionsState::registry`]), not named directly: an unregistered
 //! slot degrades the session to no status frames rather than failing it.
 
+#[path = "session-log.rs"]
 mod log;
+#[path = "session-menu.rs"]
 mod menu;
 
 use std::sync::atomic::{AtomicU64, Ordering};

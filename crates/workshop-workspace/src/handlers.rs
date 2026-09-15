@@ -161,4 +161,5 @@ fn respond<T: Serialize>(result: Result<T, WorkspaceError>) -> Response {
 }
 
 #[cfg(test)]
+#[path = "handlers-tests.rs"]
 mod tests;

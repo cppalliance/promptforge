@@ -286,4 +286,5 @@ fn valid_family_names() -> String {
 }
 
 #[cfg(test)]
+#[path = "launch_templates-tests.rs"]
 mod tests;

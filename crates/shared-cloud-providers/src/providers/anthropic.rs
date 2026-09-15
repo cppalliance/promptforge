@@ -13,6 +13,7 @@ use time::{Date, OffsetDateTime};
 
 use crate::{EnvVarSpec, FetchError, Provider};
 
+#[path = "anthropic-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
 /// Environment variable the API key arrives under; matches the GitHub

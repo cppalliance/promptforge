@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigError;
 
+#[path = "profile-name.rs"]
 mod name;
 
 pub use name::{ProfileName, ProfileNameError};

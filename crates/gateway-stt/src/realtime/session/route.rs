@@ -188,4 +188,5 @@ fn sample_millis(samples: u64) -> u64 {
 }
 
 #[cfg(test)]
+#[path = "route-tests.rs"]
 mod tests;

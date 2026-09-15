@@ -42,4 +42,5 @@ pub(crate) struct NearDuplicateDiagnostic {
 }
 
 #[cfg(test)]
+#[path = "tools-tests.rs"]
 mod tests;

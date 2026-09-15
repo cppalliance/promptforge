@@ -474,4 +474,5 @@ fn current_token(path: &Path, metadata: &fs::Metadata) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "workspace-tests.rs"]
 mod tests;

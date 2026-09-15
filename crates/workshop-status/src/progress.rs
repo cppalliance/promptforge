@@ -211,4 +211,5 @@ fn quantize(fraction: f64) -> u64 {
 }
 
 #[cfg(test)]
+#[path = "progress-tests.rs"]
 mod tests;

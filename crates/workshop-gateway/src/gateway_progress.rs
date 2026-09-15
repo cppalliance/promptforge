@@ -193,4 +193,5 @@ async fn run(
 }
 
 #[cfg(test)]
+#[path = "gateway_progress-tests.rs"]
 mod tests;

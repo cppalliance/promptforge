@@ -480,6 +480,7 @@ const _: fn() = || {
 };
 
 #[cfg(test)]
+#[path = "queue-tests.rs"]
 mod tests;
 
 fn remove_waiter(state: &mut WaitState, fair: bool, client_key: &str, id: u64) -> bool {

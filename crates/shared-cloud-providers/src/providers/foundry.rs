@@ -33,6 +33,7 @@ use time::{Date, OffsetDateTime};
 use crate::providers::openai_shape::base_entry;
 use crate::{FetchError, Provider};
 
+#[path = "foundry-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
 /// The Azure AI Foundry provider descriptor: keyless - the catalog

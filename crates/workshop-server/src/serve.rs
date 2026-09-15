@@ -337,4 +337,5 @@ fn reuse_bind(address: &str) -> std::io::Result<tokio::net::TcpListener> {
 }
 
 #[cfg(test)]
+#[path = "serve-tests.rs"]
 mod tests;

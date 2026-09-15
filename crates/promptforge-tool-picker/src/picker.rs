@@ -24,6 +24,7 @@ use crate::rank::Index;
 use crate::selected::{self, NearDuplicates};
 
 #[cfg(test)]
+#[path = "picker-tests.rs"]
 mod tests;
 
 /// A catalog embedded and held in memory, ready to answer needs.

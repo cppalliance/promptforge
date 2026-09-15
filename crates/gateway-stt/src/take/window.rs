@@ -232,6 +232,7 @@ mod tests {
     use super::{MAX_PENDING_ACCEPTED_HYPOTHESES, WholeWindowState};
     use crate::take::final_outcome::{FinalRangeOutcome, SkipReason, assemble_completion};
 
+    #[path = "../../window-tests-live-prefix.rs"]
     mod live_prefix;
 
     #[test]

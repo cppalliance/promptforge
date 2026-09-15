@@ -18,10 +18,12 @@ use crate::profile::{ProfileName, ProfileSelection, ProfileState};
 
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
+#[path = "shadow-content.rs"]
 mod content;
 pub use content::pending_var_references;
 
 #[cfg(test)]
+#[path = "shadow-tests.rs"]
 mod tests;
 
 /// Paths staged by one pending configuration write.

@@ -347,4 +347,5 @@ fn descriptors<'a>(group: &[Ranked<'a>]) -> Vec<&'a ToolDescriptor> {
 }
 
 #[cfg(test)]
+#[path = "policy-tests.rs"]
 mod tests;

@@ -386,4 +386,5 @@ async fn load_speech(
 }
 
 #[cfg(test)]
+#[path = "boot_load-tests.rs"]
 mod tests;

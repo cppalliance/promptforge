@@ -17,6 +17,7 @@ use time::{Date, Month};
 use crate::providers::openai_shape::{ListResponse, base_entry};
 use crate::{FetchError, Provider};
 
+#[path = "openrouter-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
 /// The OpenRouter provider descriptor: keyless - the model-list

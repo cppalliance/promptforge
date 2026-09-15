@@ -38,6 +38,7 @@ use workshop_support::ReconnectBackoff;
 
 use crate::gateway_binding::{GatewayBinding, GatewaySnapshot};
 
+#[path = "heartbeat-refresh.rs"]
 mod refresh;
 pub use refresh::{refresh_catalog, refresh_profiles};
 
@@ -349,4 +350,5 @@ async fn refresh_incomplete_sources(
     }
 }
 #[cfg(test)]
+#[path = "heartbeat-tests.rs"]
 mod tests;

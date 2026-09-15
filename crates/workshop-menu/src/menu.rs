@@ -19,6 +19,7 @@
 //! state only; the UI's panel layout is view state and stays in the
 //! webview's localStorage.
 
+#[path = "menu-memory.rs"]
 mod memory;
 
 use std::collections::HashMap;
@@ -445,4 +446,5 @@ fn first_model_id(models: &[serde_json::Value]) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "menu-tests.rs"]
 mod tests;

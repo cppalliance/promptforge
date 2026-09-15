@@ -501,4 +501,5 @@ impl Tool for WebSearch {
 }
 
 #[cfg(test)]
+#[path = "web_search-tests.rs"]
 mod tests;

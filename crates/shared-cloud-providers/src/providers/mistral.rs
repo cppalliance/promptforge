@@ -18,6 +18,7 @@ use time::{Date, Month, OffsetDateTime};
 use crate::providers::openai_shape::{base_entry, fetch_list};
 use crate::{EnvVarSpec, FetchError, Provider};
 
+#[path = "mistral-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
 /// Environment variable the API key arrives under; matches the GitHub

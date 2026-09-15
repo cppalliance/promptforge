@@ -1,7 +1,9 @@
 //! Guarded `llama-server` child process for gateway-owned local inference.
 
+#[path = "server-support.rs"]
 mod support;
 #[cfg(test)]
+#[path = "server-tests.rs"]
 mod tests;
 
 use std::ffi::OsString;

@@ -176,4 +176,5 @@ async fn gateway_forward(
 }
 
 #[cfg(test)]
+#[path = "gateway_config-tests.rs"]
 mod tests;

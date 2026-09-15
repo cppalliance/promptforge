@@ -182,4 +182,5 @@ impl MenuPush {
 }
 
 #[cfg(test)]
+#[path = "push-tests.rs"]
 mod tests;

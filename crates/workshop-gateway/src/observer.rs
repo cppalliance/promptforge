@@ -486,4 +486,5 @@ fn invalid_data(message: String) -> io::Error {
 }
 
 #[cfg(test)]
+#[path = "observer-tests.rs"]
 mod tests;

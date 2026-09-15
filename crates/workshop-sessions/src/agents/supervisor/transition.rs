@@ -402,4 +402,5 @@ fn changed(state: SupervisorState, effect: SupervisorEffect) -> SupervisorTransi
 }
 
 #[cfg(test)]
+#[path = "transition-tests.rs"]
 mod tests;

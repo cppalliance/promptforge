@@ -45,6 +45,7 @@
 
 use std::fmt;
 
+#[path = "untrusted-inventory.rs"]
 mod inventory;
 
 /// A run's guard-tag nonce.

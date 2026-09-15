@@ -66,6 +66,7 @@ use promptforge_tool_picker::{Catalog, Config, ToolDescriptor, ToolId, ToolPicke
 use shared_promptforge_api::capabilities::{Capability, CapabilityId};
 
 #[cfg(test)]
+#[path = "capabilities-tests.rs"]
 mod tests;
 
 // The first-party capability rides the facade so hosts never name the

@@ -284,4 +284,5 @@ fn stale_clause(reason: StaleReason) -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "resolve-tests.rs"]
 mod tests;

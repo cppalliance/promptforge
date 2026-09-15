@@ -15,7 +15,9 @@ use crate::artifacts::{self, PreparedGeneration, SpeechError};
 use crate::model::SpeechModelInfo;
 use crate::status::SpeechStatus;
 
+#[path = "generation-lease.rs"]
 mod lease;
+#[path = "generation-snapshot.rs"]
 mod snapshot;
 
 #[cfg(feature = "test-fixtures")]

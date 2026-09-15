@@ -390,7 +390,9 @@ fn settle_skipped(
 }
 
 #[cfg(test)]
+#[path = "state-alignment-tests.rs"]
 mod alignment_tests;
 
 #[cfg(test)]
+#[path = "state-tests.rs"]
 mod tests;

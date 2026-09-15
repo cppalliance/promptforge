@@ -171,4 +171,5 @@ impl Session {
 }
 
 #[cfg(all(test, feature = "test-fixtures"))]
+#[path = "items-tests.rs"]
 mod tests;

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
 
+#[path = "test_gateway-process.rs"]
 mod process;
 
 #[cfg(windows)]

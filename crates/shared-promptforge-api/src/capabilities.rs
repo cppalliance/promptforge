@@ -21,6 +21,7 @@ use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::{Tool, ToolId};
 
 #[cfg(test)]
+#[path = "capabilities-tests.rs"]
 mod tests;
 
 /// The stable identity of an installed capability.

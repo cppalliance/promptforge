@@ -124,4 +124,5 @@ fn unique_backup_path(destination: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
+#[path = "staging-tests.rs"]
 mod tests;

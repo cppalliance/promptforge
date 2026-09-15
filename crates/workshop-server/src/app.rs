@@ -9,8 +9,10 @@
 //! registration guards keeping every self-registration alive.
 
 #[cfg(any(test, feature = "test-fixtures"))]
+#[path = "app-fixtures.rs"]
 pub(crate) mod fixtures;
 #[cfg(test)]
+#[path = "app-tests.rs"]
 mod tests;
 
 use std::fmt;

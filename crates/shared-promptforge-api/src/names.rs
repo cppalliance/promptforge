@@ -10,6 +10,7 @@
 use std::fmt;
 
 #[cfg(test)]
+#[path = "names-tests.rs"]
 mod tests;
 
 /// A validated global name of two or three segments.

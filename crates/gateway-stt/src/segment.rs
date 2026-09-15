@@ -13,6 +13,7 @@ use std::ops::Range;
 
 use gateway_stt_engine::EnginePolicy;
 
+#[path = "segment-boundary.rs"]
 mod boundary;
 
 pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};

@@ -1,4 +1,6 @@
+#[path = "agreement-final-overlap.rs"]
 mod final_overlap;
+#[path = "agreement-projection.rs"]
 mod projection;
 
 pub(super) use final_overlap::{final_transcript_within_limit, range_guided_suffix_prefix_start};

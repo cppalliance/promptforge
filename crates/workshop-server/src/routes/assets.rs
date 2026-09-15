@@ -178,7 +178,9 @@ async fn ui_program_icon_2x() -> Response {
 }
 
 #[cfg(all(test, not(feature = "headless")))]
+#[path = "assets-tests.rs"]
 mod tests;
 
 #[cfg(all(test, feature = "headless"))]
+#[path = "assets-headless-tests.rs"]
 mod headless_tests;

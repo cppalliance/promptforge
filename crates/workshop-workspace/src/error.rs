@@ -197,4 +197,5 @@ fn render_message(error: &WorkspaceError, leak_detail: bool) -> String {
 }
 
 #[cfg(test)]
+#[path = "error-tests.rs"]
 mod tests;

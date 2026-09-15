@@ -389,4 +389,5 @@ impl HeaderReader {
 }
 
 #[cfg(test)]
+#[path = "gguf-tests.rs"]
 mod tests;

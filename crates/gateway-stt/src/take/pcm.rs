@@ -393,4 +393,5 @@ impl RollingPcm {
 pub(super) struct PcmRangeError;
 
 #[cfg(test)]
+#[path = "pcm-tests.rs"]
 mod tests;

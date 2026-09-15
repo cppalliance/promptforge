@@ -14,6 +14,7 @@
 //! to a dead token. Unresolved waits are retained across socket loss and
 //! re-announced on reconnect: sessions outlive sockets.
 
+#[path = "input-tool.rs"]
 mod tool;
 
 use std::fmt;
@@ -315,4 +316,5 @@ pub(crate) fn deliver_input_response_before_completion(
 }
 
 #[cfg(test)]
+#[path = "input-tests.rs"]
 mod tests;

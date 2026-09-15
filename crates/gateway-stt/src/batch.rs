@@ -341,7 +341,9 @@ fn openai_error_response(
 }
 
 #[cfg(all(test, not(miri)))]
+#[path = "batch-native-tests.rs"]
 mod native_tests;
 
 #[cfg(test)]
+#[path = "batch-tests.rs"]
 mod tests;
