@@ -7,10 +7,10 @@
 //! Docs: <https://docs.x.ai>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, Pricing, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, Pricing, Tier};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -23,8 +23,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.x.ai",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.x.ai/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -48,7 +52,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it: the OpenAI shape plus xAI's
@@ -85,6 +91,37 @@ fn pricing(model: &WireModel) -> Option<Pricing> {
         prompt_per_mtok: usd_per_mtok(model.prompt_text_token_price?),
         completion_per_mtok: usd_per_mtok(model.completion_text_token_price?),
     })
+}
+
+/// The entry's family: `grok-<version>` for the numbered line, the
+/// product line for the imagine and build ids, and the whole id
+/// otherwise.
+fn family_of(id: &str) -> String {
+    const LINES: &[&str] = &["grok-imagine-image", "grok-imagine-video", "grok-build"];
+    if let Some(rest) = id.strip_prefix("grok-") {
+        let token = rest.split('-').next().unwrap_or(rest);
+        if crate::taxonomy::is_version_token(token) {
+            return format!("grok-{token}");
+        }
+    }
+    for line in LINES {
+        if id == *line || id.starts_with(&format!("{line}-")) {
+            return (*line).to_owned();
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family, then collapse `-MMDD` snapshot suffixes
+/// onto their canonical entries. Ids carrying the date as an infix
+/// (`grok-4.20-0309-reasoning`) are not suffixes and stay canonical.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
+    crate::taxonomy::collapse_variants(entries, |id| {
+        crate::taxonomy::strip_snapshot(id, crate::taxonomy::SnapshotStyle::MonthDay)
+    });
 }
 
 #[cfg(test)]
@@ -187,6 +224,72 @@ mod tests {
         assert!(
             pricing(&half).is_none(),
             "a half-known price is worse than an absent one"
+        );
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: the real xAI ids.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-xai.json");
+
+    /// The fixture ids with the provider's taxonomy applied, by id.
+    fn classified() -> std::collections::BTreeMap<String, ModelEntry> {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect()
+    }
+
+    #[test]
+    fn fixture_ids_classify_into_version_and_product_line_families() {
+        let by_id = classified();
+        let table: &[(&str, &str)] = &[
+            ("grok-4.20-0309-non-reasoning", "grok-4.20"),
+            ("grok-4.20-0309-reasoning", "grok-4.20"),
+            ("grok-4.20-multi-agent-0309", "grok-4.20"),
+            ("grok-4.3", "grok-4.3"),
+            ("grok-4.5", "grok-4.5"),
+            ("grok-4.6", "grok-4.6"),
+            ("grok-build-0.1", "grok-build"),
+            ("grok-imagine-image", "grok-imagine-image"),
+            ("grok-imagine-image-2.0", "grok-imagine-image"),
+            ("grok-imagine-video", "grok-imagine-video"),
+            ("grok-imagine-video-1.5", "grok-imagine-video"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+    }
+
+    #[test]
+    fn month_day_snapshots_without_a_canonical_stay_canonical() {
+        let by_id = classified();
+        // `grok-4.20-multi-agent-0309` is the only `-MMDD` suffix in the
+        // 2026-09-14 sheet and its base id is absent, so nothing
+        // collapses and every id keeps a non-empty family.
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "{} must stay canonical: its base id is not in the list",
+                entry.id
+            );
+            assert!(!entry.family.is_empty(), "{} has an empty family", entry.id);
+        }
+    }
+
+    #[test]
+    fn a_month_day_snapshot_collapses_onto_its_canonical() {
+        let mut entries = vec![
+            crate::taxonomy::fixture::entry("grok-4.20-multi-agent"),
+            crate::taxonomy::fixture::entry("grok-4.20-multi-agent-0309"),
+        ];
+        apply_taxonomy(&mut entries);
+        let variant = &entries[1];
+        assert_eq!(variant.variant_of.as_deref(), Some("grok-4.20-multi-agent"));
+        assert_eq!(variant.variant.as_deref(), Some("0309"));
+        assert_eq!(
+            variant.family, "grok-4.20",
+            "the variant inherits the canonical's family"
         );
     }
 }

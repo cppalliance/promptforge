@@ -7,9 +7,9 @@
 //! Docs: <https://ai.google.dev/api/models>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, ModelKind, Thinking, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, ModelKind, Thinking, Tier};
 
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -22,8 +22,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://generativelanguage.googleapis.com",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// Page size for the list request: generous, so the full catalog arrives
@@ -60,6 +64,7 @@ pub(crate) async fn fetch(
         };
         token = Some(next);
     }
+    apply_taxonomy(&mut entries);
     Ok(entries)
 }
 
@@ -111,6 +116,49 @@ fn model_kind(methods: &[String]) -> ModelKind {
     } else {
         ModelKind::Chat
     }
+}
+
+/// The entry's family: a product line when the id opens with one
+/// (`gemma`, `veo`, `lyria`, `deep-research`, `nano-banana`,
+/// `antigravity`, the embedding line), the `gemini-<version>` prefix for
+/// the numbered line, `gemini` for unversioned gemini ids, and the first
+/// segment otherwise.
+fn family_of(id: &str) -> String {
+    const LINES: &[&str] = &[
+        "gemma",
+        "veo",
+        "lyria",
+        "deep-research",
+        "nano-banana",
+        "antigravity",
+    ];
+    for line in LINES {
+        if id == *line || id.starts_with(&format!("{line}-")) {
+            return (*line).to_owned();
+        }
+    }
+    if id == "embedding" || id.starts_with("embedding-") || id.starts_with("gemini-embedding") {
+        return "embedding".to_owned();
+    }
+    if let Some(rest) = id.strip_prefix("gemini-") {
+        let token = rest.split('-').next().unwrap_or(rest);
+        if crate::taxonomy::is_version_token(token) {
+            return format!("gemini-{token}");
+        }
+        return "gemini".to_owned();
+    }
+    id.split('-').next().unwrap_or(id).to_owned()
+}
+
+/// Set every entry's family, then collapse `-MM-YYYY` preview snapshots
+/// onto their canonical entries.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
+    crate::taxonomy::collapse_variants(entries, |id| {
+        crate::taxonomy::strip_snapshot(id, crate::taxonomy::SnapshotStyle::MonthYear)
+    });
 }
 
 /// Normalize one wire model into a sheet entry.
@@ -325,6 +373,84 @@ mod tests {
             next_token(&page),
             None,
             "an empty token must not loop the fetch forever"
+        );
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: the real Gemini ids.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-gemini.json");
+
+    /// The fixture ids with the provider's taxonomy applied, by id.
+    fn classified() -> std::collections::BTreeMap<String, ModelEntry> {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect()
+    }
+
+    #[test]
+    fn fixture_ids_classify_into_version_and_product_line_families() {
+        let by_id = classified();
+        let table: &[(&str, &str)] = &[
+            ("gemini-2.5-flash", "gemini-2.5"),
+            ("gemini-2.5-pro", "gemini-2.5"),
+            ("gemini-3-flash-preview", "gemini-3"),
+            ("gemini-3.1-pro-preview", "gemini-3.1"),
+            ("gemini-3.8-flash", "gemini-3.8"),
+            ("gemma-4-26b-a4b-it", "gemma"),
+            ("gemma-4-31b-it", "gemma"),
+            ("veo-3.1-generate-preview", "veo"),
+            ("lyria-3-clip-preview", "lyria"),
+            ("lyria-realtime-exp", "lyria"),
+            ("deep-research-max-preview-04-2026", "deep-research"),
+            ("gemini-embedding-001", "embedding"),
+            ("gemini-embedding-2-preview", "embedding"),
+            ("nano-banana-pro-preview", "nano-banana"),
+            ("antigravity-preview-05-2026", "antigravity"),
+            ("aqa", "aqa"),
+            ("gemini-flash-latest", "gemini"),
+            ("gemini-robotics-er-2-preview", "gemini"),
+            ("gemini-omni-1.1-flash", "gemini"),
+            ("gemini-2.5-computer-use-preview-10-2025", "gemini-2.5"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+    }
+
+    #[test]
+    fn month_year_snapshots_without_a_canonical_stay_canonical() {
+        let by_id = classified();
+        // The 2026-09-14 sheet carries `-MM-YYYY` preview snapshots but
+        // not their base ids, so nothing collapses and every id keeps a
+        // non-empty family.
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "{} must stay canonical: its base id is not in the list",
+                entry.id
+            );
+            assert!(!entry.family.is_empty(), "{} has an empty family", entry.id);
+        }
+    }
+
+    #[test]
+    fn a_month_year_snapshot_collapses_onto_its_canonical() {
+        let mut entries = vec![
+            crate::taxonomy::fixture::entry("deep-research-pro-preview"),
+            crate::taxonomy::fixture::entry("deep-research-pro-preview-12-2025"),
+        ];
+        apply_taxonomy(&mut entries);
+        let variant = &entries[1];
+        assert_eq!(
+            variant.variant_of.as_deref(),
+            Some("deep-research-pro-preview")
+        );
+        assert_eq!(variant.variant.as_deref(), Some("12-2025"));
+        assert_eq!(
+            variant.family, "deep-research",
+            "the variant inherits the canonical's family"
         );
     }
 }

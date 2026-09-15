@@ -231,7 +231,7 @@ In `crates/shared-gateway-api/src/lib.rs`: `ModelEntry` gains required `family: 
 
 <step-2>
 
-### Step 2: Taxonomy primitives and Prime provider pass
+### Step 2: Taxonomy primitives and Prime provider pass [completed]
 
 - Component: provider-taxonomy
 

@@ -1,0 +1,14 @@
+{
+    "source":  "cloud-provider-models.json (2026-09-14 sheet copy)",
+    "provider":  "deepseek",
+    "models":  [
+                   {
+                       "id":  "deepseek-flash",
+                       "display_name":  "deepseek-flash"
+                   },
+                   {
+                       "id":  "deepseek-v4-pro",
+                       "display_name":  "deepseek-v4-pro"
+                   }
+               ]
+}

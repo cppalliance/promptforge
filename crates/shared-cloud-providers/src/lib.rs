@@ -10,6 +10,7 @@ use shared_gateway_api::{EnvRole, ModelEntry, Tier};
 
 pub mod providers;
 mod sheet;
+mod taxonomy;
 
 pub use sheet::{build_sheet, fetch_sheet};
 

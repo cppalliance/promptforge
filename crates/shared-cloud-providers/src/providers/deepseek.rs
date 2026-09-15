@@ -6,10 +6,10 @@
 //! Docs: <https://api-docs.deepseek.com>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, Tier};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -22,8 +22,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.deepseek.com",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.deepseek.com/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL: DeepSeek mounts it at `/models`,
@@ -44,7 +48,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it.
@@ -58,6 +64,26 @@ struct WireModel {
 /// the conservative base.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, model.created)
+}
+
+/// The entry's family: the `deepseek-v<N>` version prefix for the
+/// numbered line, and the whole id otherwise. The catalog carries no
+/// snapshot suffixes, so there is no collapse pass.
+fn family_of(id: &str) -> String {
+    if let Some(rest) = id.strip_prefix("deepseek-v") {
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if !digits.is_empty() {
+            return format!("deepseek-v{digits}");
+        }
+    }
+    id.to_owned()
+}
+
+/// Set every entry's family.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +123,32 @@ mod tests {
         assert_eq!(entry.max_output, None);
         assert!(!entry.images && !entry.tool_calling && !entry.thinking.supported);
         assert!(entry.pricing.is_none());
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: the real DeepSeek ids.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-deepseek.json");
+
+    #[test]
+    fn fixture_ids_classify_into_families() {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        let by_id: std::collections::BTreeMap<String, ModelEntry> = entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+        let table: &[(&str, &str)] = &[
+            ("deepseek-flash", "deepseek-flash"),
+            ("deepseek-v4-pro", "deepseek-v4"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "the catalog carries no snapshot suffixes: {}",
+                entry.id
+            );
+        }
     }
 }

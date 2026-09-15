@@ -7,11 +7,13 @@
 //! Docs: <https://docs.anthropic.com/en/api/models-list>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, ModelKind, Thinking, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, ModelKind, Thinking, Tier};
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};
 
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
+
+mod taxonomy;
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -24,8 +26,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.anthropic.com",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.anthropic.com/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The API version the endpoint requires on every request.
@@ -67,6 +73,7 @@ pub(crate) async fn fetch(
         };
         cursor = Some(next);
     }
+    taxonomy::apply(&mut entries);
     Ok(entries)
 }
 

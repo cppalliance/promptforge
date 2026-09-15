@@ -7,10 +7,10 @@
 //! Docs: <https://ai.developer.meta.com/docs>
 
 use serde::Deserialize;
-use shared_gateway_api::{ModelEntry, Tier};
+use shared_gateway_api::{EnvRole, ModelEntry, Tier};
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
-use crate::{FetchError, Provider};
+use crate::{EnvVarSpec, FetchError, Provider};
 
 /// Environment variable the API key arrives under; matches the GitHub
 /// secret name.
@@ -23,8 +23,12 @@ pub const PROVIDER: Provider = Provider {
     tier: Tier::Prime,
     key_env: Some(KEY_ENV),
     base_url: "https://api.meta.ai/v1",
-    openai_base_url: None,
-    env_vars: &[],
+    openai_base_url: Some("https://api.meta.ai/v1"),
+    env_vars: &[EnvVarSpec {
+        name: KEY_ENV,
+        role: EnvRole::Key,
+        default: None,
+    }],
 };
 
 /// The list path under the base URL.
@@ -44,7 +48,9 @@ pub(crate) async fn fetch(
     };
     let models: Vec<WireModel> =
         fetch_list(client, &format!("{base_url}{MODELS_PATH}"), key).await?;
-    Ok(models.iter().map(normalize_model).collect())
+    let mut entries: Vec<ModelEntry> = models.iter().map(normalize_model).collect();
+    apply_taxonomy(&mut entries);
+    Ok(entries)
 }
 
 /// One model as the wire reports it.
@@ -58,6 +64,27 @@ struct WireModel {
 /// so the entry is the conservative base.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, model.created)
+}
+
+/// The entry's family: the product line, taken as the first two segments
+/// (`muse-spark`, `muse-voice`, `muse-image`). The catalog carries no
+/// snapshot suffixes, so there is no collapse pass.
+fn family_of(id: &str) -> String {
+    let mut segments = id.split('-');
+    let Some(first) = segments.next() else {
+        return id.to_owned();
+    };
+    let Some(second) = segments.next() else {
+        return id.to_owned();
+    };
+    format!("{first}-{second}")
+}
+
+/// Set every entry's family.
+fn apply_taxonomy(entries: &mut [ModelEntry]) {
+    for entry in entries.iter_mut() {
+        entry.family = family_of(&entry.id);
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +124,37 @@ mod tests {
         assert_eq!(entry.max_output, None);
         assert!(!entry.images && !entry.tool_calling && !entry.thinking.supported);
         assert!(entry.pricing.is_none());
+    }
+
+    /// Trimmed 2026-09-14 sheet excerpt: the real Meta ids.
+    const FIXTURE: &str = include_str!("../../tests/fixtures/2026-09-14-meta.json");
+
+    #[test]
+    fn fixture_ids_classify_into_product_line_families() {
+        let mut entries = crate::taxonomy::fixture::entries(FIXTURE);
+        apply_taxonomy(&mut entries);
+        let by_id: std::collections::BTreeMap<String, ModelEntry> = entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+        let table: &[(&str, &str)] = &[
+            ("muse-spark-1.1", "muse-spark"),
+            ("muse-spark-1.2", "muse-spark"),
+            ("muse-spark-1.2-contributor", "muse-spark"),
+            ("muse-spark-1.3", "muse-spark"),
+            ("muse-spark-1.3-contributor", "muse-spark"),
+            ("muse-voice-transcribe-1.0", "muse-voice"),
+            ("muse-image-1.0", "muse-image"),
+        ];
+        for &(id, family) in table {
+            assert_eq!(by_id[id].family, family, "{id}");
+        }
+        for entry in by_id.values() {
+            assert!(
+                entry.variant_of.is_none(),
+                "the catalog carries no snapshot suffixes: {}",
+                entry.id
+            );
+        }
     }
 }

@@ -1,0 +1,34 @@
+{
+    "source":  "cloud-provider-models.json (2026-09-14 sheet copy)",
+    "provider":  "meta",
+    "models":  [
+                   {
+                       "id":  "muse-spark-1.3-contributor",
+                       "display_name":  "muse-spark-1.3-contributor"
+                   },
+                   {
+                       "id":  "muse-voice-transcribe-1.0",
+                       "display_name":  "muse-voice-transcribe-1.0"
+                   },
+                   {
+                       "id":  "muse-spark-1.3",
+                       "display_name":  "muse-spark-1.3"
+                   },
+                   {
+                       "id":  "muse-image-1.0",
+                       "display_name":  "muse-image-1.0"
+                   },
+                   {
+                       "id":  "muse-spark-1.2-contributor",
+                       "display_name":  "muse-spark-1.2-contributor"
+                   },
+                   {
+                       "id":  "muse-spark-1.2",
+                       "display_name":  "muse-spark-1.2"
+                   },
+                   {
+                       "id":  "muse-spark-1.1",
+                       "display_name":  "muse-spark-1.1"
+                   }
+               ]
+}
