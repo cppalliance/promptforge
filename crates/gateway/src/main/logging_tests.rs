@@ -315,7 +315,9 @@ async fn drive_no_alignment() {
          trust_loopback = false\n"
     ))
     .expect("Gateway config parses");
-    let gateway = Gateway::new(&config, ProfilesContext::default()).with_speech_service(service);
+    let gateway = Gateway::new(&config, ProfilesContext::default())
+        .expect("Gateway assembles")
+        .with_speech_service(service);
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("mounted listener binds");

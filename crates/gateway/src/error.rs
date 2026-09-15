@@ -84,10 +84,6 @@ pub(crate) enum GatewayError {
     #[error("upstream unavailable")]
     UpstreamUnavailable,
 
-    /// A bounded profile-switch drain expired and cancelled the request.
-    #[error("request cancelled for profile switch")]
-    RequestCancelled,
-
     /// The named model is configured but not yet loaded, and a queue command
     /// (carried in the message) is working on the routing table. Maps to 503
     /// so a client can retry once the active command completes.
@@ -95,11 +91,10 @@ pub(crate) enum GatewayError {
     #[error("model provisioning in progress: {0}")]
     ModelProvisioning(String),
 
-    /// The named local model belongs to the profile being switched to and
-    /// is downloading or spawning: the switch has already published the
-    /// profile's remote models, and this one follows once its child is
-    /// ready. Maps to 503 with `Retry-After` so a client waits briefly
-    /// instead of treating the model as missing.
+    /// The named local model belongs to the boot profile and its child is
+    /// spawning: the remote models already serve, and this one follows
+    /// once its child is ready. Maps to 503 with `Retry-After` so a client
+    /// waits briefly instead of treating the model as missing.
     #[non_exhaustive]
     #[error("model is loading: {0}")]
     ModelLoading(String),
@@ -116,8 +111,9 @@ pub(crate) enum GatewayError {
     #[error("profile not found: {0}")]
     ProfileNotFound(String),
 
-    /// Profile reload failed at a named stage; the underlying cause is
-    /// preserved via `source()` rather than flattened into a string.
+    /// A command (the boot load, an apply, an unload) failed at a named
+    /// stage; the underlying cause is preserved via `source()` rather than
+    /// flattened into a string.
     #[non_exhaustive]
     #[error("switch profile failed at {stage}")]
     SwitchFailed {
@@ -312,7 +308,8 @@ impl GatewayError {
         GatewayError::Protocol(ProtocolError::upstream_protocol(source))
     }
 
-    /// Wrap a profile-switch failure at `stage`, preserving the cause.
+    /// Wrap a command failure (the boot load, an apply, an unload) at
+    /// `stage`, preserving the cause.
     #[must_use]
     pub(crate) fn switch_failed(
         stage: &'static str,
@@ -404,11 +401,6 @@ impl GatewayError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "upstream_unavailable",
-            ),
-            GatewayError::RequestCancelled => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "server_error",
-                "profile_switch",
             ),
             GatewayError::ModelProvisioning(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -694,8 +686,9 @@ mod tests {
     #[test]
     fn only_a_loading_model_carries_retry_after() {
         // A loading model is a 503 the client should wait out, so its
-        // response names the wait; the other 503s (a full queue, a cancelled
-        // request) promise nothing about when they clear and carry none.
+        // response names the wait; the other 503s (a full queue, a model
+        // still provisioning) promise nothing about when they clear and
+        // carry none.
         let response = GatewayError::ModelLoading("local-model".to_owned()).into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
@@ -707,7 +700,7 @@ mod tests {
         );
         for error in [
             GatewayError::QueueFull,
-            GatewayError::RequestCancelled,
+            GatewayError::CommandCancelled("load-profile: main".to_owned()),
             GatewayError::ModelProvisioning("load-profile: main".to_owned()),
             GatewayError::UnknownModel("ghost".to_owned()),
         ] {

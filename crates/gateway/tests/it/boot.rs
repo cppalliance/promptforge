@@ -1,5 +1,6 @@
-//! Instant-ready boot: the bind is the readiness signal and provisioning
-//! runs as the boot `LoadProfile` command on the queue.
+//! Instant-ready boot: the bind is the readiness signal, the remote table
+//! serves from the bind, and local provisioning runs as the boot
+//! `LoadProfile` command on the queue when a profile is selected.
 
 use std::time::Duration;
 
@@ -146,7 +147,7 @@ fn assert_one_canonical_log(home: &std::path::Path) {
 }
 
 /// Polls `/v1/models` until the catalog is exactly `expected`, so the test
-/// observes the boot command's hot-swap without sleeping a fixed delay.
+/// observes the published table without sleeping a fixed delay.
 async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) {
     let mut ids = Vec::new();
     for _ in 0..100 {
@@ -172,11 +173,11 @@ async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) 
     assert_eq!(ids, expected, "the boot command hot-swaps the catalog");
 }
 
-/// The boot command loads the active profile into the initially empty
-/// routing table: a remote model appears in `/v1/models` without any
-/// provisioning, and the ephemeral CLI override writes no state file.
+/// The remote table is published at the bind: a remote model appears in
+/// `/v1/models` without any provisioning, and the ephemeral CLI override
+/// writes no state file.
 #[tokio::test]
-async fn the_boot_command_loads_the_active_profile_into_an_empty_table() {
+async fn the_remote_table_serves_from_the_bind_under_a_cli_profile() {
     let backend = crate::support::fake_backend().await;
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
@@ -216,8 +217,8 @@ models = []
     let handle = gateway::spawn(&options).expect("gateway spawns");
     let http = reqwest::Client::new();
 
-    // The boot command runs asynchronously after the bind; poll the catalog
-    // until the worker's switch lands the model.
+    // The remote table is published before the bind; the poll only absorbs
+    // the readiness handshake.
     wait_for_catalog(handle.url(), &http, &["test-model"]).await;
     assert!(
         !temp.path().join("gateway.state.toml").exists(),
@@ -229,7 +230,8 @@ models = []
 /// Provisioning is not on the startup path: a config whose local model
 /// cannot provision fails the eager `Gateway::from_config` assembly, yet
 /// `spawn` binds and serves immediately - the boot command absorbs the
-/// failure while the gateway stays reachable with an empty routing table.
+/// failure while the gateway stays reachable with its (here empty) remote
+/// routing table.
 #[cfg(feature = "local")]
 #[tokio::test]
 async fn spawn_leaves_provisioning_to_the_boot_command() {
@@ -325,6 +327,227 @@ models = ["missing-model"]
         "the routing table starts empty; the boot command's failure stays in the queue: {catalog}"
     );
     handle.shutdown().expect("graceful shutdown");
+}
+
+/// A config declaring no `[[profile]]` and no state file boots with no
+/// profile: every remote model routes from the bind, a `[[local_model]]`
+/// the catalog declares but nothing selects is a plain 404 (no boot command
+/// runs, so nothing promises it), the status reports `profile: null`, and
+/// no state file appears.
+#[tokio::test]
+async fn a_boot_with_no_profile_serves_remote_models_and_404s_local_ones() {
+    let backend = crate::support::fake_backend().await;
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        format!(
+            r#"
+config-version = 0
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "test-model"
+description = "a test model for integration"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[local_model]]
+name = "local-model"
+description = "declared but selected by no profile"
+source = "/models/local.gguf"
+context = 4096
+"#
+        ),
+    );
+    let options =
+        ServeOptions::new(Some(path), None::<ProfileName>).with_run_dir(temp.path().join("run"));
+    let handle = gateway::spawn(&options).expect("gateway spawns");
+    let http = reqwest::Client::new();
+
+    let catalog = json_within(
+        send_within(
+            http.get(format!("{}/v1/models", handle.url()))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    let ids = catalog["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|model| model.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["test-model"], "the remote table serves from the bind");
+    let status = json_within(
+        send_within(
+            http.get(format!("{}/admin/status", handle.url()))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert!(status["profile"].is_null(), "no profile runs: {status}");
+    assert_eq!(
+        status["queue"]["active"],
+        Value::Null,
+        "no boot command runs with no profile: {status}"
+    );
+    let local = send_within(
+        http.post(format!("{}/v1/chat/completions", handle.url()))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "local-model",
+                "messages": [{"role": "user", "content": "ping"}]
+            })),
+    )
+    .await;
+    assert_eq!(
+        local.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "an unselected local model is a plain 404"
+    );
+    let remote = send_within(
+        http.post(format!("{}/v1/chat/completions", handle.url()))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "ping"}]
+            })),
+    )
+    .await;
+    assert_eq!(remote.status(), reqwest::StatusCode::OK);
+    assert!(
+        !temp.path().join("gateway.state.toml").exists(),
+        "booting with no profile writes no state file"
+    );
+    handle.shutdown().expect("graceful shutdown");
+}
+
+/// A state file naming a profile the config no longer defines degrades the
+/// boot to no profile: the remote models serve, the status reports
+/// `profile: null`, and the log carries the stale-selection warning naming
+/// the missing and the defined profiles.
+#[test]
+fn a_stale_state_file_boots_with_no_profile_and_logs_the_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\n\
+         [[model]]\nname = \"test-model\"\ndescription = \"remote\"\ncontext = 1024\n\
+         upstream = \"backend-model\"\nendpoints = [\"fake\"]\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    );
+    std::fs::write(
+        temp.path().join("gateway.state.toml"),
+        "active_profile = \"ghost\"\n",
+    )
+    .expect("write the stale state");
+    let run_dir = temp.path().join(".promptforge").join("run");
+    let mut gateway = GatewayProcess::spawn_selecting(&path, temp.path(), None);
+    let connection = wait_for_connection(&run_dir, Duration::from_secs(30));
+    let url = format!("http://127.0.0.1:{}", connection.port);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (status, ids, shutdown) = runtime.block_on(async {
+        let http = reqwest::Client::new();
+        let status = json_within(
+            send_within(
+                http.get(format!("{url}/admin/status"))
+                    .bearer_auth("test-token"),
+            )
+            .await,
+        )
+        .await;
+        let ids = crate::support::catalog_ids(
+            &http,
+            std::net::SocketAddr::from(([127, 0, 0, 1], connection.port)),
+        )
+        .await;
+        let shutdown = send_within(
+            http.post(format!("{url}/shutdown"))
+                .bearer_auth("test-token"),
+        )
+        .await
+        .status();
+        (status, ids, shutdown)
+    });
+    assert!(
+        status["profile"].is_null(),
+        "a stale selection boots no profile: {status}"
+    );
+    assert_eq!(ids, ["test-model"], "the remote models serve");
+    assert_eq!(shutdown, reqwest::StatusCode::ACCEPTED);
+    drop(runtime);
+    let exit = gateway.wait_for_exit(Duration::from_secs(30));
+    assert!(exit.success(), "the gateway exits cleanly: {exit}");
+
+    let log = std::fs::read_to_string(
+        temp.path()
+            .join(".promptforge")
+            .join("logs")
+            .join("gateway.log"),
+    )
+    .expect("read the log");
+    assert!(
+        log.contains(
+            "state file selects profile \"ghost\", which is not defined (defined profiles: main); booting with no profile"
+        ),
+        "the stale-selection warning is logged: {log}"
+    );
+}
+
+/// A `--profile` naming an undefined profile is an error, not a degraded
+/// boot: the process exits with a failure status and the logged chain names
+/// the missing profile and the defined ones.
+#[test]
+fn an_undefined_profile_flag_fails_the_boot_naming_the_defined_profiles() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    );
+    let mut gateway = GatewayProcess::spawn_selecting(&path, temp.path(), Some("ghost"));
+
+    let exit = gateway.wait_for_exit(Duration::from_secs(30));
+    assert!(!exit.success(), "an undefined --profile fails the boot");
+    let log = std::fs::read_to_string(
+        temp.path()
+            .join(".promptforge")
+            .join("logs")
+            .join("gateway.log"),
+    )
+    .expect("the fatal outcome drained to the log file");
+    assert!(
+        log.contains("active profile ghost is not defined (defined profiles: main)"),
+        "the error names the missing profile and the defined ones: {log}"
+    );
+    assert!(
+        !temp
+            .path()
+            .join(".promptforge")
+            .join("run")
+            .join("gateway.json")
+            .exists(),
+        "a failed boot publishes no connection"
+    );
 }
 
 /// A headless invocation with `--config` bookends its serving log: the

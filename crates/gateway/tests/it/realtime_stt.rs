@@ -54,6 +54,7 @@ fn speech_with_policy(
 
 async fn server(strict: bool, service: &SpeechService) -> TestServer {
     let gateway = Gateway::new(&config(strict), ProfilesContext::default())
+        .expect("gateway assembles")
         .with_speech_service(service.clone());
     TestServer::start(gateway).await
 }

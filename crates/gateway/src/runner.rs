@@ -5,8 +5,9 @@
 //! runtime, so an embedding binary keeps its main thread. The call blocks
 //! until the listener is bound - that bind is the readiness signal - and the
 //! returned [`GatewayHandle`] carries the bound URL and a graceful-shutdown
-//! switch. Provisioning is not on this path: the boot `LoadProfile` command
-//! runs on the gateway's command queue after the bind. [`run`] is the binary
+//! switch. The remote routing table is published at assembly; local
+//! provisioning is not on this path: the boot `LoadProfile` command runs on
+//! the gateway's command queue after the bind. [`run`] is the binary
 //! path: a thin wrapper that spawns, installs the
 //! Ctrl-C handler, and joins. `Gateway` is the in-process assembly seam used
 //! by both and by integration tests, which bind their own listener and drive
@@ -46,10 +47,8 @@ const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// A command body that ignores its cancellation token (a stalled download
 /// or spawn) would otherwise pin the join forever; after this bound the
 /// worker is abandoned and [`RUNTIME_SHUTDOWN_TIMEOUT`] reaps what is
-/// left. The bound can never abandon a half-written state file: the
-/// switch's commit section (`commit_profile_state`) is a brief
-/// `spawn_blocking` of file renames that no token can interrupt anyway, so
-/// only a download or a spawn can outlive it.
+/// left. No command writes a state file, so the bound can never abandon a
+/// half-written one; only a download or a spawn can outlive it.
 const WORKER_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Options for running the gateway. Built by the binary from parsed args.
@@ -138,14 +137,18 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    /// Assemble the serving shell instantly: an empty routing table, no
-    /// local runtime, no provisioning. Models arrive when the command
-    /// queue's boot `LoadProfile` hot-swaps them into the live table; until
-    /// then an unloaded but configured model earns a 503 naming the active
+    /// Assemble the serving shell instantly: the routing table over every
+    /// `[[model]]`, no local runtime, no provisioning. The selected
+    /// profile's local models arrive when the command queue's boot
+    /// `LoadProfile` merges them into the live table; until then an
+    /// unloaded but configured local model earns a 503 naming the active
     /// command.
     ///
     /// [`from_config`](Self::from_config) is the eager alternative for tests
     /// and embedders: it provisions before returning.
+    ///
+    /// # Errors
+    /// Returns [`StartupError`] when routing construction fails.
     ///
     /// # Examples
     /// ```
@@ -172,11 +175,10 @@ impl Gateway {
     /// endpoints = ["e"]
     /// "#;
     /// let config = Config::from_toml_str(toml).unwrap();
-    /// let gateway = Gateway::new(&config, ProfilesContext::default());
+    /// let gateway = Gateway::new(&config, ProfilesContext::default()).unwrap();
     /// let _router = gateway.router();
     /// ```
-    #[must_use]
-    pub fn new(config: &Config, profiles: ProfilesContext) -> Gateway {
+    pub fn new(config: &Config, profiles: ProfilesContext) -> Result<Gateway, StartupError> {
         Self::new_with_hub(
             config,
             profiles,
@@ -190,7 +192,8 @@ impl Gateway {
         config: &Config,
         profiles: ProfilesContext,
         hub: Arc<shared_progress::ProgressHub>,
-    ) -> Gateway {
+    ) -> Result<Gateway, StartupError> {
+        let routing = Routing::from_config(config).map_err(StartupError::config)?;
         let active = config
             .active_profile()
             .map(|profile| profile.name().to_owned())
@@ -199,7 +202,7 @@ impl Gateway {
             .active_profile()
             .map(|profile| profile.models().to_vec());
         let state = AppState::from_parts(
-            Arc::new(Routing::empty()),
+            Arc::new(routing),
             config.server_key(),
             Arc::new(config.clone()),
             #[cfg(feature = "local")]
@@ -215,12 +218,31 @@ impl Gateway {
             },
             hub,
         );
-        Gateway { state }
+        Ok(Gateway { state })
+    }
+
+    /// Enqueues the boot load for `profile`, or nothing when no profile is
+    /// selected: the local runtime then stays empty for the process
+    /// lifetime and the remote table published at assembly is the whole
+    /// catalog. Returns whether a command was enqueued.
+    pub(crate) fn enqueue_boot_load(&self, profile: Option<ProfileName>) -> bool {
+        let Some(name) = profile else {
+            return false;
+        };
+        let _boot = self
+            .state
+            .commands
+            .enqueue(crate::commands::Command::load_profile(
+                name,
+                tokio_util::sync::CancellationToken::new(),
+            ));
+        true
     }
 
     /// Assemble from a validated config. Provisions and starts local models.
     ///
-    /// Profile switches derive subsets from this config's loaded catalog.
+    /// The boot selection is fixed for the process lifetime; a later switch
+    /// persists a new selection and reports that a restart is needed.
     ///
     /// # Errors
     /// Returns [`StartupError`] when local provisioning or routing construction
@@ -649,7 +671,6 @@ mod drain_tests {
             .commands
             .enqueue(crate::commands::Command::load_profile(
                 ProfileName::parse("main").expect("profile name"),
-                false,
                 tokio_util::sync::CancellationToken::new(),
             ));
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -945,10 +966,18 @@ fn serve_thread(
             return Ok(());
         }
     };
-    // The shell assembles instantly: an empty routing table and no local
-    // runtime. Provisioning is the boot command's work, not startup's.
+    // The shell assembles instantly: the remote routing table over every
+    // `[[model]]` and no local runtime (invariant A1: the bind and the
+    // publication precede any local work). Local provisioning is the boot
+    // command's work, not startup's.
     let boot_profile = profiles.active.clone();
-    let gateway = Gateway::new_with_hub(&config, profiles, hub);
+    let gateway = match Gateway::new_with_hub(&config, profiles, hub) {
+        Ok(gateway) => gateway,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return Ok(());
+        }
+    };
     // The gateway discovery file lands before the readiness signal so a spawned
     // gateway is discoverable the moment `spawn` returns; the guard removes
     // it on every exit path below, graceful shutdown included.
@@ -960,19 +989,16 @@ fn serve_thread(
         state: gateway.state.clone(),
     }));
     // The boot command lands after the readiness signal: the queue worker
-    // loads the active profile's models into the live routing table while
-    // the gateway is already reachable, and the boot command alone then
-    // makes the process's one guarded STT load attempt. The boot selection
-    // stays ephemeral, exactly as startup always behaved.
-    if let Some(name) = boot_profile {
-        let _boot = gateway
-            .state
-            .commands
-            .enqueue(crate::commands::Command::boot_load_profile(
-                name,
-                tokio_util::sync::CancellationToken::new(),
-            ));
+    // loads the selected profile's local models into the live routing table
+    // while the gateway is already reachable, and the boot command alone
+    // then makes the process's one guarded STT load attempt. The boot
+    // selection stays ephemeral, exactly as startup always behaved.
+    match boot_selection_notice(&config) {
+        Some(BootSelectionNotice::Stale(message)) => tracing::warn!("{message}"),
+        Some(BootSelectionNotice::None(message)) => tracing::info!("{message}"),
+        None => {}
     }
+    gateway.enqueue_boot_load(boot_profile);
     // The cloud provider model sheet loads off the serving path: one
     // bounded background task on the runtime, spawned after boot, with
     // failure contained to the feature. The cache lives in the profile
@@ -1235,6 +1261,43 @@ fn load_startup_with_environment(
     ))
 }
 
+/// What the boot log says about a config that selected no profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BootSelectionNotice {
+    /// The state file named a profile the config no longer defines; the
+    /// load degraded to no profile. Logged as a warning.
+    Stale(String),
+    /// Nothing selected a profile. Logged for information.
+    None(String),
+}
+
+/// The notice for a boot config with no selected profile: the stale-state
+/// warning naming the missing profile and the defined ones, the plain
+/// no-profile line, or `None` when a profile is selected.
+fn boot_selection_notice(config: &Config) -> Option<BootSelectionNotice> {
+    if config.active_profile().is_some() {
+        return None;
+    }
+    let Some(stale) = config.stale_state_selection() else {
+        return Some(BootSelectionNotice::None(
+            "no profile selected; serving remote models only".to_owned(),
+        ));
+    };
+    let defined: Vec<&str> = config
+        .profiles()
+        .iter()
+        .map(gateway_config::ProfileConfig::name)
+        .collect();
+    let defined = if defined.is_empty() {
+        "none".to_owned()
+    } else {
+        defined.join(", ")
+    };
+    Some(BootSelectionNotice::Stale(format!(
+        "state file selects profile \"{stale}\", which is not defined (defined profiles: {defined}); booting with no profile"
+    )))
+}
+
 /// The deprecation warning for a boot config carrying a `[workshop]`
 /// section, or `None` when the section is absent. The gateway no longer
 /// hosts the workshop - the desktop shell embeds the workshop server
@@ -1433,5 +1496,109 @@ models = []
         let (config, _) =
             load_startup_with_environment(&path, &options, None).expect("startup loads");
         assert!(workshop_section_deprecation(&config).is_none());
+    }
+
+    /// A selected profile earns no notice; a stale state file earns the
+    /// warning naming the missing and the defined profiles; no selection at
+    /// all earns the plain no-profile line.
+    #[test]
+    fn the_boot_selection_notice_names_stale_and_absent_selections() {
+        let (_temp, path) = fixture("alpha");
+        let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
+        let (selected, _) =
+            load_startup_with_environment(&path, &options, None).expect("startup loads");
+        assert_eq!(boot_selection_notice(&selected), None);
+
+        std::fs::write(
+            gateway_config::profile_state_path(&path),
+            "active_profile = \"ghost\"\n",
+        )
+        .expect("write stale state");
+        let (stale, context) =
+            load_startup_with_environment(&path, &options, None).expect("a stale state degrades");
+        assert_eq!(context.active, None, "no boot command is enqueued");
+        assert_eq!(
+            boot_selection_notice(&stale),
+            Some(BootSelectionNotice::Stale(
+                "state file selects profile \"ghost\", which is not defined (defined profiles: alpha, beta); booting with no profile"
+                    .to_owned()
+            ))
+        );
+
+        std::fs::remove_file(gateway_config::profile_state_path(&path)).expect("remove state");
+        let (none, _) =
+            load_startup_with_environment(&path, &options, None).expect("no state loads");
+        assert_eq!(
+            boot_selection_notice(&none),
+            Some(BootSelectionNotice::None(
+                "no profile selected; serving remote models only".to_owned()
+            ))
+        );
+    }
+
+    /// With no profile the runner enqueues no boot command: the local
+    /// runtime stays empty, every remote model routes from assembly, and
+    /// the status reports `profile: null`.
+    #[tokio::test]
+    async fn no_profile_enqueues_no_boot_load_and_serves_the_remote_table() {
+        use tower::ServiceExt as _;
+
+        let config = Config::from_toml_str(CATALOG)
+            .expect("catalog parses")
+            .select_profile(None)
+            .expect("no selection");
+        let gateway = Gateway::new(&config, ProfilesContext::default()).expect("assembles");
+
+        assert!(!gateway.enqueue_boot_load(None), "nothing to load");
+        assert!(gateway.state.commands.pending_commands().is_empty());
+        {
+            let live = gateway.state.live.read().await;
+            #[cfg(feature = "local")]
+            assert!(live.local.models().is_empty(), "the local runtime is empty");
+            assert!(live.routing.model("alpha-model").is_ok());
+            assert!(live.routing.model("beta-model").is_ok());
+        }
+        let response = gateway
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/admin/status")
+                    .header("authorization", "Bearer test-token")
+                    .body(axum::body::Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let status: serde_json::Value = serde_json::from_slice(&body).expect("status is JSON");
+        assert!(status["profile"].is_null(), "no profile runs: {status}");
+        assert_eq!(
+            status["models"],
+            serde_json::json!(["alpha-model", "beta-model"])
+        );
+    }
+
+    /// With a selected profile the runner enqueues exactly one boot load,
+    /// labelled for the status readout.
+    #[test]
+    fn a_selected_profile_enqueues_one_boot_load() {
+        let config = Config::from_toml_str(CATALOG)
+            .expect("catalog parses")
+            .select_profile(Some(&ProfileName::parse("alpha").expect("name")))
+            .expect("alpha selects");
+        let gateway = Gateway::new(&config, ProfilesContext::default()).expect("assembles");
+
+        assert!(gateway.enqueue_boot_load(Some(ProfileName::parse("alpha").expect("name"))));
+        let pending: Vec<String> = gateway
+            .state
+            .commands
+            .pending_commands()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert_eq!(pending, ["load-profile: alpha"]);
     }
 }

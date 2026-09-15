@@ -170,10 +170,10 @@ fn keyed_array<'a>(document: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
 
 /// The UI's add-model merge (`cloud-merge.ts`), restated over the admin
 /// JSON document: append the provider's endpoint when none carries its
-/// name, then append the model with the sheet's capability fields.
-/// Profile membership is not part of the add flow; the behavior half of
-/// DEBT-MTCU-2 (selecting the merged model in the active profile) is
-/// deferred.
+/// name, then append the model with the sheet's capability fields. Profile
+/// membership is not part of the add flow: profiles select local and
+/// speech-to-text models only, and every remote model serves under any
+/// profile.
 fn merge_cloud_model(document: &mut Value, slice: &ProviderSlice, model_index: usize, name: &str) {
     let entry = &slice.models[model_index];
     let endpoints = keyed_array(document, "endpoint");

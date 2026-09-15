@@ -1,10 +1,10 @@
 //! The command queue: serialized, debounced, cancellable gateway commands.
 //!
-//! Everything slow the gateway does - the boot-time profile load, profile
-//! switches, config applies, model provisioning and unloads - runs as a
-//! [`Command`] on one worker task draining a shared pending deque FIFO, so
-//! downloads never fight each other for bandwidth and the listener stays
-//! live while they run.
+//! Everything slow the gateway does - the boot-time profile load, config
+//! applies, model provisioning and unloads - runs as a [`Command`] on one
+//! worker task draining a shared pending deque FIFO, so downloads never
+//! fight each other for bandwidth and the listener stays live while they
+//! run.
 //! Each command reports into its own [`ProgressTree`] on the process hub and
 //! carries a [`CancellationToken`] the worker honors at chunk and phase
 //! boundaries. The in-process status ([`CommandQueue::active_command`] and
@@ -21,12 +21,12 @@ use shared_progress::{OperationId, ProgressHub, ProgressTree};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+use crate::AppState;
 use crate::config_apply::ApplySnapshot;
 use crate::error::GatewayError;
-use crate::{AppState, StatePersistence};
 
 /// The `ApplyConfig` command's display name: the status bar and tray show
-/// it, and the switch's cancellation error names it.
+/// it, and the apply's cancellation error names it.
 pub(crate) const APPLY_CONFIG_LABEL: &str = "apply-config";
 
 /// What a settled command produced: the profile name for `LoadProfile`, a
@@ -39,28 +39,15 @@ pub(crate) type SharedOutcome = Arc<Outcome>;
 /// A command the queue worker can run.
 #[derive(Debug)]
 pub(crate) enum Command {
-    /// Provision and load a profile's models, hot-swapping the live routing
-    /// table. `persist` writes the selection to the profile-state file; the
-    /// boot command passes `false` so a command-line or environment profile
-    /// override stays ephemeral, exactly as startup always behaved. The flag
-    /// is shared: a debounced duplicate that asks to persist upgrades the
-    /// command it attaches to, so an explicit switch to the boot profile
-    /// still persists.
-    ///
-    /// `boot` marks the runner's startup command - the only command allowed
-    /// to attempt the process's one guarded STT load, which it runs after
-    /// its remote and local work publishes. The flag lives on the command
-    /// itself: a debounced duplicate attaches to the pending or active
-    /// command without disturbing it, and a superseding switch carries no
-    /// flag, so a superseded or cancelled boot command is never retried.
+    /// The runner's boot load: provision and spawn the selected profile's
+    /// local models into the live routing table, then make the process's
+    /// one guarded STT load. The runner enqueues it once, right after the
+    /// bind, and only when a profile is selected; nothing else produces
+    /// it. The selection it loads is the boot selection, so a command-line
+    /// or environment override stays ephemeral.
     LoadProfile {
         /// The profile to load.
         name: ProfileName,
-        /// Whether a successful load persists the active-profile selection.
-        persist: Arc<AtomicBool>,
-        /// Whether this is the runner's boot command, permitted to attempt
-        /// the one initial STT load after its switch work.
-        boot: bool,
         /// Cancellation token, checked at chunk and phase boundaries.
         token: CancellationToken,
     },
@@ -70,14 +57,11 @@ pub(crate) enum Command {
     /// file before that commit, so a failed or cancelled apply leaves every
     /// shadow staged for a retry.
     ///
-    /// Debounce is asymmetric by design. An `ApplyConfig` replaces a pending
-    /// `LoadProfile` and cancels an active one: the applied configuration
-    /// supersedes any in-flight switch, the boot load included, and a
-    /// cancelled download keeps its partial for resume. A `LoadProfile`
-    /// arriving while an `ApplyConfig` is pending or active queues behind it
-    /// FIFO without cancelling it: a switch after an apply is a legitimate
-    /// order, while the reverse would discard the user's pending changes. A
-    /// second `ApplyConfig` attaches to the first and shares its outcome.
+    /// Commands run FIFO: an `ApplyConfig` enqueued while the boot
+    /// `LoadProfile` is pending or active queues behind it and never
+    /// cancels it, so the reload merges the children the boot load
+    /// published. A second `ApplyConfig` attaches to the first and shares
+    /// its outcome.
     ApplyConfig {
         /// The pending config and shadow contents the route captured under
         /// the apply lock.
@@ -121,38 +105,9 @@ pub(crate) enum Command {
 }
 
 impl Command {
-    /// A `LoadProfile` command for `name`; `persist` controls whether a
-    /// successful load writes the active-profile selection.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the switch route persists the selection instead of enqueueing a load; the boot-only load replaces this in the next step"
-        )
-    )]
-    pub(crate) fn load_profile(
-        name: ProfileName,
-        persist: bool,
-        token: CancellationToken,
-    ) -> Command {
-        Command::LoadProfile {
-            name,
-            persist: Arc::new(AtomicBool::new(persist)),
-            boot: false,
-            token,
-        }
-    }
-
-    /// The runner's boot command: the one `LoadProfile` permitted to attempt
-    /// the process's single STT load after its remote and local work. The
-    /// boot selection stays ephemeral, exactly as startup always behaved.
-    pub(crate) fn boot_load_profile(name: ProfileName, token: CancellationToken) -> Command {
-        Command::LoadProfile {
-            name,
-            persist: Arc::new(AtomicBool::new(false)),
-            boot: true,
-            token,
-        }
+    /// The runner's boot load for `name`.
+    pub(crate) fn load_profile(name: ProfileName, token: CancellationToken) -> Command {
+        Command::LoadProfile { name, token }
     }
 
     /// The command's display name, for status readouts and log lines.
@@ -185,16 +140,6 @@ impl Command {
             Command::UnloadModel { .. } => None,
         }
     }
-
-    /// The shared persist flag, for a `LoadProfile` only.
-    fn persist_flag(&self) -> Option<Arc<AtomicBool>> {
-        match self {
-            Command::LoadProfile { persist, .. } => Some(Arc::clone(persist)),
-            Command::ApplyConfig { .. }
-            | Command::ProvisionModel { .. }
-            | Command::UnloadModel { .. } => None,
-        }
-    }
 }
 
 /// The identity a command debounces on: profile name for `LoadProfile`,
@@ -205,15 +150,6 @@ enum DebounceKey {
     Profile(String),
     Apply,
     Model(String),
-}
-
-impl DebounceKey {
-    /// Whether an incoming command with this key supersedes a `LoadProfile`
-    /// already in the queue: a newer switch (latest wins) or an apply (the
-    /// applied configuration outranks any in-flight switch).
-    fn supersedes_load_profile(&self) -> bool {
-        matches!(self, DebounceKey::Profile(_) | DebounceKey::Apply)
-    }
 }
 
 /// One waiting command's queue-side record. The deque owns the command
@@ -227,9 +163,6 @@ struct PendingEntry {
     label: String,
     queued_at: Instant,
     tree: ProgressTree,
-    /// The `LoadProfile` persist flag a debounced duplicate can still
-    /// upgrade while the command waits.
-    persist: Option<Arc<AtomicBool>>,
     waiters: Vec<oneshot::Sender<SharedOutcome>>,
 }
 
@@ -253,9 +186,6 @@ struct ActiveEntry {
     operation: OperationId,
     started_at: Instant,
     token: Option<CancellationToken>,
-    /// The `LoadProfile` persist flag a debounced duplicate can still
-    /// upgrade while the command runs; the body reads it at commit time.
-    persist: Option<Arc<AtomicBool>>,
     waiters: Vec<oneshot::Sender<SharedOutcome>>,
 }
 
@@ -317,7 +247,7 @@ pub(crate) struct Enqueued {
         not(test),
         expect(
             dead_code,
-            reason = "read only by tests since the switch route stopped streaming a command's stages; the boot-only queue in the next step decides its fate"
+            reason = "read only by tests: no route streams a command's stages, and the first producer that needs the operation id lifts this"
         )
     )]
     pub(crate) operation: OperationId,
@@ -376,11 +306,9 @@ impl CommandQueue {
 
     /// Enqueues `command`, applying the debounce: a `LoadProfile`,
     /// `ApplyConfig`, or `ProvisionModel` duplicating the pending or active
-    /// command attaches to it; a `LoadProfile` for a different profile, or
-    /// an `ApplyConfig`, replaces the pending `LoadProfile` and cancels the
-    /// active one (latest wins, and an apply outranks a switch). A
-    /// `LoadProfile` never displaces an `ApplyConfig`; it queues behind it.
-    /// `UnloadModel` is never debounced.
+    /// command attaches to it and shares its outcome. Everything else
+    /// queues FIFO; no command displaces or cancels another. `UnloadModel`
+    /// is never debounced.
     pub(crate) fn enqueue(&self, command: Command) -> Enqueued {
         let (waiter_tx, waiter_rx) = oneshot::channel();
         let mut state = self.lock();
@@ -401,17 +329,10 @@ impl CommandQueue {
         }
         let key = command.debounce_key();
         if let Some(key) = &key {
-            // A duplicate of the active command attaches to it. A duplicate
-            // asking to persist upgrades the shared flag, so an explicit
-            // switch to the boot profile still persists.
+            // A duplicate of the active command attaches to it.
             if let Some(active) = &mut state.active
                 && active.key.as_ref() == Some(key)
             {
-                if let (Some(incoming), Some(stored)) =
-                    (command.persist_flag(), active.persist.as_ref())
-                {
-                    stored.fetch_or(incoming.load(Ordering::Relaxed), Ordering::Relaxed);
-                }
                 active.waiters.push(waiter_tx);
                 return Enqueued {
                     operation: active.operation,
@@ -424,11 +345,6 @@ impl CommandQueue {
                 .iter_mut()
                 .find(|entry| entry.key.as_ref() == Some(key))
             {
-                if let (Some(incoming), Some(stored)) =
-                    (command.persist_flag(), pending.persist.as_ref())
-                {
-                    stored.fetch_or(incoming.load(Ordering::Relaxed), Ordering::Relaxed);
-                }
                 let operation = pending.tree.operation();
                 pending.waiters.push(waiter_tx);
                 return Enqueued {
@@ -440,36 +356,8 @@ impl CommandQueue {
         let id = state.next_id;
         state.next_id += 1;
         let label = command.label();
-        let persist = command.persist_flag();
         let tree = self.hub.operation();
         let operation = tree.operation();
-        if key
-            .as_ref()
-            .is_some_and(DebounceKey::supersedes_load_profile)
-        {
-            // A pending switch is replaced: the queue holds at most one
-            // pending `LoadProfile`, and the latest switch or the apply
-            // wins. A pending `ApplyConfig` is never displaced here.
-            if let Some(position) = state
-                .pending
-                .iter()
-                .position(|entry| matches!(entry.key, Some(DebounceKey::Profile(_))))
-                && let Some(replaced) = state.pending.remove(position)
-            {
-                let label = replaced.label.clone();
-                replaced.settle(Err(GatewayError::CommandCancelled(label)));
-            }
-            // An active switch is cancelled, so the new command starts
-            // promptly; an active `ApplyConfig` keeps running.
-            if let Some(token) = state
-                .active
-                .as_ref()
-                .filter(|active| matches!(active.key, Some(DebounceKey::Profile(_))))
-                .and_then(|active| active.token.as_ref())
-            {
-                token.cancel();
-            }
-        }
         state.pending.push_back(PendingEntry {
             id,
             command,
@@ -477,7 +365,6 @@ impl CommandQueue {
             label,
             queued_at: Instant::now(),
             tree,
-            persist,
             waiters: vec![waiter_tx],
         });
         // Wake after releasing the lock: the permit is stored, so a worker
@@ -676,14 +563,13 @@ impl CommandQueue {
             operation: tree.operation(),
             started_at: Instant::now(),
             token,
-            persist: entry.persist,
             waiters: entry.waiters,
         });
         BeginNext::Run(id, entry.command, tree)
     }
 
     /// Clears the active command and settles its waiters, logging the
-    /// outcome: the boot command has no waiter, so the log is where its
+    /// outcome: the boot load has no waiter, so the log is where its
     /// failure surfaces.
     fn finish(&self, id: u64, outcome: Outcome) {
         let active = {
@@ -779,12 +665,9 @@ async fn worker_loop(queue: CommandQueue, state: AppState, executor: Arc<Executo
 /// Runs one command to its end, reporting progress into its operation tree.
 async fn run_command(state: AppState, command: Command, tree: ProgressTree) -> Outcome {
     match command {
-        Command::LoadProfile {
-            name,
-            persist,
-            boot,
-            token,
-        } => load_profile(&state, name, persist, boot, token, tree).await,
+        Command::LoadProfile { name, token } => {
+            crate::boot_load::run(&state, name, tree, &token).await
+        }
         Command::ApplyConfig { snapshot, token } => {
             crate::config_apply::apply_config(&state, snapshot, token, tree).await
         }
@@ -794,113 +677,6 @@ async fn run_command(state: AppState, command: Command, tree: ProgressTree) -> O
             token,
         } => provision_model(&state, &name, &source, token, &tree).await,
         Command::UnloadModel { name } => unload_model(&state, &name, &tree).await,
-    }
-}
-
-/// The `LoadProfile` body: the profile-switch machinery, made cancellable.
-/// The boot command alone follows its published switch with the process's
-/// one guarded STT load attempt.
-async fn load_profile(
-    state: &AppState,
-    name: ProfileName,
-    persist: Arc<AtomicBool>,
-    boot: bool,
-    token: CancellationToken,
-    tree: ProgressTree,
-) -> Outcome {
-    // No apply lock here: the queue serializes this switch with Apply, and
-    // its real-state write races nothing else - saves and revert touch only
-    // shadows. Holding the lock across the download is what used to park
-    // every save, revert, and apply behind a boot load.
-    let label = format!("load-profile: {name}");
-    // The boot command's speech stage registers before the tree moves into
-    // the switch (registration is what emits the stage's begun event); the
-    // leaf reports nothing until the load itself begins after the switch
-    // settles.
-    #[cfg(feature = "stt")]
-    let speech = boot.then(|| tree.register("loading-speech", 5.0));
-    // The flag is read at commit time, so a debounced duplicate arriving
-    // mid-run can still upgrade an ephemeral boot load into a persisted one.
-    let result = crate::run_switch_with_config(
-        state.clone(),
-        name,
-        tree,
-        None,
-        move || {
-            if persist.load(Ordering::Relaxed) {
-                StatePersistence::Write
-            } else {
-                StatePersistence::None
-            }
-        },
-        &token,
-    )
-    .await;
-    let result = match result {
-        Ok(profile) => Ok(profile),
-        // A failure under a fired token reports as the cancellation it is,
-        // however deep in provisioning the stop landed.
-        Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label.clone())),
-        Err(error) => Err(error),
-    };
-    #[cfg(feature = "stt")]
-    if let Some(loading) = speech {
-        // The switch's remote and local work has settled: a full commit and
-        // a partial start both published the profile, and only a published
-        // boot profile makes the STT attempt.
-        let published = match &result {
-            Ok(_) => true,
-            #[cfg(feature = "local")]
-            Err(GatewayError::PartialStart { .. }) => true,
-            Err(_) => false,
-        };
-        if published {
-            boot_speech_load(state, loading, &token, &label).await?;
-        } else {
-            loading.fail();
-        }
-    }
-    #[cfg(not(feature = "stt"))]
-    let _ = boot;
-    result
-}
-
-/// The boot command's isolated STT attempt: the process's one guarded
-/// initial load, after the switch published the boot profile. A failure
-/// fails the boot command but never the gateway - speech stays unavailable
-/// until process restart, and no later command retries.
-#[cfg(feature = "stt")]
-async fn boot_speech_load(
-    state: &AppState,
-    loading: shared_progress::ProgressHandle,
-    token: &CancellationToken,
-    label: &str,
-) -> Result<(), GatewayError> {
-    let service = state.speech.clone();
-    let config = state.live.read().await.config.as_ref().clone();
-    let progress = loading.clone();
-    let worker_token = token.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        service.load_initial(&config, Some(&progress), &worker_token)
-    })
-    .await;
-    match result {
-        Ok(Ok(())) => {
-            loading.complete();
-            Ok(())
-        }
-        Ok(Err(_)) if token.is_cancelled() => {
-            loading.fail();
-            Err(GatewayError::CommandCancelled(label.to_owned()))
-        }
-        Ok(Err(error)) => {
-            loading.fail();
-            Err(GatewayError::switch_failed("load-speech", error))
-        }
-        Err(join) => {
-            loading.fail();
-            Err(GatewayError::switch_failed("load-speech-task", join))
-        }
     }
 }
 
@@ -966,11 +742,9 @@ async fn provision_model(
 #[cfg(feature = "local")]
 async fn unload_model(state: &AppState, name: &str, tree: &ProgressTree) -> Outcome {
     let leaf = tree.register("unload-model", 1.0);
-    // Block new inference registration while the routing table loses the
-    // model, exactly as a profile switch does. In-flight requests holding
-    // the old table entry keep their connection; the teardown below ends
-    // the child under them, which is what the caller asked for.
-    let _switch = state.switch.lock().await;
+    // In-flight requests holding the old table entry keep their connection;
+    // the teardown below ends the child under them, which is what the
+    // caller asked for.
     let model = {
         let mut live = state.live.write().await;
         let Some(model) = live.local.unload_model(name) else {
@@ -1019,7 +793,6 @@ mod tests {
     fn load_profile(name: &str) -> Command {
         Command::load_profile(
             ProfileName::parse(name).expect("profile name"),
-            true,
             CancellationToken::new(),
         )
     }
@@ -1123,49 +896,6 @@ mod tests {
         assert!(queue.active_command().is_none());
     }
 
-    #[tokio::test]
-    async fn a_newer_load_profile_replaces_a_pending_different_profile() {
-        let queue = queue();
-        let first = queue.enqueue(load_profile("alpha"));
-        let second = queue.enqueue(load_profile("beta"));
-
-        let pending = queue.pending_commands();
-        assert_eq!(pending.len(), 1, "latest wins: one pending switch");
-        assert_eq!(pending[0].name, "load-profile: beta");
-        let outcome = first.outcome.await.expect("the replaced command settles");
-        assert!(
-            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
-            "the replaced command settles as cancelled: {outcome:?}"
-        );
-        drop(second);
-    }
-
-    #[tokio::test]
-    async fn a_newer_load_profile_cancels_the_active_different_profile() {
-        let state = state();
-        let queue = state.commands.clone();
-        let _worker = state
-            .commands
-            .spawn_worker_with(&state, parking_executor())
-            .expect("worker spawns");
-
-        let first = queue.enqueue(load_profile("alpha"));
-        wait_until("alpha to go active", || queue.active_command().is_some()).await;
-
-        let second = queue.enqueue(load_profile("beta"));
-        let outcome = first.outcome.await.expect("the active command settles");
-        assert!(
-            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
-            "the active switch is cancelled so the newer one starts: {outcome:?}"
-        );
-        // The worker moved on to beta; cancel it so the test exits cleanly.
-        wait_until("beta to go active", || queue.active_command().is_some()).await;
-        assert!(queue.cancel_active());
-        let outcome = second.outcome.await.expect("beta settles");
-        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
-        queue.shutdown();
-    }
-
     #[test]
     fn an_apply_attaches_to_a_pending_apply() {
         let queue = queue();
@@ -1197,8 +927,11 @@ mod tests {
         drop(applied);
     }
 
+    /// An apply enqueued while the boot load is active queues behind it
+    /// FIFO: the boot load keeps running, its waiter is not settled, and
+    /// the apply starts only once the boot load has settled.
     #[tokio::test]
-    async fn an_apply_replaces_the_pending_load_profile_and_cancels_the_active_one() {
+    async fn an_apply_during_the_active_boot_load_queues_behind_it_without_cancelling_it() {
         let state = state();
         let queue = state.commands.clone();
         let _worker = state
@@ -1206,33 +939,38 @@ mod tests {
             .spawn_worker_with(&state, parking_executor())
             .expect("worker spawns");
 
-        let active = queue.enqueue(load_profile("alpha"));
-        wait_until("alpha to go active", || {
+        let mut boot = queue.enqueue(load_profile("alpha"));
+        wait_until("the boot load to go active", || {
             active_is(&queue, "load-profile: alpha")
         })
         .await;
-        let pending = queue.enqueue(load_profile("beta"));
         let applied = queue.enqueue(apply());
+        // Give the worker every chance to act on a cancellation that must
+        // not have happened.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
 
-        let outcome = pending.outcome.await.expect("the replaced switch settles");
         assert!(
-            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
-            "the pending switch is replaced by the apply: {outcome:?}"
+            active_is(&queue, "load-profile: alpha"),
+            "the boot load keeps running under the queued apply"
         );
-        let outcome = active.outcome.await.expect("the active switch settles");
+        assert_eq!(pending_names(&queue), ["apply-config"]);
         assert!(
-            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
-            "the active switch is cancelled so the apply starts: {outcome:?}"
+            matches!(
+                boot.outcome.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            ),
+            "the boot load's waiter is not settled by the apply"
         );
+
+        assert!(queue.cancel_active(), "the boot load is cancelled by hand");
+        let outcome = boot.outcome.await.expect("the boot load settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
         wait_until("the apply to go active", || {
             active_is(&queue, "apply-config")
         })
         .await;
-        assert!(
-            pending_names(&queue).is_empty(),
-            "no switch survives behind the apply"
-        );
-
         assert!(queue.cancel_active());
         let outcome = applied.outcome.await.expect("the apply settles");
         assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
@@ -1294,15 +1032,19 @@ mod tests {
             !queue.cancel_apply(),
             "an idle queue has no apply to cancel"
         );
-        let _switch = queue.enqueue(load_profile("alpha"));
+        let _boot = queue.enqueue(load_profile("alpha"));
         assert!(
             !queue.cancel_apply(),
-            "a pending switch is not an apply and stays put"
+            "a pending boot load is not an apply and stays put"
         );
         assert_eq!(pending_names(&queue), ["load-profile: alpha"]);
         let pending = queue.enqueue(apply());
         assert!(queue.cancel_apply(), "the pending apply is removed");
-        assert!(pending_names(&queue).is_empty());
+        assert_eq!(
+            pending_names(&queue),
+            ["load-profile: alpha"],
+            "only the apply leaves the queue"
+        );
         let outcome = pending.outcome.await.expect("the removed apply settles");
         assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
 
@@ -1503,21 +1245,17 @@ mod tests {
         let tree = state.hub.operation();
         let outcome = run_command(
             state.clone(),
-            Command::load_profile(
-                ProfileName::parse("alpha").expect("profile name"),
-                true,
-                token,
-            ),
+            Command::load_profile(ProfileName::parse("alpha").expect("profile name"), token),
             tree,
         )
         .await;
         assert!(
             matches!(outcome, Err(GatewayError::CommandCancelled(_))),
-            "a fired token stops the switch before any phase: {outcome:?}"
+            "a fired token stops the load before any phase: {outcome:?}"
         );
         assert!(
-            state.live.read().await.profile_name.is_none(),
-            "the cancelled switch never touched the live state"
+            state.live.read().await.loading.is_empty(),
+            "the cancelled load never touched the live state"
         );
     }
 
@@ -1529,50 +1267,6 @@ mod tests {
         let outcome = handle.outcome.await.expect("settled at enqueue");
         assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
         assert!(queue.pending_commands().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_persisting_duplicate_upgrades_the_pending_boot_command() {
-        let state = state();
-        let queue = state.commands.clone();
-        // The executor records the flag as the body reads it at commit time.
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let executor: Arc<Executor> = Arc::new({
-            let seen = Arc::clone(&seen);
-            move |_state, command: Command, _tree| {
-                let seen = Arc::clone(&seen);
-                Box::pin(async move {
-                    let persist = command.persist_flag().expect("a load command");
-                    seen.lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(persist.load(Ordering::Relaxed));
-                    Ok(command.label())
-                }) as BoxFuture<'static, Outcome>
-            }
-        });
-        // The boot command is ephemeral; the explicit switch to the same
-        // profile attaches and must upgrade the shared flag. Both enqueue
-        // before the worker spawns, so the attach cannot race the drain.
-        let boot = queue.enqueue(Command::load_profile(
-            ProfileName::parse("alpha").expect("profile name"),
-            false,
-            CancellationToken::new(),
-        ));
-        let _duplicate = queue.enqueue(load_profile("alpha"));
-        let _worker = state
-            .commands
-            .spawn_worker_with(&state, executor)
-            .expect("worker spawns");
-        let outcome = boot.outcome.await.expect("the boot command settles");
-        assert!(outcome.is_ok(), "the stub body succeeds: {outcome:?}");
-        assert_eq!(
-            seen.lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_slice(),
-            &[true],
-            "the attached duplicate's persist flag reached the command body"
-        );
-        queue.shutdown();
     }
 
     /// An executor that records each command's label in run order, then
@@ -1755,7 +1449,7 @@ mod tests {
     }
 
     /// A two-profile remote catalog on an endpoint nothing listens on:
-    /// remote routing is static, so the switch succeeds without network.
+    /// remote routing is static, so the boot load succeeds without network.
     #[cfg(feature = "stt")]
     fn speech_state() -> AppState {
         let catalog = Config::from_toml_str(
@@ -1771,19 +1465,11 @@ mod tests {
         crate::test_support::boot_state(catalog)
     }
 
-    #[cfg(feature = "stt")]
-    fn boot(name: &str) -> Command {
-        Command::boot_load_profile(
-            ProfileName::parse(name).expect("profile name"),
-            CancellationToken::new(),
-        )
-    }
-
-    /// The boot command runs its switch first, then makes the process's one
-    /// guarded STT load attempt.
+    /// The boot load runs its local half first, then makes the process's
+    /// one guarded STT load attempt.
     #[cfg(feature = "stt")]
     #[tokio::test]
-    async fn the_boot_command_loads_speech_after_its_switch() {
+    async fn the_boot_command_loads_speech_after_its_local_half() {
         use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 
         let mut state = speech_state();
@@ -1792,17 +1478,16 @@ mod tests {
             ScriptedModelFactory::new(ScriptedDecoder::new()),
         );
         let tree = state.hub.operation();
-        let outcome = run_command(state.clone(), boot("alpha"), tree).await;
+        let outcome = run_command(state.clone(), load_profile("alpha"), tree).await;
 
         assert_eq!(
             outcome.as_deref().ok(),
             Some("alpha"),
             "the boot command settles with the profile: {outcome:?}"
         );
-        assert_eq!(
-            state.live.read().await.profile_name.as_deref(),
-            Some("alpha"),
-            "the switch published before the command settled"
+        assert!(
+            state.live.read().await.routing.model("alpha-model").is_ok(),
+            "the remote table the runner published keeps serving"
         );
         assert!(
             state.speech.status().ready(),
@@ -1820,29 +1505,6 @@ mod tests {
         state.speech.shutdown();
     }
 
-    /// A `LoadProfile` without the boot flag never attempts the STT load:
-    /// the guarded initial load stays unspent and speech stays inactive.
-    #[cfg(feature = "stt")]
-    #[tokio::test]
-    async fn a_plain_load_profile_never_attempts_the_speech_load() {
-        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
-
-        let mut state = speech_state();
-        crate::test_support::arm_boot_speech(
-            &mut state,
-            ScriptedModelFactory::new(ScriptedDecoder::new()),
-        );
-        let tree = state.hub.operation();
-        let outcome = run_command(state.clone(), load_profile("alpha"), tree).await;
-
-        assert!(outcome.is_ok(), "the switch itself succeeds: {outcome:?}");
-        assert!(!state.speech.status().ready());
-        assert!(
-            state.speech.models().is_empty(),
-            "no speech model is discovered after a non-boot switch"
-        );
-    }
-
     /// A duplicate attaching to the pending boot command shares its outcome;
     /// the single load attempt runs once for both waiters.
     #[cfg(feature = "stt")]
@@ -1858,7 +1520,7 @@ mod tests {
         let queue = state.commands.clone();
         // Both enqueue before the worker spawns, so the attach cannot race
         // the drain.
-        let boot_handle = queue.enqueue(boot("alpha"));
+        let boot_handle = queue.enqueue(load_profile("alpha"));
         let attached = queue.enqueue(load_profile("alpha"));
         assert_eq!(
             boot_handle.operation, attached.operation,
@@ -1880,41 +1542,5 @@ mod tests {
         queue.shutdown();
         worker.await.expect("the worker exits on shutdown");
         state.speech.shutdown();
-    }
-
-    /// A newer switch superseding the pending boot command does not inherit
-    /// its flag: the process never attempts the STT load.
-    #[cfg(feature = "stt")]
-    #[tokio::test]
-    async fn a_superseded_boot_command_leaves_speech_unattempted() {
-        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
-
-        let mut state = speech_state();
-        crate::test_support::arm_boot_speech(
-            &mut state,
-            ScriptedModelFactory::new(ScriptedDecoder::new()),
-        );
-        let queue = state.commands.clone();
-        let booted = queue.enqueue(boot("alpha"));
-        let newer = queue.enqueue(load_profile("beta"));
-        let outcome = booted.outcome.await.expect("the superseded boot settles");
-        assert!(
-            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
-            "supersession settles the boot command as cancelled: {outcome:?}"
-        );
-        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
-
-        let outcome = newer.outcome.await.expect("the newer switch settles");
-        assert!(outcome.is_ok(), "the newer switch succeeds: {outcome:?}");
-        assert_eq!(
-            state.live.read().await.profile_name.as_deref(),
-            Some("beta")
-        );
-        assert!(
-            !state.speech.status().ready() && state.speech.models().is_empty(),
-            "the superseding command carries no boot flag and loads no speech"
-        );
-        queue.shutdown();
-        worker.await.expect("the worker exits on shutdown");
     }
 }

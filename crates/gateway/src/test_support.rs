@@ -74,17 +74,18 @@ pub(crate) fn app_state_with_scripted_stt(
     Ok(state)
 }
 
-/// Builds the state the instant-ready boot path serves: an empty routing
+/// Builds the state the instant-ready boot path serves: the remote routing
 /// table over `config`, no active profile, nothing local running - the
-/// shell the boot `LoadProfile` command fills.
+/// shell the boot `LoadProfile` command fills with the local children.
 pub(crate) fn boot_state(config: Config) -> AppState {
-    state_over(config, Routing::empty(), None)
+    app_state(config, None)
 }
 
-/// [`boot_state`] with config-file context, so a boot command's switch can
-/// persist the active-profile selection.
+/// [`boot_state`] with config-file context and the active profile named,
+/// as the runner assembles it from a persisted selection.
+#[cfg(feature = "stt")]
 pub(crate) fn boot_state_with_paths(config: Config, paths: AdminPaths) -> AppState {
-    state_over(config, Routing::empty(), Some(paths))
+    app_state(config, Some(paths))
 }
 
 /// Arms the state's empty speech facade to publish `factory`'s

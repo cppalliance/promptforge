@@ -379,9 +379,7 @@ async fn apply_snapshot(
         .map(WebSearchState::new)
         .map(Arc::new);
     #[cfg(test)]
-    state
-        .park_at(crate::switch_park::SwitchPhase::ApplyCommit)
-        .await;
+    state.park_at(crate::park::Phase::ApplyCommit).await;
     // The commit holds the apply lock so no save, revert, or pending read
     // interleaves with the promotion and the live swap. A revert fires the
     // token before taking this lock, so the re-check under it is what keeps
@@ -424,7 +422,7 @@ mod tests {
     use crate::AppState;
     use crate::commands::Command;
     use crate::error::GatewayError;
-    use crate::switch_park::{PhasePark, SwitchPhase};
+    use crate::park::{Phase, PhasePark};
     use crate::test_support::{AdminPaths, app_state, serve_state};
 
     const CONFIG: &str = r#"
@@ -503,7 +501,7 @@ models = []
         paths: AdminPaths,
     ) -> (SocketAddr, AppState, Arc<PhasePark>) {
         let mut state = app_state(config, Some(paths));
-        let park = Arc::new(PhasePark::at(SwitchPhase::ApplyCommit));
+        let park = Arc::new(PhasePark::at(Phase::ApplyCommit));
         state.park = Some(Arc::clone(&park));
         let _worker = state.commands.spawn_worker(&state).expect("worker spawns");
         let addr = serve_state(state.clone()).await;
@@ -568,14 +566,6 @@ models = []
         })
         .await
         .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
-    }
-
-    /// Whether the queue's active command is the one labelled `name`.
-    fn active_is(state: &AppState, name: &str) -> bool {
-        state
-            .commands
-            .active_command()
-            .is_some_and(|status| status.name == name)
     }
 
     /// The live profile name, as `GET /admin/status` would report it.
@@ -988,39 +978,33 @@ models = []
         assert!(routes(&state, "gamma-model").await);
     }
 
-    /// An apply requested while a `LoadProfile` is active supersedes it: the
-    /// switch settles as cancelled while the request that parked it is still
-    /// held, and the apply then completes.
+    /// An apply enqueued after the boot `LoadProfile` never displaces it:
+    /// the boot load settles on its own terms over the production worker,
+    /// then the apply runs over the table it published and completes. The
+    /// queue's FIFO rule under an active boot load is pinned in
+    /// `commands.rs`.
     #[tokio::test]
-    async fn an_apply_during_an_active_load_profile_supersedes_it_and_completes() {
+    async fn an_apply_after_the_boot_load_reloads_over_the_published_table() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
         let (addr, state) = serve_fixture(config, paths).await;
         stage_gamma(&config_path);
 
-        let held = state.in_flight.register();
-        let switch = state.commands.enqueue(Command::load_profile(
+        let boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("alpha").expect("profile name"),
-            true,
             CancellationToken::new(),
         ));
-        wait_until("the switch to go active", || {
-            active_is(&state, "load-profile: alpha")
+        wait_until("the boot load to settle", || {
+            state.commands.active_command().is_none()
         })
         .await;
-
-        let apply = tokio::spawn(post(addr, "admin/config-apply"));
-        let outcome = tokio::time::timeout(Duration::from_secs(10), switch.outcome)
+        let outcome = tokio::time::timeout(Duration::from_secs(10), boot.outcome)
             .await
-            .expect("the superseded switch settles while the request is still held")
-            .expect("the switch settles");
-        assert!(
-            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
-            "the apply cancels the active switch: {outcome:?}"
-        );
-        drop(held);
+            .expect("the boot load settles")
+            .expect("the boot load settles with an outcome");
+        assert!(outcome.is_ok(), "a remote-only profile loads: {outcome:?}");
 
-        let response = apply.await.expect("apply task");
+        let response = post(addr, "admin/config-apply").await;
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let reply: serde_json::Value = response.json().await.expect("apply body");
         assert_eq!(reply["reloaded"], true);

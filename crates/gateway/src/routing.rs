@@ -26,15 +26,6 @@ pub(crate) struct Routing {
 }
 
 impl Routing {
-    /// An empty table: nothing routes until a command loads models into it.
-    /// The instant-ready boot path assembles the gateway over this shell.
-    pub(crate) fn empty() -> Routing {
-        Routing {
-            by_name: HashMap::new(),
-            models: Vec::new(),
-        }
-    }
-
     /// A copy of this table without the model `name`, for the unload
     /// command. Infallible: filtering an already-valid table cannot create
     /// duplicates.
