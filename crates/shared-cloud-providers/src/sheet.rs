@@ -8,13 +8,12 @@ use std::future::Future;
 use std::pin::Pin;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use shared_gateway_api::{EnvVar, ModelEntry, ProviderSlice, Sheet, SliceStatus, Tier};
+use shared_gateway_api::{
+    ACCEPTED_SHEET_SCHEMA_VERSION, EnvVar, ModelEntry, ProviderSlice, Sheet, SliceStatus, Tier,
+};
 use time::OffsetDateTime;
 
 use crate::{FetchError, Provider};
-
-/// The current sheet schema version.
-const SCHEMA_VERSION: u32 = 1;
 
 /// The outcome of one provider fetch: the normalized models, or the
 /// failure that triggers last-known-good propagation.
@@ -130,7 +129,7 @@ async fn build_sheet_with(
         slices.insert(provider.name.to_owned(), slice);
     }
     Sheet {
-        schema_version: SCHEMA_VERSION,
+        schema_version: ACCEPTED_SHEET_SCHEMA_VERSION,
         generated_at: now,
         providers: slices,
     }
@@ -281,6 +280,23 @@ mod tests {
             generated_at: pinned("2026-09-01T00:00:00Z"),
             providers: BTreeMap::from([(name.to_owned(), slice)]),
         }
+    }
+
+    #[tokio::test]
+    async fn build_sheet_emits_accepted_schema_version() {
+        let registry = [provider("test-ok", "Test OK", Tier::Prime)];
+        let keys = |_provider: &Provider| Some("test-key".to_owned());
+        let fetch = |_client: reqwest::Client,
+                     _provider: Provider,
+                     _key: Option<String>|
+         -> BoxFetch { Box::pin(async { Ok(vec![entry("m1")]) }) };
+        let client = reqwest::Client::new();
+        let sheet = build_sheet_with(&registry, None, &keys, &fetch, &client).await;
+        assert_eq!(
+            sheet.schema_version,
+            shared_gateway_api::ACCEPTED_SHEET_SCHEMA_VERSION,
+            "the writer must emit the schema version the gateway reader accepts"
+        );
     }
 
     #[tokio::test]

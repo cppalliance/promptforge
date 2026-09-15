@@ -174,7 +174,7 @@ Move the inline `#[cfg(test)]` tests (or the download and cache logic) out of `c
 
 <step-2>
 
-### Step 2: Share the accepted sheet schema version
+### Step 2: Share the accepted sheet schema version [completed]
 
 - Component: gateway-reader
 

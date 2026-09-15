@@ -14,6 +14,12 @@ mod metadata;
 
 pub use metadata::{Capabilities, ModelInfo, ModelKind, ThinkingMode};
 
+/// The sheet schema version this reader accepts: the writer in
+/// `shared-cloud-providers` stamps it and the gateway reader gates on it.
+/// Bump only on removals and renames; additive fields carry
+/// `#[serde(default)]` so a lagging reader survives them.
+pub const ACCEPTED_SHEET_SCHEMA_VERSION: u32 = 1;
+
 /// The sheet envelope: one atomic snapshot of every provider's models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
