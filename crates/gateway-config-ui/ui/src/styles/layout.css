@@ -617,6 +617,59 @@
 		color: var(--text-secondary);
 		font-size: 0.75rem;
 	}
+
+	/* Cloud tab: the cascade controls row and the catalog table. */
+	.cloud-controls {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-block-end: 0.75rem;
+	}
+	.cloud-generated {
+		margin-inline-start: auto;
+	}
+	.cloud-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.8125rem;
+	}
+	.cloud-table th,
+	.cloud-table td {
+		padding: 0.5rem 0.625rem;
+		border-block-end: 1px solid var(--border);
+		text-align: start;
+	}
+	.cloud-table thead th {
+		color: var(--text-secondary);
+		font-size: 0.6875rem;
+		text-transform: uppercase;
+	}
+	.cloud-name-id {
+		display: block;
+		color: var(--text-secondary);
+		font-size: 0.75rem;
+	}
+	.cloud-variant-row .cloud-name-primary {
+		color: var(--text-secondary);
+	}
+	.cloud-no-add {
+		display: block;
+		color: var(--text-secondary);
+		font-size: 0.75rem;
+	}
+	.cloud-add__field {
+		margin-block-end: 0.625rem;
+	}
+	.cloud-add__label {
+		display: grid;
+		gap: 0.25rem;
+		font-size: 0.8125rem;
+	}
+	.cloud-add-error {
+		color: var(--danger, #e5484d);
+		font-size: 0.8125rem;
+	}
 	.chat-template-control,
 	.chat-template-custom {
 		display: flex;

@@ -31,7 +31,9 @@ import { GatewayApi, GatewayHttpError } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { PanelBridge, parseBridgeOrigin, type BridgeWindow } from "./services/panel-bridge";
+import { SheetStore } from "./services/sheet-store";
 import { createDiscoverView } from "./views/discover-view";
+import { createCloudModelsView } from "./views/cloud-models-view";
 import { createModelsView } from "./views/models-view";
 import { createProfilesView } from "./views/profiles-view";
 import { createSecretsView } from "./views/secrets-view";
@@ -39,6 +41,14 @@ import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY, GatewayApi, GatewayHttpError } from "./services/gateway-api";
 export { pendingSttChange } from "./services/config-store";
+export { SheetStore } from "./services/sheet-store";
+export {
+  canonicalRows,
+  displayRule,
+  familiesFor,
+  providersByTier,
+} from "./services/cloud-cascade";
+export { mergeCloudModel } from "./services/cloud-merge";
 export { matchRoute } from "./router";
 
 /** The toast for an apply the user (or a revert) cancelled before its commit. */
@@ -72,6 +82,8 @@ export interface BootOptions {
   bridgePost?: (message: unknown) => void;
   /** Panel-mode bridge reply deadline override, for tests. */
   bridgeTimeoutMs?: number;
+  /** Sheet-store poll interval override, for tests. */
+  sheetPollMs?: number;
 }
 
 /** Boots the SPA into `root`. */
@@ -96,7 +108,7 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   };
   const showShell = () => {
     dispose();
-    dispose = mountLiveShell(root, win, api, null);
+    dispose = mountLiveShell(root, win, api, null, options);
   };
   // Any 401 clears the stored key and returns to the prompt.
   api.onUnauthorized = showPrompt;
@@ -160,7 +172,7 @@ function mountPanelMode(
       win.location.hash = context.route;
     }
     const api = new GatewayApi({ fetchFn: bridge.fetchLike, storage: memoryStorage(), base: "" });
-    mountLiveShell(root, win, api, bridge);
+    mountLiveShell(root, win, api, bridge, options);
   };
   bridge.start();
 }
@@ -200,6 +212,7 @@ function mountLiveShell(
   win: BootWindow,
   api: GatewayApi,
   bridge: PanelBridge | null,
+  options: BootOptions = {},
 ): () => void {
   const toasts = createToastStack();
   // The overlay's Cancel fires the queue's active-command cancel; the
@@ -215,6 +228,10 @@ function mountLiveShell(
     },
   });
   const store = new ConfigStore(api);
+  // The cloud sheet loads on shell mount; the Cloud tab (and any other
+  // subscriber) re-renders in place when it lands.
+  const sheets = new SheetStore(api, options.sheetPollMs);
+  sheets.start();
   const switcher = createProfileSwitcher({ store, toasts });
   let applying = false;
   let disposed = false;
@@ -400,6 +417,7 @@ function mountLiveShell(
     toasts,
   });
   const secretsView = createSecretsView({ store, api, toasts });
+  const cloudView = createCloudModelsView({ store, sheets, api, toasts });
   const profilesView = createProfilesView({
     store,
     toasts,
@@ -412,6 +430,7 @@ function mountLiveShell(
       local: (target, match) => localView.mount(target, match.detail),
       remote: (target, match) => remoteView.mount(target, match.detail),
       discover: (target) => discoverView.mount(target),
+      cloud: (target) => cloudView.mount(target),
       profiles: (target) => profilesView.mount(target),
       secrets: (target) => secretsView.mount(target),
       settings: (target, match) => settingsView.mount(target, match.detail),
@@ -450,6 +469,7 @@ function mountLiveShell(
     stopRouter();
     stopProgress();
     unsubscribe();
+    sheets.dispose();
     statusBar?.stop();
     if (restartTimer !== null) {
       clearTimeout(restartTimer);

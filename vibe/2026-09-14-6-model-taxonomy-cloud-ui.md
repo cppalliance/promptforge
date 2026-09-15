@@ -281,7 +281,7 @@ Run the binary against the operator's real secrets file (never read, printed, co
 
 <step-7>
 
-### Step 7: Cloud tab - store, cascade, view, and add-model flow
+### Step 7: Cloud tab - store, cascade, view, and add-model flow [completed]
 
 - Component: cloud-tab-ui
 

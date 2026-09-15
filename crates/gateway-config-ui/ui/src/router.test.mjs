@@ -8,7 +8,7 @@ test("the tab bar uses the required order and routes Local and Remote details", 
   const { dom, root } = await bootApp({ key: "k", stub });
   assert.deepEqual(
     [...root.querySelectorAll(".tab")].map((tab) => tab.textContent),
-    ["Settings", "Discover", "Local", "Remote", "Profiles", "Secrets"],
+    ["Settings", "Discover", "Local", "Remote", "Cloud", "Profiles", "Secrets"],
   );
 
   for (const [hash, title] of [
@@ -16,6 +16,7 @@ test("the tab bar uses the required order and routes Local and Remote details", 
     ["#/discover", "Discover"],
     ["#/local/model-a", "Local"],
     ["#/remote/model-b", "Remote"],
+    ["#/cloud", "Cloud"],
     ["#/profiles", "Profiles"],
     ["#/secrets", "Secrets"],
   ]) {

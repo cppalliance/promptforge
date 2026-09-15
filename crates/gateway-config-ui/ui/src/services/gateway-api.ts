@@ -176,6 +176,96 @@ export interface ApplyOutcome {
   restart_required: boolean;
 }
 
+/** One environment variable a cloud provider reads, from the sheet. */
+export interface CloudEnvVar {
+  /** The variable name, for example `ANTHROPIC_API_KEY`. */
+  name: string;
+  /** `key` for credential material, `config` for regions and endpoints. */
+  role: "key" | "config";
+  /** The value the provider assumes when the variable is unset. */
+  default: string | null;
+}
+
+/** The sheet's reasoning capability triple for one model. */
+export interface CloudModelThinking {
+  /** Any reasoning capability at all. */
+  supported: boolean;
+  /** Manual budget mode (a per-call switch). */
+  enabled: boolean;
+  /** Model-chosen thinking depth. */
+  adaptive: boolean;
+}
+
+/** Per-million-token pricing, from the sheet. */
+export interface CloudModelPricing {
+  /** ISO 4217, for example `USD`. */
+  currency: string;
+  /** Prompt price per million tokens. */
+  prompt_per_mtok: number;
+  /** Completion price per million tokens. */
+  completion_per_mtok: number;
+}
+
+/** One cloud model entry from `GET /admin/cloud-models`. */
+export interface CloudModelEntry {
+  /** The upstream slug. */
+  id: string;
+  /** UI-facing name. */
+  display_name: string;
+  /** The UI's first grouping level. */
+  family: string;
+  /** The canonical alias this entry is a variant of, when one exists. */
+  variant_of: string | null;
+  /** The stripped suffix, for the expander label. */
+  variant: string | null;
+  /** The provider's own language codes. */
+  languages: string[];
+  /** The workload: chat, image, video, transcription, speech, ... */
+  kind: string;
+  /** Context window in tokens; null for the IDs-only providers. */
+  context_window: number | null;
+  /** Maximum completion tokens, when reported. */
+  max_output: number | null;
+  /** Accepts image input. */
+  images: boolean;
+  /** Emits tool calls. */
+  tool_calling: boolean;
+  /** Reasoning capability. */
+  thinking: CloudModelThinking;
+  /** The provider's own effort level names. */
+  effort_levels: string[];
+  /** The provider's own default level name. */
+  default_effort: string | null;
+  /** Per-million-token pricing, when reported. */
+  pricing: CloudModelPricing | null;
+}
+
+/** One provider's slice of the cloud model sheet. */
+export interface CloudProviderSlice {
+  /** UI-facing name, for example `Anthropic`. */
+  display_name: string;
+  /** The curated tier: prime, subprime, niche, aggregator. */
+  tier: string;
+  /** Freshness of this slice. */
+  status: string;
+  /** The base URL of the provider's OpenAI-compatible chat API, if any. */
+  openai_base_url: string | null;
+  /** The provider's environment variables. */
+  env_vars: CloudEnvVar[];
+  /** The provider's normalized model entries. */
+  models: CloudModelEntry[];
+}
+
+/** The cloud provider model sheet from `GET /admin/cloud-models`. */
+export interface CloudSheet {
+  /** The sheet schema version. */
+  schema_version: number;
+  /** RFC 3339 generation time; the cache age source. */
+  generated_at: string;
+  /** Provider slices keyed by provider name. */
+  providers: Record<string, CloudProviderSlice>;
+}
+
 /** One side of `GET /admin/env`: an env file's path and parsed variables. */
 export interface EnvSide {
   /** The `.env` file's absolute path. */
@@ -618,6 +708,33 @@ export class GatewayApi {
     }
   }
 
+  /**
+   * Fetches the cached cloud provider model sheet via
+   * `GET /admin/cloud-models`. While no sheet has arrived the gateway
+   * answers 503 and this throws a {@link GatewayHttpError} whose code is
+   * `cloud_models_loading`; a failed download throws with
+   * `cloud_models_unavailable`. Callers branch on the code to poll.
+   */
+  async getCloudModels(signal?: AbortSignal): Promise<CloudSheet> {
+    const response = await this.send("/admin/cloud-models", { signal });
+    if (!response.ok) {
+      throw await refusalError(response);
+    }
+    return parseCloudSheet(await response.json());
+  }
+
+  /**
+   * Forces a background re-download of the cloud model sheet via
+   * `POST /admin/cloud-models/refresh`; the gateway answers 202 and the
+   * new sheet arrives on a later `GET`.
+   */
+  async refreshCloudModels(): Promise<void> {
+    const response = await this.send("/admin/cloud-models/refresh", { method: "POST" });
+    if (!response.ok) {
+      throw await refusalError(response);
+    }
+  }
+
   /** Lists the cached blobs via `GET /v1/cache`. */
   async listCache(): Promise<CacheListEntry[]> {
     const data = await this.getJson("/v1/cache");
@@ -986,6 +1103,94 @@ function stringRecord(value: unknown): Record<string, string> {
 /** Reads a finite external number, defaulting malformed values to zero. */
 function numberOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** Reads an optional finite external number. */
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Parses one sheet env var, dropping malformed entries. */
+function parseCloudEnvVar(raw: unknown): CloudEnvVar[] {
+  if (!isRecord(raw) || typeof raw["name"] !== "string") {
+    return [];
+  }
+  return [
+    {
+      name: raw["name"],
+      role: raw["role"] === "key" ? "key" : "config",
+      default: typeof raw["default"] === "string" ? raw["default"] : null,
+    },
+  ];
+}
+
+/** Parses one sheet model entry, dropping malformed entries. */
+function parseCloudModel(raw: unknown): CloudModelEntry[] {
+  if (!isRecord(raw) || typeof raw["id"] !== "string") {
+    return [];
+  }
+  const thinking = isRecord(raw["thinking"]) ? raw["thinking"] : {};
+  const pricing = isRecord(raw["pricing"]) ? raw["pricing"] : null;
+  return [
+    {
+      id: raw["id"],
+      display_name: typeof raw["display_name"] === "string" ? raw["display_name"] : raw["id"],
+      family: typeof raw["family"] === "string" ? raw["family"] : "",
+      variant_of: typeof raw["variant_of"] === "string" ? raw["variant_of"] : null,
+      variant: typeof raw["variant"] === "string" ? raw["variant"] : null,
+      languages: stringArray(raw["languages"]),
+      kind: typeof raw["kind"] === "string" ? raw["kind"] : "chat",
+      context_window: numberOrNull(raw["context_window"]),
+      max_output: numberOrNull(raw["max_output"]),
+      images: raw["images"] === true,
+      tool_calling: raw["tool_calling"] === true,
+      thinking: {
+        supported: thinking["supported"] === true,
+        enabled: thinking["enabled"] === true,
+        adaptive: thinking["adaptive"] === true,
+      },
+      effort_levels: stringArray(raw["effort_levels"]),
+      default_effort: typeof raw["default_effort"] === "string" ? raw["default_effort"] : null,
+      pricing: pricing
+        ? {
+            currency: typeof pricing["currency"] === "string" ? pricing["currency"] : "USD",
+            prompt_per_mtok: numberOrZero(pricing["prompt_per_mtok"]),
+            completion_per_mtok: numberOrZero(pricing["completion_per_mtok"]),
+          }
+        : null,
+    },
+  ];
+}
+
+/** Parses the `GET /admin/cloud-models` envelope tolerantly. */
+function parseCloudSheet(raw: unknown): CloudSheet {
+  const data = requireRecord(raw, "cloud model sheet");
+  const providers: Record<string, CloudProviderSlice> = {};
+  if (isRecord(data["providers"])) {
+    for (const [name, value] of Object.entries(data["providers"])) {
+      if (!isRecord(value)) {
+        continue;
+      }
+      providers[name] = {
+        display_name: typeof value["display_name"] === "string" ? value["display_name"] : name,
+        tier: typeof value["tier"] === "string" ? value["tier"] : "niche",
+        status: typeof value["status"] === "string" ? value["status"] : "ok",
+        openai_base_url:
+          typeof value["openai_base_url"] === "string" ? value["openai_base_url"] : null,
+        env_vars: Array.isArray(value["env_vars"])
+          ? value["env_vars"].flatMap(parseCloudEnvVar)
+          : [],
+        models: Array.isArray(value["models"])
+          ? value["models"].flatMap(parseCloudModel)
+          : [],
+      };
+    }
+  }
+  return {
+    schema_version: numberOrZero(data["schema_version"]),
+    generated_at: typeof data["generated_at"] === "string" ? data["generated_at"] : "",
+    providers,
+  };
 }
 
 /**

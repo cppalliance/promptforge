@@ -218,6 +218,134 @@ export function envFixture() {
 export const GIB = 1024 ** 3;
 
 /**
+ * A cloud provider model sheet as `GET /admin/cloud-models` emits it:
+ * two Prime providers (Anthropic with two snapshots under its canonical
+ * Fable entry, OpenAI), a keyless Subprime provider whose one model
+ * reports no context window and whose display name equals its id, and a
+ * Niche transcription provider with no OpenAI-compatible endpoint.
+ */
+export function cloudSheetFixture() {
+  const entry = (over) => ({
+    id: "model-id",
+    display_name: "Model",
+    family: "family",
+    variant_of: null,
+    variant: null,
+    languages: [],
+    kind: "chat",
+    context_window: 128000,
+    max_output: null,
+    images: false,
+    tool_calling: false,
+    thinking: { supported: false, enabled: false, adaptive: false },
+    effort_levels: [],
+    default_effort: null,
+    pricing: null,
+    ...over,
+  });
+  const fableCaps = {
+    family: "claude-fable",
+    context_window: 200000,
+    max_output: 64000,
+    images: true,
+    tool_calling: true,
+    thinking: { supported: true, enabled: true, adaptive: true },
+    effort_levels: ["low", "high"],
+    default_effort: "low",
+  };
+  return {
+    schema_version: 1,
+    generated_at: "2026-09-14T13:00:00Z",
+    providers: {
+      anthropic: {
+        display_name: "Anthropic",
+        tier: "prime",
+        status: "ok",
+        fetched_at: "2026-09-14T13:00:00Z",
+        openai_base_url: "https://api.anthropic.com/v1",
+        env_vars: [{ name: "ANTHROPIC_API_KEY", role: "key", default: null }],
+        models: [
+          entry({
+            id: "claude-fable-5-1",
+            display_name: "Claude Fable 5.1",
+            pricing: { currency: "USD", prompt_per_mtok: 5, completion_per_mtok: 25 },
+            ...fableCaps,
+          }),
+          entry({
+            id: "claude-fable-5-1-20260901",
+            display_name: "Claude Fable 5.1 (2026-09-01)",
+            variant_of: "claude-fable-5-1",
+            variant: "2026-09-01",
+            ...fableCaps,
+          }),
+          entry({
+            id: "claude-fable-5-1-20260715",
+            display_name: "Claude Fable 5.1 (2026-07-15)",
+            variant_of: "claude-fable-5-1",
+            variant: "2026-07-15",
+            ...fableCaps,
+          }),
+          entry({
+            id: "claude-opus-5",
+            display_name: "Claude Opus 5",
+            family: "claude-opus",
+            context_window: 200000,
+            tool_calling: true,
+            thinking: { supported: true, enabled: true, adaptive: false },
+          }),
+        ],
+      },
+      openai: {
+        display_name: "OpenAI",
+        tier: "prime",
+        status: "ok",
+        fetched_at: "2026-09-14T13:00:00Z",
+        openai_base_url: "https://api.openai.com/v1",
+        env_vars: [{ name: "OPENAI_API_KEY", role: "key", default: null }],
+        models: [
+          entry({
+            id: "gpt-5.4",
+            display_name: "GPT-5.4",
+            family: "gpt-5.4",
+            context_window: 400000,
+            tool_calling: true,
+            thinking: { supported: true, enabled: false, adaptive: false },
+          }),
+        ],
+      },
+      acme: {
+        display_name: "Acme",
+        tier: "subprime",
+        status: "static",
+        fetched_at: null,
+        openai_base_url: "https://api.acme.test/v1",
+        env_vars: [],
+        models: [
+          entry({ id: "acme-1", display_name: "acme-1", family: "acme", context_window: null }),
+        ],
+      },
+      deepgram: {
+        display_name: "Deepgram",
+        tier: "niche",
+        status: "ok",
+        fetched_at: "2026-09-14T13:00:00Z",
+        openai_base_url: null,
+        env_vars: [{ name: "DEEPGRAM_API_KEY", role: "key", default: null }],
+        models: [
+          entry({
+            id: "nova-3",
+            display_name: "Nova 3",
+            family: "nova",
+            kind: "transcription",
+            context_window: null,
+          }),
+        ],
+      },
+    },
+  };
+}
+
+/**
  * A system snapshot for the fit heuristic: 20 GiB free VRAM of 24,
  * 32 GiB free RAM of 64. With the plan's 1.2 margin: 10 GiB fits the
  * GPU, 18 GiB partially offloads, 25 GiB is CPU only, 50 GiB is too
@@ -419,7 +547,12 @@ function redactSecrets(view) {
  * The queue surface: `/admin/status` returns `queue`, `endpoints`, and
  * `vram_gb` from `state` (mutate them to drive the status bar), and the
  * cancel routes record into `state.cancelActiveCalls` and
- * `state.cancelPendingCalls`.
+ * `state.cancelPendingCalls`. The cloud sheet surface: `GET
+ * /admin/cloud-models` returns `cloudModels` (unstubbed: the route
+ * 404s, putting the sheet store in its error state without polling;
+ * `onCloudModels` overrides the reply entirely, for staged
+ * loading-then-loaded sequences) and `POST /admin/cloud-models/refresh`
+ * answers 202.
  */
 export function gatewayStub({
   profile = "default",
@@ -443,6 +576,8 @@ export function gatewayStub({
   onCacheList,
   applyOutcome,
   onPutConfig,
+  cloudModels,
+  onCloudModels,
   env,
   queue,
   endpoints,
@@ -549,6 +684,12 @@ export function gatewayStub({
         return onCacheList(init);
       }
       return jsonResponse(state.cache);
+    }
+    if (url.endsWith("/admin/cloud-models/refresh")) {
+      return jsonResponse({}, 202);
+    }
+    if (url.endsWith("/admin/cloud-models") && (onCloudModels || cloudModels !== undefined)) {
+      return onCloudModels ? onCloudModels() : jsonResponse(cloudModels);
     }
     if (url.endsWith("/admin/status")) {
       return jsonResponse({

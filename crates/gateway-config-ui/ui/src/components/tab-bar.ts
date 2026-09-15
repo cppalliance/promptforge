@@ -1,10 +1,11 @@
 // The top tab bar [Adapted: Unsloth]: medallion left (standalone only),
-// the profile switcher, six icon+label tabs whose active state is the
+// the profile switcher, seven icon+label tabs whose active state is the
 // accent underline, and the right cluster holding the connection dot
 // [Adapted: llama-swap] plus the container the Apply/Revert pair mounts
 // into when the write path lands.
 
 import {
+  Cloud,
   Cpu,
   Folder,
   Globe,
@@ -30,6 +31,7 @@ const TABS: ReadonlyArray<readonly [view: ViewId, label: string, icon: IconNode,
   ["discover", "Discover", Search, "#/discover"],
   ["local", "Local", Cpu, "#/local"],
   ["remote", "Remote", Globe, "#/remote"],
+  ["cloud", "Cloud", Cloud, "#/cloud"],
   ["profiles", "Profiles", Folder, "#/profiles"],
   ["secrets", "Secrets", Key, "#/secrets"],
 ];

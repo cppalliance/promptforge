@@ -1,7 +1,14 @@
 // Hash router [Adapted: llama.cpp] for both shell modes.
 
-/** The six top-level destinations. */
-export type ViewId = "settings" | "discover" | "local" | "remote" | "profiles" | "secrets";
+/** The seven top-level destinations. */
+export type ViewId =
+  | "settings"
+  | "discover"
+  | "local"
+  | "remote"
+  | "cloud"
+  | "profiles"
+  | "secrets";
 
 /** A parsed route: the view plus its optional detail segment. */
 export interface RouteMatch {
@@ -17,6 +24,7 @@ const VIEW_TITLES: Readonly<Record<ViewId, string>> = {
   discover: "Discover",
   local: "Local",
   remote: "Remote",
+  cloud: "Cloud",
   profiles: "Profiles",
   secrets: "Secrets",
 };
@@ -44,6 +52,7 @@ export function matchRoute(hash: string): RouteMatch | null {
       return null;
     case "discover":
     case "secrets":
+    case "cloud":
       return segments.length === 1 ? { view: head } : null;
     case "profiles":
       return segments.length === 1 ? { view: "profiles" } : null;
