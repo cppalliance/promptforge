@@ -235,7 +235,7 @@ In `crates/gateway/tests/it/cloud_models.rs`, remove the profile push from `merg
 
 <step-8>
 
-### Step 8: Document the additive-field policy
+### Step 8: Document the additive-field policy [completed]
 
 - Component: schema-policy
 
