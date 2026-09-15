@@ -21,7 +21,7 @@ The Window menu:
 - Zoom In, Zoom Out, and Reset Zoom zoom the interface, with shortcuts Ctrl+=, Ctrl+-, and Ctrl+0. Ctrl+Shift+= also zooms in.
 - Minimize and Maximize/Restore operate the window. These menu commands do exactly what the visible title bar buttons do.
 
-The Model menu lists every catalog model as a checkable radio row with the selected one checked. Each model's description appears as a tooltip on its row. When the catalog is empty, the Model menu shows a disabled "No models available" row. A Profiles section at the bottom of the Model menu switches the gateway profile; it appears only when the gateway offers two or more profiles, and the active profile is checked. The Models and Profiles chapter covers this menu in depth.
+The Model menu lists every catalog model as a checkable radio row with the selected one checked. Each model's description appears as a tooltip on its row. When the catalog is empty, the Model menu shows a disabled "No models available" row. A Profiles section at the bottom of the Model menu selects the gateway profile; it appears whenever the gateway defines at least one profile, lists "No profile" first and then every profile, and checks the active one. The Models and Profiles chapter covers this menu in depth.
 
 Help > About PromptForge opens the About dialog, which also shows the desktop update state. The Updates and Configuration chapter covers it.
 
@@ -47,7 +47,7 @@ You can navigate open menus with the keyboard. ArrowDown and ArrowUp move betwee
 
 Menu rows show the label on the left and the shortcut hint on the right in muted, smaller text. Disabled rows are muted and do not react to hover. Thin separator lines group related rows. Checkable rows keep a fixed-width check column so labels stay aligned.
 
-The Model menu is live. It rebuilds its rows from the catalog every time it opens, and again whenever a workbench snapshot arrives while it stays open, so check marks move without reopening the menu. Clicking a model row sends the selection, and the check mark moves only when the server confirms the new selection. Keyboard focus survives a live rebuild of the open menu: focus stays on the equivalent row and falls back to the first row if the focused row disappears. While a profile switch is loading, every Model menu row disables, and the switch target shows a pending "..." mark in place of its check until the server confirms. The still-active profile keeps its checkmark.
+The Model menu is live. It rebuilds its rows from the catalog every time it opens, and again whenever a workbench snapshot arrives while it stays open, so check marks move without reopening the menu. Clicking a model row sends the selection, and the check mark moves only when the server confirms the new selection. Keyboard focus survives a live rebuild of the open menu: focus stays on the equivalent row and falls back to the first row if the focused row disappears. While a profile selection is in progress, every Model menu row disables, and the target profile shows a pending "..." mark in place of its check until the server confirms. The still-active profile keeps its checkmark.
 
 The same menus work in a plain browser. Only the native window commands (Minimize, Maximize/Restore, Close Window) do nothing there, because no desktop bridge carries them.
 

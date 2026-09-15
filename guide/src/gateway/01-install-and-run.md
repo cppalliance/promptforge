@@ -66,7 +66,7 @@ This convenience has one cost: on a shared machine, any other OS account can use
 
 ## Choose what to build
 
-Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, `stt`, and `config-ui` are on by default. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup and again on any profile switch.
+Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, `stt`, and `config-ui` are on by default. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup.
 
 ## Run it as a service on Linux
 

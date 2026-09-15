@@ -70,7 +70,7 @@ This convenience has one cost: on a shared machine, any other OS account can use
 
 ## Choose what to build
 
-Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, `stt`, and `config-ui` are on by default. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup and again on any profile switch.
+Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, `stt`, and `config-ui` are on by default. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup.
 
 ## Run it as a service on Linux
 
@@ -325,7 +325,7 @@ On Windows x86-64 you can pick the llama-server build with `[local].llama_backen
 
 Local inference runs on a pinned llama-server build, b10082. The gateway prefers GPU-enabled archives per platform: Vulkan on Windows and Linux, Metal on macOS. The gateway never compiles native dependencies at runtime; it downloads, verifies, stages, and launches pinned archives. A completed runtime install records its archive pins and a tree digest in a marker file, and a valid install skips re-extraction on later starts.
 
-The gateway runs one managed llama-server child per configured `[[local_model]]`. Children get supervised respawn and deterministic teardown. Staged CUDA bundle directories are prepended to the child process's PATH only; the gateway's own environment is never mutated. Local models appear to clients as ordinary routed models under their configured names.
+The gateway runs one managed llama-server child per `[[local_model]]` in the boot profile's checklist. The set of children is fixed for the process lifetime: it is decided by the profile selected at boot, and changing it means selecting a profile or editing the local catalog and restarting. Children get supervised respawn and deterministic teardown at shutdown. Staged CUDA bundle directories are prepended to the child process's PATH only; the gateway's own environment is never mutated. Local models appear to clients as ordinary routed models under their configured names.
 
 A local model's `kind` selects the child's serving mode: embedding models serve embeddings, and classifier models serve reranking. A `speech` kind has no local serving mode and is refused at launch: local speech models are not yet supported. The `parallel` key sets both the child's concurrency and its admission limit. The thinking setting changes the child's sampling preset: thinking models sample at temperature 1.0 and top-p 0.95, while non-thinking models run with reasoning switched off and sample at 0.7 and 0.8.
 
@@ -362,7 +362,7 @@ Companion artifacts follow the main-model source rule: an https URL must be pinn
 
 ## Downloads and verification
 
-Artifact downloads are bounded. The connect timeout is 30 seconds, the whole-request ceiling is 2 hours, and a single artifact is capped at 256 GiB. Cache lookups refuse path traversal and absolute paths before any file is read, so a crafted model path cannot escape the cache root. An interrupted download resumes from the partial file's offset when the source URL still matches. A partial download from a different source restarts from zero. A pin mismatch on a cached blob is repaired by re-downloading. Once a blob passes its pin check, later runs and profile switches skip re-hashing. When a runtime download fails and an older verified install exists, the gateway uses the cached install with a warning. Bundled runtime assets, including the chat templates, are written into the cache only after a SHA-256 verification pass, and a cached copy whose bytes have drifted is repaired from the bundled copy.
+Artifact downloads are bounded. The connect timeout is 30 seconds, the whole-request ceiling is 2 hours, and a single artifact is capped at 256 GiB. Cache lookups refuse path traversal and absolute paths before any file is read, so a crafted model path cannot escape the cache root. An interrupted download resumes from the partial file's offset when the source URL still matches. A partial download from a different source restarts from zero. A pin mismatch on a cached blob is repaired by re-downloading. Once a blob passes its pin check, later runs skip re-hashing. When a runtime download fails and an older verified install exists, the gateway uses the cached install with a warning. Bundled runtime assets, including the chat templates, are written into the cache only after a SHA-256 verification pass, and a cached copy whose bytes have drifted is repaired from the bundled copy.
 
 Authenticate gated Hugging Face downloads with the `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` environment variable. The token is attached only to HTTPS requests to huggingface.co and its subdomains.
 
@@ -370,13 +370,13 @@ Models downloaded from Hugging Face get a metadata sidecar file beside the cache
 
 ## Startup and supervision
 
-Startup reports a structured progress tree. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. Progress renders as tracing log lines on every stream.
+Startup reports a structured progress tree under the boot load's stages: `loading-profile`, `downloading-models`, `starting-models`, and `loading-speech`. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. Progress renders as tracing log lines on every stream and on the live progress stream.
 
 Startup is best-effort. Every model that launched keeps serving, and each model that failed is reported by name with its error. One bad model never blocks the rest. Startup failures are classified as plausibly transient or permanent, and the classification annotates the respawn diagnostics you see in the logs.
 
 Each child server listens only on loopback, and each launch uses a fresh random alias and bearer key, so other processes on the machine cannot ride the local endpoint. Responses still carry your configured model name. Startup waits up to 180 seconds for a child to become ready, and a port collision retries on a fresh port up to four times.
 
-A child that dies is transparently respawned on the same port, alias, and key, with a 3 second cooldown between attempts so a crash loop cannot storm. Only transport-level deaths trigger a respawn, and an explicitly shut-down child is never respawned. A profile switch cancels and terminates even an in-flight respawn. Teardown is bounded to 5 seconds, so shutdown and profile switches never hang.
+A child that dies is transparently respawned on the same port, alias, and key, with a 3 second cooldown between attempts so a crash loop cannot storm. Only transport-level deaths trigger a respawn, and an explicitly shut-down child is never respawned. Shutdown cancels and terminates even an in-flight respawn. Teardown is bounded to 5 seconds, so shutdown never hangs.
 
 Child stdout and stderr are captured into bounded tails with the credential redacted. You can pull the tails per model as diagnostics; they include the CUDA device report and per-model GPU offload lines. At startup the gateway also probes each local chat model to detect native tool-call support and picks the correct tool-calling dialect from the evidence.
 
@@ -522,9 +522,9 @@ Each entry is an object with `id` first and `name` mirroring it, because the cat
 
 ---
 
-# Profiles and Switching
+# Profiles and Selection
 
-This chapter teaches you profiles: named checklists that decide which models the gateway serves, and how to switch between them at runtime. Profiles are how one config file serves a work machine, a travel laptop, and a demo box without editing a single model entry.
+This chapter teaches you profiles: named checklists that decide which local models the gateway loads, how the selection is stored, and how you change it. Profiles are how one config file serves a work machine, a travel laptop, and a demo box without editing a single model entry.
 
 ## Define a profile
 
@@ -533,47 +533,61 @@ A profile is a `[[profile]]` entry that owns only a `name` and a `models` list:
 ````
 [[profile]]
 name = "work"
-models = ["gpt-5", "qwen3-local", "whisper-base-en", "whisper-small-en"]
+models = ["qwen3-local", "whisper-base-en", "whisper-small-en"]
 
 [[profile]]
 name = "travel"
-models = ["gpt-5"]
+models = ["qwen3-local"]
 ````
 
-Membership alone decides which models route, spawn, or load. Profiles carry no per-field overrides. A profile selects a subset of the catalog across remote, local, and STT models, and every name it lists must exist exactly once. Duplicate profile names and duplicate members fail validation. Speech membership is the one exception to live switching: the speech engine loads once at boot, so changing a profile's STT members takes effect on the next gateway start, not at the switch.
+A profile is a checklist of local and speech-to-text models. Membership alone decides which local models spawn and which speech models load; profiles carry no per-field overrides. Every name a profile lists must be a `[[local_model]]` or `[[stt_model]]` entry, and each must exist exactly once. Naming a remote `[[model]]` in a profile fails validation with an error saying the model is remote: remote models are never gated by a profile, because every `[[model]]` in the catalog routes all the time. Duplicate profile names and duplicate members also fail validation.
 
 Profile names must be a single safe path component: no surrounding whitespace, not empty, not `.` or `..`, and no path separators. One spelling works in URLs, state files, and labels.
 
-Every profile is validated at load. Names are unique and legal, every listed model exists, and the local and STT subsets are checked against dominion VRAM budgets. A live switch can never land on an invalid profile.
+Every profile is validated at load. Names are unique and legal, every listed model exists, each profile selects at most one interim and one final speech model, and the local and speech subsets are checked against dominion VRAM budgets. The gateway never boots into an invalid profile.
 
-## Where the active profile lives
+## Where the selection lives
 
-The active profile lives in a sibling state file, not in the config. A `gateway.toml` maps to a `gateway.state.toml` holding one canonical key:
+The selected profile lives in a sibling state file, not in the config. A `gateway.toml` maps to a `gateway.state.toml` holding one canonical key:
 
 ````
 active_profile = "work"
 ````
 
-The selection survives restarts.
+The selection survives restarts. An absent state file is the persisted form of "no profile": the gateway boots, serves every remote model, and loads no local or speech models. "No profile" is a selectable state, not an error.
 
-At startup the profile is chosen by precedence: the `--profile` command-line flag, then the `PROMPTFORGE_PROFILE` environment variable, then the sibling state file. With none set, startup refuses and lists the defined profiles. A stale state file naming a deleted profile fails startup with an error naming the stale value and the defined profiles.
+At startup the profile is chosen by precedence: the `--profile` command-line flag, then the `PROMPTFORGE_PROFILE` environment variable, then the sibling state file. The flag and the variable are ephemeral; they never write the state file. With none set, the gateway boots with no profile.
 
-## Switch at runtime
+A state file naming a profile the config no longer defines does not stop the boot. The gateway logs a warning naming the stale value and the defined profiles, then boots with no profile. The stale name stays in the state file until you select something else, and the configuration UI shows it as a stale selection. A `--profile` flag or `PROMPTFORGE_PROFILE` value naming an undefined profile is still a startup error, because an operator typed it for this run.
 
-Switch the active profile over HTTP:
+## The local model set is fixed at boot
+
+The gateway loads its local models once, at boot, from the profile it started with. After the listener is bound, one boot command downloads the profile's local model artifacts, spawns the `llama-server` children, publishes each into the routing table as it becomes ready, and performs the process's one speech engine load. While a local model is still downloading or spawning, a request for it gets `503` with code `model_loading` and `Retry-After: 5`, `GET /admin/status` lists it under `loading_models`, and `GET /v1/models` lists only routable models. When only some local models start, the boot reports which loaded and which failed, and the ones that loaded keep serving.
+
+Nothing after boot changes the set of local models. There is no live switch, no drain of in-flight requests, and no stop-and-spawn of children while the gateway serves. Remote models are the exception: every `[[model]]` routes from boot, and an applied edit to the remote catalog reloads routing live, as the next chapter explains.
+
+## Select a profile
+
+Select a profile over HTTP:
 
 ````
 curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"profile": "travel"}' \
+  -d '{"name": "travel"}' \
   http://127.0.0.1:8081/admin/switch-profile
 ````
 
-The switch streams its stages as a live SSE event stream: `loading-profile`, `stopping-models`, `starting-models`, and one terminal event. The choice persists to the state file, and the switch runs to completion even if the client disconnects. Switching uses the in-memory catalog; the config file is never re-read from disk.
+The request body carries `name`: a profile name, or `null` to select no profile. The gateway checks a named profile against the loaded catalog and refuses an undefined name with the list of defined profiles. It then writes the state file (or deletes it for `null`) and answers plain JSON:
 
-Activating a profile narrows the served remote and local catalogs to that profile's member list. The speech selection it names is recorded for the next boot instead: the running speech engine never reloads, so speech keeps serving the boot profile's models until the gateway restarts. Selecting an undefined profile fails with the list of defined profiles.
+````
+{"profile": "travel", "restart_required": true}
+````
 
-In-flight inference requests get a bounded drain of up to 30 seconds during a switch. Stragglers are then cancelled, and a caller cancelled this way receives a dedicated error. Switching tears down the old profile's children deterministically, and their VRAM is freed before the replacement profile starts. When a switch starts only some local models, the terminal event names which models loaded and which failed.
+`restart_required` is true when the selection differs from the profile the process is running. The selection persists at once; the running gateway keeps serving its boot profile until it restarts. Selecting the profile that is already running answers `restart_required: false` and changes nothing. Selection uses the in-memory catalog; the config file is never re-read from disk.
+
+Restart the gateway to load the selection. A gateway the Workshop supervises is restarted by the Workshop when you pick a profile from its Model menu; a gateway you run yourself restarts by hand, and the configuration UI shows a banner reading "Restart the gateway to apply these changes." until the new process comes up.
+
+The selection is not part of the config edit surface. `PUT /admin/config` refuses a document carrying `active_profile`, and `GET /admin/config-dirty` never reports it. `GET /admin/config-pending` reports the persisted selection under `profile.active_profile`, read from the real state file, so a client can show a selection that differs from the running profile or names a profile the config no longer defines.
 
 ---
 
@@ -632,7 +646,7 @@ The default `queue` policy parks callers up to the depth limit. The `reject` pol
 policy = "reject"
 ````
 
-You can distinguish admission failures by status code. A full waiting queue answers 503 with code `queue_full`. A fail-fast rejection answers 429 with code `queue_rejected`. A queue torn down while the caller waited reports the queue as unavailable. A profile switch that cancels an in-flight request gets its own error: the gateway answers 503 with code `profile_switch` and the message "request cancelled for profile switch", distinct from `queue_full` and `queue_rejected`.
+You can distinguish admission failures by status code. A full waiting queue answers 503 with code `queue_full`. A fail-fast rejection answers 429 with code `queue_rejected`. A queue torn down while the caller waited reports the queue as unavailable.
 
 ## Schedule fairly
 
@@ -656,9 +670,11 @@ This chapter teaches you the safe-edit surface: how the gateway stages edits in 
 
 ## Shadow files
 
-Pending admin edits are staged in shadow files: `gateway.toml.next` and `gateway.state.toml.next`. No save touches a real file until promotion.
+Pending admin edits are staged in one shadow file, `gateway.toml.next`, beside the real config. No save touches a real file until promotion.
 
-Stage a full config edit with PUT /admin/config. The request takes the same JSON shape that GET /admin/config returns. Secrets left as the redacted marker `***` are restored from the current values, and a marker with no existing value fails validation. The merged result is validated like a real load before any shadow is written.
+Stage a full config edit with PUT /admin/config. The request takes the same JSON shape that GET /admin/config returns. Secrets left as the redacted marker `***` are restored from the current values, and a marker with no existing value fails validation. The merged result is validated like a real load before any shadow is written. The reply names the shadow file that was written.
+
+The profile selection is not a config key. A document carrying `active_profile` is refused with a validation error pointing you at POST /admin/switch-profile, which the previous chapter covers.
 
 ## Preview before you apply
 
@@ -668,7 +684,9 @@ Preview the merged pending configuration with secrets still redacted:
 curl -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin/config-pending
 ````
 
-Poll a cheap dirty report of pending shadow files and changed sections, including `active_profile`:
+The pending envelope also reports the persisted profile selection under `profile.active_profile`, read from the real `gateway.state.toml`: `null` when no profile is selected, otherwise the stored name even when the running profile differs or the config no longer defines it.
+
+Poll a cheap dirty report of pending shadow files and changed sections:
 
 ````
 curl -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin/config-dirty
@@ -682,11 +700,13 @@ Applying a pending edit is an explicit promote step:
 curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin/config-apply
 ````
 
-The real file is replaced atomically. On platforms where rename cannot overwrite, a backup-and-restore fallback preserves the old file. The reply carries `applied`, `reloaded`, and `restart_required`. The reply tells you when an edit needs a process restart to take effect: an env shadow or a change to `[server]` or `[workshop]` requires a restart. The apply's reload stages stream on the live progress stream; the apply response carries only the outcome.
+The real file is replaced atomically. On platforms where rename cannot overwrite, a backup-and-restore fallback preserves the old file. The reply carries `applied`, `reloaded`, and `restart_required`.
 
-An apply that changes the config or the state runs as a command on the gateway's command queue, the same queue that runs profile switches and boot provisioning. The queue is one serialized pending deque with no fixed capacity: debounce and supersession decide what stays pending, and a single worker runs the surviving commands in order. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and the config UI's Apply overlay follows its stages and carries a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply supersedes any profile switch in flight, including the boot load, because the applied configuration is the one you want running; a profile switch requested during an apply waits behind it. An apply that touches only the env file, or only a process-owned section, needs no reload and runs inline without a command. An apply that changes speech settings or the speech model selection stores them for the next boot and leaves the running speech engine untouched.
+What an apply does depends on which sections changed. The remote-facing sections - `[[model]]`, `[[endpoint]]`, `[[dominion]]`, and `[tools]` - reload live: the gateway rebuilds the remote routing table from the applied config, keeps the running local models under it, and swaps the routing table in one write. Nothing drains, nothing stops, and no child process starts. The boot-owned sections - `[server]`, `[workshop]`, `[[profile]]`, `[[local_model]]`, `[[stt_model]]`, and `[stt]` - promote to disk but take effect at the next start, so the reply carries `restart_required: true`; an env shadow does the same. The gateway's local model set is fixed for the process lifetime, so an edit that adds, removes, or changes a local or speech model, or changes a profile's checklist, always needs a restart. One apply can do both: reload the remote catalog now and report a restart for the rest.
 
-Promotion happens at the end. The shadow files are read into memory when the apply is requested, the new configuration is downloaded and started, and only then are the captured bytes written to the real files and the shadows removed. A cancelled or failed apply therefore promotes nothing: every shadow stays on disk, the pending count stays where it was, and the next Apply runs the whole thing again. A save that lands while an apply is in flight is kept as the next pending change, never silently lost and never half-applied.
+An apply that changes the config runs as a command on the gateway's command queue, the same queue that runs the boot load. The queue is one serialized pending deque with no fixed capacity: debounce decides what stays pending, and a single worker runs the surviving commands in order. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and its one `applying-config` stage streams on the live progress stream; the config UI's Apply overlay follows it and carries a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply requested while the boot load is still running waits behind it, so a reload never races the boot's publication of local models. An apply that touches only the env file, or only boot-owned sections, needs no reload and runs inline without a command.
+
+Promotion happens at the end. The shadow is read into memory when the apply is requested, the new routing table is built, and only then are the captured bytes written to the real file and the shadow removed. A cancelled or failed apply therefore promotes nothing: the shadow stays on disk, the pending count stays where it was, and the next Apply runs the whole thing again. A save that lands while an apply is in flight is kept as the next pending change, never silently lost and never half-applied.
 
 ## Revert
 
@@ -696,11 +716,7 @@ Discard every staged edit without touching the real files:
 curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin/config-revert
 ````
 
-The reply names the deleted shadow files. Deleting the shadows is the whole revert.
-
-## Profiles and shadows
-
-You can switch the active profile immediately without consuming an unapplied state shadow staged by the config UI. Loading prefers shadow files over real files, while command-line and environment profile selections still outrank pending state.
+The reply names the deleted shadow files. Deleting the shadows is the whole revert. A revert never touches the profile selection, because the selection is never staged.
 
 ## The .env file
 
@@ -708,7 +724,7 @@ Read and stage the gateway's global `.env` file over the same surface. GET /admi
 
 ## Failure behavior
 
-You are protected from half-applied state. Saves, revert, and the apply's snapshot and commit steps serialize on one lock, and applies serialize with profile switches on the command queue. An invalid pending config is never promoted; the request fails before any command exists. A failed or cancelled apply leaves every shadow on disk for correction, retry, or revert. A revert issued during an apply cancels the apply first, so the apply's commit never writes over files you just reverted. A failed state-shadow write rolls the config shadow back to its previous contents.
+You are protected from half-applied state. Saves, revert, profile selection, and the apply's snapshot and commit steps serialize on one lock, and applies serialize with the boot load on the command queue. An invalid pending config is never promoted; the request fails before any command exists. A failed or cancelled apply leaves every shadow on disk for correction, retry, or revert. A revert issued during an apply cancels the apply first, so the apply's commit never writes over files you just reverted.
 
 ---
 
@@ -736,15 +752,15 @@ A connection dot in the tab bar shows whether the gateway is reachable. The tab 
 
 Edits move through three states: unsaved edits held in the browser, saved pending shadows on the gateway, and the applied running configuration. When pending changes exist, the tab bar shows an Apply button labeled with the pending file count beside a Revert All button. When a previous session left unapplied changes, a banner offers Review, Apply, and Revert All.
 
-Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation. When a successful apply changes speech-to-text - the `[stt]` tuning, the speech model catalog, or the active profile's speech membership - one info toast reads "Restart the Gateway to apply speech-to-text changes.", because the gateway loads speech once at boot. The toast coexists with the banner when one apply changes both.
+Pressing Apply opens a progress overlay that follows the gateway's live progress stream until the apply finishes or fails; a remote-catalog reload shows as one `applying-config` stage. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart - a change to `[server]`, `[workshop]`, `[stt]`, a profile, a local model, or a speech model, or an env edit - a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation. The same banner is raised by a profile selection that differs from the running profile.
 
 Open the Review dialog to list every pending configuration change as a table of path, running value, and pending value. Secret values are never displayed.
 
 ## Profiles
 
-The tab bar shows the active profile name. A menu lists every profile with the pending choice checked. Choosing another profile stages `active_profile` as a pending change that takes effect on Apply. A failed staging surfaces an error toast and leaves the current selection unchanged.
+The tab bar shows the selected profile. Its menu lists "No profile" first and then every defined profile, with the persisted selection checked. Choosing an entry selects it on the gateway at once through POST /admin/switch-profile; the selection is not a pending change and needs no Apply. When the selection differs from the profile the gateway is running, the restart banner appears, because the gateway loads its local models once at boot. A refused selection surfaces an error toast and leaves the current selection unchanged.
 
-In the Profiles view you edit each profile as an ordered subset of the global model catalog through Available and Chosen shuttle listboxes. The listboxes support multi-select, roving focus, typeahead, selection counts, and per-pane search. The profile saves in global catalog order, not click order. A new profile starts Empty or as a Copy of an existing profile. You cannot delete the profile currently staged as active. The Set Active button stages the active profile; once staged it reads "Selected for Apply", and the switch lands on Apply.
+In the Profiles view you edit each profile as an ordered subset of the local and speech-to-text catalog through Available and Chosen shuttle listboxes; remote models never appear, because every remote model routes regardless of profile. The listboxes support multi-select, roving focus, typeahead, selection counts, and per-pane search. The profile saves in local catalog order, not click order. A new profile starts Empty or as a Copy of an existing profile. Two pills mark the rows: Active is the profile the gateway is running, and Selected is the persisted choice when it differs. You cannot delete either. The view leads with a "No profile" row that has its own Set Active. Each row's Set Active persists that selection immediately and raises the restart banner when a restart is needed; the selected row's button reads "Selected". When the state file names a profile the config no longer defines, the view shows a Stale pill with the missing name, and Set Active on any row replaces it.
 
 The Profiles view shows an Estimated VRAM summary that sums declared model weights. Per-dominion budget rows warn at 80 percent and error when over. KV cache grows with context length, so 20 percent headroom is recommended.
 
@@ -754,7 +770,7 @@ The Discover view searches Hugging Face. The search box accepts keywords, a `use
 
 A model's GGUF files are grouped into named quantizations with exact summed byte sizes and the LFS SHA-256 for single-file quants, listed smallest first. Each quant shows a fit badge computed against the gateway's system snapshot: Fits GPU, Partial offload, CPU only, or Too large. One Recommended star marks the largest quant that fully fits free VRAM. A multi-part GGUF cannot be downloaded as one model; the button is disabled with an explaining tooltip. You can read model cards in the view, rendered as sanitized HTML so embedded scripts and event handlers cannot execute.
 
-A Download click stages a pending model entry carrying the hub resolve URL, the LFS digest, and the listing size as `vram_gb`; Apply owns the actual transfer. Staging a discovered model also adds it to the active profile's checklist, so Apply provisions and serves it. The staged entry prefills a mapped built-in chat template when the server-side catalog matches the repo. An STT-filtered download stages a first-class `stt_model` entry with the interim role. Without a configured HF token you see a banner linking to the Secrets view instead of search results.
+A Download click stages a pending model entry carrying the hub resolve URL, the LFS digest, and the listing size as `vram_gb`; the transfer happens at the next boot. Staging a discovered model also adds it to the selected profile's checklist, so the restart after Apply provisions and serves it. When no profile is selected, the model is added to the catalog alone and a toast says so; choose it in a profile to run it. The staged entry prefills a mapped built-in chat template when the server-side catalog matches the repo. An STT-filtered download stages a first-class `stt_model` entry with the interim role. Without a configured HF token you see a banner linking to the Secrets view instead of search results.
 
 ## Local and Remote
 
@@ -822,7 +838,7 @@ Callers run a web search through POST /v1/tools/web_search. The request body car
 
 Results carry `title`, `url`, `site_name`, and `extra_snippets`. Result text is sanitized and capped, results are diversified by host at `max_per_host`, and a result whose URL is not navigable or is over 2048 characters is dropped. When `strip_tracking` is on, known tracking parameters such as `utm_*`, `fbclid`, `gclid`, `mc_cid`, and `mc_eid` are removed from result URLs. Include and exclude domain lists match the host itself or any subdomain.
 
-When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the active profile's `[tools.web_search]` section and reloads on profile switch. The provider credential never appears in logs.
+When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the `[tools.web_search]` section and is replaced live when an applied edit changes it. The provider credential never appears in logs.
 
 ## The deprecated [workshop] section
 
@@ -838,7 +854,7 @@ The gateway restricts the cache root to your own account at startup and refuses 
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so boot provisioning, applies, and switches are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the running profile (`null` when the gateway booted with no profile), the local and speech models that profile lists as `model_allowlist`, the models the gateway exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so the boot load and applies are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 
@@ -852,7 +868,7 @@ You can search Hugging Face and read model details and READMEs through the gatew
 
 ## Errors and limits
 
-Every request failure reaches the client in the OpenAI error envelope: an object with `message`, `type`, and `code` under `error`, with a stable HTTP status. Examples: 401 `unauthorized`, 404 `model_not_found`, 400 `malformed_request`, 400 `kind_mismatch`, 429 `queue_rejected`, 503 `queue_full`, 503 `profile_switch`, 503 `partial_start`, 422 `config_write_rejected`, and 422 `model_info_error`.
+Every request failure reaches the client in the OpenAI error envelope: an object with `message`, `type`, and `code` under `error`, with a stable HTTP status. Examples: 401 `unauthorized`, 404 `model_not_found`, 400 `malformed_request`, 400 `kind_mismatch`, 429 `queue_rejected`, 503 `queue_full`, 503 `model_loading`, 503 `partial_start`, 422 `config_write_rejected`, and 422 `model_info_error`.
 
 Outbound calls to any backend have fixed timeouts: 10 seconds to connect and 120 seconds for a whole non-streaming request. Streaming connections are bounded only by the connect timeout. Response bodies the gateway reads are capped: 64 KiB for error bodies and 4 MiB for success JSON bodies.
 

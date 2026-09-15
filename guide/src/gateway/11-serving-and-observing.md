@@ -22,7 +22,7 @@ Callers run a web search through POST /v1/tools/web_search. The request body car
 
 Results carry `title`, `url`, `site_name`, and `extra_snippets`. Result text is sanitized and capped, results are diversified by host at `max_per_host`, and a result whose URL is not navigable or is over 2048 characters is dropped. When `strip_tracking` is on, known tracking parameters such as `utm_*`, `fbclid`, `gclid`, `mc_cid`, and `mc_eid` are removed from result URLs. Include and exclude domain lists match the host itself or any subdomain.
 
-When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the active profile's `[tools.web_search]` section and reloads on profile switch. The provider credential never appears in logs.
+When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the `[tools.web_search]` section and is replaced live when an applied edit changes it. The provider credential never appears in logs.
 
 ## The deprecated [workshop] section
 
@@ -38,7 +38,7 @@ The gateway restricts the cache root to your own account at startup and refuses 
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so boot provisioning, applies, and switches are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the running profile (`null` when the gateway booted with no profile), the local and speech models that profile lists as `model_allowlist`, the models the gateway exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so the boot load and applies are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 
@@ -52,7 +52,7 @@ You can search Hugging Face and read model details and READMEs through the gatew
 
 ## Errors and limits
 
-Every request failure reaches the client in the OpenAI error envelope: an object with `message`, `type`, and `code` under `error`, with a stable HTTP status. Examples: 401 `unauthorized`, 404 `model_not_found`, 400 `malformed_request`, 400 `kind_mismatch`, 429 `queue_rejected`, 503 `queue_full`, 503 `profile_switch`, 503 `partial_start`, 422 `config_write_rejected`, and 422 `model_info_error`.
+Every request failure reaches the client in the OpenAI error envelope: an object with `message`, `type`, and `code` under `error`, with a stable HTTP status. Examples: 401 `unauthorized`, 404 `model_not_found`, 400 `malformed_request`, 400 `kind_mismatch`, 429 `queue_rejected`, 503 `queue_full`, 503 `model_loading`, 503 `partial_start`, 422 `config_write_rejected`, and 422 `model_info_error`.
 
 Outbound calls to any backend have fixed timeouts: 10 seconds to connect and 120 seconds for a whole non-streaming request. Streaming connections are bounded only by the connect timeout. Response bodies the gateway reads are capped: 64 KiB for error bodies and 4 MiB for success JSON bodies.
 

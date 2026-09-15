@@ -369,7 +369,7 @@ Exclusions: no change to the cloud sheet `schema_version` (stays 1) or to `[[pro
 
 <step-8>
 
-### Step 8: Documentation, archdoc A5, and the full gate
+### Step 8: Documentation, archdoc A5, and the full gate [completed]
 
 - Component: docs
 - Piece: one piece. Sequential and last: it describes behavior that exists only after Steps 1-7.

@@ -56,7 +56,7 @@ The active profile is state, not config. The sibling state file for `gateway.tom
 active_profile = "work"
 ```
 
-Startup precedence is command-line `--profile`, then `PROMPTFORGE_PROFILE`, then sibling state. The caller supplies the first two values at the config boundary:
+An absent state file selects no profile, which is a legal load: `Config::load` returns `Ok` with `active_profile() == None` and empty local and STT selections, and every `[[model]]` still routes. Startup precedence is command-line `--profile`, then `PROMPTFORGE_PROFILE`, then sibling state. The first two are ephemeral and never write the state file. When the state file wins and names a profile the document does not define, the load degrades to no profile and records the stale name behind `Config::stale_state_selection()`; when the command line or environment names an undefined profile, the load fails. A malformed name from any source fails. `persist_profile_state` writes the state file and `clear_profile_state` deletes it (an absent file is success). The caller supplies the ephemeral values at the config boundary:
 
 ```no_run
 use gateway_config::{Config, ProfileSelection};
@@ -67,14 +67,14 @@ let config = Config::load(Path::new("gateway.toml"), &inputs)?;
 # Ok::<(), gateway_config::ConfigError>(())
 ```
 
-`Config::from_toml_str` validates an unselected in-memory catalog. `Config::select_profile` derives active remote, local, and STT subsets from that validated catalog without reading disk.
+`Config::from_toml_str` validates an unselected in-memory catalog. `Config::select_profile` derives the active local and STT subsets from that validated catalog without reading disk; it accepts `None` for no profile and never narrows `models()`, which is the full remote catalog under every selection.
 
 ## Validation
 
 Loading validates every profile, not only the active one:
 
 - Profile names are unique and `ProfileName`-legal.
-- Every checklist name resolves across `[[model]]`, `[[local_model]]`, and `[[stt_model]]`.
+- Every checklist name resolves to a `[[local_model]]` or `[[stt_model]]` entry. A name that resolves to a `[[model]]` is rejected as a remote model, because profiles never gate remote routing; an unknown name is rejected as undefined.
 - Every selected local and STT model fits its local dominion VRAM budget.
 - Each profile selects at most one interim and one final STT model.
 - Interim-only STT is allowed as degraded mode.
@@ -86,7 +86,7 @@ The built-in `RECOMMENDED_STT_MODELS` pair is `base.en` for interim and `small.e
 
 ## Pending edits
 
-`save_config_shadow` accepts the pending admin document. It writes global config to `gateway.toml.next` and writes the matching `active_profile` key to `gateway.state.toml.next`. `load_pending_config` reads those shadows with the same selection precedence. No save touches a real file until `promote_shadow` renames the shadow into place, or a caller holding the intended contents commits them with `write_atomic`, the replace-through-rename primitive both shadows and `persist_profile_state` build on.
+`save_config_shadow` accepts the pending admin document and writes it to `gateway.toml.next`, the only shadow. A document carrying `active_profile` fails validation with a message pointing at `POST /admin/switch-profile`: the selection is state, never staged. `load_pending_config(config_path, selection)` reads the config shadow when present and resolves the profile exactly as `Config::load` does, from the ephemeral selection and the real `gateway.state.toml`. `pending_report` lists only the config shadow. No save touches a real file until `promote_shadow` renames the shadow into place, or a caller holding the intended contents commits them with `write_atomic`, the replace-through-rename primitive the shadow and `persist_profile_state` build on.
 
 ## License
 
