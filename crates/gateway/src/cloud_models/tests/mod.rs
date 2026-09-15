@@ -15,6 +15,8 @@ use tower::ServiceExt as _;
 
 use super::*;
 
+mod version_gate;
+
 /// A one-provider sheet stamped `generated_at`, carrying one model
 /// whose id distinguishes one test sheet from another.
 fn test_sheet(generated_at: OffsetDateTime, model_id: &str) -> Sheet {
@@ -211,9 +213,8 @@ async fn a_week_old_cache_triggers_exactly_one_download() {
     assert_eq!(stub.requests.load(Ordering::Acquire), 1);
     let served = cloud.sheet().expect("the downloaded sheet swaps in");
     assert_eq!(model_id(&served), "fresh-model");
-    let on_disk: Sheet =
-        serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
-            .expect("the rewritten cache parses");
+    let on_disk: Sheet = serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
+        .expect("the rewritten cache parses");
     assert_eq!(model_id(&on_disk), "fresh-model");
 }
 
@@ -239,9 +240,8 @@ async fn an_unparseable_cache_is_treated_as_absent() {
     download.await.expect("the download task joins");
     let served = cloud.sheet().expect("the downloaded sheet is in memory");
     assert_eq!(model_id(&served), "downloaded-model");
-    let on_disk: Sheet =
-        serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
-            .expect("the overwritten cache parses");
+    let on_disk: Sheet = serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
+        .expect("the overwritten cache parses");
     assert_eq!(model_id(&on_disk), "downloaded-model");
 }
 
@@ -326,9 +326,8 @@ async fn the_cache_write_replaces_the_old_file_and_leaves_no_temp() {
         .expect("a week-old cache spawns a download")
         .await
         .expect("the download task joins");
-    let on_disk: Sheet =
-        serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
-            .expect("the replaced cache parses");
+    let on_disk: Sheet = serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
+        .expect("the replaced cache parses");
     assert_eq!(
         model_id(&on_disk),
         "fresh-model",
@@ -350,14 +349,17 @@ async fn an_over_cap_download_records_the_cap_error_without_swapping_the_sheet()
     let original = std::fs::read(&cache).expect("the cache reads");
     let over_cap = "x".repeat(MAX_JSON_BODY + 1);
     let stub = stub(StatusCode::OK, over_cap, false).await;
-    let state = route_state();
-    let download = state.cloud_models.launch(cache.clone(), stub.url.clone()).await;
+    let routes = route_state();
+    let download = routes
+        .cloud_models
+        .launch(cache.clone(), stub.url.clone())
+        .await;
     download
         .expect("a week-old cache spawns a download")
         .await
         .expect("the download task joins");
     assert_eq!(stub.requests.load(Ordering::Acquire), 1);
-    let error = state
+    let error = routes
         .cloud_models
         .last_error()
         .expect("the over-cap download records an error");
@@ -365,7 +367,7 @@ async fn an_over_cap_download_records_the_cap_error_without_swapping_the_sheet()
         error.contains(MAX_JSON_BODY.to_string().as_str()),
         "the recorded error names the {MAX_JSON_BODY} byte cap: {error}"
     );
-    let served = state.cloud_models.sheet().expect("the old sheet survives");
+    let served = routes.cloud_models.sheet().expect("the old sheet survives");
     assert_eq!(
         model_id(&served),
         "stale-model",
@@ -376,12 +378,11 @@ async fn an_over_cap_download_records_the_cap_error_without_swapping_the_sheet()
         original,
         "an over-cap download never touches the cache file"
     );
-    let response = request(state, Method::GET, "/admin/cloud-models").await;
+    let response = request(routes, Method::GET, "/admin/cloud-models").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(
-        body["providers"]["test"]["models"][0]["id"],
-        "stale-model",
+        body["providers"]["test"]["models"][0]["id"], "stale-model",
         "the route keeps serving the pre-download sheet"
     );
 }

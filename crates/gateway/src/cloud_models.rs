@@ -4,10 +4,11 @@
 //! release artifact of the promptforge-cloud-providers repository. At
 //! launch, after the async boot completes and off the serving path, the
 //! gateway loads `<profile>/cloud-provider-models.json` from disk when
-//! present and parseable (an unparseable cache is logged, treated as
+//! present, parseable, and of an accepted schema version (an
+//! unparseable or version-mismatched cache is logged, treated as
 //! absent, and overwritten by the next successful download), and spawns
 //! one bounded background download when the cache is missing,
-//! unparseable, or its envelope `generated_at` is older than one week.
+//! unusable, or its envelope `generated_at` is older than one week.
 //! The age check is a launch-time timestamp comparison, not a timer
 //! loop: a gateway that runs for weeks re-checks at its next launch.
 //!
@@ -28,7 +29,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
-use shared_gateway_api::Sheet;
+use shared_gateway_api::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
 use time::OffsetDateTime;
 
 use crate::auth::Caller;
@@ -102,7 +103,12 @@ enum CacheRead {
     /// A cache file existed but would not read or parse; treated as
     /// absent and overwritten by the next successful download.
     Unparseable,
-    /// A parseable sheet; freshness is the caller's decision.
+    /// A cache file parsed but declared a schema version this gateway
+    /// does not accept; treated as absent like [`CacheRead::Unparseable`]
+    /// and overwritten by the next successful download.
+    UnsupportedVersion(u32),
+    /// A parseable sheet of an accepted schema version; freshness is the
+    /// caller's decision.
     Loaded(Sheet),
 }
 
@@ -143,6 +149,15 @@ impl CloudModels {
                 tracing::warn!(
                     path = %cache_path.display(),
                     "cloud provider sheet cache is unparseable; treating it as absent"
+                );
+                false
+            }
+            Ok(CacheRead::UnsupportedVersion(found)) => {
+                tracing::warn!(
+                    path = %cache_path.display(),
+                    found,
+                    accepted = ACCEPTED_SHEET_SCHEMA_VERSION,
+                    "cloud provider sheet cache schema version is not accepted; treating it as absent"
                 );
                 false
             }
@@ -247,6 +262,12 @@ async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, GatewayErr
             "cloud provider sheet from {url} failed to parse: {error}"
         ))
     })?;
+    if sheet.schema_version != ACCEPTED_SHEET_SCHEMA_VERSION {
+        return Err(GatewayError::CloudModelsSchemaVersion {
+            found: sheet.schema_version,
+            accepted: ACCEPTED_SHEET_SCHEMA_VERSION,
+        });
+    }
     let bytes = serde_json::to_vec(&sheet).map_err(|error| {
         GatewayError::CloudModelsUnavailable(format!(
             "cloud provider sheet serialization failed: {error}"
@@ -269,11 +290,14 @@ async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, GatewayErr
     Ok(sheet)
 }
 
-/// Read and parse the cache file.
+/// Read and parse the cache file, gating on the accepted schema version.
 fn read_cache(path: &Path) -> CacheRead {
     match std::fs::read(path) {
         Ok(bytes) => match serde_json::from_slice::<Sheet>(&bytes) {
-            Ok(sheet) => CacheRead::Loaded(sheet),
+            Ok(sheet) if sheet.schema_version == ACCEPTED_SHEET_SCHEMA_VERSION => {
+                CacheRead::Loaded(sheet)
+            }
+            Ok(sheet) => CacheRead::UnsupportedVersion(sheet.schema_version),
             Err(_) => CacheRead::Unparseable,
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => CacheRead::Missing,

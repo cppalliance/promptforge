@@ -250,6 +250,20 @@ pub(crate) enum GatewayError {
         cap: usize,
     },
 
+    /// The cloud provider model sheet parsed but declared a schema
+    /// version this gateway does not accept; the message carries both
+    /// versions. Maps to 502 like every other sheet download failure.
+    #[non_exhaustive]
+    #[error(
+        "cloud provider model sheet schema version {found} is not accepted; this gateway accepts version {accepted}"
+    )]
+    CloudModelsSchemaVersion {
+        /// The schema version the sheet declared.
+        found: u32,
+        /// The schema version this gateway accepts.
+        accepted: u32,
+    },
+
     /// No cloud provider model sheet is available and the last download
     /// or cache write failed; the message carries the failure.
     #[non_exhaustive]
@@ -512,6 +526,11 @@ impl GatewayError {
                 StatusCode::BAD_GATEWAY,
                 "server_error",
                 "cloud_models_body_too_large",
+            ),
+            GatewayError::CloudModelsSchemaVersion { .. } => (
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                "cloud_models_schema_version",
             ),
             GatewayError::CloudModelsUnavailable(_) => (
                 StatusCode::BAD_GATEWAY,
@@ -796,6 +815,17 @@ mod tests {
                     StatusCode::BAD_GATEWAY,
                     "server_error",
                     "cloud_models_body_too_large",
+                ),
+            ),
+            (
+                GatewayError::CloudModelsSchemaVersion {
+                    found: 2,
+                    accepted: 1,
+                },
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "server_error",
+                    "cloud_models_schema_version",
                 ),
             ),
         ];

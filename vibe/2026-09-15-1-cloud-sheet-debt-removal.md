@@ -194,7 +194,7 @@ In `download_once` (`crates/gateway/src/cloud_models.rs` or its split sibling), 
 
 <step-4>
 
-### Step 4: Gate the sheet on its schema version
+### Step 4: Gate the sheet on its schema version [completed]
 
 - Component: gateway-reader
 
