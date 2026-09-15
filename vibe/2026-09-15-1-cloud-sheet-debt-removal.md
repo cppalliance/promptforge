@@ -61,7 +61,7 @@ Observable behavior changes in three places: the Cloud tab's Refresh control, th
 - States and validation: sheet state stays absent, fresh, stale, or unreachable; a version-mismatched or over-cap cache file is treated as absent (logged, overwritten by the next good download) exactly as an unparseable one is today; a version-mismatched or over-cap download leaves any in-memory sheet in place and records the named error.
 - Errors and recovery: a failed refresh surfaces through the POST's own error to the view's existing catch and toast; the loaded sheet stays visible; the next launch re-checks age as before.
 - Security and privacy behavior: the download's memory ceiling becomes `MAX_JSON_BODY` (4 MiB); no secret material is involved; the admin routes remain loopback-walled and proxy-allowlisted exactly as today.
-- Acceptance criteria: with a stub that serves sheet A then sheet B, pressing Refresh in the UI ends with B rendered; with a stub that serves A then fails, Refresh ends with A still rendered and a toast; a stub body over the cap yields a recorded cap error and no sheet swap; a stub sheet with `schema_version: 2` yields a recorded version error naming 2 and the accepted version, from both the cache path and the download path; the integration test's `merge_cloud_model` contains no profile handling and the model still appears in `GET /v1/models` under its fixture.
+- Acceptance criteria: with a stub that serves sheet A then sheet B, pressing Refresh in the UI ends with B rendered; with a stub that serves A then fails, Refresh ends with A still rendered and a toast; a stub body over the cap yields a recorded cap error and no sheet swap; a stub sheet with `schema_version: 2` yields a recorded version error naming 2 and the accepted version, from both the cache path and the download path; the integration test's `merge_cloud_model` contains no profile handling and asserts the behavior the UI produces: the model applies but is absent from `GET /v1/models` under the fixture's empty profile, with the profile-membership gap recorded as deferred.
 
 </product-contract>
 <implementation-contract>
@@ -92,7 +92,7 @@ Each debt has one proving check that fails at the endpoint and passes after its 
   - DEBT-MTCU-3: a route test whose stub body exceeds `MAX_JSON_BODY` asserts the download records a cap error, swaps no sheet, and leaves any existing cache file unchanged.
   - DEBT-MTCU-4: a route test whose stub sheet carries `schema_version: 2` asserts `last_error` names 2 and the accepted version and the GET reports it (no cache) or keeps the old sheet (cache present); a cache-read test with a version-mismatched file asserts it is treated as absent and a download is spawned; a `shared-gateway-api` or `shared-cloud-providers` test asserts the emitted sheet's `schema_version` equals the shared constant.
 - Integration and end-to-end:
-  - DEBT-MTCU-2: `the_sheet_downloads_and_merged_models_apply_end_to_end` passes with the profile push removed and the fixture's `[[profile]]` block removed; a reviewer can diff `merge_cloud_model` against `mergeCloudModel` and find the same two array appends.
+  - DEBT-MTCU-2: `the_sheet_downloads_and_merged_models_apply_end_to_end` passes with the profile push removed and the fixture's `[[profile]]` block retained (the gateway cannot boot without a selected profile); the test asserts the UI's actual outcome - the model applies but is absent from `GET /v1/models` under the empty profile; a reviewer can diff `merge_cloud_model` against `mergeCloudModel` and find the same two array appends.
   - The existing gateway `it` suite and `cloud_models` unit tests stay green; the loopback-wall sweep still covers both admin routes.
 - Regression, security, and performance: `cargo nextest run -p gateway`, `-p shared-gateway-api`, `-p shared-cloud-providers` (the binary integration suite `tests/sheet_binary.rs` proves `fetch_sheet` is unaffected); the UI `npm run build && npm run typecheck && npm test`; clippy `-D warnings`; `cargo fmt --all --check`; `cargo test -p build-xtask` for the file ceiling. No new outbound call and no change to launch timing.
 - Exit criteria: all proving checks above pass; all listed suites green; no change to `forward_allowed` was needed.
@@ -112,6 +112,7 @@ Each debt has one proving check that fails at the endpoint and passes after its 
   - No new admin route or method: every remedy fits inside `GET /admin/cloud-models` and `POST /admin/cloud-models/refresh`, so the exposed allowlist debt is not re-triggered.
   - Reconciliation: diffs and the endpoint tree outranked commit-message and plan claims; the Challenger's corrections (the filter is `Config::select_profile`, not `runner.rs::model_allowlist`; the cap fix is gateway-only; the version gate is reader-side) are adopted.
   - Plan shape: the debt inventory sits as an H3 inside Product Requirements so the seven-section contract the executor requires holds unchanged.
+  - The e2e alignment asserts actual production behavior rather than using a profile-less fixture: the gateway cannot boot without a defined, selected profile, and a selected profile's empty `models` list narrows the catalog to empty, so the plan's original fixture change was unreachable. The test performs the UI's exact merge and asserts the model applies but is absent from `GET /v1/models`, recording the deferred behavior gap. The operator's choice on 2026-09-15, after the coding sub-agent returned blocked: assert actual production behavior (DEBT-MTCU-2).
 - Rejected alternatives:
   - Driving the Rust integration test from the TypeScript merge helper or a shared fixture document: correct but heavier than the finding needs; revisit if the two merges diverge again.
   - Pushing a download progress event through the existing SSE stream to fix Refresh: the workshop proxy refuses `/admin/progress` to the config UI by design, so the tab could not consume it; revisit never.
@@ -224,11 +225,11 @@ In `crates/gateway-config-ui/ui/src/services/sheet-store.ts`, make `SheetStore.r
 
 <step-7>
 
-### Step 7: Align the e2e merge test to the UI
+### Step 7: Align the e2e merge test to the UI [completed]
 
 - Component: e2e-alignment
 
-In `crates/gateway/tests/it/cloud_models.rs`, remove the profile push from `merge_cloud_model` (lines 196 to 204) and the `[[profile]]` block from the fixture (line 118), and add a one-line comment that profile membership is not part of the add flow. Verify: `the_sheet_downloads_and_merged_models_apply_end_to_end` passes, and a diff of `merge_cloud_model` against `mergeCloudModel` in `crates/gateway-config-ui/ui/src/services/cloud-merge.ts` shows the same two array appends.
+In `crates/gateway/tests/it/cloud_models.rs`, remove the profile push from `merge_cloud_model` (lines 196 to 204) so it performs exactly the UI's two array appends. Keep the fixture's `[[profile]]` block (line 118): the gateway cannot boot without a defined, selected profile, and a selected profile's empty `models` list narrows the catalog to empty. Change the assertions to the behavior the UI actually produces: the merged model validates and applies, and it is absent from `GET /v1/models` under the empty profile. Add a comment that profile membership is not part of the add flow and that the behavior half of DEBT-MTCU-2 is deferred. Verify: `the_sheet_downloads_and_merged_models_apply_end_to_end` passes in this shape, and a diff of `merge_cloud_model` against `mergeCloudModel` in `crates/gateway-config-ui/ui/src/services/cloud-merge.ts` shows the same two array appends.
 
 </step-7>
 

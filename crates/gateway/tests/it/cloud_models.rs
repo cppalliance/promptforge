@@ -2,9 +2,10 @@
 //! `PROMPTFORGE_MODELS_SHEET_URL` override points the launch download at
 //! a loopback stub, `GET /admin/cloud-models` serves the fixture sheet,
 //! and a UI-shaped `[[model]]` + `[[endpoint]]` merge staged through
-//! `PUT /admin/config` and promoted by `POST /admin/config-apply` lands
-//! in the live catalog, with a second model for the same provider
-//! reusing the one endpoint.
+//! `PUT /admin/config` and promoted by `POST /admin/config-apply`
+//! validates and applies, with a second model for the same provider
+//! reusing the one endpoint. The selected profile's empty `models`
+//! list narrows the catalog, so the merged models stay unlisted.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -162,8 +163,10 @@ fn keyed_array<'a>(document: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
 
 /// The UI's add-model merge (`cloud-merge.ts`), restated over the admin
 /// JSON document: append the provider's endpoint when none carries its
-/// name, append the model with the sheet's capability fields, and select
-/// the model in the active profile so the reload lists it.
+/// name, then append the model with the sheet's capability fields.
+/// Profile membership is not part of the add flow; the behavior half of
+/// DEBT-MTCU-2 (selecting the merged model in the active profile) is
+/// deferred.
 fn merge_cloud_model(document: &mut Value, slice: &ProviderSlice, model_index: usize, name: &str) {
     let entry = &slice.models[model_index];
     let endpoints = keyed_array(document, "endpoint");
@@ -193,18 +196,6 @@ fn merge_cloud_model(document: &mut Value, slice: &ProviderSlice, model_index: u
         "effort_levels": entry.effort_levels,
         "max_output": entry.max_output,
     }));
-    let active = document["active_profile"]
-        .as_str()
-        .expect("the document names the active profile")
-        .to_owned();
-    let profile = keyed_array(document, "profile")
-        .iter_mut()
-        .find(|profile| profile["name"] == active)
-        .expect("the active profile is in the document");
-    profile["models"]
-        .as_array_mut()
-        .expect("the profile models key is an array")
-        .push(Value::String(name.to_owned()));
 }
 
 /// Stages the merged document and promotes it, asserting each half of
@@ -238,11 +229,13 @@ async fn put_and_apply(url: &str, http: &reqwest::Client, document: &Value) {
     );
 }
 
-/// Polls `/v1/models` until the catalog is exactly `expected`, observing
-/// the apply's hot-swap without a fixed sleep.
-async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) {
-    let mut ids = Vec::new();
-    for _ in 0..100 {
+/// Polls `/v1/models` for a short window and asserts the catalog stays
+/// empty: the selected profile's empty `models` list narrows it, so a
+/// UI-shaped add validates and applies without becoming listable. The
+/// window lets a regressed merge (one that re-adds profile membership)
+/// land before the final answer is read.
+async fn assert_catalog_empty(url: &str, http: &reqwest::Client) {
+    for _ in 0..50 {
         let catalog = json_within(
             send_within(
                 http.get(format!("{url}/v1/models"))
@@ -251,18 +244,18 @@ async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) 
             .await,
         )
         .await;
-        ids = catalog["data"]
+        let ids = catalog["data"]
             .as_array()
             .unwrap()
             .iter()
             .filter_map(|model| model.get("id").and_then(Value::as_str).map(str::to_owned))
             .collect::<Vec<_>>();
-        if ids == expected {
-            return;
-        }
+        assert!(
+            ids.is_empty(),
+            "the empty profile narrows the catalog to empty: {ids:?}"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(ids, expected, "the applied models land in the catalog");
 }
 
 #[tokio::test]
@@ -305,7 +298,8 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "the download landed in the profile cache beside the runtime state"
     );
 
-    // The first add stages endpoint + model, applies, and lists live.
+    // The first add stages endpoint + model and applies; the selected
+    // profile's empty `models` list keeps the merged model unlisted.
     let mut document = get_config(&url, &http).await;
     merge_cloud_model(
         &mut document,
@@ -314,9 +308,10 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "test-model-one",
     );
     put_and_apply(&url, &http, &document).await;
-    wait_for_catalog(&url, &http, &["test-model-one"]).await;
+    assert_catalog_empty(&url, &http).await;
 
-    // The second add for the same provider reuses the one endpoint.
+    // The second add for the same provider reuses the one endpoint and
+    // is likewise absent from the catalog.
     let mut document = get_config(&url, &http).await;
     merge_cloud_model(
         &mut document,
@@ -325,7 +320,7 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "test-model-two",
     );
     put_and_apply(&url, &http, &document).await;
-    wait_for_catalog(&url, &http, &["test-model-one", "test-model-two"]).await;
+    assert_catalog_empty(&url, &http).await;
     let document = get_config(&url, &http).await;
     let endpoints = document["endpoint"].as_array().unwrap();
     assert_eq!(
