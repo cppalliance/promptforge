@@ -39,34 +39,6 @@ function dirtyStub() {
   });
 }
 
-/** The exact STT restart toast the product contract pins. */
-const STT_RESTART_TOAST = "Restart the Gateway to apply speech-to-text changes.";
-
-/** The visible toasts carrying the STT restart message. */
-function sttToasts(root) {
-  return [...root.querySelectorAll(".toast")].filter(
-    (toast) => toast.textContent === STT_RESTART_TOAST,
-  );
-}
-
-/** A stub whose pending view stages an STT model edit. */
-function sttDirtyStub(extra = {}) {
-  const config = modelsFixture();
-  const pending = structuredClone(config);
-  pending.stt_model[0].source = "models/ggml-large-v3.bin";
-  return gatewayStub({
-    key: "k",
-    config,
-    pending,
-    dirty: {
-      dirty: true,
-      pending_files: ["gateway.toml"],
-      changed_sections: ["stt_model"],
-    },
-    ...extra,
-  });
-}
-
 test("shadows at load raise the banner and Apply count, and Apply calls the endpoint", async () => {
   const stub = dirtyStub();
   const { root } = await bootApp({ key: "k", stub });
@@ -382,88 +354,40 @@ test("a Revert All that lands while the Settings view is unmounted clears it for
   );
 });
 
-test("a successful Apply staging an STT change shows exactly one restart toast", async () => {
-  const stub = sttDirtyStub();
-  const { root } = await bootApp({ key: "k", stub });
-
-  root.querySelector(".apply-button").click();
-  await settle();
-
-  // The stub's apply makes the running view identical to the pending
-  // one, so a predicate read after the refresh would see no difference:
-  // the toast itself proves the snapshot happened before the refresh.
-  assert.equal(sttToasts(root).length, 1, "exactly one STT restart toast");
-  assert.ok(root.querySelector(".toast-success"), "the apply success toast still shows");
-  await settle();
-  assert.equal(sttToasts(root).length, 1, "no duplicate appears later");
-});
-
-test("a successful Apply without STT changes shows no STT restart toast", async () => {
-  const stub = dirtyStub();
+test("a successful Apply raises no client-side speech toast; the gateway's outcome decides", async () => {
+  const config = modelsFixture();
+  const pending = structuredClone(config);
+  pending.stt_model[0].source = "models/ggml-large-v3.bin";
+  const stub = gatewayStub({
+    key: "k",
+    config,
+    pending,
+    dirty: { dirty: true, pending_files: ["gateway.toml"], changed_sections: ["stt_model"] },
+  });
   const { root } = await bootApp({ key: "k", stub });
 
   root.querySelector(".apply-button").click();
   await settle();
 
   assert.ok(root.querySelector(".toast-success"), "the apply succeeded");
-  assert.equal(sttToasts(root).length, 0, "chat and endpoint changes need no speech restart");
-});
-
-test("a failed Apply shows no STT restart toast", async () => {
-  const stub = sttDirtyStub();
-  const fetch = stub.fetchFn;
-  stub.fetchFn = async (input, init = {}) => {
-    if (String(input).endsWith("/admin/config-apply")) {
-      return jsonResponse({ error: "profile validation failed" }, 500);
-    }
-    return fetch(input, init);
-  };
-  const { root } = await bootApp({ key: "k", stub });
-
-  root.querySelector(".apply-button").click();
-  await settle();
-
-  assert.ok(root.querySelector(".toast-error"), "the failure surfaces as a toast");
-  assert.equal(sttToasts(root).length, 0, "no restart toast without success");
-});
-
-test("a cancelled Apply shows no STT restart toast", async () => {
-  const stub = sttDirtyStub();
-  const fetch = stub.fetchFn;
-  stub.fetchFn = async (input, init = {}) => {
-    if (String(input).endsWith("/admin/config-apply")) {
-      return jsonResponse({ error: { message: "superseded", code: "apply_cancelled" } }, 409);
-    }
-    return fetch(input, init);
-  };
-  const { root } = await bootApp({ key: "k", stub });
-
-  root.querySelector(".apply-button").click();
-  await settle();
-
-  assert.ok(
-    [...root.querySelectorAll(".toast-error")].some((toast) =>
-      /Apply cancelled/.test(toast.textContent),
-    ),
-    "the cancelled wording shows",
+  assert.equal(
+    [...root.querySelectorAll(".toast")].filter((toast) => /speech-to-text/.test(toast.textContent))
+      .length,
+    0,
+    "the browser no longer guesses at speech restarts",
   );
-  assert.equal(sttToasts(root).length, 0, "a cancelled apply is not a qualifying success");
+  assert.equal(root.querySelector(".banner-restart").hidden, true, "no restart was reported");
 });
 
-test("an Apply changing both a process-owned section and STT shows the banner and one STT toast", async (t) => {
+test("an Apply reporting restart_required raises the banner and the restart toast", async (t) => {
   const config = modelsFixture();
   const pending = structuredClone(config);
-  pending.server.bind = "0.0.0.0:9999";
   pending.stt_model[0].source = "models/ggml-large-v3.bin";
   const stub = gatewayStub({
     key: "k",
     config,
     pending,
-    dirty: {
-      dirty: true,
-      pending_files: ["gateway.toml"],
-      changed_sections: ["server", "stt_model"],
-    },
+    dirty: { dirty: true, pending_files: ["gateway.toml"], changed_sections: ["stt_model"] },
     applyOutcome: { applied: ["gateway.toml"], reloaded: false, restart_required: true },
   });
   // However the test ends, advance the config generation so the restart
@@ -478,12 +402,12 @@ test("an Apply changing both a process-owned section and STT shows the banner an
   await settle();
 
   const banner = root.querySelector(".banner-restart");
-  assert.equal(banner.hidden, false, "the process-owned change raises the restart banner");
-  assert.equal(sttToasts(root).length, 1, "the STT toast shows once beside it");
+  assert.equal(banner.hidden, false, "restart_required raises the restart banner");
   assert.ok(
     [...root.querySelectorAll(".toast-success")].some((toast) =>
       /restart the gateway to finish/.test(toast.textContent),
     ),
-    "the restart-required success toast shows too",
+    "the restart-required success toast shows",
   );
+  assert.equal(root.querySelectorAll(".toast").length, 1, "one toast, no speech duplicate");
 });

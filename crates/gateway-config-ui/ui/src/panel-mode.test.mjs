@@ -252,6 +252,40 @@ test("Apply and Revert All are announced to the workshop", async () => {
   );
 });
 
+test("a profile pick rides the Workshop bridge to POST /admin/switch-profile", async (t) => {
+  const stub = gatewayStub({ config: modelsFixture(), pending: modelsFixture() });
+  t.after(async () => {
+    stub.state.configGeneration = "generation-2";
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+  });
+  const { root, parent, direct } = await bootPanel({ stub });
+
+  root.querySelector(".profile-switcher button").click();
+  await settle();
+  [...root.querySelectorAll("[role='menuitemradio']")]
+    .find((row) => row.textContent === "travel")
+    .click();
+  await settle();
+
+  const pick = parent.posted.find(
+    (message) => message.type === "pf-api" && message.path === "/admin/switch-profile",
+  );
+  assert.ok(pick, "the switch rode the bridge");
+  assert.equal(pick.method, "POST");
+  assert.deepEqual(JSON.parse(pick.body), { name: "travel" }, "the body carries the pick");
+  assert.deepEqual(stub.state.switchCalls, [{ name: "travel" }], "the gateway received it");
+  assert.deepEqual(
+    direct.filter((url) => !/^https?:\/\//.test(url)),
+    [],
+    "the frame never dials the gateway directly",
+  );
+  assert.equal(
+    root.querySelector(".banner-restart").hidden,
+    false,
+    "the panel shows the restart banner on restart_required",
+  );
+});
+
 test("a bridge timeout surfaces an error toast, not a hang", async () => {
   const stub = gatewayStub({
     config: modelsFixture(),

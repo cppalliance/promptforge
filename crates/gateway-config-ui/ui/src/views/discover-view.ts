@@ -757,8 +757,21 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       }
     }
     try {
-      const name = await store.stageDiscoveredModel(isStt ? "stt" : "local", data);
-      toasts.show(`${name} added - Apply to download`, "success");
+      const staged = await store.stageDiscoveredModel(isStt ? "stt" : "local", data);
+      if (staged.profile === null) {
+        const selected = store.selectedProfile();
+        toasts.show(
+          selected === null
+            ? `${staged.name} added to the catalog - no profile is selected, so choose it in a profile to run it`
+            : `${staged.name} added to the catalog - the selected profile ${selected} is not defined`,
+          "info",
+        );
+      } else {
+        toasts.show(
+          `${staged.name} added to ${staged.profile} - Apply and restart to download`,
+          "success",
+        );
+      }
     } catch (error) {
       toasts.show(error instanceof Error ? error.message : "The model could not be added", "error");
     } finally {

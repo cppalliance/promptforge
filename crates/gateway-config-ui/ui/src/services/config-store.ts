@@ -6,7 +6,9 @@
 // running config itself. Save builds the full PUT /admin/config payload
 // from the pending view plus one model's edits - untouched secrets ride
 // through as the "***" the gateway sent, so no real secret ever leaves
-// or re-enters the browser.
+// or re-enters the browser. Profile selection is not a configuration
+// key: it is persisted through POST /admin/switch-profile, read back
+// from the pending envelope, and never staged.
 import { GatewayHttpError } from "./gateway-api";
 import type {
   CacheListEntry,
@@ -111,73 +113,12 @@ function stripKindBoundFields(data: EntryData): void {
   }
 }
 
-/** A config document's `active_profile` pointer, when it carries one. */
-function profilePointer(config: EntryData): string | null {
-  const pointer = config["active_profile"];
-  return typeof pointer === "string" ? pointer : null;
-}
-
-/** The document's `[[stt_model]]` entries keyed by name. */
-function sttCatalogByName(config: EntryData): Map<string, EntryData> {
-  const catalog = new Map<string, EntryData>();
-  const entries = config["stt_model"];
-  if (!Array.isArray(entries)) {
-    return catalog;
-  }
-  for (const entry of entries) {
-    if (entry !== null && typeof entry === "object") {
-      catalog.set(String((entry as EntryData)["name"] ?? ""), entry as EntryData);
-    }
-  }
-  return catalog;
-}
-
-/** The STT catalog names the named profile selects. */
-function sttMembership(
-  config: EntryData,
-  active: string | null,
-  catalog: Map<string, EntryData>,
-): Set<string> {
-  const profiles = config["profile"];
-  if (!Array.isArray(profiles)) {
-    return new Set();
-  }
-  const profile = profiles.find(
-    (entry): entry is EntryData =>
-      entry !== null && typeof entry === "object" && (entry as EntryData)["name"] === active,
-  );
-  const models = profile?.["models"];
-  if (!Array.isArray(models)) {
-    return new Set();
-  }
-  return new Set(models.map(String).filter((name) => catalog.has(name)));
-}
-
-/**
- * Whether applying the pending view changes the speech-to-text
- * configuration the next gateway boot would load: the `[stt]` tuning
- * section, the `[[stt_model]]` catalog, or the STT membership of the
- * effective active profile (which the active-profile pointer selects).
- * Pure over the two documents so the Apply path can snapshot the answer
- * before the post-apply refresh makes the views identical.
- */
-export function pendingSttChange(running: EntryData, pending: EntryData): boolean {
-  if (!sameValue(running["stt"], pending["stt"])) {
-    return true;
-  }
-  const runningCatalog = sttCatalogByName(running);
-  const pendingCatalog = sttCatalogByName(pending);
-  for (const name of new Set([...runningCatalog.keys(), ...pendingCatalog.keys()])) {
-    if (!sameValue(runningCatalog.get(name), pendingCatalog.get(name))) {
-      return true;
-    }
-  }
-  const runningActive = profilePointer(running);
-  const pendingActive = profilePointer(pending) ?? runningActive;
-  return !sameValue(
-    [...sttMembership(running, runningActive, runningCatalog)].sort(),
-    [...sttMembership(pending, pendingActive, pendingCatalog)].sort(),
-  );
+/** The outcome of staging a discovered model. */
+export interface StagedModel {
+  /** The unique catalog name the entry received. */
+  name: string;
+  /** The profile that gained the model; null when no profile is selected. */
+  profile: string | null;
 }
 
 /** One changed path in the pending-vs-running Review diff. */
@@ -205,7 +146,7 @@ export class ConfigStore {
   orphans: OrphanFile[] = [];
   /** Cache metadata used for per-model file status. */
   cache: CacheListEntry[] = [];
-  /** The active profile's name, from `GET /admin/status`. */
+  /** The running profile's name from `GET /admin/status`; empty for none. */
   activeProfile = "";
   /**
    * Counts completed reverts. A view that holds unsaved edits of its own
@@ -219,6 +160,11 @@ export class ConfigStore {
   private readonly api: GatewayApi;
   private running: EntryData = {};
   private pending: EntryData = {};
+  /**
+   * The persisted selection from the pending envelope, once it has
+   * loaded: `undefined` until then, `null` for no profile.
+   */
+  private persistedProfile: string | null | undefined = undefined;
   /** Names of models the running profile exposes (the status list). */
   private runningModels: string[] = [];
   /** Unsaved edits: entry key -> field key -> value. */
@@ -260,7 +206,8 @@ export class ConfigStore {
         this.loadChatTemplates(),
       ]);
       this.running = running;
-      this.pending = pending;
+      this.pending = pending.config;
+      this.persistedProfile = pending.activeProfile;
       this.dirty = dirty;
       this.orphans = visibleOrphans(orphans);
       this.cache = cache;
@@ -282,7 +229,8 @@ export class ConfigStore {
       this.api.getConfigDirty(),
       this.loadChatTemplates(),
     ]);
-    this.pending = pending;
+    this.pending = pending.config;
+    this.persistedProfile = pending.activeProfile;
     this.dirty = dirty;
     this.chatTemplates = chatTemplates;
   }
@@ -421,10 +369,36 @@ export class ConfigStore {
     }));
   }
 
-  /** The active profile staged for Apply, falling back to the running one. */
-  pendingActiveProfile(): string {
-    const pending = this.pending["active_profile"];
-    return typeof pending === "string" ? pending : this.activeProfile;
+  /**
+   * The persisted selection: the pending envelope's `active_profile`,
+   * null when none is persisted. Before the envelope has loaded the
+   * running profile stands in (null when nothing runs).
+   */
+  selectedProfile(): string | null {
+    if (this.persistedProfile === undefined) {
+      return this.activeProfile === "" ? null : this.activeProfile;
+    }
+    return this.persistedProfile;
+  }
+
+  /** Whether the persisted selection names a profile the config no longer defines. */
+  selectionIsStale(): boolean {
+    const selected = this.selectedProfile();
+    return selected !== null && !this.profiles().some((profile) => profile.name === selected);
+  }
+
+  /**
+   * Persists `name` (null for no profile) through the switch route, then
+   * re-reads status and the pending envelope. Returns whether the gateway
+   * needs a restart for the selection to run.
+   */
+  async selectProfile(name: string | null): Promise<boolean> {
+    const outcome = await this.api.switchProfile(name);
+    const [status] = await Promise.all([this.api.getStatus(), this.refreshPending()]);
+    this.activeProfile = status.profile;
+    this.runningModels = status.models;
+    this.notify();
+    return outcome.restart_required;
   }
 
   /** Profiles whose checklists contain `modelName`. */
@@ -488,17 +462,21 @@ export class ConfigStore {
     return structuredClone(this.pending);
   }
 
-  /** Stages the global config and optional active-profile shadow. */
+  /** Stages the global config shadow. */
   async savePayload(payload: EntryData): Promise<void> {
     await this.api.putConfig(payload);
     await this.refreshPending();
     this.notify();
   }
 
-  /** Saves one profile checklist in catalog order. */
+  /** Saves one profile checklist in local-then-STT catalog order. */
   async saveProfile(name: string, chosen: readonly string[]): Promise<void> {
     const payload = this.buildConfigPayload();
-    const catalogOrder = new Map(this.models().map((entry, index) => [entry.name, index]));
+    const catalogOrder = new Map(
+      this.models()
+        .filter((entry) => entry.kind !== "remote")
+        .map((entry, index) => [entry.name, index]),
+    );
     const ordered = [...new Set(chosen)].sort(
       (left, right) =>
         (catalogOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
@@ -524,19 +502,12 @@ export class ConfigStore {
     await this.savePayload(payload);
   }
 
-  /** Deletes a non-active profile from the pending document. */
+  /** Deletes a profile that is neither running nor selected from the pending document. */
   async deleteProfile(name: string): Promise<void> {
     const payload = this.buildConfigPayload();
     payload["profile"] = this.entriesOf(payload, "profile").filter(
       (entry) => entry["name"] !== name,
     );
-    await this.savePayload(payload);
-  }
-
-  /** Stages the active-profile pointer without switching the live runtime. */
-  async stageActiveProfile(name: string): Promise<void> {
-    const payload = this.buildConfigPayload();
-    payload["active_profile"] = name;
     await this.savePayload(payload);
   }
 
@@ -657,11 +628,13 @@ export class ConfigStore {
   }
 
   /**
-   * Stages a discovered local or STT model and chooses it in the pending
-   * active profile, so Apply provisions the artifact.
+   * Stages a discovered local or STT model and chooses it in the selected
+   * profile, so the next boot of that profile provisions the artifact.
+   * With no profile selected (or a stale selection) the model joins the
+   * catalog alone and the outcome's `profile` is null.
    */
-  async stageDiscoveredModel(kind: "local" | "stt", data: EntryData): Promise<string> {
-    const operation = this.stageTail.then(async (): Promise<string> => {
+  async stageDiscoveredModel(kind: "local" | "stt", data: EntryData): Promise<StagedModel> {
+    const operation = this.stageTail.then(async (): Promise<StagedModel> => {
       const payload = this.buildConfigPayload();
       const array = modelArray(kind);
       const items = this.entriesOf(payload, array);
@@ -675,18 +648,20 @@ export class ConfigStore {
       }
       items.push({ ...structuredClone(data), name });
       payload[array] = items;
-      const active = this.pendingActiveProfile();
+      const selected = this.selectedProfile();
+      let target: string | null = null;
       for (const profile of this.entriesOf(payload, "profile")) {
-        if (profile["name"] !== active) {
+        if (selected === null || profile["name"] !== selected) {
           continue;
         }
         const chosen = Array.isArray(profile["models"]) ? profile["models"].map(String) : [];
         profile["models"] = [...chosen, name];
+        target = selected;
       }
       await this.api.putConfig(payload);
       await this.refreshPending();
       this.notify();
-      return name;
+      return { name, profile: target };
     });
     this.stageTail = operation.then(
       () => undefined,
@@ -774,16 +749,6 @@ export class ConfigStore {
     await this.refreshAll();
     this.notify();
     return outcome;
-  }
-
-  /**
-   * Whether the staged changes alter the speech-to-text configuration
-   * the next gateway boot would load. Snapshot this before Apply: the
-   * post-apply refresh makes the pending view identical to the running
-   * one, erasing the difference the predicate reads.
-   */
-  hasPendingSttChange(): boolean {
-    return pendingSttChange(this.running, this.pending);
   }
 
   /**

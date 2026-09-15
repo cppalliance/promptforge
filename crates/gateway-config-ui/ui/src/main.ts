@@ -40,7 +40,6 @@ import { createSecretsView } from "./views/secrets-view";
 import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY, GatewayApi, GatewayHttpError } from "./services/gateway-api";
-export { pendingSttChange } from "./services/config-store";
 export { SheetStore } from "./services/sheet-store";
 export {
   canonicalRows,
@@ -54,12 +53,6 @@ export { matchRoute } from "./router";
 
 /** The toast for an apply the user (or a revert) cancelled before its commit. */
 const APPLY_CANCELLED_MESSAGE = "Apply cancelled - your pending changes are still staged";
-
-/**
- * The toast for a successful apply whose staged changes touch speech:
- * the gateway loads STT once at boot, so only a restart picks them up.
- */
-const STT_RESTART_MESSAGE = "Restart the Gateway to apply speech-to-text changes.";
 
 /** The window surface boot needs; tests hand in a jsdom window. */
 export interface BootWindow {
@@ -233,12 +226,15 @@ function mountLiveShell(
   // subscriber) re-renders in place when it lands.
   const sheets = new SheetStore(api, options.sheetPollMs);
   sheets.start();
-  const switcher = createProfileSwitcher({ store, toasts });
   let applying = false;
   let disposed = false;
   let observedConfigGeneration: string | null = null;
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Raised by any operation the gateway answers with `restart_required`
+  // (a config apply touching a boot-owned section, a profile selection);
+  // it polls `config_generation` and clears itself once the process
+  // restarts.
   const restartBanner = document.createElement("div");
   restartBanner.className = "banner banner-warning banner-restart";
   restartBanner.hidden = true;
@@ -275,22 +271,24 @@ function mountLiveShell(
     void poll();
   };
 
+  const raiseRestartBanner = (): void => {
+    restartBanner.hidden = false;
+    watchForRestart();
+  };
+
+  const switcher = createProfileSwitcher({ store, toasts, onRestartRequired: raiseRestartBanner });
+
   const runApply = async (): Promise<void> => {
     if (applying) {
       return;
     }
     applying = true;
-    // Snapshot the speech predicate before the apply: the store's
-    // post-apply refresh makes pending identical to running, erasing
-    // the difference the predicate reads.
-    const sttChange = store.hasPendingSttChange();
     overlay.open("Applying configuration");
     try {
       const outcome = await store.apply();
       overlay.finish();
       if (outcome.restart_required) {
-        restartBanner.hidden = false;
-        watchForRestart();
+        raiseRestartBanner();
       }
       toasts.show(
         outcome.restart_required
@@ -298,12 +296,6 @@ function mountLiveShell(
           : "Configuration applied",
         "success",
       );
-      if (sttChange) {
-        // One toast per qualifying apply. When the same apply also
-        // changed a process-owned section, the restart banner above
-        // already shows; the two messages coexist.
-        toasts.show(STT_RESTART_MESSAGE, "info");
-      }
       bridge?.notifyAction("apply");
     } catch (error) {
       const message =
@@ -422,6 +414,7 @@ function mountLiveShell(
   const profilesView = createProfilesView({
     store,
     toasts,
+    onRestartRequired: raiseRestartBanner,
   });
   const stopRouter = startRouter({
     win,
@@ -451,9 +444,9 @@ function mountLiveShell(
   void store.load();
   // The live progress stream: while an apply is in flight, the hub's
   // events feed the overlay, which maps stage leaves itself. The
-  // `applying` guard suffices because an Apply cancels any active
-  // profile load and later loads queue behind it, so during an Apply
-  // the only switch-stage emitter is the Apply. Subscribing at boot
+  // `applying` guard suffices because the boot load runs once per
+  // process and an Apply queues behind it, so during an Apply the only
+  // stage emitter the overlay can see is the Apply. Subscribing at boot
   // keeps the shell an independent subscriber whether or not the
   // workshop is connected. Panel mode never subscribes: the workshop
   // already consumes the same stream and owns all progress display.

@@ -6,7 +6,7 @@
 //
 // SSE is parsed from fetch response bodies, never through EventSource:
 // EventSource cannot send the Authorization header the admin routes
-// require, and the switch route is a POST besides.
+// require.
 
 import { isRecord } from "./json";
 
@@ -47,7 +47,7 @@ export interface QueueStatus {
 
 /** The shape of `GET /admin/status` this UI consumes. */
 export interface GatewayStatus {
-  /** The active profile's name. */
+  /** The running profile's name; empty when no profile is running. */
   profile: string;
   /** Names of the models the running profile exposes. */
   models: string[];
@@ -170,10 +170,30 @@ export interface CacheListEntry {
 export interface ApplyOutcome {
   /** The promoted real files, relative to the config root. */
   applied: string[];
-  /** Whether the active profile reloaded. */
+  /** Whether remote routing reloaded live. */
   reloaded: boolean;
-  /** Whether a promoted boot shadow needs a gateway restart. */
+  /** Whether a promoted change needs a gateway restart to take effect. */
   restart_required: boolean;
+}
+
+/** The shape of `POST /admin/switch-profile`'s reply. */
+export interface SwitchOutcome {
+  /** The persisted selection; null when no profile is selected. */
+  profile: string | null;
+  /** Whether the selection differs from the running profile. */
+  restart_required: boolean;
+}
+
+/** The `GET /admin/config-pending` envelope this UI consumes. */
+export interface PendingView {
+  /** The shadow-preferred global config, secrets redacted. */
+  config: Record<string, unknown>;
+  /**
+   * The persisted selection from `gateway.state.toml`: null when none is
+   * persisted, otherwise the raw name even when the config no longer
+   * defines it.
+   */
+  activeProfile: string | null;
 }
 
 /** One environment variable a cloud provider reads, from the sheet. */
@@ -491,12 +511,25 @@ export class GatewayApi {
     return requireRecord(await this.getJson("/admin/config"), "config");
   }
 
-  /** Fetches the pending (shadow-overlaid) config view. */
-  async getConfigPending(): Promise<Record<string, unknown>> {
+  /**
+   * Fetches the pending (shadow-overlaid) config view. The envelope's
+   * `profile` object carries the persisted selection as `active_profile`;
+   * it is split out here because it is not a configuration key and must
+   * never ride back in a `PUT /admin/config` body.
+   */
+  async getConfigPending(): Promise<PendingView> {
     const data = requireRecord(await this.getJson("/admin/config-pending"), "pending config");
-    return data["profile"] === undefined
-      ? {}
-      : requireRecord(data["profile"], "pending config profile");
+    if (data["profile"] === undefined) {
+      return { config: {}, activeProfile: null };
+    }
+    const { active_profile: selection, ...config } = requireRecord(
+      data["profile"],
+      "pending config profile",
+    );
+    return {
+      config,
+      activeProfile: typeof selection === "string" ? selection : null,
+    };
   }
 
   /** Fetches the pending-shadow dirty report. */
@@ -510,9 +543,10 @@ export class GatewayApi {
   }
 
   /**
-   * Stages `body` (the `GET /admin/config` JSON shape) as the active
-   * profile's shadow via `PUT /admin/config`. Untouched secrets stay
-   * `"***"`; the gateway restores their real values.
+   * Stages `body` (the `GET /admin/config` JSON shape) as the config
+   * shadow via `PUT /admin/config`. Untouched secrets stay `"***"`; the
+   * gateway restores their real values. A body carrying `active_profile`
+   * is refused: selection belongs to {@link switchProfile}.
    */
   async putConfig(body: unknown): Promise<void> {
     const response = await this.send("/admin/config", {
@@ -537,6 +571,28 @@ export class GatewayApi {
     return {
       applied: stringArray(data["applied"]),
       reloaded: data["reloaded"] === true,
+      restart_required: data["restart_required"] === true,
+    };
+  }
+
+  /**
+   * Persists the profile selection via `POST /admin/switch-profile`:
+   * a name writes `gateway.state.toml`, `null` clears it. The running
+   * profile never changes; the reply's `restart_required` says whether a
+   * restart is needed for the selection to run.
+   */
+  async switchProfile(name: string | null): Promise<SwitchOutcome> {
+    const response = await this.send("/admin/switch-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) {
+      throw await refusalError(response);
+    }
+    const data = requireRecord(await response.json(), "switch outcome");
+    return {
+      profile: typeof data["profile"] === "string" ? data["profile"] : null,
       restart_required: data["restart_required"] === true,
     };
   }
