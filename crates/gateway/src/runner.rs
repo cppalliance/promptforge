@@ -1295,11 +1295,11 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "alpha"
-models = ["alpha-model"]
+models = []
 
 [[profile]]
 name = "beta"
-models = ["beta-model"]
+models = []
 "#;
 
     fn fixture(state: &str) -> (tempfile::TempDir, PathBuf) {
@@ -1336,7 +1336,12 @@ models = ["beta-model"]
         let (config, context) =
             load_startup_with_environment(&path, &options, Some("alpha")).expect("startup loads");
 
-        assert_eq!(config.models()[0].name(), "beta-model");
+        assert_eq!(
+            config
+                .active_profile()
+                .map(gateway_config::ProfileConfig::name),
+            Some("beta")
+        );
         assert_eq!(
             context.active.as_ref().map(ProfileName::as_str),
             Some("beta")
@@ -1351,7 +1356,12 @@ models = ["beta-model"]
         let (config, _) =
             load_startup_with_environment(&path, &options, Some("beta")).expect("startup loads");
 
-        assert_eq!(config.models()[0].name(), "beta-model");
+        assert_eq!(
+            config
+                .active_profile()
+                .map(gateway_config::ProfileConfig::name),
+            Some("beta")
+        );
     }
 
     #[test]

@@ -17,20 +17,19 @@
 //! and line. Failures are reported as the opaque
 //! [`ConfigError`]; classify them with [`ConfigError::kind`].
 //!
-//! Pending edits stage as shadow files beside the real ones
+//! Pending edits stage as a shadow file beside the real one
 //! (`gateway.toml` gains `gateway.toml.next`):
-//! [`save_config_shadow`] validates a pending admin document and splits its
-//! `active_profile` into the sibling state shadow, [`write_shadow`] stages
-//! arbitrary sibling content, and [`shadow_path`] names either shadow.
-//! [`load_pending_config`] reads both shadows with the same selection rules,
-//! and [`pending_report`] summarizes changed sections.
+//! [`save_config_shadow`] validates a pending admin document and refuses
+//! `active_profile` (selection is not a configuration key), [`write_shadow`]
+//! stages arbitrary sibling content, and [`shadow_path`] names a shadow.
+//! [`load_pending_config`] reads the shadow with the same selection rules as
+//! [`Config::load`], and [`pending_report`] summarizes changed sections.
 //! [`promote_shadow`] is the explicit apply step. It uses atomic replacement
 //! where the platform supports it and a failure-safe backup fallback
 //! elsewhere. [`persist_profile_state`] atomically updates the real active
-//! profile without consuming an unapplied state shadow,
-//! [`clear_profile_state`] deletes it (the persisted form of "no profile"),
-//! and [`write_atomic`] is the bare replace-through-rename primitive both
-//! build on.
+//! profile, [`clear_profile_state`] deletes it (the persisted form of "no
+//! profile"), and [`write_atomic`] is the bare replace-through-rename
+//! primitive both build on.
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.

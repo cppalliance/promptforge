@@ -1,32 +1,33 @@
-//! Apply and revert routes for pending config shadows:
+﻿//! Apply and revert routes for pending config shadows:
 //! `POST /admin/config-apply` and `POST /admin/config-revert`.
 //!
 //! Apply captures the pending state under the apply lock - a census of the
 //! shadows, the parsed shadow-preferred config, and every shadow's current
 //! contents - then releases the lock. A change that needs no reload (an env
-//! shadow, a process-owned section) is promoted inline. Anything else runs
-//! as an `ApplyConfig` command on the command queue: the switch goes
-//! through the same machinery as `POST /admin/switch-profile`, and the
-//! captured shadows are promoted at its commit, so a failed or cancelled
-//! apply promotes nothing and leaves every shadow staged for a retry.
-//! Revert cancels any apply in flight, then deletes every shadow and
-//! touches nothing else. Saves, the capture step, the commit, and revert
-//! serialize on one mutex, so apply only captures combinations the latest
-//! save validated whole. Both routes reply with plain JSON: the reload's
-//! staged progress (`loading-profile`, `downloading-models`,
-//! `stopping-models`, `starting-models`) streams to `GET /admin/progress`
-//! subscribers, so the apply response carries the outcome and the progress
-//! stream carries the stages.
+//! shadow alone) is promoted inline. A config shadow runs as an
+//! `ApplyConfig` command on the command queue: the command rebuilds the
+//! remote routing table from the pending config, merges the running local
+//! models under it, promotes the captured shadows under the apply lock, and
+//! swaps the live routing, config, and web-search state in one write. A
+//! failed or cancelled apply promotes nothing and leaves every shadow staged
+//! for a retry. Sections the process reads once at boot (`[server]`,
+//! `[workshop]`, `[[profile]]`, `[[local_model]]`, `[[stt_model]]`, `[stt]`)
+//! and env shadows promote the same way but report `restart_required`: the
+//! local runtime is fixed for the process lifetime. Revert cancels any apply
+//! in flight, then deletes every shadow and touches nothing else. Saves, the
+//! capture step, the commit, and revert serialize on one mutex, so apply only
+//! captures combinations the latest save validated whole. Both routes reply
+//! with plain JSON; the reload's one `applying-config` stage streams to
+//! `GET /admin/progress` subscribers.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use gateway_config::{
-    Config, ProfileName, ProfileSelection, load_pending_config, profile_state_path, shadow_path,
-    write_atomic,
-};
+use gateway_config::{Config, ProfileSelection, load_pending_config, shadow_path, write_atomic};
+#[cfg(feature = "web-search")]
+use gateway_web_search::WebSearchState;
 use shared_progress::ProgressTree;
 use tokio_util::sync::CancellationToken;
 
@@ -35,24 +36,39 @@ use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
 use crate::config_pending::{canonical_form, config_root, relative_name, shadow_census};
 use crate::config_write::{config_write_error, error_chain};
 use crate::error::GatewayError;
-use crate::{AppState, StatePersistence, check_auth};
+use crate::routing::Routing;
+use crate::{AppState, check_auth};
+
+/// Top-level sections the process reads once at boot. A change to one of
+/// them promotes to disk but takes effect at the next start, so the apply
+/// reports `restart_required`.
+const RESTART_SECTIONS: [&str; 6] = [
+    "server",
+    "workshop",
+    "profile",
+    "local_model",
+    "stt_model",
+    "stt",
+];
 
 /// The `POST /admin/config-apply` route: bearer-authed, applies every
-/// staged shadow, reloading the selected profile when the change needs it.
+/// staged shadow, reloading the remote routing table when the change needs
+/// it.
 ///
 /// The reply is plain JSON - `{"applied": [...], "reloaded": bool,
 /// "restart_required": bool}` - not SSE: the reload runs as a command on
-/// the queue through the same path as `POST /admin/switch-profile`, so its
-/// staged progress streams to `GET /admin/progress` subscribers, and the
-/// response carries the outcome. `applied` names the promoted real files
-/// relative to the config root, sorted. `reloaded` is true when a config or
-/// profile-state shadow applied successfully. `restart_required` is true
-/// for an env shadow or a process-owned `[server]` or `[workshop]` change.
-/// With no shadows on disk the reply is the clean no-op
+/// the queue, so its `applying-config` stage streams to
+/// `GET /admin/progress` subscribers, and the response carries the outcome.
+/// `applied` names the promoted real files relative to the config root,
+/// sorted. `reloaded` is true when a config shadow applied successfully.
+/// `restart_required` is true for an env shadow or a change to a section
+/// the process reads once at boot: `[server]`, `[workshop]`, `[[profile]]`,
+/// `[[local_model]]`, `[[stt_model]]`, or `[stt]`. With no shadows on disk
+/// the reply is the clean no-op
 /// `{"applied": [], "reloaded": false, "restart_required": false}`.
 ///
-/// Nothing is promoted before the switch commits. A parse failure replies
-/// 500 before any command exists; a switch failure replies
+/// Nothing is promoted before the command commits. A parse failure replies
+/// 500 before any command exists; a reload failure replies
 /// [`GatewayError::ApplyReloadFailed`] (500) and a cancelled command -
 /// the user's cancel, a revert, or shutdown - replies
 /// [`GatewayError::ApplyCancelled`] (503). In both cases every shadow is
@@ -67,7 +83,7 @@ pub(crate) async fn admin_config_apply(
         // The lock spans the census, the parse, and the capture (or the
         // inline promotion), so a save cannot land between them and the
         // snapshot is one the latest save validated whole. It is released
-        // before the switch runs: the queue serializes the switch itself.
+        // before the command runs: the queue serializes the reload itself.
         let _guard = state.apply.lock().await;
         let plan = tokio::task::spawn_blocking(move || capture_apply(&config_path))
             .await
@@ -144,7 +160,7 @@ pub(crate) async fn admin_config_revert(
 }
 
 /// One shadow as the Apply route captured it, ready to land in its real
-/// file at the switch's commit.
+/// file at the command's commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShadowCapture {
     /// The real file the shadow stands in for, in canonical form.
@@ -156,18 +172,19 @@ pub(crate) struct ShadowCapture {
 }
 
 /// What one reloading apply carries onto the command queue: the parsed
-/// pending config, the profile it selects, and every captured shadow.
+/// pending config and every captured shadow.
 #[derive(Debug)]
 pub(crate) struct ApplySnapshot {
-    /// The shadow-preferred pending config, parsed and validated. Boxed so
-    /// the `Command` enum stays the size of its other variants.
+    /// The shadow-preferred pending config, parsed and validated, with no
+    /// profile selected (`active_profile()` is `None` and the local and
+    /// speech-to-text subsets are empty): the apply swaps the remote
+    /// catalog and never the local runtime. Boxed so the `Command` enum
+    /// stays the size of its other variants.
     pub(crate) config: Box<Config>,
-    /// The profile the pending config selects.
-    pub(crate) profile: ProfileName,
     /// Every shadow the census found, with its contents at capture time:
-    /// the config shadow, the state shadow, and any env shadow.
+    /// the config shadow and any env shadow.
     pub(crate) files: Vec<ShadowCapture>,
-    /// Whether an env or process-owned setting changed.
+    /// Whether an env or boot-read setting changed.
     pub(crate) restart_required: bool,
 }
 
@@ -186,14 +203,14 @@ impl ApplySnapshot {
 
 /// What the census decided: promote inline, or reload through the queue.
 enum ApplyPlan {
-    /// No config or state shadow: the captures are promoted under the route's
-    /// lock and nothing in the switch machinery runs.
+    /// No config shadow: the captures are promoted under the route's lock
+    /// and no command runs.
     Inline {
         files: Vec<ShadowCapture>,
         restart_required: bool,
     },
-    /// A config or state shadow: the switch runs as an `ApplyConfig` command
-    /// and promotes the captures at its commit.
+    /// A config shadow: the reload runs as an `ApplyConfig` command and
+    /// promotes the captures at its commit.
     Reload(ApplySnapshot),
 }
 
@@ -203,16 +220,12 @@ fn capture_apply(config_path: &Path) -> Result<ApplyPlan, GatewayError> {
     let census = shadow_census(config_path)?;
     let root = config_root(config_path);
     let config_canonical = canonical_form(config_path);
-    let state_canonical = canonical_form(&profile_state_path(config_path));
     let env_canonical = canonical_form(&config_path.with_extension("env"));
-    let needs_reload = census
-        .files
-        .iter()
-        .any(|file| file == &config_canonical || file == &state_canonical);
+    let needs_reload = census.files.iter().any(|file| file == &config_canonical);
     let mut restart_required = census
         .sections
         .iter()
-        .any(|section| matches!(section.as_str(), "server" | "workshop"));
+        .any(|section| RESTART_SECTIONS.contains(&section.as_str()));
     let mut files = Vec::with_capacity(census.files.len());
     for file in &census.files {
         if file == &env_canonical {
@@ -233,18 +246,18 @@ fn capture_apply(config_path: &Path) -> Result<ApplyPlan, GatewayError> {
             restart_required,
         });
     }
+    // The selection is irrelevant to what the apply swaps (the remote
+    // catalog is the same for every profile). The pending loader resolves
+    // the state file the way the next boot would, which admits a stale or
+    // absent one, and the selection it resolved is then dropped: a
+    // persisted name can differ from the running profile (a switch that
+    // persisted a new name and is waiting on a restart) and must not be
+    // published as the live document's selection.
     let config = load_pending_config(config_path, &ProfileSelection::default())
+        .and_then(|config| config.select_profile(None))
         .map_err(config_write_error)?;
-    let profile = config
-        .active_profile()
-        .ok_or(GatewayError::ActiveProfileUnavailable)?
-        .name()
-        .to_owned();
-    let profile = ProfileName::parse(&profile)
-        .map_err(|error| GatewayError::switch_failed("parse-name", error))?;
     Ok(ApplyPlan::Reload(ApplySnapshot {
         config: Box::new(config),
-        profile,
         files,
         restart_required,
     }))
@@ -300,66 +313,118 @@ fn delete_all_shadows(config_path: &Path) -> Result<Vec<String>, GatewayError> {
     Ok(reverted)
 }
 
-/// The `ApplyConfig` command body: the switch to the snapshot's profile,
-/// promoting the captured shadows at its commit.
+/// The `ApplyConfig` command body: one `applying-config` leaf that swaps
+/// the remote routing table live and promotes the captured shadows.
+///
+/// Any failure under a fired token reports as the cancellation it is, so
+/// the route's reply can promise the shadows are still staged.
 pub(crate) async fn apply_config(
     state: &AppState,
     snapshot: ApplySnapshot,
     token: CancellationToken,
     tree: ProgressTree,
 ) -> Outcome {
-    let ApplySnapshot {
-        config,
-        profile,
-        files,
-        ..
-    } = snapshot;
-    let result = crate::run_switch_with_config(
-        state.clone(),
-        profile,
-        tree,
-        Some(*config),
-        move || StatePersistence::Promote(files),
-        &token,
-    )
-    .await;
-    match result {
-        Ok(profile) => Ok(profile),
-        // A partial start lands after the commit: the captures are promoted
-        // and the profile is live, so it must not report as a cancellation
-        // whose reply promises the shadows are still staged.
-        #[cfg(feature = "local")]
-        Err(error @ GatewayError::PartialStart { .. }) => Err(error),
-        // Fatal replacement outcomes deliberately fire both cancellation
-        // and controlled shutdown after persistence became indeterminate or
-        // native staging outlived its deadline. Preserve that failure instead
-        // of promising the shadows are still staged.
-        Err(error) if state.shutdown.is_fired() => Err(error),
-        // Any other failure under a fired token reports as the cancellation
-        // it is, however deep in the switch the stop landed.
-        Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(
-            APPLY_CONFIG_LABEL.to_owned(),
-        )),
-        Err(error) => Err(error),
+    let ApplySnapshot { config, files, .. } = snapshot;
+    let applying = tree.register("applying-config", 1.0);
+    match apply_snapshot(state, *config, files, &token).await {
+        Ok(summary) => {
+            applying.complete();
+            Ok(summary)
+        }
+        Err(_) if token.is_cancelled() => {
+            applying.fail();
+            Err(apply_cancelled())
+        }
+        Err(error) => {
+            applying.fail();
+            Err(error)
+        }
     }
+}
+
+fn apply_cancelled() -> GatewayError {
+    GatewayError::CommandCancelled(APPLY_CONFIG_LABEL.to_owned())
+}
+
+/// Builds the new routing table, then commits under the apply lock: the
+/// captures land in their real files first (a failed promotion changes
+/// nothing live), and one live write swaps the routing, config, and
+/// web-search state. The running local children are never touched; their
+/// routing entries carry over under the new remote catalog.
+async fn apply_snapshot(
+    state: &AppState,
+    config: Config,
+    files: Vec<ShadowCapture>,
+    token: &CancellationToken,
+) -> Outcome {
+    if token.is_cancelled() {
+        return Err(apply_cancelled());
+    }
+    let remote = Routing::from_config(&config)
+        .map_err(|error| GatewayError::switch_failed("build-routing", error))?;
+    // Only queue commands change the local runtime, and this is one, so the
+    // set read here is the set the swap below publishes.
+    #[cfg(feature = "local")]
+    let routing = {
+        let live = state.live.read().await;
+        remote
+            .merge(live.local.models().iter().cloned())
+            .map_err(|error| GatewayError::switch_failed("merge-routing", error))?
+    };
+    #[cfg(not(feature = "local"))]
+    let routing = remote;
+    #[cfg(feature = "web-search")]
+    let web_search = config
+        .web_search_config()
+        .map(WebSearchState::new)
+        .map(Arc::new);
+    #[cfg(test)]
+    state
+        .park_at(crate::switch_park::SwitchPhase::ApplyCommit)
+        .await;
+    // The commit holds the apply lock so no save, revert, or pending read
+    // interleaves with the promotion and the live swap. A revert fires the
+    // token before taking this lock, so the re-check under it is what keeps
+    // a cancelled apply from writing over files the user just reverted.
+    let _publication = tokio::select! {
+        biased;
+        () = token.cancelled() => return Err(apply_cancelled()),
+        guard = state.apply.lock() => guard,
+    };
+    if token.is_cancelled() {
+        return Err(apply_cancelled());
+    }
+    let applied = tokio::task::spawn_blocking(move || promote_captures(&files))
+        .await
+        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
+    let mut live = state.live.write().await;
+    live.routing = Arc::new(routing);
+    live.config = Arc::new(config);
+    #[cfg(feature = "web-search")]
+    {
+        live.web_search = web_search;
+    }
+    Ok(format!("applied {}", applied.join(", ")))
 }
 
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use gateway_config::{
-        Config, ProfileName, ProfileSelection, ProfileState, profile_state_path, shadow_path,
-        write_shadow,
+        Config, ProfileName, ProfileSelection, profile_state_path, shadow_path, write_shadow,
     };
     use shared_progress::{EventState, ProgressEvent};
     use tokio::sync::broadcast;
     use tokio_util::sync::CancellationToken;
 
+    use super::{ApplyPlan, capture_apply};
     use crate::AppState;
     use crate::commands::Command;
     use crate::error::GatewayError;
+    use crate::switch_park::{PhasePark, SwitchPhase};
     use crate::test_support::{AdminPaths, app_state, serve_state};
 
     const CONFIG: &str = r#"
@@ -391,12 +456,17 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "alpha"
-models = ["alpha-model"]
+models = []
 
 [[profile]]
 name = "beta"
-models = ["beta-model"]
+models = []
 "#;
+
+    /// A third remote model appended to `CONFIG`: the shape of the one
+    /// change an apply reloads live.
+    const GAMMA_MODEL: &str = "\n[[model]]\nname = \"gamma-model\"\ndescription = \"gamma\"\n\
+                               context = 1024\nupstream = \"gamma\"\nendpoints = [\"fake\"]\n";
 
     fn fixture() -> (tempfile::TempDir, Config, AdminPaths) {
         let temp = tempfile::TempDir::new().expect("temp dir");
@@ -418,12 +488,31 @@ models = ["beta-model"]
 
     /// Serves the fixture with the production queue worker running, so an
     /// apply's `ApplyConfig` command actually drains; the state comes back
-    /// for tests that park the switch or read the queue.
+    /// for tests that read the queue or the live table.
     async fn serve_fixture(config: Config, paths: AdminPaths) -> (SocketAddr, AppState) {
         let state = app_state(config, Some(paths));
         let _worker = state.commands.spawn_worker(&state).expect("worker spawns");
         let addr = serve_state(state.clone()).await;
         (addr, state)
+    }
+
+    /// [`serve_fixture`] with the apply command parked at its commit, so a
+    /// test can act between the capture and the promotion.
+    async fn serve_parked_fixture(
+        config: Config,
+        paths: AdminPaths,
+    ) -> (SocketAddr, AppState, Arc<PhasePark>) {
+        let mut state = app_state(config, Some(paths));
+        let park = Arc::new(PhasePark::at(SwitchPhase::ApplyCommit));
+        state.park = Some(Arc::clone(&park));
+        let _worker = state.commands.spawn_worker(&state).expect("worker spawns");
+        let addr = serve_state(state.clone()).await;
+        (addr, state, park)
+    }
+
+    /// Stages `CONFIG` plus `GAMMA_MODEL` as the pending config.
+    fn stage_gamma(config_path: &std::path::Path) {
+        write_shadow(config_path, &format!("{CONFIG}{GAMMA_MODEL}")).expect("stage config shadow");
     }
 
     async fn post(addr: SocketAddr, route: &str) -> reqwest::Response {
@@ -447,11 +536,19 @@ models = ["beta-model"]
             .expect("json body")
     }
 
-    /// Stages `profile` as the pending active profile through the real
-    /// save route, so the shadows are exactly what the UI would write.
-    async fn save_active_profile(addr: SocketAddr, profile: &str) -> reqwest::Response {
+    /// Saves the live config with `edit` applied through the real save
+    /// route, so the shadow is exactly what the UI would write: the running
+    /// `active_profile` that `GET /admin/config` reports is not a
+    /// configuration key and never goes back in a save.
+    async fn save_edited(
+        addr: SocketAddr,
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) -> reqwest::Response {
         let mut body = get_json(addr, "admin/config").await;
-        body["active_profile"] = serde_json::json!(profile);
+        body.as_object_mut()
+            .expect("the config is an object")
+            .remove("active_profile");
+        edit(&mut body);
         reqwest::Client::new()
             .put(format!("http://{addr}/admin/config"))
             .bearer_auth("test-token")
@@ -486,12 +583,17 @@ models = ["beta-model"]
         state.live.read().await.profile_name.clone()
     }
 
-    /// How many switches the hub saw: each run of the switch machinery
-    /// opens exactly one `loading-profile` leaf.
-    fn switches_begun(events: &mut broadcast::Receiver<ProgressEvent>) -> usize {
+    /// Whether the live routing table resolves `name`.
+    async fn routes(state: &AppState, name: &str) -> bool {
+        state.live.read().await.routing.model(name).is_ok()
+    }
+
+    /// How many times the hub saw `label` begin: each apply opens exactly one
+    /// `applying-config` leaf and each switch one `loading-profile` leaf.
+    fn stages_begun(events: &mut broadcast::Receiver<ProgressEvent>, label: &str) -> usize {
         let mut count = 0;
         while let Ok(event) = events.try_recv() {
-            if event.label == "loading-profile" && matches!(event.state, EventState::Begun { .. }) {
+            if event.label == label && matches!(event.state, EventState::Begun { .. }) {
                 count += 1;
             }
         }
@@ -517,56 +619,181 @@ models = ["beta-model"]
         );
     }
 
+    /// A child-free local runtime holding one model named `name`, standing
+    /// in for a running `llama-server` the apply must keep routing.
+    #[cfg(feature = "test-fixtures")]
+    fn running_local(name: &str) -> crate::local::LocalRuntime {
+        let config = Config::from_toml_str(&format!(
+            "config-version = 0\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"local\"\nprotocol = \"openai\"\n\
+             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"{name}\"\ndescription = \"running child\"\n\
+             context = 4096\nupstream = \"{name}\"\nendpoints = [\"local\"]\n"
+        ))
+        .expect("local fixture config parses");
+        let routing =
+            crate::routing::Routing::from_config(&config).expect("local fixture routing builds");
+        crate::local::LocalRuntime::from_test_models(routing.models().to_vec())
+    }
+
+    /// The reload an apply performs: a new `[[model]]` enters the live
+    /// routing table, the running local child keeps its entry, the shadow
+    /// promotes, and the reply says so without a restart.
+    #[cfg(feature = "test-fixtures")]
     #[tokio::test]
-    async fn apply_switches_and_persists_pending_active_profile() {
+    async fn apply_with_a_new_model_swaps_the_routing_live_and_promotes_the_shadow() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let (addr, _state) = serve_fixture(config, paths).await;
-        let http = reqwest::Client::new();
-        let save = save_active_profile(addr, "beta").await;
-        assert_eq!(save.status(), reqwest::StatusCode::OK);
+        let (addr, state) = serve_fixture(config, paths).await;
+        {
+            let mut live = state.live.write().await;
+            live.local = running_local("alpha-local");
+            let routing = Arc::clone(&live.routing);
+            live.routing = Arc::new(
+                routing
+                    .as_ref()
+                    .clone()
+                    .merge(live.local.models().iter().cloned())
+                    .expect("the running child routes"),
+            );
+        }
+        let mut events = state.hub.subscribe();
+        stage_gamma(&config_path);
 
-        let apply = post(addr, "admin/config-apply").await;
-        assert_eq!(apply.status(), reqwest::StatusCode::OK);
-        let reply: serde_json::Value = apply.json().await.expect("apply json");
+        let response = post(addr, "admin/config-apply").await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let reply: serde_json::Value = response.json().await.expect("apply body");
         assert_eq!(reply["reloaded"], true);
-        assert_eq!(
-            reply["applied"],
-            serde_json::json!(["gateway.state.toml", "gateway.toml"])
-        );
-
-        let state_path = profile_state_path(&config_path);
-        let state =
-            ProfileState::from_toml_str(&std::fs::read_to_string(&state_path).expect("read state"))
-                .expect("parse state");
-        assert_eq!(state.active_profile(), "beta");
-        assert!(!shadow_path(&config_path).exists());
-        assert!(!shadow_path(&state_path).exists());
-        let applied_config = std::fs::read_to_string(&config_path).expect("read applied config");
+        assert_eq!(reply["restart_required"], false);
+        assert_eq!(reply["applied"], serde_json::json!(["gateway.toml"]));
+        assert!(routes(&state, "gamma-model").await, "the new model routes");
         assert!(
-            !applied_config.contains("active_profile"),
-            "active selection stays in the sibling state file"
+            routes(&state, "alpha-local").await,
+            "the running local child keeps its routing entry"
         );
-        let status: serde_json::Value = http
-            .get(format!("http://{addr}/admin/status"))
-            .bearer_auth("test-token")
-            .send()
-            .await
-            .expect("status sends")
-            .json()
-            .await
-            .expect("status json");
-        assert_eq!(status["profile"], "beta");
-        assert_eq!(status["models"], serde_json::json!(["beta-model"]));
+        assert_eq!(
+            state.live.read().await.local.child_count(),
+            1,
+            "the local runtime is untouched"
+        );
+        assert_eq!(live_profile(&state).await.as_deref(), Some("alpha"));
+        assert!(!shadow_path(&config_path).exists(), "the shadow promoted");
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .expect("read applied config")
+                .contains("gamma-model"),
+            "the real file carries the applied change"
+        );
+        let served = get_json(addr, "admin/config").await;
+        assert_eq!(served["model"][2]["name"], "gamma-model");
+        assert_eq!(stages_begun(&mut events, "applying-config"), 1);
+        assert_eq!(
+            stages_begun(&mut events, "loading-profile"),
+            0,
+            "no switch runs for an apply"
+        );
+    }
+
+    /// A persisted selection that differs from the running profile (a
+    /// switch that persisted a new name and awaits a restart) never reaches
+    /// the live document: the applied config carries no selection, the
+    /// running profile is unchanged, and `GET /admin/config` does not report
+    /// the persisted name as the running one.
+    #[tokio::test]
+    async fn apply_publishes_the_document_without_the_persisted_selection() {
+        let (_temp, config, paths) = fixture();
+        let config_path = paths.config_path.clone();
+        let (addr, state) = serve_fixture(config, paths).await;
+        std::fs::write(
+            profile_state_path(&config_path),
+            "active_profile = \"beta\"\n",
+        )
+        .expect("persist a selection awaiting restart");
+        stage_gamma(&config_path);
+
+        let response = post(addr, "admin/config-apply").await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert!(routes(&state, "gamma-model").await);
+        assert!(
+            state.live.read().await.config.active_profile().is_none(),
+            "the live document carries no selection"
+        );
+        assert_eq!(live_profile(&state).await.as_deref(), Some("alpha"));
+        let served = get_json(addr, "admin/config").await;
+        assert!(
+            served.get("active_profile").is_none(),
+            "the persisted name is not reported as running: {served}"
+        );
+    }
+
+    /// Each boot-read section flags a restart; the live-reloadable ones do
+    /// not. Every case stages a valid config differing from the real one in
+    /// exactly that section.
+    #[test]
+    fn capture_apply_flags_restart_for_boot_read_sections_only() {
+        let cases: [(&str, &str, bool); 7] = [
+            (
+                "profile",
+                "\n[[profile]]\nname = \"gamma\"\nmodels = []\n",
+                true,
+            ),
+            (
+                "local_model",
+                "\n[[local_model]]\nname = \"gamma\"\ndescription = \"g\"\n\
+                 source = \"/models/gamma.gguf\"\ncontext = 4096\n",
+                true,
+            ),
+            (
+                "stt_model",
+                "\n[[stt_model]]\nname = \"speech\"\nrole = \"interim\"\n\
+                 source = \"/speech.bin\"\nvram_gb = 1.0\n",
+                true,
+            ),
+            (
+                "stt",
+                "\n[stt]\nwindow_seconds = 8\ninterval_ms = 250\n",
+                true,
+            ),
+            ("model", GAMMA_MODEL, false),
+            (
+                "endpoint",
+                "\n[[endpoint]]\nid = \"other\"\nprotocol = \"openai\"\n\
+                 base_url = \"http://127.0.0.1:10\"\napi_key = \"\"\n",
+                false,
+            ),
+            (
+                "tools",
+                "\n[tools.web_search]\nprovider = \"brave\"\napi_key = \"k\"\n",
+                false,
+            ),
+        ];
+        for (section, addition, expected) in cases {
+            let temp = tempfile::TempDir::new().expect("temp dir");
+            let config_path = temp.path().join("gateway.toml");
+            std::fs::write(&config_path, CONFIG).expect("write config");
+            write_shadow(&config_path, &format!("{CONFIG}{addition}")).expect("stage shadow");
+
+            let plan = capture_apply(&config_path).expect("the pending config captures");
+
+            let ApplyPlan::Reload(snapshot) = plan else {
+                panic!("a config shadow always reloads: {section}");
+            };
+            assert_eq!(
+                snapshot.restart_required, expected,
+                "restart_required for a {section} change"
+            );
+            assert_eq!(snapshot.applied_names(), ["gateway.toml"]);
+        }
     }
 
     #[tokio::test]
     async fn invalid_pending_config_is_never_promoted() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
         let original_config = std::fs::read_to_string(&config_path).expect("read config");
-        let original_state = std::fs::read_to_string(&state_path).expect("read state");
         write_shadow(&config_path, "not valid TOML [[[").expect("stage tampered shadow");
         let (addr, state) = serve_fixture(config, paths).await;
         let mut events = state.hub.subscribe();
@@ -581,16 +808,12 @@ models = ["beta-model"]
             std::fs::read_to_string(&config_path).expect("re-read config"),
             original_config
         );
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("re-read state"),
-            original_state
-        );
         assert!(
             shadow_path(&config_path).is_file(),
             "the rejected shadow remains available for correction or revert"
         );
         assert_eq!(
-            switches_begun(&mut events),
+            stages_begun(&mut events, "applying-config"),
             0,
             "the parse failure replies before any command exists"
         );
@@ -599,7 +822,7 @@ models = ["beta-model"]
     }
 
     #[tokio::test]
-    async fn env_only_apply_requires_restart_without_switching() {
+    async fn env_only_apply_requires_restart_without_a_command() {
         let (_temp, config, paths) = fixture();
         let env_path = paths.config_path.with_extension("env");
         write_shadow(&env_path, "HF_TOKEN=pending\n").expect("stage env shadow");
@@ -622,7 +845,7 @@ models = ["beta-model"]
             "the promoted shadow is retired"
         );
         assert_eq!(
-            switches_begun(&mut events),
+            stages_begun(&mut events, "applying-config"),
             0,
             "the no-reload path promotes inline without a command"
         );
@@ -633,23 +856,10 @@ models = ["beta-model"]
         let (_temp, config, paths) = fixture();
         let (addr, _state) = serve_fixture(config, paths).await;
         let http = reqwest::Client::new();
-        let mut body: serde_json::Value = http
-            .get(format!("http://{addr}/admin/config"))
-            .bearer_auth("test-token")
-            .send()
-            .await
-            .expect("config request sends")
-            .json()
-            .await
-            .expect("config body");
-        body["server"]["api_key"] = serde_json::json!("next-token");
-        let save = http
-            .put(format!("http://{addr}/admin/config"))
-            .bearer_auth("test-token")
-            .json(&body)
-            .send()
-            .await
-            .expect("save sends");
+        let save = save_edited(addr, |body| {
+            body["server"]["api_key"] = serde_json::json!("next-token");
+        })
+        .await;
         assert_eq!(save.status(), reqwest::StatusCode::OK);
 
         let response = post(addr, "admin/config-apply").await;
@@ -677,8 +887,10 @@ models = ["beta-model"]
         );
     }
 
+    /// The speech pipeline is configured once at boot: an `[stt]` change
+    /// promotes and reloads the document but reports a restart.
     #[tokio::test]
-    async fn stt_pipeline_change_reloads_without_restart() {
+    async fn stt_pipeline_change_promotes_and_requires_restart() {
         let (_temp, config, paths) = fixture();
         write_shadow(
             &paths.config_path,
@@ -697,7 +909,7 @@ models = ["beta-model"]
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let reply: serde_json::Value = response.json().await.expect("apply body");
         assert_eq!(reply["reloaded"], true);
-        assert_eq!(reply["restart_required"], false);
+        assert_eq!(reply["restart_required"], true);
         let applied = get_json(addr, "admin/config").await;
         assert_eq!(applied["stt"]["window_seconds"], 8);
         assert_eq!(applied["stt"]["interval_ms"], 250);
@@ -708,12 +920,9 @@ models = ["beta-model"]
     async fn revert_removes_all_shadows_without_touching_real_files() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
         let env_path = config_path.with_extension("env");
         let original_config = std::fs::read_to_string(&config_path).expect("read config");
-        let original_state = std::fs::read_to_string(&state_path).expect("read state");
-        write_shadow(&config_path, &original_config).expect("stage config");
-        write_shadow(&state_path, "active_profile = \"beta\"\n").expect("stage state");
+        stage_gamma(&config_path);
         write_shadow(&env_path, "HF_TOKEN=pending\n").expect("stage env");
         let (addr, _state) = serve_fixture(config, paths).await;
 
@@ -723,44 +932,28 @@ models = ["beta-model"]
         let reply: serde_json::Value = response.json().await.expect("revert body");
         assert_eq!(
             reply["reverted"],
-            serde_json::json!([
-                "gateway.env.next",
-                "gateway.state.toml.next",
-                "gateway.toml.next"
-            ])
+            serde_json::json!(["gateway.env.next", "gateway.toml.next"])
         );
         assert_eq!(
             std::fs::read_to_string(&config_path).expect("re-read config"),
             original_config
-        );
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("re-read state"),
-            original_state
         );
         assert!(!env_path.exists());
     }
 
     /// Two applies in flight at once share one command: the second attaches
     /// to the first through the debounce, both replies carry the same
-    /// `applied` list, and the switch machinery runs exactly once.
+    /// `applied` list, and the reload runs exactly once.
     #[tokio::test]
-    async fn concurrent_applies_promote_pending_state_once() {
+    async fn concurrent_applies_promote_the_pending_config_once() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
-        let (addr, state) = serve_fixture(config, paths).await;
+        let (addr, state, park) = serve_parked_fixture(config, paths).await;
         let mut events = state.hub.subscribe();
-        let save = save_active_profile(addr, "beta").await;
-        assert_eq!(save.status(), reqwest::StatusCode::OK);
+        stage_gamma(&config_path);
 
-        // A registered request parks the first apply's switch in its drain,
-        // so the second apply provably arrives while the first is active.
-        let held = state.in_flight.register();
         let first = tokio::spawn(post(addr, "admin/config-apply"));
-        wait_until("the first apply to go active", || {
-            active_is(&state, "apply-config")
-        })
-        .await;
+        park.entered().await;
         let second = tokio::spawn(post(addr, "admin/config-apply"));
         wait_until("the second apply to attach to the first", || {
             state.commands.active_waiters() == 2
@@ -770,7 +963,7 @@ models = ["beta-model"]
             state.commands.pending_commands().is_empty(),
             "the second apply attached to the active one instead of queueing"
         );
-        drop(held);
+        park.release();
 
         let first = first.await.expect("first apply task");
         let second = second.await.expect("second apply task");
@@ -778,7 +971,7 @@ models = ["beta-model"]
         assert_eq!(second.status(), reqwest::StatusCode::OK);
         let first: serde_json::Value = first.json().await.expect("first body");
         let second: serde_json::Value = second.json().await.expect("second body");
-        let expected = serde_json::json!(["gateway.state.toml", "gateway.toml"]);
+        let expected = serde_json::json!(["gateway.toml"]);
         assert_eq!(first["applied"], expected);
         assert_eq!(
             second["applied"], expected,
@@ -787,31 +980,23 @@ models = ["beta-model"]
         assert_eq!(first["reloaded"], true);
         assert_eq!(second["reloaded"], true);
         assert_eq!(
-            switches_begun(&mut events),
+            stages_begun(&mut events, "applying-config"),
             1,
-            "the attached duplicate never runs a second switch"
+            "the attached duplicate never runs a second reload"
         );
         assert!(!shadow_path(&config_path).exists());
-        assert!(!shadow_path(&state_path).exists());
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("read state"),
-            "active_profile = \"beta\"\n"
-        );
-        assert_eq!(live_profile(&state).await.as_deref(), Some("beta"));
+        assert!(routes(&state, "gamma-model").await);
     }
 
-    /// The deadlock this run fixes: an apply requested while a `LoadProfile`
-    /// is active used to wait on the apply lock the switch held for its whole
-    /// download. Now the apply supersedes the switch - which settles as
-    /// cancelled while the request that parked it is still held - and then
-    /// completes.
+    /// An apply requested while a `LoadProfile` is active supersedes it: the
+    /// switch settles as cancelled while the request that parked it is still
+    /// held, and the apply then completes.
     #[tokio::test]
     async fn an_apply_during_an_active_load_profile_supersedes_it_and_completes() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
         let (addr, state) = serve_fixture(config, paths).await;
-        write_shadow(&state_path, "active_profile = \"beta\"\n").expect("stage state");
+        stage_gamma(&config_path);
 
         let held = state.in_flight.register();
         let switch = state.commands.enqueue(Command::load_profile(
@@ -833,59 +1018,46 @@ models = ["beta-model"]
             matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
             "the apply cancels the active switch: {outcome:?}"
         );
-        wait_until("the apply to go active", || {
-            active_is(&state, "apply-config")
-        })
-        .await;
         drop(held);
 
         let response = apply.await.expect("apply task");
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let reply: serde_json::Value = response.json().await.expect("apply body");
         assert_eq!(reply["reloaded"], true);
-        assert_eq!(reply["applied"], serde_json::json!(["gateway.state.toml"]));
-        assert!(!shadow_path(&state_path).exists());
-        assert_eq!(live_profile(&state).await.as_deref(), Some("beta"));
+        assert_eq!(reply["applied"], serde_json::json!(["gateway.toml"]));
+        assert!(!shadow_path(&config_path).exists());
+        assert!(routes(&state, "gamma-model").await);
+        assert_eq!(live_profile(&state).await.as_deref(), Some("alpha"));
     }
 
-    /// A cancelled apply promotes nothing: every shadow stays on disk with
-    /// its contents, the dirty report is unchanged, the reply is the
-    /// cancellation envelope, and a retry applies the same changes.
+    /// A cancelled apply promotes nothing: the shadow stays on disk with its
+    /// contents, the dirty report is unchanged, the reply is the
+    /// cancellation envelope, and a retry applies the same change.
     #[tokio::test]
     async fn a_cancelled_apply_leaves_every_shadow_staged_and_a_retry_succeeds() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
         let original_config = std::fs::read_to_string(&config_path).expect("read config");
-        let original_state = std::fs::read_to_string(&state_path).expect("read state");
-        let (addr, state) = serve_fixture(config, paths).await;
-        write_shadow(&config_path, &original_config).expect("stage config");
-        write_shadow(&state_path, "active_profile = \"beta\"\n").expect("stage state");
+        let (addr, state, park) = serve_parked_fixture(config, paths).await;
+        stage_gamma(&config_path);
+        let staged = std::fs::read_to_string(shadow_path(&config_path)).expect("staged shadow");
         let dirty_before = get_json(addr, "admin/config-dirty").await;
         assert_eq!(dirty_before["dirty"], true);
 
-        let held = state.in_flight.register();
         let apply = tokio::spawn(post(addr, "admin/config-apply"));
-        wait_until("the apply to go active", || {
-            active_is(&state, "apply-config")
-        })
-        .await;
+        park.entered().await;
         assert!(state.commands.cancel_active());
+        park.release();
 
         assert_apply_cancelled(apply.await.expect("apply task")).await;
         assert_eq!(
             std::fs::read_to_string(shadow_path(&config_path)).expect("config shadow"),
-            original_config,
+            staged,
             "the config shadow is still staged"
         );
         assert_eq!(
-            std::fs::read_to_string(shadow_path(&state_path)).expect("state shadow"),
-            "active_profile = \"beta\"\n",
-            "the state shadow is still staged"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("re-read state"),
-            original_state,
+            std::fs::read_to_string(&config_path).expect("re-read config"),
+            original_config,
             "nothing was promoted"
         );
         assert_eq!(
@@ -893,20 +1065,17 @@ models = ["beta-model"]
             dirty_before,
             "the dirty report is unchanged"
         );
-        assert_eq!(live_profile(&state).await.as_deref(), Some("alpha"));
-        drop(held);
+        assert!(!routes(&state, "gamma-model").await, "nothing went live");
 
+        // The retry parks at the same phase; a stored release lets it through.
+        park.release();
         let retry = post(addr, "admin/config-apply").await;
         assert_eq!(retry.status(), reqwest::StatusCode::OK);
         let reply: serde_json::Value = retry.json().await.expect("retry body");
         assert_eq!(reply["reloaded"], true);
-        assert_eq!(
-            reply["applied"],
-            serde_json::json!(["gateway.state.toml", "gateway.toml"])
-        );
+        assert_eq!(reply["applied"], serde_json::json!(["gateway.toml"]));
         assert!(!shadow_path(&config_path).exists());
-        assert!(!shadow_path(&state_path).exists());
-        assert_eq!(live_profile(&state).await.as_deref(), Some("beta"));
+        assert!(routes(&state, "gamma-model").await);
     }
 
     /// A save that lands mid-apply neither blocks nor is lost: the snapshot's
@@ -916,83 +1085,68 @@ models = ["beta-model"]
     async fn a_save_landing_mid_apply_stays_pending_while_the_snapshot_lands() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
-        let (addr, state) = serve_fixture(config, paths).await;
-        write_shadow(&state_path, "active_profile = \"beta\"\n").expect("stage state");
+        let (addr, state, park) = serve_parked_fixture(config, paths).await;
+        stage_gamma(&config_path);
 
-        let held = state.in_flight.register();
         let apply = tokio::spawn(post(addr, "admin/config-apply"));
-        wait_until("the apply to go active", || {
-            active_is(&state, "apply-config")
-        })
-        .await;
-        let save =
-            tokio::time::timeout(Duration::from_secs(10), save_active_profile(addr, "alpha"))
-                .await
-                .expect("the save completes while the apply is active");
+        park.entered().await;
+        let save = tokio::time::timeout(
+            Duration::from_secs(10),
+            save_edited(addr, |body| {
+                body["model"][0]["description"] = serde_json::json!("edited mid-apply");
+            }),
+        )
+        .await
+        .expect("the save completes while the apply is active");
         assert_eq!(save.status(), reqwest::StatusCode::OK);
-        drop(held);
+        park.release();
 
         let response = apply.await.expect("apply task");
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         let reply: serde_json::Value = response.json().await.expect("apply body");
-        assert_eq!(reply["applied"], serde_json::json!(["gateway.state.toml"]));
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("read state"),
-            "active_profile = \"beta\"\n",
+        assert_eq!(reply["applied"], serde_json::json!(["gateway.toml"]));
+        let real = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            real.contains("gamma-model") && !real.contains("edited mid-apply"),
             "the snapshot's contents landed in the real file"
         );
-        assert_eq!(
-            std::fs::read_to_string(shadow_path(&state_path)).expect("state shadow"),
-            "active_profile = \"alpha\"\n",
+        let pending = std::fs::read_to_string(shadow_path(&config_path)).expect("config shadow");
+        assert!(
+            pending.contains("edited mid-apply"),
             "the newer save stays pending instead of being deleted"
         );
-        assert!(
-            shadow_path(&config_path).is_file(),
-            "the save's config shadow, absent from the snapshot, is untouched"
-        );
-        assert_eq!(live_profile(&state).await.as_deref(), Some("beta"));
+        assert!(routes(&state, "gamma-model").await);
         let dirty = get_json(addr, "admin/config-dirty").await;
-        assert_eq!(
-            dirty["pending_files"],
-            serde_json::json!(["gateway.state.toml", "gateway.toml"])
-        );
+        assert_eq!(dirty["pending_files"], serde_json::json!(["gateway.toml"]));
     }
 
     /// A revert during an active apply wins: the apply settles as cancelled,
-    /// its commit writes nothing, and the shadows are gone.
+    /// its commit writes nothing, and the shadow is gone.
     #[tokio::test]
     async fn a_revert_during_an_active_apply_cancels_it_and_the_commit_writes_nothing() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
-        let state_path = profile_state_path(&config_path);
-        let original_state = std::fs::read_to_string(&state_path).expect("read state");
-        let (addr, state) = serve_fixture(config, paths).await;
-        write_shadow(&state_path, "active_profile = \"beta\"\n").expect("stage state");
+        let original_config = std::fs::read_to_string(&config_path).expect("read config");
+        let (addr, state, park) = serve_parked_fixture(config, paths).await;
+        stage_gamma(&config_path);
 
-        let held = state.in_flight.register();
         let apply = tokio::spawn(post(addr, "admin/config-apply"));
-        wait_until("the apply to go active", || {
-            active_is(&state, "apply-config")
-        })
-        .await;
+        park.entered().await;
 
         let revert = post(addr, "admin/config-revert").await;
         assert_eq!(revert.status(), reqwest::StatusCode::OK);
         let reply: serde_json::Value = revert.json().await.expect("revert body");
-        assert_eq!(
-            reply["reverted"],
-            serde_json::json!(["gateway.state.toml.next"])
-        );
+        assert_eq!(reply["reverted"], serde_json::json!(["gateway.toml.next"]));
+        park.release();
 
         assert_apply_cancelled(apply.await.expect("apply task")).await;
-        drop(held);
         assert_eq!(
-            std::fs::read_to_string(&state_path).expect("re-read state"),
-            original_state,
+            std::fs::read_to_string(&config_path).expect("re-read config"),
+            original_config,
             "the cancelled apply's commit wrote nothing"
         );
-        assert!(!shadow_path(&state_path).exists());
+        assert!(!shadow_path(&config_path).exists());
+        assert!(!routes(&state, "gamma-model").await);
         assert_eq!(live_profile(&state).await.as_deref(), Some("alpha"));
         wait_until("the queue to go idle", || {
             state.commands.active_command().is_none()

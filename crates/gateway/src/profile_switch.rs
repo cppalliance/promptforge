@@ -55,12 +55,8 @@ pub(crate) const STT_RUNTIME_UNAVAILABLE: &str =
 pub(crate) enum StatePersistence {
     /// The selection already matches persisted state.
     None,
-    /// Atomically replace real state while preserving any pending shadow.
+    /// Atomically replace the real state file.
     Write,
-    /// Promote the shadows an Apply captured: each capture's contents land in
-    /// its real file, and the shadow is deleted only when it still holds
-    /// those contents, so a save that raced the apply stays pending.
-    Promote(Vec<crate::config_apply::ShadowCapture>),
 }
 
 struct ProcessPreparationNames<N> {
@@ -270,10 +266,9 @@ fn sync_parent(path: &Path) -> Result<(), std::io::Error> {
     std::fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
 }
 
-/// Synced profile files and shadow captures awaiting terminal commit.
+/// Synced profile files awaiting terminal commit.
 pub(super) struct PreparedPersistence {
     files: Vec<PreparedFile>,
-    captures: Vec<crate::config_apply::ShadowCapture>,
 }
 
 /// Whether failed persistence left every authoritative file unchanged.
@@ -291,7 +286,6 @@ impl PreparedPersistence {
         persistence: StatePersistence,
     ) -> Result<Self, GatewayError> {
         let mut plans = Vec::new();
-        let mut captures = Vec::new();
         match persistence {
             StatePersistence::None => {}
             StatePersistence::Write => {
@@ -302,14 +296,6 @@ impl PreparedPersistence {
                     plans.push((gateway_config::profile_state_path(&config.path), contents));
                 }
             }
-            StatePersistence::Promote(selected) => {
-                plans.extend(
-                    selected
-                        .iter()
-                        .map(|capture| (capture.real_path.clone(), capture.contents.clone())),
-                );
-                captures = selected;
-            }
         }
         let files = tokio::task::spawn_blocking(move || {
             plans
@@ -319,10 +305,10 @@ impl PreparedPersistence {
         })
         .await
         .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
-        Ok(Self { files, captures })
+        Ok(Self { files })
     }
 
-    /// Atomically replaces each target and retires matching shadows.
+    /// Atomically replaces each target.
     pub(super) async fn commit(self) -> Result<(), PersistenceCommitError> {
         tokio::task::spawn_blocking(move || self.commit_blocking())
             .await
@@ -355,27 +341,6 @@ impl PreparedPersistence {
                 PersistenceCommitError::Indeterminate(GatewayError::ConfigWriteIo(Box::new(error)))
             })?;
         }
-        for capture in &self.captures {
-            let shadow = gateway_config::shadow_path(&capture.real_path);
-            match std::fs::read_to_string(&shadow) {
-                Ok(current) if current == capture.contents => {
-                    if let Err(error) = std::fs::remove_file(&shadow)
-                        && error.kind() != std::io::ErrorKind::NotFound
-                    {
-                        return Err(PersistenceCommitError::Indeterminate(
-                            GatewayError::ConfigWriteIo(Box::new(error)),
-                        ));
-                    }
-                }
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(PersistenceCommitError::Indeterminate(
-                        GatewayError::ConfigWriteIo(Box::new(error)),
-                    ));
-                }
-            }
-        }
         Ok(())
     }
 
@@ -384,7 +349,6 @@ impl PreparedPersistence {
     pub(super) fn for_test(target: PathBuf, contents: String) -> Result<Self, GatewayError> {
         Ok(Self {
             files: vec![PreparedFile::prepare(target, contents)?],
-            captures: Vec::new(),
         })
     }
 
@@ -1561,8 +1525,8 @@ mod tests {
              [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha-model\"\ndescription = \"alpha\"\ncontext = 1024\nupstream = \"alpha\"\nendpoints = [\"fake\"]\n\
              [[model]]\nname = \"beta-model\"\ndescription = \"beta\"\ncontext = 1024\nupstream = \"beta\"\nendpoints = [\"fake\"]\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n",
+             [[profile]]\nname = \"alpha\"\nmodels = []\n\
+             [[profile]]\nname = \"beta\"\nmodels = []\n",
         )
         .expect("catalog parses");
         let config = catalog
@@ -1851,8 +1815,9 @@ mod tests {
             "beta"
         );
         let live = state.live.read().await;
+        assert!(live.loading.is_empty(), "nothing is published as loading");
         assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
+        assert!(live.routing.model("beta-model").is_ok());
     }
 
     #[tokio::test]
@@ -1873,10 +1838,12 @@ mod tests {
 
         let cutover = prepared.cut_over().await.expect("cutover succeeds");
 
+        // The remote table is the same under every selection: the prior
+        // snapshot and the interim live table both route both models.
         assert!(cutover.prior.routing.model("alpha-model").is_ok());
-        assert!(cutover.prior.routing.model("beta-model").is_err());
+        assert!(cutover.prior.routing.model("beta-model").is_ok());
         let live = state.live.read().await;
-        assert!(live.routing.model("alpha-model").is_err());
+        assert!(live.routing.model("alpha-model").is_ok());
         assert!(live.routing.model("beta-model").is_ok());
     }
 }

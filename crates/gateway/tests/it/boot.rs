@@ -1274,7 +1274,7 @@ async fn a_save_completes_while_a_switch_command_is_parked() {
 
     // The save lands while the switch is parked; `send_within` bounds it by
     // the phase timeout, well inside the drain's own deadline.
-    let document = json_within(
+    let mut document = json_within(
         send_within(
             http.get(format!("{url}/admin/config"))
                 .bearer_auth("test-token"),
@@ -1282,6 +1282,12 @@ async fn a_save_completes_while_a_switch_command_is_parked() {
         .await,
     )
     .await;
+    // The served document reports the running `active_profile`, which is
+    // not a configuration key: a save carrying it is refused.
+    document
+        .as_object_mut()
+        .expect("the config document is an object")
+        .remove("active_profile");
     let save = send_within(
         http.put(format!("{url}/admin/config"))
             .bearer_auth("test-token")

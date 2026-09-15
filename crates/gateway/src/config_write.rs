@@ -18,13 +18,14 @@ use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
-/// The `PUT /admin/config` route: bearer-authed, stages the global config
-/// and optional sibling profile state.
+/// The `PUT /admin/config` route: bearer-authed, stages the global config.
 ///
-/// The body is the full `GET /admin/config` JSON shape. Redacted `"***"` secrets are
-/// restored from the current pending chain, the merged result is validated
-/// like a real load, and only then is the shadow written atomically. The
-/// real files stay untouched and nothing reloads.
+/// The body is the full `GET /admin/config` JSON shape. Redacted `"***"`
+/// secrets are restored from the current pending chain, the merged result
+/// is validated like a real load, and only then is the shadow written
+/// atomically. The real file stays untouched and nothing reloads. The reply
+/// is `{"shadow": path}`. A body carrying `active_profile` is rejected as a
+/// config-write error: selection belongs to `POST /admin/switch-profile`.
 pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
     caller: Caller,
@@ -48,7 +49,6 @@ pub(crate) async fn admin_put_config(
         .map_err(config_write_error)?;
     Ok(Json(serde_json::json!({
         "shadow": shadows.config.display().to_string(),
-        "state_shadow": shadows.state.map(|path| path.display().to_string()),
     })))
 }
 
@@ -170,11 +170,11 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "alpha"
-models = ["alpha-model"]
+models = []
 
 [[profile]]
 name = "beta"
-models = ["beta-model"]
+models = []
 "#;
 
     fn fixture() -> (tempfile::TempDir, Config, AdminPaths) {
@@ -195,13 +195,11 @@ models = ["beta-model"]
         (temp, config, paths)
     }
 
-    #[tokio::test]
-    async fn pending_active_profile_does_not_switch_before_apply() {
-        let (_temp, config, paths) = fixture();
-        let config_path = paths.config_path.clone();
-        let addr = serve_with_paths(config, paths).await;
-        let http = reqwest::Client::new();
-        let mut body: serde_json::Value = http
+    /// The live config as a save body: `GET /admin/config` also reports the
+    /// running `active_profile`, which is not a configuration key and never
+    /// goes back in a save.
+    async fn save_body(addr: std::net::SocketAddr) -> serde_json::Value {
+        let mut body: serde_json::Value = reqwest::Client::new()
             .get(format!("http://{addr}/admin/config"))
             .bearer_auth("test-token")
             .send()
@@ -210,29 +208,64 @@ models = ["beta-model"]
             .json()
             .await
             .expect("config json");
-        body["active_profile"] = serde_json::json!("beta");
+        body.as_object_mut()
+            .expect("the config is an object")
+            .remove("active_profile");
+        body
+    }
 
-        let response = http
+    async fn put_config(addr: std::net::SocketAddr, body: &serde_json::Value) -> reqwest::Response {
+        reqwest::Client::new()
             .put(format!("http://{addr}/admin/config"))
             .bearer_auth("test-token")
-            .json(&body)
+            .json(body)
             .send()
             .await
-            .expect("put sends");
+            .expect("put sends")
+    }
+
+    #[tokio::test]
+    async fn a_save_carrying_active_profile_is_rejected_and_stages_nothing() {
+        let (_temp, config, paths) = fixture();
+        let config_path = paths.config_path.clone();
+        let addr = serve_with_paths(config, paths).await;
+        let mut body = save_body(addr).await;
+        body["active_profile"] = serde_json::json!("beta");
+
+        let response = put_config(addr, &body).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+        let error: serde_json::Value = response.json().await.expect("error envelope");
+        assert_eq!(error["error"]["code"], "config_write_rejected");
+        assert!(
+            error["error"]["message"].as_str().is_some_and(|message| {
+                message.contains("active_profile is not a configuration key")
+                    && message.contains("POST /admin/switch-profile")
+            }),
+            "the message names the switch route: {error}"
+        );
+        assert!(!shadow_path(&config_path).exists());
+        assert!(!shadow_path(&profile_state_path(&config_path)).exists());
+    }
+
+    #[tokio::test]
+    async fn a_save_replies_with_the_config_shadow_alone() {
+        let (_temp, config, paths) = fixture();
+        let config_path = paths.config_path.clone();
+        let addr = serve_with_paths(config, paths).await;
+        let mut body = save_body(addr).await;
+        body["model"][0]["description"] = serde_json::json!("edited");
+
+        let response = put_config(addr, &body).await;
 
         assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let reply: serde_json::Value = response.json().await.expect("save reply");
+        assert_eq!(
+            reply,
+            serde_json::json!({ "shadow": shadow_path(&config_path).display().to_string() }),
+            "the reply carries only the config shadow"
+        );
         assert!(shadow_path(&config_path).is_file());
-        assert!(shadow_path(&profile_state_path(&config_path)).is_file());
-        let status: serde_json::Value = http
-            .get(format!("http://{addr}/admin/status"))
-            .bearer_auth("test-token")
-            .send()
-            .await
-            .expect("status sends")
-            .json()
-            .await
-            .expect("status json");
-        assert_eq!(status["profile"], "alpha");
-        assert_eq!(status["models"], serde_json::json!(["alpha-model"]));
+        assert!(!shadow_path(&profile_state_path(&config_path)).exists());
     }
 }

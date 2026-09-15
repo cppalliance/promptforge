@@ -191,8 +191,16 @@ struct LiveState {
     /// `[server]` is process-owned, so a change takes effect on restart.
     trust_loopback: bool,
     /// The running configuration, retained so `GET /admin/config` can render
-    /// it; swapped with the rest of the live state on a profile switch.
+    /// it; swapped with the rest of the live state on a profile switch, and
+    /// alone (with the routing table) by a config apply, which publishes the
+    /// applied document with no profile selected; `profile_name` alone
+    /// names the running profile.
     config: Arc<Config>,
+    /// The declared VRAM of the speech-to-text models the boot selection
+    /// loaded, summed at assembly. The speech runtime is fixed for the
+    /// process lifetime while `config` is swapped by every apply, so the
+    /// status readout keeps its own copy.
+    stt_vram_gb: f64,
     #[cfg(feature = "web-search")]
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
@@ -211,23 +219,32 @@ struct LiveState {
 
 impl LiveState {
     /// The number of models in the live routing table and the declared VRAM
-    /// total of the active local and STT models, for the tray's status line
-    /// and `GET /admin/status`.
+    /// total of the running local children and the boot STT selection, for
+    /// the tray's status line and `GET /admin/status`.
+    ///
+    /// The local total is derived from the children the runtime holds,
+    /// looked up by name in the catalog for their declaration, not from the
+    /// config's selected subset: an apply swaps `config` for a document
+    /// parsed with no selection while the children keep running.
     fn model_status(&self) -> (usize, f64) {
         let models = self.routing.models().len();
-        let vram_gb = self
-            .config
-            .local_models()
-            .iter()
-            .filter_map(gateway_config::LocalModelConfig::vram_gb)
-            .sum::<f64>()
-            + self
-                .config
-                .stt_models()
+        #[cfg(feature = "local")]
+        let local_vram_gb = {
+            let declared = self.config.catalog_local_models();
+            self.local
+                .models()
                 .iter()
-                .map(gateway_config::SttModelConfig::vram_gb)
-                .sum::<f64>();
-        (models, vram_gb)
+                .filter_map(|running| {
+                    declared
+                        .iter()
+                        .find(|model| model.name() == running.name)
+                        .and_then(gateway_config::LocalModelConfig::vram_gb)
+                })
+                .sum::<f64>()
+        };
+        #[cfg(not(feature = "local"))]
+        let local_vram_gb = 0.0;
+        (models, local_vram_gb + self.stt_vram_gb)
     }
 }
 
@@ -338,6 +355,9 @@ pub(crate) mod switch_park {
         Commit,
         /// The persistence-to-live-publication boundary.
         Publish,
+        /// A config apply's commit, before it takes the apply lock: the
+        /// captured shadows are not yet promoted and nothing is live.
+        ApplyCommit,
     }
 
     /// One transaction failure a test can inject through the production path.
@@ -425,6 +445,11 @@ impl AppState {
                 routing,
                 key,
                 trust_loopback: config.server().trust_loopback(),
+                stt_vram_gb: config
+                    .stt_models()
+                    .iter()
+                    .map(gateway_config::SttModelConfig::vram_gb)
+                    .sum(),
                 config,
                 #[cfg(feature = "web-search")]
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
@@ -2268,28 +2293,78 @@ mod tray_status_tests {
 
     use crate::test_support::app_state;
 
+    /// Two remote models, one local model at 3.5 GB, one STT model at 1 GB,
+    /// and a profile selecting both local entries.
+    const CONFIG: &str = "config-version = 0\n\
+         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+         [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+         [[model]]\nname = \"alpha\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"fake\"]\n\
+         [[model]]\nname = \"beta\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"fake\"]\n\
+         [[local_model]]\nname = \"gamma\"\ndescription = \"g\"\nsource = \"/models/gamma.gguf\"\ncontext = 4096\nvram_gb = 3.5\n\
+         [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n\
+         [[profile]]\nname = \"work\"\nmodels = [\"gamma\", \"speech\"]\n";
+
+    fn selected_config() -> Config {
+        Config::from_toml_str(CONFIG)
+            .expect("config parses")
+            .select_profile(Some(
+                &gateway_config::ProfileName::parse("work").expect("profile name"),
+            ))
+            .expect("the work profile selects")
+    }
+
+    /// With no local child running, only the boot STT selection counts.
     #[test]
-    #[expect(
-        clippy::float_cmp,
-        reason = "3.5 + 1.0 is exact in binary floating point"
-    )]
-    fn the_tray_status_counts_routed_models_and_sums_declared_vram() {
-        let config = Config::from_toml_str(
-            "config-version = 0\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
-             [[model]]\nname = \"alpha\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"fake\"]\n\
-             [[model]]\nname = \"beta\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"fake\"]\n\
-             [[local_model]]\nname = \"gamma\"\ndescription = \"g\"\nsource = \"/models/gamma.gguf\"\ncontext = 4096\nvram_gb = 3.5\n\
-             [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-        )
-        .expect("config parses");
-        let state = app_state(config, None);
+    #[expect(clippy::float_cmp, reason = "1.0 is exact in binary floating point")]
+    fn the_tray_status_counts_routed_models_and_the_boot_stt_selection() {
+        let state = app_state(selected_config(), None);
         let (models, vram_gb) = state
             .tray_model_status()
             .expect("an uncontended state reads");
         assert_eq!(models, 2, "the harness routes the remote catalog");
-        assert_eq!(vram_gb, 4.5, "local and STT declarations sum");
+        assert_eq!(
+            vram_gb, 1.0,
+            "no local child runs; the STT declaration counts"
+        );
+    }
+
+    /// A running local child's declared VRAM counts, and keeps counting
+    /// after an apply swaps the live config for one with no selection.
+    #[cfg(feature = "test-fixtures")]
+    #[tokio::test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "3.5 + 1.0 is exact in binary floating point"
+    )]
+    async fn the_status_sums_running_children_after_an_apply_swaps_the_config() {
+        let state = app_state(selected_config(), None);
+        let child = Config::from_toml_str(
+            "config-version = 0\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"local\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"gamma\"\ndescription = \"running child\"\ncontext = 4096\nupstream = \"gamma\"\nendpoints = [\"local\"]\n",
+        )
+        .expect("child config parses");
+        let routing = crate::routing::Routing::from_config(&child).expect("child routes");
+        state.live.write().await.local =
+            crate::local::LocalRuntime::from_test_models(routing.models().to_vec());
+        assert_eq!(state.live.read().await.model_status().1, 4.5);
+
+        // What an apply publishes: the same document, parsed with no
+        // profile selected, so `local_models()` and `stt_models()` are empty.
+        let applied = Config::from_toml_str(CONFIG)
+            .expect("config parses")
+            .select_profile(None)
+            .expect("no selection");
+        assert!(applied.local_models().is_empty() && applied.stt_models().is_empty());
+        state.live.write().await.config = std::sync::Arc::new(applied);
+
+        let (models, vram_gb) = state.live.read().await.model_status();
+        assert_eq!(models, 2);
+        assert_eq!(
+            vram_gb, 4.5,
+            "the running child and the boot STT selection still count"
+        );
     }
 }
 
@@ -2473,8 +2548,8 @@ mod provisioning_tests {
              context = 8192\nupstream = \"a\"\nendpoints = [\"e\"]\n\
              [[model]]\nname = \"beta-model\"\ndescription = \"b\"\n\
              context = 8192\nupstream = \"b\"\nendpoints = [\"e\"]\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
+             [[profile]]\nname = \"alpha\"\nmodels = []\n\
+             [[profile]]\nname = \"beta\"\nmodels = []\n"
     }
 
     fn two_remote_profiles() -> AppState {
@@ -2546,8 +2621,8 @@ mod provisioning_tests {
              context = 8192\nupstream = \"b\"\nendpoints = [\"e\"]\n\
              [[local_model]]\nname = \"alpha-local\"\ndescription = \"local\"\n\
              source = \"{local_source}\"\ncontext = 4096\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\", \"alpha-local\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
+             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-local\"]\n\
+             [[profile]]\nname = \"beta\"\nmodels = []\n"
         );
         let config_path = temp.path().join("gateway.toml");
         std::fs::write(&config_path, catalog).expect("write local catalog");
@@ -2715,8 +2790,8 @@ mod provisioning_tests {
                 "{phase:?} cancellation restores old routing"
             );
             assert!(
-                live.routing.model("beta-model").is_err(),
-                "{phase:?} cancellation never publishes target routing"
+                live.routing.model("beta-model").is_ok(),
+                "{phase:?} the remote table is the same under every selection"
             );
         }
     }
@@ -2753,7 +2828,7 @@ mod provisioning_tests {
         );
         let live = state.live.read().await;
         assert_eq!(live.profile_name.as_deref(), Some("alpha"));
-        assert!(live.routing.model("alpha-model").is_err());
+        assert!(live.routing.model("alpha-model").is_ok());
         assert!(live.routing.model("beta-model").is_ok());
         assert!(token.is_cancelled());
         assert!(state.shutdown.is_fired());
@@ -2817,7 +2892,7 @@ mod provisioning_tests {
         let live = state.live.read().await;
         assert_eq!(live.profile_name.as_deref(), Some("alpha"));
         assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
+        assert!(live.routing.model("beta-model").is_ok());
         let local = live
             .routing
             .model("alpha-local")
@@ -2889,7 +2964,7 @@ mod provisioning_tests {
         );
         let live = state.live.read().await;
         assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
+        assert!(live.routing.model("beta-model").is_ok());
     }
 
     #[tokio::test]
@@ -3045,7 +3120,8 @@ mod provisioning_tests {
         assert_eq!(reply["profile"]["active_profile"], "beta");
         assert_eq!(dirty["dirty"], false);
         let catalog = serde_json::to_value(catalog).expect("catalog serializes");
-        assert_eq!(catalog["data"][0]["id"], "beta-model");
+        assert_eq!(catalog["data"][0]["id"], "alpha-model");
+        assert_eq!(catalog["data"][1]["id"], "beta-model");
         assert_eq!(status["profile"], "beta");
         assert_eq!(
             state.live.read().await.profile_name.as_deref(),
@@ -3072,7 +3148,7 @@ mod provisioning_tests {
              context = 8192\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
              [[local_model]]\nname = \"local-model\"\ndescription = \"l\"\n\
              source = '{}'\ncontext = 4096\n\
-             [[profile]]\nname = \"main\"\nmodels = [\"remote-model\", \"local-model\"]\n",
+             [[profile]]\nname = \"main\"\nmodels = [\"local-model\"]\n",
             slash(&temp.path().join("cache")),
             slash(&fake_server),
             slash(&model_file),
@@ -3472,8 +3548,8 @@ mod boot_speech_tests {
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://{backend}\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
              [[model]]\nname = \"beta-model\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
+             [[profile]]\nname = \"alpha\"\nmodels = []\n\
+             [[profile]]\nname = \"beta\"\nmodels = []\n"
         )
     }
 
@@ -3697,8 +3773,8 @@ mod boot_speech_tests {
                 .iter()
                 .map(|model| model["id"].as_str().expect("model id"))
                 .collect::<Vec<_>>(),
-            ["alpha-model"],
-            "only the ready non-STT model is advertised"
+            ["alpha-model", "beta-model"],
+            "only the ready non-STT models are advertised"
         );
 
         let health = get(addr, "/health").await;
@@ -3787,6 +3863,7 @@ mod boot_speech_tests {
                 .collect::<Vec<_>>(),
             [
                 "alpha-model",
+                "beta-model",
                 "scripted-interim",
                 "scripted-final",
                 "realtime-transcribe"
@@ -3862,7 +3939,7 @@ mod boot_speech_tests {
                 .iter()
                 .map(|model| model["id"].as_str().expect("model id"))
                 .collect::<Vec<_>>(),
-            ["alpha-model"],
+            ["alpha-model", "beta-model"],
             "speech discovery stays empty until restart"
         );
 
@@ -4079,6 +4156,10 @@ mod boot_speech_tests {
 
         // Stage an STT vocabulary change through the real save route.
         let mut document = get_json(addr, "/admin/config").await;
+        document
+            .as_object_mut()
+            .expect("the config is an object")
+            .remove("active_profile");
         document["stt"]["vocabulary"] = serde_json::json!(["beta-words"]);
         let save = reqwest::Client::new()
             .put(format!("http://{addr}/admin/config"))
@@ -4100,9 +4181,10 @@ mod boot_speech_tests {
         let reply: serde_json::Value = apply.json().await.expect("apply body");
         assert_eq!(reply["reloaded"], true);
         assert_eq!(
-            reply["applied"],
-            serde_json::json!(["gateway.state.toml", "gateway.toml"])
+            reply["restart_required"], true,
+            "the speech pipeline is read once at boot"
         );
+        assert_eq!(reply["applied"], serde_json::json!(["gateway.toml"]));
 
         assert!(
             std::fs::read_to_string(&config_path)

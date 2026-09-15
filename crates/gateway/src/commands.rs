@@ -64,10 +64,10 @@ pub(crate) enum Command {
         /// Cancellation token, checked at chunk and phase boundaries.
         token: CancellationToken,
     },
-    /// Apply the staged configuration: switch to the snapshot's selected
-    /// profile through the profile-switch machinery, then promote the
-    /// captured shadows at the switch's commit. Nothing touches a real file
-    /// before that commit, so a failed or cancelled apply leaves every
+    /// Apply the staged configuration: promote the captured shadows and
+    /// swap the remote routing table to the snapshot's config in one live
+    /// write, leaving the local runtime as it is. Nothing touches a real
+    /// file before that commit, so a failed or cancelled apply leaves every
     /// shadow staged for a retry.
     ///
     /// Debounce is asymmetric by design. An `ApplyConfig` replaces a pending
@@ -1035,7 +1035,6 @@ mod tests {
         Command::ApplyConfig {
             snapshot: ApplySnapshot {
                 config: Box::new(config),
-                profile: ProfileName::parse("alpha").expect("profile name"),
                 files: Vec::new(),
                 restart_required: false,
             },
@@ -1751,8 +1750,8 @@ mod tests {
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"e\"]\n\
              [[model]]\nname = \"beta-model\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"e\"]\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n",
+             [[profile]]\nname = \"alpha\"\nmodels = []\n\
+             [[profile]]\nname = \"beta\"\nmodels = []\n",
         )
         .expect("catalog parses");
         crate::test_support::boot_state(catalog)

@@ -1,4 +1,9 @@
-//! Single-file pending configuration and sibling profile-state shadows.
+//! Single-file pending configuration shadow and the real profile-state file.
+//!
+//! `gateway.toml.next` is the only shadow: a save stages the whole config
+//! document there, and apply promotes it. Profile selection is never
+//! staged; `POST /admin/switch-profile` writes or deletes the real
+//! `gateway.state.toml` directly.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,8 +41,6 @@ mod tests;
 pub struct PendingShadows {
     /// Shadow containing the global configuration and profile checklists.
     pub config: PathBuf,
-    /// Sibling state shadow when the payload selected `active_profile`.
-    pub state: Option<PathBuf>,
 }
 
 /// Summary of pending single-file changes.
@@ -54,9 +57,10 @@ pub struct PendingShadows {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PendingReport {
-    /// Real config or state files that carry shadows.
+    /// Real config files that carry shadows: the config path when
+    /// `gateway.toml.next` exists, otherwise empty.
     pub shadowed_files: Vec<PathBuf>,
-    /// Changed top-level config keys plus `active_profile`, sorted.
+    /// Changed top-level config keys, sorted.
     pub changed_sections: Vec<String>,
 }
 
@@ -230,11 +234,10 @@ pub fn promote_shadow(target: &Path) -> Result<(), crate::ConfigError> {
     Ok(())
 }
 
-/// Persists the active profile without consuming a pending state shadow.
+/// Persists the active profile to the real sibling state file.
 ///
-/// The real sibling state file is replaced through a unique temporary file,
-/// so an immediate runtime switch can coexist with an unapplied Config UI
-/// selection in `gateway.state.toml.next`.
+/// The file is replaced through a unique temporary file and rename, so a
+/// reader never observes a partial write.
 ///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when rendering, writing, or
@@ -294,16 +297,18 @@ pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError>
 
 /// Validates and stages one pending admin document.
 ///
-/// The document contains the global version-2 config plus an optional
-/// `active_profile` string. The latter is removed from `gateway.toml.next`
-/// and written to `gateway.state.toml.next`, preserving the config/state
-/// boundary while using the same pending key. Redacted secrets are restored
-/// from the current pending config before validation.
+/// The document is the global config alone. Profile selection is not a
+/// configuration key: a document carrying `active_profile` is refused, so
+/// the Config UI cannot stage a selection that `POST /admin/switch-profile`
+/// owns. Redacted secrets are restored from the current pending config
+/// before validation. The persisted selection is not checked against the
+/// document: a state file naming a profile the document drops degrades to
+/// "no profile" at the next load, exactly as [`Config::load`] treats it.
 ///
 /// # Errors
-/// Returns [`ConfigError`](crate::ConfigError) when the document is malformed,
-/// a secret cannot be restored, the config or selected profile is invalid, or
-/// either shadow cannot be written.
+/// Returns [`ConfigError`](crate::ConfigError) when the document is malformed
+/// or carries `active_profile`, a secret cannot be restored, the config is
+/// invalid, or the shadow cannot be written.
 ///
 /// # Examples
 /// ```no_run
@@ -320,10 +325,16 @@ pub fn save_config_shadow(
     mut document: Value,
 ) -> Result<PendingShadows, crate::ConfigError> {
     crate::config::reject_profiles_directory(config_path).map_err(crate::ConfigError::from)?;
-    let table = document.as_table_mut().ok_or_else(|| {
+    let table = document.as_table().ok_or_else(|| {
         crate::ConfigError::validation("pending config must be a TOML table".to_owned())
     })?;
-    let active_profile = table.remove("active_profile");
+    if table.contains_key("active_profile") {
+        return Err(crate::ConfigError::validation(
+            "active_profile is not a configuration key; select a profile with \
+             POST /admin/switch-profile"
+                .to_owned(),
+        ));
+    }
     let current = read_pending_or_real(config_path)
         .map_err(crate::ConfigError::from)?
         .map(|(_, value)| value);
@@ -331,80 +342,18 @@ pub fn save_config_shadow(
     let rendered = toml::to_string_pretty(&document).map_err(|error| {
         crate::ConfigError::validation(format!("pending config does not render as TOML: {error}"))
     })?;
-    let config =
-        Config::parse_toml_at(&rendered, Some(config_path)).map_err(crate::ConfigError::from)?;
-
-    let state = match active_profile {
-        None => {
-            if let Some(selected) =
-                pending_selected_name(config_path, &ProfileSelection::default())?
-            {
-                config.select_profile(Some(&selected))?;
-            }
-            None
-        }
-        Some(Value::String(name)) => {
-            let name = ProfileName::parse(&name).map_err(|error| {
-                crate::ConfigError::validation(format!(
-                    "pending active_profile is invalid: {error}"
-                ))
-            })?;
-            config.select_profile(Some(&name))?;
-            Some(ProfileState::new(&name))
-        }
-        Some(_) => {
-            return Err(crate::ConfigError::validation(
-                "pending active_profile must be a string".to_owned(),
-            ));
-        }
-    };
-
-    let previous_config_shadow = read_existing_shadow(config_path)?;
-    let config_shadow = write_shadow(config_path, &rendered)?;
-    let state_shadow = if let Some(state) = state {
-        let state_path = crate::profile_state_path(config_path);
-        match write_shadow(&state_path, &state.to_toml_string()?) {
-            Ok(path) => Some(path),
-            Err(error) => {
-                restore_shadow(config_path, previous_config_shadow.as_deref())?;
-                return Err(error);
-            }
-        }
-    } else {
-        None
-    };
-    Ok(PendingShadows {
-        config: config_shadow,
-        state: state_shadow,
-    })
+    Config::parse_toml_at(&rendered, Some(config_path)).map_err(crate::ConfigError::from)?;
+    let config = write_shadow(config_path, &rendered)?;
+    Ok(PendingShadows { config })
 }
 
-fn read_existing_shadow(target: &Path) -> Result<Option<String>, crate::ConfigError> {
-    let path = shadow_path(target);
-    match fs::read_to_string(&path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(source) => Err(crate::ConfigError::from(Repr::Read { path, source })),
-    }
-}
-
-fn restore_shadow(target: &Path, contents: Option<&str>) -> Result<(), crate::ConfigError> {
-    if let Some(contents) = contents {
-        write_shadow(target, contents)?;
-    } else {
-        let path = shadow_path(target);
-        if let Err(source) = fs::remove_file(&path)
-            && source.kind() != std::io::ErrorKind::NotFound
-        {
-            return Err(crate::ConfigError::from(Repr::Write { path, source }));
-        }
-    }
-    Ok(())
-}
-
-/// Loads the shadow-preferred config and state without any include resolution.
+/// Loads the shadow-preferred config, resolving the profile exactly as
+/// [`Config::load`] does against the real state file.
 ///
-/// Command-line and environment inputs still outrank pending state.
+/// Command-line and environment inputs outrank the state file and must name
+/// a defined profile; a state file naming a profile the pending document
+/// drops degrades to no profile, reported through
+/// [`Config::stale_state_selection`].
 ///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) under the same conditions as
@@ -442,53 +391,13 @@ pub fn load_pending_config(
         Some(&source_path),
     )
     .map_err(crate::ConfigError::from)?;
-    let selected = pending_selected_name(config_path, inputs)?;
-    let Some(selected) = selected else {
-        return Err(crate::ConfigError::validation(format!(
-            "no active profile selected (defined profiles: {})",
-            config.defined_profile_names()
-        )));
-    };
-    config.select_profile(Some(&selected))
+    // The state file sits beside the real config, not the shadow.
+    config
+        .select_at_load(config_path, inputs)
+        .map_err(crate::ConfigError::from)
 }
 
-fn pending_selected_name(
-    config_path: &Path,
-    inputs: &ProfileSelection,
-) -> Result<Option<ProfileName>, crate::ConfigError> {
-    if let Some(value) = inputs.command_line() {
-        return ProfileName::parse(value)
-            .map(Some)
-            .map_err(|error| crate::ConfigError::validation(error.to_string()));
-    }
-    if let Some(value) = inputs.environment() {
-        return ProfileName::parse(value)
-            .map(Some)
-            .map_err(|error| crate::ConfigError::validation(error.to_string()));
-    }
-    let state_path = crate::profile_state_path(config_path);
-    let state_source = if shadow_path(&state_path).is_file() {
-        shadow_path(&state_path)
-    } else {
-        state_path
-    };
-    let raw = match fs::read_to_string(&state_source) {
-        Ok(raw) => raw,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(crate::ConfigError::from(Repr::Read {
-                path: state_source,
-                source,
-            }));
-        }
-    };
-    let state = ProfileState::from_toml_str(&raw)?;
-    ProfileName::parse(state.active_profile())
-        .map(Some)
-        .map_err(|error| crate::ConfigError::validation(error.to_string()))
-}
-
-/// Reports pending changes across the config and sibling state shadows.
+/// Reports pending changes in the config shadow.
 ///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when a real file or shadow
@@ -511,32 +420,14 @@ pub fn pending_report(config_path: &Path) -> Result<PendingReport, crate::Config
     } else {
         real.clone()
     };
-    let state_path = crate::profile_state_path(config_path);
-    let state_shadow_path = shadow_path(&state_path);
-    let mut shadowed_files = Vec::new();
-    if config_shadow_path.is_file() {
-        shadowed_files.push(config_path.to_owned());
-    }
-    if state_shadow_path.is_file() {
-        shadowed_files.push(state_path.clone());
-    }
-    let mut changed_sections = changed_sections(&real, &pending);
-    if state_shadow_path.is_file() {
-        let real_state = fs::read_to_string(&state_path).ok();
-        let pending_state = fs::read_to_string(&state_shadow_path).map_err(|source| {
-            crate::ConfigError::from(Repr::Read {
-                path: state_shadow_path,
-                source,
-            })
-        })?;
-        if real_state.as_deref() != Some(pending_state.as_str()) {
-            changed_sections.push("active_profile".to_owned());
-            changed_sections.sort_unstable();
-        }
-    }
+    let shadowed_files = if config_shadow_path.is_file() {
+        vec![config_path.to_owned()]
+    } else {
+        Vec::new()
+    };
     Ok(PendingReport {
         shadowed_files,
-        changed_sections,
+        changed_sections: changed_sections(&real, &pending),
     })
 }
 

@@ -140,10 +140,6 @@ pub(crate) enum GatewayError {
         failed: Vec<String>,
     },
 
-    /// An operation required a selected profile, but none is active.
-    #[error("active profile not configured")]
-    ActiveProfileUnavailable,
-
     /// A file-backed admin route was reached without a known config path.
     #[error("config path not configured")]
     ConfigPathUnavailable,
@@ -443,11 +439,6 @@ impl GatewayError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "partial_start",
-            ),
-            GatewayError::ActiveProfileUnavailable => (
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                "active_profile_unavailable",
             ),
             GatewayError::ConfigPathUnavailable => (
                 StatusCode::BAD_REQUEST,

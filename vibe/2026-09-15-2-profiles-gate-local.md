@@ -304,7 +304,7 @@ Exclusions: no change to the cloud sheet `schema_version` (stays 1) or to `[[pro
 
 <step-3>
 
-### Step 3: Remove the profile-state shadow; apply reloads remote routing live
+### Step 3: Remove the profile-state shadow; apply reloads remote routing live [completed]
 
 - Component: gateway
 - Piece: configuration routes. Sequential: `PendingShadows` and `load_pending_config` change shape, and their three gateway consumers must change in the same commit; the apply rewrite shares `config_apply.rs` with the state-capture removal.

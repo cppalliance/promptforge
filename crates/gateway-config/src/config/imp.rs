@@ -57,19 +57,32 @@ impl Config {
             path: path.to_owned(),
             source,
         })?;
-        let mut config = Self::parse_toml_at(&raw, Some(path))?;
+        let config = Self::parse_toml_at(&raw, Some(path))?;
+        config.select_at_load(path, inputs)
+    }
+
+    /// Applies the startup selection to a parsed document exactly as
+    /// [`Config::load`] does: `path` locates the sibling state file, and a
+    /// stale persisted name degrades to no profile while an ephemeral
+    /// override must name a defined profile. Shared with the pending loader
+    /// so a shadow resolves like the real file would at the next boot.
+    pub(crate) fn select_at_load(
+        mut self,
+        path: &Path,
+        inputs: &ProfileSelection,
+    ) -> Result<Config, ConfigError> {
         match resolve_selection(path, inputs)? {
-            None => config.activate_profile(None)?,
-            Some((SelectionSource::StateFile, name)) if !config.defines_profile(&name) => {
+            None => self.activate_profile(None)?,
+            Some((SelectionSource::StateFile, name)) if !self.defines_profile(&name) => {
                 // A persisted preference can outlive its profile (the operator
                 // deleted it from the file). Refusing to boot would leave no
                 // running gateway to fix it through; the caller warns instead.
-                config.activate_profile(None)?;
-                config.stale_state_selection = Some(name.as_str().to_owned());
+                self.activate_profile(None)?;
+                self.stale_state_selection = Some(name.as_str().to_owned());
             }
-            Some((_, name)) => config.activate_profile(Some(&name))?,
+            Some((_, name)) => self.activate_profile(Some(&name))?,
         }
-        Ok(config)
+        Ok(self)
     }
 
     fn defines_profile(&self, name: &ProfileName) -> bool {
