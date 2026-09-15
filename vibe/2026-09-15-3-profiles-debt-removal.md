@@ -174,7 +174,7 @@ Base: `95116424` on `master`, clean worktree. `95116424` is the rebased twin of 
 
 <step-2>
 
-### Step 2: Round-trippable running document (DEBT-PGL-002)
+### Step 2: Round-trippable running document (DEBT-PGL-002) [completed]
 
 - Component: gateway
 - Piece: `GET /admin/config` document shape

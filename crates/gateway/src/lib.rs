@@ -1455,23 +1455,16 @@ async fn admin_queue_cancel_pending(
 }
 
 /// The `GET /admin/config` route: bearer-authed, renders the running global
-/// config plus its active profile in the pending admin shape.
+/// config in the pending admin shape. The running profile is not part of
+/// the document (`GET /admin/status` reports it), so the reply round-trips
+/// through `PUT /admin/config` unchanged.
 async fn admin_config(
     State(state): State<AppState>,
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
     let live = state.live.read().await;
-    let mut document = live.config.to_json();
-    if let Some(table) = document.as_object_mut()
-        && let Some(profile) = live.config.active_profile()
-    {
-        table.insert(
-            "active_profile".to_owned(),
-            serde_json::Value::String(profile.name().to_owned()),
-        );
-    }
-    Ok(Json(document))
+    Ok(Json(live.config.to_json()))
 }
 
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an
@@ -2774,7 +2767,10 @@ mod boot_speech_tests {
         );
 
         let config_body = get_json(addr, "/admin/config").await;
-        assert_eq!(config_body["active_profile"], "alpha");
+        assert!(
+            config_body.get("active_profile").is_none(),
+            "the running document never names the profile; status does"
+        );
         let profiles = get_json(addr, "/admin/profiles").await;
         assert_eq!(profiles["profiles"], serde_json::json!(["alpha", "beta"]));
 
@@ -3088,6 +3084,40 @@ mod boot_speech_tests {
         restarted.speech.shutdown();
     }
 
+    /// The document `GET /admin/config` serves is accepted verbatim by
+    /// `PUT /admin/config`: the running document carries no
+    /// `active_profile` key for the save route to refuse.
+    #[tokio::test]
+    async fn the_served_config_round_trips_through_the_save_route() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+        let addr = serve_state(boot_state_with_paths(config, paths)).await;
+
+        let document = get_json(addr, "/admin/config").await;
+        assert!(
+            document.get("active_profile").is_none(),
+            "the running document carries no active_profile key: {document}"
+        );
+        let save = reqwest::Client::new()
+            .put(format!("http://{addr}/admin/config"))
+            .bearer_auth("test-token")
+            .json(&document)
+            .send()
+            .await
+            .expect("the save sends");
+        assert_eq!(
+            save.status(),
+            reqwest::StatusCode::OK,
+            "the served document saves unchanged"
+        );
+        let reply: serde_json::Value = save.json().await.expect("save body");
+        assert!(
+            reply.get("shadow").is_some(),
+            "the reply names the config shadow: {reply}"
+        );
+    }
+
     /// An Apply that persists an STT settings change leaves the running
     /// boot runtime untouched and emits no speech stage.
     #[tokio::test]
@@ -3114,10 +3144,6 @@ mod boot_speech_tests {
 
         // Stage an STT vocabulary change through the real save route.
         let mut document = get_json(addr, "/admin/config").await;
-        document
-            .as_object_mut()
-            .expect("the config is an object")
-            .remove("active_profile");
         document["stt"]["vocabulary"] = serde_json::json!(["beta-words"]);
         let save = reqwest::Client::new()
             .put(format!("http://{addr}/admin/config"))

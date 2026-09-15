@@ -73,6 +73,30 @@ test("with no selected profile the model joins the catalog alone and the toast s
   );
 });
 
+test("the Review diff is empty when pending equals running while a profile runs", async () => {
+  const config = modelsFixture();
+  const stub = gatewayStub({
+    key: "k",
+    profile: "alpha",
+    config,
+    pending: structuredClone(config),
+    dirty: { dirty: true, pending_files: ["gateway.toml"], changed_sections: [] },
+  });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  const doc = dom.window.document;
+
+  root.querySelector(".banner-review").click();
+  await settle();
+  const overlay = doc.querySelector(".review-overlay");
+  assert.ok(overlay, "Review opens");
+  assert.equal(
+    overlay.querySelector(".diff-table"),
+    null,
+    "no row renders: the running profile is not a document difference",
+  );
+  assert.match(overlay.textContent, /No visible value changes/);
+});
+
 test("the persisted selection never rides a config PUT", async () => {
   const { stub } = await stageFirstQuant("travel");
   const puts = stub.calls.filter(
