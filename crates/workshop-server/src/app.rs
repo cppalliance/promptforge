@@ -249,7 +249,24 @@ pub fn state_with_gateway(
     config: &Config,
     gateway: &ResolvedGateway,
 ) -> Result<AppState, StateError> {
-    compose(config, gateway, None)
+    compose(config, gateway, None, None)
+}
+
+/// [`state_with_gateway`] with the profile switch's sidecar restart bound
+/// replaced: the seam for a test that must trip the bound without
+/// waiting out the production value.
+///
+/// # Errors
+/// Returns [`StateError::Gateway`] if the HTTP client cannot be built,
+/// and [`StateError::Composition`] when a required contribution is
+/// absent after every subsystem has registered.
+#[cfg(feature = "test-fixtures")]
+pub fn state_with_gateway_and_restart_bound(
+    config: &Config,
+    gateway: &ResolvedGateway,
+    restart_bound: std::time::Duration,
+) -> Result<AppState, StateError> {
+    compose(config, gateway, None, Some(restart_bound))
 }
 
 /// [`state_with_gateway`] with one subsystem's `register` call removed:
@@ -265,15 +282,18 @@ pub fn state_with_gateway_omitting(
     gateway: &ResolvedGateway,
     omit: Omit,
 ) -> Result<AppState, StateError> {
-    compose(config, gateway, Some(omit))
+    compose(config, gateway, Some(omit), None)
 }
 
 /// The composition root behind [`state_with_gateway`]; `omit` removes
-/// one subsystem's `register` call for the boot-failure test.
+/// one subsystem's `register` call for the boot-failure test, and
+/// `restart_bound` replaces the sessions subsystem's sidecar restart
+/// bound when given.
 fn compose(
     config: &Config,
     gateway: &ResolvedGateway,
     omit: Option<Omit>,
+    restart_bound: Option<std::time::Duration>,
 ) -> Result<AppState, StateError> {
     let status = StatusBus::new();
     let catalog = CatalogBus::new();
@@ -351,7 +371,10 @@ fn compose(
         gateway_binding,
         SessionHost::new(registry.clone(), backoff.clone(), menu, catalog),
     );
-    let sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
+    let mut sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
+    if let Some(bound) = restart_bound {
+        sessions = sessions.with_restart_bound(bound);
+    }
     if omit != Some(Omit::Sessions) {
         let (routes, state) = workshop_sessions::register(&registry, &sessions, &agents);
         registrations.hold(routes);

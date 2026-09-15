@@ -8,18 +8,19 @@
 //! chat model: the menu validates the id against the retained catalog and
 //! publishes the fresh workbench snapshot, handled inline because a map
 //! lookup and a broadcast send cost microseconds; an unknown model is
-//! refused with an `error` frame. `{"type":"switch_profile","name":"..."}`
-//! starts a gateway profile switch: `begin_switch` publishes the pending
-//! snapshot (`switching` set, `chat_ready` false) before the frame
-//! handler returns, and the switch itself runs on its own task - it
-//! consumes the gateway's stage stream into determinate status-bar
-//! progress, refetches the profile state and model catalog, and settles
-//! the menu. A second switch while one runs is refused with an `error`
-//! frame. Both events echo an `id` on their refusals when the frame
-//! carried one. A frame that is not a well-formed menu event is answered
-//! with an `error` frame and the session continues. Chat itself lives on
-//! the `/agents/ws` socket ([`crate::agents`]); this endpoint
-//! carries no chat frames.
+//! refused with an `error` frame. `{"type":"switch_profile","name":...}`
+//! selects a gateway profile (`null` selects no profile): `begin_switch`
+//! publishes the pending snapshot (`switching` set, `chat_ready` false)
+//! before the frame handler returns, and the selection itself runs on
+//! its own task - it persists the selection on the gateway, restarts a
+//! supervised sidecar when the gateway must reload, reports each step as
+//! determinate status-bar progress, refetches the profile state and model
+//! catalog, and settles the menu. A second switch while one runs is
+//! refused with an `error` frame. Both events echo an `id` on their
+//! refusals when the frame carried one. A frame that is not a
+//! well-formed menu event is answered with an `error` frame and the
+//! session continues. Chat itself lives on the `/agents/ws` socket
+//! ([`crate::agents`]); this endpoint carries no chat frames.
 //!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer

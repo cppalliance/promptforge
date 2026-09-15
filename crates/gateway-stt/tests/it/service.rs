@@ -55,13 +55,13 @@ fn logical_realtime_model_requires_both_physical_roles() {
 )]
 fn selected_speech_config(models: &str, selected: &str) -> Config {
     Config::from_toml_str(&format!(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
          {models}\
          [[profile]]\nname = \"speech\"\nmodels = {selected}\n"
     ))
     .expect("speech catalog parses")
-    .select_profile(&ProfileName::parse("speech").expect("profile name"))
+    .select_profile(Some(&ProfileName::parse("speech").expect("profile name")))
     .expect("speech profile selects")
 }
 

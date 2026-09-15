@@ -308,14 +308,16 @@ async fn drive_no_alignment() {
     )
     .expect("scripted speech starts");
     let config = Config::from_toml_str(&format!(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\n\
          bind = \"127.0.0.1:0\"\n\
          api_key = \"{BEARER_SENTINEL}\"\n\
          trust_loopback = false\n"
     ))
     .expect("Gateway config parses");
-    let gateway = Gateway::new(&config, ProfilesContext::default()).with_speech_service(service);
+    let gateway = Gateway::new(&config, ProfilesContext::default())
+        .expect("Gateway assembles")
+        .with_speech_service(service);
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("mounted listener binds");

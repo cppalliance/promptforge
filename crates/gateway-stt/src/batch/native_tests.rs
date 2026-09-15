@@ -69,7 +69,7 @@ async fn verbose_round_trip_accepts_literal_timestamp_granularities_field() {
         .replace('\\', "/");
     let cache = dir.path().display().to_string().replace('\\', "/");
     let catalog = gateway_config::Config::from_toml_str(&format!(
-        "config-version = 2\n\
+        "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
          [local]\ncache_dir = {cache:?}\n\
          [workshop]\n\
@@ -79,7 +79,9 @@ async fn verbose_round_trip_accepts_literal_timestamp_granularities_field() {
     ))
     .expect("catalog parses");
     let config = catalog
-        .select_profile(&gateway_config::ProfileName::parse("work").expect("name"))
+        .select_profile(Some(
+            &gateway_config::ProfileName::parse("work").expect("name"),
+        ))
         .expect("profile selects");
     let service = native_runtime::start(config);
     let (boundary, body) = multipart_body(&wav_f32(&crate::test_fixtures::jfk_samples()));

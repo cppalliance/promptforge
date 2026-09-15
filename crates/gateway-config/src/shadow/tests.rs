@@ -1,7 +1,7 @@
 use super::*;
 
 const CONFIG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -22,6 +22,9 @@ name = "travel"
 models = []
 "#;
 
+const ACTIVE_PROFILE_REFUSED: &str =
+    "active_profile is not a configuration key; select a profile with POST /admin/switch-profile";
+
 fn write_config() -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let path = temp.path().join("gateway.toml");
@@ -29,10 +32,18 @@ fn write_config() -> (tempfile::TempDir, PathBuf) {
     (temp, path)
 }
 
+fn document(toml: &str) -> Value {
+    toml::from_str(toml).expect("document parses")
+}
+
+fn state_shadow(path: &Path) -> PathBuf {
+    shadow_path(&crate::profile_state_path(path))
+}
+
 #[test]
 fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
     let (_temp, path) = write_config();
-    write_shadow(&path, "config-version = 2\n").expect("stage shadow");
+    write_shadow(&path, "config-version = 0\n").expect("stage shadow");
 
     write_atomic(&path, "config-version = 3\n").expect("atomic write");
 
@@ -43,7 +54,7 @@ fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
     );
     assert_eq!(
         fs::read_to_string(shadow_path(&path)).expect("read shadow"),
-        "config-version = 2\n",
+        "config-version = 0\n",
         "the shadow is not consumed by a direct write"
     );
     let leftovers: Vec<_> = fs::read_dir(path.parent().expect("parent"))
@@ -56,32 +67,108 @@ fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
 }
 
 #[test]
-fn pending_document_splits_active_profile_into_state_shadow() {
+fn active_profile_in_the_pending_document_is_refused_and_writes_no_shadow() {
     let (_temp, path) = write_config();
-    let mut document: Value = toml::from_str(CONFIG).expect("fixture parses");
+    let mut document = document(CONFIG);
     document.as_table_mut().expect("table").insert(
         "active_profile".to_owned(),
         Value::String("work".to_owned()),
     );
 
+    let error = save_config_shadow(&path, document).expect_err("active_profile is refused");
+
+    assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
+    assert!(
+        error.to_string().contains(ACTIVE_PROFILE_REFUSED),
+        "the error names the switch route: {error}"
+    );
+    assert!(!shadow_path(&path).exists(), "no config shadow is written");
+    assert!(!state_shadow(&path).exists(), "no state shadow is written");
+}
+
+#[test]
+fn pending_save_writes_only_the_config_shadow() {
+    let (_temp, path) = write_config();
+
+    let shadows = save_config_shadow(&path, document(CONFIG)).expect("pending save");
+
+    assert_eq!(
+        shadows,
+        PendingShadows {
+            config: shadow_path(&path)
+        }
+    );
+    assert!(shadows.config.is_file());
+    assert!(!state_shadow(&path).exists());
+}
+
+#[test]
+fn pending_save_restores_redacted_secrets() {
+    let (_temp, path) = write_config();
+    let mut document = document(CONFIG);
+    document["server"]["api_key"] = Value::String("***".to_owned());
+
     let shadows = save_config_shadow(&path, document).expect("pending save");
 
-    assert_eq!(shadows.config, shadow_path(&path));
-    let state = shadows.state.expect("state shadow");
-    assert_eq!(state, shadow_path(&crate::profile_state_path(&path)));
-    assert_eq!(
-        fs::read_to_string(state).expect("read state"),
-        "active_profile = \"work\"\n"
-    );
     assert!(
-        !fs::read_to_string(shadows.config)
-            .expect("read config")
-            .contains("active_profile")
+        fs::read_to_string(shadows.config)
+            .expect("read shadow")
+            .contains("api_key = \"secret\""),
+        "the redacted secret is restored from the real file"
     );
 }
 
 #[test]
-fn pending_loader_prefers_pending_profile_state() {
+fn pending_save_rejects_invalid_profiles() {
+    let (_temp, path) = write_config();
+    let mut document = document(CONFIG);
+    document["profile"][1]["models"] = Value::Array(vec![Value::String("ghost".to_owned())]);
+
+    let error = save_config_shadow(&path, document).expect_err("unknown member fails");
+
+    assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
+    assert!(!shadow_path(&path).exists());
+}
+
+#[test]
+fn pending_save_accepts_a_document_that_drops_the_persisted_profile() {
+    let (_temp, path) = write_config();
+    fs::write(
+        crate::profile_state_path(&path),
+        "active_profile = \"work\"\n",
+    )
+    .expect("write state");
+    let candidate = CONFIG.replace("[[profile]]\nname = \"work\"\nmodels = [\"local\"]\n\n", "");
+
+    let shadows = save_config_shadow(&path, document(&candidate)).expect("stale state degrades");
+
+    assert!(shadows.config.is_file());
+}
+
+#[test]
+fn pending_loader_honors_a_supplied_selection() {
+    let (_temp, path) = write_config();
+
+    let config = load_pending_config(&path, &ProfileSelection::new(Some("travel"), None))
+        .expect("pending loads");
+
+    assert_eq!(config.active_profile().expect("selected").name(), "travel");
+    assert!(config.local_models().is_empty());
+}
+
+#[test]
+fn pending_loader_accepts_no_selection() {
+    let (_temp, path) = write_config();
+
+    let config = load_pending_config(&path, &ProfileSelection::default()).expect("pending loads");
+
+    assert!(config.active_profile().is_none());
+    assert!(config.local_models().is_empty());
+    assert!(config.stale_state_selection().is_none());
+}
+
+#[test]
+fn pending_loader_reads_the_state_file_and_ignores_a_state_shadow() {
     let (_temp, path) = write_config();
     fs::write(
         crate::profile_state_path(&path),
@@ -92,76 +179,42 @@ fn pending_loader_prefers_pending_profile_state() {
         &crate::profile_state_path(&path),
         "active_profile = \"travel\"\n",
     )
-    .expect("write state shadow");
+    .expect("write leftover state shadow");
 
     let config = load_pending_config(&path, &ProfileSelection::default()).expect("pending loads");
 
-    assert_eq!(config.active_profile().expect("selected").name(), "travel");
-    assert!(config.local_models().is_empty());
+    assert_eq!(config.active_profile().expect("selected").name(), "work");
+    assert_eq!(config.local_models().len(), 1);
 }
 
 #[test]
-fn pending_save_restores_redacted_secrets_and_rejects_invalid_profiles() {
-    let (_temp, path) = write_config();
-    let mut document: Value = toml::from_str(CONFIG).expect("config parses");
-    document["server"]["api_key"] = Value::String("***".to_owned());
-    document.as_table_mut().expect("table").insert(
-        "active_profile".to_owned(),
-        Value::String("missing".to_owned()),
-    );
-
-    let error = save_config_shadow(&path, document).expect_err("unknown profile fails");
-
-    assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
-    assert!(!shadow_path(&path).exists());
-}
-
-#[test]
-fn pending_save_validates_retained_profile_state() {
+fn pending_loader_degrades_a_stale_state_file_like_load() {
     let (_temp, path) = write_config();
     fs::write(
         crate::profile_state_path(&path),
-        "active_profile = \"work\"\n",
+        "active_profile = \"missing\"\n",
     )
     .expect("write state");
-    let candidate = CONFIG.replace("[[profile]]\nname = \"work\"\nmodels = [\"local\"]\n\n", "");
-    let document: Value = toml::from_str(&candidate).expect("candidate parses");
 
-    let error = save_config_shadow(&path, document).expect_err("stale state must fail");
+    let config = load_pending_config(&path, &ProfileSelection::default()).expect("pending loads");
+
+    assert!(config.active_profile().is_none());
+    assert_eq!(config.stale_state_selection(), Some("missing"));
+}
+
+#[test]
+fn pending_loader_rejects_an_undefined_ephemeral_selection() {
+    let (_temp, path) = write_config();
+
+    let error = load_pending_config(&path, &ProfileSelection::new(Some("missing"), None))
+        .expect_err("a typed override must name a defined profile");
 
     assert_eq!(error.kind(), crate::ConfigErrorKind::Validation);
-    assert!(error.to_string().contains("work"));
-    assert!(!shadow_path(&path).exists());
+    assert!(error.to_string().contains("missing"));
 }
 
 #[test]
-fn failed_state_write_rolls_back_config_shadow() {
-    let (_temp, path) = write_config();
-    let previous = CONFIG.replace(
-        "description = \"local model\"",
-        "description = \"previous\"",
-    );
-    write_shadow(&path, &previous).expect("write previous config shadow");
-    let mut document: Value = toml::from_str(CONFIG).expect("config parses");
-    document.as_table_mut().expect("table").insert(
-        "active_profile".to_owned(),
-        Value::String("work".to_owned()),
-    );
-    let state_shadow = shadow_path(&crate::profile_state_path(&path));
-    fs::create_dir(&state_shadow).expect("block state shadow with directory");
-
-    let error = save_config_shadow(&path, document).expect_err("state write must fail");
-
-    assert_eq!(error.kind(), crate::ConfigErrorKind::Write);
-    assert_eq!(
-        fs::read_to_string(shadow_path(&path)).expect("previous shadow remains"),
-        previous
-    );
-    assert!(state_shadow.is_dir());
-}
-
-#[test]
-fn pending_report_includes_config_and_active_profile_changes() {
+fn pending_report_lists_only_the_config_shadow() {
     let (_temp, path) = write_config();
     let state = crate::profile_state_path(&path);
     fs::write(&state, "active_profile = \"work\"\n").expect("write state");
@@ -170,30 +223,25 @@ fn pending_report_includes_config_and_active_profile_changes() {
         &CONFIG.replace("description = \"local model\"", "description = \"edited\""),
     )
     .expect("write config shadow");
-    write_shadow(&state, "active_profile = \"travel\"\n").expect("write state shadow");
+    write_shadow(&state, "active_profile = \"travel\"\n").expect("write leftover state shadow");
 
     let report = pending_report(&path).expect("report");
 
-    assert_eq!(report.shadowed_files, [path.clone(), state]);
-    assert_eq!(report.changed_sections, ["active_profile", "local_model"]);
+    assert_eq!(report.shadowed_files, std::slice::from_ref(&path));
+    assert_eq!(report.changed_sections, ["local_model"]);
 }
 
 #[test]
-fn immediate_persistence_preserves_an_unapplied_state_shadow() {
+fn persist_profile_state_replaces_the_real_state_file() {
     let (_temp, path) = write_config();
     let state = crate::profile_state_path(&path);
-    fs::write(&state, "active_profile = \"work\"\n").expect("write state");
-    write_shadow(&state, "active_profile = \"travel\"\n").expect("write pending state");
+    fs::write(&state, "active_profile = \"travel\"\n").expect("write state");
     let selected = ProfileName::parse("work").expect("profile name");
 
-    persist_profile_state(&path, &selected).expect("persist immediate selection");
+    persist_profile_state(&path, &selected).expect("persist selection");
 
     assert_eq!(
         fs::read_to_string(&state).expect("read real state"),
         "active_profile = \"work\"\n"
-    );
-    assert_eq!(
-        fs::read_to_string(shadow_path(&state)).expect("read pending state"),
-        "active_profile = \"travel\"\n"
     );
 }

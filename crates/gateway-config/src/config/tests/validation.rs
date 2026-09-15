@@ -5,7 +5,7 @@ use super::SAMPLE;
 fn rejects_remote_local_model_without_digest() {
     // ART-002: a remote (https) local_model source must be pinned by sha256.
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -25,7 +25,7 @@ context = 1024
 #[test]
 fn rejects_duplicate_endpoint_names() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -58,7 +58,7 @@ endpoints = ["dup"]
 #[test]
 fn rejects_model_naming_undefined_endpoint() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -85,7 +85,7 @@ endpoints = ["ghost"]
 #[test]
 fn rejects_model_with_no_endpoints() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -112,7 +112,7 @@ endpoints = []
 #[test]
 fn parses_web_search_tool_config() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -151,7 +151,7 @@ api_key = "secret-key"
 #[test]
 fn parses_web_search_tool_config_explicit_defaults() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -199,7 +199,7 @@ fn parses_config_without_tools_section() {
 #[test]
 fn rejects_legacy_stt_section() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -216,7 +216,7 @@ window_seconds = 8
 #[test]
 fn rejects_canonical_and_legacy_stt_sections_together() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -237,7 +237,7 @@ interval_ms = 250
 fn rejects_zero_stt_pipeline_bounds() {
     for field in ["window_seconds = 0", "interval_ms = 0"] {
         let toml = format!(
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n\
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n\
              [stt]\n{field}\n"
         );
         assert!(
@@ -263,7 +263,7 @@ fn rejects_legacy_queue_section() {
     // The legacy `[queue]` section is gone (absorbed into `[[dominion]]`);
     // `deny_unknown_fields` on the root DTO rejects it at parse time.
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -280,7 +280,7 @@ max_depth = 50
 #[test]
 fn rejects_legacy_device_section() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -321,7 +321,7 @@ fn rejects_legacy_local_model_device_and_lane() {
     for legacy_key in ["device = \"gpu0\"", "lane = \"generative\""] {
         let toml = format!(
             r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -344,7 +344,7 @@ context = 4096
 #[test]
 fn parses_local_model_with_defaults() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -376,7 +376,7 @@ thinking = "never"
 #[test]
 fn parses_local_model_knobs_and_cache_dir() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -412,7 +412,7 @@ n_predict = 256
 #[test]
 fn parses_local_backend_selection_and_server_path() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -432,7 +432,7 @@ llama_server_path = "/opt/llama/llama-server.exe"
 #[test]
 fn local_backend_defaults_to_auto_with_no_path_override() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -445,7 +445,7 @@ api_key = "t"
 #[test]
 fn rejects_an_unknown_local_backend() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -459,7 +459,7 @@ llama_backend = "tensorrt"
 #[test]
 fn rejects_duplicate_name_across_remote_and_local() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -492,7 +492,7 @@ context = 4096
 #[test]
 fn rejects_invalid_local_model_sha256() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -513,7 +513,7 @@ context = 4096
 #[test]
 fn rejects_empty_local_model_source() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -533,7 +533,7 @@ context = 4096
 #[test]
 fn parses_dominions_and_bindings() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -598,7 +598,7 @@ vram_gb = 14
 #[test]
 fn dominion_defaults_apply() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -619,7 +619,7 @@ kind = "remote"
 #[test]
 fn rejects_empty_dominion_id() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -637,7 +637,7 @@ kind = "remote"
 #[test]
 fn rejects_duplicate_dominion_id() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -659,7 +659,7 @@ kind = "local"
 #[test]
 fn rejects_zero_dominion_max_concurrency() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -678,7 +678,7 @@ max_concurrency = 0
 #[test]
 fn rejects_zero_dominion_max_queue() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -699,7 +699,7 @@ fn rejects_remote_dominion_with_vram_gb() {
     // Kind-incompatible payloads are rejected, same spirit as CFG-004: a VRAM
     // budget is meaningful only for a local GPU.
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -718,7 +718,7 @@ vram_gb = 24
 #[test]
 fn rejects_endpoint_naming_undefined_dominion() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -746,7 +746,7 @@ endpoints = ["e"]
 #[test]
 fn rejects_endpoint_naming_local_dominion() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -778,7 +778,7 @@ endpoints = ["e"]
 #[test]
 fn rejects_local_model_naming_undefined_dominion() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -799,7 +799,7 @@ dominion = "missing"
 #[test]
 fn rejects_local_model_naming_remote_dominion() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -824,7 +824,7 @@ dominion = "runpod-pool"
 #[test]
 fn rejects_zero_local_model_parallel() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -845,7 +845,7 @@ parallel = 0
 #[test]
 fn rejects_vram_budget_overflow() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -895,7 +895,7 @@ fn rejects_bound_model_without_vram_estimate() {
     // Budgets must be complete to be meaningful: a model bound to a budgeted
     // dominion without its own estimate is an error.
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -942,7 +942,7 @@ models = ["a", "b"]
 #[test]
 fn accepts_exact_vram_fit() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -981,7 +981,7 @@ fn accepts_fractional_local_model_vram_estimate() {
     // decimals, e.g. 1.22 for a 1.2 GiB download. A u32 schema rejected
     // that for every non-whole-GiB model (workshop finding 30).
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1012,7 +1012,7 @@ fn rejects_non_positive_local_model_vram_estimate() {
     for value in ["0.0", "-1.0", "nan", "inf"] {
         let toml = format!(
             r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1040,7 +1040,7 @@ fn accepts_bound_models_when_dominion_has_no_budget() {
     // A local dominion without vram_gb imposes no co-residency obligation:
     // bound models need no estimate.
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1067,10 +1067,11 @@ vram_gb = 14
     assert!(Config::parse_toml(toml).is_ok());
 }
 
-#[test]
-fn selected_profile_filters_each_catalog_kind() {
-    let toml = r#"
-config-version = 2
+/// One remote, one local, and one STT model, plus a profile over `models`.
+fn mixed_catalog_with_profile(models: &str) -> String {
+    format!(
+        r#"
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1103,16 +1104,61 @@ vram_gb = 1.0
 
 [[profile]]
 name = "work"
-models = ["remote", "interim"]
-"#;
-    let catalog = Config::from_toml_str(toml).expect("catalog parses");
+models = {models}
+"#
+    )
+}
+
+#[test]
+fn selected_profile_narrows_local_and_stt_and_serves_every_remote_model() {
+    let toml = mixed_catalog_with_profile("[\"interim\"]");
+    let catalog = Config::from_toml_str(&toml).expect("catalog parses");
     let selected = catalog
-        .select_profile(&crate::ProfileName::parse("work").expect("profile name"))
+        .select_profile(Some(
+            &crate::ProfileName::parse("work").expect("profile name"),
+        ))
         .expect("profile selects");
+    assert_eq!(selected.models().len(), catalog.models().len());
     assert_eq!(selected.models()[0].name(), "remote");
     assert!(selected.local_models().is_empty());
     assert_eq!(selected.stt_models()[0].name(), "interim");
     assert_eq!(selected.catalog_local_models()[0].name(), "local");
+    assert_eq!(selected.catalog_stt_models()[0].name(), "interim");
+}
+
+#[test]
+fn selecting_no_profile_serves_remote_models_and_nothing_local() {
+    let toml = mixed_catalog_with_profile("[\"local\", \"interim\"]");
+    let catalog = Config::from_toml_str(&toml).expect("catalog parses");
+    let selected = catalog.select_profile(None).expect("no profile selects");
+    assert!(selected.active_profile().is_none());
+    assert_eq!(selected.models()[0].name(), "remote");
+    assert!(selected.local_models().is_empty());
+    assert!(selected.stt_models().is_empty());
+    assert_eq!(selected.catalog_local_models()[0].name(), "local");
+    assert_eq!(selected.catalog_stt_models()[0].name(), "interim");
+}
+
+#[test]
+fn profile_listing_a_remote_model_names_the_profile_and_model() {
+    let toml = mixed_catalog_with_profile("[\"remote\", \"local\"]");
+    match Config::parse_toml(&toml) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(
+                message.contains("profile \"work\""),
+                "profile named: {message}"
+            );
+            assert!(
+                message.contains("remote model \"remote\""),
+                "remote model named: {message}"
+            );
+            assert!(
+                message.contains("remote models are always served"),
+                "boundary explained: {message}"
+            );
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1122,6 +1168,10 @@ fn every_profile_reference_must_exist() {
         Err(ConfigError::Validation(message)) => {
             assert!(message.contains("unused"), "profile named: {message}");
             assert!(message.contains("ghost"), "missing model named: {message}");
+            assert!(
+                message.contains("undefined catalog model"),
+                "unknown names keep the undefined-model error: {message}"
+            );
         }
         other => panic!("expected a validation error, got {other:?}"),
     }
@@ -1133,7 +1183,7 @@ fn unselected_catalog_entries_still_validate_references() {
         "{SAMPLE}\n\
          [[model]]\nname = \"dangling\"\ndescription = \"prose\"\ncontext = 1\n\
          upstream = \"u\"\nendpoints = [\"ghost\"]\n\
-         [[profile]]\nname = \"work\"\nmodels = [\"m1\"]\n"
+         [[profile]]\nname = \"work\"\nmodels = []\n"
     );
     assert!(matches!(
         Config::parse_toml(&toml),
@@ -1146,7 +1196,7 @@ fn unselected_catalog_entries_still_validate_references() {
 fn overbooked_catalog_with_profile(models: &str) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1203,7 +1253,7 @@ fn any_overbooked_profile_rejects_the_whole_catalog() {
 fn stt_profile_config(entries: &str, models: &str) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1236,11 +1286,15 @@ fn profile_names_and_membership_are_unique() {
         Err(ConfigError::Validation(message)) if message.contains("../work")
     ));
 
-    let duplicate_member =
-        format!("{SAMPLE}\n[[profile]]\nname = \"work\"\nmodels = [\"m1\", \"m1\"]\n");
+    let duplicate_member = format!(
+        "{SAMPLE}\n\
+         [[local_model]]\nname = \"q\"\ndescription = \"prose\"\n\
+         source = \"/models/q.gguf\"\ncontext = 4096\n\
+         [[profile]]\nname = \"work\"\nmodels = [\"q\", \"q\"]\n"
+    );
     assert!(matches!(
         Config::parse_toml(&duplicate_member),
-        Err(ConfigError::Validation(message)) if message.contains("duplicate model m1")
+        Err(ConfigError::Validation(message)) if message.contains("duplicate model q")
     ));
 }
 
@@ -1381,7 +1435,7 @@ fn stt_catalog_validates_source_pin_vram_and_dominion() {
 fn config_with_endpoint(endpoint_block: &str) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1456,7 +1510,7 @@ api_key = """#
 fn config_with_web_search_knobs(freshness: &str, safesearch: &str) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1527,7 +1581,7 @@ fn accepts_valid_web_search_knobs() {
 fn rejects_web_search_non_url_base() {
     // CFG-006: the base URL is parsed, not prefix-matched.
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1563,7 +1617,7 @@ base_url = "https://"
 fn catalog_with_model_kind(kind: &str, extra: &str) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1591,7 +1645,7 @@ endpoints = ["e"]
 fn catalog_with_local_model_kind(kind: &str, extra: &str) -> String {
     format!(
         r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"

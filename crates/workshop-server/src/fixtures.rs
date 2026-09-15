@@ -1,5 +1,7 @@
 //! Integration-test seams that exercise Workshop behavior in-process.
 
+#[cfg(feature = "test-fixtures")]
+pub use crate::app::state_with_gateway_and_restart_bound;
 pub use crate::app::{Omit, state_with_gateway, state_with_gateway_omitting};
 pub use crate::catalog::CatalogBus;
 pub use crate::heartbeat::{GatewayHealth, Heartbeat};

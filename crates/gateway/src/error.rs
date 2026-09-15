@@ -84,10 +84,6 @@ pub(crate) enum GatewayError {
     #[error("upstream unavailable")]
     UpstreamUnavailable,
 
-    /// A bounded profile-switch drain expired and cancelled the request.
-    #[error("request cancelled for profile switch")]
-    RequestCancelled,
-
     /// The named model is configured but not yet loaded, and a queue command
     /// (carried in the message) is working on the routing table. Maps to 503
     /// so a client can retry once the active command completes.
@@ -95,11 +91,10 @@ pub(crate) enum GatewayError {
     #[error("model provisioning in progress: {0}")]
     ModelProvisioning(String),
 
-    /// The named local model belongs to the profile being switched to and
-    /// is downloading or spawning: the switch has already published the
-    /// profile's remote models, and this one follows once its child is
-    /// ready. Maps to 503 with `Retry-After` so a client waits briefly
-    /// instead of treating the model as missing.
+    /// The named local model belongs to the boot profile and its child is
+    /// spawning: the remote models already serve, and this one follows
+    /// once its child is ready. Maps to 503 with `Retry-After` so a client
+    /// waits briefly instead of treating the model as missing.
     #[non_exhaustive]
     #[error("model is loading: {0}")]
     ModelLoading(String),
@@ -110,13 +105,15 @@ pub(crate) enum GatewayError {
     #[error("command cancelled: {0}")]
     CommandCancelled(String),
 
-    /// `POST /admin/switch-profile` named a profile that is not on disk.
+    /// `POST /admin/switch-profile` named a profile the live catalog does
+    /// not define; the message names the profiles it does.
     #[non_exhaustive]
     #[error("profile not found: {0}")]
     ProfileNotFound(String),
 
-    /// Profile reload failed at a named stage; the underlying cause is
-    /// preserved via `source()` rather than flattened into a string.
+    /// A command (the boot load, an apply, an unload) failed at a named
+    /// stage; the underlying cause is preserved via `source()` rather than
+    /// flattened into a string.
     #[non_exhaustive]
     #[error("switch profile failed at {stage}")]
     SwitchFailed {
@@ -139,10 +136,6 @@ pub(crate) enum GatewayError {
         /// Failed model names and their startup errors.
         failed: Vec<String>,
     },
-
-    /// An operation required a selected profile, but none is active.
-    #[error("active profile not configured")]
-    ActiveProfileUnavailable,
 
     /// A file-backed admin route was reached without a known config path.
     #[error("config path not configured")]
@@ -238,6 +231,32 @@ pub(crate) enum GatewayError {
     #[error("cloud provider model sheet is still downloading")]
     CloudModelsLoading,
 
+    /// The cloud provider model sheet download announced a body over the
+    /// gateway's JSON body cap, so the read was refused before the body
+    /// allocated. Maps to 502 like every other sheet download failure.
+    #[non_exhaustive]
+    #[error("cloud provider model sheet announced a {announced} byte body over the {cap} byte cap")]
+    CloudModelsBodyTooLarge {
+        /// The body size the response's `Content-Length` announced.
+        announced: u64,
+        /// The cap the download refused to exceed, in bytes.
+        cap: usize,
+    },
+
+    /// The cloud provider model sheet parsed but declared a schema
+    /// version this gateway does not accept; the message carries both
+    /// versions. Maps to 502 like every other sheet download failure.
+    #[non_exhaustive]
+    #[error(
+        "cloud provider model sheet schema version {found} is not accepted; this gateway accepts version {accepted}"
+    )]
+    CloudModelsSchemaVersion {
+        /// The schema version the sheet declared.
+        found: u32,
+        /// The schema version this gateway accepts.
+        accepted: u32,
+    },
+
     /// No cloud provider model sheet is available and the last download
     /// or cache write failed; the message carries the failure.
     #[non_exhaustive]
@@ -289,7 +308,8 @@ impl GatewayError {
         GatewayError::Protocol(ProtocolError::upstream_protocol(source))
     }
 
-    /// Wrap a profile-switch failure at `stage`, preserving the cause.
+    /// Wrap a command failure (the boot load, an apply, an unload) at
+    /// `stage`, preserving the cause.
     #[must_use]
     pub(crate) fn switch_failed(
         stage: &'static str,
@@ -382,11 +402,6 @@ impl GatewayError {
                 "server_error",
                 "upstream_unavailable",
             ),
-            GatewayError::RequestCancelled => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "server_error",
-                "profile_switch",
-            ),
             GatewayError::ModelProvisioning(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
@@ -417,11 +432,6 @@ impl GatewayError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "partial_start",
-            ),
-            GatewayError::ActiveProfileUnavailable => (
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                "active_profile_unavailable",
             ),
             GatewayError::ConfigPathUnavailable => (
                 StatusCode::BAD_REQUEST,
@@ -495,6 +505,16 @@ impl GatewayError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "cloud_models_loading",
+            ),
+            GatewayError::CloudModelsBodyTooLarge { .. } => (
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                "cloud_models_body_too_large",
+            ),
+            GatewayError::CloudModelsSchemaVersion { .. } => (
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                "cloud_models_schema_version",
             ),
             GatewayError::CloudModelsUnavailable(_) => (
                 StatusCode::BAD_GATEWAY,
@@ -666,8 +686,9 @@ mod tests {
     #[test]
     fn only_a_loading_model_carries_retry_after() {
         // A loading model is a 503 the client should wait out, so its
-        // response names the wait; the other 503s (a full queue, a cancelled
-        // request) promise nothing about when they clear and carry none.
+        // response names the wait; the other 503s (a full queue, a model
+        // still provisioning) promise nothing about when they clear and
+        // carry none.
         let response = GatewayError::ModelLoading("local-model".to_owned()).into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
@@ -679,7 +700,7 @@ mod tests {
         );
         for error in [
             GatewayError::QueueFull,
-            GatewayError::RequestCancelled,
+            GatewayError::CommandCancelled("load-profile: main".to_owned()),
             GatewayError::ModelProvisioning("load-profile: main".to_owned()),
             GatewayError::UnknownModel("ghost".to_owned()),
         ] {
@@ -768,6 +789,28 @@ mod tests {
                     StatusCode::BAD_GATEWAY,
                     "server_error",
                     "cloud_models_unavailable",
+                ),
+            ),
+            (
+                GatewayError::CloudModelsBodyTooLarge {
+                    announced: 5_000_000,
+                    cap: 4_194_304,
+                },
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "server_error",
+                    "cloud_models_body_too_large",
+                ),
+            ),
+            (
+                GatewayError::CloudModelsSchemaVersion {
+                    found: 2,
+                    accepted: 1,
+                },
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "server_error",
+                    "cloud_models_schema_version",
                 ),
             ),
         ];

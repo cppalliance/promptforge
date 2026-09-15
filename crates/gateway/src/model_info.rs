@@ -152,7 +152,7 @@ mod tests {
     fn cache_config(cache_dir: &Path) -> Config {
         Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

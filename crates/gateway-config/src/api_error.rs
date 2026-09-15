@@ -19,7 +19,7 @@ use crate::error::ConfigError as ConfigErrorRepr;
 /// use gateway_config::{Config, ConfigErrorKind};
 ///
 /// let err =
-///     Config::from_toml_str("config-version = 2\nthis is not valid = = toml").unwrap_err();
+///     Config::from_toml_str("config-version = 0\nthis is not valid = = toml").unwrap_err();
 /// assert_eq!(err.kind(), ConfigErrorKind::Parse);
 /// ```
 #[non_exhaustive]

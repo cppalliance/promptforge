@@ -323,10 +323,12 @@ test("Download stages a pending model without touching the cache", async () => {
   assert.equal(entry.sha256, "1".repeat(64), "the pending entry carries the LFS digest");
   assert.equal(entry.vram_gb, 10, "the pending entry carries the listing size as VRAM");
   assert.equal(entry.kind, "chat");
+  // This stub defines no profiles, so the persisted "default" is stale
+  // and the model can only join the catalog.
   assert.match(
     dom.window.document.querySelector(".toast")?.textContent ?? "",
-    /Apply to download/,
-    "the toast explains that Apply owns the transfer",
+    /added to the catalog - the selected profile default is not defined/,
+    "the toast says the model joined the catalog alone and why",
   );
   assert.equal(
     stub.calls.some((call) => call.url.endsWith("/v1/cache") && call.init.method === "POST"),

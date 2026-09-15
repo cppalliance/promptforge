@@ -161,9 +161,10 @@ const profileMenu: ProfileMenuService = {
     return workbenchService.snapshot.switching ?? "";
   },
   onDidChange: workbenchService.onDidChangeSnapshot,
-  switchTo(name: string): void {
+  switchTo(name: string | null): void {
     if (!workshopSocket.switchProfile(name)) {
-      statusBar.showLocal(`Could not switch to ${name}: the workshop socket is down`, "error");
+      const target = name === null ? "no profile" : name;
+      statusBar.showLocal(`Could not switch to ${target}: the workshop socket is down`, "error");
     }
   },
 };

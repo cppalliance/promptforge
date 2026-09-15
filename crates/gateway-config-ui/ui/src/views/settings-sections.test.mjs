@@ -236,10 +236,13 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
     root.querySelector(".banner-restart").hidden,
     "the backend reports no process-owned restart",
   );
-  const sttToasts = [...root.querySelectorAll(".toast")].filter(
-    (toast) => toast.textContent === "Restart the Gateway to apply speech-to-text changes.",
+  assert.equal(
+    [...root.querySelectorAll(".toast")].filter((toast) =>
+      /speech-to-text/.test(toast.textContent),
+    ).length,
+    0,
+    "the browser raises no speech toast of its own; the apply outcome decides",
   );
-  assert.equal(sttToasts.length, 1, "the staged speech tuning asks for a restart once");
 });
 
 test("a canonical STT payload round-trips through the Workshop editor", async () => {

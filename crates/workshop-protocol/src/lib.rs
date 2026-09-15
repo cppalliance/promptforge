@@ -31,12 +31,13 @@
 //! menu validates the id against the retained catalog and publishes a
 //! fresh [`WorkbenchFrame`] on success; an unknown model is refused
 //! with an `error` frame. `{"type":"switch_profile","name":"..."}`
-//! starts a gateway profile switch: the pending snapshot publishes
-//! immediately, stage progress arrives as [`StatusFrame`]s, and the
-//! settled menu publishes a final [`WorkbenchFrame`] and a
-//! [`CatalogFrame`]; a switch requested while one runs is refused with
-//! an `error` frame. Both events may carry an optional `id`, echoed on
-//! the `error` frame that refuses them.
+//! ([`SwitchProfileFrame`]) selects a gateway profile, `null` selecting
+//! no profile: the pending snapshot publishes immediately, the steps of
+//! the selection arrive as [`StatusFrame`]s, and the settled menu
+//! publishes a final [`WorkbenchFrame`] and a [`CatalogFrame`]; a switch
+//! requested while one runs is refused with an `error` frame. Both
+//! events may carry an optional `id`, echoed on the `error` frame that
+//! refuses them.
 //!
 //! No inbound frame is pushed by the server, so none takes a delivery
 //! classification; the reply frames they trigger are classified below.
@@ -131,6 +132,7 @@ mod agent;
 mod catalog;
 mod error;
 mod input;
+mod menu;
 mod status;
 mod workbench;
 
@@ -138,5 +140,6 @@ pub use agent::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, AgentSessionFr
 pub use catalog::{CatalogFrame, CatalogPush, is_chat_capable};
 pub use error::{ErrorEnvelope, ErrorFrame};
 pub use input::{InputFrame, InputResponse};
+pub use menu::SwitchProfileFrame;
 pub use status::{Activity, Progress, Severity, StatusBarUpdate, StatusFrame};
 pub use workbench::{WorkbenchFrame, WorkbenchSnapshot};

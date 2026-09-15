@@ -6,7 +6,7 @@
 - [Local Models](04-local-models.md)
 - [Speech-to-Text](05-speech.md)
 - [Speech Synthesis](06-speech-synthesis.md)
-- [Profiles and Switching](07-profiles.md)
+- [Profiles and Selection](07-profiles.md)
 - [Dominions and Queues](08-dominions.md)
 - [Editing Configuration Safely](09-editing-configuration.md)
 - [The Configuration UI](10-config-ui.md)

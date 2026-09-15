@@ -56,6 +56,16 @@ impl GatewayProcess {
             .expect("the Gateway race fixture spawns")
     }
 
+    /// Starts the production binary with `profile` as its `--profile`, or
+    /// with no `--profile` at all, so the boot resolves the selection from
+    /// the environment and the sibling state file the way a restart does.
+    pub(crate) fn spawn_selecting(config: &Path, home: &Path, profile: Option<&str>) -> Self {
+        Self::command_selecting(config, home, profile)
+            .spawn()
+            .map(|child| Self { child })
+            .expect("the Gateway fixture spawns")
+    }
+
     /// Starts the production binary paused immediately before lease
     /// acquisition until `release` exists.
     #[cfg(feature = "test-fixtures")]
@@ -99,16 +109,21 @@ impl GatewayProcess {
     }
 
     fn spawn_command(config: &Path, home: &Path) -> Command {
+        Self::command_selecting(config, home, Some("main"))
+    }
+
+    fn command_selecting(config: &Path, home: &Path, profile: Option<&str>) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"));
+        command.arg("--config").arg(config);
+        if let Some(profile) = profile {
+            command.arg("--profile").arg(profile);
+        }
         command
-            .arg("--config")
-            .arg(config)
-            .arg("--profile")
-            .arg("main")
             .arg("--print-url")
             .env("USERPROFILE", home)
             .env("HOME", home)
             .env_remove("RUST_LOG")
+            .env_remove("PROMPTFORGE_PROFILE")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -439,7 +454,7 @@ pub(crate) async fn recording_backend() -> (SocketAddr, Recorder) {
 pub(crate) fn gateway_config(backend: SocketAddr) -> Config {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -494,7 +509,7 @@ pub(crate) async fn fake_brave() -> SocketAddr {
 pub(crate) async fn gateway_with_web_search(brave: SocketAddr) -> TestServer {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -560,7 +575,7 @@ pub(crate) async fn gateway_with_queue(
 ) -> TestServer {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

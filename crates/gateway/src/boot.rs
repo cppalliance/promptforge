@@ -523,7 +523,7 @@ fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
         InstallerStt::Omitted => ("", "[]"),
     };
     format!(
-        r#"config-version = 2
+        r#"config-version = 0
 
 # PromptForge gateway configuration
 # Generated on first run. Edit as needed.
@@ -712,6 +712,11 @@ mod tests {
             &gateway_config::ProfileSelection::new(None, None),
         )
         .expect("the generated config boots with no profile flags");
+        assert_eq!(
+            config.config_version(),
+            0,
+            "the first-run default declares the pre-release format version"
+        );
         assert_eq!(
             config
                 .active_profile()

@@ -185,11 +185,12 @@ export class WorkshopSocket extends Disposable {
   }
 
   /**
-   * Sends one `switch_profile` event frame starting a gateway profile
-   * switch. The failure contract matches `selectModel`: false when the
-   * socket is down, nothing sent.
+   * Sends one `switch_profile` event frame selecting a gateway profile,
+   * or no profile for `null` (an explicit `null` name on the wire). The
+   * failure contract matches `selectModel`: false when the socket is
+   * down, nothing sent.
    */
-  switchProfile(name: string): boolean {
+  switchProfile(name: string | null): boolean {
     return this.sendFrame({ type: "switch_profile", name });
   }
 

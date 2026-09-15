@@ -107,6 +107,48 @@ fn configured_gateway_has_no_shutdown_authority() {
 }
 
 #[test]
+fn a_sidecar_snapshot_posts_the_authenticated_shutdown_itself() {
+    let mut gateway = crate::test_gateway::ValidatedGateway::spawn("snapshot-key");
+    let identity = validated_connection(
+        &gateway,
+        "snapshot-key",
+        1_778_000_001,
+        "2026-09-07T18:00:01Z",
+    );
+    let base_url = format!("http://127.0.0.1:{}", identity.port());
+    let binding = GatewayBinding::new_with_identity(&base_url, "snapshot-key", Some(identity))
+        .expect("binding builds");
+    let snapshot = binding.snapshot();
+
+    assert!(snapshot.is_sidecar());
+    assert!(
+        snapshot
+            .request_shutdown()
+            .expect("the authenticated shutdown is accepted"),
+        "a sidecar snapshot reports the shutdown it sent"
+    );
+    assert!(
+        gateway.received_shutdown(FIXTURE_PHASE_TIMEOUT),
+        "the shutdown reaches the gateway the snapshot's identity names"
+    );
+}
+
+#[test]
+fn a_configured_snapshot_sends_no_shutdown_and_reports_false() {
+    let binding =
+        GatewayBinding::new("http://192.0.2.10:8080", "configured-key").expect("binding builds");
+    let snapshot = binding.snapshot();
+
+    assert!(!snapshot.is_sidecar());
+    assert!(
+        !snapshot
+            .request_shutdown()
+            .expect("a configured Gateway is an intentional no-op"),
+        "without a validated identity there is nothing to shut down"
+    );
+}
+
+#[test]
 fn publication_close_preserves_shutdown_authority_for_the_current_snapshot() {
     let mut gateway = crate::test_gateway::ValidatedGateway::spawn("current-key");
     let current = validated_connection(

@@ -14,8 +14,8 @@
 //! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
 //! gateway-owned local generative inference via a managed `llama-server`
 //! subprocess (`[[local_model]]`), named profile checklists from one loaded
-//! catalog with bounded-drain `POST /admin/switch-profile` streaming its
-//! existing stages over SSE, a bearer-authed `GET /admin/status` readout
+//! catalog with `POST /admin/switch-profile` persisting the selection and
+//! reporting `restart_required`, a bearer-authed `GET /admin/status` readout
 //! carrying the command queue's active and pending commands plus one
 //! readiness entry per capability endpoint, bearer-authed
 //! `POST /admin/queue/cancel` and `POST /admin/queue/cancel-pending`
@@ -57,7 +57,7 @@
 //! host OS file manager at a path confined to the artifact cache, a
 //! bearer-authed `GET /admin/cloud-models` readout of the cached cloud
 //! provider model sheet (with `POST /admin/cloud-models/refresh` forcing
-//! a background re-download), a loopback-only, bearer-authed
+//! a re-download and answering with the fresh sheet), a loopback-only, bearer-authed
 //! `POST /shutdown` driving the same
 //! graceful shutdown Ctrl-C drives - and
 //! `GET /health`. The whole admin config surface (config read/write, env,
@@ -83,6 +83,7 @@
 mod api_error;
 mod auth;
 mod boot;
+mod boot_load;
 #[cfg(feature = "local")]
 mod cache;
 #[cfg(feature = "local")]
@@ -94,7 +95,6 @@ mod config_pending;
 mod config_write;
 mod diagnostics;
 mod dialect;
-mod drain;
 mod env_file;
 mod error;
 mod handoff;
@@ -102,7 +102,6 @@ mod hf;
 mod model_info;
 #[cfg(feature = "local")]
 mod orphans;
-mod profile_switch;
 mod relaunch;
 mod render;
 mod reveal;
@@ -127,12 +126,11 @@ pub(crate) use gateway_routing::queue;
 pub(crate) use gateway_local as local;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
-pub use crate::diagnostics::diagnostics_json;
 #[cfg(not(feature = "local"))]
-pub(crate) use crate::profile_switch::LOCAL_MODELS_UNSUPPORTED;
+pub(crate) use crate::boot_load::LOCAL_MODELS_UNSUPPORTED;
 #[cfg(not(feature = "stt"))]
-pub(crate) use crate::profile_switch::STT_RUNTIME_UNAVAILABLE;
-pub(crate) use crate::profile_switch::StatePersistence;
+pub(crate) use crate::boot_load::STT_RUNTIME_UNAVAILABLE;
+pub use crate::diagnostics::diagnostics_json;
 pub use crate::relaunch::{GatewayStartup, GatewayStartupError, settle_gateway_startup};
 pub use crate::runner::{
     Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, run_printing_url, spawn,
@@ -178,10 +176,10 @@ use gateway_protocol::ProtocolError;
 use gateway_stt::SpeechService;
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
-use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
+use shared_progress::{EventState, ProgressEvent, ProgressHub};
 
-/// Mutable live configuration held behind a lock so profile switches can swap
-/// routing and local children without rebuilding the axum router.
+/// Mutable live configuration held behind a lock so the boot load and a
+/// config apply can swap routing without rebuilding the axum router.
 #[derive(Debug)]
 struct LiveState {
     routing: Arc<Routing>,
@@ -191,8 +189,15 @@ struct LiveState {
     /// `[server]` is process-owned, so a change takes effect on restart.
     trust_loopback: bool,
     /// The running configuration, retained so `GET /admin/config` can render
-    /// it; swapped with the rest of the live state on a profile switch.
+    /// it; swapped (with the routing table) by a config apply, which
+    /// publishes the applied document with no profile selected;
+    /// `profile_name` alone names the running profile.
     config: Arc<Config>,
+    /// The declared VRAM of the speech-to-text models the boot selection
+    /// loaded, summed at assembly. The speech runtime is fixed for the
+    /// process lifetime while `config` is swapped by every apply, so the
+    /// status readout keeps its own copy.
+    stt_vram_gb: f64,
     #[cfg(feature = "web-search")]
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
@@ -200,34 +205,42 @@ struct LiveState {
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
     model_allowlist: Option<Vec<String>>,
-    /// Local models of the profile being switched to whose children are
-    /// still downloading or spawning. Published with the interim routing
-    /// table at cut-over and cleared by the commit or by the switch
-    /// failing, so a request for one of them earns
-    /// [`GatewayError::ModelLoading`] instead of a 404 while the switch
-    /// runs, and never afterwards.
+    /// Local models of the boot profile whose children are spawning.
+    /// Published by the boot load once their artifacts are staged and
+    /// cleared by its commit or its failure, so a request for one of them
+    /// earns [`GatewayError::ModelLoading`] instead of a 404 while the
+    /// spawn runs, and never afterwards.
     loading: BTreeSet<String>,
 }
 
 impl LiveState {
     /// The number of models in the live routing table and the declared VRAM
-    /// total of the active local and STT models, for the tray's status line
-    /// and `GET /admin/status`.
+    /// total of the running local children and the boot STT selection, for
+    /// the tray's status line and `GET /admin/status`.
+    ///
+    /// The local total is derived from the children the runtime holds,
+    /// looked up by name in the catalog for their declaration, not from the
+    /// config's selected subset: an apply swaps `config` for a document
+    /// parsed with no selection while the children keep running.
     fn model_status(&self) -> (usize, f64) {
         let models = self.routing.models().len();
-        let vram_gb = self
-            .config
-            .local_models()
-            .iter()
-            .filter_map(gateway_config::LocalModelConfig::vram_gb)
-            .sum::<f64>()
-            + self
-                .config
-                .stt_models()
+        #[cfg(feature = "local")]
+        let local_vram_gb = {
+            let declared = self.config.catalog_local_models();
+            self.local
+                .models()
                 .iter()
-                .map(gateway_config::SttModelConfig::vram_gb)
-                .sum::<f64>();
-        (models, vram_gb)
+                .filter_map(|running| {
+                    declared
+                        .iter()
+                        .find(|model| model.name() == running.name)
+                        .and_then(gateway_config::LocalModelConfig::vram_gb)
+                })
+                .sum::<f64>()
+        };
+        #[cfg(not(feature = "local"))]
+        let local_vram_gb = 0.0;
+        (models, local_vram_gb + self.stt_vram_gb)
     }
 }
 
@@ -238,8 +251,8 @@ struct AdminConfig {
 }
 
 /// What the active profile selected: its name and its `models` allowlist.
-/// Both are reported by `GET /admin/status` and swapped together on a
-/// profile switch.
+/// Both are reported by `GET /admin/status` and fixed at assembly for the
+/// process lifetime.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProfileSelection {
     /// The active profile name.
@@ -248,37 +261,27 @@ pub(crate) struct ProfileSelection {
     pub(crate) model_allowlist: Option<Vec<String>>,
 }
 
-#[cfg(all(test, feature = "local"))]
-type LocalRuntimeRestarter = fn(&Config) -> LocalRuntime;
-
 /// Shared handler state: live routing/key/local runtime, configuration path,
-/// and switch coordination.
+/// and command coordination.
 #[derive(Debug, Clone)]
 pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
     config: Option<Arc<AdminConfig>>,
     /// Process-lifetime identifier used by the config UI to detect a restart.
     config_generation: Arc<str>,
-    /// Serializes profile switches so two concurrent switches cannot interleave
-    /// their reads and writes of the live state. Inference registration takes
-    /// this same lock before entering the in-flight set.
-    switch: Arc<tokio::sync::Mutex<()>>,
-    /// Inference requests that must drain before local children stop.
-    in_flight: Arc<drain::InFlight>,
     /// Protects shadow-file consistency: the census-and-capture step of
     /// `POST /admin/config-apply`, the Apply command's commit,
-    /// `POST /admin/config-revert`, and every shadow-writing `PUT` save
-    /// serialize on it, so Apply only captures shadow combinations the
-    /// latest save validated whole and never half-promotes one. Profile
-    /// publication and pending reads also take it, so no reader can observe
-    /// authoritative files from one profile with the prior live snapshot.
-    /// Held for those short steps only, never across a download.
+    /// `POST /admin/config-revert`, every shadow-writing `PUT` save, and
+    /// the switch route's state write serialize on it, so Apply only
+    /// captures shadow combinations the latest save validated whole, never
+    /// half-promotes one, and no pending read observes a half-written
+    /// selection. Held for those short steps only, never across a download.
     apply: Arc<tokio::sync::Mutex<()>>,
     /// The process-lifetime progress broker: operations attach trees for
     /// their own lifetimes, and `GET /admin/progress` streams its events.
     hub: Arc<ProgressHub>,
-    /// The command queue: boot provisioning, profile switches, and unloads
-    /// run as serialized, cancellable commands; the tray and routes read its
+    /// The command queue: the boot load, config applies, and unloads run
+    /// as serialized, cancellable commands; the tray and routes read its
     /// status in-process.
     commands: commands::CommandQueue,
     /// Shared host-metrics sampler for `GET /admin/system`: one process-wide
@@ -301,64 +304,49 @@ pub(crate) struct AppState {
     /// Process-lifetime random salt for the `/auth` handoff's session
     /// proof; a restart or key rotation invalidates every minted cookie.
     handoff_salt: [u8; 32],
-    /// Process-lifetime speech facade shared by routes and profile switches.
+    /// Process-lifetime speech facade shared by routes and the boot load.
     #[cfg(feature = "stt")]
     speech: SpeechService,
-    /// Test-only rendezvous the switch awaits at the start of one named
-    /// phase, so a test can hold a switch inside the download, the
-    /// cut-over, the spawn, or the commit and observe the lock and the live
-    /// state there. `None` in production and in every test that does not
+    /// Test-only rendezvous a command awaits at the start of one named
+    /// phase, so a test can hold the boot load inside its download or its
+    /// spawn, or an apply before its commit, and observe the live state
+    /// there. `None` in production and in every test that does not
     /// install one.
     #[cfg(test)]
-    park: Option<Arc<switch_park::PhasePark>>,
-    /// Test-only transaction failure selected before the state is cloned into
-    /// a switch task.
-    #[cfg(test)]
-    switch_fault: Option<switch_park::SwitchFault>,
-    /// Test-only replacement for local-runtime reconstruction after rollback.
-    #[cfg(all(test, feature = "local"))]
-    local_restarter: Option<LocalRuntimeRestarter>,
+    park: Option<Arc<park::PhasePark>>,
 }
 
-/// The test-only phase rendezvous for [`run_switch_with_config`].
+/// The test-only phase rendezvous for the boot load and the apply command.
 #[cfg(test)]
-pub(crate) mod switch_park {
+pub(crate) mod park {
     use tokio::sync::Notify;
 
-    /// One phase of the switch a test can park.
+    /// One command phase a test can park.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub(crate) enum SwitchPhase {
-        /// The local artifact download, before or after cutover by order.
+    pub(crate) enum Phase {
+        /// The boot load's artifact download, before anything is promised
+        /// as loading.
         Download,
-        /// The cut-over, once the switch lock is held.
-        CutOver,
-        /// The child spawn, after the interim live state is published.
+        /// The boot load's child spawn, once the local models are promised
+        /// as loading.
         Spawn,
-        /// The commit, once the switch lock is held again.
-        Commit,
-        /// The persistence-to-live-publication boundary.
-        Publish,
+        /// A config apply's commit, before it takes the apply lock: the
+        /// captured shadows are not yet promoted and nothing is live.
+        ApplyCommit,
     }
 
-    /// One transaction failure a test can inject through the production path.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub(crate) enum SwitchFault {
-        /// Runtime startup timed out after cutover and cannot be preempted.
-        StageIndeterminate,
-    }
-
-    /// Parks the switch at `phase` until the test releases it. Single use:
-    /// each notify stores one permit, so a release before the switch
+    /// Parks the command at `phase` until the test releases it. Single use:
+    /// each notify stores one permit, so a release before the command
     /// arrives is not lost.
     #[derive(Debug)]
     pub(crate) struct PhasePark {
-        phase: SwitchPhase,
+        phase: Phase,
         entered: Notify,
         release: Notify,
     }
 
     impl PhasePark {
-        pub(crate) fn at(phase: SwitchPhase) -> PhasePark {
+        pub(crate) fn at(phase: Phase) -> PhasePark {
             PhasePark {
                 phase,
                 entered: Notify::new(),
@@ -366,17 +354,17 @@ pub(crate) mod switch_park {
             }
         }
 
-        /// Resolves once the switch has parked at the phase.
+        /// Resolves once the command has parked at the phase.
         pub(crate) async fn entered(&self) {
             self.entered.notified().await;
         }
 
-        /// Lets the parked switch continue.
+        /// Lets the parked command continue.
         pub(crate) fn release(&self) {
             self.release.notify_one();
         }
 
-        pub(crate) async fn park(&self, phase: SwitchPhase) {
+        pub(crate) async fn park(&self, phase: Phase) {
             if phase == self.phase {
                 self.entered.notify_one();
                 self.release.notified().await;
@@ -389,15 +377,10 @@ impl AppState {
     /// Awaits the installed test rendezvous at `phase`; a no-op in
     /// production and without one installed.
     #[cfg(test)]
-    async fn park_at(&self, phase: switch_park::SwitchPhase) {
+    async fn park_at(&self, phase: park::Phase) {
         if let Some(park) = &self.park {
             park.park(phase).await;
         }
-    }
-
-    #[cfg(test)]
-    fn has_switch_fault(&self, fault: switch_park::SwitchFault) -> bool {
-        self.switch_fault == Some(fault)
     }
 
     /// Build full runtime state for `Gateway` and integration tests.
@@ -425,6 +408,11 @@ impl AppState {
                 routing,
                 key,
                 trust_loopback: config.server().trust_loopback(),
+                stt_vram_gb: config
+                    .stt_models()
+                    .iter()
+                    .map(gateway_config::SttModelConfig::vram_gb)
+                    .sum(),
                 config,
                 #[cfg(feature = "web-search")]
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
@@ -436,8 +424,6 @@ impl AppState {
             })),
             config: config_path.map(|path| Arc::new(AdminConfig { path })),
             config_generation: format!("{}-{started}", std::process::id()).into(),
-            switch: Arc::new(tokio::sync::Mutex::new(())),
-            in_flight: Arc::new(drain::InFlight::default()),
             apply: Arc::new(tokio::sync::Mutex::new(())),
             commands: commands::CommandQueue::new(Arc::clone(&hub)),
             hub,
@@ -459,10 +445,6 @@ impl AppState {
             speech,
             #[cfg(test)]
             park: None,
-            #[cfg(test)]
-            switch_fault: None,
-            #[cfg(all(test, feature = "local"))]
-            local_restarter: None,
         }
     }
 
@@ -478,19 +460,12 @@ impl AppState {
         self.live.read().await.local.cache_dir().map(str::to_owned)
     }
 
-    /// Registers an inference request under the same lock profile switches use.
-    async fn begin_inference(&self) -> drain::InFlightGuard {
-        let _switch = self.switch.lock().await;
-        self.in_flight.register()
-    }
-
     /// A point-in-time readout for the tray's status line: the number of
     /// models in the live routing table and the declared VRAM total of the
     /// active local and STT models.
     ///
-    /// Returns `None` when a profile switch holds the live-state write
-    /// lock: the tray's timer skips that tick rather than blocking the
-    /// message loop.
+    /// Returns `None` when a command holds the live-state write lock: the
+    /// tray's timer skips that tick rather than blocking the message loop.
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", test))]
     pub(crate) fn tray_model_status(&self) -> Option<(usize, f64)> {
         let live = self.live.try_read().ok()?;
@@ -672,11 +647,7 @@ async fn authorize_stt_route(
     if request.uri().path() == "/v1/realtime" && !gateway_realtime_origin_allowed(&request) {
         return Ok(axum::http::StatusCode::FORBIDDEN.into_response());
     }
-    let in_flight = state.begin_inference().await;
-    tokio::select! {
-        response = next.run(request) => Ok(response),
-        () = in_flight.cancelled() => Err(GatewayError::RequestCancelled),
-    }
+    Ok(next.run(request).await)
 }
 
 #[cfg(feature = "stt")]
@@ -701,14 +672,14 @@ const CLIENT_HEADER: &str = "X-PromptForge-Client";
 
 /// Resolves a request's model name against the live routing table.
 ///
-/// A local model the running switch has cut over to but not yet spawned
-/// (one in [`LiveState::loading`]) earns [`GatewayError::ModelLoading`]: a
-/// 503 with `Retry-After`, because the switch will land it. A configured
-/// but not-yet-loaded model - one the catalog names while the routing
-/// table is still empty or mid-switch - earns a 503 naming the active
-/// queue command rather than a bare 404, so the caller knows to retry once
-/// the command completes. With no command active the miss is
-/// [`GatewayError::UnknownModel`], exactly as before the queue existed.
+/// A local model the boot load is spawning (one in [`LiveState::loading`])
+/// earns [`GatewayError::ModelLoading`]: a 503 with `Retry-After`, because
+/// the load will land it. A configured but not-yet-loaded model - one the
+/// catalog names while the boot load is still downloading - earns a 503
+/// naming the active queue command rather than a bare 404, so the caller
+/// knows to retry once the command completes. With no command active the
+/// miss is [`GatewayError::UnknownModel`], exactly as before the queue
+/// existed.
 async fn resolve_routed_model(
     state: &AppState,
     name: &str,
@@ -722,7 +693,7 @@ async fn resolve_routed_model(
             }
             let configured = live
                 .config
-                .catalog_models()
+                .models()
                 .iter()
                 .any(|model| model.name() == name)
                 || live
@@ -748,7 +719,6 @@ async fn chat_completions(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
-    let in_flight = state.begin_inference().await;
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Chat)?;
     let client_id = crate::queue::ClientId::from_header(
@@ -756,10 +726,7 @@ async fn chat_completions(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let permit = tokio::select! {
-        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
+    let permit = model.endpoint.queue.admit(client_id.as_str()).await?;
     // Emulated dialects rewrite the request (guide injection, tool stripping)
     // and parse the reply's content fences. The fence parse needs the whole
     // reply, so the emulated streaming path buffers one non-streaming
@@ -782,34 +749,33 @@ async fn chat_completions(
             // call; the synthetic summary chunk restores the usage the
             // caller asked `stream_options.include_usage` for.
             buffered.rest.remove("stream_options");
-            let response = tokio::select! {
-                result = model.endpoint.upstream.send(buffered, &model.upstream_name) => result?,
-                () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-            };
+            let response = model
+                .endpoint
+                .upstream
+                .send(buffered, &model.upstream_name)
+                .await?;
             response
                 .validate()
                 .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
             let mut response = response;
             crate::dialect::apply_response(&mut response, &model.name);
-            return Ok(relay_sse(
-                crate::dialect::response_chunks(response),
-                permit,
-                in_flight,
-            ));
+            return Ok(relay_sse(crate::dialect::response_chunks(response), permit));
         }
         // A failure here is before the SSE response starts, so it is
         // consumed as a normal JSON error, never a stream that dies
         // mid-flight.
-        let streamed = tokio::select! {
-            result = model.endpoint.upstream.stream(request, &model.upstream_name) => result?,
-            () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-        };
-        return Ok(relay_sse(streamed, permit, in_flight));
+        let streamed = model
+            .endpoint
+            .upstream
+            .stream(request, &model.upstream_name)
+            .await?;
+        return Ok(relay_sse(streamed, permit));
     }
-    let response = tokio::select! {
-        result = model.endpoint.upstream.send(request, &model.upstream_name) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
+    let response = model
+        .endpoint
+        .upstream
+        .send(request, &model.upstream_name)
+        .await?;
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
@@ -834,44 +800,31 @@ async fn chat_completions(
 /// goes away the response body is dropped, which drops the chunk stream,
 /// which drops the upstream response and aborts the upstream connection,
 /// releasing the permit in the same unwind. There is no explicit cancel path.
-fn relay_sse(
-    streamed: crate::upstream::StreamedChunks,
-    permit: crate::queue::Permit,
-    in_flight: drain::InFlightGuard,
-) -> Response {
+fn relay_sse(streamed: crate::upstream::StreamedChunks, permit: crate::queue::Permit) -> Response {
     use futures_util::StreamExt as _;
 
     let relayed = futures_util::stream::unfold(
-        (streamed.chunks, false, permit, in_flight),
-        |(mut chunks, failed, permit, in_flight)| async move {
+        (streamed.chunks, false, permit),
+        |(mut chunks, failed, permit)| async move {
             if failed {
                 return None;
             }
-            let (line, failed) = tokio::select! {
-                item = chunks.next() => {
-                    let item = item?;
-                    match item {
-                        Ok(chunk) => match serde_json::to_string(&chunk) {
-                            Ok(json) => (format!("data: {json}\n\n"), false),
-                            Err(error) => (
-                                format!(
-                                    "data: {}\n\n",
-                                    GatewayError::upstream_protocol(error).envelope()
-                                ),
-                                true,
-                            ),
-                        },
-                        Err(error) => (format!("data: {}\n\n", error.envelope()), true),
-                    }
-                }
-                () = in_flight.cancelled() => (
-                    format!("data: {}\n\n", GatewayError::RequestCancelled.envelope()),
-                    true,
-                ),
+            let (line, failed) = match chunks.next().await? {
+                Ok(chunk) => match serde_json::to_string(&chunk) {
+                    Ok(json) => (format!("data: {json}\n\n"), false),
+                    Err(error) => (
+                        format!(
+                            "data: {}\n\n",
+                            GatewayError::upstream_protocol(error).envelope()
+                        ),
+                        true,
+                    ),
+                },
+                Err(error) => (format!("data: {}\n\n", error.envelope()), true),
             };
             Some((
                 Ok::<String, std::convert::Infallible>(line),
-                (chunks, failed, permit, in_flight),
+                (chunks, failed, permit),
             ))
         },
     );
@@ -902,7 +855,6 @@ async fn embeddings(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
-    let in_flight = state.begin_inference().await;
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Embedding)?;
     let client_id = crate::queue::ClientId::from_header(
@@ -910,14 +862,12 @@ async fn embeddings(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let _permit = tokio::select! {
-        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
-    let response = tokio::select! {
-        result = model.endpoint.upstream.send_embeddings(request, &model.upstream_name) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
+    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    let response = model
+        .endpoint
+        .upstream
+        .send_embeddings(request, &model.upstream_name)
+        .await?;
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
@@ -935,7 +885,6 @@ async fn rerank(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
-    let in_flight = state.begin_inference().await;
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Classifier)?;
     let client_id = crate::queue::ClientId::from_header(
@@ -943,14 +892,12 @@ async fn rerank(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let _permit = tokio::select! {
-        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
-    let response = tokio::select! {
-        result = model.endpoint.upstream.send_rerank(request, &model.upstream_name) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
+    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    let response = model
+        .endpoint
+        .upstream
+        .send_rerank(request, &model.upstream_name)
+        .await?;
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
@@ -972,9 +919,9 @@ async fn rerank(
 /// long-lived byte stream, this route must never sit under a
 /// `CompressionLayer` or a whole-request `TimeoutLayer`: both buffer or
 /// kill long-lived streams. The stream runs under the bounded background
-/// relay [`relay_audio`] documents, so every early end - a tripped bound, an
-/// upstream failure, a profile-switch cancellation - fails the client's
-/// body read rather than truncating it.
+/// relay [`relay_audio`] documents, so every early end - a tripped bound or
+/// an upstream failure - fails the client's body read rather than
+/// truncating it.
 async fn audio_speech(
     State(state): State<AppState>,
     caller: Caller,
@@ -987,7 +934,6 @@ async fn audio_speech(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
-    let in_flight = state.begin_inference().await;
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Speech)?;
     // A voice the model does not offer is a client error, so it is judged
@@ -1012,35 +958,22 @@ async fn audio_speech(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let permit = tokio::select! {
-        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
+    let permit = model.endpoint.queue.admit(client_id.as_str()).await?;
     // A failure here is before the response starts, so it is consumed as a
     // normal JSON error, never a stream that dies mid-flight. The speech
     // path maps upstream 429/503 to its own envelope codes; every other
     // error keeps the shared protocol mapping.
-    let streamed = tokio::select! {
-        result = model.endpoint.upstream.send_speech(request, &model.upstream_name) => {
-            result.map_err(|error| match error {
-                ProtocolError::UpstreamStatus { status: 429, .. } => {
-                    GatewayError::UpstreamRateLimited
-                }
-                ProtocolError::UpstreamStatus { status: 503, .. } => {
-                    GatewayError::UpstreamUnavailable
-                }
-                other => GatewayError::Protocol(other),
-            })?
-        },
-        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
-    };
-    Ok(relay_audio(
-        streamed,
-        format,
-        stream_format,
-        permit,
-        in_flight,
-    ))
+    let streamed = model
+        .endpoint
+        .upstream
+        .send_speech(request, &model.upstream_name)
+        .await
+        .map_err(|error| match error {
+            ProtocolError::UpstreamStatus { status: 429, .. } => GatewayError::UpstreamRateLimited,
+            ProtocolError::UpstreamStatus { status: 503, .. } => GatewayError::UpstreamUnavailable,
+            other => GatewayError::Protocol(other),
+        })?;
+    Ok(relay_audio(streamed, format, stream_format, permit))
 }
 
 /// Total lifetime of one speech relay, headers to terminal end: a bound on
@@ -1093,32 +1026,30 @@ const SPEECH_RELAY_CHANNEL_CAPACITY: usize = 4;
 /// selector is `sse`); `Content-Length` is never set, so hyper emits
 /// `Transfer-Encoding: chunked`.
 ///
-/// The forwarding runs in a spawned task that owns the upstream body, the
-/// permit, and the cancellation guard, feeding a small bounded channel the
-/// HTTP body consumes, so the permit's lifetime never depends on downstream
-/// polling. Four named bounds cap the stream: [`SPEECH_RELAY_TOTAL_LIFETIME`],
+/// The forwarding runs in a spawned task that owns the upstream body and
+/// the permit, feeding a small bounded channel the HTTP body consumes, so
+/// the permit's lifetime never depends on downstream polling. Four named
+/// bounds cap the stream: [`SPEECH_RELAY_TOTAL_LIFETIME`],
 /// [`SPEECH_RELAY_BYTE_CEILING`], [`SPEECH_RELAY_UPSTREAM_IDLE`], and
 /// [`SPEECH_RELAY_DOWNSTREAM_BLOCKED`].
 ///
 /// No error envelope can follow 200 plus audio bytes, so every terminal
-/// path - a bound tripped, an upstream body error, a profile-switch
-/// cancellation, the downstream gone - emits exactly one `Err` item into
-/// the channel, then drops the permit and the guard: the client's body read
-/// fails rather than seeing a clean EOF, the same fail-rather-than-truncate
-/// trade [`relay_sse`] makes with its RequestCancelled envelope. Over the
-/// wire a body-stream error aborts the response, so the item's message is
-/// server-side diagnostics; the client observes a failed read. Only a
-/// stream that ran to a clean upstream end inside every bound ends the body
-/// without an error item.
+/// path - a bound tripped, an upstream body error, the downstream gone -
+/// emits exactly one `Err` item into the channel, then drops the permit:
+/// the client's body read fails rather than seeing a clean EOF, the same
+/// fail-rather-than-truncate trade [`relay_sse`] makes with its mid-stream
+/// error envelope. Over the wire a body-stream error aborts the response,
+/// so the item's message is server-side diagnostics; the client observes a
+/// failed read. Only a stream that ran to a clean upstream end inside every
+/// bound ends the body without an error item.
 fn relay_audio(
     streamed: crate::upstream::StreamedAudio,
     format: SpeechResponseFormat,
     stream_format: Option<SpeechStreamFormat>,
     permit: crate::queue::Permit,
-    in_flight: drain::InFlightGuard,
 ) -> Response {
     let (tx, rx) = tokio::sync::mpsc::channel(SPEECH_RELAY_CHANNEL_CAPACITY + 1);
-    tokio::spawn(relay_speech_stream(streamed.body, tx, permit, in_flight));
+    tokio::spawn(relay_speech_stream(streamed.body, tx, permit));
     let relayed = futures_util::stream::unfold(rx, |mut rx| async move {
         rx.recv().await.map(|item| (item, rx))
     });
@@ -1137,13 +1068,12 @@ fn relay_audio(
 /// idle and total-lifetime budgets, forwards each chunk under the
 /// blocked-delivery budget, and on every terminal path emits exactly one
 /// `Err` item through the reserved channel slot before returning, which
-/// drops the upstream body, the permit, and the cancellation guard
-/// together. A clean upstream end is the one exit with no error item.
+/// drops the upstream body and the permit together. A clean upstream end
+/// is the one exit with no error item.
 async fn relay_speech_stream(
     mut body: futures_util::stream::BoxStream<'static, Result<Bytes, ProtocolError>>,
     tx: tokio::sync::mpsc::Sender<Result<Bytes, ProtocolError>>,
     permit: crate::queue::Permit,
-    in_flight: drain::InFlightGuard,
 ) {
     use futures_util::StreamExt as _;
 
@@ -1159,9 +1089,6 @@ async fn relay_speech_stream(
     let terminal: Option<ProtocolError> = 'relay: loop {
         let item = tokio::select! {
             item = tokio::time::timeout(SPEECH_RELAY_UPSTREAM_IDLE, body.next()) => item,
-            () = in_flight.cancelled() => {
-                break 'relay Some(relay_terminal("request cancelled for profile switch"));
-            }
             () = tokio::time::sleep_until(deadline) => {
                 break 'relay Some(relay_terminal("speech relay total lifetime exceeded"));
             }
@@ -1188,9 +1115,6 @@ async fn relay_speech_stream(
             result = tokio::time::timeout(SPEECH_RELAY_DOWNSTREAM_BLOCKED, tx.send(Ok(chunk))) => {
                 result
             }
-            () = in_flight.cancelled() => {
-                break 'relay Some(relay_terminal("request cancelled for profile switch"));
-            }
             () = tokio::time::sleep_until(deadline) => {
                 break 'relay Some(relay_terminal("speech relay total lifetime exceeded"));
             }
@@ -1214,10 +1138,10 @@ async fn relay_speech_stream(
         // is already gone the item is simply discarded.
         let _ = error_slot.send(Err(error));
     }
-    // Explicit about the ownership the task exists for: the upstream body,
-    // the dominion permit, and the cancellation guard are released together
-    // on every exit, so no path can end the stream while holding the slot.
-    drop((body, permit, in_flight));
+    // Explicit about the ownership the task exists for: the upstream body
+    // and the dominion permit are released together on every exit, so no
+    // path can end the stream while holding the slot.
+    drop((body, permit));
 }
 
 /// The relay's terminal condition as a transport-classified protocol error:
@@ -1265,7 +1189,6 @@ async fn audio_voices(
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
-    let _publication = state.switch.lock().await;
     let live = state.live.read().await;
     let voices = live
         .routing
@@ -1287,7 +1210,6 @@ async fn list_models(
     caller: Caller,
 ) -> Result<Json<model_info::CatalogModelsResponse>, GatewayError> {
     check_auth(&state, &caller).await?;
-    let _publication = state.switch.lock().await;
     let live = state.live.read().await;
     let data = live
         .routing
@@ -1323,9 +1245,11 @@ async fn list_models(
     }))
 }
 
+/// The `POST /admin/switch-profile` body: a profile name, or `null` (or
+/// absent) to select no profile.
 #[derive(Debug, Deserialize)]
 struct SwitchProfileRequest {
-    name: String,
+    name: Option<String>,
 }
 
 /// Lists profile names from the loaded global catalog.
@@ -1404,17 +1328,16 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
-/// Current profile name, loaded model names, the local models a running
-/// switch is still loading, process config generation, the profile's model
-/// allowlist, the declared VRAM total, the command queue's active and
-/// pending commands, and one readiness entry per capability endpoint the
-/// gateway can serve.
+/// Current profile name, loaded model names, the local models the boot
+/// load is still spawning, process config generation, the profile's model
+/// allowlist (its local and speech-to-text members), the declared VRAM
+/// total, the command queue's active and pending commands, and one
+/// readiness entry per capability endpoint the gateway can serve.
 async fn admin_status(
     State(state): State<AppState>,
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
-    let _publication = state.switch.lock().await;
     let active = state.commands.active_command();
     let pending = state.commands.pending_commands();
     let live = state.live.read().await;
@@ -1679,269 +1602,74 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
     }
 }
 
-/// Immediately switches to another named profile, streaming its progress.
+/// Persists the profile selection and reports whether a restart is needed.
 ///
-/// The reply is `text/event-stream`: a `{"stage": ...}` event opens each
-/// phase in execution order - `loading-profile` around config load and
-/// validation, `downloading-models` while the new local models' weights
-/// stage into the cache (only when the profile names local models),
-/// `stopping-models` before the old local children shut
-/// down (only when there are any to stop), `starting-models` before the new
-/// children load their weights into VRAM (the long pole) - and the stream
-/// ends with exactly one terminal event, `{"status": "ready", "profile":
-/// ...}` or `{"status": "error", "message": ...}`. The download precedes
-/// the stop when old children exist, so they serve through it, and follows
-/// the cut-over otherwise, so the remote models serve through it; see
-/// [`run_switch_with_config`]. The bounded drain has no stage of its own,
-/// preserving the existing stage vocabulary. A refusal before the switch
-/// starts (bad auth or a malformed name) stays a buffered JSON error
-/// envelope. Builds without the `local` feature emit no
-/// `downloading-models`/`stopping-models`/`starting-models` stages, and
-/// refuse a profile declaring `[[local_model]]` with a terminal error event
-/// instead of starting children. Speech never participates: the runner's
-/// boot command alone appends a `loading-speech` stage for the process's
-/// one initial STT load, after its switch settles.
+/// The local runtime is fixed for the process lifetime, so a switch never
+/// starts or stops anything. A defined name is written to
+/// `gateway.state.toml`; `null` deletes the file, the persisted form of
+/// "no profile". The reply is `{"profile": Option<String>,
+/// "restart_required": bool}`, where `restart_required` is whether the
+/// selection differs from the running profile. The check against the live
+/// catalog and the state write run under the apply lock, so
+/// `GET /admin/config-pending` never reads a half-written selection.
 ///
-/// The switch runs as a `LoadProfile` command on the gateway's command
-/// queue: serialized with every other command, debounced so a burst of
-/// switches runs only the latest, and cancellable through the command's
-/// token. A client disconnect drops only the response body and its hub
-/// subscription, never the half-finished command.
+/// A malformed name fails at the `parse-name` stage; an undefined one is
+/// [`GatewayError::ProfileNotFound`] naming the defined profiles; a failed
+/// state write is the config-write error. Every refusal changes nothing.
 async fn admin_switch_profile(
     State(state): State<AppState>,
     caller: Caller,
     Json(request): Json<SwitchProfileRequest>,
-) -> Result<Response, GatewayError> {
+) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
-    let name = ProfileName::parse(&request.name)
+    let selected = request
+        .name
+        .as_deref()
+        .map(ProfileName::parse)
+        .transpose()
         .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
-    // Subscribe before enqueueing so no event of this switch is missed; the
-    // response filters the hub stream to this command's operation.
-    let rx = state.hub.subscribe();
-    let enqueued = state.commands.enqueue(commands::Command::load_profile(
-        name,
-        true,
-        tokio_util::sync::CancellationToken::new(),
-    ));
-    let switch = tokio::spawn(async move {
-        enqueued.outcome.await.unwrap_or_else(|_| {
-            // The worker settles every command it begins, so a dropped
-            // sender means the worker task itself died.
-            Arc::new(Err(GatewayError::switch_failed(
-                "queue",
-                std::io::Error::other("the command queue dropped the command without settling it"),
-            )))
-        })
-    });
-    Ok(switch_sse_response(rx, enqueued.operation, switch))
-}
-
-/// Executes a switch using an optional catalog parsed by Apply.
-///
-/// The switch runs in five phases and holds the `switch` lock - the one
-/// [`AppState::begin_inference`] takes - only in the two short ones, so
-/// inference on remote models flows while weights download and children
-/// spawn:
-///
-/// 1. **Prepare** (unlocked): the `loading-profile` leaf, the catalog, the
-///    target profile's config, and remote routing table.
-/// 2. **Download** (unlocked): every artifact the new local models need,
-///    under a `downloading-models` leaf, through the same artifact store
-///    the `ProvisionModel` command uses. Cancellation lands at chunk
-///    boundaries. Synced persistence temporaries are prepared before cutover.
-/// 3. **Cut over** (locked, bounded): the bounded drain, then the old
-///    local runtimes stop under a
-///    `stopping-models` leaf (only
-///    registered when there is something to stop), and one `live.write`
-///    publishes the interim state: the new profile's remote models as the
-///    routing table, the surviving runtimes, and the local models about to
-///    spawn as [`LiveState::loading`].
-/// 4. **Spawn** (unlocked): all target children start under one deadline. A request for a model in `loading` earns
-///    [`GatewayError::ModelLoading`] (503, `Retry-After`); remote models
-///    serve.
-/// 5. **Commit** (locked, brief): prepared files atomically replace their
-///    authoritative targets, then one
-///    `live.write` swaps in the full routing table, the runtimes, the
-///    profile, and clears `loading`.
-///
-/// Ordering: the cut-over runs as soon as there is nothing old to stop.
-/// When the live state holds no local children (a cold
-/// boot, or a remote-only previous profile) phase 3 follows phase 1
-/// directly, so the remote models are published before the download
-/// starts. Otherwise the download runs first, so the old runtimes keep
-/// serving through it, and the cut-over follows. In both orders the old
-/// runtimes stop only right before the new ones spawn, never before a
-/// download.
-///
-/// Determinate failure or cancellation after cutover
-/// restores the prior routing snapshot and drops target workers. Indeterminate
-/// persistence or non-preemptible staging timeout
-/// requests controlled shutdown. A partial start (some children ready, others
-/// failed) is not that case: as before, it commits and swaps the ready
-/// children in, and reports the rest through [`GatewayError::PartialStart`].
-/// A failure before the cut-over leaves the live state untouched.
-///
-/// Speech is never part of the transaction: the runner's boot command makes
-/// the process's one guarded STT load after its switch settles, and later
-/// switches persist desired speech state without touching the running
-/// runtime.
-///
-/// `token` is the command's cancellation: checked at phase boundaries and
-/// honored by the download and the local start, so a cancelled switch
-/// stops instead of running its remaining phases. `persistence` is evaluated
-/// once before cutover, so a debounced duplicate can upgrade an ephemeral
-/// load until destructive replacement begins.
-async fn run_switch_with_config(
-    state: AppState,
-    name: ProfileName,
-    tree: ProgressTree,
-    candidate: Option<Config>,
-    persistence: impl FnOnce() -> StatePersistence,
-    token: &tokio_util::sync::CancellationToken,
-) -> Result<String, GatewayError> {
-    profile_switch::run(&state, name, tree, candidate, persistence, token).await
-}
-
-/// Builds the switch-profile SSE response: the hub's event stream filtered
-/// to this switch's operation, each leaf's `Begun` re-emitted as the
-/// `{"stage": ...}` event the route has always carried, then the terminal
-/// event from the command's settled outcome, so the outcome can never be
-/// lost to broadcast lag.
-///
-/// The queue worker broadcasts every stage event before settling the
-/// command, so once the outcome resolves the remaining stages are already
-/// queued on the receiver and are drained ahead of the terminal event.
-fn switch_sse_response(
-    rx: tokio::sync::broadcast::Receiver<ProgressEvent>,
-    operation: OperationId,
-    switch: tokio::task::JoinHandle<commands::SharedOutcome>,
-) -> Response {
-    let stream = futures_util::stream::unfold(
-        (rx, switch, std::collections::VecDeque::new(), false),
-        move |(mut rx, mut switch, mut pending, mut done)| async move {
-            loop {
-                if let Some(line) = pending.pop_front() {
-                    return Some((
-                        Ok::<_, std::convert::Infallible>(line),
-                        (rx, switch, pending, done),
-                    ));
-                }
-                if done {
-                    return None;
-                }
-                let result = loop {
-                    tokio::select! {
-                        received = rx.recv() => match received {
-                            Ok(event) => {
-                                if event.operation == operation
-                                    && matches!(event.state, EventState::Begun { .. })
-                                {
-                                    return Some((
-                                        Ok(stage_line(&event)),
-                                        (rx, switch, pending, done),
-                                    ));
-                                }
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                tracing::debug!(skipped, "switch stage subscriber lagged; events dropped");
-                            }
-                            // The hub lives in `AppState` for the process
-                            // lifetime, so its sender never closes first; the
-                            // join result still carries the outcome if it did.
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                break (&mut switch).await;
-                            }
-                        },
-                        result = &mut switch => break result,
-                    }
-                };
-                drain_switch_stages(&mut rx, operation, &mut pending);
-                done = true;
-                pending.push_back(terminal_line(result));
+    let _publication = state.apply.lock().await;
+    let config_path = config_path(&state)?.to_path_buf();
+    let restart_required = {
+        let live = state.live.read().await;
+        if let Some(name) = &selected {
+            let defined: Vec<&str> = live
+                .config
+                .profiles()
+                .iter()
+                .map(gateway_config::ProfileConfig::name)
+                .collect();
+            if !defined.contains(&name.as_str()) {
+                return Err(GatewayError::ProfileNotFound(undefined_profile_message(
+                    name, &defined,
+                )));
             }
-        },
-    );
-    let mut response = Response::new(Body::from_stream(stream));
-    let headers = response.headers_mut();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    response
-}
-
-/// Drains stage events already queued when the switch task completes.
-///
-/// A lag marker describes dropped older events, not an empty receiver, so
-/// catch-up continues after it and preserves every retained stage.
-fn drain_switch_stages(
-    rx: &mut tokio::sync::broadcast::Receiver<ProgressEvent>,
-    operation: OperationId,
-    pending: &mut std::collections::VecDeque<String>,
-) {
-    loop {
-        match rx.try_recv() {
-            Ok(event)
-                if event.operation == operation
-                    && matches!(event.state, EventState::Begun { .. }) =>
-            {
-                pending.push_back(stage_line(&event));
-            }
-            Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
-            Err(
-                tokio::sync::broadcast::error::TryRecvError::Empty
-                | tokio::sync::broadcast::error::TryRecvError::Closed,
-            ) => break,
         }
-    }
-}
-
-/// Maps a leaf's `Begun` to the switch stream's stage event.
-fn stage_line(event: &ProgressEvent) -> String {
-    format!("data: {}\n\n", serde_json::json!({ "stage": event.label }))
-}
-
-/// Maps the switch command's settled outcome to the stream's terminal event.
-fn terminal_line(result: Result<commands::SharedOutcome, tokio::task::JoinError>) -> String {
-    let payload = match result {
-        Ok(outcome) => match &*outcome {
-            Ok(profile) => serde_json::json!({ "status": "ready", "profile": profile }),
-            #[cfg(feature = "local")]
-            Err(GatewayError::PartialStart {
-                profile,
-                loaded,
-                failed,
-            }) => serde_json::json!({
-                "status": "error",
-                "profile": profile,
-                "loaded": loaded,
-                "failed": failed,
-            }),
-            Err(error) => serde_json::json!({
-                "status": "error",
-                "message": error_chain(error),
-            }),
-        },
-        Err(join_error) => serde_json::json!({
-            "status": "error",
-            "message": format!("switch task failed: {join_error}"),
-        }),
+        selected.as_ref().map(ProfileName::as_str) != live.profile_name.as_deref()
     };
-    format!("data: {payload}\n\n")
+    let persisted = selected.clone();
+    tokio::task::spawn_blocking(move || match &persisted {
+        Some(name) => gateway_config::persist_profile_state(&config_path, name),
+        None => gateway_config::clear_profile_state(&config_path),
+    })
+    .await
+    .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+    .map_err(config_write::config_write_error)?;
+    Ok(Json(serde_json::json!({
+        "profile": selected.as_ref().map(ProfileName::as_str),
+        "restart_required": restart_required,
+    })))
 }
 
-/// Renders `error` with its full source chain for the terminal SSE error
-/// event: the stream has a single `message` field where the JSON envelope
-/// had `message` plus `code`, and a bare `switch profile failed at
-/// load-profile` without its cause tells the operator nothing.
-fn error_chain(error: &GatewayError) -> String {
-    use std::fmt::Write as _;
-
-    let mut message = error.to_string();
-    let mut source = std::error::Error::source(error);
-    while let Some(cause) = source {
-        let _ = write!(message, ": {cause}");
-        source = cause.source();
+/// The `profile not found` detail for a switch to a name the live catalog
+/// does not define: the name, then every defined profile so the operator
+/// can pick one without a second request.
+fn undefined_profile_message(name: &ProfileName, defined: &[&str]) -> String {
+    if defined.is_empty() {
+        format!("{name} (no profiles are defined)")
+    } else {
+        format!("{name} (defined profiles: {})", defined.join(", "))
     }
-    message
 }
 
 fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
@@ -2056,7 +1784,7 @@ mod transcription_auth_tests {
 
     fn state() -> crate::AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [workshop]\n",
         )
@@ -2210,7 +1938,7 @@ mod speech_auth_tests {
 
     fn state() -> crate::AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [workshop]\n",
         )
@@ -2268,28 +1996,78 @@ mod tray_status_tests {
 
     use crate::test_support::app_state;
 
+    /// Two remote models, one local model at 3.5 GB, one STT model at 1 GB,
+    /// and a profile selecting both local entries.
+    const CONFIG: &str = "config-version = 0\n\
+         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+         [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+         [[model]]\nname = \"alpha\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"fake\"]\n\
+         [[model]]\nname = \"beta\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"fake\"]\n\
+         [[local_model]]\nname = \"gamma\"\ndescription = \"g\"\nsource = \"/models/gamma.gguf\"\ncontext = 4096\nvram_gb = 3.5\n\
+         [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n\
+         [[profile]]\nname = \"work\"\nmodels = [\"gamma\", \"speech\"]\n";
+
+    fn selected_config() -> Config {
+        Config::from_toml_str(CONFIG)
+            .expect("config parses")
+            .select_profile(Some(
+                &gateway_config::ProfileName::parse("work").expect("profile name"),
+            ))
+            .expect("the work profile selects")
+    }
+
+    /// With no local child running, only the boot STT selection counts.
     #[test]
-    #[expect(
-        clippy::float_cmp,
-        reason = "3.5 + 1.0 is exact in binary floating point"
-    )]
-    fn the_tray_status_counts_routed_models_and_sums_declared_vram() {
-        let config = Config::from_toml_str(
-            "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
-             [[model]]\nname = \"alpha\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"fake\"]\n\
-             [[model]]\nname = \"beta\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"fake\"]\n\
-             [[local_model]]\nname = \"gamma\"\ndescription = \"g\"\nsource = \"/models/gamma.gguf\"\ncontext = 4096\nvram_gb = 3.5\n\
-             [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
-        )
-        .expect("config parses");
-        let state = app_state(config, None);
+    #[expect(clippy::float_cmp, reason = "1.0 is exact in binary floating point")]
+    fn the_tray_status_counts_routed_models_and_the_boot_stt_selection() {
+        let state = app_state(selected_config(), None);
         let (models, vram_gb) = state
             .tray_model_status()
             .expect("an uncontended state reads");
         assert_eq!(models, 2, "the harness routes the remote catalog");
-        assert_eq!(vram_gb, 4.5, "local and STT declarations sum");
+        assert_eq!(
+            vram_gb, 1.0,
+            "no local child runs; the STT declaration counts"
+        );
+    }
+
+    /// A running local child's declared VRAM counts, and keeps counting
+    /// after an apply swaps the live config for one with no selection.
+    #[cfg(feature = "test-fixtures")]
+    #[tokio::test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "3.5 + 1.0 is exact in binary floating point"
+    )]
+    async fn the_status_sums_running_children_after_an_apply_swaps_the_config() {
+        let state = app_state(selected_config(), None);
+        let child = Config::from_toml_str(
+            "config-version = 0\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"local\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"gamma\"\ndescription = \"running child\"\ncontext = 4096\nupstream = \"gamma\"\nendpoints = [\"local\"]\n",
+        )
+        .expect("child config parses");
+        let routing = crate::routing::Routing::from_config(&child).expect("child routes");
+        state.live.write().await.local =
+            crate::local::LocalRuntime::from_test_models(routing.models().to_vec());
+        assert_eq!(state.live.read().await.model_status().1, 4.5);
+
+        // What an apply publishes: the same document, parsed with no
+        // profile selected, so `local_models()` and `stt_models()` are empty.
+        let applied = Config::from_toml_str(CONFIG)
+            .expect("config parses")
+            .select_profile(None)
+            .expect("no selection");
+        assert!(applied.local_models().is_empty() && applied.stt_models().is_empty());
+        state.live.write().await.config = std::sync::Arc::new(applied);
+
+        let (models, vram_gb) = state.live.read().await.model_status();
+        assert_eq!(models, 2);
+        assert_eq!(
+            vram_gb, 4.5,
+            "the running child and the boot STT selection still count"
+        );
     }
 }
 
@@ -2314,7 +2092,7 @@ mod provisioning_tests {
     /// stays configured-but-unloaded for the test's whole run.
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [[local_model]]\nname = \"slow-model\"\ndescription = \"d\"\n\
              source = \"/models/slow.gguf\"\ncontext = 4096\n\
@@ -2330,7 +2108,7 @@ mod provisioning_tests {
         Arc::new(|_state, command, _tree| {
             Box::pin(async move {
                 match command {
-                    Command::LoadProfile { name, token, .. } => {
+                    Command::LoadProfile { name, token } => {
                         token.cancelled().await;
                         Err(crate::error::GatewayError::CommandCancelled(format!(
                             "load-profile: {name}"
@@ -2359,6 +2137,17 @@ mod provisioning_tests {
             .expect("router answers")
     }
 
+    /// Polls `condition` with a bounded wait.
+    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !condition() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+    }
+
     #[tokio::test]
     async fn an_unloaded_but_configured_model_earns_a_503_naming_the_active_command() {
         let state = state();
@@ -2368,16 +2157,12 @@ mod provisioning_tests {
             .expect("worker spawns");
         let _boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("main").expect("profile name"),
-            false,
             CancellationToken::new(),
         ));
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while state.commands.active_command().is_none() {
-                tokio::task::yield_now().await;
-            }
+        wait_until("the command to go active", || {
+            state.commands.active_command().is_some()
         })
-        .await
-        .expect("the command goes active");
+        .await;
 
         let response = chat(state.clone(), "slow-model").await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -2403,659 +2188,33 @@ mod provisioning_tests {
         worker.await.expect("the worker exits on shutdown");
     }
 
-    /// A featureless switch cancelled at the phase-independent spawn
-    /// rendezvous restores the prior routing and never publishes its target.
-    #[cfg(not(any(feature = "local", feature = "stt")))]
+    /// The resolver's miss ladder: a name in `loading` is `ModelLoading`,
+    /// a name the catalog does not know stays `UnknownModel`.
     #[tokio::test]
-    async fn featureless_cancellation_stops_persistence_and_publication() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Spawn,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let token = CancellationToken::new();
-        let switch_state = state.clone();
-        let switch_token = token.clone();
-        let switch = tokio::spawn(async move {
-            let tree = switch_state.hub.operation();
-            crate::run_switch_with_config(
-                switch_state,
-                ProfileName::parse("beta").expect("profile name"),
-                tree,
-                None,
-                || crate::StatePersistence::Write,
-                &switch_token,
-            )
+    async fn a_routing_miss_on_a_loading_model_is_model_loading_not_not_found() {
+        let state = state();
+        state
+            .live
+            .write()
             .await
-        });
-
-        tokio::time::timeout(Duration::from_secs(10), park.entered())
-            .await
-            .expect("featureless switch reaches spawn");
-        token.cancel();
-        park.release();
-        let outcome = tokio::time::timeout(Duration::from_secs(10), switch)
-            .await
-            .expect("featureless cancellation settles")
-            .expect("switch task joins");
-
+            .loading
+            .insert("pending-model".to_owned());
+        let loading = crate::resolve_routed_model(&state, "pending-model").await;
         assert!(
-            matches!(
-                outcome,
-                Err(crate::error::GatewayError::CommandCancelled(_))
-            ),
-            "the late cancellation stops the switch: {outcome:?}"
+            matches!(&loading, Err(crate::error::GatewayError::ModelLoading(name)) if name == "pending-model"),
+            "a loading model resolves to ModelLoading: {loading:?}"
         );
-        let live = state.live.read().await;
-        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
-        assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
-        assert_eq!(
-            std::fs::read_to_string(state_path).expect("read profile state"),
-            "active_profile = \"alpha\"\n"
-        );
+        let unknown = crate::resolve_routed_model(&state, "ghost").await;
         assert!(
-            live.loading.is_empty(),
-            "a cancelled switch leaves no model promised as loading"
-        );
-    }
-
-    /// The remote-only catalog the lock tests switch within: `alpha` and
-    /// `beta` each select one remote model on an endpoint nothing listens
-    /// on, and the harness state starts with `alpha` live.
-    fn two_remote_catalog() -> &'static str {
-        "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
-             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
-             [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\n\
-             context = 8192\nupstream = \"a\"\nendpoints = [\"e\"]\n\
-             [[model]]\nname = \"beta-model\"\ndescription = \"b\"\n\
-             context = 8192\nupstream = \"b\"\nendpoints = [\"e\"]\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
-    }
-
-    fn two_remote_profiles() -> AppState {
-        let catalog = Config::from_toml_str(two_remote_catalog()).expect("config parses");
-        let config = catalog
-            .select_profile(&ProfileName::parse("alpha").expect("profile name"))
-            .expect("alpha profile selects");
-        app_state(config, None)
-    }
-
-    fn persisted_two_remote_profiles(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
-        let config_path = temp.path().join("gateway.toml");
-        std::fs::write(&config_path, two_remote_catalog()).expect("write catalog");
-        let state_path = gateway_config::profile_state_path(&config_path);
-        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
-        let config = Config::load(
-            &config_path,
-            &gateway_config::ProfileSelection::new(Some("alpha"), None),
-        )
-        .expect("load alpha profile");
-        let state = app_state(
-            config,
-            Some(crate::test_support::AdminPaths {
-                fixture_dir: temp.path().to_path_buf(),
-                active: "alpha".to_owned(),
-                config_path,
-            }),
-        );
-        (state, state_path)
-    }
-
-    #[cfg(feature = "test-fixtures")]
-    fn local_runtime_fixture(upstream_name: &str) -> crate::local::LocalRuntime {
-        let config = Config::from_toml_str(&format!(
-            "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [[endpoint]]\nid = \"local-fixture\"\nprotocol = \"openai\"\n\
-             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
-             [[model]]\nname = \"alpha-local\"\ndescription = \"local fixture\"\n\
-             context = 4096\nupstream = \"{upstream_name}\"\nendpoints = [\"local-fixture\"]\n"
-        ))
-        .expect("local fixture config parses");
-        let routing =
-            crate::routing::Routing::from_config(&config).expect("local fixture routing builds");
-        crate::local::LocalRuntime::from_test_models(routing.models().to_vec())
-    }
-
-    #[cfg(feature = "test-fixtures")]
-    fn restart_local_fixture(_config: &Config) -> crate::local::LocalRuntime {
-        local_runtime_fixture("restored-local")
-    }
-
-    #[cfg(feature = "test-fixtures")]
-    fn persisted_profiles_with_local(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
-        let local_source = temp
-            .path()
-            .join("alpha-local.gguf")
-            .display()
-            .to_string()
-            .replace('\\', "/");
-        let catalog = format!(
-            "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
-             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
-             [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\n\
-             context = 8192\nupstream = \"a\"\nendpoints = [\"e\"]\n\
-             [[model]]\nname = \"beta-model\"\ndescription = \"b\"\n\
-             context = 8192\nupstream = \"b\"\nendpoints = [\"e\"]\n\
-             [[local_model]]\nname = \"alpha-local\"\ndescription = \"local\"\n\
-             source = \"{local_source}\"\ncontext = 4096\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\", \"alpha-local\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
-        );
-        let config_path = temp.path().join("gateway.toml");
-        std::fs::write(&config_path, catalog).expect("write local catalog");
-        let state_path = gateway_config::profile_state_path(&config_path);
-        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
-        let config = Config::load(
-            &config_path,
-            &gateway_config::ProfileSelection::new(Some("alpha"), None),
-        )
-        .expect("load alpha profile");
-        let state = app_state(
-            config,
-            Some(crate::test_support::AdminPaths {
-                fixture_dir: temp.path().to_path_buf(),
-                active: "alpha".to_owned(),
-                config_path,
-            }),
-        );
-        (state, state_path)
-    }
-
-    #[cfg(not(any(feature = "local", feature = "stt")))]
-    #[tokio::test]
-    async fn featureless_profile_switch_commits_the_complete_target() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let (state, state_path) = persisted_two_remote_profiles(&temp);
-        let token = CancellationToken::new();
-        let tree = state.hub.operation();
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(10),
-            crate::run_switch_with_config(
-                state.clone(),
-                ProfileName::parse("beta").expect("profile name"),
-                tree,
-                None,
-                || crate::StatePersistence::Write,
-                &token,
-            ),
-        )
-        .await
-        .expect("featureless switch settles")
-        .expect("featureless switch commits");
-
-        assert_eq!(outcome, "beta");
-        let live = state.live.read().await;
-        assert_eq!(live.profile_name.as_deref(), Some("beta"));
-        assert!(live.routing.model("alpha-model").is_err());
-        assert!(live.routing.model("beta-model").is_ok());
-        assert_eq!(
-            std::fs::read_to_string(state_path).expect("read profile state"),
-            "active_profile = \"beta\"\n"
-        );
-        assert!(!token.is_cancelled());
-        assert!(!state.shutdown.is_fired());
-    }
-
-    /// Runs the switch to `profile` on its own task with no persistence.
-    fn spawn_switch(
-        state: &AppState,
-        profile: &str,
-        token: &CancellationToken,
-    ) -> tokio::task::JoinHandle<Result<String, crate::error::GatewayError>> {
-        let state = state.clone();
-        let name = ProfileName::parse(profile).expect("profile name");
-        let token = token.clone();
-        tokio::spawn(async move {
-            let tree = state.hub.operation();
-            crate::run_switch_with_config(
-                state,
-                name,
-                tree,
-                None,
-                || crate::StatePersistence::None,
-                &token,
-            )
-            .await
-        })
-    }
-
-    /// Polls `condition` with a bounded wait.
-    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while !condition() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
-    }
-
-    /// Inference registration waits behind the switch lock only in the
-    /// cut-over: a request held in flight parks the switch in its bounded
-    /// drain, in phase 3, with the lock held, and a new registration does
-    /// not complete until the held request ends and the switch moves on.
-    /// Pinned in-process because the cut-over is the one phase with no
-    /// stage of its own to observe over HTTP when nothing old is stopping.
-    #[tokio::test]
-    async fn request_registration_waits_behind_the_switch_lock() {
-        let state = two_remote_profiles();
-        let held = state.in_flight.register();
-        let token = CancellationToken::new();
-        let switch = spawn_switch(&state, "beta", &token);
-
-        // The drain parks the switch in the cut-over with the lock held.
-        wait_until("the switch to take its lock in the cut-over", || {
-            state.switch.try_lock().is_err()
-        })
-        .await;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), state.begin_inference())
-                .await
-                .is_err(),
-            "a registration arriving during the cut-over waits behind the lock"
-        );
-
-        drop(held);
-        let outcome = tokio::time::timeout(Duration::from_secs(10), switch)
-            .await
-            .expect("the switch completes once the held request ends")
-            .expect("the switch task joins");
-        assert_eq!(outcome.expect("the switch succeeds"), "beta");
-        let _registered = tokio::time::timeout(Duration::from_secs(1), state.begin_inference())
-            .await
-            .expect("registration flows once the switch released its lock");
-        assert!(
-            state.live.read().await.routing.model("beta-model").is_ok(),
-            "the switch landed beta's routing"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancellation_at_each_switch_await_preserves_the_old_routing() {
-        for phase in [
-            crate::switch_park::SwitchPhase::Download,
-            crate::switch_park::SwitchPhase::CutOver,
-            crate::switch_park::SwitchPhase::Spawn,
-            crate::switch_park::SwitchPhase::Commit,
-        ] {
-            let mut state = two_remote_profiles();
-            let park = Arc::new(crate::switch_park::PhasePark::at(phase));
-            state.park = Some(Arc::clone(&park));
-            let token = CancellationToken::new();
-            let switch = spawn_switch(&state, "beta", &token);
-
-            tokio::time::timeout(Duration::from_secs(10), park.entered())
-                .await
-                .unwrap_or_else(|_| panic!("switch did not reach {phase:?}"));
-            token.cancel();
-            park.release();
-            let outcome = tokio::time::timeout(Duration::from_secs(10), switch)
-                .await
-                .expect("cancelled switch settles")
-                .expect("switch task joins");
-
-            assert!(
-                matches!(
-                    outcome,
-                    Err(crate::error::GatewayError::CommandCancelled(_))
-                ),
-                "{phase:?} cancellation is explicit: {outcome:?}"
-            );
-            let live = state.live.read().await;
-            assert!(
-                live.routing.model("alpha-model").is_ok(),
-                "{phase:?} cancellation restores old routing"
-            );
-            assert!(
-                live.routing.model("beta-model").is_err(),
-                "{phase:?} cancellation never publishes target routing"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn indeterminate_staging_timeout_requests_shutdown_without_persisting() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
-        state.switch_fault = Some(crate::switch_park::SwitchFault::StageIndeterminate);
-        let token = CancellationToken::new();
-        let tree = state.hub.operation();
-
-        let error = tokio::time::timeout(
-            Duration::from_secs(10),
-            crate::run_switch_with_config(
-                state.clone(),
-                ProfileName::parse("beta").expect("profile name"),
-                tree,
-                None,
-                || crate::StatePersistence::Write,
-                &token,
-            ),
-        )
-        .await
-        .expect("injected staging timeout settles")
-        .expect_err("indeterminate staging fails");
-
-        let chain = crate::config_write::error_chain(&error);
-        assert!(chain.contains("stage-profile-timeout"));
-        assert!(chain.contains("injected non-preemptible runtime startup timeout"));
-        assert_eq!(
-            std::fs::read_to_string(state_path).expect("read profile state"),
-            "active_profile = \"alpha\"\n"
-        );
-        let live = state.live.read().await;
-        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
-        assert!(live.routing.model("alpha-model").is_err());
-        assert!(live.routing.model("beta-model").is_ok());
-        assert!(token.is_cancelled());
-        assert!(state.shutdown.is_fired());
-    }
-
-    #[cfg(all(feature = "local", feature = "test-fixtures"))]
-    #[tokio::test]
-    async fn determinate_persistence_failure_reconstructs_and_republishes_local_models() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let (mut state, state_path) = persisted_profiles_with_local(&temp);
-        let old_local = local_runtime_fixture("retired-local");
-        {
-            let mut live = state.live.write().await;
-            live.routing = Arc::new(
-                live.routing
-                    .as_ref()
-                    .clone()
-                    .merge(old_local.models().iter().cloned())
-                    .expect("old local model routes"),
-            );
-            live.local = old_local;
-        }
-        state.local_restarter = Some(restart_local_fixture);
-
-        let persistence = crate::profile_switch::PreparedPersistence::for_test(
-            state_path.clone(),
-            "active_profile = \"beta\"\n".to_owned(),
-        )
-        .expect("prepare state");
-        persistence.discard_temporaries();
-        let name = ProfileName::parse("beta").expect("profile name");
-        let tree = state.hub.operation();
-        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
-            .await
-            .expect("target prepares");
-        let replacement = crate::profile_switch::RuntimeReplacement {
-            local: crate::local::LocalRuntime::empty(),
-            start_failures: Vec::new(),
-        };
-        let token = CancellationToken::new();
-
-        let error = crate::profile_switch::commit_for_test(
-            &state,
-            name,
-            target,
-            replacement,
-            persistence,
-            token.clone(),
-        )
-        .await
-        .expect_err("missing prepared file makes persistence fail determinately");
-
-        assert!(matches!(
-            error,
-            crate::error::GatewayError::ConfigWriteIo(_)
-        ));
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("read state"),
-            "active_profile = \"alpha\"\n"
-        );
-        let live = state.live.read().await;
-        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
-        assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
-        let local = live
-            .routing
-            .model("alpha-local")
-            .expect("reconstructed local model is republished");
-        assert_eq!(
-            local.upstream_name, "restored-local",
-            "routing uses the reconstructed binding, not the retired one"
-        );
-        assert_eq!(live.local.models().len(), 1);
-        assert_eq!(live.local.models()[0].upstream_name, "restored-local");
-        drop(live);
-        assert!(!token.is_cancelled());
-        assert!(!state.shutdown.is_fired());
-    }
-
-    #[tokio::test]
-    async fn indeterminate_persistence_requests_shutdown_without_claiming_state() {
-        let state = two_remote_profiles();
-        let temp = tempfile::tempdir().expect("tempdir");
-        let target_path = temp.path().join("gateway.state.toml");
-        std::fs::write(&target_path, "active_profile = \"alpha\"\n").expect("write state");
-        let persistence = crate::profile_switch::PreparedPersistence::for_test(
-            target_path.clone(),
-            "active_profile = \"beta\"\n".to_owned(),
-        )
-        .expect("prepare state");
-        std::fs::write(&target_path, "uncertain authoritative contents")
-            .expect("make persistence state indeterminate");
-        persistence.discard_temporaries();
-        let name = ProfileName::parse("beta").expect("profile name");
-        let tree = state.hub.operation();
-        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
-            .await
-            .expect("target prepares");
-        let replacement = crate::profile_switch::RuntimeReplacement {
-            #[cfg(feature = "local")]
-            local: crate::local::LocalRuntime::empty(),
-            #[cfg(feature = "local")]
-            start_failures: Vec::new(),
-        };
-        let token = CancellationToken::new();
-
-        let error = crate::profile_switch::commit_for_test(
-            &state,
-            name,
-            target,
-            replacement,
-            persistence,
-            token.clone(),
-        )
-        .await
-        .expect_err("indeterminate persistence is fatal");
-        let crate::error::GatewayError::SwitchFailed { stage, source } = &error else {
-            panic!("fatal persistence error retains its phase and cause: {error:?}");
-        };
-        assert_eq!(*stage, "persist-profile-indeterminate");
-        assert!(
-            source
-                .downcast_ref::<crate::error::GatewayError>()
-                .is_some_and(|cause| matches!(cause, crate::error::GatewayError::ConfigWriteIo(_))),
-            "fatal persistence retains the originating I/O error: {error:?}"
-        );
-        assert!(token.is_cancelled());
-        assert!(state.shutdown.is_fired());
-        assert_eq!(
-            std::fs::read_to_string(&target_path).expect("read uncertain state"),
-            "uncertain authoritative contents",
-            "fatal handling does not claim or overwrite indeterminate persistence"
-        );
-        let live = state.live.read().await;
-        assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
-    }
-
-    #[tokio::test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the single linear scenario proves both readers stay blocked across the same persistence-to-publication boundary"
-    )]
-    async fn pending_readers_serialize_with_persistence_and_live_publication() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config_path = temp.path().join("gateway.toml");
-        std::fs::write(&config_path, two_remote_catalog()).expect("write catalog");
-        let state_path = gateway_config::profile_state_path(&config_path);
-        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
-        let config = Config::load(
-            &config_path,
-            &gateway_config::ProfileSelection::new(Some("alpha"), None),
-        )
-        .expect("load alpha profile");
-        let mut state = app_state(
-            config,
-            Some(crate::test_support::AdminPaths {
-                fixture_dir: temp.path().to_path_buf(),
-                active: "alpha".to_owned(),
-                config_path,
-            }),
-        );
-        let persistence = crate::profile_switch::PreparedPersistence::for_test(
-            state_path.clone(),
-            "active_profile = \"beta\"\n".to_owned(),
-        )
-        .expect("prepare state");
-        let name = ProfileName::parse("beta").expect("profile name");
-        let tree = state.hub.operation();
-        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
-            .await
-            .expect("target prepares");
-        let replacement = crate::profile_switch::RuntimeReplacement {
-            #[cfg(feature = "local")]
-            local: crate::local::LocalRuntime::empty(),
-            #[cfg(feature = "local")]
-            start_failures: Vec::new(),
-        };
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Publish,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let token = CancellationToken::new();
-        let commit_state = state.clone();
-        let commit_token = token.clone();
-        let commit = tokio::spawn(async move {
-            crate::profile_switch::commit_for_test(
-                &commit_state,
-                name,
-                target,
-                replacement,
-                persistence,
-                commit_token,
-            )
-            .await
-        });
-        tokio::time::timeout(Duration::from_secs(1), park.entered())
-            .await
-            .expect("commit reaches the publication boundary");
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("read committed state"),
-            "active_profile = \"beta\"\n"
-        );
-        assert_eq!(
-            state.live.read().await.profile_name.as_deref(),
-            Some("alpha")
-        );
-
-        let mut headers = axum::http::HeaderMap::new();
-        headers.insert(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_static("Bearer test-token"),
-        );
-        let caller = crate::auth::Caller::new(
-            headers,
-            Some("127.0.0.1:50000".parse().expect("loopback address")),
-        );
-        let reader_state = state.clone();
-        let dirty_state = state.clone();
-        let catalog_state = state.clone();
-        let status_state = state.clone();
-        let dirty_caller = caller.clone();
-        let catalog_caller = caller.clone();
-        let status_caller = caller.clone();
-        let mut reader = tokio::spawn(async move {
-            crate::config_pending::admin_config_pending(axum::extract::State(reader_state), caller)
-                .await
-        });
-        let mut dirty_reader = tokio::spawn(async move {
-            crate::config_pending::admin_config_dirty(
-                axum::extract::State(dirty_state),
-                dirty_caller,
-            )
-            .await
-        });
-        let mut catalog_reader = tokio::spawn(async move {
-            crate::list_models(axum::extract::State(catalog_state), catalog_caller).await
-        });
-        let mut status_reader = tokio::spawn(async move {
-            crate::admin_status(axum::extract::State(status_state), status_caller).await
-        });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut reader)
-                .await
-                .is_err(),
-            "pending readers wait while disk and live state differ"
-        );
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut dirty_reader)
-                .await
-                .is_err(),
-            "dirty readers wait while disk and live state differ"
-        );
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut catalog_reader)
-                .await
-                .is_err(),
-            "model discovery waits while disk and live publication differ"
-        );
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut status_reader)
-                .await
-                .is_err(),
-            "operational status waits while disk and live publication differ"
-        );
-
-        token.cancel();
-        park.release();
-        commit
-            .await
-            .expect("commit task joins")
-            .expect("cancellation after persistence cannot split publication");
-        let axum::Json(reply) = reader
-            .await
-            .expect("reader task joins")
-            .expect("pending read succeeds");
-        let axum::Json(dirty) = dirty_reader
-            .await
-            .expect("dirty reader task joins")
-            .expect("dirty read succeeds");
-        let axum::Json(catalog) = catalog_reader
-            .await
-            .expect("catalog reader task joins")
-            .expect("catalog read succeeds");
-        let axum::Json(status) = status_reader
-            .await
-            .expect("status reader task joins")
-            .expect("status read succeeds");
-        assert_eq!(reply["profile"]["active_profile"], "beta");
-        assert_eq!(dirty["dirty"], false);
-        let catalog = serde_json::to_value(catalog).expect("catalog serializes");
-        assert_eq!(catalog["data"][0]["id"], "beta-model");
-        assert_eq!(status["profile"], "beta");
-        assert_eq!(
-            state.live.read().await.profile_name.as_deref(),
-            Some("beta")
+            matches!(unknown, Err(crate::error::GatewayError::UnknownModel(_))),
+            "a name outside loading keeps its 404: {unknown:?}"
         );
     }
 
     /// A profile over one remote model on `backend` and one local model
     /// whose source is a real file but whose `llama-server` is a plain text
     /// file, so the artifact step succeeds and the spawn fails per model.
+    #[cfg(feature = "local")]
     fn local_profile_config(temp: &tempfile::TempDir, backend: &str) -> Config {
         let fake_server = temp.path().join("fake-llama-server");
         std::fs::write(&fake_server, b"not a server").expect("write fake server");
@@ -3063,7 +2222,7 @@ mod provisioning_tests {
         std::fs::write(&model_file, b"not a gguf").expect("write model");
         let slash = |path: &std::path::Path| path.display().to_string().replace('\\', "/");
         Config::from_toml_str(&format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [local]\ncache_dir = '{}'\nllama_server_path = '{}'\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
@@ -3072,7 +2231,7 @@ mod provisioning_tests {
              context = 8192\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
              [[local_model]]\nname = \"local-model\"\ndescription = \"l\"\n\
              source = '{}'\ncontext = 4096\n\
-             [[profile]]\nname = \"main\"\nmodels = [\"remote-model\", \"local-model\"]\n",
+             [[profile]]\nname = \"main\"\nmodels = [\"local-model\"]\n",
             slash(&temp.path().join("cache")),
             slash(&fake_server),
             slash(&model_file),
@@ -3080,16 +2239,10 @@ mod provisioning_tests {
         .expect("config parses")
     }
 
-    /// [`local_profile_config`] served by the harness with nothing local
-    /// running and an endpoint nothing listens on, so the switch takes the
-    /// nothing-to-stop order: cut-over, then download, then spawn.
-    fn local_profile_state(temp: &tempfile::TempDir) -> AppState {
-        app_state(local_profile_config(temp, "http://127.0.0.1:9"), None)
-    }
-
     /// A fake OpenAI backend on an ephemeral loopback port answering every
     /// chat completion with a canned reply, so a routed request completes
     /// end to end.
+    #[cfg(feature = "local")]
     async fn fake_chat_backend() -> std::net::SocketAddr {
         async fn completions(
             axum::Json(body): axum::Json<serde_json::Value>,
@@ -3119,6 +2272,7 @@ mod provisioning_tests {
         addr
     }
 
+    #[cfg(feature = "local")]
     async fn status(state: AppState) -> serde_json::Value {
         let response = build_router(state, None)
             .oneshot(
@@ -3139,36 +2293,147 @@ mod provisioning_tests {
         .expect("the status body is JSON")
     }
 
-    /// What every unlocked phase after the cut-over must look like: the
-    /// lock is free and registration flows, the remote model routes, the
-    /// local model is promised as loading and answers 503 with the wait,
-    /// the status names it, and the catalog lists only what routes.
-    async fn assert_interim_state(state: &AppState, phase: &str) {
-        assert!(
-            state.switch.try_lock().is_ok(),
-            "the switch lock is free during the {phase}"
-        );
-        let _registered = tokio::time::timeout(Duration::from_secs(1), state.begin_inference())
+    /// The boot load over the runner's shell, parked at `phase` on the
+    /// production worker: the state, the park, the worker, and the enqueued
+    /// command's outcome.
+    #[cfg(feature = "local")]
+    async fn parked_boot_load(
+        phase: crate::park::Phase,
+    ) -> (
+        AppState,
+        Arc<crate::park::PhasePark>,
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<crate::commands::SharedOutcome>,
+        tempfile::TempDir,
+    ) {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut state = crate::test_support::boot_state(local_profile_config(
+            &temp,
+            &format!("http://{backend}"),
+        ));
+        let park = Arc::new(crate::park::PhasePark::at(phase));
+        state.park = Some(Arc::clone(&park));
+        let worker = state
+            .commands
+            .spawn_worker(&state)
+            .expect("the production worker spawns");
+        let boot = state.commands.enqueue(Command::load_profile(
+            ProfileName::parse("main").expect("profile name"),
+            CancellationToken::new(),
+        ));
+        tokio::time::timeout(Duration::from_secs(10), park.entered())
             .await
-            .unwrap_or_else(|_| panic!("registration flows during the {phase}"));
+            .unwrap_or_else(|_| panic!("the boot load parks at {phase:?}"));
+        (state, park, worker, boot.outcome, temp)
+    }
+
+    /// After the spawn failed: nothing is promised as loading, the local
+    /// model is a plain 404, and the remote model keeps routing.
+    #[cfg(feature = "local")]
+    async fn assert_settled_after_failed_spawn(state: &AppState) {
         {
             let live = state.live.read().await;
             assert!(
-                live.routing.model("remote-model").is_ok(),
-                "the cut-over published the remote model before the {phase}"
+                live.loading.is_empty(),
+                "a failed spawn clears the loading set"
             );
-            assert_eq!(
-                live.loading.iter().collect::<Vec<_>>(),
-                ["local-model"],
-                "the local model is promised as loading during the {phase}"
+            assert!(
+                live.routing.model("remote-model").is_ok(),
+                "the remote routing stays live after the failed spawn"
+            );
+            assert!(
+                live.local.models().is_empty(),
+                "no child is installed after the failed spawn"
             );
         }
         let response = chat(state.clone(), "local-model").await;
         assert_eq!(
             response.status(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "a loading model is a 503 during the {phase}"
+            StatusCode::NOT_FOUND,
+            "a model whose spawn failed is a 404, never a lingering 503"
         );
+        assert_eq!(
+            status(state.clone()).await["loading_models"],
+            serde_json::json!([]),
+            "the status lists nothing as loading after the spawn"
+        );
+        assert_eq!(
+            chat(state.clone(), "remote-model").await.status(),
+            StatusCode::OK,
+            "the remote model keeps serving"
+        );
+    }
+
+    /// The remote table the runner published serves end to end while the
+    /// boot load downloads: nothing is promised as loading yet, so the
+    /// local model answers 503 naming the boot command, and the status
+    /// names the command as active. Released, the fake llama-server fails
+    /// the spawn and the local model is a plain 404.
+    #[cfg(feature = "local")]
+    #[tokio::test]
+    async fn a_remote_model_serves_while_the_boot_load_downloads() {
+        let (state, park, worker, outcome, _temp) =
+            parked_boot_load(crate::park::Phase::Download).await;
+
+        assert_eq!(
+            chat(state.clone(), "remote-model").await.status(),
+            StatusCode::OK,
+            "the remote model serves while the boot load downloads the local one"
+        );
+        assert!(
+            state.live.read().await.loading.is_empty(),
+            "nothing is promised as loading before the artifacts are staged"
+        );
+        let response = chat(state.clone(), "local-model").await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "model_provisioning");
+        assert_eq!(
+            status(state.clone()).await["queue"]["active"]["name"],
+            "load-profile: main",
+            "the boot load is the active command"
+        );
+
+        park.release();
+        let outcome = tokio::time::timeout(Duration::from_secs(30), outcome)
+            .await
+            .expect("the boot load settles")
+            .expect("the worker settles the command");
+        assert!(
+            matches!(
+                &*outcome,
+                Err(crate::error::GatewayError::PartialStart { failed, .. })
+                    if failed.iter().any(|entry| entry.starts_with("local-model"))
+            ),
+            "the fake llama-server cannot start the local model: {outcome:?}"
+        );
+        assert_settled_after_failed_spawn(&state).await;
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    /// Once the artifacts are staged the local model is promised as
+    /// loading: it answers 503 `model_loading` with `Retry-After`, the
+    /// status lists it, the catalog lists only what routes, and the remote
+    /// model serves throughout. Once the spawn fails the promise is
+    /// withdrawn to a 404.
+    #[cfg(feature = "local")]
+    #[tokio::test]
+    async fn a_loading_model_answers_503_until_its_spawn_settles() {
+        let (state, park, worker, outcome, _temp) =
+            parked_boot_load(crate::park::Phase::Spawn).await;
+
+        assert_eq!(
+            state.live.read().await.loading.iter().collect::<Vec<_>>(),
+            ["local-model"],
+            "the local model is promised as loading during the spawn"
+        );
+        let response = chat(state.clone(), "local-model").await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
             response
                 .headers()
@@ -3183,215 +2448,42 @@ mod provisioning_tests {
         let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
         assert_eq!(json["error"]["code"], "model_loading");
         let status = status(state.clone()).await;
+        assert_eq!(status["loading_models"], serde_json::json!(["local-model"]));
+        assert_eq!(status["models"], serde_json::json!(["remote-model"]));
         assert_eq!(
-            status["loading_models"],
-            serde_json::json!(["local-model"]),
-            "the status names the loading model during the {phase}"
+            chat(state.clone(), "remote-model").await.status(),
+            StatusCode::OK
         );
-        assert_eq!(
-            status["models"],
-            serde_json::json!(["remote-model"]),
-            "only routable models are listed during the {phase}"
-        );
-    }
-
-    /// After the spawn failed: nothing is promised as loading, the local
-    /// model is a plain 404, and the remote model keeps routing.
-    async fn assert_settled_after_failed_spawn(state: &AppState) {
-        {
-            let live = state.live.read().await;
-            assert!(
-                live.loading.is_empty(),
-                "a failed spawn clears the loading set"
-            );
-            assert!(
-                live.routing.model("remote-model").is_ok(),
-                "the remote routing stays live after the failed spawn"
-            );
-        }
-        let response = chat(state.clone(), "local-model").await;
-        assert_eq!(
-            response.status(),
-            StatusCode::NOT_FOUND,
-            "a model whose spawn failed is a 404, never a lingering 503"
-        );
-        assert_eq!(
-            status(state.clone()).await["loading_models"],
-            serde_json::json!([]),
-            "the status lists nothing as loading after the spawn"
-        );
-    }
-
-    /// Cold-boot order: with nothing old to stop, the cut-over runs before
-    /// the download, so the remote model serves and the local model
-    /// answers 503 while the artifacts stage, with the switch lock free.
-    #[cfg(feature = "local")]
-    #[tokio::test]
-    async fn the_download_runs_unlocked_after_the_cut_over_published_the_remote_models() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let mut state = local_profile_state(&temp);
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Download,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let token = CancellationToken::new();
-        let switch = spawn_switch(&state, "main", &token);
-
-        tokio::time::timeout(Duration::from_secs(10), park.entered())
-            .await
-            .expect("the switch parks in the download");
-        assert_interim_state(&state, "download").await;
 
         park.release();
-        let outcome = tokio::time::timeout(Duration::from_secs(30), switch)
+        let outcome = tokio::time::timeout(Duration::from_secs(30), outcome)
             .await
-            .expect("the switch settles")
-            .expect("the switch task joins");
+            .expect("the boot load settles")
+            .expect("the worker settles the command");
         assert!(
             matches!(
-                &outcome,
-                Err(crate::error::GatewayError::PartialStart { failed, .. })
-                    if failed.iter().any(|entry| entry.starts_with("local-model"))
-            ),
-            "the fake llama-server cannot start the local model: {outcome:?}"
-        );
-        assert_settled_after_failed_spawn(&state).await;
-    }
-
-    /// The spawn runs unlocked after the cut-over: the remote model
-    /// serves, the local model answers 503 with `Retry-After`, the status
-    /// names it, and once the spawn fails the promise is withdrawn to a 404.
-    #[cfg(feature = "local")]
-    #[tokio::test]
-    async fn the_spawn_runs_unlocked_and_a_loading_model_answers_503_until_it_settles() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let mut state = local_profile_state(&temp);
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Spawn,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let token = CancellationToken::new();
-        let switch = spawn_switch(&state, "main", &token);
-
-        tokio::time::timeout(Duration::from_secs(30), park.entered())
-            .await
-            .expect("the switch parks in the spawn");
-        assert_interim_state(&state, "spawn").await;
-
-        park.release();
-        let outcome = tokio::time::timeout(Duration::from_secs(30), switch)
-            .await
-            .expect("the switch settles")
-            .expect("the switch task joins");
-        assert!(
-            matches!(
-                &outcome,
+                &*outcome,
                 Err(crate::error::GatewayError::PartialStart { .. })
             ),
             "the fake llama-server cannot start the local model: {outcome:?}"
         );
         assert_settled_after_failed_spawn(&state).await;
-    }
-
-    /// The headline regression, on the boot command itself: the boot
-    /// `LoadProfile` runs on the real queue worker over the instant-ready
-    /// empty shell and parks inside its download. With nothing old to stop,
-    /// the cut-over already published the remote model, so a chat request
-    /// for it completes end to end against the fake backend while the
-    /// local model downloads; the local model answers 503 `model_loading`
-    /// with the wait and is listed as loading. Once released, the spawn
-    /// fails and the promise is withdrawn to a plain 404.
-    #[cfg(feature = "local")]
-    #[tokio::test]
-    async fn a_remote_model_serves_while_the_boot_command_is_parked_in_its_download() {
-        let backend = fake_chat_backend().await;
-        let temp = tempfile::tempdir().expect("tempdir");
-        let mut state = crate::test_support::boot_state(local_profile_config(
-            &temp,
-            &format!("http://{backend}"),
-        ));
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Download,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let worker = state
-            .commands
-            .spawn_worker(&state)
-            .expect("the production worker spawns");
-        let _boot = state.commands.enqueue(Command::load_profile(
-            ProfileName::parse("main").expect("profile name"),
-            false,
-            CancellationToken::new(),
-        ));
-        tokio::time::timeout(Duration::from_secs(10), park.entered())
-            .await
-            .expect("the boot command parks in its download");
-
-        let response = chat(state.clone(), "remote-model").await;
-        assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "the remote model serves while the boot command downloads the local one"
-        );
-        assert_interim_state(&state, "boot download").await;
-        assert_eq!(
-            status(state.clone()).await["queue"]["active"]["name"],
-            "load-profile: main",
-            "the boot command is the active command"
-        );
-
-        park.release();
-        wait_until("the boot command to settle", || {
-            state.commands.active_command().is_none()
-        })
-        .await;
-        assert_settled_after_failed_spawn(&state).await;
-        assert_eq!(
-            chat(state.clone(), "remote-model").await.status(),
-            StatusCode::OK,
-            "the remote model keeps serving after the partial start"
-        );
         state.commands.shutdown();
         worker.await.expect("the worker exits on shutdown");
     }
 
-    /// A cancellation of the boot command while its download is parked
-    /// (cold-boot order) withdraws the loading promise and keeps the
-    /// published remote routing: the remote model serves, the local model
-    /// is a 404, not a lingering 503.
+    /// A cancellation while the download is parked settles the boot load as
+    /// cancelled and leaves the remote table serving: the local model is a
+    /// 404, not a lingering 503.
     #[cfg(feature = "local")]
     #[tokio::test]
-    async fn a_cancellation_during_the_download_clears_loading_and_keeps_the_remote_routing() {
-        let backend = fake_chat_backend().await;
-        let temp = tempfile::tempdir().expect("tempdir");
-        let mut state = crate::test_support::boot_state(local_profile_config(
-            &temp,
-            &format!("http://{backend}"),
-        ));
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Download,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let worker = state
-            .commands
-            .spawn_worker(&state)
-            .expect("the production worker spawns");
-        let boot = state.commands.enqueue(Command::load_profile(
-            ProfileName::parse("main").expect("profile name"),
-            false,
-            CancellationToken::new(),
-        ));
-        tokio::time::timeout(Duration::from_secs(10), park.entered())
-            .await
-            .expect("the boot command parks in its download");
-        assert_eq!(
-            state.live.read().await.loading.iter().collect::<Vec<_>>(),
-            ["local-model"]
-        );
+    async fn a_cancellation_during_the_download_keeps_the_remote_routing() {
+        let (state, park, worker, outcome, _temp) =
+            parked_boot_load(crate::park::Phase::Download).await;
 
-        assert!(state.commands.cancel_active(), "the boot command is active");
+        assert!(state.commands.cancel_active(), "the boot load is active");
         park.release();
-        let outcome = tokio::time::timeout(Duration::from_secs(10), boot.outcome)
+        let outcome = tokio::time::timeout(Duration::from_secs(10), outcome)
             .await
             .expect("the cancelled command settles")
             .expect("the worker settles the command");
@@ -3403,44 +2495,15 @@ mod provisioning_tests {
             "the download honors the cancellation: {outcome:?}"
         );
         assert_settled_after_failed_spawn(&state).await;
-        assert_eq!(
-            chat(state.clone(), "remote-model").await.status(),
-            StatusCode::OK,
-            "the remote routing published at cut-over survives the cancellation"
-        );
         state.commands.shutdown();
         worker.await.expect("the worker exits on shutdown");
-    }
-
-    /// The resolver's miss ladder: a name in `loading` is `ModelLoading`,
-    /// a name the catalog does not know stays `UnknownModel`.
-    #[tokio::test]
-    async fn a_routing_miss_on_a_loading_model_is_model_loading_not_not_found() {
-        let state = two_remote_profiles();
-        state
-            .live
-            .write()
-            .await
-            .loading
-            .insert("pending-model".to_owned());
-        let loading = crate::resolve_routed_model(&state, "pending-model").await;
-        assert!(
-            matches!(&loading, Err(crate::error::GatewayError::ModelLoading(name)) if name == "pending-model"),
-            "a loading model resolves to ModelLoading: {loading:?}"
-        );
-        let unknown = crate::resolve_routed_model(&state, "ghost").await;
-        assert!(
-            matches!(unknown, Err(crate::error::GatewayError::UnknownModel(_))),
-            "a name outside loading keeps its 404: {unknown:?}"
-        );
     }
 }
 
 /// The boot `LoadProfile` command owns the process's one STT load: the
 /// control plane serves complete responses while that load is parked,
-/// speech becomes ready when it completes, and later profile and Apply
-/// transactions persist new speech state without touching the running
-/// runtime.
+/// speech becomes ready when it completes, and a later switch or Apply
+/// persists new speech state without touching the running runtime.
 #[cfg(all(test, feature = "stt"))]
 mod boot_speech_tests {
     #![expect(
@@ -3466,14 +2529,14 @@ mod boot_speech_tests {
     /// A catalog with one remote model per profile on the fake backend.
     fn catalog(backend: std::net::SocketAddr) -> String {
         format!(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [stt]\nwindow_seconds = 8\ninterval_ms = 250\nvocabulary = [\"alpha-words\"]\n\
              [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://{backend}\"\napi_key = \"\"\n\
              [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
              [[model]]\nname = \"beta-model\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
-             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
-             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
+             [[profile]]\nname = \"alpha\"\nmodels = []\n\
+             [[profile]]\nname = \"beta\"\nmodels = []\n"
         )
     }
 
@@ -3626,22 +2689,6 @@ mod boot_speech_tests {
             .collect()
     }
 
-    /// Labels of every progress event the hub broadcast for `operation`.
-    fn begun_stages(
-        events: &mut tokio::sync::broadcast::Receiver<shared_progress::ProgressEvent>,
-        operation: shared_progress::OperationId,
-    ) -> Vec<String> {
-        let mut labels = Vec::new();
-        while let Ok(event) = events.try_recv() {
-            if event.operation == operation
-                && matches!(event.state, shared_progress::EventState::Begun { .. })
-            {
-                labels.push(event.label.clone());
-            }
-        }
-        labels
-    }
-
     /// While the boot command is parked inside its STT load, every
     /// control-plane and ready non-STT route answers completely; releasing
     /// the load brings batch and Realtime to readiness.
@@ -3667,7 +2714,7 @@ mod boot_speech_tests {
         arm_boot_speech(&mut state, gate.clone());
         let addr = serve_state(state.clone()).await;
         let worker = state.commands.spawn_worker(&state).expect("worker spawns");
-        let boot = state.commands.enqueue(Command::boot_load_profile(
+        let boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("alpha").expect("profile name"),
             CancellationToken::new(),
         ));
@@ -3676,8 +2723,8 @@ mod boot_speech_tests {
         })
         .await;
 
-        // The switch published before the speech load parked: the remote
-        // model routes and answers end to end.
+        // The runner published the remote table before the boot load ran:
+        // the remote model routes and answers end to end.
         let chat = reqwest::Client::new()
             .post(format!("http://{addr}/v1/chat/completions"))
             .bearer_auth("test-token")
@@ -3697,8 +2744,8 @@ mod boot_speech_tests {
                 .iter()
                 .map(|model| model["id"].as_str().expect("model id"))
                 .collect::<Vec<_>>(),
-            ["alpha-model"],
-            "only the ready non-STT model is advertised"
+            ["alpha-model", "beta-model"],
+            "only the ready non-STT models are advertised"
         );
 
         let health = get(addr, "/health").await;
@@ -3787,6 +2834,7 @@ mod boot_speech_tests {
                 .collect::<Vec<_>>(),
             [
                 "alpha-model",
+                "beta-model",
                 "scripted-interim",
                 "scripted-final",
                 "realtime-transcribe"
@@ -3808,8 +2856,9 @@ mod boot_speech_tests {
     }
 
     /// A failed boot STT load fails the boot command but never the gateway:
-    /// the published profile keeps serving, speech stays unavailable, and a
-    /// later switch neither retries the load nor emits a speech stage.
+    /// the boot profile keeps serving, speech stays unavailable, and a
+    /// later switch persists its selection without retrying the load or
+    /// emitting a speech stage.
     #[tokio::test]
     async fn a_failed_boot_speech_load_leaves_the_gateway_serving_without_speech() {
         let backend = fake_chat_backend().await;
@@ -3823,7 +2872,7 @@ mod boot_speech_tests {
         );
         let addr = serve_state(state.clone()).await;
         let worker = state.commands.spawn_worker(&state).expect("worker spawns");
-        let boot = state.commands.enqueue(Command::boot_load_profile(
+        let boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("alpha").expect("profile name"),
             CancellationToken::new(),
         ));
@@ -3849,7 +2898,7 @@ mod boot_speech_tests {
         let health = get(addr, "/health").await;
         assert_eq!(health.status(), reqwest::StatusCode::OK);
         let status = get_json(addr, "/admin/status").await;
-        assert_eq!(status["profile"], "alpha", "the switch published");
+        assert_eq!(status["profile"], "alpha", "the boot profile serves");
         assert_eq!(
             status["speech"],
             serde_json::json!({"configured": false, "ready": false, "gpu": false})
@@ -3862,27 +2911,24 @@ mod boot_speech_tests {
                 .iter()
                 .map(|model| model["id"].as_str().expect("model id"))
                 .collect::<Vec<_>>(),
-            ["alpha-model"],
+            ["alpha-model", "beta-model"],
             "speech discovery stays empty until restart"
         );
 
-        // A later switch runs its full course without a speech stage and
+        // A later switch persists its selection without a speech stage and
         // without retrying the spent initial load.
         let mut events = state.hub.subscribe();
-        let switch = state.commands.enqueue(Command::load_profile(
-            ProfileName::parse("beta").expect("profile name"),
-            true,
-            CancellationToken::new(),
-        ));
-        let operation = switch.operation;
-        let outcome = tokio::time::timeout(WAIT, switch.outcome)
+        let switching = reqwest::Client::new()
+            .post(format!("http://{addr}/admin/switch-profile"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "name": "beta" }))
+            .send()
             .await
-            .expect("the switch settles")
-            .expect("the worker settles the command");
-        assert!(outcome.is_ok(), "the later switch succeeds: {outcome:?}");
+            .expect("the switch request sends");
+        assert_eq!(switching.status(), reqwest::StatusCode::OK);
         assert!(
-            !begun_stages(&mut events, operation).contains(&"loading-speech".to_owned()),
-            "a non-boot switch emits no speech stage"
+            !begun_stages_any(&mut events).contains(&"loading-speech".to_owned()),
+            "a switch emits no speech stage"
         );
         assert!(!state.speech.status().ready());
 
@@ -3903,7 +2949,7 @@ mod boot_speech_tests {
         arm_boot_speech(&mut state, gate.clone());
         let addr = serve_state(state.clone()).await;
         let worker = state.commands.spawn_worker(&state).expect("worker spawns");
-        let boot = state.commands.enqueue(Command::boot_load_profile(
+        let boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("alpha").expect("profile name"),
             CancellationToken::new(),
         ));
@@ -3939,9 +2985,9 @@ mod boot_speech_tests {
             .expect("the worker task joins");
     }
 
-    /// Boot speech A keeps serving after a later switch persists B, with no
-    /// speech stage on the switch's stream; a fresh process state over the
-    /// persisted selection loads B.
+    /// Boot speech A keeps serving after a later switch persists B and
+    /// reports a restart; a fresh process state over the persisted
+    /// selection loads B.
     #[tokio::test]
     async fn a_later_switch_persists_b_while_boot_speech_a_keeps_serving() {
         let backend = fake_chat_backend().await;
@@ -3954,7 +3000,7 @@ mod boot_speech_tests {
         arm_boot_speech(&mut state, ScriptedModelFactory::new(interim));
         let addr = serve_state(state.clone()).await;
         let worker = state.commands.spawn_worker(&state).expect("worker spawns");
-        let boot = state.commands.enqueue(Command::boot_load_profile(
+        let boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("alpha").expect("profile name"),
             CancellationToken::new(),
         ));
@@ -3965,9 +3011,9 @@ mod boot_speech_tests {
         assert!(outcome.is_ok(), "boot A loads: {outcome:?}");
         assert_eq!(speech_models(&state), ["scripted-interim"]);
 
-        // Switch to beta through the admin route, reading its stage stream
-        // to the terminal event.
-        let mut switching = reqwest::Client::new()
+        // Select beta through the admin route: the selection persists and
+        // the reply asks for a restart; nothing running changes.
+        let switching = reqwest::Client::new()
             .post(format!("http://{addr}/admin/switch-profile"))
             .bearer_auth("test-token")
             .json(&serde_json::json!({ "name": "beta" }))
@@ -3975,22 +3021,11 @@ mod boot_speech_tests {
             .await
             .expect("the switch request sends");
         assert_eq!(switching.status(), reqwest::StatusCode::OK);
-        let mut body = String::new();
-        while !body.contains("\"status\"") {
-            let chunk = tokio::time::timeout(WAIT, switching.chunk())
-                .await
-                .expect("the switch stream answers")
-                .expect("the switch stream reads");
-            let Some(chunk) = chunk else { break };
-            body.push_str(std::str::from_utf8(&chunk).expect("SSE frames are UTF-8"));
-        }
-        assert!(
-            body.contains("\"ready\""),
-            "the switch to beta succeeds: {body}"
-        );
-        assert!(
-            !body.contains("loading-speech"),
-            "the switch emits no speech stage: {body}"
+        let body: serde_json::Value = switching.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": "beta", "restart_required": true }),
+            "the switch to beta persists and reports a restart"
         );
 
         assert_eq!(
@@ -4034,7 +3069,7 @@ mod boot_speech_tests {
             .commands
             .spawn_worker(&restarted)
             .expect("worker spawns");
-        let boot = restarted.commands.enqueue(Command::boot_load_profile(
+        let boot = restarted.commands.enqueue(Command::load_profile(
             ProfileName::parse("beta").expect("profile name"),
             CancellationToken::new(),
         ));
@@ -4067,7 +3102,7 @@ mod boot_speech_tests {
         arm_boot_speech(&mut state, ScriptedModelFactory::new(interim));
         let addr = serve_state(state.clone()).await;
         let worker = state.commands.spawn_worker(&state).expect("worker spawns");
-        let boot = state.commands.enqueue(Command::boot_load_profile(
+        let boot = state.commands.enqueue(Command::load_profile(
             ProfileName::parse("alpha").expect("profile name"),
             CancellationToken::new(),
         ));
@@ -4079,6 +3114,10 @@ mod boot_speech_tests {
 
         // Stage an STT vocabulary change through the real save route.
         let mut document = get_json(addr, "/admin/config").await;
+        document
+            .as_object_mut()
+            .expect("the config is an object")
+            .remove("active_profile");
         document["stt"]["vocabulary"] = serde_json::json!(["beta-words"]);
         let save = reqwest::Client::new()
             .put(format!("http://{addr}/admin/config"))
@@ -4100,9 +3139,10 @@ mod boot_speech_tests {
         let reply: serde_json::Value = apply.json().await.expect("apply body");
         assert_eq!(reply["reloaded"], true);
         assert_eq!(
-            reply["applied"],
-            serde_json::json!(["gateway.state.toml", "gateway.toml"])
+            reply["restart_required"], true,
+            "the speech pipeline is read once at boot"
         );
+        assert_eq!(reply["applied"], serde_json::json!(["gateway.toml"]));
 
         assert!(
             std::fs::read_to_string(&config_path)
@@ -4411,143 +3451,257 @@ mod progress_tests {
 }
 
 #[cfg(test)]
-mod switch_tests {
-    use std::collections::VecDeque;
+mod switch_route_tests {
+    //! `POST /admin/switch-profile` persists the selection and reports
+    //! whether a restart is needed; it never touches the live state.
+
     use std::sync::Arc;
 
-    use futures_util::StreamExt as _;
-    use shared_progress::ProgressHub;
+    use gateway_config::{Config, ProfileSelection, profile_state_path};
 
-    use super::{GatewayError, drain_switch_stages, switch_sse_response};
+    use crate::AppState;
+    use crate::test_support::{AdminPaths, app_state, serve_state};
 
-    /// Collects the finite switch stream's full body text.
-    async fn body_text(response: axum::response::Response) -> String {
-        let mut frames = response.into_body().into_data_stream();
-        let mut text = String::new();
-        while let Some(frame) = frames.next().await {
-            let frame = frame.expect("the switch stream errored");
-            text.push_str(std::str::from_utf8(&frame).expect("SSE frames are UTF-8"));
+    const TWO_PROFILES: &str = "config-version = 0\n\
+         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+         [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
+         base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+         [[model]]\nname = \"m\"\ndescription = \"d\"\n\
+         context = 8192\nupstream = \"u\"\nendpoints = [\"e\"]\n\
+         [[profile]]\nname = \"alpha\"\nmodels = []\n\
+         [[profile]]\nname = \"beta\"\nmodels = []\n";
+
+    /// Writes the two-profile catalog into `temp` with no state file and
+    /// builds the state `alpha` runs under, as a `--profile alpha` boot
+    /// would leave it. Returns the state and the state file's path.
+    fn running_alpha(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
+        let config_path = temp.path().join("gateway.toml");
+        std::fs::write(&config_path, TWO_PROFILES).expect("write catalog");
+        let config = Config::load(&config_path, &ProfileSelection::new(Some("alpha"), None))
+            .expect("alpha loads");
+        let state = app_state(
+            config,
+            Some(AdminPaths {
+                fixture_dir: temp.path().to_path_buf(),
+                active: "alpha".to_owned(),
+                config_path: config_path.clone(),
+            }),
+        );
+        (state, profile_state_path(&config_path))
+    }
+
+    /// What a switch must leave alone: the routing table, the running
+    /// profile, and the local children.
+    struct LiveSnapshot {
+        routing: Arc<crate::routing::Routing>,
+        profile_name: Option<String>,
+        #[cfg(feature = "local")]
+        local_models: Vec<String>,
+    }
+
+    async fn snapshot(state: &AppState) -> LiveSnapshot {
+        let live = state.live.read().await;
+        LiveSnapshot {
+            routing: Arc::clone(&live.routing),
+            profile_name: live.profile_name.clone(),
+            #[cfg(feature = "local")]
+            local_models: live
+                .local
+                .models()
+                .iter()
+                .map(|model| model.name.clone())
+                .collect(),
         }
-        text
     }
 
-    #[tokio::test]
-    async fn the_switch_stream_shows_only_its_own_operations_stages() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let other = hub.operation();
-        let _unrelated = other.register("download", 1.0);
-        let _leaf = tree.register("loading-profile", 1.0);
-        let switch = tokio::spawn(async { Arc::new(Ok::<_, GatewayError>("beta".to_owned())) });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
+    async fn assert_live_unchanged(state: &AppState, before: &LiveSnapshot) {
+        let after = snapshot(state).await;
         assert!(
-            text.contains("\"stage\":\"loading-profile\""),
-            "body: {text}"
+            Arc::ptr_eq(&before.routing, &after.routing),
+            "a switch never swaps the routing table"
         );
-        assert!(
-            !text.contains("download"),
-            "another operation's leaf must not leak into the switch stream: {text}"
-        );
-        assert!(
-            text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
-            "the terminal event comes from the join result: {text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_switch_stream_ends_with_the_terminal_error_from_the_join_result() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let switch = tokio::spawn(async {
-            Arc::new(Err::<String, _>(GatewayError::ProfileNotFound(
-                "ghost".to_owned(),
-            )))
-        });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
-        assert!(text.contains("\"status\":\"error\""), "body: {text}");
-        assert!(text.contains("profile not found: ghost"), "body: {text}");
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "local")]
-    async fn partial_start_terminal_reports_every_ready_and_failed_model() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let switch = tokio::spawn(async {
-            Arc::new(Err::<String, _>(GatewayError::PartialStart {
-                profile: "beta".to_owned(),
-                loaded: vec!["ready".to_owned()],
-                failed: vec!["broken: startup error".to_owned()],
-            }))
-        });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
-
-        assert!(text.contains("\"profile\":\"beta\""), "body: {text}");
-        assert!(text.contains("\"loaded\":[\"ready\"]"), "body: {text}");
-        assert!(
-            text.contains("\"failed\":[\"broken: startup error\"]"),
-            "body: {text}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_switch_stream_survives_broadcast_lag() {
-        let hub = Arc::new(ProgressHub::new());
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-
-        // Overflow the hub's 1024-event ring before the stream's first poll,
-        // so the receiver lags: the Lagged arm must drop the skipped events
-        // and carry on rather than ending the stream.
-        let noise = hub.operation();
-        let _noise_leaves: Vec<_> = (0..1100)
-            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
-            .collect();
-        let _leaf = tree.register("loading-profile", 1.0);
-        let switch = tokio::spawn(async { Arc::new(Ok::<_, GatewayError>("beta".to_owned())) });
-
-        let text = body_text(switch_sse_response(rx, operation, switch)).await;
-        assert!(
-            text.contains("\"stage\":\"loading-profile\""),
-            "the stage event survives the lag: {text}"
-        );
-        assert!(
-            text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
-            "the terminal event comes from the join result: {text}"
-        );
-    }
-
-    #[test]
-    fn completed_switch_catch_up_continues_after_a_lag_marker() {
-        let hub = Arc::new(ProgressHub::new());
-        let mut rx = hub.subscribe();
-        let noise = hub.operation();
-        let _noise_leaves: Vec<_> = (0..1100)
-            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
-            .collect();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let _loading = tree.register("loading-profile", 1.0);
-        let mut pending = VecDeque::new();
-
-        drain_switch_stages(&mut rx, operation, &mut pending);
-
         assert_eq!(
-            pending,
-            [r#"data: {"stage":"loading-profile"}
-
-"#]
+            before.profile_name, after.profile_name,
+            "a switch never changes the running profile"
         );
+        #[cfg(feature = "local")]
+        assert_eq!(
+            before.local_models, after.local_models,
+            "a switch never starts or stops local children"
+        );
+    }
+
+    async fn switch(addr: std::net::SocketAddr, body: serde_json::Value) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("http://{addr}/admin/switch-profile"))
+            .bearer_auth("test-token")
+            .json(&body)
+            .send()
+            .await
+            .expect("the switch request sends")
+    }
+
+    async fn get_json(addr: std::net::SocketAddr, path: &str) -> serde_json::Value {
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}{path}"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::OK, "{path}");
+        response.json().await.expect("the body is JSON")
+    }
+
+    #[tokio::test]
+    async fn switching_to_a_different_defined_profile_persists_it_and_requires_a_restart() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "beta" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": "beta", "restart_required": true })
+        );
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("the state file is written"),
+            "active_profile = \"beta\"\n"
+        );
+        assert_live_unchanged(&state, &before).await;
+        assert_eq!(
+            get_json(addr, "/admin/config-pending").await["profile"]["active_profile"],
+            "beta",
+            "the pending view reports the persisted selection"
+        );
+        assert_eq!(
+            get_json(addr, "/admin/status").await["profile"],
+            "alpha",
+            "the status readout reports the running profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_to_the_running_profile_persists_it_without_a_restart() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "alpha" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": "alpha", "restart_required": false })
+        );
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("the state file is written"),
+            "active_profile = \"alpha\"\n",
+            "an ephemeral --profile boot becomes persisted by selecting it"
+        );
+        assert_live_unchanged(&state, &before).await;
+    }
+
+    #[tokio::test]
+    async fn switching_to_an_undefined_profile_names_the_defined_ones_and_writes_nothing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "ghost" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+        let body: serde_json::Value = response.json().await.expect("the error is JSON");
+        assert_eq!(body["error"]["code"], "profile_not_found");
+        let message = body["error"]["message"]
+            .as_str()
+            .expect("the message is a string");
+        assert!(
+            message.contains("ghost"),
+            "names the refused profile: {message}"
+        );
+        assert!(
+            message.contains("alpha, beta"),
+            "names the defined profiles: {message}"
+        );
+        assert!(!state_path.exists(), "a refused switch writes no state");
+        assert_live_unchanged(&state, &before).await;
+        assert!(
+            get_json(addr, "/admin/config-pending").await["profile"]["active_profile"].is_null(),
+            "nothing is persisted"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_name_is_refused_before_anything_is_written() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        let addr = serve_state(state).await;
+
+        let response = switch(addr, serde_json::json!({ "name": "../escape" })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json().await.expect("the error is JSON");
+        assert_eq!(body["error"]["code"], "switch_failed");
+        assert!(!state_path.exists(), "a malformed name writes no state");
+    }
+
+    #[tokio::test]
+    async fn switching_to_null_deletes_the_state_file_and_requires_a_restart_when_a_profile_runs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": null })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": null, "restart_required": true })
+        );
+        assert!(
+            !state_path.exists(),
+            "an absent state file is the persisted form of no profile"
+        );
+        assert_live_unchanged(&state, &before).await;
+        assert!(
+            get_json(addr, "/admin/config-pending").await["profile"]["active_profile"].is_null(),
+            "the pending view reports no persisted selection"
+        );
+        assert_eq!(
+            get_json(addr, "/admin/status").await["profile"],
+            "alpha",
+            "the running profile is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_to_null_with_no_running_profile_needs_no_restart() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = running_alpha(&temp);
+        state.live.write().await.profile_name = None;
+        let before = snapshot(&state).await;
+        let addr = serve_state(state.clone()).await;
+
+        let response = switch(addr, serde_json::json!({ "name": null })).await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({ "profile": null, "restart_required": false })
+        );
+        assert!(!state_path.exists(), "no state file was ever written");
+        assert_live_unchanged(&state, &before).await;
     }
 }
 
@@ -4582,7 +3736,7 @@ mod loopback_wall_tests {
         std::fs::write(&boot, "").expect("write boot");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -4983,7 +4137,7 @@ mod status_surface_tests {
     /// test pins that a missing key is refused from the loopback listener.
     fn state() -> AppState {
         let config = Config::from_toml_str(
-            "config-version = 2\n\
+            "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              trust_loopback = false\n\
              [[local_model]]\nname = \"slow-model\"\ndescription = \"d\"\n\
@@ -5000,7 +4154,7 @@ mod status_surface_tests {
         Arc::new(|_state, command, _tree| {
             Box::pin(async move {
                 match command {
-                    Command::LoadProfile { name, token, .. } => {
+                    Command::LoadProfile { name, token } => {
                         token.cancelled().await;
                         Err(GatewayError::CommandCancelled(format!(
                             "load-profile: {name}"
@@ -5138,7 +4292,6 @@ mod status_surface_tests {
             .expect("worker spawns");
         let active = queue.enqueue(Command::load_profile(
             ProfileName::parse("main").expect("profile name"),
-            false,
             CancellationToken::new(),
         ));
         let pending = queue.enqueue(Command::ProvisionModel {
@@ -5201,7 +4354,6 @@ mod status_surface_tests {
 
         let active = queue.enqueue(Command::load_profile(
             ProfileName::parse("main").expect("profile name"),
-            false,
             CancellationToken::new(),
         ));
         let pending = queue.enqueue(Command::ProvisionModel {

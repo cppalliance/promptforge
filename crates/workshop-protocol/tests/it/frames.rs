@@ -6,7 +6,7 @@
 use workshop_protocol::{
     Activity, AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, AgentSessionFrame, AgentsFrame,
     CatalogPush, ErrorEnvelope, ErrorFrame, InputFrame, InputResponse, Progress, Severity,
-    StatusBarUpdate, WorkbenchSnapshot,
+    StatusBarUpdate, SwitchProfileFrame, WorkbenchSnapshot,
 };
 
 /// Builds a minimal update with the given label.
@@ -234,6 +234,38 @@ fn an_input_response_parses_its_body_byte_exact_ignoring_the_envelope() {
     assert_eq!(
         response.text, gnarly,
         "the operator's text survives the wire byte-exact"
+    );
+}
+
+#[test]
+fn a_switch_profile_frame_accepts_a_name_or_null_and_refuses_the_rest() {
+    let named: SwitchProfileFrame = serde_json::from_value(serde_json::json!({
+        "type": "switch_profile",
+        "name": "beta",
+        "id": 4,
+    }))
+    .expect("a named selection parses with its envelope present");
+    assert_eq!(named.name.as_deref(), Some("beta"));
+
+    let none: SwitchProfileFrame =
+        serde_json::from_value(serde_json::json!({"type": "switch_profile", "name": null}))
+            .expect("null selects no profile");
+    assert_eq!(none.name, None, "a null name is the no-profile selection");
+
+    assert!(
+        serde_json::from_value::<SwitchProfileFrame>(serde_json::json!({
+            "type": "switch_profile"
+        }))
+        .is_err(),
+        "an absent name is a malformed frame, not a no-profile selection"
+    );
+    assert!(
+        serde_json::from_value::<SwitchProfileFrame>(serde_json::json!({
+            "type": "switch_profile",
+            "name": 7,
+        }))
+        .is_err(),
+        "a non-string name is refused"
     );
 }
 

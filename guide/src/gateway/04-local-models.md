@@ -39,7 +39,7 @@ On Windows x86-64 you can pick the llama-server build with `[local].llama_backen
 
 Local inference runs on a pinned llama-server build, b10082. The gateway prefers GPU-enabled archives per platform: Vulkan on Windows and Linux, Metal on macOS. The gateway never compiles native dependencies at runtime; it downloads, verifies, stages, and launches pinned archives. A completed runtime install records its archive pins and a tree digest in a marker file, and a valid install skips re-extraction on later starts.
 
-The gateway runs one managed llama-server child per configured `[[local_model]]`. Children get supervised respawn and deterministic teardown. Staged CUDA bundle directories are prepended to the child process's PATH only; the gateway's own environment is never mutated. Local models appear to clients as ordinary routed models under their configured names.
+The gateway runs one managed llama-server child per `[[local_model]]` in the boot profile's checklist. The set of children is fixed for the process lifetime: it is decided by the profile selected at boot, and changing it means selecting a profile or editing the local catalog and restarting. Children get supervised respawn and deterministic teardown at shutdown. Staged CUDA bundle directories are prepended to the child process's PATH only; the gateway's own environment is never mutated. Local models appear to clients as ordinary routed models under their configured names.
 
 A local model's `kind` selects the child's serving mode: embedding models serve embeddings, and classifier models serve reranking. A `speech` kind has no local serving mode and is refused at launch: local speech models are not yet supported. The `parallel` key sets both the child's concurrency and its admission limit. The thinking setting changes the child's sampling preset: thinking models sample at temperature 1.0 and top-p 0.95, while non-thinking models run with reasoning switched off and sample at 0.7 and 0.8.
 
@@ -76,7 +76,7 @@ Companion artifacts follow the main-model source rule: an https URL must be pinn
 
 ## Downloads and verification
 
-Artifact downloads are bounded. The connect timeout is 30 seconds, the whole-request ceiling is 2 hours, and a single artifact is capped at 256 GiB. Cache lookups refuse path traversal and absolute paths before any file is read, so a crafted model path cannot escape the cache root. An interrupted download resumes from the partial file's offset when the source URL still matches. A partial download from a different source restarts from zero. A pin mismatch on a cached blob is repaired by re-downloading. Once a blob passes its pin check, later runs and profile switches skip re-hashing. When a runtime download fails and an older verified install exists, the gateway uses the cached install with a warning. Bundled runtime assets, including the chat templates, are written into the cache only after a SHA-256 verification pass, and a cached copy whose bytes have drifted is repaired from the bundled copy.
+Artifact downloads are bounded. The connect timeout is 30 seconds, the whole-request ceiling is 2 hours, and a single artifact is capped at 256 GiB. Cache lookups refuse path traversal and absolute paths before any file is read, so a crafted model path cannot escape the cache root. An interrupted download resumes from the partial file's offset when the source URL still matches. A partial download from a different source restarts from zero. A pin mismatch on a cached blob is repaired by re-downloading. Once a blob passes its pin check, later runs skip re-hashing. When a runtime download fails and an older verified install exists, the gateway uses the cached install with a warning. Bundled runtime assets, including the chat templates, are written into the cache only after a SHA-256 verification pass, and a cached copy whose bytes have drifted is repaired from the bundled copy.
 
 Authenticate gated Hugging Face downloads with the `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` environment variable. The token is attached only to HTTPS requests to huggingface.co and its subdomains.
 
@@ -84,13 +84,13 @@ Models downloaded from Hugging Face get a metadata sidecar file beside the cache
 
 ## Startup and supervision
 
-Startup reports a structured progress tree. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. Progress renders as tracing log lines on every stream.
+Startup reports a structured progress tree under the boot load's stages: `loading-profile`, `downloading-models`, `starting-models`, and `loading-speech`. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. Progress renders as tracing log lines on every stream and on the live progress stream.
 
 Startup is best-effort. Every model that launched keeps serving, and each model that failed is reported by name with its error. One bad model never blocks the rest. Startup failures are classified as plausibly transient or permanent, and the classification annotates the respawn diagnostics you see in the logs.
 
 Each child server listens only on loopback, and each launch uses a fresh random alias and bearer key, so other processes on the machine cannot ride the local endpoint. Responses still carry your configured model name. Startup waits up to 180 seconds for a child to become ready, and a port collision retries on a fresh port up to four times.
 
-A child that dies is transparently respawned on the same port, alias, and key, with a 3 second cooldown between attempts so a crash loop cannot storm. Only transport-level deaths trigger a respawn, and an explicitly shut-down child is never respawned. A profile switch cancels and terminates even an in-flight respawn. Teardown is bounded to 5 seconds, so shutdown and profile switches never hang.
+A child that dies is transparently respawned on the same port, alias, and key, with a 3 second cooldown between attempts so a crash loop cannot storm. Only transport-level deaths trigger a respawn, and an explicitly shut-down child is never respawned. Shutdown cancels and terminates even an in-flight respawn. Teardown is bounded to 5 seconds, so shutdown never hangs.
 
 Child stdout and stderr are captured into bounded tails with the credential redacted. You can pull the tails per model as diagnostics; they include the CUDA device report and per-model GPU offload lines. At startup the gateway also probes each local chat model to detect native tool-call support and picks the correct tool-calling dialect from the evidence.
 

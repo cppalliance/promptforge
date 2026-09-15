@@ -24,7 +24,7 @@ async fn local_model_embeddings_return_vectors() {
     let cache = tempfile::tempdir().unwrap();
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -110,7 +110,7 @@ async fn local_model_rerank_returns_scores() {
     let cache = tempfile::tempdir().unwrap();
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

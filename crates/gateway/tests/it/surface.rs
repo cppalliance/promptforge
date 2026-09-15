@@ -14,7 +14,7 @@ use crate::support::{TestServer, fake_backend, gateway_for, send_within};
 async fn strict_gateway_for(backend: SocketAddr) -> TestServer {
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

@@ -56,9 +56,9 @@ impl Config {
     /// dominion's `vram_gb` budget exceeded by the bound models' estimates,
     /// or a bound model with no estimate).
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
-        if self.version != 2 {
+        if self.version != 0 {
             return Err(ConfigError::Validation(format!(
-                "config-version must be 2, got {}",
+                "config-version must be 0, got {}",
                 self.version
             )));
         }
@@ -253,7 +253,7 @@ impl Config {
 
     fn validate_models(&self, endpoint_ids: &HashSet<&str>) -> Result<(), ConfigError> {
         let mut model_names = HashSet::new();
-        for model in &self.catalog_models {
+        for model in &self.models {
             if !model_names.insert(model.name.as_str()) {
                 return Err(ConfigError::Validation(format!(
                     "duplicate model name {}",
@@ -431,7 +431,7 @@ impl Config {
 
     fn validate_stt_models(&self) -> Result<(), ConfigError> {
         let mut names: HashSet<&str> = self
-            .catalog_models
+            .models
             .iter()
             .map(|model| model.name.as_str())
             .chain(
@@ -487,20 +487,23 @@ impl Config {
     }
 
     fn validate_profiles(&self) -> Result<(), ConfigError> {
-        let catalog: HashSet<&str> = self
-            .catalog_models
+        // A profile gates only what the gateway must spawn or load itself.
+        // Remote models cost nothing to serve, so they are always routed and
+        // a profile that lists one is told so rather than silently accepted.
+        let selectable: HashSet<&str> = self
+            .catalog_local_models
             .iter()
             .map(|model| model.name.as_str())
-            .chain(
-                self.catalog_local_models
-                    .iter()
-                    .map(|model| model.name.as_str()),
-            )
             .chain(
                 self.catalog_stt_models
                     .iter()
                     .map(|model| model.name.as_str()),
             )
+            .collect();
+        let remote: HashSet<&str> = self
+            .models
+            .iter()
+            .map(|model| model.name.as_str())
             .collect();
         let mut profile_names = HashSet::new();
         for profile in &self.profiles {
@@ -521,7 +524,15 @@ impl Config {
             let mut interim = None;
             let mut final_model = None;
             for name in &profile.models {
-                if !catalog.contains(name.as_str()) {
+                if !selectable.contains(name.as_str()) {
+                    if remote.contains(name.as_str()) {
+                        return Err(ConfigError::Validation(format!(
+                            "profile {:?} lists remote model {name:?}; a profile selects only \
+                             [[local_model]] and [[stt_model]] entries, remote models are \
+                             always served",
+                            profile.name
+                        )));
+                    }
                     return Err(ConfigError::Validation(format!(
                         "profile {} names undefined catalog model {name}",
                         profile.name
@@ -588,7 +599,23 @@ impl Config {
         Ok(())
     }
 
-    pub(crate) fn activate_profile(&mut self, name: &ProfileName) -> Result<(), ConfigError> {
+    /// Selects `name`, or no profile at all, narrowing only the local and
+    /// speech-to-text sets. The remote routing table is never touched.
+    ///
+    /// Any stale state-file name recorded by an earlier load is cleared: a
+    /// fresh selection supersedes it, and `Config::load` records the stale
+    /// name only after this call when the state file wins.
+    pub(crate) fn activate_profile(
+        &mut self,
+        name: Option<&ProfileName>,
+    ) -> Result<(), ConfigError> {
+        self.stale_state_selection = None;
+        let Some(name) = name else {
+            self.local_models = Vec::new();
+            self.stt_models = Vec::new();
+            self.active_profile = None;
+            return Ok(());
+        };
         let Some(index) = self
             .profiles
             .iter()
@@ -604,12 +631,6 @@ impl Config {
             .models
             .iter()
             .map(String::as_str)
-            .collect();
-        self.models = self
-            .catalog_models
-            .iter()
-            .filter(|model| selected.contains(model.name.as_str()))
-            .cloned()
             .collect();
         self.local_models = self
             .catalog_local_models

@@ -54,7 +54,7 @@ pub struct LocalRuntime {
 /// use gateway_local::LocalRuntime;
 ///
 /// let config = Config::from_toml_str(
-///     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+///     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
 /// )?;
 /// let outcome = LocalRuntime::start_partial(&config, None)?;
 /// assert!(outcome.failures().is_empty());
@@ -75,7 +75,7 @@ impl LocalStartOutcome {
     /// # use gateway_config::Config;
     /// # use gateway_local::LocalRuntime;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
     /// # )?;
     /// let outcome = LocalRuntime::start_partial(&config, None)?;
     /// assert_eq!(outcome.runtime().child_count(), 0);
@@ -93,7 +93,7 @@ impl LocalStartOutcome {
     /// # use gateway_config::Config;
     /// # use gateway_local::LocalRuntime;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
     /// # )?;
     /// let outcome = LocalRuntime::start_partial(&config, None)?;
     /// assert!(outcome.failures().is_empty());
@@ -111,7 +111,7 @@ impl LocalStartOutcome {
     /// # use gateway_config::Config;
     /// # use gateway_local::LocalRuntime;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
     /// # )?;
     /// let outcome = LocalRuntime::start_partial(&config, None)?;
     /// let (runtime, failures) = outcome.into_parts();
@@ -143,7 +143,7 @@ impl LocalStartFailure {
     /// # use gateway_config::Config;
     /// # use gateway_local::LocalRuntime;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
     /// # )?;
     /// for failure in LocalRuntime::start_partial(&config, None)?.failures() {
     ///     eprintln!("{} did not start", failure.model());
@@ -162,7 +162,7 @@ impl LocalStartFailure {
     /// # use gateway_config::Config;
     /// # use gateway_local::LocalRuntime;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
     /// # )?;
     /// for failure in LocalRuntime::start_partial(&config, None)?.failures() {
     ///     eprintln!("{}", failure.error());
@@ -247,7 +247,7 @@ impl LocalRuntime {
     /// use gateway_local::LocalRuntime;
     ///
     /// let config = Config::from_toml_str(
-    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    ///     "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
     /// )?;
     /// let outcome = LocalRuntime::start_partial(&config, None)?;
     /// assert_eq!(outcome.runtime().child_count(), 0);
@@ -1046,7 +1046,7 @@ mod tests {
     fn empty_local_models_starts_noop_runtime() {
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1142,7 +1142,7 @@ endpoints = ["e"]
         // uncancelled start would fail with `InvalidSource` instead.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1184,7 +1184,7 @@ context = 4096
         // gains no children at all.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1232,7 +1232,7 @@ endpoints = ["e"]
         std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1321,7 +1321,7 @@ context = 512
         std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1418,7 +1418,7 @@ context = 512
         // `InvalidSource`.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1459,7 +1459,7 @@ context = 4096
         let cache_dir = temp.path().join("cache");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1534,7 +1534,7 @@ context = 4096
         let cache_dir = temp.path().join("cache");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1634,7 +1634,7 @@ context = 4096
         let cache_dir = temp.path().join("cache");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1713,7 +1713,7 @@ context = 4096
         let cache_dir = temp.path().join("cache");
         let config = Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1812,7 +1812,7 @@ context = 4096
         // requests through its per-model queue.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1862,7 +1862,7 @@ parallel = 3
         // parks the other model's admit.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1916,7 +1916,7 @@ dominion = "gpu0"
         // the argv); a chat child launches without it.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1956,7 +1956,7 @@ context = 4096
         // the argv); a chat child launches without it.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -1998,7 +1998,7 @@ context = 4096
         // what the wildcard arm did before the mapping went fallible.
         let config = Config::from_toml_str(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"
@@ -2033,7 +2033,7 @@ context = 4096
     fn companion_config(body: &str) -> Config {
         Config::from_toml_str(&format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:8081"

@@ -1,7 +1,7 @@
 // Pins the sheet store's poll cycle: it requests the cloud model sheet
 // on start, keeps polling while the gateway answers its loading
 // indication, notifies once when the sheet lands, stops polling on a
-// terminal download error, and re-requests on refresh.
+// terminal download error, and stores the refresh POST's answer.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -72,17 +72,14 @@ test("a download error stops polling and notifies the error", async () => {
   store.dispose();
 });
 
-test("refresh forces a re-download and notifies again when the sheet lands", async () => {
-  let loading = true;
-  const { api, calls } = apiWith((url, init) => {
+test("refresh stores the POST's sheet answer directly, without a follow-up poll", async () => {
+  const oldSheet = cloudSheetFixture();
+  const newSheet = { ...cloudSheetFixture(), generated_at: "2026-09-15T09:30:00Z" };
+  const { api, calls } = apiWith((url) => {
     if (url.endsWith("/admin/cloud-models/refresh")) {
-      return jsonResponse({}, 202);
+      return jsonResponse(newSheet, 200);
     }
-    if (loading) {
-      loading = false;
-      return LOADING();
-    }
-    return jsonResponse(cloudSheetFixture());
+    return jsonResponse(oldSheet);
   });
   const store = new app.SheetStore(api, 5);
   let notifications = 0;
@@ -90,19 +87,23 @@ test("refresh forces a re-download and notifies again when the sheet lands", asy
     notifications += 1;
   });
   store.start();
-  await sleep(100);
+  await sleep(50);
   assert.equal(store.status, "loaded");
+  assert.equal(store.sheet.generated_at, oldSheet.generated_at);
   const baseline = notifications;
   await store.refresh();
-  await sleep(100);
   assert.ok(
     calls.some(
       (call) => call.url.endsWith("/admin/cloud-models/refresh") && call.init.method === "POST",
     ),
     "the refresh posts to the refresh route",
   );
-  assert.ok(notifications > baseline, "the re-requested sheet notifies again");
   assert.equal(store.status, "loaded");
+  assert.equal(store.sheet.generated_at, newSheet.generated_at, "the store holds the POST's answer");
+  const settled = calls.length;
+  await sleep(30);
+  assert.equal(calls.length, settled, "no poll follows the refresh answer");
+  assert.ok(notifications > baseline, "the fresh sheet notifies again");
   store.dispose();
 });
 

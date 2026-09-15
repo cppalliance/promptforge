@@ -81,11 +81,11 @@ test("a hub Begun event labelled with a switch stage lights that stage; other fr
   assert.deepEqual(activeStages(overlay), [], "no stage is active before the gateway reports one");
   assert.deepEqual(
     [...overlay.querySelectorAll(".stage")].map((row) => row.dataset.stage),
-    ["loading-profile", "downloading-models", "stopping-models", "starting-models"],
-    "the card lists the four switch stages the gateway can register",
+    ["loading-profile", "downloading-models", "starting-models", "applying-config"],
+    "the card lists the boot-load stages and the apply leaf, nothing else",
   );
 
-  // The download stage the switch registers while the new profile's
+  // The download stage the boot load registers while a profile's
   // weights stage into the cache lights like the others.
   progress.push(hubEvent("downloading-models", { Begun: { weight: 5.0 } }));
   await settle();
@@ -93,11 +93,11 @@ test("a hub Begun event labelled with a switch stage lights that stage; other fr
   assert.deepEqual(activeStages(overlay), ["downloading-models"], "the download stage is active");
   assert.ok(downloading.querySelector(".spinner"), "the active download stage shows the spinner");
 
-  progress.push(hubEvent("stopping-models", { Begun: { weight: 2.0 } }));
+  progress.push(hubEvent("applying-config", { Begun: { weight: 2.0 } }));
   await settle();
-  const stopping = overlay.querySelector('.stage[data-stage="stopping-models"]');
-  assert.deepEqual(activeStages(overlay), ["stopping-models"], "the Begun stage is active");
-  assert.ok(stopping.querySelector(".spinner"), "the active stage shows the spinner");
+  const applying = overlay.querySelector('.stage[data-stage="applying-config"]');
+  assert.deepEqual(activeStages(overlay), ["applying-config"], "the Begun stage is active");
+  assert.ok(applying.querySelector(".spinner"), "the active stage shows the spinner");
   assert.ok(downloading.classList.contains("is-done"), "the earlier stage is marked done");
 
   // A non-Begun frame for a stage and a Begun frame for a non-stage leaf
@@ -106,10 +106,13 @@ test("a hub Begun event labelled with a switch stage lights that stage; other fr
   progress.push(hubEvent("downloading-models/qwen/download", { Begun: { weight: 1.0 } }));
   progress.push(hubEvent("starting-models", { Finished: { ok: true } }));
   progress.push({ stage: "starting-models" });
+  // A Begun frame for a stage label the card does not map is ignored.
+  progress.push(hubEvent("unmapped-stage", { Begun: { weight: 2.0 } }));
   await settle();
-  assert.deepEqual(activeStages(overlay), ["stopping-models"], "only the Begun stage is active");
+  assert.deepEqual(activeStages(overlay), ["applying-config"], "only the Begun stage is active");
   assert.equal(overlay.querySelectorAll(".stage").length, 4, "no row was appended");
-  assert.ok(stopping.querySelector(".spinner"), "the spinner is still on the Begun stage");
+  assert.equal(overlay.querySelector('.stage[data-stage="unmapped-stage"]'), null);
+  assert.ok(applying.querySelector(".spinner"), "the spinner is still on the Begun stage");
 
   settleApply(jsonResponse({ applied: ["gateway.toml"], reloaded: true, restart_required: false }));
   await settle();

@@ -86,12 +86,12 @@ function cleanDirty() {
 
 /**
  * A single-file config fixture with remote, local chat, STT, and two
- * profile checklists.
+ * profile checklists. Profile selection is not a configuration key: the
+ * persisted selection rides the stub's `selected` state instead.
  */
 export function modelsFixture() {
   return {
-    "config-version": 2,
-    active_profile: "default",
+    "config-version": 0,
     server: { bind: "127.0.0.1:8081", api_key: "***" },
     local: { cache_dir: "~/.promptforge" },
     dominion: [
@@ -190,7 +190,7 @@ export function modelsFixture() {
       },
     ],
     profile: [
-      { name: "default", models: ["gpt-remote", "qwen-common", "whisper-base-en"] },
+      { name: "default", models: ["qwen-common", "whisper-base-en"] },
       { name: "travel", models: ["llama-leaf"] },
     ],
   };
@@ -529,10 +529,18 @@ function redactSecrets(view) {
  * A canned gateway behind the fetch signature: status, an idle progress
  * stream, and the config surface - running/pending/dirty views, shadow saves
  * (PUT re-points the pending view, redacting secrets to "***" the way
- * the gateway's pending view does, and flips the dirty report), apply
- * (outcome overridable through `applyOutcome`), revert, orphans,
+ * the gateway's pending view does, and flips the dirty report; a body
+ * carrying `active_profile` is refused the way the gateway refuses it),
+ * apply (outcome overridable through `applyOutcome`), revert, orphans,
  * model-info, reveal, and cache deletes. `onPutConfig` optionally stages
- * a refusal before the stub's own handling. The Discover
+ * a refusal before the stub's own handling. The profile surface:
+ * `/admin/status` reports the running profile (`profile`, null for
+ * none), `/admin/config-pending` carries the persisted selection as
+ * `profile.active_profile` (`selected`, defaulting to the running
+ * profile; null when none is persisted), and `POST /admin/switch-profile`
+ * checks the name against the pending checklists, re-points `selected`,
+ * and answers `{profile, restart_required}` without touching the running
+ * profile. The Discover
  * surface: `/admin/system` (`system`), the HF proxy (`hfSearch` rows
  * and `hfModels` by repo; `hfAuth401` makes both answer the hub's
  * pass-through 401), hub README fetches (`readme`), and the `GET
@@ -556,6 +564,7 @@ function redactSecrets(view) {
  */
 export function gatewayStub({
   profile = "default",
+  selected = profile,
   configGeneration = "generation-1",
   configGenerationAfterApply,
   models = [],
@@ -595,8 +604,12 @@ export function gatewayStub({
     env: env ?? { boot: null, references: {} },
     /** Every PUT /admin/env, as `{ scope, vars }` in arrival order. */
     envPuts: [],
-    /** The active profile; the default switch handler re-points it. */
+    /** The running profile (null for none); nothing re-points it. */
     active: profile,
+    /** The persisted selection the switch route writes (null for none). */
+    selected,
+    /** Every POST /admin/switch-profile body, in arrival order. */
+    switchCalls: [],
     /** Process-lifetime config generation returned by admin status. */
     configGeneration,
     /** The command queue readout returned by admin status. */
@@ -729,9 +742,31 @@ export function gatewayStub({
       }
       return jsonResponse(state.env);
     }
+    if (url.endsWith("/admin/switch-profile")) {
+      const body = JSON.parse(init.body ?? "{}");
+      state.switchCalls.push(body);
+      const name = body.name ?? null;
+      const defined = (Array.isArray(state.pending.profile) ? state.pending.profile : []).map(
+        (entry) => entry.name,
+      );
+      if (name !== null && !defined.includes(name)) {
+        return jsonResponse(
+          {
+            error: {
+              message: `profile ${name} is not defined; defined profiles: ${defined.join(", ")}`,
+              type: "invalid_request_error",
+              code: "profile_not_found",
+            },
+          },
+          404,
+        );
+      }
+      state.selected = name;
+      return jsonResponse({ profile: name, restart_required: name !== state.active });
+    }
     if (url.endsWith("/admin/config-pending")) {
       return jsonResponse({
-        profile: state.pending,
+        profile: { ...state.pending, active_profile: state.selected },
         boot: null,
       });
     }
@@ -740,9 +775,6 @@ export function gatewayStub({
     }
     if (url.endsWith("/admin/config-apply")) {
       state.config = structuredClone(state.pending);
-      if (typeof state.pending.active_profile === "string") {
-        state.active = state.pending.active_profile;
-      }
       state.dirty = cleanDirty();
       if (configGenerationAfterApply !== undefined) {
         state.configGeneration = configGenerationAfterApply;
@@ -769,6 +801,19 @@ export function gatewayStub({
           }
         }
         const body = JSON.parse(init.body);
+        if ("active_profile" in body) {
+          return jsonResponse(
+            {
+              error: {
+                message:
+                  "active_profile is not a configuration key; select a profile with POST /admin/switch-profile",
+                type: "invalid_request_error",
+                code: "config_validation",
+              },
+            },
+            422,
+          );
+        }
         // Boot-owned sections the body omits survive in the pending view.
         for (const section of ["server", "workshop"]) {
           if (!(section in body) && section in state.pending) {

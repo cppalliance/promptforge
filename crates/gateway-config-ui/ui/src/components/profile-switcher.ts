@@ -1,34 +1,39 @@
 // The tab bar's profile switcher [Adapted: workshop]: a dropdown button
-// showing the active profile, opening a menu of every profile with the
-// pending one checked. Selecting another profile stages
-// `active_profile`; Apply performs the runtime switch atomically with
-// every other configuration edit.
+// showing the selected profile, opening a menu of "No profile" followed
+// by every profile, with the persisted selection checked. Picking a row
+// posts `POST /admin/switch-profile`; the running profile never changes
+// in place, so a pick that differs from it raises the restart banner.
 
 import { Check, ChevronDown, createElement as lucideElement } from "lucide";
 
 import type { ConfigStore } from "../services/config-store";
 import type { ToastStack } from "shared-ui/toast";
 
+/** The row label for the null selection. */
+const NO_PROFILE_LABEL = "No profile";
+
 /** Construction dependencies for the switcher. */
 export interface ProfileSwitcherDeps {
-  /** Pending configuration state and write path. */
+  /** Pending configuration state and the switch path. */
   store: ConfigStore;
-  /** Error surfacing for failed staging. */
+  /** Error surfacing for a refused switch. */
   toasts: ToastStack;
+  /** Runs when the gateway reports the selection needs a restart to run. */
+  onRestartRequired: () => void;
 }
 
 /** The mounted switcher and its live-update handle. */
 export interface ProfileSwitcher {
   /** The wrapper element holding the trigger button and its menu. */
   element: HTMLElement;
-  /** Sets the active profile name shown on the trigger. */
+  /** Sets the running profile name (empty for none) the label compares against. */
   setActiveProfile(name: string): void;
 }
 
 /** Builds the profile switcher. */
 export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitcher {
-  let active = "";
-  let staging = false;
+  let running = "";
+  let switching = false;
 
   const element = document.createElement("div");
   element.className = "profile-switcher";
@@ -40,7 +45,7 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
   button.setAttribute("aria-expanded", "false");
   const prefix = document.createElement("span");
   prefix.className = "visually-hidden";
-  prefix.textContent = "Active profile:";
+  prefix.textContent = "Selected profile:";
   const label = document.createElement("span");
   label.textContent = "\u2026";
   button.append(
@@ -52,7 +57,7 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
   const menu = document.createElement("div");
   menu.className = "menu";
   menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "Switch profile");
+  menu.setAttribute("aria-label", "Select profile");
   menu.hidden = true;
 
   element.append(button, menu);
@@ -69,13 +74,18 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
     document.removeEventListener("click", onDocumentClick);
   };
 
-  const pendingName = (): string => deps.store.pendingActiveProfile() || active;
+  const selectedName = (): string | null => deps.store.selectedProfile();
+
+  const labelFor = (name: string | null): string => name ?? NO_PROFILE_LABEL;
 
   const paintLabel = (): void => {
-    const pending = pendingName();
-    label.textContent = pending;
-    label.classList.toggle("is-pending", pending !== active);
-    button.title = pending !== active ? `${pending} will become active on Apply` : "";
+    const selected = selectedName();
+    const differs = (selected ?? "") !== running;
+    label.textContent = labelFor(selected);
+    label.classList.toggle("is-pending", differs);
+    button.title = differs
+      ? `${labelFor(selected)} is selected; restart the gateway to run it`
+      : "";
   };
 
   const openMenu = (): void => {
@@ -83,7 +93,7 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
     menu.hidden = false;
     document.addEventListener("click", onDocumentClick);
     renderRows(deps.store.profiles().map((profile) => profile.name));
-    // The menu pattern: focus lands on the active row so the arrow
+    // The menu pattern: focus lands on the checked row so the arrow
     // keys work from the moment the menu opens.
     const landing =
       menu.querySelector<HTMLButtonElement>("[aria-checked='true']") ??
@@ -92,20 +102,25 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
   };
 
   const renderRows = (profiles: string[]) => {
-    const rows = profiles.map((name) => {
+    const selected = selectedName();
+    // "No profile" leads whenever at least one profile is defined; with
+    // none defined there is nothing to select away from.
+    const choices: Array<string | null> = profiles.length > 0 ? [null, ...profiles] : [];
+    const rows = choices.map((name) => {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "menu-item";
       row.setAttribute("role", "menuitemradio");
-      row.setAttribute("aria-checked", name === pendingName() ? "true" : "false");
-      row.disabled = staging;
+      row.setAttribute("aria-checked", name === selected ? "true" : "false");
+      row.dataset["profile"] = name ?? "";
+      row.disabled = switching;
       const mark = document.createElement("span");
       mark.className = "menu-check";
-      if (name === pendingName()) {
+      if (name === selected) {
         mark.append(lucideElement(Check, { "aria-hidden": "true", width: 14, height: 14 }));
       }
       const text = document.createElement("span");
-      text.textContent = name;
+      text.textContent = labelFor(name);
       row.append(mark, text);
       row.addEventListener("click", () => void select(name));
       return row;
@@ -119,34 +134,45 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
     }
   };
 
-  const select = async (name: string): Promise<void> => {
-    if (staging) {
+  const select = async (name: string | null): Promise<void> => {
+    if (switching) {
       return;
     }
-    if (name === pendingName()) {
+    if (name === selectedName()) {
       closeMenu();
       button.focus();
       return;
     }
-    staging = true;
+    switching = true;
     setRowsDisabled(true);
-    const target = [...menu.querySelectorAll<HTMLButtonElement>(".menu-item")].find(
-      (row) => row.textContent === name,
-    );
-    target?.classList.add("is-pending");
-    target?.setAttribute("aria-busy", "true");
+    let restartRequired: boolean;
     try {
-      await deps.store.stageActiveProfile(name);
+      // A dataset comparison, not an attribute selector: a profile name
+      // may contain `"` or `]`, which would make a built selector throw.
+      const target = [...menu.querySelectorAll<HTMLButtonElement>(".menu-item")].find(
+        (row) => row.dataset["profile"] === (name ?? ""),
+      );
+      target?.classList.add("is-pending");
+      target?.setAttribute("aria-busy", "true");
+      restartRequired = await deps.store.selectProfile(name);
     } catch (error) {
-      deps.toasts.show(error instanceof Error ? error.message : "The profile could not be staged", "error");
+      deps.toasts.show(
+        error instanceof Error ? error.message : "The profile could not be selected",
+        "error",
+      );
       closeMenu();
       button.focus();
-      staging = false;
+      switching = false;
       return;
     }
-    staging = false;
+    switching = false;
     paintLabel();
-    deps.toasts.show(`${name} will become active on Apply`, "success");
+    if (restartRequired) {
+      deps.onRestartRequired();
+      deps.toasts.show(`${labelFor(name)} selected - restart the gateway to run it`, "success");
+    } else {
+      deps.toasts.show(`${labelFor(name)} selected`, "success");
+    }
     closeMenu();
     button.focus();
   };
@@ -185,8 +211,10 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
   });
 
   deps.store.subscribe(() => {
-    if (deps.store.activeProfile !== "") {
-      active = deps.store.activeProfile;
+    // An empty name means "no profile runs" only once status has loaded;
+    // before that the shell's own status probe owns the value.
+    if (deps.store.loaded && deps.store.loadError === null) {
+      running = deps.store.activeProfile;
     }
     paintLabel();
   });
@@ -194,7 +222,7 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
   return {
     element,
     setActiveProfile(name: string): void {
-      active = name;
+      running = name;
       paintLabel();
     },
   };

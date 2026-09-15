@@ -1,7 +1,7 @@
-// Full-screen switch/apply overlay [Adapted: Unsloth]: a dimmed layer
-// centering a card that lists the gateway's switch stages, each with a
-// spinner while active, a check when passed, and an error mark when the
-// switch dies in it. Stages come from the `GET /admin/progress` hub
+// Full-screen apply overlay [Adapted: Unsloth]: a dimmed layer centering
+// a card that lists the gateway's progress stages, each with a spinner
+// while active, a check when passed, and an error mark when the apply
+// dies in it. Stages come from the `GET /admin/progress` hub
 // stream through `observe`: a `Begun` leaf whose label is a known stage
 // opens that stage. While a stage runs, a `<stage>/<model>/download`
 // leaf drives a detail row under the active stage - "Downloading
@@ -25,12 +25,12 @@ import { isRecord } from "../services/json";
 const ERROR_HOLD_MS = 1500;
 
 /**
- * The stage leaves the gateway's switch registers on its progress tree,
- * in execution order, with their display labels (the same wording the
- * workshop's status bar uses). The gateway skips the download when the
- * profile names no local model and the stop when nothing old runs, and
- * runs the download after the stop-free cut-over on a cold boot, so a
- * switch may light a subset of these rows, out of this order. Unknown
+ * The stage leaves the gateway registers on its progress tree, with
+ * their display labels (the same wording the workshop's status bar
+ * uses): the boot load's three stages, which run once per process and
+ * skip the download when the profile names no local model, and the one
+ * `applying-config` leaf a config apply registers while it swaps remote
+ * routing. A given operation lights a subset of these rows. Unknown
  * stages begun through `beginStage` are appended as they arrive, so a
  * gateway that grows stages never breaks the overlay; `observe` only
  * maps these four.
@@ -38,8 +38,8 @@ const ERROR_HOLD_MS = 1500;
 const KNOWN_STAGES: ReadonlyArray<readonly [id: string, label: string]> = [
   ["loading-profile", "Loading profile"],
   ["downloading-models", "Downloading models"],
-  ["stopping-models", "Stopping models"],
   ["starting-models", "Starting models"],
+  ["applying-config", "Applying configuration"],
 ];
 
 /** The overlay controller handed to the composition root. */

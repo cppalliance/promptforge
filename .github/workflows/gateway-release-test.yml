@@ -46,7 +46,7 @@ jobs:
       - name: The gateway serves the config page
         run: |
           workdir="$(mktemp -d)"
-          printf 'config-version = 2\n[server]\nbind = "127.0.0.1:8081"\napi_key = "test-key"\n\n[[profile]]\nname = "main"\nmodels = []\n' > "$workdir/gateway.toml"
+          printf 'config-version = 0\n[server]\nbind = "127.0.0.1:8081"\napi_key = "test-key"\n\n[[profile]]\nname = "main"\nmodels = []\n' > "$workdir/gateway.toml"
           promptforge-gateway --config "$workdir/gateway.toml" --profile main &
           server_pid=$!
           trap 'kill $server_pid 2>/dev/null || true' EXIT

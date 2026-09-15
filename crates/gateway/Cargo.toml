@@ -52,10 +52,9 @@ rand.workspace = true
 # because those endpoints hold secrets in every build.
 shared-loopback.workspace = true
 gateway-protocol.workspace = true
-# The provider model sheet schema (shared-gateway-api) and the release
-# artifact fetch (shared-cloud-providers) behind `GET /admin/cloud-models`
-# and the launch-time sheet cache (src/cloud_models.rs).
-shared-cloud-providers.workspace = true
+# The provider model sheet schema (shared-gateway-api) behind
+# `GET /admin/cloud-models` and the launch-time sheet cache
+# (src/cloud_models.rs).
 shared-gateway-api.workspace = true
 # The gateway-discovery-file seam: gateway.json is written after every successful
 # bind, in every build, so the workshop can discover a running gateway.

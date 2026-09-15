@@ -14,10 +14,19 @@ mod metadata;
 
 pub use metadata::{Capabilities, ModelInfo, ModelKind, ThinkingMode};
 
+/// The sheet schema version this reader accepts: the writer in
+/// `shared-cloud-providers` stamps it and the gateway reader gates on it.
+/// Bump only on removals and renames; additive fields carry
+/// `#[serde(default)]` so a lagging reader survives them.
+pub const ACCEPTED_SHEET_SCHEMA_VERSION: u32 = 1;
+
 /// The sheet envelope: one atomic snapshot of every provider's models.
+/// Future additive fields carry `#[serde(default)]` so a lagging reader
+/// survives them; `schema_version` bumps only on removals and renames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
-    /// Bumped on breaking change.
+    /// Bumped on breaking change. Stays 1: additive fields carry
+    /// `#[serde(default)]`; the bump is reserved for removals and renames.
     pub schema_version: u32,
     /// RFC 3339; always this run's time.
     #[serde(with = "time::serde::rfc3339")]
@@ -28,7 +37,9 @@ pub struct Sheet {
 
 /// One provider's slice of the sheet. Self-describing: the descriptor's
 /// public fields are copied in at build time so consumers can render a
-/// provider dropdown from the sheet alone.
+/// provider dropdown from the sheet alone. Future additive fields carry
+/// `#[serde(default)]`; the schema version bump is reserved for removals
+/// and renames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSlice {
     /// UI-facing name, e.g. "Anthropic".
@@ -100,7 +111,9 @@ pub enum SliceStatus {
     Static,
 }
 
-/// One normalized model entry.
+/// One normalized model entry. Future additive fields carry
+/// `#[serde(default)]`; the schema version bump is reserved for removals
+/// and renames.
 // The modality and capability booleans are the sheet schema itself; a
 // builder or sub-struct would only obscure the wire shape.
 #[allow(clippy::struct_excessive_bools)]

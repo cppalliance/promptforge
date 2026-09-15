@@ -1,6 +1,6 @@
-//! Instant-ready boot: the bind is the readiness signal, provisioning runs
-//! as the boot `LoadProfile` command on the queue, and quitting while a
-//! command is active cancels it and exits promptly.
+//! Instant-ready boot: the bind is the readiness signal, the remote table
+//! serves from the bind, and local provisioning runs as the boot
+//! `LoadProfile` command on the queue when a profile is selected.
 
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ fn write_config(temp: &tempfile::TempDir, body: String) -> std::path::PathBuf {
 fn race_config(temp: &tempfile::TempDir) -> std::path::PathBuf {
     write_config(
         temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     )
@@ -147,7 +147,7 @@ fn assert_one_canonical_log(home: &std::path::Path) {
 }
 
 /// Polls `/v1/models` until the catalog is exactly `expected`, so the test
-/// observes the boot command's hot-swap without sleeping a fixed delay.
+/// observes the published table without sleeping a fixed delay.
 async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) {
     let mut ids = Vec::new();
     for _ in 0..100 {
@@ -173,31 +173,18 @@ async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) 
     assert_eq!(ids, expected, "the boot command hot-swaps the catalog");
 }
 
-/// Reads a streaming response until `marker` appears in the accumulated
-/// text, returning what arrived. Bounded by the phase timeout.
-async fn read_until(response: &mut reqwest::Response, marker: &str, text: &mut String) {
-    while !text.contains(marker) {
-        let chunk = tokio::time::timeout(PHASE_TIMEOUT, response.chunk())
-            .await
-            .expect("stream read exceeded the phase timeout")
-            .expect("stream read failed");
-        let Some(chunk) = chunk else { break };
-        text.push_str(std::str::from_utf8(&chunk).expect("SSE frames are UTF-8"));
-    }
-}
-
-/// The boot command loads the active profile into the initially empty
-/// routing table: a remote model appears in `/v1/models` without any
-/// provisioning, and the ephemeral CLI override writes no state file.
+/// The remote table is published at the bind: a remote model appears in
+/// `/v1/models` without any provisioning, and the ephemeral CLI override
+/// writes no state file.
 #[tokio::test]
-async fn the_boot_command_loads_the_active_profile_into_an_empty_table() {
+async fn the_remote_table_serves_from_the_bind_under_a_cli_profile() {
     let backend = crate::support::fake_backend().await;
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
         format!(
             r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -218,7 +205,7 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "main"
-models = ["test-model"]
+models = []
 "#
         ),
     );
@@ -230,8 +217,8 @@ models = ["test-model"]
     let handle = gateway::spawn(&options).expect("gateway spawns");
     let http = reqwest::Client::new();
 
-    // The boot command runs asynchronously after the bind; poll the catalog
-    // until the worker's switch lands the model.
+    // The remote table is published before the bind; the poll only absorbs
+    // the readiness handshake.
     wait_for_catalog(handle.url(), &http, &["test-model"]).await;
     assert!(
         !temp.path().join("gateway.state.toml").exists(),
@@ -243,7 +230,8 @@ models = ["test-model"]
 /// Provisioning is not on the startup path: a config whose local model
 /// cannot provision fails the eager `Gateway::from_config` assembly, yet
 /// `spawn` binds and serves immediately - the boot command absorbs the
-/// failure while the gateway stays reachable with an empty routing table.
+/// failure while the gateway stays reachable with its (here empty) remote
+/// routing table.
 #[cfg(feature = "local")]
 #[tokio::test]
 async fn spawn_leaves_provisioning_to_the_boot_command() {
@@ -252,7 +240,7 @@ async fn spawn_leaves_provisioning_to_the_boot_command() {
     std::fs::write(&fake_server, b"not a server").expect("write fake server");
     let body = format!(
         r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -341,6 +329,227 @@ models = ["missing-model"]
     handle.shutdown().expect("graceful shutdown");
 }
 
+/// A config declaring no `[[profile]]` and no state file boots with no
+/// profile: every remote model routes from the bind, a `[[local_model]]`
+/// the catalog declares but nothing selects is a plain 404 (no boot command
+/// runs, so nothing promises it), the status reports `profile: null`, and
+/// no state file appears.
+#[tokio::test]
+async fn a_boot_with_no_profile_serves_remote_models_and_404s_local_ones() {
+    let backend = crate::support::fake_backend().await;
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        format!(
+            r#"
+config-version = 0
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "test-model"
+description = "a test model for integration"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[local_model]]
+name = "local-model"
+description = "declared but selected by no profile"
+source = "/models/local.gguf"
+context = 4096
+"#
+        ),
+    );
+    let options =
+        ServeOptions::new(Some(path), None::<ProfileName>).with_run_dir(temp.path().join("run"));
+    let handle = gateway::spawn(&options).expect("gateway spawns");
+    let http = reqwest::Client::new();
+
+    let catalog = json_within(
+        send_within(
+            http.get(format!("{}/v1/models", handle.url()))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    let ids = catalog["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|model| model.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["test-model"], "the remote table serves from the bind");
+    let status = json_within(
+        send_within(
+            http.get(format!("{}/admin/status", handle.url()))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert!(status["profile"].is_null(), "no profile runs: {status}");
+    assert_eq!(
+        status["queue"]["active"],
+        Value::Null,
+        "no boot command runs with no profile: {status}"
+    );
+    let local = send_within(
+        http.post(format!("{}/v1/chat/completions", handle.url()))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "local-model",
+                "messages": [{"role": "user", "content": "ping"}]
+            })),
+    )
+    .await;
+    assert_eq!(
+        local.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "an unselected local model is a plain 404"
+    );
+    let remote = send_within(
+        http.post(format!("{}/v1/chat/completions", handle.url()))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "ping"}]
+            })),
+    )
+    .await;
+    assert_eq!(remote.status(), reqwest::StatusCode::OK);
+    assert!(
+        !temp.path().join("gateway.state.toml").exists(),
+        "booting with no profile writes no state file"
+    );
+    handle.shutdown().expect("graceful shutdown");
+}
+
+/// A state file naming a profile the config no longer defines degrades the
+/// boot to no profile: the remote models serve, the status reports
+/// `profile: null`, and the log carries the stale-selection warning naming
+/// the missing and the defined profiles.
+#[test]
+fn a_stale_state_file_boots_with_no_profile_and_logs_the_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\n\
+         [[model]]\nname = \"test-model\"\ndescription = \"remote\"\ncontext = 1024\n\
+         upstream = \"backend-model\"\nendpoints = [\"fake\"]\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    );
+    std::fs::write(
+        temp.path().join("gateway.state.toml"),
+        "active_profile = \"ghost\"\n",
+    )
+    .expect("write the stale state");
+    let run_dir = temp.path().join(".promptforge").join("run");
+    let mut gateway = GatewayProcess::spawn_selecting(&path, temp.path(), None);
+    let connection = wait_for_connection(&run_dir, Duration::from_secs(30));
+    let url = format!("http://127.0.0.1:{}", connection.port);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (status, ids, shutdown) = runtime.block_on(async {
+        let http = reqwest::Client::new();
+        let status = json_within(
+            send_within(
+                http.get(format!("{url}/admin/status"))
+                    .bearer_auth("test-token"),
+            )
+            .await,
+        )
+        .await;
+        let ids = crate::support::catalog_ids(
+            &http,
+            std::net::SocketAddr::from(([127, 0, 0, 1], connection.port)),
+        )
+        .await;
+        let shutdown = send_within(
+            http.post(format!("{url}/shutdown"))
+                .bearer_auth("test-token"),
+        )
+        .await
+        .status();
+        (status, ids, shutdown)
+    });
+    assert!(
+        status["profile"].is_null(),
+        "a stale selection boots no profile: {status}"
+    );
+    assert_eq!(ids, ["test-model"], "the remote models serve");
+    assert_eq!(shutdown, reqwest::StatusCode::ACCEPTED);
+    drop(runtime);
+    let exit = gateway.wait_for_exit(Duration::from_secs(30));
+    assert!(exit.success(), "the gateway exits cleanly: {exit}");
+
+    let log = std::fs::read_to_string(
+        temp.path()
+            .join(".promptforge")
+            .join("logs")
+            .join("gateway.log"),
+    )
+    .expect("read the log");
+    assert!(
+        log.contains(
+            "state file selects profile \"ghost\", which is not defined (defined profiles: main); booting with no profile"
+        ),
+        "the stale-selection warning is logged: {log}"
+    );
+}
+
+/// A `--profile` naming an undefined profile is an error, not a degraded
+/// boot: the process exits with a failure status and the logged chain names
+/// the missing profile and the defined ones.
+#[test]
+fn an_undefined_profile_flag_fails_the_boot_naming_the_defined_profiles() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    );
+    let mut gateway = GatewayProcess::spawn_selecting(&path, temp.path(), Some("ghost"));
+
+    let exit = gateway.wait_for_exit(Duration::from_secs(30));
+    assert!(!exit.success(), "an undefined --profile fails the boot");
+    let log = std::fs::read_to_string(
+        temp.path()
+            .join(".promptforge")
+            .join("logs")
+            .join("gateway.log"),
+    )
+    .expect("the fatal outcome drained to the log file");
+    assert!(
+        log.contains("active profile ghost is not defined (defined profiles: main)"),
+        "the error names the missing profile and the defined ones: {log}"
+    );
+    assert!(
+        !temp
+            .path()
+            .join(".promptforge")
+            .join("run")
+            .join("gateway.json")
+            .exists(),
+        "a failed boot publishes no connection"
+    );
+}
+
 /// A headless invocation with `--config` bookends its serving log: the
 /// versioned launch record is first, and route-driven shutdown leaves the
 /// clean terminal record last. The real binary is spawned with the profile
@@ -351,7 +560,7 @@ fn headless_serve_bookends_the_log_file() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
@@ -537,7 +746,7 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
@@ -902,7 +1111,7 @@ fn diagnostics_reports_without_serving_or_mutating() {
     std::fs::create_dir_all(&logs).expect("create the logs dir");
     std::fs::write(logs.join("gateway.log"), "the running gateway's log").expect("seed the log");
     let config = temp.path().join(".promptforge").join("gateway.toml");
-    std::fs::write(&config, "config-version = 2\n").expect("seed the profile config");
+    std::fs::write(&config, "config-version = 0\n").expect("seed the profile config");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
         .arg("diagnostics")
@@ -975,7 +1184,7 @@ fn diagnostics_reports_a_running_gateway_without_rotating_its_log() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
@@ -1105,207 +1314,4 @@ fn a_fatal_boot_error_lands_in_the_log_with_its_chain() {
             .is_some_and(|line| line.contains("gateway exiting after a fatal error")),
         "the fatal terminal record is last: {log}"
     );
-}
-
-/// A config with two profiles over one backend, so a switch from `main` to
-/// `other` exercises the switch machinery against the slow backend.
-fn two_profile_config(backend: std::net::SocketAddr) -> String {
-    format!(
-        r#"
-config-version = 2
-
-[server]
-bind = "127.0.0.1:0"
-api_key = "test-token"
-
-[[endpoint]]
-id = "fake"
-protocol = "openai"
-base_url = "http://{backend}"
-api_key = ""
-
-[[model]]
-name = "main-model"
-description = "the boot profile's model"
-context = 8192
-upstream = "backend-model"
-endpoints = ["fake"]
-
-[[model]]
-name = "other-model"
-description = "the switch target's model"
-context = 8192
-upstream = "backend-model"
-endpoints = ["fake"]
-
-[[profile]]
-name = "main"
-models = ["main-model"]
-
-[[profile]]
-name = "other"
-models = ["other-model"]
-"#
-    )
-}
-
-/// Quit while a command is active fires the command's cancellation token:
-/// the command settles as cancelled and the gateway thread joins promptly
-/// instead of waiting out the command's work. The in-flight window here is
-/// the switch's bounded drain behind a held request; the mid-download stop
-/// is pinned by gateway-local's chunk-boundary test.
-#[tokio::test]
-async fn quit_during_an_active_command_cancels_it_and_exits_promptly() {
-    let (backend, mut arrivals) = crate::support::slow_fake_backend().await;
-    let temp = tempfile::tempdir().unwrap();
-    let path = write_config(&temp, two_profile_config(backend));
-    let options = ServeOptions::new(
-        Some(path),
-        ProfileName::parse("main").expect("profile name"),
-    )
-    .with_run_dir(temp.path().join("run"));
-    let handle = gateway::spawn(&options).expect("gateway spawns");
-    let url = handle.url().to_owned();
-    let http = reqwest::Client::new();
-
-    // Wait for the boot command to land main-model in the routing table.
-    wait_for_catalog(&url, &http, &["main-model"]).await;
-
-    // Hold a chat request in flight, so the switch command parks in its
-    // bounded drain with the request still registered.
-    let chat = tokio::spawn({
-        let http = http.clone();
-        let url = format!("{url}/v1/chat/completions");
-        async move {
-            http.post(url)
-                .bearer_auth("test-token")
-                .json(&serde_json::json!({
-                    "model": "main-model",
-                    "messages": [{ "role": "user", "content": "ping" }]
-                }))
-                .send()
-                .await
-        }
-    });
-    let release = crate::support::next_arrival(&mut arrivals).await;
-
-    // The switch goes active and parks in the drain behind the held request.
-    let mut switching = send_within(
-        http.post(format!("{url}/admin/switch-profile"))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "other" })),
-    )
-    .await;
-    let mut body = String::new();
-    read_until(&mut switching, "loading-profile", &mut body).await;
-    assert!(
-        body.contains("loading-profile"),
-        "the switch command went active: {body}"
-    );
-
-    // Quit: the active command's token fires first, then the serve signal.
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = done_tx.send(handle.shutdown());
-    });
-
-    // The command settles as cancelled while the request is still held.
-    read_until(&mut switching, "\"status\"", &mut body).await;
-    assert!(
-        body.contains("cancelled"),
-        "the active switch settles as cancelled: {body}"
-    );
-
-    // Release the held request so the graceful drain can finish.
-    let _ = release.send(());
-    let response = chat.await.expect("chat task").expect("chat request");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-
-    let result = done_rx
-        .recv_timeout(PHASE_TIMEOUT)
-        .expect("quit during an active command returns promptly");
-    result.expect("graceful shutdown");
-}
-
-/// A save never waits for a running switch: the `LoadProfile` command does
-/// not hold the apply lock, so `PUT /admin/config` completes within the
-/// phase timeout while the switch is parked in its drain behind a held
-/// request, and the switch still finishes once the request is released.
-#[tokio::test]
-async fn a_save_completes_while_a_switch_command_is_parked() {
-    let (backend, mut arrivals) = crate::support::slow_fake_backend().await;
-    let temp = tempfile::tempdir().unwrap();
-    let path = write_config(&temp, two_profile_config(backend));
-    let options = ServeOptions::new(
-        Some(path.clone()),
-        ProfileName::parse("main").expect("profile name"),
-    )
-    .with_run_dir(temp.path().join("run"));
-    let handle = gateway::spawn(&options).expect("gateway spawns");
-    let url = handle.url().to_owned();
-    let http = reqwest::Client::new();
-    wait_for_catalog(&url, &http, &["main-model"]).await;
-
-    // Hold a chat request in flight, so the switch command parks in its
-    // bounded drain with the request still registered.
-    let chat = tokio::spawn({
-        let http = http.clone();
-        let url = format!("{url}/v1/chat/completions");
-        async move {
-            http.post(url)
-                .bearer_auth("test-token")
-                .json(&serde_json::json!({
-                    "model": "main-model",
-                    "messages": [{ "role": "user", "content": "ping" }]
-                }))
-                .send()
-                .await
-        }
-    });
-    let release = crate::support::next_arrival(&mut arrivals).await;
-    let mut switching = send_within(
-        http.post(format!("{url}/admin/switch-profile"))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "other" })),
-    )
-    .await;
-    let mut body = String::new();
-    read_until(&mut switching, "loading-profile", &mut body).await;
-
-    // The save lands while the switch is parked; `send_within` bounds it by
-    // the phase timeout, well inside the drain's own deadline.
-    let document = json_within(
-        send_within(
-            http.get(format!("{url}/admin/config"))
-                .bearer_auth("test-token"),
-        )
-        .await,
-    )
-    .await;
-    let save = send_within(
-        http.put(format!("{url}/admin/config"))
-            .bearer_auth("test-token")
-            .json(&document),
-    )
-    .await;
-    assert_eq!(
-        save.status(),
-        reqwest::StatusCode::OK,
-        "the save does not wait for the parked switch"
-    );
-    assert!(
-        path.with_file_name("gateway.toml.next").is_file(),
-        "the save staged its shadow while the switch was active"
-    );
-
-    // Release the held request: the switch drains and completes.
-    let _ = release.send(());
-    let response = chat.await.expect("chat task").expect("chat request");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    read_until(&mut switching, "\"status\"", &mut body).await;
-    assert!(
-        body.contains("\"ready\""),
-        "the parked switch completes after the release: {body}"
-    );
-    handle.shutdown().expect("graceful shutdown");
 }

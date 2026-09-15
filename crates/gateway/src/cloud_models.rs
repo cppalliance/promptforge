@@ -4,10 +4,11 @@
 //! release artifact of the promptforge-cloud-providers repository. At
 //! launch, after the async boot completes and off the serving path, the
 //! gateway loads `<profile>/cloud-provider-models.json` from disk when
-//! present and parseable (an unparseable cache is logged, treated as
+//! present, parseable, and of an accepted schema version (an
+//! unparseable or version-mismatched cache is logged, treated as
 //! absent, and overwritten by the next successful download), and spawns
 //! one bounded background download when the cache is missing,
-//! unparseable, or its envelope `generated_at` is older than one week.
+//! unusable, or its envelope `generated_at` is older than one week.
 //! The age check is a launch-time timestamp comparison, not a timer
 //! loop: a gateway that runs for weeks re-checks at its next launch.
 //!
@@ -16,18 +17,19 @@
 //! truncated cache and a failed download keeps the old one. `GET
 //! /admin/cloud-models` serves the in-memory sheet, a 503 loading
 //! indication while none has arrived, or the last download error; `POST
-//! /admin/cloud-models/refresh` forces a background re-download
-//! regardless of age. Both routes sit behind the shared loopback wall
-//! with the rest of the admin config surface.
+//! /admin/cloud-models/refresh` forces a re-download regardless of age
+//! and answers with the fresh sheet once the download it started or
+//! joined lands, or with the download's error. Both routes sit behind
+//! the shared loopback wall with the rest of the admin config surface.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use shared_gateway_api::Sheet;
+use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
+use shared_gateway_api::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
 use time::OffsetDateTime;
 
 use crate::auth::Caller;
@@ -57,7 +59,7 @@ pub(crate) struct CloudModels {
     inner: Arc<Mutex<Inner>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Inner {
     /// The launched cache location; `None` until [`CloudModels::launch`].
     cache_path: Option<PathBuf>,
@@ -70,6 +72,30 @@ struct Inner {
     last_error: Option<String>,
     /// One download at a time, across launch and every refresh.
     download_in_flight: bool,
+    /// The generation of the latest download, bumped per spawn so a
+    /// refresh awaits exactly the download it started or joined.
+    generation: u64,
+    /// The latest completed download's generation and outcome; the
+    /// refresh route's answer.
+    last_outcome: Option<(u64, Result<(), String>)>,
+    /// Announces each completed download's generation to awaiting
+    /// refreshes.
+    completion: tokio::sync::watch::Sender<u64>,
+}
+
+impl Default for Inner {
+    fn default() -> Self {
+        Self {
+            cache_path: None,
+            url: None,
+            sheet: None,
+            last_error: None,
+            download_in_flight: false,
+            generation: 0,
+            last_outcome: None,
+            completion: tokio::sync::watch::channel(0).0,
+        }
+    }
 }
 
 /// The outcome of asking for a background download.
@@ -101,7 +127,12 @@ enum CacheRead {
     /// A cache file existed but would not read or parse; treated as
     /// absent and overwritten by the next successful download.
     Unparseable,
-    /// A parseable sheet; freshness is the caller's decision.
+    /// A cache file parsed but declared a schema version this gateway
+    /// does not accept; treated as absent like [`CacheRead::Unparseable`]
+    /// and overwritten by the next successful download.
+    UnsupportedVersion(u32),
+    /// A parseable sheet of an accepted schema version; freshness is the
+    /// caller's decision.
     Loaded(Sheet),
 }
 
@@ -145,6 +176,15 @@ impl CloudModels {
                 );
                 false
             }
+            Ok(CacheRead::UnsupportedVersion(found)) => {
+                tracing::warn!(
+                    path = %cache_path.display(),
+                    found,
+                    accepted = ACCEPTED_SHEET_SCHEMA_VERSION,
+                    "cloud provider sheet cache schema version is not accepted; treating it as absent"
+                );
+                false
+            }
             Err(join) => {
                 tracing::warn!(
                     path = %cache_path.display(),
@@ -159,10 +199,36 @@ impl CloudModels {
             self.spawn_download().started()
         }
     }
-
-    /// Force a background re-download regardless of cache age.
-    pub(crate) fn refresh(&self) -> Download {
-        self.spawn_download()
+    /// Force a re-download regardless of cache age and await its
+    /// outcome: the fresh sheet on success, the download's error on
+    /// failure. A refresh asked during an in-flight download joins it
+    /// and awaits the same result instead of starting a second one.
+    pub(crate) async fn refresh(&self) -> Result<Arc<Sheet>, GatewayError> {
+        let (generation, mut completion) = {
+            let mut inner = self.lock();
+            match self.spawn_download_locked(&mut inner) {
+                Download::Started(_) | Download::InFlight => {
+                    (inner.generation, inner.completion.subscribe())
+                }
+                Download::Unavailable => return Err(GatewayError::CloudModelsLoading),
+            }
+        };
+        let waited = completion.wait_for(|done| *done >= generation).await;
+        let inner = self.lock();
+        match (waited, &inner.last_outcome) {
+            (Ok(_), Some((done, Ok(())))) if *done >= generation => match &inner.sheet {
+                Some(sheet) => Ok(Arc::clone(sheet)),
+                None => Err(GatewayError::CloudModelsUnavailable(
+                    "cloud provider sheet download finished without installing a sheet".to_owned(),
+                )),
+            },
+            (Ok(_), Some((done, Err(error)))) if *done >= generation => {
+                Err(GatewayError::CloudModelsUnavailable(error.clone()))
+            }
+            _ => Err(GatewayError::CloudModelsUnavailable(
+                "cloud provider sheet download outcome was lost".to_owned(),
+            )),
+        }
     }
 
     /// The in-memory sheet, when one has loaded or downloaded.
@@ -178,62 +244,121 @@ impl CloudModels {
 
     /// Spawn the one background download, or report why none started.
     fn spawn_download(&self) -> Download {
-        let (cache_path, url) = {
-            let mut inner = self.lock();
-            if inner.download_in_flight {
-                return Download::InFlight;
-            }
-            let (Some(cache_path), Some(url)) = (inner.cache_path.clone(), inner.url.clone())
-            else {
-                return Download::Unavailable;
-            };
-            inner.download_in_flight = true;
-            (cache_path, url)
+        let mut inner = self.lock();
+        self.spawn_download_locked(&mut inner)
+    }
+
+    /// The spawn half of [`CloudModels::spawn_download`] with the lock
+    /// already held, so a refresh spawns or joins and subscribes to the
+    /// completion signal atomically.
+    fn spawn_download_locked(&self, inner: &mut Inner) -> Download {
+        if inner.download_in_flight {
+            return Download::InFlight;
+        }
+        let (Some(cache_path), Some(url)) = (inner.cache_path.clone(), inner.url.clone()) else {
+            return Download::Unavailable;
         };
+        inner.download_in_flight = true;
+        inner.generation += 1;
+        let generation = inner.generation;
         let this = self.clone();
         Download::Started(tokio::spawn(async move {
             let outcome = download_once(&cache_path, &url).await;
             let mut inner = this.lock();
-            match outcome {
+            let result = match outcome {
                 Ok(sheet) => {
                     inner.sheet = Some(Arc::new(sheet));
                     inner.last_error = None;
+                    Ok(())
                 }
                 Err(error) => {
                     tracing::warn!("{error}");
-                    inner.last_error = Some(error);
+                    let message = error.to_string();
+                    inner.last_error = Some(message.clone());
+                    Err(message)
                 }
-            }
+            };
             inner.download_in_flight = false;
+            inner.last_outcome = Some((generation, result));
+            let _ignored = inner.completion.send(generation);
         }))
     }
 }
 
 /// Fetch the sheet and persist it, returning the sheet only after the
 /// cache write lands: the in-memory copy never runs ahead of the disk.
-async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, String> {
-    let sheet =
-        shared_cloud_providers::fetch_sheet(&gateway_protocol::http_util::bounded_client(), url)
-            .await
-            .map_err(|error| format!("cloud provider sheet download from {url} failed: {error}"))?;
-    let bytes = serde_json::to_vec(&sheet)
-        .map_err(|error| format!("cloud provider sheet serialization failed: {error}"))?;
+///
+/// The body read is capped at [`MAX_JSON_BODY`] like every other gateway
+/// outbound read; a response announcing an over-cap `Content-Length` is
+/// refused before the read so the failure names the cap rather than a
+/// truncated parse.
+async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, GatewayError> {
+    let response = bounded_client()
+        .get(url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|error| {
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet download from {url} failed: {error}"
+            ))
+        })?;
+    if let Some(announced) = response.content_length()
+        && announced > MAX_JSON_BODY as u64
+    {
+        return Err(GatewayError::CloudModelsBodyTooLarge {
+            announced,
+            cap: MAX_JSON_BODY,
+        });
+    }
+    let bytes = read_bytes_capped(response, MAX_JSON_BODY)
+        .await
+        .map_err(|error| {
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet download from {url} failed: {error}"
+            ))
+        })?;
+    let sheet: Sheet = serde_json::from_slice(&bytes).map_err(|error| {
+        GatewayError::CloudModelsUnavailable(format!(
+            "cloud provider sheet from {url} failed to parse: {error}"
+        ))
+    })?;
+    if sheet.schema_version != ACCEPTED_SHEET_SCHEMA_VERSION {
+        return Err(GatewayError::CloudModelsSchemaVersion {
+            found: sheet.schema_version,
+            accepted: ACCEPTED_SHEET_SCHEMA_VERSION,
+        });
+    }
+    let bytes = serde_json::to_vec(&sheet).map_err(|error| {
+        GatewayError::CloudModelsUnavailable(format!(
+            "cloud provider sheet serialization failed: {error}"
+        ))
+    })?;
     let display = cache_path.display().to_string();
     let path = cache_path.to_path_buf();
     tokio::task::spawn_blocking(move || write_cache_atomic(&path, &bytes))
         .await
-        .map_err(|join| format!("cloud provider sheet cache write to {display} failed: {join}"))?
+        .map_err(|join| {
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet cache write to {display} failed: {join}"
+            ))
+        })?
         .map_err(|error| {
-            format!("cloud provider sheet cache write to {display} failed: {error}")
+            GatewayError::CloudModelsUnavailable(format!(
+                "cloud provider sheet cache write to {display} failed: {error}"
+            ))
         })?;
     Ok(sheet)
 }
 
-/// Read and parse the cache file.
+/// Read and parse the cache file, gating on the accepted schema version.
 fn read_cache(path: &Path) -> CacheRead {
     match std::fs::read(path) {
         Ok(bytes) => match serde_json::from_slice::<Sheet>(&bytes) {
-            Ok(sheet) => CacheRead::Loaded(sheet),
+            Ok(sheet) if sheet.schema_version == ACCEPTED_SHEET_SCHEMA_VERSION => {
+                CacheRead::Loaded(sheet)
+            }
+            Ok(sheet) => CacheRead::UnsupportedVersion(sheet.schema_version),
             Err(_) => CacheRead::Unparseable,
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => CacheRead::Missing,
@@ -272,440 +397,18 @@ pub(crate) async fn admin_cloud_models(
 }
 
 /// The `POST /admin/cloud-models/refresh` route: bearer-authed and
-/// loopback-walled, forces a background re-download regardless of cache
-/// age; 202 whether this call spawned the download or one was already
-/// running.
+/// loopback-walled, forces a re-download regardless of cache age and
+/// answers 200 with the fresh sheet once the download it started or
+/// joined lands, or the download's 502 error; a concurrent refresh
+/// awaits the same download rather than starting a second one.
 pub(crate) async fn admin_cloud_models_refresh(
     State(state): State<AppState>,
     caller: Caller,
-) -> Result<(StatusCode, Json<serde_json::Value>), GatewayError> {
+) -> Result<Json<Sheet>, GatewayError> {
     check_auth(&state, &caller).await?;
-    match state.cloud_models.refresh() {
-        Download::Started(_) | Download::InFlight => Ok((
-            StatusCode::ACCEPTED,
-            Json(serde_json::json!({ "status": "downloading" })),
-        )),
-        Download::Unavailable => Err(GatewayError::CloudModelsLoading),
-    }
+    let sheet = state.cloud_models.refresh().await?;
+    Ok(Json(Sheet::clone(&sheet)))
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::net::SocketAddr;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use axum::body::Body;
-    use axum::extract::ConnectInfo;
-    use axum::http::header::AUTHORIZATION;
-    use axum::http::{Method, Request};
-    use gateway_config::Config;
-    use shared_gateway_api::{ModelEntry, ModelKind, ProviderSlice, SliceStatus, Thinking, Tier};
-    use tokio::sync::Notify;
-    use tower::ServiceExt as _;
-
-    use super::*;
-
-    /// A one-provider sheet stamped `generated_at`, carrying one model
-    /// whose id distinguishes one test sheet from another.
-    fn test_sheet(generated_at: OffsetDateTime, model_id: &str) -> Sheet {
-        Sheet {
-            schema_version: 1,
-            generated_at,
-            providers: BTreeMap::from([(
-                "test".to_owned(),
-                ProviderSlice {
-                    display_name: "Test".to_owned(),
-                    tier: Tier::Prime,
-                    status: SliceStatus::Static,
-                    fetched_at: None,
-                    openai_base_url: Some("https://api.test.example/v1".to_owned()),
-                    env_vars: vec![],
-                    models: vec![ModelEntry {
-                        id: model_id.to_owned(),
-                        display_name: model_id.to_owned(),
-                        family: "test-family".to_owned(),
-                        variant_of: None,
-                        variant: None,
-                        languages: vec![],
-                        kind: ModelKind::Chat,
-                        released_at: None,
-                        context_window: None,
-                        max_output: None,
-                        images: false,
-                        pdf_input: false,
-                        video_input: false,
-                        audio_input: false,
-                        batch: false,
-                        citations: false,
-                        code_execution: false,
-                        structured_outputs: false,
-                        tool_calling: false,
-                        thinking: Thinking::default(),
-                        effort_levels: vec![],
-                        default_effort: None,
-                        pricing: None,
-                        deprecation: None,
-                    }],
-                },
-            )]),
-        }
-    }
-
-    /// The model id of the one entry in a sheet built by [`test_sheet`].
-    fn model_id(sheet: &Sheet) -> &str {
-        &sheet.providers["test"].models[0].id
-    }
-
-    type StubState = (
-        Arc<AtomicUsize>,
-        Option<Arc<Notify>>,
-        Arc<Notify>,
-        StatusCode,
-        String,
-    );
-
-    /// A loopback stub for the release URL: counts requests, parks each
-    /// response on the gate when gated, signals `answered` per response,
-    /// and answers with a fixed status and body.
-    struct Stub {
-        url: String,
-        requests: Arc<AtomicUsize>,
-        gate: Option<Arc<Notify>>,
-        answered: Arc<Notify>,
-    }
-
-    async fn stub_handler(
-        State((requests, gate, answered, status, body)): State<StubState>,
-    ) -> (StatusCode, String) {
-        requests.fetch_add(1, Ordering::AcqRel);
-        if let Some(gate) = gate {
-            gate.notified().await;
-        }
-        answered.notify_one();
-        (status, body)
-    }
-
-    async fn stub(status: StatusCode, body: String, gated: bool) -> Stub {
-        let requests = Arc::new(AtomicUsize::new(0));
-        let gate = gated.then(|| Arc::new(Notify::new()));
-        let answered = Arc::new(Notify::new());
-        let state: StubState = (
-            Arc::clone(&requests),
-            gate.clone(),
-            Arc::clone(&answered),
-            status,
-            body,
-        );
-        let app = axum::Router::new()
-            .route("/sheet.json", axum::routing::get(stub_handler))
-            .with_state(state);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("the stub binds");
-        let addr = listener.local_addr().expect("the stub address");
-        tokio::spawn(async move {
-            let _ignored = axum::serve(listener, app).await;
-        });
-        Stub {
-            url: format!("http://{addr}/sheet.json"),
-            requests,
-            gate,
-            answered,
-        }
-    }
-
-    /// Writes `sheet` as the cache file under a fresh tempdir, returning
-    /// both so the tempdir outlives the test.
-    fn cache_dir_with(sheet: &Sheet) -> (tempfile::TempDir, PathBuf) {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let cache = temp.path().join(CACHE_FILE_NAME);
-        std::fs::write(
-            &cache,
-            serde_json::to_vec(sheet).expect("the sheet serializes"),
-        )
-        .expect("the cache writes");
-        (temp, cache)
-    }
-
-    /// A bearer-authed state with no filesystem context, for route tests.
-    fn route_state() -> AppState {
-        let config = Config::from_toml_str(
-            "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
-        )
-        .expect("the config parses");
-        crate::test_support::app_state(config, None)
-    }
-
-    /// Sends one empty-bodied request through `build_router` with the
-    /// valid bearer key and a loopback peer planted as the `ConnectInfo`.
-    async fn request(state: AppState, method: Method, path: &str) -> Response {
-        let mut request = Request::builder()
-            .method(method)
-            .uri(path)
-            .header(AUTHORIZATION, "Bearer test-token")
-            .body(Body::empty())
-            .expect("static request parts are valid");
-        let peer: SocketAddr = "127.0.0.1:50000".parse().expect("a socket address");
-        request.extensions_mut().insert(ConnectInfo(peer));
-        crate::build_router(state, None)
-            .oneshot(request)
-            .await
-            .expect("the router is infallible")
-    }
-
-    /// Reads a JSON response body to a value.
-    async fn body_json(response: Response) -> serde_json::Value {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("the response body reads");
-        serde_json::from_slice(&body).expect("the response body is JSON")
-    }
-
-    #[tokio::test]
-    async fn a_fresh_cache_loads_without_a_download() {
-        let sheet = test_sheet(OffsetDateTime::now_utc(), "cached-model");
-        let (_temp, cache) = cache_dir_with(&sheet);
-        let stub = stub(StatusCode::OK, "unreachable".to_owned(), false).await;
-        let cloud = CloudModels::default();
-        let download = cloud.launch(cache, stub.url.clone()).await;
-        assert!(cloud.sheet().is_some(), "the fresh cache loads into memory");
-        assert!(download.is_none(), "a fresh cache spawns no download");
-        let served = cloud.sheet().expect("the cached sheet is in memory");
-        assert_eq!(model_id(&served), "cached-model");
-        // No task was spawned, so no request can ever have arrived.
-        assert_eq!(stub.requests.load(Ordering::Acquire), 0);
-    }
-
-    #[tokio::test]
-    async fn a_week_old_cache_triggers_exactly_one_download() {
-        let stale = test_sheet(
-            OffsetDateTime::now_utc() - time::Duration::days(8),
-            "stale-model",
-        );
-        let (_temp, cache) = cache_dir_with(&stale);
-        let fresh = test_sheet(OffsetDateTime::now_utc(), "fresh-model");
-        let stub = stub(
-            StatusCode::OK,
-            serde_json::to_string(&fresh).expect("the sheet serializes"),
-            false,
-        )
-        .await;
-        let cloud = CloudModels::default();
-        let download = cloud.launch(cache.clone(), stub.url.clone()).await;
-        assert_eq!(
-            model_id(&cloud.sheet().expect("the stale sheet is in memory")),
-            "stale-model"
-        );
-        let download = download.expect("a week-old cache spawns a download");
-        download.await.expect("the download task joins");
-        assert_eq!(stub.requests.load(Ordering::Acquire), 1);
-        let served = cloud.sheet().expect("the downloaded sheet swaps in");
-        assert_eq!(model_id(&served), "fresh-model");
-        let on_disk: Sheet =
-            serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
-                .expect("the rewritten cache parses");
-        assert_eq!(model_id(&on_disk), "fresh-model");
-    }
-
-    #[tokio::test]
-    async fn an_unparseable_cache_is_treated_as_absent() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let cache = temp.path().join(CACHE_FILE_NAME);
-        std::fs::write(&cache, b"not a sheet").expect("the cache writes");
-        let sheet = test_sheet(OffsetDateTime::now_utc(), "downloaded-model");
-        let stub = stub(
-            StatusCode::OK,
-            serde_json::to_string(&sheet).expect("the sheet serializes"),
-            false,
-        )
-        .await;
-        let cloud = CloudModels::default();
-        let download = cloud.launch(cache.clone(), stub.url.clone()).await;
-        assert!(
-            cloud.sheet().is_none(),
-            "an unparseable cache loads nothing"
-        );
-        let download = download.expect("an unparseable cache spawns a download");
-        download.await.expect("the download task joins");
-        let served = cloud.sheet().expect("the downloaded sheet is in memory");
-        assert_eq!(model_id(&served), "downloaded-model");
-        let on_disk: Sheet =
-            serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
-                .expect("the overwritten cache parses");
-        assert_eq!(model_id(&on_disk), "downloaded-model");
-    }
-
-    #[tokio::test]
-    async fn a_failed_download_keeps_the_old_cache() {
-        let stale = test_sheet(
-            OffsetDateTime::now_utc() - time::Duration::days(8),
-            "stale-model",
-        );
-        let (_temp, cache) = cache_dir_with(&stale);
-        let original = std::fs::read(&cache).expect("the cache reads");
-        let stub = stub(StatusCode::INTERNAL_SERVER_ERROR, "boom".to_owned(), false).await;
-        let cloud = CloudModels::default();
-        let download = cloud.launch(cache.clone(), stub.url.clone()).await;
-        assert!(
-            cloud.sheet().is_some(),
-            "the stale cache still loads into memory"
-        );
-        let download = download.expect("a week-old cache spawns a download");
-        download.await.expect("the download task joins");
-        assert_eq!(stub.requests.load(Ordering::Acquire), 1);
-        let served = cloud.sheet().expect("the old sheet survives");
-        assert_eq!(model_id(&served), "stale-model");
-        assert!(
-            cloud.last_error().is_some(),
-            "the failure is recorded for the route's error answer"
-        );
-        assert_eq!(
-            std::fs::read(&cache).expect("the cache reads"),
-            original,
-            "a failed download never touches the cache file"
-        );
-    }
-
-    #[tokio::test]
-    async fn concurrent_refreshes_never_start_a_second_download() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let cache = temp.path().join(CACHE_FILE_NAME);
-        let sheet = test_sheet(OffsetDateTime::now_utc(), "downloaded-model");
-        let stub = stub(
-            StatusCode::OK,
-            serde_json::to_string(&sheet).expect("the sheet serializes"),
-            true,
-        )
-        .await;
-        let cloud = CloudModels::default();
-        let download = cloud.launch(cache, stub.url.clone()).await;
-        assert!(cloud.sheet().is_none(), "a missing cache loads nothing");
-        let download = download.expect("a missing cache spawns a download");
-        // The in-flight guard is set before the task starts, so both
-        // refreshes observe it regardless of where the download sits.
-        assert!(
-            matches!(cloud.refresh(), Download::InFlight),
-            "a refresh during a download never starts a second one"
-        );
-        assert!(
-            matches!(cloud.refresh(), Download::InFlight),
-            "every concurrent refresh shares the one download"
-        );
-        stub.gate.as_ref().expect("the stub is gated").notify_one();
-        download.await.expect("the download task joins");
-        assert_eq!(stub.requests.load(Ordering::Acquire), 1);
-    }
-
-    #[tokio::test]
-    async fn the_cache_write_replaces_the_old_file_and_leaves_no_temp() {
-        let stale = test_sheet(
-            OffsetDateTime::now_utc() - time::Duration::days(8),
-            "stale-model",
-        );
-        let (_temp, cache) = cache_dir_with(&stale);
-        let fresh = test_sheet(OffsetDateTime::now_utc(), "fresh-model");
-        let stub = stub(
-            StatusCode::OK,
-            serde_json::to_string(&fresh).expect("the sheet serializes"),
-            false,
-        )
-        .await;
-        let cloud = CloudModels::default();
-        let download = cloud.launch(cache.clone(), stub.url.clone()).await;
-        download
-            .expect("a week-old cache spawns a download")
-            .await
-            .expect("the download task joins");
-        let on_disk: Sheet =
-            serde_json::from_slice(&std::fs::read(&cache).expect("the cache reads"))
-                .expect("the replaced cache parses");
-        assert_eq!(
-            model_id(&on_disk),
-            "fresh-model",
-            "the rename replaced the old cache wholesale"
-        );
-        assert!(
-            !cache.with_extension("tmp").exists(),
-            "the temp file is gone after the atomic replace"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_route_serves_the_cached_sheet() {
-        let sheet = test_sheet(OffsetDateTime::now_utc(), "cached-model");
-        let (_temp, cache) = cache_dir_with(&sheet);
-        let stub = stub(StatusCode::OK, "unreachable".to_owned(), false).await;
-        let state = route_state();
-        let download = state.cloud_models.launch(cache, stub.url.clone()).await;
-        assert!(download.is_none(), "a fresh cache spawns no download");
-        assert!(state.cloud_models.sheet().is_some());
-        let response = request(state, Method::GET, "/admin/cloud-models").await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = body_json(response).await;
-        assert_eq!(body["providers"]["test"]["models"][0]["id"], "cached-model");
-    }
-
-    #[tokio::test]
-    async fn the_route_reports_loading_before_the_sheet_arrives() {
-        let state = route_state();
-        let response = request(state.clone(), Method::GET, "/admin/cloud-models").await;
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let body = body_json(response).await;
-        assert_eq!(body["error"]["code"], "cloud_models_loading");
-        let response = request(state, Method::POST, "/admin/cloud-models/refresh").await;
-        assert_eq!(
-            response.status(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "an unlaunched module cannot refresh: there is nowhere to cache to"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_route_reports_the_download_error() {
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let cache = temp.path().join(CACHE_FILE_NAME);
-        let stub = stub(StatusCode::INTERNAL_SERVER_ERROR, "boom".to_owned(), false).await;
-        let state = route_state();
-        let download = state.cloud_models.launch(cache, stub.url.clone()).await;
-        download
-            .expect("a missing cache spawns a download")
-            .await
-            .expect("the download task joins");
-        let response = request(state, Method::GET, "/admin/cloud-models").await;
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-        let body = body_json(response).await;
-        assert_eq!(body["error"]["code"], "cloud_models_unavailable");
-    }
-
-    #[tokio::test]
-    async fn the_refresh_route_forces_a_redownload_regardless_of_age() {
-        let sheet = test_sheet(OffsetDateTime::now_utc(), "cached-model");
-        let (_temp, cache) = cache_dir_with(&sheet);
-        let fresh = test_sheet(OffsetDateTime::now_utc(), "refreshed-model");
-        let stub = stub(
-            StatusCode::OK,
-            serde_json::to_string(&fresh).expect("the sheet serializes"),
-            false,
-        )
-        .await;
-        let state = route_state();
-        let download = state.cloud_models.launch(cache, stub.url.clone()).await;
-        assert!(
-            download.is_none(),
-            "a fresh cache spawns no launch download"
-        );
-        let response = request(state, Method::POST, "/admin/cloud-models/refresh").await;
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        tokio::time::timeout(std::time::Duration::from_secs(10), stub.answered.notified())
-            .await
-            .expect("the forced download answers");
-        assert_eq!(
-            stub.requests.load(Ordering::Acquire),
-            1,
-            "refresh downloads even though the cache is fresh"
-        );
-    }
-}
+mod tests;

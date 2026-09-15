@@ -46,7 +46,7 @@ async fn a_stalled_gateway_trips_the_request_timeout() {
 async fn a_stalled_gateway_trips_the_stream_header_bound() {
     let base_url = spawn_stalled_gateway().await;
     let error = impatient_client(&base_url)
-        .switch_profile("beta")
+        .cache_ensure("hf://example/blob")
         .await
         .expect_err("a gateway that never sends headers must trip the header bound");
     assert!(

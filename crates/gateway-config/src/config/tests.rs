@@ -2,7 +2,7 @@ use super::interpolate::interpolate;
 use super::*;
 
 const SAMPLE: &str = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -35,7 +35,7 @@ fn parses_a_valid_config() {
 #[test]
 fn rejects_model_missing_description() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -61,7 +61,7 @@ endpoints = ["anthropic"]
 #[test]
 fn rejects_model_missing_context() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -87,7 +87,7 @@ endpoints = ["anthropic"]
 #[test]
 fn rejects_empty_server_key() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = ""
@@ -123,7 +123,7 @@ fn server_trust_loopback_defaults_to_true() {
 #[test]
 fn server_trust_loopback_explicit_false_parses() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -137,11 +137,11 @@ trust_loopback = false
 fn server_trust_loopback_round_trips_through_json() {
     for (toml, expected) in [
         (
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n",
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n",
             true,
         ),
         (
-            "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\ntrust_loopback = false\n",
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\ntrust_loopback = false\n",
             false,
         ),
     ] {
@@ -156,7 +156,7 @@ fn server_trust_loopback_round_trips_through_json() {
 #[test]
 fn rejects_web_search_default_count_over_max() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -190,7 +190,7 @@ max_count = 10
 #[test]
 fn rejects_web_search_non_http_base_url() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -224,7 +224,7 @@ fn rejects_plaintext_http_local_model_source() {
     let sha = "a".repeat(64);
     let toml = format!(
         r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -246,7 +246,7 @@ context = 4096
 #[test]
 fn rejects_unknown_model_key() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -274,7 +274,7 @@ mystery = true
 #[test]
 fn parses_thinking_modes() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -303,7 +303,7 @@ fn model_kind_defaults_to_chat() {
     assert_eq!(config.models[0].kind, ModelKind::Chat);
 
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -321,7 +321,7 @@ context = 4096
 #[test]
 fn parses_model_kinds() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -355,7 +355,7 @@ context = 4096
 #[test]
 fn rejects_unknown_model_kind() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -389,7 +389,7 @@ fn tool_dialect_defaults_to_openai() {
 #[test]
 fn parses_gemma3_tool_code_dialect() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -415,7 +415,7 @@ endpoints = ["e"]
 #[test]
 fn rejects_unknown_tool_dialect() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -443,7 +443,7 @@ endpoints = ["e"]
 #[test]
 fn rejects_tool_dialect_on_a_non_chat_model() {
     let toml = r#"
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -483,7 +483,7 @@ fn interpolation_ignores_comments_and_keys() {
     // tried to resolve it and errored.
     let toml = r#"
 # a comment mentioning ${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}
-config-version = 2
+config-version = 0
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"

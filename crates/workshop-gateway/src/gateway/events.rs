@@ -1,11 +1,11 @@
 //! The gateway client's wire types: the buffered relay response, the
-//! forwarded config-panel response, the SSE payload stream, and the
-//! typed cache and profile-switch events decoded from it.
+//! forwarded config-panel response, the SSE payload stream, the typed
+//! cache events decoded from it, and the profile-selection outcome.
 
 use std::path::PathBuf;
 use std::pin::Pin;
 
-use futures_util::stream::{Stream, StreamExt};
+use futures_util::stream::Stream;
 use serde::Deserialize;
 
 use super::GatewayError;
@@ -112,98 +112,31 @@ pub enum CacheEvent {
     },
 }
 
-/// The gateway's answer to a profile switch, `POST /admin/switch-profile`.
+/// The gateway's answer to a profile selection, `POST /admin/switch-profile`.
 ///
-/// An accepted switch answers `text/event-stream`: stage markers as the
-/// switch proceeds, then exactly one terminal `ready` or `error` event, all
-/// decoding as [`SwitchEvent`]. A refusal before the switch starts (bad
-/// auth, a malformed name, no profiles directory) is buffered rather than
-/// reported as an error, matching the relay contract of the other client
-/// methods.
+/// An accepted selection answers one JSON document decoding as
+/// [`SwitchOutcome`]: the gateway persisted the selection and reports
+/// whether it must restart to load it. A refusal (bad auth, a malformed or
+/// undefined name) is buffered rather than reported as an error, matching
+/// the relay contract of the other client methods.
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum SwitchResponse {
-    /// The gateway accepted the switch and is streaming its progress.
-    Switching {
-        /// The gateway's success status.
-        status: reqwest::StatusCode,
-        /// The SSE payload stream of [`SwitchEvent`] JSON documents, ending
-        /// in a terminal `ready` or `error` event.
-        payloads: SsePayloadStream,
-    },
+    /// The gateway accepted and persisted the selection.
+    Selected(SwitchOutcome),
 
     /// A refusal, buffered: the gateway's error envelope.
     Buffered(GatewayResponse),
 }
 
-// Manual because the boxed payload stream has no `Debug` impl.
-impl std::fmt::Debug for SwitchResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Switching { status, .. } => f
-                .debug_struct("SwitchResponse::Switching")
-                .field("status", status)
-                .finish_non_exhaustive(),
-            Self::Buffered(response) => f
-                .debug_tuple("SwitchResponse::Buffered")
-                .field(response)
-                .finish(),
-        }
-    }
-}
-
-/// One event of the gateway's switch-profile stream: a stage marker as the
-/// switch proceeds, then exactly one terminal event.
-///
-/// Stage markers arrive in execution order - `loading-profile`,
-/// `stopping-models`, `starting-models` (the long pole: weights loading
-/// into VRAM). The stage stays a string so a gateway that grows a new
-/// stage never breaks the decode.
+/// The body of an accepted profile selection.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-#[non_exhaustive]
-pub enum SwitchEvent {
-    /// A phase of the switch is beginning.
-    Stage {
-        /// The gateway's name for the phase, e.g. `starting-models`.
-        stage: String,
-    },
-
-    /// Terminal: the switch committed and `profile` is live.
-    Ready {
-        /// The now-active profile name.
-        profile: String,
-    },
-
-    /// Terminal: the switch failed. The previous profile stays
-    /// authenticated and remote-routable, but its local children may
-    /// already be gone (the gateway's documented degraded state).
-    Error {
-        /// The gateway's description of the failure.
-        message: String,
-    },
-}
-
-/// A stream of decoded [`SwitchEvent`]s, as produced by [`switch_events`].
-pub type SwitchEventStream = Pin<Box<dyn Stream<Item = Result<SwitchEvent, GatewayError>> + Send>>;
-
-/// Decodes a switch-profile payload stream into typed [`SwitchEvent`]s.
-///
-/// A payload that does not parse as a switch event is logged and skipped -
-/// a malformed line from the gateway degrades one progress update, never
-/// the switch - and the stream continues to its terminal event. A transport
-/// failure passes through and ends the stream.
-#[must_use]
-pub fn switch_events(payloads: SsePayloadStream) -> SwitchEventStream {
-    Box::pin(payloads.filter_map(|item| async move {
-        match item {
-            Ok(payload) => match serde_json::from_str::<SwitchEvent>(&payload) {
-                Ok(event) => Some(Ok(event)),
-                Err(error) => {
-                    tracing::warn!(%error, payload, "skipping a malformed switch-profile event");
-                    None
-                }
-            },
-            Err(error) => Some(Err(error)),
-        }
-    }))
+pub struct SwitchOutcome {
+    /// The selection now persisted: a profile name, or `None` for no
+    /// profile.
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Whether the gateway must restart before the selection is served;
+    /// `false` when the selection already matches the running profile.
+    pub restart_required: bool,
 }

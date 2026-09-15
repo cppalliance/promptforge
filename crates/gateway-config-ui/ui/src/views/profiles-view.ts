@@ -1,5 +1,11 @@
 // Profile checklist editor. Each profile is one ordered subset of the
-// global model catalog, edited through APG-style rearrangeable listboxes.
+// local and STT model catalogs, edited through APG-style rearrangeable
+// listboxes. Selection goes through `POST /admin/switch-profile`: Set
+// Active persists a name (or null through the "No profile" row) and the
+// gateway says whether a restart is needed for it to run. The list pills
+// distinguish the running profile (Active) from the persisted one
+// (Selected), and a persisted name the config no longer defines shows a
+// Stale notice until any Set Active replaces it.
 
 import {
   ArrowLeft,
@@ -28,7 +34,12 @@ export interface ProfilesViewDeps {
   store: ConfigStore;
   /** Save and validation outcomes. */
   toasts: ToastStack;
+  /** Runs when a selection needs a gateway restart to run. */
+  onRestartRequired: () => void;
 }
+
+/** The list label for the null selection. */
+const NO_PROFILE_LABEL = "No profile";
 
 /** The mounted Profiles view. */
 export interface ProfilesView {
@@ -54,7 +65,7 @@ export function profileNameError(name: string): string | null {
 
 /** Builds the Profiles view. */
 export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
-  const { store, toasts } = deps;
+  const { store, toasts, onRestartRequired } = deps;
   let main: HTMLElement | null = null;
   let viewRoot: HTMLElement | null = null;
   let selectedProfile = "";
@@ -97,13 +108,16 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     }
   });
 
+  /** Whether `name` is the running or the persisted profile, so it cannot be deleted. */
+  const isRunningOrSelected = (name: string): boolean =>
+    name === store.activeProfile || name === store.selectedProfile();
+
   const currentProfile = (): ProfileEntry | null => {
     const profiles = store.profiles();
     if (!profiles.some((profile) => profile.name === selectedProfile)) {
+      const preferred = store.selectedProfile() ?? store.activeProfile;
       selectedProfile =
-        profiles.find((profile) => profile.name === store.pendingActiveProfile())?.name ??
-        profiles[0]?.name ??
-        "";
+        profiles.find((profile) => profile.name === preferred)?.name ?? profiles[0]?.name ?? "";
     }
     return profiles.find((profile) => profile.name === selectedProfile) ?? null;
   };
@@ -114,9 +128,16 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
       return [];
     }
     const chosen = new Set(profile.models);
+    // Profiles hold local and STT members only; the remote catalog
+    // routes for every profile and is never chosen.
     return store
       .models()
-      .filter((entry) => !entry.draft && chosen.has(entry.name) === (pane === "chosen"));
+      .filter(
+        (entry) =>
+          !entry.draft &&
+          entry.kind !== "remote" &&
+          chosen.has(entry.name) === (pane === "chosen"),
+      );
   };
 
   const entriesFor = (pane: Pane): ModelEntry[] => {
@@ -173,22 +194,32 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     }
   };
 
-  const stageActive = async (): Promise<void> => {
-    const profile = currentProfile();
-    if (!profile || saving || profile.name === store.pendingActiveProfile()) {
+  /** Persists `name` (null for no profile) through the switch route. */
+  const selectActive = async (name: string | null): Promise<void> => {
+    if (saving || name === store.selectedProfile()) {
       return;
     }
+    const label = name ?? NO_PROFILE_LABEL;
     saving = true;
     let message: string | null = null;
+    let restartRequired = false;
     try {
-      await store.stageActiveProfile(profile.name);
-      message = `${profile.name} will become active on Apply.`;
+      restartRequired = await store.selectProfile(name);
+      message = restartRequired
+        ? `${label} selected - restart the gateway to run it.`
+        : `${label} selected.`;
       toasts.show(message, "success");
     } catch (error) {
-      toasts.show(error instanceof Error ? error.message : "The active profile could not be staged", "error");
+      toasts.show(
+        error instanceof Error ? error.message : "The profile could not be selected",
+        "error",
+      );
     } finally {
       saving = false;
       render();
+    }
+    if (restartRequired) {
+      onRestartRequired();
     }
     if (message !== null) {
       announce(message);
@@ -197,7 +228,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
 
   const deleteProfile = async (): Promise<void> => {
     const profile = currentProfile();
-    if (!main || !profile || profile.name === store.pendingActiveProfile()) {
+    if (!main || !profile || isRunningOrSelected(profile.name)) {
       return;
     }
     const yes = await confirmDialog(main, {
@@ -263,7 +294,11 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     create.addEventListener("click", openCreateDialog);
     const list = document.createElement("ul");
     list.className = "profile-list";
-    for (const profile of store.profiles()) {
+    const profiles = store.profiles();
+    if (profiles.length > 0) {
+      list.append(noProfileRow());
+    }
+    for (const profile of profiles) {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
@@ -275,18 +310,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
       const count = document.createElement("span");
       count.className = "pill";
       count.textContent = String(profile.models.length);
-      button.append(name, count);
-      if (profile.name === store.activeProfile) {
-        const active = document.createElement("span");
-        active.className = "pill pill-accent";
-        active.textContent = "Active";
-        button.append(active);
-      } else if (profile.name === store.pendingActiveProfile()) {
-        const pending = document.createElement("span");
-        pending.className = "pill pill-accent";
-        pending.textContent = "Pending";
-        button.append(pending);
-      }
+      button.append(name, count, ...statePills(profile.name));
       button.addEventListener("click", () => {
         selectedProfile = profile.name;
         selected.available.clear();
@@ -296,8 +320,66 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
       item.append(button);
       list.append(item);
     }
-    pane.append(heading, create, list);
+    pane.append(heading, create);
+    if (store.selectionIsStale()) {
+      pane.append(staleNotice(store.selectedProfile() ?? ""));
+    }
+    pane.append(list);
     return pane;
+  };
+
+  /**
+   * Active marks the running profile, Selected the persisted one when it
+   * differs; `name` is empty for the "No profile" row.
+   */
+  const statePills = (name: string): HTMLElement[] => {
+    const pills: HTMLElement[] = [];
+    if (name === store.activeProfile) {
+      pills.push(pill("Active"));
+    } else if (name === (store.selectedProfile() ?? "")) {
+      pills.push(pill("Selected"));
+    }
+    return pills;
+  };
+
+  const pill = (text: string): HTMLElement => {
+    const element = document.createElement("span");
+    element.className = "pill pill-accent";
+    element.textContent = text;
+    return element;
+  };
+
+  /**
+   * The "No profile" row: not a checklist, so it has no editor to open;
+   * its own Set Active persists the null selection.
+   */
+  const noProfileRow = (): HTMLElement => {
+    const item = document.createElement("li");
+    item.className = "profile-none";
+    const name = document.createElement("span");
+    name.className = "profile-name";
+    name.textContent = NO_PROFILE_LABEL;
+    const setActive = document.createElement("button");
+    setActive.type = "button";
+    setActive.className = "button button-xs button-outline set-active-none";
+    setActive.textContent = "Set Active";
+    setActive.disabled = saving || store.selectedProfile() === null;
+    setActive.addEventListener("click", () => void selectActive(null));
+    item.append(name, ...statePills(""), setActive);
+    return item;
+  };
+
+  /** The persisted name is not defined: the gateway boots with no profile. */
+  const staleNotice = (name: string): HTMLElement => {
+    const note = document.createElement("p");
+    note.className = "profile-stale";
+    const badge = document.createElement("span");
+    badge.className = "pill pill-stale";
+    badge.textContent = "Stale";
+    const text = document.createElement("span");
+    text.textContent = ` ${name} is selected but not defined; Set Active on any row to replace it.`;
+    note.append(badge, text);
+    return note;
   };
 
   const editor = (): HTMLElement => {
@@ -318,22 +400,21 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     heading.textContent = profile.name;
     const actions = document.createElement("div");
     actions.className = "detail-actions";
+    const isSelected = profile.name === store.selectedProfile();
     const setActive = document.createElement("button");
     setActive.type = "button";
     setActive.className = "button button-primary set-active";
-    setActive.textContent =
-      profile.name === store.pendingActiveProfile() ? "Selected for Apply" : "Set Active";
-    setActive.disabled = saving || profile.name === store.pendingActiveProfile();
-    setActive.addEventListener("click", () => void stageActive());
+    setActive.textContent = isSelected ? "Selected" : "Set Active";
+    setActive.disabled = saving || isSelected;
+    setActive.addEventListener("click", () => void selectActive(profile.name));
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "button button-danger profile-delete";
     remove.textContent = "Delete";
-    remove.disabled = saving || profile.name === store.pendingActiveProfile();
-    remove.title =
-      profile.name === store.pendingActiveProfile()
-        ? "Choose another active profile before deleting this one."
-        : "";
+    remove.disabled = saving || isRunningOrSelected(profile.name);
+    remove.title = isRunningOrSelected(profile.name)
+      ? "Select another profile before deleting the running or selected one."
+      : "";
     remove.addEventListener("click", () => void deleteProfile());
     actions.append(setActive, remove);
     header.append(heading, actions);

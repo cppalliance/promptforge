@@ -2,9 +2,10 @@
 //! `PROMPTFORGE_MODELS_SHEET_URL` override points the launch download at
 //! a loopback stub, `GET /admin/cloud-models` serves the fixture sheet,
 //! and a UI-shaped `[[model]]` + `[[endpoint]]` merge staged through
-//! `PUT /admin/config` and promoted by `POST /admin/config-apply` lands
-//! in the live catalog, with a second model for the same provider
-//! reusing the one endpoint.
+//! `PUT /admin/config` and promoted by `POST /admin/config-apply`
+//! validates and applies, with a second model for the same provider
+//! reusing the one endpoint. The apply reloads the remote catalog live,
+//! so each merged model is listed as soon as the apply replies.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -114,7 +115,7 @@ fn write_config(temp: &tempfile::TempDir) -> PathBuf {
     let path = temp.path().join("gateway.toml");
     std::fs::write(
         &path,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+        "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
          [[profile]]\nname = \"main\"\nmodels = []\n",
     )
     .expect("write config");
@@ -138,16 +139,23 @@ async fn wait_for_sheet(url: &str, http: &reqwest::Client) -> Value {
     panic!("the downloaded sheet never arrived at /admin/cloud-models");
 }
 
-/// The running config document, the merge's input.
+/// The running config document, the merge's input, without the running
+/// `active_profile` the route reports: it is not a configuration key, and
+/// a save carrying it is refused.
 async fn get_config(url: &str, http: &reqwest::Client) -> Value {
-    json_within(
+    let mut document = json_within(
         send_within(
             http.get(format!("{url}/admin/config"))
                 .bearer_auth("test-token"),
         )
         .await,
     )
-    .await
+    .await;
+    document
+        .as_object_mut()
+        .expect("the config document is an object")
+        .remove("active_profile");
+    document
 }
 
 /// One keyed array of the config document, created when absent.
@@ -162,8 +170,10 @@ fn keyed_array<'a>(document: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
 
 /// The UI's add-model merge (`cloud-merge.ts`), restated over the admin
 /// JSON document: append the provider's endpoint when none carries its
-/// name, append the model with the sheet's capability fields, and select
-/// the model in the active profile so the reload lists it.
+/// name, then append the model with the sheet's capability fields. Profile
+/// membership is not part of the add flow: profiles select local and
+/// speech-to-text models only, and every remote model serves under any
+/// profile.
 fn merge_cloud_model(document: &mut Value, slice: &ProviderSlice, model_index: usize, name: &str) {
     let entry = &slice.models[model_index];
     let endpoints = keyed_array(document, "endpoint");
@@ -193,18 +203,6 @@ fn merge_cloud_model(document: &mut Value, slice: &ProviderSlice, model_index: u
         "effort_levels": entry.effort_levels,
         "max_output": entry.max_output,
     }));
-    let active = document["active_profile"]
-        .as_str()
-        .expect("the document names the active profile")
-        .to_owned();
-    let profile = keyed_array(document, "profile")
-        .iter_mut()
-        .find(|profile| profile["name"] == active)
-        .expect("the active profile is in the document");
-    profile["models"]
-        .as_array_mut()
-        .expect("the profile models key is an array")
-        .push(Value::String(name.to_owned()));
 }
 
 /// Stages the merged document and promotes it, asserting each half of
@@ -238,31 +236,29 @@ async fn put_and_apply(url: &str, http: &reqwest::Client, document: &Value) {
     );
 }
 
-/// Polls `/v1/models` until the catalog is exactly `expected`, observing
-/// the apply's hot-swap without a fixed sleep.
-async fn wait_for_catalog(url: &str, http: &reqwest::Client, expected: &[&str]) {
-    let mut ids = Vec::new();
-    for _ in 0..100 {
-        let catalog = json_within(
-            send_within(
-                http.get(format!("{url}/v1/models"))
-                    .bearer_auth("test-token"),
-            )
-            .await,
+/// Asserts `/v1/models` lists exactly `expected`: the remote catalog is the
+/// same for every profile, and an apply swaps it live, so a UI-shaped add
+/// is listable as soon as the apply replies.
+async fn assert_catalog_lists(url: &str, http: &reqwest::Client, expected: &[&str]) {
+    let catalog = json_within(
+        send_within(
+            http.get(format!("{url}/v1/models"))
+                .bearer_auth("test-token"),
         )
-        .await;
-        ids = catalog["data"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|model| model.get("id").and_then(Value::as_str).map(str::to_owned))
-            .collect::<Vec<_>>();
-        if ids == expected {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(ids, expected, "the applied models land in the catalog");
+        .await,
+    )
+    .await;
+    let mut ids = catalog["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|model| model.get("id").and_then(Value::as_str).map(str::to_owned))
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(
+        ids, expected,
+        "the applied remote catalog is what is listed"
+    );
 }
 
 #[tokio::test]
@@ -305,7 +301,8 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "the download landed in the profile cache beside the runtime state"
     );
 
-    // The first add stages endpoint + model, applies, and lists live.
+    // The first add stages endpoint + model and applies; the reload lists
+    // the merged model at once, whatever the selected profile.
     let mut document = get_config(&url, &http).await;
     merge_cloud_model(
         &mut document,
@@ -314,9 +311,10 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "test-model-one",
     );
     put_and_apply(&url, &http, &document).await;
-    wait_for_catalog(&url, &http, &["test-model-one"]).await;
+    assert_catalog_lists(&url, &http, &["test-model-one"]).await;
 
-    // The second add for the same provider reuses the one endpoint.
+    // The second add for the same provider reuses the one endpoint and
+    // joins the catalog beside the first.
     let mut document = get_config(&url, &http).await;
     merge_cloud_model(
         &mut document,
@@ -325,7 +323,7 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "test-model-two",
     );
     put_and_apply(&url, &http, &document).await;
-    wait_for_catalog(&url, &http, &["test-model-one", "test-model-two"]).await;
+    assert_catalog_lists(&url, &http, &["test-model-one", "test-model-two"]).await;
     let document = get_config(&url, &http).await;
     let endpoints = document["endpoint"].as_array().unwrap();
     assert_eq!(

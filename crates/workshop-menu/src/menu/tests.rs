@@ -2,6 +2,8 @@ use super::*;
 
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
+mod memory;
+
 /// A catalog bus already holding one push of the given model ids.
 fn catalog_of(ids: &[&str]) -> CatalogBus {
     let catalog = CatalogBus::new();
@@ -18,7 +20,8 @@ fn menu_of(ids: &[&str]) -> MenuBus {
 /// and a completed switch, which selects a model.
 fn onto_profile(menu: &MenuBus, profile: &str) {
     menu.set_gateway_reachable(true);
-    menu.begin_switch(profile).expect("no switch is running");
+    menu.begin_switch(Some(profile))
+        .expect("no switch is running");
     menu.finish_switch(SwitchOutcome::Completed);
 }
 
@@ -60,7 +63,8 @@ fn an_unknown_model_is_refused_and_not_applied() {
 fn a_switch_publishes_its_begin_and_its_finish() {
     let menu = menu_of(&["model-a"]);
     menu.set_gateway_reachable(true);
-    menu.begin_switch("coding").expect("no switch is running");
+    menu.begin_switch(Some("coding"))
+        .expect("no switch is running");
     let during = snapshot(&menu);
     assert_eq!(during.switching.as_deref(), Some("coding"));
     assert!(!during.chat_ready, "a switch in flight blocks chat");
@@ -80,7 +84,8 @@ fn a_switch_publishes_its_begin_and_its_finish() {
 fn a_failed_switch_keeps_the_previous_profile() {
     let menu = menu_of(&["model-a"]);
     onto_profile(&menu, "main");
-    menu.begin_switch("coding").expect("no switch is running");
+    menu.begin_switch(Some("coding"))
+        .expect("no switch is running");
     menu.finish_switch(SwitchOutcome::Failed);
     let after = snapshot(&menu);
     assert_eq!(after.active.as_deref(), Some("main"));
@@ -91,21 +96,82 @@ fn a_failed_switch_keeps_the_previous_profile() {
 #[test]
 fn a_second_switch_while_one_runs_is_refused() {
     let menu = menu_of(&["model-a"]);
-    menu.begin_switch("coding").expect("no switch is running");
+    menu.begin_switch(Some("coding"))
+        .expect("no switch is running");
     let refusal = menu
-        .begin_switch("writing")
+        .begin_switch(Some("writing"))
         .expect_err("switches are single-flight");
     assert_eq!(
         refusal,
         MenuRefusal::SwitchInProgress {
-            name: "coding".to_string()
+            name: Some("coding".to_string())
         }
+    );
+    assert_eq!(
+        refusal.to_string(),
+        "a switch to \"coding\" is already in progress",
+        "the refusal names the running switch's target"
     );
     assert_eq!(
         snapshot(&menu).switching.as_deref(),
         Some("coding"),
         "the refused switch is not applied"
     );
+}
+
+#[test]
+fn a_switch_to_no_profile_blocks_chat_and_settles_with_no_active_profile() {
+    let menu = menu_of(&["model-a", "model-b"]);
+    onto_profile(&menu, "main");
+    menu.set_selected("model-b")
+        .expect("the id is in the catalog");
+    menu.begin_switch(None).expect("no switch is running");
+    let during = snapshot(&menu);
+    assert_eq!(
+        during.switching, None,
+        "the wire frame names no target while no profile is being selected"
+    );
+    assert!(!during.chat_ready, "a switch in flight blocks chat");
+    assert_eq!(
+        during.active.as_deref(),
+        Some("main"),
+        "the previous profile still serves while the switch runs"
+    );
+    let refusal = menu
+        .begin_switch(Some("coding"))
+        .expect_err("switches are single-flight even toward no profile");
+    assert_eq!(refusal, MenuRefusal::SwitchInProgress { name: None });
+    assert_eq!(
+        refusal.to_string(),
+        "a switch to no profile is already in progress"
+    );
+    menu.finish_switch(SwitchOutcome::Completed);
+    let after = snapshot(&menu);
+    assert_eq!(after.active, None, "no profile is active once it settles");
+    assert_eq!(after.switching, None);
+    assert_eq!(
+        after.selected_model.as_deref(),
+        Some("model-a"),
+        "with no profile there is no memory; the first catalog model serves"
+    );
+    assert!(after.chat_ready, "chat is usable with no profile selected");
+}
+
+#[test]
+fn a_deferred_switch_keeps_the_previous_profile_and_clears_the_switch() {
+    let menu = menu_of(&["model-a"]);
+    onto_profile(&menu, "main");
+    menu.begin_switch(Some("coding"))
+        .expect("no switch is running");
+    menu.finish_switch(SwitchOutcome::Deferred);
+    let after = snapshot(&menu);
+    assert_eq!(
+        after.active.as_deref(),
+        Some("main"),
+        "the selection persisted but the running profile is unchanged"
+    );
+    assert_eq!(after.switching, None);
+    assert!(after.chat_ready, "the previous profile still serves");
 }
 
 #[test]
@@ -194,7 +260,8 @@ fn chat_ready_is_true_only_when_every_condition_holds() {
     assert!(!snapshot(&menu).chat_ready, "gateway down forces false");
     menu.set_gateway_reachable(true);
 
-    menu.begin_switch("coding").expect("no switch is running");
+    menu.begin_switch(Some("coding"))
+        .expect("no switch is running");
     assert!(
         !snapshot(&menu).chat_ready,
         "a switch in flight forces false"
@@ -267,185 +334,4 @@ fn an_empty_profile_list_replaces_a_populated_one() {
         "a gateway without profile support publishes an empty list"
     );
     assert_eq!(after.active, None);
-}
-
-#[test]
-fn a_selection_is_remembered_per_profile_across_switches() {
-    let menu = menu_of(&["model-a", "model-b", "model-c"]);
-    onto_profile(&menu, "main");
-    menu.set_selected("model-c")
-        .expect("the id is in the catalog");
-    menu.begin_switch("coding").expect("no switch is running");
-    menu.finish_switch(SwitchOutcome::Completed);
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "a profile with no memory selects the first model"
-    );
-    menu.set_selected("model-b")
-        .expect("the id is in the catalog");
-    menu.begin_switch("main").expect("no switch is running");
-    menu.finish_switch(SwitchOutcome::Completed);
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-c"),
-        "the remembered model for the profile is restored"
-    );
-}
-
-#[test]
-fn model_memory_round_trips_through_the_state_file() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let catalog = catalog_of(&["model-a", "model-b"]);
-    {
-        let menu = MenuBus::new(catalog.clone(), Some(dir.path()));
-        onto_profile(&menu, "main");
-        menu.set_selected("model-b")
-            .expect("the id is in the catalog");
-    }
-    let reborn = MenuBus::new(catalog, Some(dir.path()));
-    onto_profile(&reborn, "main");
-    assert_eq!(
-        snapshot(&reborn).selected_model.as_deref(),
-        Some("model-b"),
-        "the persisted memory survives a restart"
-    );
-}
-
-#[test]
-fn a_missing_state_file_means_no_memory_yet() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let menu = MenuBus::new(catalog_of(&["model-a"]), Some(dir.path()));
-    onto_profile(&menu, "main");
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "no memory yet: the first catalog model is selected"
-    );
-}
-
-#[test]
-fn a_corrupt_state_file_means_no_memory_yet() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(dir.path().join(WORKSHOP_STATE_FILE), "not json {").expect("write fixture");
-    let menu = MenuBus::new(catalog_of(&["model-a"]), Some(dir.path()));
-    onto_profile(&menu, "main");
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "corrupt memory degrades to no memory, never to a failure"
-    );
-}
-
-#[test]
-fn an_unreadable_state_file_means_no_memory_yet() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    // A directory in the file's place: reads and writes both fail for
-    // a reason other than NotFound, and both must degrade.
-    std::fs::create_dir(dir.path().join(WORKSHOP_STATE_FILE))
-        .expect("directory in the file's place");
-    let menu = MenuBus::new(catalog_of(&["model-a"]), Some(dir.path()));
-    onto_profile(&menu, "main");
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "unreadable memory degrades to no memory, never to a failure"
-    );
-}
-
-#[test]
-fn a_remembered_model_gone_from_the_catalog_falls_back_to_the_first() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        dir.path().join(WORKSHOP_STATE_FILE),
-        r#"{"last_selected":{"main":"retired-model"}}"#,
-    )
-    .expect("write fixture");
-    let menu = MenuBus::new(catalog_of(&["model-a"]), Some(dir.path()));
-    onto_profile(&menu, "main");
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "a remembered model the catalog no longer holds falls back to the first"
-    );
-}
-
-#[test]
-fn restore_selection_picks_the_remembered_model_for_the_active_profile() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        dir.path().join(WORKSHOP_STATE_FILE),
-        r#"{"last_selected":{"main":"model-b"}}"#,
-    )
-    .expect("write fixture");
-    let menu = MenuBus::new(catalog_of(&["model-a", "model-b"]), Some(dir.path()));
-    menu.set_profiles(vec!["main".to_string()], Some("main".to_string()));
-    menu.restore_selection();
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-b"),
-        "boot restores the remembered model for the active profile"
-    );
-}
-
-#[test]
-fn restore_selection_falls_back_to_the_first_model_when_memory_is_stale() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        dir.path().join(WORKSHOP_STATE_FILE),
-        r#"{"last_selected":{"main":"retired-model"}}"#,
-    )
-    .expect("write fixture");
-    let menu = MenuBus::new(catalog_of(&["model-a", "model-b"]), Some(dir.path()));
-    menu.set_profiles(vec!["main".to_string()], Some("main".to_string()));
-    menu.restore_selection();
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "a remembered model the catalog lacks falls back to the first"
-    );
-}
-
-#[test]
-fn restore_selection_without_an_active_profile_picks_the_first_model() {
-    let menu = menu_of(&["model-a", "model-b"]);
-    menu.restore_selection();
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-a"),
-        "with no active profile there is no memory; the first model serves"
-    );
-}
-
-#[test]
-fn restore_selection_with_a_selection_applied_publishes_nothing() {
-    let menu = menu_of(&["model-a", "model-b"]);
-    menu.set_selected("model-b")
-        .expect("the id is in the catalog");
-    let mut receiver = menu.subscribe();
-    menu.restore_selection();
-    assert!(
-        matches!(receiver.try_recv(), Err(TryRecvError::Empty)),
-        "an existing selection makes the restore a no-op"
-    );
-    assert_eq!(
-        snapshot(&menu).selected_model.as_deref(),
-        Some("model-b"),
-        "the surviving selection is untouched"
-    );
-}
-
-#[test]
-fn restore_selection_with_an_empty_catalog_publishes_nothing() {
-    let menu = menu_of(&[]);
-    let mut receiver = menu.subscribe();
-    menu.restore_selection();
-    assert!(
-        matches!(receiver.try_recv(), Err(TryRecvError::Empty)),
-        "an empty catalog leaves nothing to restore"
-    );
-    assert!(
-        menu.latest().is_none(),
-        "a no-op restore retains no snapshot"
-    );
 }

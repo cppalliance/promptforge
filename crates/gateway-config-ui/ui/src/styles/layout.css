@@ -1133,6 +1133,32 @@
 	.profile-select[aria-pressed="true"] {
 		background: var(--accent-subtle);
 	}
+	/* The "No profile" row is not a checklist: a static label with its
+	   own Set Active instead of a pressable row that opens an editor. */
+	.profile-none {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 0;
+		padding: 0.5rem 0.75rem;
+		color: var(--text-secondary);
+	}
+	.profile-none .set-active-none {
+		margin-inline-start: auto;
+	}
+	/* A persisted selection the config no longer defines. */
+	.profile-stale {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 0.8125rem;
+	}
+	.pill-stale {
+		background: color-mix(in srgb, var(--warning) 20%, transparent);
+		color: var(--warning);
+	}
 	.profile-name {
 		font-family: var(--font-mono);
 		font-size: 0.8125rem;

@@ -8,7 +8,7 @@ use gateway::{ProfileName, ServeOptions, spawn};
 /// A minimal boot config: one unreachable fake backend, one profile. The
 /// backend is never contacted at boot.
 const CATALOG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"
@@ -29,7 +29,7 @@ endpoints = ["fake"]
 
 [[profile]]
 name = "alpha"
-models = ["alpha-model"]
+models = []
 "#;
 
 #[test]

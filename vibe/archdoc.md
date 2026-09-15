@@ -21,7 +21,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A2. Vendor credentials remain inside the Gateway process; Workshop and CLI reach credentialed model providers only through server-side Gateway relays that never expose vendor bearer keys to browser or Lua code.
 - A3. `promptforge-webfetch` revalidates every model- or tool-selected URL and resolved address on each redirect, and denies non-global addresses unless fetch configuration grants an exact host-and-address exception.
 - A4. The Workshop server rejects cross-site requests, non-loopback Host values, and WebSocket origins outside its allowed loopback origins; the Workshop webview accepts in-view navigation only to its exact boot origin.
-- A5. During a Gateway profile switch, the previous routing table serves until a bounded in-flight drain completes; after cutover, a selected model that is not ready returns an explicit loading error.
+- A5. The Gateway's local model set is fixed for the process lifetime; profile and local-model changes persist and report `restart_required`, and remote routing changes replace the routing table atomically without draining.
 - A6. The executor neutralizes chat-template control delimiters in untrusted tool and Lua text, but never rewrites assistant replay or tool-call wire payloads.
 - A7. The Workshop shell grants each Tauri capability to one named window and the in-process server's exact bound origin, never a wildcard port.
 - A8. The Lua VM boundary accepts scheduler state changes only from typed `Request` variants yielded by the installed shim; direct or malformed yields fail without changing scheduler state.

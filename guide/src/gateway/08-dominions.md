@@ -53,7 +53,7 @@ The default `queue` policy parks callers up to the depth limit. The `reject` pol
 policy = "reject"
 ````
 
-You can distinguish admission failures by status code. A full waiting queue answers 503 with code `queue_full`. A fail-fast rejection answers 429 with code `queue_rejected`. A queue torn down while the caller waited reports the queue as unavailable. A profile switch that cancels an in-flight request gets its own error: the gateway answers 503 with code `profile_switch` and the message "request cancelled for profile switch", distinct from `queue_full` and `queue_rejected`.
+You can distinguish admission failures by status code. A full waiting queue answers 503 with code `queue_full`. A fail-fast rejection answers 429 with code `queue_rejected`. A queue torn down while the caller waited reports the queue as unavailable.
 
 ## Schedule fairly
 

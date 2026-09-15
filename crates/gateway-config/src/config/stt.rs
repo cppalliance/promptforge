@@ -18,7 +18,7 @@ const DEFAULT_STT_INTERVAL_MS: u64 = 500;
 /// use gateway_config::Config;
 ///
 /// let config = Config::from_toml_str(
-///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
 ///      [stt]\nwindow_seconds = 8\n",
 /// )?;
 /// assert_eq!(
@@ -154,7 +154,7 @@ pub enum SttRole {
 /// use gateway_config::Config;
 ///
 /// let config = Config::from_toml_str(
-///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
 ///      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
 /// )?;
 /// assert_eq!(config.catalog_stt_models()[0].name(), "speech");
@@ -187,7 +187,7 @@ impl SttModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
     /// # )?;
     /// assert_eq!(config.catalog_stt_models()[0].name(), "speech");
@@ -204,7 +204,7 @@ impl SttModelConfig {
     /// ```
     /// # use gateway_config::{Config, SttRole};
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
     /// # )?;
     /// assert_eq!(config.catalog_stt_models()[0].role(), SttRole::Interim);
@@ -221,7 +221,7 @@ impl SttModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
     /// # )?;
     /// assert_eq!(config.catalog_stt_models()[0].source(), "/speech.bin");
@@ -238,7 +238,7 @@ impl SttModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
     /// # )?;
     /// assert_eq!(config.catalog_stt_models()[0].sha256(), None);
@@ -255,7 +255,7 @@ impl SttModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
     /// # )?;
     /// assert_eq!(config.catalog_stt_models()[0].vram_gb(), 1.0);
@@ -272,7 +272,7 @@ impl SttModelConfig {
     /// ```
     /// # use gateway_config::Config;
     /// # let config = Config::from_toml_str(
-    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    /// #     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
     /// #      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
     /// # )?;
     /// assert_eq!(config.catalog_stt_models()[0].dominion(), None);

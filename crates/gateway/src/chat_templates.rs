@@ -152,7 +152,7 @@ mod tests {
     use crate::test_support::serve;
 
     const CONFIG: &str = r#"
-config-version = 2
+config-version = 0
 
 [server]
 bind = "127.0.0.1:0"

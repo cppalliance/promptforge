@@ -4,7 +4,7 @@
 //! responses as raw bytes so the workshop routes can relay them to the
 //! caller byte-for-byte. A non-success status from the gateway is *not* an
 //! error here: it is part of the relayed response. Streaming responses
-//! (profile switches, cache downloads) are decoded from SSE into a
+//! (cache downloads, progress) are decoded from SSE into a
 //! [`SsePayloadStream`] of `data:` payloads.
 
 use std::time::Duration;
@@ -16,8 +16,8 @@ mod sse;
 pub mod socket;
 
 pub use events::{
-    CacheEvent, CacheResponse, ForwardedResponse, GatewayResponse, SsePayloadStream, SwitchEvent,
-    SwitchEventStream, SwitchResponse, switch_events,
+    CacheEvent, CacheResponse, ForwardedResponse, GatewayResponse, SsePayloadStream, SwitchOutcome,
+    SwitchResponse,
 };
 pub use progress::ProgressEventStream;
 pub use socket::GatewayRealtimeSocket;
@@ -34,10 +34,11 @@ pub(crate) const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Default whole-request timeout for non-streaming operations: the model
-/// catalog fetch and the initial cache API handshake. Streaming responses
-/// (cache downloads and profile switches) can legitimately run for
-/// minutes, so the same bound covers only their header phase (see
-/// `send_bounded`) and the body stream stays open-ended.
+/// catalog fetch, the profile selection, and the initial cache API
+/// handshake. Streaming responses (cache downloads and the progress
+/// subscription) can legitimately run for minutes, so the same bound
+/// covers only their header phase (see `send_bounded`) and the body
+/// stream stays open-ended.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A gateway request failure.
@@ -73,13 +74,14 @@ pub enum GatewayError {
     },
 
     /// A gateway event stream carried a block that could not be decoded,
-    /// or one that grew past its size bound without terminating.
+    /// one that grew past its size bound without terminating, or a
+    /// success answer whose body was not the documented JSON shape.
     #[non_exhaustive]
-    #[error("malformed gateway event: {message}")]
+    #[error("malformed gateway answer: {message}")]
     Malformed {
-        /// What was wrong with the block.
+        /// What was wrong with the block or body.
         message: String,
-        /// The decode failure, when the block was undecodable.
+        /// The decode failure, when the block or body was undecodable.
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
@@ -192,9 +194,9 @@ impl GatewayClient {
     /// Forwards one request to the gateway: `method` on
     /// `path_and_query`, with an optional JSON `body`, authenticated
     /// with the client's bearer key. Only the wait for the response
-    /// headers is bounded - a forwarded cache download or profile
-    /// switch legitimately streams for minutes - and the whole body is
-    /// buffered for relay. A non-success status is relayed in the
+    /// headers is bounded - a forwarded cache download or config apply
+    /// legitimately runs for minutes - and the whole body is buffered
+    /// for relay. A non-success status is relayed in the
     /// returned [`ForwardedResponse`], not reported as an error.
     ///
     /// # Errors
@@ -311,38 +313,42 @@ impl GatewayClient {
         read(response).await
     }
 
-    /// Posts a profile switch to `POST /admin/switch-profile`.
+    /// Posts a profile selection to `POST /admin/switch-profile`: `name`
+    /// selects a defined profile, `None` selects no profile (`null` on
+    /// the wire).
     ///
-    /// An accepted switch answers `text/event-stream` and returns
-    /// [`SwitchResponse::Switching`], whose payload stream carries stage
-    /// markers and then a terminal `ready` or `error` event (decode it with
-    /// [`switch_events`]). Only the wait for the response headers is
-    /// bounded: loading model weights into VRAM legitimately runs for
-    /// minutes and the stream reports progress the whole way, so the
-    /// stream itself carries no deadline. A non-success or non-streaming
-    /// answer is buffered and returned, not reported as an error.
+    /// The gateway persists the selection and answers one JSON document,
+    /// returned as [`SwitchResponse::Selected`], reporting whether it
+    /// must restart to serve the selection; the caller decides how that
+    /// restart happens. A non-success answer is buffered and returned,
+    /// not reported as an error.
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
-    /// completed (the header bound elapsing included) and
-    /// [`GatewayError::ReadBody`] if a buffered answer's body cannot be
-    /// read.
-    pub async fn switch_profile(&self, name: &str) -> Result<SwitchResponse, GatewayError> {
-        let request = self
+    /// completed, [`GatewayError::ReadBody`] if the answer's body cannot
+    /// be read, and [`GatewayError::Malformed`] when a success answer is
+    /// not the documented outcome shape.
+    pub async fn switch_profile(&self, name: Option<&str>) -> Result<SwitchResponse, GatewayError> {
+        let response = self
             .authorize(
                 self.http
                     .post(format!("{}/admin/switch-profile", self.base_url)),
             )
-            .json(&serde_json::json!({ "name": name }));
-        let response = self.send_bounded(request).await?;
-        let status = response.status();
-        if status.is_success() && is_event_stream(&response) {
-            return Ok(SwitchResponse::Switching {
-                status,
-                payloads: payload_stream(response),
-            });
+            .timeout(self.request_timeout)
+            .json(&serde_json::json!({ "name": name }))
+            .send()
+            .await
+            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+        let answer = read(response).await?;
+        if !answer.status.is_success() {
+            return Ok(SwitchResponse::Buffered(answer));
         }
-        read(response).await.map(SwitchResponse::Buffered)
+        serde_json::from_slice::<SwitchOutcome>(&answer.body)
+            .map(SwitchResponse::Selected)
+            .map_err(|source| GatewayError::Malformed {
+                message: "the switch-profile answer is not the outcome document".to_owned(),
+                source: Some(Box::new(source)),
+            })
     }
 
     /// Posts a cache-ensure request to `POST /v1/cache`, asking the gateway

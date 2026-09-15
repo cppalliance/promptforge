@@ -25,7 +25,7 @@
 - [Local Models](gateway/04-local-models.md)
 - [Speech-to-Text](gateway/05-speech.md)
 - [Speech Synthesis](gateway/06-speech-synthesis.md)
-- [Profiles and Switching](gateway/07-profiles.md)
+- [Profiles and Selection](gateway/07-profiles.md)
 - [Dominions and Queues](gateway/08-dominions.md)
 - [Editing Configuration Safely](gateway/09-editing-configuration.md)
 - [The Configuration UI](gateway/10-config-ui.md)
