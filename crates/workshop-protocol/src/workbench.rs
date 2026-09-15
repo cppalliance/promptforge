@@ -7,13 +7,22 @@ use serde::Serialize;
 /// The server computes `chat_ready` - a chat-capable model available, one
 /// selected, no switch in flight, gateway reachable - and the UI never
 /// derives it.
+///
+/// Known gap: a switch to no profile is in flight only as `chat_ready:
+/// false`. `switching` is `null` for it, the same as no switch at all, so
+/// a UI reading `switching` alone shows no pending mark and leaves the
+/// profile rows enabled; a second selection while it runs is refused by
+/// the server. The frame keeps its shape deliberately; the server-side
+/// refusal is the guard.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkbenchSnapshot {
     /// Every gateway profile name, in gateway order.
     pub profiles: Vec<String>,
     /// The profile the gateway is serving, once known.
     pub active: Option<String>,
-    /// The profile a switch is loading, while one is in flight.
+    /// The profile a switch is loading, while one is in flight. `None`
+    /// both when no switch runs and when the in-flight switch selects no
+    /// profile; only `chat_ready` distinguishes the two.
     pub switching: Option<String>,
     /// The model chat requests go to, once one is selected.
     pub selected_model: Option<String>,

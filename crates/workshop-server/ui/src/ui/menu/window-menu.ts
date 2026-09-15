@@ -94,25 +94,30 @@ export interface ModelMenuService {
 
 /**
  * The gateway-profile surface the Model menu reads and dispatches
- * through: the menu lists every profile with the active one checked, and
- * selecting another asks the gateway to switch. The state is read at
- * open time and re-read on every onDidChange while the menu stays open,
- * so a switch's progress shows without reopening.
+ * through: the menu lists "No profile" and then every profile, the
+ * active selection checked, and selecting another asks the gateway to
+ * switch. The state is read at open time and re-read on every
+ * onDidChange while the menu stays open, so a switch's progress shows
+ * without reopening.
  */
 export interface ProfileMenuService {
   /** Every profile the gateway can load, by name. */
   readonly profiles: readonly string[];
-  /** The active profile's name, or "" when unknown. */
+  /** The active profile's name, or "" when no profile is active. */
   readonly active: string;
-  /** The profile a switch is loading, or "" when no switch is running. */
+  /**
+   * The profile a switch is loading, or "" when no switch is running. A
+   * switch to no profile also reads "": the rows stay enabled and show no
+   * pending mark while it runs, and the server refuses a second selection.
+   */
   readonly switching: string;
   /**
    * Fires when the state behind this view changes; the open Model
    * popover rebuilds its rows on each firing. Absent on a static view.
    */
   readonly onDidChange?: Event<unknown>;
-  /** Asks the gateway to switch to the named profile. */
-  switchTo(name: string): void;
+  /** Asks the gateway to select the named profile, or no profile for null. */
+  switchTo(name: string | null): void;
 }
 
 /** The editable elements the Edit menu commands act on. */
@@ -134,11 +139,12 @@ function isEditable(element: Element | null): element is HTMLElement {
  * The Model menu's rows mirror the catalog at open time: one checkable
  * radio row per model, the description as the tooltip, and a single
  * disabled row when the catalog is empty or no service was provided.
- * Below the models, a Profiles section lists the gateway's loadable
- * profiles the same way; selecting one switches the whole catalog.
- * While a switch is loading, every row - model and profile alike -
- * disables (the rows describe a catalog about to be replaced) and the
- * switch target shows a pending mark where its check would land.
+ * Below the models, a Profiles section lists "No profile" and then the
+ * gateway's loadable profiles the same way; selecting one switches the
+ * whole catalog. While a switch is loading, every row - model and
+ * profile alike - disables (the rows describe a catalog about to be
+ * replaced) and the switch target shows a pending mark where its check
+ * would land.
  */
 function modelMenuItems(
   service: ModelMenuService | undefined,
@@ -183,10 +189,11 @@ function modelMenuItems(
     }
   }
   // The Profiles section only appears when the gateway actually offers a
-  // choice; a single-profile (or profile-less) gateway keeps the menu as
-  // it was.
+  // choice: with at least one profile defined, "No profile" is always the
+  // alternative, so a single-profile gateway shows the section too. A
+  // profile-less gateway keeps the menu as it was.
   const profiles = profileService ? profileService.profiles : [];
-  if (profileService && profiles.length >= 2) {
+  if (profileService && profiles.length >= 1) {
     items.push({ kind: "separator" });
     items.push({
       kind: "command",
@@ -195,6 +202,16 @@ function modelMenuItems(
       run: () => {},
       enabled: () => false,
     });
+    items.push(
+      radio(
+        "profile:",
+        "No profile",
+        profileService.active === "",
+        false,
+        "Serve remote models only; load no local models",
+        () => profileService.switchTo(null),
+      ),
+    );
     for (const profile of profiles) {
       items.push(
         radio(

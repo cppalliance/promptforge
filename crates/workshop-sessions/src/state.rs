@@ -4,6 +4,7 @@
 //! the composition root calls.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::http::HeaderMap;
@@ -34,17 +35,40 @@ use crate::{agents, relay, session};
 pub struct SessionsState {
     registry: Registry,
     origin_allowed: fn(&HeaderMap) -> bool,
+    restart_bound: Duration,
 }
+
+/// How long a profile switch waits for a relaunched sidecar gateway to
+/// publish a replacement generation serving the selection before the
+/// switch fails. Model downloads never run inside this window (the boot
+/// load publishes its listener first), so it covers process exit, the
+/// supervisor's relaunch, and the bind.
+pub const DEFAULT_RESTART_BOUND: Duration = Duration::from_secs(90);
 
 impl SessionsState {
     /// Builds the route state over the subsystem registry and the
-    /// shell's origin policy.
+    /// shell's origin policy, with the default restart bound.
     #[must_use]
     pub fn new(registry: Registry, origin_allowed: fn(&HeaderMap) -> bool) -> Self {
         Self {
             registry,
             origin_allowed,
+            restart_bound: DEFAULT_RESTART_BOUND,
         }
+    }
+
+    /// Replaces the bound a profile switch waits for a relaunched sidecar
+    /// (see [`DEFAULT_RESTART_BOUND`]); a host embedding a slower
+    /// supervisor, or a test that must trip the bound, sets it here.
+    #[must_use]
+    pub fn with_restart_bound(mut self, bound: Duration) -> Self {
+        self.restart_bound = bound;
+        self
+    }
+
+    /// The bound a profile switch waits for a relaunched sidecar.
+    pub(crate) fn restart_bound(&self) -> Duration {
+        self.restart_bound
     }
 
     /// The agent-session registry behind `/agents/ws`, or `None` while

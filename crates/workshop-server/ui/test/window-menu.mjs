@@ -406,8 +406,8 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const rows = itemsOf("model");
   const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
   check(
-    "the Model menu appends the Profiles section after the catalog",
-    rows.map(rowLabel).join(",") === "alpha,Profiles,main,qwen38",
+    "the Model menu appends the Profiles section after the catalog, No profile first",
+    rows.map(rowLabel).join(",") === "alpha,Profiles,No profile,main,qwen38",
   );
   check(
     "the sections are divided by a separator",
@@ -418,29 +418,72 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     rows[1].getAttribute("aria-disabled") === "true",
   );
   check(
-    "the active profile is announced checked",
-    rows[2].getAttribute("aria-checked") === "true" &&
-      rows[3].getAttribute("aria-checked") === "false",
+    "the active profile is announced checked and No profile is not",
+    rows[2].getAttribute("aria-checked") === "false" &&
+      rows[3].getAttribute("aria-checked") === "true" &&
+      rows[4].getAttribute("aria-checked") === "false",
   );
   check(
     "the active profile shows the checkmark",
-    rows[2].querySelector(".ws-window-titlebar__item-check").textContent === "✓" &&
-      rows[3].querySelector(".ws-window-titlebar__item-check").textContent === "",
+    rows[3].querySelector(".ws-window-titlebar__item-check").textContent === "✓" &&
+      rows[4].querySelector(".ws-window-titlebar__item-check").textContent === "",
   );
-  rows[3].click();
+  rows[4].click();
   check("clicking a profile row dispatches switchTo", switches.join(",") === "qwen38");
   check("switching closes the menu", !isOpen("model"));
+  menus.model.click();
+  itemsOf("model")[2].click();
+  check(
+    "clicking No profile dispatches switchTo with null",
+    switches.length === 2 && switches[1] === null,
+  );
 }
 
 {
   const modelMenu = new ModelService(() => true);
   modelMenu.setModels([{ id: "alpha" }]);
-  const profileMenu = { profiles: ["main"], active: "main", switchTo: () => {} };
+  const switches = [];
+  const profileMenu = { profiles: ["main"], active: "main", switchTo: (name) => switches.push(name) };
+  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
+  check(
+    "a single-profile gateway still offers No profile as the way out",
+    rows.map(rowLabel).join(",") === "alpha,Profiles,No profile,main",
+  );
+  rows[2].click();
+  check(
+    "No profile is selectable from a single-profile gateway",
+    switches.length === 1 && switches[0] === null,
+  );
+}
+
+{
+  const modelMenu = new ModelService(() => true);
+  modelMenu.setModels([{ id: "alpha" }]);
+  const profileMenu = { profiles: [], active: "", switchTo: () => {} };
   const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
   menus.model.click();
   check(
-    "a single-profile gateway shows no Profiles section",
+    "a gateway with no profiles defined shows no Profiles section",
     itemsOf("model").length === 1,
+  );
+}
+
+{
+  const modelMenu = new ModelService(() => true);
+  modelMenu.setModels([{ id: "alpha" }]);
+  const profileMenu = { profiles: ["main", "qwen38"], active: "", switchTo: () => {} };
+  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  check(
+    "No profile is checked when no profile is active",
+    rows[2].getAttribute("aria-checked") === "true" &&
+      rows[2].querySelector(".ws-window-titlebar__item-check").textContent === "✓" &&
+      rows[3].getAttribute("aria-checked") === "false" &&
+      rows[4].getAttribute("aria-checked") === "false",
   );
 }
 
@@ -460,9 +503,9 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
   check(
     "an empty catalog still lists the profiles",
-    rows.map(rowLabel).join(",") === "No models available,Profiles,main,qwen38",
+    rows.map(rowLabel).join(",") === "No models available,Profiles,No profile,main,qwen38",
   );
-  rows[2].click();
+  rows[3].click();
   check("a profile can be switched out of an empty catalog", switches.join(",") === "main");
 }
 
@@ -490,25 +533,25 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   );
   check(
     "the switch target shows the pending mark instead of a check",
-    markOf(rows[3]).textContent === "…" &&
-      markOf(rows[3]).classList.contains("ws-window-titlebar__item-check--pending"),
+    markOf(rows[4]).textContent === "…" &&
+      markOf(rows[4]).classList.contains("ws-window-titlebar__item-check--pending"),
   );
   check(
     "the still-active profile keeps its check while the switch runs",
-    markOf(rows[2]).textContent === "✓" &&
-      rows[2].getAttribute("aria-checked") === "true" &&
-      rows[3].getAttribute("aria-checked") === "false",
+    markOf(rows[3]).textContent === "✓" &&
+      rows[3].getAttribute("aria-checked") === "true" &&
+      rows[4].getAttribute("aria-checked") === "false",
   );
   check(
     "the pending row stays a radio item for assistive tech",
-    rows[3].getAttribute("role") === "menuitemradio",
+    rows[4].getAttribute("role") === "menuitemradio",
   );
   check(
     "only the switch target is announced busy",
-    rows[3].getAttribute("aria-busy") === "true" &&
+    rows[4].getAttribute("aria-busy") === "true" &&
       rows.filter((row) => row.getAttribute("aria-busy") === "true").length === 1,
   );
-  rows[3].click();
+  rows[4].click();
   check("a disabled profile row cannot dispatch another switch", switches.length === 0);
   rows[0].click();
   check("a disabled model row cannot send a selection", selections.length === 0);
@@ -544,10 +587,10 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     "a snapshot while open disables the rows without reopening",
     isOpen("model") && rows.every((row) => row.getAttribute("aria-disabled") === "true"),
   );
-  check("the pending mark appears without reopening", markOf(rows[3]).textContent === "…");
+  check("the pending mark appears without reopening", markOf(rows[4]).textContent === "…");
   check(
     "the switch target is announced busy without reopening",
-    rows[3].getAttribute("aria-busy") === "true",
+    rows[4].getAttribute("aria-busy") === "true",
   );
   // The switch completes: the final snapshot restores truth, including
   // the server-owned model selection.
@@ -558,14 +601,14 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   rows = itemsOf("model");
   check(
     "the completing snapshot moves the check to the new profile",
-    rows[3].getAttribute("aria-checked") === "true" &&
-      markOf(rows[3]).textContent === "✓" &&
-      rows[2].getAttribute("aria-checked") === "false",
+    rows[4].getAttribute("aria-checked") === "true" &&
+      markOf(rows[4]).textContent === "✓" &&
+      rows[3].getAttribute("aria-checked") === "false",
   );
   check(
     "rows re-enable when the switch completes",
     rows[0].getAttribute("aria-disabled") === "false" &&
-      rows[2].getAttribute("aria-disabled") === "false",
+      rows[3].getAttribute("aria-disabled") === "false",
   );
   check(
     "the checked model row tracks the snapshot selection",

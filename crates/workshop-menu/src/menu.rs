@@ -19,6 +19,8 @@
 //! state only; the UI's panel layout is view state and stays in the
 //! webview's localStorage.
 
+mod memory;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -30,13 +32,11 @@ use workshop_support::RetainedBus;
 
 use crate::catalog::{CatalogBus, is_chat_capable};
 
+use self::memory::{PendingWrite, WORKSHOP_STATE_FILE, load_memory, store_pending};
+
 /// Ring capacity of the menu bus. Pushes follow user interactions and
 /// heartbeat transitions, so a handful of slots is generous.
 const MENU_CHANNEL_CAPACITY: usize = 8;
-
-/// Name of the persisted server-state file, written in the server's
-/// state directory.
-const WORKSHOP_STATE_FILE: &str = "workshop-state.json";
 
 /// The shared menu bus: the Model-menu state, its mutators, and the
 /// broadcast channel their snapshots fan out on, mirroring
@@ -60,8 +60,8 @@ struct MenuState {
     profiles: Vec<String>,
     /// The profile the gateway is serving, once known.
     active: Option<String>,
-    /// The profile a switch is loading, while one is in flight.
-    switching: Option<String>,
+    /// The selection a switch is applying, while one is in flight.
+    switching: Option<SwitchTarget>,
     /// The model chat requests go to, once one is selected.
     selected_model: Option<String>,
     /// The heartbeat's verdict on the gateway.
@@ -71,6 +71,33 @@ struct MenuState {
     last_selected: HashMap<String, String>,
     /// Where the memory persists; `None` disables persistence.
     memory_path: Option<PathBuf>,
+}
+
+/// What an in-flight switch selects: a named profile, or no profile at
+/// all. Distinct from "no switch running", which is the absence of a
+/// target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SwitchTarget {
+    /// A defined profile, by name.
+    Profile(String),
+    /// No profile: the gateway serves remote models only.
+    NoProfile,
+}
+
+impl SwitchTarget {
+    /// The target as the optional profile name the wire and the active
+    /// state carry.
+    fn name(&self) -> Option<&str> {
+        match self {
+            Self::Profile(name) => Some(name),
+            Self::NoProfile => None,
+        }
+    }
+}
+
+/// Renders an optional profile name for a refusal message.
+fn describe_target(name: Option<&str>) -> String {
+    name.map_or_else(|| "no profile".to_owned(), |name| format!("{name:?}"))
 }
 
 impl MenuState {
@@ -112,17 +139,6 @@ impl MenuState {
     }
 }
 
-/// One serialized memory snapshot awaiting its write: the bytes and path
-/// are captured under the state lock, and the write runs after the guard
-/// drops, off the async executor.
-#[derive(Debug)]
-struct PendingWrite {
-    /// Where the memory persists.
-    path: PathBuf,
-    /// The serialized [`WORKSHOP_STATE_FILE`] contents.
-    bytes: Vec<u8>,
-}
-
 /// A refused menu mutation. A refusal is a state to report, not an error
 /// to escalate (zone two): the caller relays it and the applied state is
 /// untouched.
@@ -138,19 +154,23 @@ pub enum MenuRefusal {
     },
 
     /// A profile switch is already in flight; switches are single-flight.
-    #[error("a switch to {name:?} is already in progress")]
+    #[error("a switch to {} is already in progress", describe_target(.name.as_deref()))]
     #[non_exhaustive]
     SwitchInProgress {
-        /// The target of the switch already running.
-        name: String,
+        /// The target of the switch already running: a profile name, or
+        /// `None` for a switch to no profile.
+        name: Option<String>,
     },
 }
 
 /// How a profile switch ended, reported by whoever ran it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SwitchOutcome {
-    /// The gateway finished loading the target profile.
+    /// The gateway serves the target selection.
     Completed,
+    /// The selection persisted but the gateway must restart to load it;
+    /// the previously active profile still serves.
+    Deferred,
     /// The switch failed; the previously active profile still serves.
     Failed,
 }
@@ -213,31 +233,41 @@ impl MenuBus {
         Ok(())
     }
 
-    /// Marks a switch to profile `name` as in flight and publishes a
-    /// fresh snapshot; `chat_ready` is false until the switch finishes.
+    /// Marks a switch to profile `name` - or to no profile, for `None` -
+    /// as in flight and publishes a fresh snapshot; `chat_ready` is false
+    /// until the switch finishes. The wire snapshot names the target
+    /// profile while one is being selected and carries `null` for a
+    /// switch to no profile, the same as no switch at all: the workbench
+    /// frame's shape is unchanged, and `chat_ready` still reports the
+    /// switch.
     ///
     /// # Errors
     /// Returns [`MenuRefusal::SwitchInProgress`] while another switch
-    /// runs - switches are single-flight because the gateway loads one
-    /// profile at a time.
-    pub fn begin_switch(&self, name: &str) -> Result<(), MenuRefusal> {
+    /// runs - switches are single-flight because the gateway applies one
+    /// selection at a time.
+    pub fn begin_switch(&self, name: Option<&str>) -> Result<(), MenuRefusal> {
         let mut state = self.lock_state();
         if let Some(running) = &state.switching {
             return Err(MenuRefusal::SwitchInProgress {
-                name: running.clone(),
+                name: running.name().map(str::to_owned),
             });
         }
-        state.switching = Some(name.to_string());
+        state.switching = Some(name.map_or(SwitchTarget::NoProfile, |name| {
+            SwitchTarget::Profile(name.to_owned())
+        }));
         self.publish(&state);
         Ok(())
     }
 
     /// Ends the in-flight switch and publishes a fresh snapshot. On
-    /// [`SwitchOutcome::Completed`] the target becomes the active profile
-    /// and the selection moves to the remembered model for it when the
-    /// catalog still holds that model, else to the first catalog model.
-    /// On [`SwitchOutcome::Failed`] the previous profile stays active. A
-    /// finish with no switch in flight is logged and ignored (zone two).
+    /// [`SwitchOutcome::Completed`] the target becomes the active
+    /// selection and the model selection moves to the remembered model
+    /// for the target profile when the catalog still holds that model,
+    /// else to the first catalog model; a switch to no profile has no
+    /// memory to consult and selects the first catalog model. On
+    /// [`SwitchOutcome::Deferred`] and [`SwitchOutcome::Failed`] the
+    /// previous profile stays active. A finish with no switch in flight
+    /// is logged and ignored (zone two).
     pub fn finish_switch(&self, outcome: SwitchOutcome) {
         let mut state = self.lock_state();
         let Some(target) = state.switching.take() else {
@@ -246,9 +276,17 @@ impl MenuBus {
         };
         let mut pending = None;
         if outcome == SwitchOutcome::Completed {
-            state.active = Some(target.clone());
             let models = self.catalog_models();
-            pending = state.select_for_profile(target, &models);
+            match target {
+                SwitchTarget::Profile(profile) => {
+                    state.active = Some(profile.clone());
+                    pending = state.select_for_profile(profile, &models);
+                }
+                SwitchTarget::NoProfile => {
+                    state.active = None;
+                    state.selected_model = first_model_id(&models);
+                }
+            }
         }
         self.publish(&state);
         drop(state);
@@ -349,7 +387,10 @@ impl MenuBus {
         WorkbenchSnapshot {
             profiles: state.profiles.clone(),
             active: state.active.clone(),
-            switching: state.switching.clone(),
+            switching: state
+                .switching
+                .as_ref()
+                .and_then(|target| target.name().map(str::to_owned)),
             selected_model: state.selected_model.clone(),
             chat_ready: catalog_has_chat
                 && state.selected_model.is_some()
@@ -402,73 +443,6 @@ fn first_model_id(models: &[serde_json::Value]) -> Option<String> {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string)
         })
-}
-
-/// The persisted shape of [`WORKSHOP_STATE_FILE`]. Server state only:
-/// the UI's panel layout is view state and stays in webview localStorage.
-#[derive(Debug, Default, serde::Deserialize)]
-struct StoredState {
-    /// Remembered model selection per profile name.
-    #[serde(default)]
-    last_selected: HashMap<String, String>,
-}
-
-/// Loads the per-profile model memory. A missing, unreadable, or corrupt
-/// file means "no memory yet": logged and tolerated (zone two).
-fn load_memory(path: &Path) -> HashMap<String, String> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(
-                    %error,
-                    path = %path.display(),
-                    "workshop state unreadable; starting with no model memory"
-                );
-            }
-            return HashMap::new();
-        }
-    };
-    match serde_json::from_str::<StoredState>(&raw) {
-        Ok(stored) => stored.last_selected,
-        Err(error) => {
-            tracing::warn!(
-                %error,
-                path = %path.display(),
-                "workshop state corrupt; starting with no model memory"
-            );
-            HashMap::new()
-        }
-    }
-}
-
-/// Performs a pending memory write off the async executor. On a runtime
-/// the file IO moves to the blocking pool and completes in the
-/// background - the memory file is a best-effort cache, so no caller
-/// awaits it. Outside a runtime (the unit tests drive the mutators
-/// synchronously) the write runs inline instead.
-fn store_pending(pending: Option<PendingWrite>) {
-    let Some(pending) = pending else { return };
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            handle.spawn_blocking(move || store_memory(&pending));
-        }
-        Err(_) => store_memory(&pending),
-    }
-}
-
-/// Writes one per-profile model-memory snapshot through the shared
-/// atomic-write helper, so a crash mid-write cannot leave a truncated
-/// [`WORKSHOP_STATE_FILE`]. A failed write costs the memory, not the
-/// process (zone two): logged and tolerated.
-fn store_memory(pending: &PendingWrite) {
-    if let Err(error) = workshop_support::write_atomic(&pending.path, &pending.bytes) {
-        tracing::warn!(
-            %error,
-            path = %pending.path.display(),
-            "workshop state write failed; model memory not persisted"
-        );
-    }
 }
 
 #[cfg(test)]

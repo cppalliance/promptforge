@@ -66,6 +66,19 @@ impl ResolvedGateway {
         }
     }
 
+    /// The same resolution with its API served from `base_url` instead of
+    /// the identity's own port: a test host whose shutdown authority (the
+    /// validated fixture process) and API surface (a mock router) are two
+    /// processes.
+    #[cfg(feature = "test-fixtures")]
+    #[must_use]
+    pub fn with_base_url(self, base_url: &str) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_owned(),
+            ..self
+        }
+    }
+
     /// The resolved base URL, for example `http://127.0.0.1:8081`.
     #[must_use]
     pub fn base_url(&self) -> &str {

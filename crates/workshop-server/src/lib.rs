@@ -68,7 +68,7 @@ pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use cross_site::{guard as cross_site_guard, origin_allowed};
 pub use gateway::{
     CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
-    SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
+    SwitchOutcome, SwitchResponse,
 };
 pub use gateway_binding::{GatewayPublicationError, GatewayUpdater};
 pub use observer::WorkshopObserver;

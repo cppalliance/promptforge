@@ -36,6 +36,10 @@ fn capability_replacement_publishes_one_coherent_snapshot() {
         old.identity.is_none(),
         "configured gateways have no local identity"
     );
+    assert!(
+        !old.is_sidecar(),
+        "a configured gateway is never a supervised sidecar"
+    );
     assert_eq!(new.client().base_url, format!("http://127.0.0.1:{port}"));
     assert_eq!(new.client().api_key, "new-key");
     assert_eq!(new.base_url(), format!("http://127.0.0.1:{port}"));
@@ -45,6 +49,10 @@ fn capability_replacement_publishes_one_coherent_snapshot() {
         .as_ref()
         .expect("the validated identity is published");
     assert_eq!(identity, &validated);
+    assert!(
+        new.is_sidecar(),
+        "a validated identity makes the snapshot a supervised sidecar"
+    );
     assert!(new.generation() > old.generation());
     assert_eq!(binding.generation(), new.generation());
 }

@@ -343,7 +343,7 @@ Exclusions: no change to the cloud sheet `schema_version` (stays 1) or to `[[pro
 
 <step-6>
 
-### Step 6: Workshop proxy rule, "No profile", and the sidecar restart ladder
+### Step 6: Workshop proxy rule, "No profile", and the sidecar restart ladder [completed]
 
 - Component: workshop
 - Piece: one piece, built jointly: `workshop-protocol`'s `Option` name, `workshop-menu`'s `begin_switch`, `workshop-gateway`'s `SwitchOutcome`, and `workshop-sessions`' switch task compile as one dependency chain, and the `workshop-server` proxy rule and IT mocks live in the crate whose tests prove the ladder. Sequential after Step 4.

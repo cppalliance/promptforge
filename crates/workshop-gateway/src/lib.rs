@@ -29,7 +29,7 @@ pub mod test_gateway;
 
 pub use gateway::{
     CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, ProgressEventStream,
-    SsePayloadStream, SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
+    SsePayloadStream, SwitchOutcome, SwitchResponse,
 };
 pub use gateway_binding::{
     GatewayBinding, GatewayPublicationError, GatewaySnapshot, GatewayUpdater,

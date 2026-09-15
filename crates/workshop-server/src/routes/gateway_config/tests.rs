@@ -12,19 +12,31 @@ use crate::app::router;
 mod recovery;
 
 #[test]
-fn the_allowlist_admits_the_config_surface_and_refuses_the_rest() {
+fn the_rule_admits_the_admin_surface_and_the_cache_reads_and_refuses_the_rest() {
     for (method, path) in [
+        // Every current /admin/ route the gateway serves.
         (Method::GET, "/admin/config"),
+        (Method::PUT, "/admin/config"),
+        (Method::GET, "/admin/config-dirty"),
+        (Method::GET, "/admin/config-pending"),
+        (Method::POST, "/admin/config-apply"),
+        (Method::POST, "/admin/config-revert"),
+        (Method::GET, "/admin/env"),
+        (Method::PUT, "/admin/env"),
         (Method::GET, "/admin/chat-templates"),
         (Method::GET, "/admin/cloud-models"),
         (Method::POST, "/admin/cloud-models/refresh"),
-        (Method::PUT, "/admin/config"),
-        (Method::POST, "/admin/config-apply"),
-        (Method::POST, "/admin/config-revert"),
+        (Method::GET, "/admin/model-info"),
+        (Method::GET, "/admin/orphans"),
+        (Method::POST, "/admin/reveal"),
+        (Method::GET, "/admin/status"),
+        (Method::GET, "/admin/system"),
+        (Method::GET, "/admin/hf/search"),
         (Method::POST, "/admin/queue/cancel"),
         (Method::POST, "/admin/queue/cancel-pending"),
-        (Method::GET, "/admin/status"),
-        (Method::GET, "/admin/hf/search"),
+        (Method::POST, "/admin/switch-profile"),
+        (Method::GET, "/admin/profiles"),
+        // The two cache reads outside /admin/.
         (Method::GET, "/v1/cache"),
         (
             Method::DELETE,
@@ -37,21 +49,18 @@ fn the_allowlist_admits_the_config_surface_and_refuses_the_rest() {
         );
     }
     for (method, path) in [
-        (Method::POST, "/v1/cache"),
-        (Method::GET, "/v1/models"),
-        (Method::POST, "/v1/chat/completions"),
         (Method::GET, "/admin/progress"),
-        (Method::PUT, "/admin/boot-config"),
-        (Method::PUT, "/admin/include/common.toml"),
-        (Method::POST, "/admin/profiles/beta"),
-        (Method::POST, "/admin/switch-profile"),
-        (Method::GET, "/health"),
-        (Method::GET, "/config/"),
+        (Method::GET, "/admin"),
         (Method::GET, "/admin/hf/../../v1/chat/completions"),
         (Method::GET, "/admin/hf/..\\..\\v1\\chat\\completions"),
         (Method::GET, "/admin/hf/./search"),
-        (Method::GET, "/admin"),
+        (Method::GET, "/v1/models"),
+        (Method::POST, "/v1/chat/completions"),
+        (Method::POST, "/v1/cache"),
         (Method::DELETE, "/v1/cache/abc123"),
+        (Method::GET, "/health"),
+        (Method::POST, "/shutdown"),
+        (Method::GET, "/config/"),
     ] {
         assert!(
             !forward_allowed(&method, path),

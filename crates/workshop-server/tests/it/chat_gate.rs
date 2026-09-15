@@ -129,19 +129,10 @@ fn gate_completions(captured: &CapturedRequests, body: &str) -> Response {
     ([(header::CONTENT_TYPE, "text/event-stream")], sse).into_response()
 }
 
-/// A successful profile switch whose refreshed catalog replaces the
-/// launch-time model with `model-b`.
+/// A profile selection the gateway serves without a restart, whose
+/// refreshed catalog replaces the launch-time model with `model-b`.
 async fn switch_to_model_b() -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/event-stream")],
-        concat!(
-            "data: {\"stage\":\"loading-profile\"}\n\n",
-            "data: {\"stage\":\"stopping-models\"}\n\n",
-            "data: {\"stage\":\"starting-models\"}\n\n",
-            "data: {\"status\":\"ready\",\"profile\":\"beta\"}\n\n",
-        ),
-    )
-        .into_response()
+    axum::Json(json!({"profile": "beta", "restart_required": false})).into_response()
 }
 
 /// One workshop server over the gate mock. The agents directory is

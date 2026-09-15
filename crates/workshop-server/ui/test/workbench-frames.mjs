@@ -131,6 +131,11 @@ await assertNoLeaks(lifecycle, async () => {
     "switchProfile sends one switch_profile frame naming the profile",
     fakeSockets[0].sent.at(-1) === JSON.stringify({ type: "switch_profile", name: "coding" }),
   );
+  check("switchProfile(null) on an open socket reports success", socket.switchProfile(null) === true);
+  check(
+    "switchProfile(null) sends the no-profile selection as an explicit null name",
+    fakeSockets[0].sent.at(-1) === JSON.stringify({ type: "switch_profile", name: null }),
+  );
 
   // --- Socket down: the send methods fail loudly instead of dropping --------
 
