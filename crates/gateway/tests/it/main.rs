@@ -24,6 +24,7 @@ mod boot;
 #[cfg(feature = "local")]
 mod cache;
 mod chat;
+mod cloud_models;
 #[cfg(feature = "local")]
 mod cuda;
 mod embeddings;

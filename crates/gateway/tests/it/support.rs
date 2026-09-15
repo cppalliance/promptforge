@@ -68,6 +68,19 @@ impl GatewayProcess {
         Self { child }
     }
 
+    /// Starts the production binary with extra environment layered on the
+    /// isolated home. The child command line is the only safe way to hand
+    /// a spawned gateway a variable (edition 2024 makes `env::set_var`
+    /// unsafe, which the workspace forbids).
+    pub(crate) fn spawn_with_env(config: &Path, home: &Path, envs: &[(&str, &str)]) -> Self {
+        let mut command = Self::spawn_command(config, home);
+        command.envs(envs.iter().copied());
+        command
+            .spawn()
+            .map(|child| Self { child })
+            .expect("the Gateway fixture spawns")
+    }
+
     /// Starts the default binary with rendezvous-looking environment that
     /// must be inert when the test fixture feature is absent.
     #[cfg(not(feature = "test-fixtures"))]
@@ -281,6 +294,27 @@ pub(crate) async fn join_within<T>(handle: JoinHandle<T>) -> T {
         .await
         .expect("task join exceeded the phase timeout")
         .expect("joined task panicked")
+}
+
+/// Polls the discovery file until a spawned gateway publishes its port,
+/// the readiness signal for a real-binary fixture.
+pub(crate) fn wait_for_connection(
+    run_dir: &Path,
+    timeout: Duration,
+) -> shared_sidecar::GatewayDiscoveryFile {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(connection) = shared_sidecar::GatewayDiscoveryFile::read(run_dir)
+            .expect("read the gateway discovery file")
+        {
+            return connection;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no Gateway published a connection within {timeout:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// Spawn a plain axum backend on an ephemeral port and return its address.

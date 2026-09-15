@@ -301,7 +301,7 @@ New `crates/gateway-config-ui/ui/src/services/providers.ts`: reads the loaded sh
 
 <step-9>
 
-### Step 9: End-to-end verification
+### Step 9: End-to-end verification [completed]
 
 - Component: end-to-end
 

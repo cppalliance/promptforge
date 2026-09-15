@@ -7,7 +7,9 @@ use std::time::Duration;
 use gateway::{ProfileName, ServeOptions};
 use serde_json::Value;
 
-use crate::support::{GatewayProcess, PHASE_TIMEOUT, json_within, send_within};
+use crate::support::{
+    GatewayProcess, PHASE_TIMEOUT, json_within, send_within, wait_for_connection,
+};
 
 /// Writes the config and returns its path; the profile selects every model
 /// the body declares.
@@ -55,25 +57,6 @@ fn spawn_at_ownership_rendezvous(
     );
     std::fs::write(&release, b"release").expect("release both ownership contenders");
     (first, second)
-}
-
-fn wait_for_connection(
-    run_dir: &std::path::Path,
-    timeout: Duration,
-) -> shared_sidecar::GatewayDiscoveryFile {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if let Some(connection) = shared_sidecar::GatewayDiscoveryFile::read(run_dir)
-            .expect("read the gateway discovery file")
-        {
-            return connection;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "a Gateway owner did not publish within {timeout:?}"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
 }
 
 #[cfg(feature = "test-fixtures")]
