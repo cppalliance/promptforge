@@ -4,6 +4,8 @@ use super::*;
 mod backing;
 #[path = "workspace-tests-pointer.rs"]
 mod pointer;
+#[path = "workspace-tests-ui-state.rs"]
+mod ui_state;
 
 /// A workspace with one granted tempdir, returned alongside so the
 /// directory outlives the test.

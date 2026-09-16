@@ -247,7 +247,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-2>
 
-### Step 2: Actor put command and Workspace ui-state API
+### Step 2: Actor put command and Workspace ui-state API [completed]
 
 - Component: `workspace-bucket`
 - Piece: storage layer (continues Step 1)

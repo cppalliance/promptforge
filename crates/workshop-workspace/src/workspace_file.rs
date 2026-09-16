@@ -31,7 +31,9 @@ mod ui_state;
 pub(crate) use actor::now_rfc3339;
 use actor::{COMMAND_QUEUE_DEPTH, Command, SCHEMA_V1};
 use siblings::{copy_siblings, plan_siblings, remove_sibling};
-pub(crate) use ui_state::{UI_STATE_KEYS, empty_ui_state};
+#[cfg(test)]
+pub(crate) use ui_state::UI_STATE_VALUE_CAP;
+pub(crate) use ui_state::{UI_STATE_KEYS, check_ui_state_cap, empty_ui_state, ui_state_key};
 
 /// Meta key naming the file format; always [`FORMAT_NAME`].
 pub(crate) const META_FORMAT: &str = "format";

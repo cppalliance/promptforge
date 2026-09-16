@@ -5,6 +5,7 @@
 //! here is consulted on a request path; a persist that fails is logged
 //! degradation that leaves memory exactly as it is (zone two).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
@@ -18,6 +19,9 @@ use crate::workspace_file::{
 
 use super::Workspace;
 
+#[path = "workspace-ui-state.rs"]
+mod ui_state;
+
 /// The display name of a workspace that has no file yet.
 pub(crate) const EPHEMERAL_NAME: &str = "Untitled";
 
@@ -28,6 +32,10 @@ pub(super) struct Backing {
     file: WorkspaceFile,
     /// Where the file lives on disk.
     path: PathBuf,
+    /// The opaque ui-state values, read from the file at open and
+    /// updated on every accepted put; what [`Workspace::ui_state`]
+    /// reports.
+    ui_state: BTreeMap<&'static str, Option<serde_json::Value>>,
 }
 
 /// One granted root as the workspace reports it.
@@ -124,7 +132,7 @@ impl Workspace {
             }
         };
         self.replace_all(contents.grants);
-        self.swap_backing(file, path).await;
+        self.swap_backing(file, path, contents.ui_state).await;
         Ok(())
     }
 
@@ -132,8 +140,9 @@ impl Workspace {
     /// and the previous backing's window state, and makes it the backing.
     /// The previous file, if any, keeps its contents and is closed; its
     /// siblings stay where they are. Save-as moves preferences to a new
-    /// name, not the world. The ui-state keys are not carried: the SPA
-    /// is their one writer and writes them after a save-as itself.
+    /// name, not the world. The ui-state keys are not carried, in the
+    /// file or in memory: the SPA is their one writer and writes them
+    /// after a save-as itself.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileTaken`] when something
@@ -161,14 +170,17 @@ impl Workspace {
             ui_state: empty_ui_state(),
         };
         let file = WorkspaceFile::create(path, &contents).await?;
-        self.swap_backing(file, path).await;
+        self.swap_backing(file, path, contents.ui_state).await;
         Ok(())
     }
 
     /// Copies the backing file and its siblings to `path`, then makes the
-    /// copy the backing; the original is closed and left as it was. An
-    /// ephemeral workspace has no file to copy, so its duplicate is a
-    /// [`Workspace::save_as`]: the current grants land in a new file.
+    /// copy the backing; the original is closed and left as it was. The
+    /// in-memory ui-state values carry over unchanged, as the grants do:
+    /// the copy holds the same rows, and memory stays the source of
+    /// truth. An ephemeral workspace has no file to copy, so its
+    /// duplicate is a [`Workspace::save_as`]: the current grants land in
+    /// a new file.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileTaken`] when something
@@ -180,7 +192,8 @@ impl Workspace {
             return self.save_as(path).await;
         };
         let file = previous.duplicate_to(path).await?;
-        self.swap_backing(file, path).await;
+        let ui_state = self.ui_state();
+        self.swap_backing(file, path, ui_state).await;
         Ok(())
     }
 
@@ -278,11 +291,16 @@ impl Workspace {
             .map(|backing| (backing.file.clone(), backing.path.clone()))
     }
 
-    /// Installs `file` at `path` as the backing, records it as the
-    /// last-used workspace, and closes the previous backing, if any,
-    /// waiting for its connection to go so the old file is left complete
-    /// with no sidecar.
-    async fn swap_backing(&self, file: WorkspaceFile, path: &Path) {
+    /// Installs `file` at `path` as the backing holding `ui_state` in
+    /// memory, records it as the last-used workspace, and closes the
+    /// previous backing, if any, waiting for its connection to go so the
+    /// old file is left complete with no sidecar.
+    async fn swap_backing(
+        &self,
+        file: WorkspaceFile,
+        path: &Path,
+        ui_state: BTreeMap<&'static str, Option<serde_json::Value>>,
+    ) {
         let previous = self
             .backing
             .write()
@@ -290,6 +308,7 @@ impl Workspace {
             .replace(Backing {
                 file,
                 path: path.to_path_buf(),
+                ui_state,
             });
         self.remember(path);
         if let Some(previous) = previous {

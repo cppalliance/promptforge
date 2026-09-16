@@ -39,6 +39,20 @@ pub(crate) fn ui_state_key(key: &str) -> Result<&'static str, WorkspaceError> {
         .ok_or_else(|| WorkspaceError::UiStateKey(key.to_string()))
 }
 
+/// Checks that a value whose JSON text is `len` bytes fits under the cap.
+///
+/// # Errors
+/// Returns [`WorkspaceError::UiStateTooLarge`] past the cap.
+pub(crate) fn check_ui_state_cap(len: usize) -> Result<(), WorkspaceError> {
+    if len > UI_STATE_VALUE_CAP {
+        return Err(WorkspaceError::UiStateTooLarge {
+            actual: len,
+            cap: UI_STATE_VALUE_CAP,
+        });
+    }
+    Ok(())
+}
+
 /// Checks that `json_text` fits under the cap and parses as JSON. The
 /// cap is checked first so oversized text is never parsed.
 ///
@@ -46,12 +60,7 @@ pub(crate) fn ui_state_key(key: &str) -> Result<&'static str, WorkspaceError> {
 /// Returns [`WorkspaceError::UiStateTooLarge`] past the cap and
 /// [`WorkspaceError::UiStateNotJson`] for text that does not parse.
 pub(crate) fn check_ui_state_text(json_text: &str) -> Result<(), WorkspaceError> {
-    if json_text.len() > UI_STATE_VALUE_CAP {
-        return Err(WorkspaceError::UiStateTooLarge {
-            actual: json_text.len(),
-            cap: UI_STATE_VALUE_CAP,
-        });
-    }
+    check_ui_state_cap(json_text.len())?;
     serde_json::from_str::<serde::de::IgnoredAny>(json_text)
         .map(|_| ())
         .map_err(|_| WorkspaceError::UiStateNotJson)
@@ -66,13 +75,6 @@ impl WorkspaceFile {
     /// Returns [`WorkspaceError::UiStateKey`], [`WorkspaceError::UiStateTooLarge`],
     /// or [`WorkspaceError::UiStateNotJson`] for a refused input, and
     /// [`WorkspaceError::WorkspaceFileFailed`] when the write fails.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the storage layer lands first; `Workspace::put_ui_state` consumes it next"
-        )
-    )]
     pub(crate) async fn put_ui_state(
         &self,
         key: &str,
@@ -91,18 +93,14 @@ impl WorkspaceFile {
     }
 
     /// Reads every ui-state value; a key with no row, or whose text no
-    /// longer parses, reads as `None`.
+    /// longer parses, reads as `None`. The workspace reads these values
+    /// once, through [`WorkspaceFile::contents`] at open, and serves
+    /// them from memory after that; this direct read is a test seam.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileFailed`] when the file
     /// cannot be read.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the storage layer lands first; `Workspace::ui_state` consumes it next"
-        )
-    )]
+    #[cfg(test)]
     pub(crate) async fn read_ui_state(
         &self,
     ) -> Result<BTreeMap<&'static str, Option<Value>>, WorkspaceError> {

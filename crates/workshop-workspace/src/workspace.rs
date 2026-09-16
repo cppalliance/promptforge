@@ -15,7 +15,6 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
@@ -29,9 +28,14 @@ use crate::error::WorkspaceError;
 mod backing;
 #[path = "workspace-pointer.rs"]
 mod pointer;
+#[path = "workspace-token.rs"]
+mod token;
 
 use backing::Backing;
 pub use backing::{GrantEntry, WorkspaceSummary};
+use token::{current_token, file_token};
+#[cfg(test)]
+use token::{hash_token, mtime_token};
 
 /// The largest file the workspace reads or accepts for a write: the editor
 /// targets source text, not media, so one MiB is generous.
@@ -104,6 +108,9 @@ pub struct Workspace {
     /// The backing workspace file; `None` while the workspace is
     /// ephemeral.
     backing: Arc<RwLock<Option<Backing>>>,
+    /// Serializes ui-state puts so values reach the backing file's actor
+    /// in the order they reached memory; see [`Workspace::put_ui_state`].
+    ui_state_puts: Arc<tokio::sync::Mutex<()>>,
     /// Where the last-used file is remembered between runs; `None` when
     /// built without a state directory (see [`Workspace::with_state_dir`]).
     pointer: Option<pointer::LastWorkspacePointer>,
@@ -453,46 +460,6 @@ fn modified_ms(metadata: &fs::Metadata) -> u64 {
         .map_or(0, |duration| {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
-}
-
-/// The mtime half of the conflict token: full-precision modified time in
-/// nanoseconds since the Unix epoch plus the byte length. `None` when the
-/// filesystem reports no usable modified time, which callers cover with
-/// [`hash_token`] - collapsing the error to a constant would make every
-/// token on such a filesystem equal and no write would ever conflict.
-fn mtime_token(metadata: &fs::Metadata) -> Option<String> {
-    let duration = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(format!("{}-{}", duration.as_nanos(), metadata.len()))
-}
-
-/// The content-hash fallback token for filesystems without modified times.
-/// `DefaultHasher` is stable within one process run, which is all a token
-/// needs: a restart invalidates outstanding tokens toward conflict, never
-/// toward a silent overwrite.
-fn hash_token(contents: &[u8]) -> String {
-    let mut hasher = DefaultHasher::new();
-    contents.hash(&mut hasher);
-    format!("h-{:016x}", hasher.finish())
-}
-
-/// A file's opaque conflict token from its metadata and already-read
-/// contents: the mtime form when available, otherwise the hash form.
-fn file_token(metadata: &fs::Metadata, contents: &[u8]) -> String {
-    mtime_token(metadata).unwrap_or_else(|| hash_token(contents))
-}
-
-/// The current on-disk token of an existing write target, reading the file
-/// only when the hash fallback demands it. `None` means no token could be
-/// derived - an unreadable or oversized file - and the caller must refuse
-/// the write rather than overwrite unverified contents.
-fn current_token(path: &Path, metadata: &fs::Metadata) -> Option<String> {
-    if let Some(token) = mtime_token(metadata) {
-        return Some(token);
-    }
-    if metadata.len() > MAX_FILE_BYTES {
-        return None;
-    }
-    fs::read(path).ok().map(|bytes| hash_token(&bytes))
 }
 
 #[cfg(test)]
