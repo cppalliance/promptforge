@@ -35,17 +35,19 @@ interface EditActionRow {
   readonly title: string;
   readonly menu: MenuId;
   readonly group: string;
+  /** The position within the group, matching the spec's row order. */
+  readonly order: number;
   readonly keybinding: string;
   readonly run: () => void;
 }
 
 const editActions = [
-  { id: "undo", title: "Undo", menu: MenuId.MenubarEditMenu, group: "1_do", keybinding: "ctrlcmd+z", run: () => getService(TEXT_CONTROL_SERVICE).undo() },
-  { id: "redo", title: "Redo", menu: MenuId.MenubarEditMenu, group: "1_do", keybinding: "ctrlcmd+y", run: () => getService(TEXT_CONTROL_SERVICE).redo() },
-  { id: "editor.action.clipboardCutAction", title: "Cut", menu: MenuId.MenubarEditMenu, group: "2_ccp", keybinding: "ctrlcmd+x", run: () => getService(TEXT_CONTROL_SERVICE).execCommand("cut") },
-  { id: "editor.action.clipboardCopyAction", title: "Copy", menu: MenuId.MenubarEditMenu, group: "2_ccp", keybinding: "ctrlcmd+c", run: () => getService(TEXT_CONTROL_SERVICE).execCommand("copy") },
-  { id: "editor.action.clipboardPasteAction", title: "Paste", menu: MenuId.MenubarEditMenu, group: "2_ccp", keybinding: "ctrlcmd+v", run: () => getService(TEXT_CONTROL_SERVICE).execCommand("paste") },
-  { id: "editor.action.selectAll", title: "Select All", menu: MenuId.MenubarSelectionMenu, group: "1_basic", keybinding: "ctrlcmd+a", run: () => getService(TEXT_CONTROL_SERVICE).selectAll() },
+  { id: "undo", title: "Undo", menu: MenuId.MenubarEditMenu, group: "1_do", order: 1, keybinding: "ctrlcmd+z", run: () => getService(TEXT_CONTROL_SERVICE).undo() },
+  { id: "redo", title: "Redo", menu: MenuId.MenubarEditMenu, group: "1_do", order: 2, keybinding: "ctrlcmd+y", run: () => getService(TEXT_CONTROL_SERVICE).redo() },
+  { id: "editor.action.clipboardCutAction", title: "Cut", menu: MenuId.MenubarEditMenu, group: "2_ccp", order: 1, keybinding: "ctrlcmd+x", run: () => getService(TEXT_CONTROL_SERVICE).execCommand("cut") },
+  { id: "editor.action.clipboardCopyAction", title: "Copy", menu: MenuId.MenubarEditMenu, group: "2_ccp", order: 2, keybinding: "ctrlcmd+c", run: () => getService(TEXT_CONTROL_SERVICE).execCommand("copy") },
+  { id: "editor.action.clipboardPasteAction", title: "Paste", menu: MenuId.MenubarEditMenu, group: "2_ccp", order: 3, keybinding: "ctrlcmd+v", run: () => getService(TEXT_CONTROL_SERVICE).execCommand("paste") },
+  { id: "editor.action.selectAll", title: "Select All", menu: MenuId.MenubarSelectionMenu, group: "1_basic", order: 1, keybinding: "ctrlcmd+a", run: () => getService(TEXT_CONTROL_SERVICE).selectAll() },
 ] satisfies readonly EditActionRow[];
 
 for (const row of editActions) {
@@ -55,7 +57,7 @@ for (const row of editActions) {
     f1: true,
     precondition: "textInputFocus",
     keybinding: { keybinding: row.keybinding },
-    menu: [{ id: row.menu, group: row.group }],
+    menu: [{ id: row.menu, group: row.group, order: row.order }],
     run: row.run,
   });
 }

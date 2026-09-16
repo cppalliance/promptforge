@@ -48,7 +48,7 @@ addAction({
   title: "Command Palette...",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+shift+p" },
-  menu: [{ id: MenuId.MenubarViewMenu, group: "1_open" }],
+  menu: [{ id: MenuId.MenubarViewMenu, group: "1_open", order: 1 }],
   run: () => showQuickInput(">"),
 });
 KeybindingsRegistry.registerKeybindingRule({ id: "workbench.action.showCommands", keybinding: "f1" });
@@ -56,6 +56,7 @@ appendMenuItem(MenuId.MenubarHelpMenu, {
   command: "workbench.action.showCommands",
   title: "Show All Commands",
   group: "1_welcome",
+  order: 1,
 });
 
 addAction({
@@ -63,7 +64,7 @@ addAction({
   title: "Go to File...",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+p" },
-  menu: [{ id: MenuId.MenubarGoMenu, group: "3_global_nav" }],
+  menu: [{ id: MenuId.MenubarGoMenu, group: "3_global_nav", order: 1 }],
   run: () => showQuickInput(""),
 });
 

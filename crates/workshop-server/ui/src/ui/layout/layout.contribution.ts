@@ -43,7 +43,7 @@ addAction({
   title: "Explorer",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+shift+e" },
-  menu: [{ id: MenuId.MenubarViewMenu, group: "3_views" }],
+  menu: [{ id: MenuId.MenubarViewMenu, group: "3_views", order: 1 }],
   run: focusWorkshopTree,
 });
 
@@ -53,7 +53,7 @@ addAction({
   f1: true,
   toggled: "sideBarVisible",
   keybinding: { keybinding: "ctrlcmd+b" },
-  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 1 }],
+  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 2 }],
   run: () => {
     setVisibilityKey("sideBarVisible", toggleWorkshopPanel());
   },
@@ -65,7 +65,7 @@ addAction({
   f1: true,
   toggled: "auxiliaryBarVisible",
   keybinding: { keybinding: "ctrlcmd+alt+b" },
-  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 2 }],
+  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 3 }],
   run: () => {
     // A hidden group stays live, so the toggle always finds it; a zone
     // whose group was never built opens the agent panel instead.

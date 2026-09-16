@@ -16,6 +16,7 @@
 // command becomes its menu label, so Reset Zoom shows Ctrl+NumPad0.
 
 import type { IDisposable } from "../../base/lifecycle";
+import { invoke } from "@tauri-apps/api/core";
 import { registerAction, type ActionDescriptor } from "../../services/action-registry";
 import type { ParseError } from "../../services/context-key-expr";
 import type { Result } from "../../services/error-catalog";
@@ -42,7 +43,7 @@ addAction({
   f1: true,
   precondition: "!isWeb",
   toggled: "isFullscreen",
-  menu: [{ id: APPEARANCE_MENU, group: "1_toggle_view" }],
+  menu: [{ id: APPEARANCE_MENU, group: "1_toggle_view", order: 1 }],
   run: toggleFullScreen,
 });
 KeybindingsRegistry.registerKeybindingRule({
@@ -57,7 +58,7 @@ addAction({
   title: "Close Window",
   f1: true,
   precondition: "!isWeb",
-  menu: [{ id: MenuId.MenubarFileMenu, group: "6_close" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 4 }],
   run: closeWindow,
 });
 KeybindingsRegistry.registerKeybindingRule({
@@ -109,5 +110,23 @@ addAction({
   menu: [{ id: MenuId.MenubarHelpMenu, group: "z_about" }],
   run: () => {
     showAboutDialog();
+  },
+});
+
+// File > Exit (plan step 20's menu assembly; the catalog's chrome row).
+// The run body invokes the shell's quit command - the same
+// gateway-shutdown-then-exit path the native menu's quit item runs -
+// which the shell step lands in promptforge/crates/workshop; until then
+// an activation rejects and surfaces on the status bar, never
+// plugin-process exit(0), which would strand the sidecar gateway.
+// Desktop-only: the !isWeb precondition disables the row in a browser.
+addAction({
+  id: "workbench.action.quit",
+  title: "Exit",
+  f1: true,
+  precondition: "!isWeb",
+  menu: [{ id: MenuId.MenubarFileMenu, group: "z_Exit", order: 1 }],
+  run: async () => {
+    await invoke("quit");
   },
 });

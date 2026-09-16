@@ -23,7 +23,7 @@ const action: ActionDescriptor = {
   title: "Settings",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+," },
-  menu: [{ id: PREFERENCES_MENU, group: "1_settings" }],
+  menu: [{ id: PREFERENCES_MENU, group: "1_settings", order: 2 }],
   run: () => {
     openInZone("config", {});
   },

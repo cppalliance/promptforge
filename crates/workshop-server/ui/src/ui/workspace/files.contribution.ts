@@ -66,7 +66,7 @@ addAction({
   f1: true,
   precondition: "!isWeb",
   keybinding: { keybinding: "ctrlcmd+o", weight: KeybindingWeight.WorkbenchContrib },
-  menu: [{ id: MenuId.MenubarFileMenu, group: "2_open" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "2_open", order: 1 }],
   run: runFileAction((actions) => actions.openFile),
 });
 
@@ -75,7 +75,7 @@ addAction({
   title: "Open Folder...",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+m ctrlcmd+o", weight: KeybindingWeight.WorkbenchContrib },
-  menu: [{ id: MenuId.MenubarFileMenu, group: "2_open" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "2_open", order: 2 }],
   run: runFileAction((actions) => actions.openFolder),
 });
 
@@ -83,7 +83,7 @@ addAction({
   id: "workbench.action.addRootFolder",
   title: "Add Folder to Workspace...",
   f1: true,
-  menu: [{ id: MenuId.MenubarFileMenu, group: "3_workspace" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "3_workspace", order: 1 }],
   run: runFileAction((actions) => actions.addRootFolder),
 });
 
@@ -93,7 +93,7 @@ addAction({
   f1: true,
   precondition: "!isWeb && activeEditor",
   keybinding: { keybinding: "ctrlcmd+shift+s", weight: KeybindingWeight.WorkbenchContrib },
-  menu: [{ id: MenuId.MenubarFileMenu, group: "4_save" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "4_save", order: 2 }],
   run: runFileAction((actions) => actions.saveActiveEditorAs),
 });
 
@@ -102,7 +102,7 @@ addAction({
   title: "Save All",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+m s", weight: KeybindingWeight.WorkbenchContrib },
-  menu: [{ id: MenuId.MenubarFileMenu, group: "4_save" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "4_save", order: 3 }],
   run: runFileAction((actions) => actions.saveAllEditors),
 });
 
@@ -111,7 +111,7 @@ addAction({
   title: "Revert File",
   f1: true,
   precondition: "activeEditor",
-  menu: [{ id: MenuId.MenubarFileMenu, group: "6_close" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 1 }],
   run: runFileAction((actions) => actions.revertActiveEditor),
 });
 

@@ -21,7 +21,7 @@ const action: ActionDescriptor = {
   title: "New Agents Window",
   f1: true,
   keybinding: { keybinding: "ctrlcmd+alt+n" },
-  menu: [{ id: MenuId.MenubarFileMenu, group: "1_new" }],
+  menu: [{ id: MenuId.MenubarFileMenu, group: "1_new", order: 3 }],
   run: () => {
     openInZone("agent", { instance: window.crypto.randomUUID() });
   },

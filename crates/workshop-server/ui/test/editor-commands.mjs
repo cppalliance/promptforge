@@ -8,8 +8,9 @@
 // comment toggles, line copy/move, duplicate selection, cursor add rows,
 // occurrence rows, bracket jump - or against a real EditorView in jsdom
 // for the view commands (find, replace, smart select with its selection
-// stack, diagnostic navigation). runInActiveEditor and withActiveEditor
-// run against a stub dock, and the contribution's registry wiring (menu
+// stack, diagnostic navigation). runInActiveEditor, withActiveEditor,
+// and splitActiveEditor run against a stub dock, and the contribution's
+// registry wiring (menu
 // rows, palette rows, keybinding rules, the lazy run path) is asserted
 // on the shared registries. Bundles the modules with esbuild and drives
 // them in jsdom with the same measurement shims as editor-idioms.mjs.
@@ -408,6 +409,79 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
 }
 
 {
+  // splitActiveEditor against a fake dock recording addGroup/moveTo:
+  // each Split direction maps to its dockview direction, the active
+  // editor moves into the fresh group, and a missing or non-editor
+  // active panel is a no-op.
+  const splitSurface = new CodeMirrorSurface();
+  window.document.body.appendChild(splitSurface.element);
+  splitSurface.open({ path: "C:\\project\\split.txt", text: "one\n" });
+  const splitPanel = new EditorPanel({ createSurface: () => splitSurface });
+  const moveTos = [];
+  const splitDockPanel = {
+    view: { content: splitPanel },
+    api: { moveTo: (target) => moveTos.push(target) },
+  };
+  const addGroups = [];
+  const group = { id: "split-group" };
+  const unregisterSplitDock = registerService(DOCK, () => ({
+    activePanel: splitDockPanel,
+    panels: [splitDockPanel],
+    addGroup: (options) => {
+      addGroups.push(options);
+      return group;
+    },
+  }));
+
+  const directions = { up: "above", down: "below", left: "left", right: "right" };
+  for (const [split, dockviewDirection] of Object.entries(directions)) {
+    addGroups.length = 0;
+    moveTos.length = 0;
+    editorCommands.splitActiveEditor(split);
+    check(
+      `split ${split} adds a group ${dockviewDirection} of the active editor`,
+      addGroups.length === 1 &&
+        addGroups[0].referencePanel === splitDockPanel &&
+        addGroups[0].direction === dockviewDirection,
+    );
+    check(
+      `split ${split} moves the active editor into the new group`,
+      moveTos.length === 1 && moveTos[0].group === group,
+    );
+  }
+  unregisterSplitDock.dispose();
+
+  // No active editor: addGroup is never called.
+  const emptyAddGroups = [];
+  const unregisterEmptySplit = registerService(DOCK, () => ({
+    activePanel: undefined,
+    panels: [],
+    addGroup: (options) => {
+      emptyAddGroups.push(options);
+      return group;
+    },
+  }));
+  editorCommands.splitActiveEditor("right");
+  check("split with no active editor is a no-op", emptyAddGroups.length === 0);
+  unregisterEmptySplit.dispose();
+
+  // A non-editor active panel is a no-op too.
+  const foreignAddGroups = [];
+  const unregisterForeignSplit = registerService(DOCK, () => ({
+    activePanel: { view: { content: {} }, api: {} },
+    panels: [],
+    addGroup: (options) => {
+      foreignAddGroups.push(options);
+      return group;
+    },
+  }));
+  editorCommands.splitActiveEditor("right");
+  check("split with a non-editor active panel is a no-op", foreignAddGroups.length === 0);
+  unregisterForeignSplit.dispose();
+  splitPanel.dispose();
+}
+
+{
   // The contribution's registry wiring: every catalog row lands in the
   // command registry, its menu, and the palette; keybound rows get a
   // label, the three keybinding-less rows get none.
@@ -435,6 +509,16 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "workbench.action.files.newUntitledFile",
     "workbench.action.reopenClosedEditor",
     "workbench.action.gotoLine",
+    // Step 20: the workbench-level editor rows registered when the menu
+    // tree assembled - Save, Close Editor, the four splits, and cycling.
+    "workbench.action.files.save",
+    "workbench.action.closeActiveEditor",
+    "workbench.action.splitEditorUp",
+    "workbench.action.splitEditorDown",
+    "workbench.action.splitEditorLeft",
+    "workbench.action.splitEditorRight",
+    "workbench.action.nextEditor",
+    "workbench.action.previousEditor",
   ];
   check("the contribution registered without errors", consoleErrors.length === 0);
   check(
@@ -473,9 +557,14 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
         .every((id) => goMenu.includes(id)),
   );
   const fileMenu = Menus.getMenuItems(MenuId.MenubarFileMenu).map((row) => row.command);
+  // Updated in step 20: the editor contribution also registers Save and
+  // Close Editor (File 4_save / 6_close) when the menu tree assembled.
   check(
-    "the File menu carries New Text File",
-    fileMenu.length === 1 && fileMenu.includes("workbench.action.files.newUntitledFile"),
+    "the File menu carries New Text File, Save, and Close Editor",
+    fileMenu.length === 3 &&
+      ["workbench.action.files.newUntitledFile", "workbench.action.files.save", "workbench.action.closeActiveEditor"].every((id) =>
+        fileMenu.includes(id),
+      ),
   );
   const recentMenu = Menus.getMenuItems(MenuId.MenubarRecentMenu).map((row) => row.command);
   check(

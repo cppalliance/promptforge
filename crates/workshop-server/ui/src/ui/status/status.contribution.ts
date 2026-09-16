@@ -22,7 +22,7 @@ const result: Result<IDisposable, ParseError> = registerAction({
   title: "Status Bar",
   f1: true,
   toggled: "statusBarVisible",
-  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 3 }],
+  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 4 }],
   run: () => {
     const bar = getServiceOrNull(STATUS_BAR);
     if (bar !== null) {

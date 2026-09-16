@@ -81,6 +81,33 @@ export function closeActiveEditor(): void {
   asEditor(getService(DOCK).activePanel)?.requestClose();
 }
 
+/** The dockview direction behind each Split row. */
+const SPLIT_DIRECTIONS = {
+  up: "above",
+  down: "below",
+  left: "left",
+  right: "right",
+} as const;
+
+/** The direction a Split row moves the active editor. */
+export type SplitDirection = keyof typeof SPLIT_DIRECTIONS;
+
+/**
+ * Split Up/Down/Left/Right: opens a fresh dock group beside the active
+ * editor in the direction and moves the editor into it. Moving the only
+ * panel out of a group dissolves the empty group, so splitting a lone
+ * editor just repositions it. A no-op when no editor is active.
+ */
+export function splitActiveEditor(direction: SplitDirection): void {
+  const dock = getService(DOCK);
+  const panel = dock.activePanel;
+  if (panel === undefined || asEditor(panel) === null) {
+    return;
+  }
+  const group = dock.addGroup({ referencePanel: panel, direction: SPLIT_DIRECTIONS[direction] });
+  panel.api.moveTo({ group });
+}
+
 /** Ctrl+Tab / Ctrl+Shift+Tab: cycle the open editors, wrapping around. */
 export function cycleEditor(direction: 1 | -1): void {
   const dock = getService(DOCK);

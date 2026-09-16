@@ -870,7 +870,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-20>
 
-### Step 20: Menubar and stub tables
+### Step 20: Menubar and stub tables [completed]
 
 - Component: shell
 - Artifacts: `src/ui/menu/menubar.contribution.ts` (eight `SubmenuItem`s on `MenubarMainMenu`, fourteen nested submenu declarations, `satisfies`-typed) and `src/ui/menu/stubs.contribution.ts` (`satisfies readonly StubRow[]`, loop-registered with `precondition: "false"`, constant-true `toggled` for unbackable checked rows).
