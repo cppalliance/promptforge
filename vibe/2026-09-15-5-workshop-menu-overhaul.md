@@ -771,7 +771,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-11>
 
-### Step 11: Palette, help, and placeholder providers
+### Step 11: Palette, help, and placeholder providers [completed]
 
 - Component: quickinput
 - Artifacts: the `>` palette provider (`CommandPalette` items whose `precondition` holds, `Category: Title` labels, keybinding labels, localStorage `CommandsHistory` recency), the `?` help provider, placeholder providers for `@`, `%`, `debug `, `task `, and the four quick-access actions (`showCommands`, `quickOpen`, `quickOpenWithModes`, `quickOpenHelp`) with the `includeHelp` modes list.

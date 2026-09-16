@@ -9,6 +9,11 @@
 // restored, a factory whose product is not a provider rendering an empty
 // list, and includeHelp rendering every provider's help entries above
 // the active provider's rows with a help row re-routing to its prefix.
+// The provider half covers the command palette provider (Category: Title
+// labels, keybinding labels, precondition filtering, substring filter,
+// CommandsHistory recency and persistence), the ? help provider, the
+// not-available placeholder providers, and the real provider
+// descriptors' modes list rendering before the recent files.
 // Bundles the module with esbuild and drives it against jsdom.
 // Run: node --test test/quick-input.mjs
 import path from "node:path";
@@ -32,6 +37,17 @@ const bundle = await esbuild.build({
     contents: `
       export { QuickInputService } from "./src/ui/quickinput/quick-input.ts";
       export { createQuickAccessRegistry } from "./src/services/quick-access-registry.ts";
+      export { CommandsHistory } from "./src/ui/quickinput/commands-history.ts";
+      export {
+        createCommandPaletteProvider,
+        createHelpProvider,
+        createPlaceholderProvider,
+        createQuickAccessProviderDescriptors,
+      } from "./src/ui/quickinput/quick-access-providers.ts";
+      export { CommandRegistry } from "./src/services/command-registry.ts";
+      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
+      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { ContextKeyService } from "./src/services/context-key-service.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -44,7 +60,20 @@ const bundle = await esbuild.build({
   logLevel: "silent",
   loader: { ".css": "empty" },
 });
-const { QuickInputService, createQuickAccessRegistry } = await import(
+const {
+  QuickInputService,
+  createQuickAccessRegistry,
+  CommandsHistory,
+  createCommandPaletteProvider,
+  createHelpProvider,
+  createPlaceholderProvider,
+  createQuickAccessProviderDescriptors,
+  CommandRegistry,
+  MenuRegistry,
+  MenuId,
+  createKeybindingsRegistry,
+  ContextKeyService,
+} = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 
@@ -222,6 +251,190 @@ quickInput.quickAccess.show("", { includeHelp: true });
 
 quickInput.dispose();
 check("dispose removes the panel", window.document.querySelector(".ws-quick-input") === null);
+
+// --- Provider half: the command palette provider --------------------------------
+
+function memoryStorage() {
+  const entries = new Map();
+  return {
+    getItem: (key) => (entries.has(key) ? entries.get(key) : null),
+    setItem: (key, value) => entries.set(key, String(value)),
+    removeItem: (key) => entries.delete(key),
+  };
+}
+
+function paletteSetup() {
+  const commands = new CommandRegistry();
+  const menus = new MenuRegistry();
+  const keybindings = createKeybindingsRegistry("windows");
+  const context = new ContextKeyService();
+  const storage = memoryStorage();
+  const history = new CommandsHistory(storage, "test.commandsHistory");
+  const provider = createCommandPaletteProvider({ commands, menus, keybindings, context, history });
+  return { commands, menus, keybindings, context, storage, history, provider };
+}
+
+{
+  // Palette rows are Category: Title and carry the keybinding label.
+  const { commands, menus, keybindings, provider } = paletteSetup();
+  let ran = 0;
+  commands.register("file.save", { title: "Save", category: "File", run: () => { ran += 1; } });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "file.save" });
+  keybindings.registerKeybindingRule({ id: "file.save", keybinding: "ctrl+s" });
+  const rows = provider.getItems("");
+  check("the palette lists the palette-menu command", rows.length === 1);
+  check("the palette label is Category: Title", rows[0]?.label === "File: Save");
+  check("the palette row carries the keybinding label", rows[0]?.keybinding === "Ctrl+S");
+  rows[0]?.accept();
+  await Promise.resolve();
+  check("accept runs the command through the registry", ran === 1);
+}
+
+{
+  // A command whose precondition fails is absent from the palette.
+  const { commands, menus, context, provider } = paletteSetup();
+  const focus = context.createKey("editorTextFocus", false);
+  commands.register("editor.format", { title: "Format", precondition: "editorTextFocus", run: () => {} });
+  commands.register("file.save", { title: "Save", category: "File", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "editor.format" });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "file.save" });
+  check(
+    "a failed precondition keeps the command out of the palette",
+    provider.getItems("").map((row) => row.label).join(",") === "File: Save",
+  );
+  focus.set(true);
+  check("a met precondition admits the command", provider.getItems("").length === 2);
+  context.dispose();
+}
+
+{
+  // The filter narrows rows; a category-less command labels with its title.
+  const { commands, menus, provider } = paletteSetup();
+  commands.register("file.save", { title: "Save", category: "File", run: () => {} });
+  commands.register("window.reload", { title: "Reload Window", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "file.save" });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "window.reload" });
+  check("a category-less label is the bare title", provider.getItems("").map((row) => row.label).join(",") === "File: Save,Reload Window");
+  check("the filter narrows case-insensitively", provider.getItems("reload").map((row) => row.label).join(",") === "Reload Window");
+  check("a filter matching nothing renders no rows", provider.getItems("zzz").length === 0);
+}
+
+{
+  // Recently used commands sort first, in recency order; accept records history.
+  const { commands, menus, storage, history, provider } = paletteSetup();
+  commands.register("a.one", { title: "One", run: () => {} });
+  commands.register("b.two", { title: "Two", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "a.one" });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "b.two" });
+  check("without history the rows keep menu order", provider.getItems("").map((row) => row.label).join(",") === "One,Two");
+  history.add("b.two");
+  check("a used command sorts first", provider.getItems("").map((row) => row.label).join(",") === "Two,One");
+  provider.getItems("")[1]?.accept();
+  await Promise.resolve();
+  check("accept records the command in the history", history.list[0] === "a.one");
+  const reloaded = new CommandsHistory(storage, "test.commandsHistory");
+  check("the history survives a reload", reloaded.list.join(",") === "a.one,b.two");
+  const hostile = memoryStorage();
+  hostile.setItem("test.commandsHistory", '{"not":"a list"}');
+  check("a malformed payload reads as no history", new CommandsHistory(hostile, "test.commandsHistory").list.length === 0);
+}
+
+// --- Provider half: the help provider --------------------------------------------
+
+{
+  const helpRegistry = createQuickAccessRegistry();
+  helpRegistry.registerQuickAccessProvider({
+    prefix: "",
+    placeholder: "files",
+    helpEntries: [{ description: "Go to File", prefix: "" }],
+    factory: () => ({ getItems: () => [] }),
+  });
+  helpRegistry.registerQuickAccessProvider({
+    prefix: ">",
+    placeholder: "commands",
+    helpEntries: [{ description: "Show and Run Commands", prefix: ">" }],
+    factory: () => ({ getItems: () => [] }),
+  });
+  const shown = [];
+  const help = createHelpProvider({ registry: helpRegistry, show: (value) => shown.push(value) });
+  const rows = help.getItems("");
+  check("the help provider lists one row per help entry", rows.map((row) => row.label).join(",") === "Go to File,Show and Run Commands");
+  check("the default mode's row carries no prefix description", rows[0]?.description === undefined);
+  check("a prefixed mode's row carries its prefix", rows[1]?.description === ">");
+  rows[1]?.accept();
+  check("accepting a help row enters its mode", shown.join(",") === ">");
+}
+
+// --- Provider half: the placeholder provider --------------------------------------
+
+{
+  const placeholder = createPlaceholderProvider("Debugging is not available");
+  const rows = placeholder.getItems("anything");
+  check("a placeholder provider renders its single row", rows.length === 1 && rows[0]?.label === "Debugging is not available");
+  const stateRegistry = createQuickAccessRegistry();
+  stateRegistry.registerQuickAccessProvider({
+    prefix: "",
+    placeholder: "Search files by name",
+    helpEntries: [],
+    factory: () => ({ getItems: () => [{ label: "a.ts", accept: () => {} }] }),
+  });
+  const stateInput = new QuickInputService({ registry: stateRegistry });
+  stateInput.quickAccess.show("");
+  rows[0]?.accept();
+  check(
+    "a placeholder row's accept leaves quick input state unchanged",
+    panel().hidden === false && optionLabels().join(",") === "a.ts",
+  );
+  key("Escape");
+  stateInput.dispose();
+}
+
+// --- Provider half: includeHelp renders the modes list before recent files ---------
+
+{
+  const modesRegistry = createQuickAccessRegistry();
+  modesRegistry.registerQuickAccessProvider({
+    prefix: "",
+    placeholder: "Search files by name",
+    helpEntries: [{ description: "Go to File", prefix: "" }],
+    factory: () => ({
+      getItems: () => [
+        { label: "alpha.md", accept: () => {} },
+        { label: "beta.md", accept: () => {} },
+      ],
+    }),
+  });
+  const { commands, menus, keybindings, context, history } = paletteSetup();
+  commands.register("file.save", { title: "Save", category: "File", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "file.save" });
+  for (const descriptor of createQuickAccessProviderDescriptors({
+    commands,
+    menus,
+    keybindings,
+    context,
+    history,
+    quickAccess: modesRegistry,
+    show: () => {},
+  })) {
+    modesRegistry.registerQuickAccessProvider(descriptor);
+  }
+  const modesInput = new QuickInputService({ registry: modesRegistry });
+  modesInput.quickAccess.show("", { includeHelp: true });
+  check(
+    "includeHelp renders the modes list before the recent files",
+    optionLabels().join(",") ===
+      "Go to File,Show and Run Commands,Search for Text,Go to Symbol in Editor,Start Debugging,Run Task,More,alpha.md,beta.md",
+  );
+  key("Escape");
+  modesInput.quickAccess.show(">");
+  check("the palette descriptor routes the > prefix", optionLabels().join(",") === "File: Save");
+  key("Escape");
+  modesInput.quickAccess.show("debug ");
+  check("the debug descriptor renders its not-available row", optionLabels().join(",") === "Debugging is not available");
+  key("Escape");
+  modesInput.dispose();
+  context.dispose();
+}
 
 if (failures.length > 0) {
   console.error(`quick-input: ${failures.length} failure(s)`);
