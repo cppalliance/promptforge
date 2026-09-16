@@ -705,7 +705,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-5>
 
-### Step 5: Quick-access registry
+### Step 5: Quick-access registry [completed]
 
 - Component: services
 - Artifacts: `src/services/quick-access-registry.ts` (`registerQuickAccessProvider`, longest-prefix `getQuickAccessProvider`, `getQuickAccessProviders` for the `?` list).
