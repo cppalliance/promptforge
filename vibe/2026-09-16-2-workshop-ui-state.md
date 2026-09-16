@@ -305,7 +305,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-6>
 
-### Step 6: SPA `ui-storage.ts` adapter
+### Step 6: SPA `ui-storage.ts` adapter [completed]
 
 - Component: `spa-adapter`
 - Piece: adapter module (sequential; boot wiring depends on it)
