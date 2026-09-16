@@ -749,7 +749,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-9>
 
-### Step 9: Keybinding dispatcher
+### Step 9: Keybinding dispatcher [completed]
 
 - Component: dispatcher
 - Artifacts: `src/ui/layout/keybinding-dispatcher.ts` replacing `shortcuts.ts` (capture-phase listener on `document`, `MoreChordsNeeded` chord state with `chordPending` key and status message, five-second timer and blur exit, unrecognized-chord message, claimed-chord swallow, fall-through for unbound keys).

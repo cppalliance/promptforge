@@ -1,17 +1,18 @@
-// Unit test for the global zoom (src/ui/chrome/zoom.ts), its keybindings in
-// src/ui/layout/shortcuts.ts, and its Window menu entries in
-// src/ui/menu/window-menu.ts. Bundles the TS modules with esbuild into one
-// module graph - so the menu rows, the keydown listener, and the test all
+// Unit test for the global zoom (src/ui/chrome/zoom.ts) and its Window
+// menu entries in src/ui/menu/window-menu.ts. Bundles the TS modules
+// with esbuild into one
+// module graph - so the menu rows and the test all
 // share one zoom state - with "@tauri-apps/api/window" and
 // "@tauri-apps/api/webviewWindow" aliased to recording stubs in
 // test/helpers, and drives them against jsdom built from the real
 // index.html. Covers: the zoom math (0.1 steps, clamped to 0.5-2.0, reset
 // to 1.0), the browser fallback's CSS zoom application, persistence
 // across a reload, corrupt and out-of-range stored values falling back to
-// the default, a storage failure leaving the zoom applied and logged, the
-// Ctrl+= / Ctrl+Shift+= / Ctrl+- / Ctrl+0 keybindings,
+// the default, a storage failure leaving the zoom applied and logged,
 // the Window menu's zoom rows, and the desktop path routing zoom to the
-// native webview. Overlay anchoring at non-1.0 zoom is a visual check,
+// native webview. The Ctrl+= / Ctrl+Shift+= / Ctrl+- / Ctrl+0 keybinding
+// assertions moved to test/keybinding-dispatcher.mjs with the dispatcher.
+// Overlay anchoring at non-1.0 zoom is a visual check,
 // deferred out of jsdom scope.
 // Run: node test/zoom.mjs
 import { readFile } from "node:fs/promises";
@@ -26,8 +27,6 @@ const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { installShortcuts } from "./src/ui/layout/shortcuts.ts";
-      export { register as registerChrome } from "./src/ui/chrome/index.ts";
       export { setupWindowMenus } from "./src/ui/menu/window-menu.ts";
       export {
         getZoom,
@@ -89,18 +88,8 @@ async function scenario({ desktop = false } = {}) {
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Node = window.Node;
   const module = await freshModule();
-  const press = (key, options = {}) => {
-    const event = new window.KeyboardEvent("keydown", {
-      key,
-      ctrlKey: true,
-      cancelable: true,
-      ...options,
-    });
-    window.document.dispatchEvent(event);
-    return event;
-  };
   const webviewZooms = () => window.__TAURI_WEBVIEW_STUB__?.zooms ?? [];
-  return { window, module, press, webviewZooms };
+  return { window, module, webviewZooms };
 }
 
 // --- Zoom math: 0.1 steps, clamped to 0.5-2.0, reset to 1.0 ----------------
@@ -200,39 +189,6 @@ async function scenario({ desktop = false } = {}) {
     window.document.documentElement.style.zoom === "1.1",
   );
   check("a storage failure is logged", errors.length === 1);
-}
-
-// --- Keybindings: Ctrl+= / Ctrl+Shift+= / Ctrl+- / Ctrl+0 --------------------
-
-{
-  const { module, press } = await scenario();
-  // The zoom keybindings dispatch to the chrome.* commands, which the
-  // chrome directory's register() installs (main.ts calls it at boot).
-  module.registerChrome();
-  const uninstall = module.installShortcuts({});
-  let event = press("=");
-  check("Ctrl+= zooms in", module.getZoom() === 1.1);
-  check("Ctrl+= is consumed", event.defaultPrevented === true);
-  // The shifted plus key reports "+" and must beat the handler's Shift
-  // early-return.
-  event = press("+", { shiftKey: true });
-  check("Ctrl+Shift+= zooms in through the shifted + key", module.getZoom() === 1.2);
-  check("Ctrl+Shift+= is consumed", event.defaultPrevented === true);
-  press("-");
-  check("Ctrl+- zooms out", module.getZoom() === 1.1);
-  press("0");
-  check("Ctrl+0 resets the zoom", module.getZoom() === 1);
-  event = press("Unidentified", { code: "Equal" });
-  check("the main keyboard Equal code zooms in", module.getZoom() === 1.1);
-  check("the Equal code is consumed", event.defaultPrevented === true);
-  event = press("Unidentified", { code: "Minus" });
-  check("the main keyboard Minus code zooms out", module.getZoom() === 1);
-  check("the Minus code is consumed", event.defaultPrevented === true);
-  press("=", { altKey: true });
-  check("an Alt chord is not a zoom binding", module.getZoom() === 1);
-  uninstall.dispose();
-  press("=");
-  check("disposing uninstalls the keydown listener", module.getZoom() === 1);
 }
 
 // --- Window menu: zoom rows dispatch the shared commands ---------------------
