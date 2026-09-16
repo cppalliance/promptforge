@@ -204,10 +204,85 @@ export class EditorPanel extends WorkshopPart {
     }
   }
 
+  /**
+   * Save As: writes the live text to a new path and retargets the panel
+   * onto it - the tab title, the conflict token, and the saved baseline
+   * all move to the new file, and an untitled buffer becomes a file
+   * editor. The picker and the parent-directory grant are the caller's
+   * job (the files contribution). Failures paint the error bar; a
+   * conflict offers the reload/overwrite dialog, same as save().
+   */
+  async saveAs(path: string): Promise<void> {
+    if (this.saving) {
+      return;
+    }
+    this.saving = true;
+    try {
+      // The text is captured once, as in save(): the write and the saved
+      // baseline must agree.
+      const text = this.surface.text();
+      const written = await this.writer()(path, text, null);
+      this.path = path;
+      this.untitled = false;
+      this.title = baseName(path);
+      this.token = written.token;
+      this.surface.markSaved(text);
+      this.updateTitle();
+      getServiceOrNull(RECENT_FILES_STORE)?.add(path);
+    } catch (error: unknown) {
+      if (isModifiedConflict(error)) {
+        this.showConflictDialog();
+      } else {
+        this.showError(error);
+      }
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  /**
+   * Revert File: reloads the on-disk text. A dirty panel prompts first -
+   * reverting discards its unsaved changes; a clean panel reloads
+   * immediately; an untitled buffer has no on-disk text and ignores the
+   * command.
+   */
+  requestRevert(): void {
+    const path = this.path;
+    if (path === null) {
+      return;
+    }
+    if (!this.surface.isDirty()) {
+      void this.load(path).catch((error: unknown) => {
+        this.showError(error);
+      });
+      return;
+    }
+    this._register(
+      showPanelDialog({
+        host: this.element,
+        classPrefix: "ws-editor-revert",
+        titleId: "editor-revert-title",
+        title: "Revert file",
+        message: `${this.title} has unsaved changes. Reverting to the on-disk text discards them.`,
+        buttons: [
+          {
+            label: "Revert",
+            danger: true,
+            run: () => {
+              void this.load(path).catch((error: unknown) => {
+                this.showError(error);
+              });
+            },
+          },
+          { label: "Cancel", run: () => undefined },
+        ],
+      }),
+    );
+  }
+
   private reader(): (path: string) => Promise<WorkspaceFile> {
     return this.deps.readFile ?? fetchFile;
   }
-
   private writer(): (
     path: string,
     text: string,

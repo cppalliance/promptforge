@@ -11,7 +11,6 @@
 // native folder picker in the desktop app, through a typed-path dialog in
 // a plain browser.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import type { GroupPanelPartInitParameters } from "dockview";
 
 import { toDisposable } from "../../base/lifecycle";
@@ -20,9 +19,9 @@ import { DOCK, resolvePanelContent } from "../../services/panel-registry";
 import { getService } from "../../services/service-registry";
 import { TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
-import { grantPath, WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
+import { addFolderToWorkspace } from "../workspace/add-folder";
+import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
 import { DropdownMenu } from "shared-ui/dropdown";
-import { showPanelDialog } from "../editor/editor-dialog";
 import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../shared/icons";
 import { openInZone, panelIdFor } from "./zones";
 
@@ -301,55 +300,15 @@ export class WorkshopTreePanel extends WorkshopPart {
   }
 
   /**
-   * Starts the Add Folder flow. In the desktop app the native folder
-   * picker answers with the chosen path (a cancel answers nothing); in a
-   * plain browser, where no picker and no OS paths exist, a dialog asks
-   * for the path as text.
+   * Starts the Add Folder flow: the native picker in the desktop app, a
+   * typed-path dialog in a plain browser. The flow lives in the
+   * workspace feature's add-folder module, shared with the File menu's
+   * Open Folder and Add Folder to Workspace rows; the panel owns the
+   * dialog's dismissal with its own lifetime.
    */
   private addFolder(): void {
-    if (window.__TAURI_INTERNALS__ !== undefined) {
-      void this.pickFolder();
-      return;
-    }
     this.dialog?.dispose();
-    this.dialog = showPanelDialog({
-      host: this.element,
-      classPrefix: "ws-workspace-add",
-      titleId: "workspace-add-title",
-      title: "Add Folder to Workspace",
-      message: "Enter the full path of a folder to browse in the Workshop.",
-      field: { id: "workspace-add-path", label: "Folder path" },
-      buttons: [
-        {
-          label: "Add",
-          requiresValue: true,
-          run: (value) => {
-            void this.grantFolder(value);
-          },
-        },
-        { label: "Cancel", run: () => undefined },
-      ],
-    });
-  }
-
-  /** The desktop pick: the native dialog; a cancel resolves null. */
-  private async pickFolder(): Promise<void> {
-    const picked = await open({ directory: true, title: "Add Folder to Workspace" });
-    if (picked === null) {
-      return;
-    }
-    await this.grantFolder(picked);
-  }
-
-  /** Grants one folder and announces the outcome, like the drop flow. */
-  private async grantFolder(path: string): Promise<void> {
-    const result = await grantPath(path);
-    if (!result.ok) {
-      this.statusBar?.showLocal(`Could not add ${path}: ${result.error.message}`, "error");
-      return;
-    }
-    this.statusBar?.showLocal(`Added ${path} to the Workshop`, "info");
-    window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+    this.dialog = addFolderToWorkspace(this.element, this.statusBar);
   }
 
   /** Revokes one granted root and announces the outcome. */

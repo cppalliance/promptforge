@@ -826,7 +826,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-16>
 
-### Step 16: File pickers and file actions
+### Step 16: File pickers and file actions [completed]
 
 - Component: files
 - Artifacts: `src/ui/workspace/files.contribution.ts` (`openFile`, `openFolder`, `addRootFolder`, `saveAs`, `saveAll` with sequential `for...of`, `revert` with the dirty prompt), the tree's `addFolder` flow lifted into a shared function, browser-mode typed-path fallback.
