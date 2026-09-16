@@ -496,7 +496,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-7>
 
-### Step 7: `Workspace` backing integration
+### Step 7: `Workspace` backing integration [completed]
 
 - Component: `workspace-file`
 - Piece: integration

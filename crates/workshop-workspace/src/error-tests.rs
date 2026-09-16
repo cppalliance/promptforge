@@ -112,6 +112,51 @@ fn workspace_failures_keep_their_wire_mapping() {
     }
 }
 
+/// The file-backed failures map to their own statuses and codes: a
+/// refused file is the client's mistake, a taken path is a conflict,
+/// and everything else is the server's problem.
+#[test]
+fn workspace_file_failures_map_to_their_wire_codes() {
+    let refused = WorkspaceError::from(WorkspaceFileError::UnsupportedVersion {
+        found: "2".to_string(),
+        supported: "1",
+    });
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(refused.code(), "workspace_file_refused");
+    assert_eq!(
+        render_message(&refused, false),
+        "workspace file version 2 is unsupported; this build supports version 1",
+        "the required-versus-actual text reaches production bodies"
+    );
+
+    let alien = WorkspaceError::from(WorkspaceFileError::NotAWorkspace {
+        path: std::path::PathBuf::from("alien.pfwork"),
+    });
+    assert_eq!(alien.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(alien.code(), "workspace_file_refused");
+
+    let taken = WorkspaceError::from(WorkspaceFileError::Io {
+        source: io::Error::new(io::ErrorKind::AlreadyExists, "taken"),
+    });
+    assert_eq!(taken.status(), StatusCode::CONFLICT);
+    assert_eq!(taken.code(), "workspace_file_taken");
+
+    let missing = WorkspaceError::from(WorkspaceFileError::Io {
+        source: io::Error::new(io::ErrorKind::NotFound, "missing"),
+    });
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(missing.code(), "not_found");
+
+    let closed = WorkspaceError::from(WorkspaceFileError::Closed);
+    assert_eq!(closed.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(closed.code(), "workspace_file_failed");
+    assert_eq!(
+        render_message(&closed, true),
+        "workspace file operation failed: workspace file is closed",
+        "debug bodies still chain the file failure"
+    );
+}
+
 #[tokio::test]
 async fn the_json_envelope_carries_message_code_and_content_type() {
     let response = WorkspaceError::OutsideGrants.into_response();

@@ -14,8 +14,10 @@
 //!   prefix-matched against the canonical grants before any filesystem
 //!   operation, so traversal, symlink escapes, and UNC aliases cannot
 //!   reach outside a grant.
-//! - Grants live in memory for the running process only - profile
-//!   persistence is a separate future consent decision.
+//! - The in-memory grant set is the confinement source of truth; an
+//!   optional workspace file (a single Turso database) mirrors it between
+//!   sessions and is never consulted on a request path. A persist that
+//!   fails is logged degradation; the in-memory state stands.
 //! - The crate maps its own [`WorkspaceError`] to the wire envelope at
 //!   its route boundary; no shell error type appears here.
 
@@ -23,16 +25,12 @@ mod error;
 mod handlers;
 pub mod handles;
 mod workspace;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired into the Workspace backing by the steps that follow"
-    )
-)]
 mod workspace_file;
 
 pub use error::WorkspaceError;
 pub use handlers::routes;
 pub use handles::register;
-pub use workspace::{EntryKind, FileContents, TreeEntry, TreeListing, Workspace};
+pub use workspace::{
+    EntryKind, FileContents, GrantEntry, TreeEntry, TreeListing, Workspace, WorkspaceSummary,
+};
+pub use workspace_file::{WindowState, WorkspaceFileError};

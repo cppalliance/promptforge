@@ -24,6 +24,7 @@ mod actor;
 #[path = "workspace_file-siblings.rs"]
 mod siblings;
 
+pub(crate) use actor::now_rfc3339;
 use actor::{COMMAND_QUEUE_DEPTH, Command, SCHEMA_V1};
 use siblings::{copy_siblings, plan_siblings, remove_sibling};
 
@@ -47,9 +48,14 @@ pub(crate) const SUPPORTED_VERSION: &str = "1";
 /// [`SUPPORTED_VERSION`] as the pragma integer.
 const SUPPORTED_USER_VERSION: i64 = 1;
 
-/// A workspace-file operation failure.
+/// A workspace-file operation failure. Public because [`WorkspaceError`]
+/// wraps it at the route boundary; nothing outside the crate constructs
+/// one.
+///
+/// [`WorkspaceError`]: crate::WorkspaceError
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum WorkspaceFileError {
+#[non_exhaustive]
+pub enum WorkspaceFileError {
     /// The path could not be handed to the database engine, or does
     /// not name a usable file.
     #[error("workspace file path cannot be used")]
@@ -121,18 +127,18 @@ pub(crate) struct GrantRow {
 }
 
 /// The kv 'window' value: the shell's saved geometry.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct WindowState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowState {
     /// Logical width.
-    pub(crate) width: u32,
+    pub width: u32,
     /// Logical height.
-    pub(crate) height: u32,
+    pub height: u32,
     /// Logical x position.
-    pub(crate) x: i32,
+    pub x: i32,
     /// Logical y position.
-    pub(crate) y: i32,
+    pub y: i32,
     /// Whether the window is maximized.
-    pub(crate) maximized: bool,
+    pub maximized: bool,
 }
 
 /// A handle to an open workspace file: a clone-cheap sender into the
@@ -417,7 +423,7 @@ fn is_not_a_database(error: &WorkspaceFileError) -> bool {
 }
 
 /// The file stem of `path`, the display name a file falls back to.
-fn stem_of(path: &Path) -> String {
+pub(crate) fn stem_of(path: &Path) -> String {
     path.file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default()

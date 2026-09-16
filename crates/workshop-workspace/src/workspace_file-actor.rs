@@ -297,7 +297,7 @@ fn window_json(state: &WindowState) -> String {
 }
 
 /// The current time as RFC 3339 in UTC, whole seconds.
-fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     humantime::format_rfc3339_seconds(SystemTime::now()).to_string()
 }
 

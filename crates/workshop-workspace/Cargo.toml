@@ -8,6 +8,12 @@ repository.workspace = true
 
 description = "Workshop workspace subsystem: the jailed filesystem behind /workspace/* - directory trees, file reads, and file writes confined to granted roots"
 
+[features]
+default = []
+# Exposes test seams (`Workspace::close_backing_for_test`) to the
+# dependent crates' integration tests.
+test-fixtures = []
+
 [dependencies]
 axum.workspace = true
 dunce.workspace = true

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "workspace-tests-backing.rs"]
+mod backing;
+
 /// A workspace with one granted tempdir, returned alongside so the
 /// directory outlives the test.
 fn granted_dir() -> (Workspace, tempfile::TempDir) {

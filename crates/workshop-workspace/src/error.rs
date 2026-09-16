@@ -16,6 +16,8 @@ use axum::response::{IntoResponse, Response};
 
 use workshop_protocol::ErrorEnvelope;
 
+use crate::workspace_file::WorkspaceFileError;
+
 /// Whether wire bodies carry internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at
 /// the variant's own message.
@@ -122,24 +124,77 @@ pub enum WorkspaceError {
     /// The on-disk conflict token does not match the writer's token.
     #[error("file changed on disk since it was read")]
     ModifiedConflict,
+
+    /// A workspace file was refused: not a PromptForge workspace, or one
+    /// at a schema version this build does not read. The message is the
+    /// refusal's own required-versus-actual text.
+    #[non_exhaustive]
+    #[error(transparent)]
+    WorkspaceFileRefused {
+        /// The refusal.
+        source: WorkspaceFileError,
+    },
+
+    /// A save-as or duplicate named a path that already exists.
+    #[error("workspace file path is already taken; a path with no file at it is required")]
+    WorkspaceFileTaken,
+
+    /// The workspace file could not be read, written, or copied.
+    #[non_exhaustive]
+    #[error("workspace file operation failed")]
+    WorkspaceFileFailed {
+        /// The underlying file failure.
+        #[source]
+        source: WorkspaceFileError,
+    },
+}
+
+impl From<WorkspaceFileError> for WorkspaceError {
+    /// Sorts a file failure into the wire shape the client can act on: a
+    /// missing file is the ordinary not-found, a taken path a conflict,
+    /// a refused stamp the client's mistake, and the rest the server's.
+    fn from(source: WorkspaceFileError) -> Self {
+        match source {
+            WorkspaceFileError::NotAWorkspace { .. }
+            | WorkspaceFileError::UnsupportedVersion { .. } => {
+                Self::WorkspaceFileRefused { source }
+            }
+            WorkspaceFileError::Io { source: ref cause }
+                if cause.kind() == io::ErrorKind::NotFound =>
+            {
+                Self::NotFound
+            }
+            WorkspaceFileError::Io { source: ref cause }
+                if cause.kind() == io::ErrorKind::AlreadyExists =>
+            {
+                Self::WorkspaceFileTaken
+            }
+            WorkspaceFileError::Io { .. }
+            | WorkspaceFileError::Database { .. }
+            | WorkspaceFileError::Closed => Self::WorkspaceFileFailed { source },
+        }
+    }
 }
 
 impl WorkspaceError {
     /// The one HTTP status this failure answers with.
     pub(crate) fn status(&self) -> StatusCode {
         match self {
-            Self::NotADirectory | Self::NotAFile => StatusCode::BAD_REQUEST,
+            Self::NotADirectory | Self::NotAFile | Self::WorkspaceFileRefused { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::OutsideGrants | Self::ForbiddenComponent => StatusCode::FORBIDDEN,
             Self::NotFound | Self::NotGranted => StatusCode::NOT_FOUND,
             Self::BinaryFile | Self::NotUtf8 => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::FileTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
-            Self::ModifiedConflict => StatusCode::CONFLICT,
+            Self::ModifiedConflict | Self::WorkspaceFileTaken => StatusCode::CONFLICT,
             Self::ResolveGrant { .. }
             | Self::ResolvePath { .. }
             | Self::InspectPath { .. }
             | Self::ListDirectory { .. }
             | Self::ReadFile { .. }
-            | Self::WriteFile { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            | Self::WriteFile { .. }
+            | Self::WorkspaceFileFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -162,6 +217,9 @@ impl WorkspaceError {
             Self::NotUtf8 => "not_utf8",
             Self::FileTooLarge { .. } => "file_too_large",
             Self::ModifiedConflict => "modified_conflict",
+            Self::WorkspaceFileRefused { .. } => "workspace_file_refused",
+            Self::WorkspaceFileTaken => "workspace_file_taken",
+            Self::WorkspaceFileFailed { .. } => "workspace_file_failed",
         }
     }
 }

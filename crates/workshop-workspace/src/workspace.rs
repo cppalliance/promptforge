@@ -2,8 +2,9 @@
 //! file writes jailed to roots explicitly granted through drag and drop.
 //!
 //! A dropped folder becomes a granted root; a dropped file grants its parent
-//! directory. Grants live in memory for the running process only - profile
-//! persistence is a separate future consent decision. Every request path is
+//! directory. The in-memory grant set is the confinement source of truth;
+//! an optional workspace file (the `backing` module) mirrors it between
+//! sessions and is never consulted on a request path. Every request path is
 //! checked lexically (no `..`, and on Windows no NTFS alternate data
 //! stream names) and then
 //! canonicalized and prefix-matched against the canonical grants before any
@@ -23,6 +24,12 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 
 use crate::error::WorkspaceError;
+
+#[path = "workspace-backing.rs"]
+mod backing;
+
+use backing::Backing;
+pub use backing::{GrantEntry, WorkspaceSummary};
 
 /// The largest file the workspace reads or accepts for a write: the editor
 /// targets source text, not media, so one MiB is generous.
@@ -81,24 +88,33 @@ pub struct FileContents {
     text: String,
 }
 
-/// The in-memory set of granted workspace roots.
+/// The workspace: the granted roots and the optional backing file.
 ///
-/// Cloning shares the same grant set, so the router state and every handler
-/// see grants registered through `POST /workspace/grant` immediately.
+/// Cloning shares the same state, so the router state and every handler
+/// see grants registered through `POST /workspace/grant` immediately. The
+/// grant set is the confinement source of truth; the backing file, when
+/// present, is its persistent mirror and is swapped at runtime by open,
+/// save-as, and duplicate.
 #[derive(Debug, Clone, Default)]
 pub struct Workspace {
+    /// The granted roots, in canonical form. Read-hot: its own lock.
     grants: Arc<RwLock<BTreeSet<PathBuf>>>,
+    /// The backing workspace file; `None` while the workspace is
+    /// ephemeral.
+    backing: Arc<RwLock<Option<Backing>>>,
 }
 
 impl Workspace {
-    /// Creates a workspace with no grants.
+    /// Creates an ephemeral workspace with no grants and no file.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers `path` as a granted root: a directory grants itself, a
-    /// file grants its parent directory.
+    /// Registers `path` as a granted root in memory only: a directory
+    /// grants itself, a file grants its parent directory. Handlers use
+    /// [`Workspace::grant_and_persist`], which also mirrors the grant into
+    /// the backing file.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::ForbiddenComponent`] when the path carries
@@ -124,7 +140,8 @@ impl Workspace {
         Ok(root)
     }
 
-    /// Removes `path` from the granted roots by exact canonical match.
+    /// Removes `path` from the granted roots in memory only, by exact
+    /// canonical match; handlers use [`Workspace::revoke_and_persist`].
     /// A root deleted from disk stays revocable by the literal stored
     /// key. Nested grants are independent: revoking a parent leaves a
     /// separately granted child intact, and files under the child stay

@@ -127,26 +127,30 @@ pub(crate) async fn write_file(
     ))
 }
 
-/// Registers a dropped path as a granted root for this process.
+/// Registers a dropped path as a granted root, mirrored into the open
+/// workspace file when there is one.
 pub(crate) async fn grant(
     State(workspace): State<Workspace>,
     Json(body): Json<GrantRequest>,
 ) -> Response {
     respond(
         workspace
-            .grant(Path::new(&body.path))
+            .grant_and_persist(Path::new(&body.path))
+            .await
             .map(|granted| GrantResponse { granted }),
     )
 }
 
-/// Removes a granted root; paths under it fail their next operation.
+/// Removes a granted root, mirrored into the open workspace file when
+/// there is one; paths under it fail their next operation.
 pub(crate) async fn revoke(
     State(workspace): State<Workspace>,
     Json(body): Json<RevokeRequest>,
 ) -> Response {
     respond(
         workspace
-            .revoke(Path::new(&body.path))
+            .revoke_and_persist(Path::new(&body.path))
+            .await
             .map(|revoked| RevokeResponse { revoked }),
     )
 }
