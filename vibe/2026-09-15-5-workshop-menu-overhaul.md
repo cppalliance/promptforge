@@ -672,7 +672,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-2>
 
-### Step 2: Keybinding parser, resolver, and registry
+### Step 2: Keybinding parser, resolver, and registry [completed]
 
 - Component: services
 - Artifacts: `src/services/keybinding-parser.ts` (`parseKeybinding`, `Chord`, `ctrlcmd` token, `event.code` mapping), `src/services/keybinding-resolver.ts` (`KeybindingResolver.resolve`, `hasRuleForChord`), `src/services/keybinding-registry.ts` (`KeybindingsRegistry.registerKeybindingRule`, `KeybindingWeight`, `lookupKeybinding` with per-platform `getLabel()`).
