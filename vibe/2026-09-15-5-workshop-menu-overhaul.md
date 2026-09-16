@@ -542,7 +542,7 @@ flowchart LR
   - Files (`ui/workspace/`): the pickers and file actions per the catalog; the tree's `addFolder` flow lifts from `WorkshopTreePanel` into a function the tree and the actions share; `MenuRegistry.setProvider(MenuId.MenubarRecentMenu, ...)` for the dynamic rows; registers the `""` provider.
   - chrome / layout / status / agent / gateway contributions per the catalog; layout's `toggleAuxiliaryBar` hides and shows the agent zone's dockview group through `group.api.setVisible(...)` so the panel's session socket survives - the panel is never removed.
 - File and public API changes:
-  - Moved: `ui/menu/command-registry.ts` and `ui/menu/menu-registry.ts` to `services/` (same names); one-line re-export shims remain at the old paths until the closing sweep removes them.
+  - Moved: `ui/menu/command-registry.ts` and `ui/menu/menu-registry.ts` to `services/` (same names). The legacy implementations remain at the old paths as the compatibility layer - re-export shims are infeasible because the shapes changed while `menu-renderer.ts`, `window-menu.ts`, and two feature `index.ts` files still consume the old API; the closing sweep deletes the legacy files once no consumer remains.
   - New under `services/`: `context-key-service.ts`, `context-key-expr.ts`, `keybinding-parser.ts`, `keybinding-resolver.ts`, `keybinding-registry.ts`, `action-registry.ts`, `quick-access-registry.ts`, `recent-files-store.ts`, `text-control-service.ts`.
   - New under `ui/`: `menu/menubar.ts`, `menu/menu.ts`, `menu/menubar.contribution.ts`, `menu/stubs.contribution.ts`, `menu/edit.contribution.ts`, `layout/keybinding-dispatcher.ts`, `quickinput/quick-input.ts`, `quickinput/quick-input.css`, `chrome/command-center.ts`, `workbench.contributions.ts`, and one `<feature>.contribution.ts` per feature (editor, workspace, chrome, layout, status, agent, gateway).
   - Deleted (moved to `cabinet/_trash/`): `ui/menu/menu-renderer.ts`, `ui/menu/window-menu.ts`, `ui/layout/shortcuts.ts`. `setupWindowMenus` survives as a thin bootstrap in `ui/menu/index.ts` that imports `workbench.contributions.ts` and starts the menubar, so tests keep one entry point.
@@ -580,7 +580,7 @@ Registries and resolvers get jsdom-free unit tests; widgets and contributions ge
   - The lazy chunk split must hold: `lazy-css-entry-bundle.mjs` and `lazy-panel-sizing.mjs` are the guards; the registries in `services/` must not pull CodeMirror, dockview, or tiptap into the initial bundle, and contribution files must not import them at module scope.
   - `editor-save-race.mjs` and `editor-idioms.mjs` pin the save and conflict paths the untitled-buffer work touches; they must pass unmodified or be updated with the reason recorded.
   - No CSP relaxation; the existing CSP test in `promptforge/crates/workshop-server/src/csp.rs` passes unchanged.
-- Exit criteria: full suite, `npm run typecheck`, and `npm run build` green; manual verification in the desktop shell (the `workshop` crate, `promptforge/crates/workshop/`) on macOS and Linux of cut/copy/paste/undo in an editor, the agent prompt, and a native input, plus one chord and one flyout; on macOS, the traffic lights overlay the title bar's left inset with no native title bar and no duplicate controls; `noUncheckedIndexedAccess` enabled in `promptforge/crates/workshop-server/ui/tsconfig.json` with fallout fixed; the re-export shims and `shortcuts.ts` removed; `ui/AGENTS.md` updated (registries in `services/`, VS Code command ids and context-key names, `registerAction`, the stub table, no `export *` in `index.ts`); the spec's acceptance criteria demonstrated.
+- Exit criteria: full suite, `npm run typecheck`, and `npm run build` green; manual verification in the desktop shell (the `workshop` crate, `promptforge/crates/workshop/`) on macOS and Linux of cut/copy/paste/undo in an editor, the agent prompt, and a native input, plus one chord and one flyout; on macOS, the traffic lights overlay the title bar's left inset with no native title bar and no duplicate controls; `noUncheckedIndexedAccess` enabled in `promptforge/crates/workshop-server/ui/tsconfig.json` with fallout fixed; the legacy `ui/menu` registry files and `shortcuts.ts` removed; `ui/AGENTS.md` updated (registries in `services/`, VS Code command ids and context-key names, `registerAction`, the stub table, no `export *` in `index.ts`); the spec's acceptance criteria demonstrated.
 
 </verification-contract>
 <decision-record>
@@ -716,7 +716,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-6>
 
-### Step 6: Recent-files store and text-control service
+### Step 6: Recent-files store and text-control service [completed]
 
 - Component: services
 - Artifacts: `src/services/recent-files-store.ts` (`RecentFilesStore`, localStorage with hand-written shape check) and `src/services/text-control-service.ts` (`TextControl` interface, `register`, `active`, the document `focusin` tracker lifted from `window-menu.ts`, binding `inputFocus`/`editorTextFocus`/`textInputFocus`).
@@ -906,9 +906,9 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 ### Step 23: Shim removal and noUncheckedIndexedAccess
 
 - Component: sweep
-- Artifacts: the `services/` re-export shims and `shortcuts.ts` removed (to `cabinet/_trash/`), `noUncheckedIndexedAccess` enabled in `tsconfig.json`, fallout fixed.
+- Artifacts: the legacy `ui/menu/command-registry.ts` and `ui/menu/menu-registry.ts` files and `shortcuts.ts` removed (to `cabinet/_trash/`), `noUncheckedIndexedAccess` enabled in `tsconfig.json`, fallout fixed.
 - Tests: full suite, `npm run typecheck`, `npm run build` green; bundle guards `lazy-css-entry-bundle.mjs` and `lazy-panel-sizing.mjs` prove the chunk split.
-- Placement reason: sweep component; depends on all components so no consumer of a shim remains.
+- Placement reason: sweep component; depends on all components so no consumer of the legacy registries remains.
 
 </step-23>
 
