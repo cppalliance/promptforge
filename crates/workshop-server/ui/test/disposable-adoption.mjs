@@ -2,7 +2,7 @@
 // workshop components register their listeners, subscriptions, and timers
 // through the lifecycle primitives, so one root dispose() severs them all.
 // Bundles the TS modules with esbuild and drives them against jsdom built
-// from the real index.html. Covers: setupWindowMenus releasing its
+// from the real index.html. Covers: the Menubar releasing its
 // document-level listeners and popovers, EditorPanel disposing its surface
 // child and dirty subscription, StatusBar cancelling its LED decay timer,
 // and PermanentTab dropping its title subscription (emitter delivery
@@ -26,10 +26,13 @@ const bundle = await esbuild.build({
     contents: `
       export { DisposableStore } from "./src/base/lifecycle.ts";
       export { Emitter } from "./src/base/event.ts";
-      export { ModelService } from "./src/services/model-service.ts";
       export { WorkshopSocket } from "./src/services/workshop-socket.ts";
+      export { CommandRegistry } from "./src/services/command-registry.ts";
+      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
+      export { ContextKeyService } from "./src/services/context-key-service.ts";
+      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
       export { StatusBar } from "./src/ui/status/status-bar.ts";
-      export { setupWindowMenus } from "./src/ui/menu/window-menu.ts";
+      export { Menubar } from "./src/ui/menu/menubar.ts";
       export { EditorPanel } from "./src/ui/editor/editor-panel.ts";
       export { createPanelTabComponent, PERMANENT_TAB } from "./src/ui/layout/panel-types.ts";
     `,
@@ -63,10 +66,14 @@ await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   DisposableStore,
   Emitter,
-  ModelService,
   WorkshopSocket,
+  CommandRegistry,
+  MenuRegistry,
+  MenuId,
+  ContextKeyService,
+  createKeybindingsRegistry,
   StatusBar,
-  setupWindowMenus,
+  Menubar,
   EditorPanel,
   createPanelTabComponent,
   PERMANENT_TAB,
@@ -106,27 +113,29 @@ window.document.removeEventListener = (type, listener, options) => {
   realRemoveEventListener(type, listener, options);
 };
 
-// --- setupWindowMenus: document listeners and popovers ----------------------
+// --- Menubar: document listeners and popovers -----------------------------
 
 const baselineListeners = liveDocListeners.size;
-const menus = root.add(
-  setupWindowMenus({
-    agents: { newAgent: () => {} },
-    workshop: { toggleWorkshopPanel: () => {} },
-    modelMenu: new ModelService(() => true),
+const menuRegistry = new MenuRegistry();
+const commandRegistry = new CommandRegistry();
+commandRegistry.register("file.new", { title: "New File", run: () => {} });
+menuRegistry.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/file", title: "File", order: 1 });
+menuRegistry.appendMenuItem("menubar/file", { command: "file.new" });
+root.add(
+  new Menubar(window.document.querySelector(".ws-window-titlebar__menus"), {
+    menus: menuRegistry,
+    commands: commandRegistry,
+    contextKeys: new ContextKeyService(),
+    keybindings: createKeybindingsRegistry("linux"),
   }),
 );
-check("menu setup registers document-level listeners", liveDocListeners.size > baselineListeners);
-check(
-  "menu setup still returns the shared command set",
-  typeof menus.newAgent === "function" && typeof menus.showAbout === "function",
-);
+check("the menubar registers a document-level listener", liveDocListeners.size > baselineListeners);
 const fileButton = window.document.querySelector('[data-menu="file"]');
 fileButton.click();
-const filePopover = fileButton.nextElementSibling;
+const filePopover = window.document.querySelector(".ws-window-titlebar__popover");
 check("the File menu opens before disposal", filePopover !== null && filePopover.hidden === false);
-fileButton.click();
-check("the File menu closes again before disposal", filePopover.hidden === true);
+// The menu stays open into the disposal below: the open popover's own
+// document listeners (keydown, outside pointer) must release with it.
 
 // --- EditorPanel: surface child and dirty subscription ----------------------
 

@@ -7,11 +7,9 @@
 // pointer, window blur).
 //
 // data-menu carries the menu id's last segment, so the selectors the
-// tests and the legacy renderer key on ("file", "edit", ...) survive
-// the move from static markup to generated buttons. The shipped nav is
-// empty; appendMenubarButtons is also how the legacy window-menu.ts
-// composition root fills it until the composition-root step retires
-// that file.
+// tests key on ("file", "edit", ...) survive the move from static markup
+// to generated buttons. The shipped nav is empty; the menu feature's
+// bootstrap (ui/menu/index.ts) fills it through this generator at boot.
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { MenuId, Menus, type SubmenuItem } from "../../services/menu-registry";

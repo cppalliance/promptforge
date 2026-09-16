@@ -10,23 +10,26 @@ import { createToastStack } from "shared-ui/toast";
 
 import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService, MODEL_SERVICE } from "./services/model-service";
-import { registerService } from "./services/service-registry";
+import { getService, registerService } from "./services/service-registry";
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
+import { TEXT_CONTROL_SERVICE } from "./services/text-control-service";
 import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
-import { executeCommand } from "./ui/menu/command-registry";
 import { register as registerChrome } from "./ui/chrome/index";
+import { CommandCenter } from "./ui/chrome/command-center";
+import { EDITOR_SETTINGS_SERVICE } from "./ui/editor/editor-settings-service";
 import { setupGatewayConfigBridge } from "./ui/gateway/gateway-config-bridge";
 import { StatusBar, STATUS_BAR } from "./ui/status/status-bar";
 import { UpdateView } from "./ui/chrome/update-view";
 import { setupWindowChrome } from "./ui/chrome/window-chrome";
-import { setupWindowMenus, type ModelMenuService, type ProfileMenuService } from "./ui/menu/window-menu";
+import { setupWindowMenus } from "./ui/menu/index";
+import { KeybindingDispatcher } from "./ui/layout/keybinding-dispatcher";
+import { QuickInputService, QUICK_INPUT_SERVICE } from "./ui/quickinput/quick-input";
 import { setupWorkspaceDrops } from "./ui/workspace/workspace-drops";
 import { restoreZoom } from "./ui/chrome/zoom";
 import { restoreLayout, startLayoutPersistence } from "./ui/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./ui/layout/panel-types";
-import { installShortcuts } from "./ui/layout/shortcuts";
 import { initZones, openInZone } from "./ui/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
@@ -73,17 +76,19 @@ disposables.add(setupGatewayConfigBridge({ statusBar }));
 const workshopSocket = disposables.add(new WorkshopSocket());
 
 // The model catalog and selection live in the ModelService, not module
-// state: the title-bar Model menu receives the service through its
-// constructor and observes its change events. Selecting a model is a
+// state: the agent toolbar's picker resolves the service from the
+// registry and observes its change events. Selecting a model is a
 // command the socket carries to the server; the selection itself changes
-// only when a workbench snapshot arrives.
+// only when a workbench snapshot arrives. The service subscribes itself
+// to the socket's catalog push, so a gateway returning after an outage
+// heals a boot-time empty catalog in place.
 const modelService = disposables.add(
-  new ModelService((id) => workshopSocket.selectModel(id)),
+  new ModelService((id) => workshopSocket.selectModel(id), workshopSocket.onModels),
 );
 
 // The rest of the server-owned workbench state - profiles, switch
 // progress, chat gating - lives in the WorkbenchService, fed from the
-// same snapshots. The Model menu's Profiles section reads it below.
+// same snapshots.
 const workbenchService = disposables.add(new WorkbenchService());
 const speechCapture = new SpeechCaptureService();
 
@@ -94,6 +99,28 @@ const speechCapture = new SpeechCaptureService();
 registerService(STATUS_BAR, () => statusBar);
 registerService(MODEL_SERVICE, () => modelService);
 registerService(SPEECH_CAPTURE, () => speechCapture);
+
+// The focus-tracking and editor-settings services resolve at boot so the
+// inputFocus/editorTextFocus/textInputFocus and config.editor.* context
+// keys exist from first paint; both self-register with default factories,
+// and the settings module stays CodeMirror-free so the lazy chunk split
+// holds.
+disposables.add(getService(TEXT_CONTROL_SERVICE));
+disposables.add(getService(EDITOR_SETTINGS_SERVICE));
+
+// The quick input widget: one instance for the page lifetime, registered
+// for the quick-access actions (Command Palette, Go to File, Go to Line)
+// to resolve at call time. Its panel anchors under the title bar.
+const quickInput = disposables.add(new QuickInputService());
+registerService(QUICK_INPUT_SERVICE, () => quickInput);
+
+// The command center: the title bar's center drag region hosts the pill
+// (search icon, window title, quick-access chevron) as a no-drag child.
+const titleCenter = document.querySelector<HTMLElement>(".ws-window-titlebar__center");
+if (!titleCenter) {
+  throw new Error("DOM Error: .ws-window-titlebar__center not found in the page.");
+}
+disposables.add(new CommandCenter(titleCenter));
 
 // The eager directories' registrations: chrome's zoom commands. The lazy
 // directories register through the panel registry when their chunks load.
@@ -143,85 +170,17 @@ if (!restoreLayout(dock)) {
 openInZone("tree", {});
 openInZone("agent", {});
 disposables.add(startLayoutPersistence(dock));
-disposables.add(installShortcuts());
+// The keybinding dispatcher owns every registered chord: one
+// capture-phase listener resolving through the keybinding registry the
+// contributions populate.
+disposables.add(new KeybindingDispatcher());
 
-// The Model menu's Profiles section: a thin view over the workbench
-// snapshots the server pushes. Switching is a command on the socket -
-// progress and failure arrive back as server status frames, so the only
-// local message is for the failure the server can never report: the
-// socket is down and nothing went out.
-const profileMenu: ProfileMenuService = {
-  get profiles() {
-    return workbenchService.snapshot.profiles;
-  },
-  get active() {
-    return workbenchService.snapshot.active ?? "";
-  },
-  get switching() {
-    return workbenchService.snapshot.switching ?? "";
-  },
-  get switchInFlight() {
-    return workbenchService.snapshot.switchInFlight;
-  },
-  onDidChange: workbenchService.onDidChangeSnapshot,
-  switchTo(name: string | null): void {
-    if (!workshopSocket.switchProfile(name)) {
-      const target = name === null ? "no profile" : name;
-      statusBar.showLocal(`Could not switch to ${target}: the workshop socket is down`, "error");
-    }
-  },
-};
-
-// The Model menu's catalog section: a thin view over the model service.
-// Selecting a model is a command on the socket - the confirmed selection
-// arrives back in a workbench snapshot - so, exactly as with a profile
-// switch above, the only local message is for the failure the server can
-// never report: the socket is down and nothing went out.
-const modelMenu: ModelMenuService = {
-  get models() {
-    return modelService.models;
-  },
-  get current() {
-    return modelService.current;
-  },
-  setCurrent(id: string): void {
-    if (!modelService.setCurrent(id)) {
-      statusBar.showLocal(`Could not select ${id}: the workshop socket is down`, "error");
-    }
-  },
-};
-
-const openNewAgent = (): void => {
-  openInZone("agent", { instance: window.crypto.randomUUID() });
-};
-
-// The title-bar menus dispatch through the command and menu registries;
-// the keyboard shortcuts call the same registered commands. The Model
-// menu reads the model service's catalog and writes the selection back
-// into it, and its Profiles section reads the workbench service through
-// the profileMenu view above. Each New Agent command creates a separate
-// panel, socket, and modal server session in the right zone.
-disposables.add(
-  setupWindowMenus({
-    agents: {
-      newAgent: openNewAgent,
-    },
-    workshop: {
-      toggleWorkshopPanel: () => executeCommand("workshop.togglePanel"),
-      openGatewayConfig: () => {
-        openInZone("config", {});
-      },
-      openAgentSession: openNewAgent,
-    },
-    modelMenu,
-    profileMenu,
-    updates,
-  }),
-);
-
-// A pushed catalog means the gateway returned after an outage; refresh the
-// catalog state in place so a boot-time failure heals itself.
-disposables.add(workshopSocket.onModels((models) => modelService.setModels(models)));
+// The title-bar menus dispatch through the command and menu registries
+// the contribution surface populates (imported by the menu bootstrap at
+// module scope); the keyboard chords reach the same commands through the
+// dispatcher. The bar generates its buttons from the MenubarMainMenu
+// submenu rows.
+disposables.add(setupWindowMenus());
 
 // The server-owned selection and the rest of the workbench state arrive
 // in the same snapshot: the model service takes the selection, the

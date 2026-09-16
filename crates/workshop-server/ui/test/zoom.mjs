@@ -1,6 +1,7 @@
-// Unit test for the global zoom (src/ui/chrome/zoom.ts) and its Window
-// menu entries in src/ui/menu/window-menu.ts. Bundles the TS modules
-// with esbuild into one
+// Unit test for the global zoom (src/ui/chrome/zoom.ts) and its menu
+// rows, registered by the chrome contribution
+// (src/ui/chrome/chrome.contribution.ts) into View > Appearance. Bundles
+// the TS modules with esbuild into one
 // module graph - so the menu rows and the test all
 // share one zoom state - with "@tauri-apps/api/window" and
 // "@tauri-apps/api/webviewWindow" aliased to recording stubs in
@@ -9,9 +10,10 @@
 // to 1.0), the browser fallback's CSS zoom application, persistence
 // across a reload, corrupt and out-of-range stored values falling back to
 // the default, a storage failure leaving the zoom applied and logged,
-// the Window menu's zoom rows, and the desktop path routing zoom to the
-// native webview. The Ctrl+= / Ctrl+Shift+= / Ctrl+- / Ctrl+0 keybinding
-// assertions moved to test/keybinding-dispatcher.mjs with the dispatcher.
+// the Appearance flyout's zoom rows with their shortcut hints, and the
+// desktop path routing zoom to the native webview. The Ctrl+= /
+// Ctrl+Shift+= / Ctrl+- / Ctrl+NumPad0 / Ctrl+0 keybinding assertions
+// live in test/gateway-config-menu.mjs with the dispatcher.
 // Overlay anchoring at non-1.0 zoom is a visual check,
 // deferred out of jsdom scope.
 // Run: node test/zoom.mjs
@@ -27,7 +29,8 @@ const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { setupWindowMenus } from "./src/ui/menu/window-menu.ts";
+      import "./src/ui/chrome/chrome.contribution.ts";
+      export { Menu } from "./src/ui/menu/menu.ts";
       export {
         getZoom,
         restoreZoom,
@@ -191,55 +194,46 @@ async function scenario({ desktop = false } = {}) {
   check("a storage failure is logged", errors.length === 1);
 }
 
-// --- Window menu: zoom rows dispatch the shared commands ---------------------
+// --- Appearance flyout: the zoom rows dispatch the registered actions --------
 
 {
   const { window, module } = await scenario();
-  const commands = module.setupWindowMenus({
-    agents: { newAgent: () => {} },
-    workshop: {
-      toggleWorkshopPanel: () => {},
-      openGatewayConfig: () => {},
-      openAgentSession: () => {},
-    },
-  });
-  check(
-    "the shared command set exposes the zoom commands",
-    typeof commands.zoomIn === "function" &&
-      typeof commands.zoomOut === "function" &&
-      typeof commands.resetZoom === "function",
-  );
-  const windowButton = window.document.querySelector('[data-menu="window"]');
-  const popover = windowButton.nextElementSibling;
-  const itemByLabel = (label) =>
-    [...popover.querySelectorAll(".ws-window-titlebar__item")].find(
+  const anchor = window.document.createElement("button");
+  anchor.type = "button";
+  window.document.body.appendChild(anchor);
+  const menu = new module.Menu();
+  const popover = () =>
+    [...window.document.querySelectorAll(".ws-window-titlebar__popover")].find((el) => !el.hidden);
+  const rowByLabel = (label) =>
+    [...popover().querySelectorAll(":scope > .ws-window-titlebar__item")].find(
       (item) => item.querySelector(".ws-window-titlebar__item-label").textContent === label,
     );
-  windowButton.click();
-  const zoomInRow = itemByLabel("Zoom In");
-  const zoomOutRow = itemByLabel("Zoom Out");
-  const resetRow = itemByLabel("Reset Zoom");
+  menu.open("menubar/view/appearance", anchor);
+  const zoomInRow = rowByLabel("Zoom In");
+  const zoomOutRow = rowByLabel("Zoom Out");
+  const resetRow = rowByLabel("Reset Zoom");
   check(
-    "the Window menu lists the zoom commands",
+    "the Appearance flyout lists the zoom rows",
     zoomInRow !== undefined && zoomOutRow !== undefined && resetRow !== undefined,
   );
   check(
     "the zoom rows show their shortcut hints",
     zoomInRow?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+=" &&
       zoomOutRow?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+-" &&
-      resetRow?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+0",
+      resetRow?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+NumPad0",
   );
   zoomInRow.click();
   check("the menu's Zoom In zooms in", module.getZoom() === 1.1);
-  check("running Zoom In closes the menu", popover.hidden === true);
-  windowButton.click();
-  itemByLabel("Zoom Out").click();
+  check("running Zoom In closes the menu", popover() === undefined);
+  menu.open("menubar/view/appearance", anchor);
+  rowByLabel("Zoom Out").click();
   check("the menu's Zoom Out zooms out", module.getZoom() === 1);
-  windowButton.click();
-  itemByLabel("Zoom In").click();
-  windowButton.click();
-  itemByLabel("Reset Zoom").click();
+  menu.open("menubar/view/appearance", anchor);
+  rowByLabel("Zoom In").click();
+  menu.open("menubar/view/appearance", anchor);
+  rowByLabel("Reset Zoom").click();
   check("the menu's Reset Zoom returns to 100%", module.getZoom() === 1);
+  menu.dispose();
 }
 
 // --- Desktop: viewport-aware zoom routes through the native webview -----------

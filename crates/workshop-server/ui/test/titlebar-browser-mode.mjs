@@ -4,9 +4,10 @@
 // into the Tauri window API - the whole test runs with no
 // __TAURI_INTERNALS__ defined, so a passing run proves the menu path needs
 // no desktop bridge.
-// Covers the <header> landmark, the program icon's attributes, the five
-// menus and their popovers (File opens and announces aria-expanded), the
-// drag region, and the window-control cluster's buttons and glyphs.
+// Covers the <header> landmark, the program icon's attributes, the eight
+// generated menus (File opens and announces aria-expanded; the popover is
+// built lazily at open), the drag region, and the window-control
+// cluster's buttons and glyphs.
 // Run: node test/titlebar-browser-mode.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
@@ -50,21 +51,24 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
     const menuLabels = [...titlebar.querySelectorAll(".ws-window-titlebar__menu")].map(
       (button) => button.textContent,
     );
-    if (menuLabels.join(",") !== "File,Edit,Model,Window,Help") {
-      failures.push(`title bar menus are "${menuLabels.join(",")}", expected "File,Edit,Model,Window,Help"`);
+    if (menuLabels.join(",") !== "File,Edit,Selection,View,Go,Run,Terminal,Help") {
+      failures.push(
+        `title bar menus are "${menuLabels.join(",")}", expected "File,Edit,Selection,View,Go,Run,Terminal,Help"`,
+      );
     }
     for (const button of titlebar.querySelectorAll(".ws-window-titlebar__menu")) {
       if (button.tagName !== "BUTTON") failures.push("a title bar menu is not a <button>");
     }
-    const popovers = titlebar.querySelectorAll(".ws-window-titlebar__popover");
-    if (popovers.length !== 5) {
-      failures.push(`browser mode built ${popovers.length} menu popovers, expected 5`);
+    if (document.querySelectorAll(".ws-window-titlebar__popover").length !== 0) {
+      failures.push("the menubar must build its popovers lazily, not at boot");
     }
     const fileButton = titlebar.querySelector('[data-menu="file"]');
     if (fileButton) {
       fileButton.click();
-      const filePopover = fileButton.nextElementSibling;
-      if (!filePopover || !filePopover.classList.contains("ws-window-titlebar__popover") || filePopover.hidden) {
+      const filePopover = [...document.querySelectorAll(".ws-window-titlebar__popover")].find(
+        (popover) => !popover.hidden,
+      );
+      if (!filePopover) {
         failures.push("clicking the File menu button does not open its popover in browser mode");
       }
       if (fileButton.getAttribute("aria-expanded") !== "true") {

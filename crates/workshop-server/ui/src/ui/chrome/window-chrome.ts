@@ -71,7 +71,7 @@ export function toggleFullScreen(): void {
  * only inside the desktop app; in a browser the control cluster is
  * hidden instead, since the commands would have no window to reach.
  * The menu buttons are wired to their popovers by `setupWindowMenus` in
- * window-menu.ts. Returns the disposable owning every listener wired here.
+ * ui/menu/index.ts. Returns the disposable owning every listener wired here.
  */
 export function setupWindowChrome(): IDisposable {
   const store = new DisposableStore();

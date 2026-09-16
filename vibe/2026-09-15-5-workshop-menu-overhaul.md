@@ -881,11 +881,11 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-21>
 
-### Step 21: Composition root and main.ts cleanup
+### Step 21: Composition root and main.ts cleanup [completed]
 
 - Component: shell
 - Artifacts: `src/ui/workbench.contributions.ts` (flat side-effect imports), `window-menu.ts` moved to `cabinet/_trash/` with `setupWindowMenus` surviving as a thin bootstrap in `ui/menu/index.ts`, `main.ts` cleanup (drop `modelMenu`/`profileMenu`/`ModelMenuService`/`ProfileMenuService` and the `onModels` wiring; import `workbench.contributions.ts`; resolve `TEXT_CONTROL_SERVICE` and `EDITOR_SETTINGS_SERVICE` at boot so the `inputFocus`/`editorTextFocus`/`textInputFocus` and `config.editor.*` keys exist from first paint - the settings module must stay CodeMirror-free so the lazy chunk split holds, and the bundle guards prove it), the `export *` strip in every touched feature `index.ts`.
-- Tests: `model-select-socket-down.mjs` and `models-push-refresh.mjs` re-pointed at the agent toolbar's model picker or moved to `cabinet/_trash/`; full suite green.
+- Tests: `models-push-refresh.mjs` re-pointed at the agent toolbar's model picker; `model-select-socket-down.mjs` moved to `cabinet/_trash/` (its pinned status-bar surfacing behavior no longer exists) and `profile-switch-in-flight.mjs` likewise; the focused suites are the rewritten `models-push-refresh.mjs`, `window-menu.mjs`, `zoom.mjs`, `disposable-adoption.mjs`, and `titlebar-browser-mode.mjs`; full suite green.
 - Placement reason: removes the old entry point, so every row's action must already exist (steps 13-20).
 
 </step-21>

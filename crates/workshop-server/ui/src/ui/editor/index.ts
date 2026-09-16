@@ -1,8 +1,6 @@
-// editor feature directory barrel: re-exports the directory's public API.
-export * from "./editor-commands";
-export * from "./editor-dialog";
-export * from "./editor-panel";
-export * from "./editor-surface";
+// The editor feature's entry point: register() is the panel registry's
+// activation hook. Importers point at the source files directly; this
+// module re-exports nothing.
 
 import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { DOCK, registerPanelFactory } from "../../services/panel-registry";

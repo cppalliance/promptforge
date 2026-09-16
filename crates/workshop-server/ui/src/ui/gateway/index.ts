@@ -1,6 +1,6 @@
-// gateway feature directory barrel: re-exports the directory's public API.
-export * from "./gateway-config-bridge";
-export * from "./gateway-config-panel";
+// The gateway feature's entry point: register() is the panel registry's
+// activation hook. Importers point at the source files directly; this
+// module re-exports nothing.
 
 import type { IDisposable } from "../../base/lifecycle";
 import { registerPanelFactory } from "../../services/panel-registry";

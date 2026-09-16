@@ -1,9 +1,6 @@
-// layout feature directory barrel: re-exports the directory's public API.
-export * from "./layout-persistence";
-export * from "./panel-types";
-export * from "./shortcuts";
-export * from "./workshop-panel";
-export * from "./zones";
+// The layout feature's entry point: register() is the panel registry's
+// activation hook. Importers point at the source files directly; this
+// module re-exports nothing.
 
 import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";

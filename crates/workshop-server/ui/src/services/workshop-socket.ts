@@ -1,7 +1,8 @@
 // The persistent workshop socket: one WebSocket to /ws carries the
 // server's downstream JSON - unsolicited status, catalog, and workbench
-// pushes - and the inbound Model-menu events (select_model,
-// switch_profile). Chat itself rides the /agents/ws socket
+// pushes - and the inbound selection events (select_model,
+// switch_profile) the agent toolbar's picker and future profile surfaces
+// send. Chat rides the /agents/ws socket
 // (agent-socket.ts); this connection carries no chat frames. The frame
 // shapes themselves live in protocol.ts.
 

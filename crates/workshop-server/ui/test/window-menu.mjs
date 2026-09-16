@@ -1,18 +1,15 @@
 // Unit test for the menubar (src/ui/menu/menubar.ts) composing the menu
-// popover widget (src/ui/menu/menu.ts) over the services registries, and
-// for the legacy composition root (src/ui/menu/window-menu.ts), which
-// fills the shipped empty nav through the menubar's button generator
-// until the composition-root step retires it. Bundles the TS modules
-// with esbuild - with "@tauri-apps/api/window" aliased to the recording
-// stub in test/helpers - and drives them against jsdom built from the
-// real index.html. Covers: button generation in registry sort order,
-// click toggle, one-menu-at-a-time, rollover, ArrowLeft/Right between
-// menus with flyout navigation yielding to the widget, Escape, outside
-// pointer and blur dismissal, disabled rows and context-key rebuilds,
-// command dispatch with shortcut hints, and disposal; then the legacy
-// setupWindowMenus over the generated nav: the five buttons, New Agent
-// dispatch, Edit target preservation, the Model menu's catalog rows,
-// the About dialog's focus trap, and teardown.
+// popover widget (src/ui/menu/menu.ts) over the services registries.
+// Bundles the TS modules with esbuild - with "@tauri-apps/api/window"
+// aliased to the recording stub in test/helpers - and drives them
+// against jsdom built from the real index.html. Covers: button
+// generation in registry sort order, click toggle, one-menu-at-a-time,
+// rollover, ArrowLeft/Right between menus with flyout navigation
+// yielding to the widget, Escape, outside pointer and blur dismissal,
+// disabled rows and context-key rebuilds, command dispatch with
+// shortcut hints, and disposal. The composition-root bootstrap
+// (src/ui/menu/index.ts) is covered end-to-end by the boot tests
+// (titlebar-browser-mode.mjs).
 // Run: node --test test/window-menu.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -53,9 +50,6 @@ const { Menubar, CommandRegistry, MenuRegistry, MenuId, ContextKeyService, creat
     export { ContextKeyService } from "./src/services/context-key-service.ts";
     export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
   `);
-const { setupWindowMenus } = await bundle(`export { setupWindowMenus } from "./src/ui/menu/window-menu.ts";`);
-const { ModelService } = await bundle(`export { ModelService } from "./src/services/model-service.ts";`);
-
 const failures = [];
 function check(name, condition) {
   if (!condition) failures.push(name);
@@ -293,132 +287,6 @@ function rowByLabelSafe(popovers, label) {
   );
   fileButton.click();
   check("a disposed bar's button no longer opens anything", popovers().length === 0);
-}
-
-// --- Legacy bridge: setupWindowMenus over the generated nav ----------------------------------
-// Until the composition-root step retires window-menu.ts, the shipped
-// boot keeps the legacy renderer; its buttons come from the menubar's
-// generator, so the empty nav and the data-menu selectors both hold.
-
-function legacyScenario({ modelMenu } = {}) {
-  const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
-  const { window } = dom;
-  window.__TAURI_INTERNALS__ = {};
-  installGlobals(window);
-  const execCalls = [];
-  window.document.execCommand = (command) => {
-    execCalls.push(command);
-    return true;
-  };
-  let agentsOpened = 0;
-  const commands = setupWindowMenus({
-    agents: {
-      newAgent: () => {
-        agentsOpened += 1;
-      },
-    },
-    workshop: {
-      toggleWorkshopPanel: () => {},
-      openGatewayConfig: () => {},
-      openAgentSession: () => {},
-    },
-    modelMenu,
-  });
-  const button = (id) => window.document.querySelector(`.ws-window-titlebar__menu[data-menu="${id}"]`);
-  const popoverOf = (id) => button(id).nextElementSibling;
-  const itemsOf = (id) => [...popoverOf(id).querySelectorAll(".ws-window-titlebar__item")];
-  const itemByLabel = (id, label) =>
-    itemsOf(id).find((item) => item.querySelector(".ws-window-titlebar__item-label").textContent === label);
-  const isOpen = (id) => !popoverOf(id).hidden;
-  return { window, commands, button, popoverOf, itemsOf, itemByLabel, isOpen, execCalls, agentsOpened: () => agentsOpened };
-}
-
-{
-  const { window, button, popoverOf, itemByLabel, isOpen, agentsOpened } = legacyScenario();
-  const labels = [...window.document.querySelectorAll(".ws-window-titlebar__menu")].map((b) => b.textContent);
-  check(
-    "the legacy setup generates the five buttons into the empty nav",
-    labels.join(",") === "File,Edit,Model,Window,Help",
-  );
-  check(
-    "the legacy renderer attaches its popover to the generated button",
-    popoverOf("file")?.classList.contains("ws-window-titlebar__popover") === true,
-  );
-  button("file").click();
-  check("the File menu opens", isOpen("file"));
-  itemByLabel("file", "New Agent").click();
-  check("New Agent dispatches through the agent surface", agentsOpened() === 1);
-  check("running a command closes the menu", !isOpen("file"));
-}
-
-{
-  const { window, button, itemsOf, itemByLabel, isOpen, execCalls } = legacyScenario();
-  button("edit").click();
-  check(
-    "edit commands are announced disabled with no target",
-    itemsOf("edit").every((item) => item.getAttribute("aria-disabled") === "true"),
-  );
-  itemByLabel("edit", "Undo").click();
-  check("a disabled command cannot run", execCalls.length === 0 && isOpen("edit"));
-  button("edit").click();
-  check("clicking the open menu's button closes it", !isOpen("edit"));
-
-  const textarea = window.document.createElement("textarea");
-  window.document.body.appendChild(textarea);
-  textarea.focus();
-  button("edit").click();
-  itemByLabel("edit", "Paste").click();
-  check("Paste dispatches execCommand with a focused editable", execCalls.join(",") === "paste");
-  check("the command restores focus to the preserved target", window.document.activeElement === textarea);
-}
-
-{
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }, { id: "beta" }]);
-  modelMenu.applySelected("alpha");
-  const { button, itemsOf, isOpen } = legacyScenario({ modelMenu });
-  button("model").click();
-  const rows = itemsOf("model");
-  check(
-    "the Model menu lists the catalog with the selection checked",
-    isOpen("model") &&
-      rows.length === 2 &&
-      rows[0].getAttribute("aria-checked") === "true" &&
-      rows[1].getAttribute("aria-checked") === "false",
-  );
-}
-
-{
-  const { window, button, itemByLabel, isOpen } = legacyScenario();
-  button("help").focus();
-  button("help").click();
-  itemByLabel("help", "About PromptForge").click();
-  check("running About closes the menu", !isOpen("help"));
-  const dialog = window.document.querySelector(".ws-about-dialog");
-  check("the About dialog opens as a modal dialog", dialog !== null && dialog.getAttribute("role") === "dialog" && dialog.getAttribute("aria-modal") === "true");
-  if (dialog) {
-    check(
-      "the version line renders the build-time define",
-      dialog.querySelector(".ws-about-dialog__line").textContent === "Version 0.0.0-test",
-    );
-    const close = dialog.querySelector(".ws-about-dialog__close");
-    check("focus moves into the dialog", window.document.activeElement === close);
-    window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
-    check("Tab stays trapped inside the dialog", window.document.activeElement === close);
-    window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    check("Escape dismisses the dialog", !window.document.querySelector(".ws-about-dialog"));
-    check("dismissal returns focus to the invoker", window.document.activeElement === button("help"));
-  }
-}
-
-{
-  const { window, commands } = legacyScenario();
-  commands.dispose();
-  check(
-    "disposing the legacy setup removes popovers and generated buttons",
-    window.document.querySelectorAll(".ws-window-titlebar__popover").length === 0 &&
-      window.document.querySelectorAll(".ws-window-titlebar__menu").length === 0,
-  );
 }
 
 if (failures.length > 0) {

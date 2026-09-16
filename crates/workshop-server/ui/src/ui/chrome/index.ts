@@ -1,10 +1,6 @@
-// chrome feature directory barrel: re-exports the directory's public API.
-export * from "./about-dialog";
-export * from "./model-picker-trigger";
-export * from "./token-ring";
-export * from "./update-view";
-export * from "./window-chrome";
-export * from "./zoom";
+// The chrome feature's entry point: register() is called by the
+// composition root at boot (chrome loads eagerly). Importers point at
+// the source files directly; this module re-exports nothing.
 
 import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { registerCommand } from "../menu/command-registry";
