@@ -89,8 +89,17 @@
   background: var(--bg-hover);
 }
 
+/* Disabled rows drop to the tertiary tier so they read as unavailable
+   next to a live row; the muted tier is too close to full text for that.
+   The row's shortcut and chevron dim with it, or a dim label would sit
+   beside a bright hint. */
+.ws-window-titlebar__item[aria-disabled="true"],
+.ws-window-titlebar__item[aria-disabled="true"] .ws-window-titlebar__shortcut,
+.ws-window-titlebar__item[aria-disabled="true"] .ws-window-titlebar__chevron {
+  color: var(--text-tertiary);
+}
+
 .ws-window-titlebar__item[aria-disabled="true"] {
-  color: var(--text-muted);
   cursor: default;
 }
 
