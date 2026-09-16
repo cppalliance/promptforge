@@ -447,7 +447,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-4>
 
-### Step 4: Turso dependency spike
+### Step 4: Turso dependency spike [completed]
 
 - Component: `workspace-file`
 - Piece: spike (gates Steps 5-13; on any failure stop and report options: alternative pin, `deny.toml` license entry, alternative crate)

@@ -102,6 +102,13 @@ humantime = "2"
 humantime-serde = "1"
 notify = "8"
 tempfile = "3"
+# Exact pin: turso is pre-1.0 and backs user-visible workspace files, so
+# upgrades are deliberate, reviewed changes rather than resolver drift.
+# default-features off: the `mimalloc` default installs a
+# `#[global_allocator]` from inside the library (process-global state and a
+# C build in a serve path), and `fts` is unused; the workspace schema is
+# three plain tables.
+turso = { version = "=0.7.2", default-features = false }
 time = { version = "0.3", features = ["formatting"] }
 hf-hub = { version = "1", features = ["blocking"] }
 safetensors = "0.8"

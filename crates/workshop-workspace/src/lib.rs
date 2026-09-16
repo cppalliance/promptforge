@@ -23,6 +23,7 @@ mod error;
 mod handlers;
 pub mod handles;
 mod workspace;
+mod workspace_file;
 
 pub use error::WorkspaceError;
 pub use handlers::routes;
