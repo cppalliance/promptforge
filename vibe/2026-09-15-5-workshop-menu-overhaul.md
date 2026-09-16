@@ -914,7 +914,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-24>
 
-### Step 24: Documentation and final gates
+### Step 24: Documentation and final gates [completed]
 
 - Component: sweep
 - Artifacts: `ui/AGENTS.md` updated (registries in `services/`, VS Code command ids and context-key names, `registerAction`, the stub table, no `export *` in `index.ts`) and the `PanelFeatureModule` doc comment in `panel-registry.ts` updated.

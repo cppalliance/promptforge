@@ -28,10 +28,16 @@ export type PanelType = "tree" | "editor" | "config" | "agent";
 
 /**
  * The contract a lazy feature directory's barrel (index.ts) satisfies.
- * register() installs the directory's panel factory, commands, menu
- * items, socket subscriptions, and keyboard shortcuts, and returns a
- * disposable the registry holds for the page lifetime. It may return a
- * promise when activation has async setup; the panel mounts after it
+ * register() installs what belongs to the chunk: the directory's panel
+ * factory, chunk-bound quick-access providers, and chunk-sourced
+ * context keys (the editor's activeEditor/editorLangId, which follow
+ * the dock). Actions, menu rows, and keybinding rules do not belong
+ * here - they live in the feature's eager <feature>.contribution.ts,
+ * registered into the shared registries at module scope through
+ * registerAction, because register() runs only when the chunk loads
+ * and the boot-time menus must render before that. register() returns
+ * a disposable the registry holds for the page lifetime. It may return
+ * a promise when activation has async setup; the panel mounts after it
  * resolves.
  */
 export interface PanelFeatureModule {

@@ -9,7 +9,7 @@
 // process exit code. Run after `npm run build`.
 // Export-only module: the node --test runner discovers every file under
 // test/, so running this file directly must (and does) exit 0.
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
@@ -265,10 +265,40 @@ export async function bootWorkbench(name, run) {
       // Idempotent: dist is not rebuilt between test runs, so a previous
       // run's appended export may already be there.
       if (!source.includes("__setDisposableTracker")) {
+        // Atomic append: node --test runs the boot tests concurrently, and
+        // a truncate-and-write would let a concurrent scanner read a
+        // partial chunk - missing the seam entirely, or worse, appending
+        // the export to truncated bytes and corrupting the chunk. Write a
+        // per-process temp file and rename it over the chunk so readers
+        // only ever see complete content.
+        const tempPath = `${scriptPath}.${process.pid}.tmp`;
         await writeFile(
-          scriptPath,
+          tempPath,
           `${source}\nexport function __setDisposableTracker(next) { ${trackerVar} = next; }\n`,
         );
+        // Windows: when two boot tests lose the scan race together, both
+        // rename over the chunk, and the loser's rename fails with EPERM
+        // while the winner's freshly replaced file is still held open.
+        // The append is idempotent, so a chunk that already carries the
+        // export satisfies every concurrent appender; only a chunk still
+        // missing the seam after the retries is a real failure.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await rename(tempPath, scriptPath);
+            break;
+          } catch (error) {
+            const current = await readFile(scriptPath, "utf8").catch(() => "");
+            if (current.includes("__setDisposableTracker")) {
+              await rm(tempPath, { force: true });
+              break;
+            }
+            if (error?.code !== "EPERM" || attempt >= 4) {
+              await rm(tempPath, { force: true });
+              throw error;
+            }
+            await sleep(50);
+          }
+        }
       }
       break;
     }
