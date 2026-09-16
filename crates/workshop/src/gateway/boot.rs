@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use shared_sidecar::{
+use shared_gateway_discovery::{
     GatewayDiscoveryFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
 };
 use workshop_server_api::Config;
@@ -76,14 +76,19 @@ pub(crate) fn ensure_gateway(config: &Config) -> anyhow::Result<GatewayAttachmen
                 .context("the executable has no parent directory")
         })?;
     let explicit = !config.gateway.base_url.is_empty();
-    let Some(run_dir) = shared_sidecar::default_run_dir() else {
+    let Some(run_dir) = shared_gateway_discovery::default_run_dir() else {
         return if explicit {
             Ok(GatewayAttachment::Config)
         } else {
             Err(no_gateway_error())
         };
     };
-    match plan_gateway(&run_dir, &exe_dir, explicit, shared_sidecar::resolve) {
+    match plan_gateway(
+        &run_dir,
+        &exe_dir,
+        explicit,
+        shared_gateway_discovery::resolve,
+    ) {
         GatewayPlan::Attach(file) => validated_attachment(file),
         GatewayPlan::ConfigOnly => Ok(GatewayAttachment::Config),
         GatewayPlan::Fail => Err(no_gateway_error()),
@@ -155,7 +160,7 @@ pub(super) fn no_gateway_error() -> anyhow::Error {
 
 /// Settles the launch race, launches once when elected, and attaches.
 fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<RecoveryLaunch> {
-    match shared_sidecar::launch_or_attach(run_dir, LAUNCH_TIMEOUT)
+    match shared_gateway_discovery::launch_or_attach(run_dir, LAUNCH_TIMEOUT)
         .context("settle the gateway launch race")?
     {
         LaunchDecision::Attach(file) => Ok(RecoveryLaunch::Attached(file)),
@@ -175,7 +180,7 @@ fn wait_for_launched_file(
     run_dir: &Path,
     timeout: Duration,
 ) -> anyhow::Result<GatewayDiscoveryFile> {
-    wait_for_launched_file_with(run_dir, timeout, shared_sidecar::resolve)
+    wait_for_launched_file_with(run_dir, timeout, shared_gateway_discovery::resolve)
 }
 
 /// Waits for readiness with resolution injected for deterministic tests.
@@ -192,7 +197,7 @@ where
         if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir) {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let url = format!("http://127.0.0.1:{}", file.port);
-            shared_sidecar::wait_for_health(&url, remaining)
+            shared_gateway_discovery::wait_for_health(&url, remaining)
                 .context("the launched gateway did not answer its health probe")?;
             if let Ok(Resolution::Attach(validated)) = resolve(run_dir) {
                 return Ok(validated);

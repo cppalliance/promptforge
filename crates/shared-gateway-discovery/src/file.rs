@@ -86,7 +86,7 @@ impl GatewayDiscoveryFile {
     /// # Examples
     /// ```
     /// # let dir = tempfile::tempdir()?;
-    /// let file = shared_sidecar::GatewayDiscoveryFile::read(dir.path())?;
+    /// let file = shared_gateway_discovery::GatewayDiscoveryFile::read(dir.path())?;
     /// assert!(file.is_none());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

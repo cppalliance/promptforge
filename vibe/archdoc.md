@@ -13,7 +13,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - store: run-scoped Store facade over the VFS layer, exposed as `vfs.store(&access)`; depends on: VFS layer
 - VFS layer: canonical paths, claims, routing, and memory and host backends (`shared-vfs`), plus the policy gate (`promptforge-vfs`); depends on: none
 - Lua VM boundary: sandbox and coroutine bridge between prompt code and host capabilities; depends on: gateway, store, shared substrate
-- shared substrate: cross-product progress, loopback discovery, protocol, and sidecar facilities; depends on: none
+- shared substrate: cross-product progress, loopback discovery, protocol, and gateway discovery facilities; depends on: none
 
 ## Invariants
 

@@ -51,8 +51,10 @@ fn spawn_at_ownership_rendezvous(
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        !shared_sidecar::gateway_discovery_file_path(&home.join(".promptforge").join("run"))
-            .exists(),
+        !shared_gateway_discovery::gateway_discovery_file_path(
+            &home.join(".promptforge").join("run")
+        )
+        .exists(),
         "neither process can acquire ownership or publish before release"
     );
     std::fs::write(&release, b"release").expect("release both ownership contenders");
@@ -63,7 +65,7 @@ fn spawn_at_ownership_rendezvous(
 fn assert_exactly_one_process_owns(
     first: &mut GatewayProcess,
     second: &mut GatewayProcess,
-    connection: &shared_sidecar::GatewayDiscoveryFile,
+    connection: &shared_gateway_discovery::GatewayDiscoveryFile,
 ) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
@@ -585,7 +587,7 @@ fn headless_serve_bookends_the_log_file() {
         .expect("the gateway binary spawns");
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let connection = loop {
-        if let Some(file) = shared_sidecar::GatewayDiscoveryFile::read(&run_dir)
+        if let Some(file) = shared_gateway_discovery::GatewayDiscoveryFile::read(&run_dir)
             .expect("read the gateway discovery file")
         {
             break file;
@@ -725,7 +727,7 @@ fn the_workshop_package_smoke_profile_boots_without_cli_arguments() {
         );
         std::thread::sleep(Duration::from_millis(25));
     }
-    let file = shared_sidecar::GatewayDiscoveryFile::read(&profile.join("run"))
+    let file = shared_gateway_discovery::GatewayDiscoveryFile::read(&profile.join("run"))
         .expect("read package connection")
         .expect("package connection exists");
     assert_eq!(
@@ -851,7 +853,7 @@ fn simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff() {
     let first_owns = assert_exactly_one_process_owns(&mut first, &mut second, &connection);
     assert_one_canonical_log(temp.path());
     assert!(
-        shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+        shared_gateway_discovery::GatewayInstanceLease::try_acquire(&run_dir)
             .expect("contend for the live Gateway's process lease")
             .is_none(),
         "the surviving process keeps its lease for its serving lifetime"
@@ -873,8 +875,8 @@ fn workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
     let run_dir = temp.path().join(".promptforge").join("run");
-    let shared_sidecar::LaunchDecision::Launch(workshop_lock) =
-        shared_sidecar::launch_or_attach(&run_dir, Duration::from_secs(5))
+    let shared_gateway_discovery::LaunchDecision::Launch(workshop_lock) =
+        shared_gateway_discovery::launch_or_attach(&run_dir, Duration::from_secs(5))
             .expect("Workshop wins the parent launch election")
     else {
         panic!("an empty run directory elects the Workshop launcher");
@@ -947,10 +949,10 @@ fn a_silent_process_lease_owner_causes_a_bounded_console_only_failure() {
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
     let log_path = logs.join("gateway.log");
     std::fs::write(&log_path, "owner-log-sentinel").expect("seed the owner's canonical log");
-    let _owner = shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+    let _owner = shared_gateway_discovery::GatewayInstanceLease::try_acquire(&run_dir)
         .expect("acquire the silent owner lease")
         .expect("the test owns the process lease");
-    let connection_path = shared_sidecar::gateway_discovery_file_path(&run_dir);
+    let connection_path = shared_gateway_discovery::gateway_discovery_file_path(&run_dir);
     std::fs::write(&connection_path, b"owner-is-still-publishing")
         .expect("seed an unreadable owner record");
 
@@ -993,7 +995,7 @@ fn a_connection_resolution_failure_is_console_only() {
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
     let log_path = logs.join("gateway.log");
     std::fs::write(&log_path, "owner-log-sentinel").expect("seed the canonical log");
-    let connection_path = shared_sidecar::gateway_discovery_file_path(&run_dir);
+    let connection_path = shared_gateway_discovery::gateway_discovery_file_path(&run_dir);
     std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
 
     let mut gateway = GatewayProcess::spawn(&config, temp.path());
@@ -1036,7 +1038,7 @@ fn a_direct_launch_recovers_the_lease_from_a_terminated_owner() {
     let first_connection = wait_for_connection(&run_dir, Duration::from_secs(30));
     assert_eq!(first_connection.pid, first.id());
     assert!(
-        shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+        shared_gateway_discovery::GatewayInstanceLease::try_acquire(&run_dir)
             .expect("contend for the first owner's process lease")
             .is_none(),
         "the first process owns the lifetime lease"
@@ -1046,7 +1048,7 @@ fn a_direct_launch_recovers_the_lease_from_a_terminated_owner() {
     let mut replacement = GatewayProcess::spawn(&config, temp.path());
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let replacement_connection = loop {
-        if let Some(connection) = shared_sidecar::GatewayDiscoveryFile::read(&run_dir)
+        if let Some(connection) = shared_gateway_discovery::GatewayDiscoveryFile::read(&run_dir)
             .expect("read replacement connection")
             && connection.pid == replacement.id()
         {

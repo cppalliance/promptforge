@@ -1,6 +1,6 @@
 //! Local Gateway attachment and validated process identity.
 
-use shared_sidecar::ValidatedConnection;
+use shared_gateway_discovery::ValidatedConnection;
 
 use super::supervisor::RecoveryCandidate;
 

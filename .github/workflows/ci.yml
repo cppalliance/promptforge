@@ -211,7 +211,7 @@ jobs:
 
       - name: Test Gateway process ownership races
         run: |
-          cargo test --locked -p shared-sidecar a_process_lifetime_lease_recovers_after_its_owner_is_terminated
+          cargo test --locked -p shared-gateway-discovery a_process_lifetime_lease_recovers_after_its_owner_is_terminated
           cargo test --locked -p gateway --no-default-features --features test-fixtures --test it simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff
           cargo test --locked -p gateway --no-default-features --features test-fixtures --test it workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot
           cargo test --locked -p gateway --no-default-features --features test-fixtures --test it a_direct_launch_recovers_the_lease_from_a_terminated_owner
@@ -275,7 +275,7 @@ jobs:
 
       - name: Test Gateway process ownership races
         run: |
-          cargo test --locked -p shared-sidecar a_process_lifetime_lease_recovers_after_its_owner_is_terminated
+          cargo test --locked -p shared-gateway-discovery a_process_lifetime_lease_recovers_after_its_owner_is_terminated
           cargo test --locked -p gateway --no-default-features --features test-fixtures --test it simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff
           cargo test --locked -p gateway --no-default-features --features test-fixtures --test it workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot
           cargo test --locked -p gateway --no-default-features --features test-fixtures --test it a_direct_launch_recovers_the_lease_from_a_terminated_owner

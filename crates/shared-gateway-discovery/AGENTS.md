@@ -1,6 +1,6 @@
-# shared-sidecar
+# shared-gateway-discovery
 
-This crate owns the shared Gateway discovery-file and sidecar lifecycle seam.
+This crate owns the shared Gateway discovery-file and lifecycle seam.
 
 - This is the only implementation of gateway-discovery-file discovery, atomic owner-only publication, shutdown removal, stale resolution, launch locking, health probing, and authenticated shutdown. Consumers do not reimplement those contracts.
 - Keep the crate synchronous and runtime-independent so a lean Gateway build can always use it.

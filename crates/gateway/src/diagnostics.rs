@@ -18,13 +18,15 @@ use std::path::{Path, PathBuf};
 /// would use (the profile location when nothing exists yet).
 #[must_use]
 pub fn diagnostics_json(explicit_config: Option<PathBuf>) -> String {
-    let run_dir = shared_sidecar::default_run_dir();
+    let run_dir = shared_gateway_discovery::default_run_dir();
     let state_dir = run_dir
         .as_deref()
         .and_then(Path::parent)
         .map(Path::to_path_buf);
     let config_path = crate::boot::discover_for_report(explicit_config);
-    let running = run_dir.as_deref().is_some_and(shared_sidecar::is_running);
+    let running = run_dir
+        .as_deref()
+        .is_some_and(shared_gateway_discovery::is_running);
     render(
         state_dir.as_deref(),
         config_path.as_deref(),
@@ -65,7 +67,7 @@ fn render(
     run_dir: Option<&Path>,
     running: bool,
 ) -> String {
-    let discovery_file = run_dir.map(shared_sidecar::gateway_discovery_file_path);
+    let discovery_file = run_dir.map(shared_gateway_discovery::gateway_discovery_file_path);
     let mut out = String::new();
     // Writing to a String is infallible, so each writeln's Result is
     // dropped on purpose.
@@ -193,7 +195,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).expect("run dir");
         // A live-looking gateway discovery file with a bearer key: the report
         // names the file but never reads its contents into the output.
-        shared_sidecar::GatewayDiscoveryFile {
+        shared_gateway_discovery::GatewayDiscoveryFile {
             port: 8081,
             api_key: "the-bearer-key".to_owned(),
             pid: 4242,

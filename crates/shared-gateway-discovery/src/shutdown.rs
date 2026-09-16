@@ -56,7 +56,7 @@ impl From<ProbeError> for ShutdownError {
 ///
 /// # Examples
 /// ```no_run
-/// # let file = shared_sidecar::GatewayDiscoveryFile {
+/// # let file = shared_gateway_discovery::GatewayDiscoveryFile {
 /// #     port: 8081,
 /// #     api_key: "secret".into(),
 /// #     pid: 42,
@@ -64,8 +64,8 @@ impl From<ProbeError> for ShutdownError {
 /// #     version: "0.2.0".into(),
 /// #     started_at: "2026-09-07T00:00:00Z".into(),
 /// # };
-/// let connection = shared_sidecar::ValidatedConnection::validate(file)?;
-/// shared_sidecar::request_shutdown(&connection)?;
+/// let connection = shared_gateway_discovery::ValidatedConnection::validate(file)?;
+/// shared_gateway_discovery::request_shutdown(&connection)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn request_shutdown(connection: &ValidatedConnection) -> Result<(), ShutdownError> {

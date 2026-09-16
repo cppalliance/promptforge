@@ -2068,9 +2068,9 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "shared-gateway-api",
+ "shared-gateway-discovery",
  "shared-loopback",
  "shared-progress",
- "shared-sidecar",
  "subtle",
  "sysinfo",
  "tempfile",
@@ -6100,6 +6100,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared-gateway-discovery"
+version = "0.3.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "shared-loopback"
 version = "0.3.0"
 dependencies = [
@@ -6130,18 +6142,6 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "shared-sidecar"
-version = "0.3.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8565,7 +8565,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde_json",
- "shared-sidecar",
+ "shared-gateway-discovery",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -8592,9 +8592,9 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "shared-gateway-discovery",
  "shared-progress",
  "shared-promptforge-api",
- "shared-sidecar",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -8654,10 +8654,10 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "shared-gateway-discovery",
  "shared-loopback",
  "shared-progress",
  "shared-promptforge-api",
- "shared-sidecar",
  "socket2",
  "tempfile",
  "thiserror 2.0.19",

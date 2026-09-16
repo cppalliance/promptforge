@@ -58,7 +58,7 @@ gateway-protocol.workspace = true
 shared-gateway-api.workspace = true
 # The gateway-discovery-file seam: gateway.json is written after every successful
 # bind, in every build, so the workshop can discover a running gateway.
-shared-sidecar.workspace = true
+shared-gateway-discovery.workspace = true
 gateway-routing.workspace = true
 # The serde feature wires the progress event stream onto HTTP.
 shared-progress = { workspace = true, features = ["serde"] }

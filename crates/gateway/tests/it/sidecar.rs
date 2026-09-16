@@ -47,7 +47,7 @@ fn spawn_writes_the_gateway_discovery_file_and_shutdown_removes_it() {
     let gateway = spawn(&options).expect("the gateway boots");
 
     // The file exists the moment spawn returns, carrying the real bind.
-    let file = shared_sidecar::GatewayDiscoveryFile::read(&run_dir)
+    let file = shared_gateway_discovery::GatewayDiscoveryFile::read(&run_dir)
         .expect("the gateway discovery file reads")
         .expect("the gateway discovery file exists after the bind");
     assert_eq!(file.pid, std::process::id());
@@ -62,12 +62,13 @@ fn spawn_writes_the_gateway_discovery_file_and_shutdown_removes_it() {
     assert_eq!(file.version, env!("CARGO_PKG_VERSION"));
     assert!(file.epoch > 0);
     // The file's parameters reach the live gateway.
-    shared_sidecar::wait_for_health(gateway.url(), Duration::from_secs(5))
+    shared_gateway_discovery::wait_for_health(gateway.url(), Duration::from_secs(5))
         .expect("the health endpoint answers through the file's port");
 
     gateway.shutdown().expect("clean shutdown");
     assert_eq!(
-        shared_sidecar::GatewayDiscoveryFile::read(&run_dir).expect("read after shutdown"),
+        shared_gateway_discovery::GatewayDiscoveryFile::read(&run_dir)
+            .expect("read after shutdown"),
         None,
         "a clean shutdown removes the gateway discovery file"
     );
@@ -116,7 +117,8 @@ fn post_shutdown_stops_the_gateway_and_removes_the_gateway_discovery_file() {
         .expect("the route's signal stopped the gateway thread")
         .expect("clean shutdown");
     assert_eq!(
-        shared_sidecar::GatewayDiscoveryFile::read(&run_dir).expect("read after shutdown"),
+        shared_gateway_discovery::GatewayDiscoveryFile::read(&run_dir)
+            .expect("read after shutdown"),
         None,
         "the route-driven shutdown removes the gateway discovery file"
     );

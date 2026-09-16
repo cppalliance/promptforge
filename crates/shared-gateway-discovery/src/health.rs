@@ -420,8 +420,8 @@ fn response_status(head: &str) -> Option<u16> {
 /// # Examples
 /// ```no_run
 /// # use std::time::Duration;
-/// shared_sidecar::wait_for_health("http://127.0.0.1:8081", Duration::from_secs(5))?;
-/// # Ok::<(), shared_sidecar::HealthError>(())
+/// shared_gateway_discovery::wait_for_health("http://127.0.0.1:8081", Duration::from_secs(5))?;
+/// # Ok::<(), shared_gateway_discovery::HealthError>(())
 /// ```
 pub fn wait_for_health(base_url: &str, timeout: Duration) -> Result<(), HealthError> {
     wait_for_health_cancellable_with(

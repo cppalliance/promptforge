@@ -29,7 +29,7 @@ pub(crate) enum Relaunch {
 #[non_exhaustive]
 pub enum GatewayStartup {
     /// This process owns the lifetime lease and may boot.
-    Boot(shared_sidecar::GatewayInstanceLease),
+    Boot(shared_gateway_discovery::GatewayInstanceLease),
     /// Another validated Gateway owns the lease, so this process hands off.
     OpenSettings(String),
 }
@@ -43,10 +43,10 @@ pub enum GatewayStartupError {
     NoRunDirectory,
     /// The operating-system lease could not be opened or attempted.
     #[error("establish Gateway process ownership")]
-    Lease(#[source] shared_sidecar::SidecarError),
+    Lease(#[source] shared_gateway_discovery::SidecarError),
     /// The lease holder could not resolve existing shared connection state.
     #[error("resolve existing Gateway connection before startup")]
-    Resolve(#[source] shared_sidecar::SidecarError),
+    Resolve(#[source] shared_gateway_discovery::SidecarError),
     /// The lease owner did not publish a validated record in time.
     #[error("the Gateway process owner published no validated connection within {timeout:?}")]
     #[non_exhaustive]
@@ -58,9 +58,9 @@ pub enum GatewayStartupError {
 
 /// Maps a gateway discovery file resolution to the relaunch decision. Only a
 /// fully live file hands off; `Absent` and every stale reason boot.
-pub(crate) fn decide(resolution: &shared_sidecar::Resolution) -> Relaunch {
+pub(crate) fn decide(resolution: &shared_gateway_discovery::Resolution) -> Relaunch {
     match resolution {
-        shared_sidecar::Resolution::Attach(file) => {
+        shared_gateway_discovery::Resolution::Attach(file) => {
             // The file carries the real port of the loopback bind; URLs
             // normalize to a literal 127.0.0.1, never localhost.
             Relaunch::OpenSettings(crate::handoff::auth_url(
@@ -72,7 +72,7 @@ pub(crate) fn decide(resolution: &shared_sidecar::Resolution) -> Relaunch {
     }
 }
 
-fn settings_url(connection: &shared_sidecar::ValidatedConnection) -> String {
+fn settings_url(connection: &shared_gateway_discovery::ValidatedConnection) -> String {
     crate::handoff::auth_url(
         &format!("http://127.0.0.1:{}", connection.port()),
         connection.api_key(),
@@ -98,14 +98,14 @@ pub fn settle_gateway_startup(
     let run_dir = options
         .run_dir
         .clone()
-        .or_else(shared_sidecar::default_run_dir)
+        .or_else(shared_gateway_discovery::default_run_dir)
         .ok_or(GatewayStartupError::NoRunDirectory)?;
-    match shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+    match shared_gateway_discovery::GatewayInstanceLease::try_acquire(&run_dir)
         .map_err(GatewayStartupError::Lease)?
     {
         Some(lease) => {
-            let resolution =
-                shared_sidecar::resolve(&run_dir).map_err(GatewayStartupError::Resolve)?;
+            let resolution = shared_gateway_discovery::resolve(&run_dir)
+                .map_err(GatewayStartupError::Resolve)?;
             match decide(&resolution) {
                 Relaunch::OpenSettings(url) => Ok(GatewayStartup::OpenSettings(url)),
                 Relaunch::Boot => Ok(GatewayStartup::Boot(lease)),
@@ -120,9 +120,10 @@ fn wait_for_owner(
     timeout: Duration,
 ) -> Result<GatewayStartup, GatewayStartupError> {
     wait_for_owner_with(timeout, |deadline| {
-        let connection = shared_sidecar::GatewayDiscoveryFile::read(run_dir).ok()??;
+        let connection = shared_gateway_discovery::GatewayDiscoveryFile::read(run_dir).ok()??;
         let validated =
-            shared_sidecar::ValidatedConnection::validate_before(connection, deadline).ok()?;
+            shared_gateway_discovery::ValidatedConnection::validate_before(connection, deadline)
+                .ok()?;
         Some(settings_url(&validated))
     })
 }
@@ -152,8 +153,8 @@ mod tests {
     use super::*;
 
     /// A gateway discovery file as a live gateway would write it.
-    fn live_file() -> shared_sidecar::GatewayDiscoveryFile {
-        shared_sidecar::GatewayDiscoveryFile {
+    fn live_file() -> shared_gateway_discovery::GatewayDiscoveryFile {
+        shared_gateway_discovery::GatewayDiscoveryFile {
             port: 8081,
             api_key: "abc123".to_owned(),
             pid: std::process::id(),
@@ -165,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_live_file_hands_off_its_settings_url() {
-        let decision = decide(&shared_sidecar::Resolution::Attach(live_file()));
+        let decision = decide(&shared_gateway_discovery::Resolution::Attach(live_file()));
         assert_eq!(
             decision,
             Relaunch::OpenSettings("http://127.0.0.1:8081/auth?key=abc123".to_owned()),
@@ -175,11 +176,11 @@ mod tests {
 
     #[test]
     fn a_live_file_with_a_query_special_key_encodes_the_url() {
-        let file = shared_sidecar::GatewayDiscoveryFile {
+        let file = shared_gateway_discovery::GatewayDiscoveryFile {
             api_key: "a&b=c d".to_owned(),
             ..live_file()
         };
-        let decision = decide(&shared_sidecar::Resolution::Attach(file));
+        let decision = decide(&shared_gateway_discovery::Resolution::Attach(file));
         assert_eq!(
             decision,
             Relaunch::OpenSettings("http://127.0.0.1:8081/auth?key=a%26b%3Dc+d".to_owned()),
@@ -189,16 +190,19 @@ mod tests {
 
     #[test]
     fn absent_and_stale_files_boot_normally() {
-        assert_eq!(decide(&shared_sidecar::Resolution::Absent), Relaunch::Boot);
+        assert_eq!(
+            decide(&shared_gateway_discovery::Resolution::Absent),
+            Relaunch::Boot
+        );
         for reason in [
-            shared_sidecar::StaleReason::Invalid,
-            shared_sidecar::StaleReason::ProcessDead,
-            shared_sidecar::StaleReason::ImageMismatch,
-            shared_sidecar::StaleReason::HealthFailed,
-            shared_sidecar::StaleReason::KeyRejected,
+            shared_gateway_discovery::StaleReason::Invalid,
+            shared_gateway_discovery::StaleReason::ProcessDead,
+            shared_gateway_discovery::StaleReason::ImageMismatch,
+            shared_gateway_discovery::StaleReason::HealthFailed,
+            shared_gateway_discovery::StaleReason::KeyRejected,
         ] {
             assert_eq!(
-                decide(&shared_sidecar::Resolution::Stale(reason)),
+                decide(&shared_gateway_discovery::Resolution::Stale(reason)),
                 Relaunch::Boot,
                 "stale ({reason:?}) boots rather than handing off"
             );
@@ -233,7 +237,7 @@ mod tests {
         let pid = child.id();
         child.wait().expect("the child exits");
         drop(child);
-        let file = shared_sidecar::GatewayDiscoveryFile { pid, ..live_file() };
+        let file = shared_gateway_discovery::GatewayDiscoveryFile { pid, ..live_file() };
         file.write_to(temp.path()).expect("write fixture");
         let options = ServeOptions::new(None, None::<crate::ProfileName>)
             .with_run_dir(temp.path().to_path_buf());
@@ -247,7 +251,7 @@ mod tests {
             "a stale file lets the lease holder boot"
         );
         assert!(
-            !shared_sidecar::gateway_discovery_file_path(temp.path()).exists(),
+            !shared_gateway_discovery::gateway_discovery_file_path(temp.path()).exists(),
             "the stale file was deleted so the boot rewrites it cleanly"
         );
     }
@@ -255,7 +259,7 @@ mod tests {
     #[test]
     fn a_connection_resolution_failure_stops_startup_with_its_source() {
         let temp = tempfile::TempDir::new().expect("tempdir");
-        let connection_path = shared_sidecar::gateway_discovery_file_path(temp.path());
+        let connection_path = shared_gateway_discovery::gateway_discovery_file_path(temp.path());
         std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
         let options = ServeOptions::new(None, None::<crate::ProfileName>)
             .with_run_dir(temp.path().to_path_buf());
@@ -266,7 +270,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                GatewayStartupError::Resolve(shared_sidecar::SidecarError::Read { .. })
+                GatewayStartupError::Resolve(shared_gateway_discovery::SidecarError::Read { .. })
             ),
             "the startup error preserves the connection read failure: {error:?}"
         );

@@ -316,10 +316,10 @@ pub(crate) async fn join_within<T>(handle: JoinHandle<T>) -> T {
 pub(crate) fn wait_for_connection(
     run_dir: &Path,
     timeout: Duration,
-) -> shared_sidecar::GatewayDiscoveryFile {
+) -> shared_gateway_discovery::GatewayDiscoveryFile {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(connection) = shared_sidecar::GatewayDiscoveryFile::read(run_dir)
+        if let Some(connection) = shared_gateway_discovery::GatewayDiscoveryFile::read(run_dir)
             .expect("read the gateway discovery file")
         {
             return connection;

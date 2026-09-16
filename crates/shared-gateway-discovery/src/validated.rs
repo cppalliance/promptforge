@@ -51,7 +51,7 @@ pub enum ValidationError {
 /// The bearer is deliberately absent from [`Debug`](fmt::Debug) output.
 ///
 /// ```compile_fail
-/// use shared_sidecar::ValidatedConnection;
+/// use shared_gateway_discovery::ValidatedConnection;
 ///
 /// let _raw = ValidatedConnection {
 ///     connection: panic!("external code cannot fill the private field"),
@@ -62,7 +62,7 @@ pub enum ValidationError {
 /// constructor:
 ///
 /// ```compile_fail
-/// use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
+/// use shared_gateway_discovery::{GatewayDiscoveryFile, ValidatedConnection};
 ///
 /// let raw = GatewayDiscoveryFile {
 ///     port: 8081,
@@ -78,7 +78,7 @@ pub enum ValidationError {
 /// The crate-private named validator is equally unavailable:
 ///
 /// ```compile_fail
-/// use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
+/// use shared_gateway_discovery::{GatewayDiscoveryFile, ValidatedConnection};
 ///
 /// let raw = GatewayDiscoveryFile {
 ///     port: 8081,

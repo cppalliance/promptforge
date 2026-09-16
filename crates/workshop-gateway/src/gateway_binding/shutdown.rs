@@ -21,13 +21,13 @@ impl GatewaySnapshot {
     /// runs it off the executor.
     ///
     /// # Errors
-    /// Returns [`shared_sidecar::ShutdownError`] when the local Gateway
+    /// Returns [`shared_gateway_discovery::ShutdownError`] when the local Gateway
     /// refuses the request or cannot be reached.
-    pub fn request_shutdown(&self) -> Result<bool, shared_sidecar::ShutdownError> {
+    pub fn request_shutdown(&self) -> Result<bool, shared_gateway_discovery::ShutdownError> {
         let Some(identity) = self.identity.as_ref() else {
             return Ok(false);
         };
-        shared_sidecar::request_shutdown(identity)?;
+        shared_gateway_discovery::request_shutdown(identity)?;
         Ok(true)
     }
 }
@@ -42,9 +42,9 @@ impl GatewayUpdater {
     /// authority.
     ///
     /// # Errors
-    /// Returns [`shared_sidecar::ShutdownError`] when the current local
+    /// Returns [`shared_gateway_discovery::ShutdownError`] when the current local
     /// Gateway refuses the request or cannot be reached.
-    pub fn request_shutdown(&self) -> Result<bool, shared_sidecar::ShutdownError> {
+    pub fn request_shutdown(&self) -> Result<bool, shared_gateway_discovery::ShutdownError> {
         self.binding.snapshot().request_shutdown()
     }
 }

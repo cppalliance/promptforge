@@ -16,7 +16,7 @@ fn cancellation_wakes_a_replacement_contending_on_the_publication_lock() {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let worker_binding = binding.clone();
-    let cancellation = shared_sidecar::CancellationToken::new();
+    let cancellation = shared_gateway_discovery::CancellationToken::new();
     let worker_cancellation = cancellation.clone();
     let (entered, blocked) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
@@ -77,7 +77,7 @@ fn publication_close_is_permanent_for_every_updater_clone() {
             .expect_err("a closed binding rejects every updater clone");
         assert!(matches!(error, GatewayPublicationError::PublicationClosed));
     }
-    let cancellation = shared_sidecar::CancellationToken::new();
+    let cancellation = shared_gateway_discovery::CancellationToken::new();
     cancellation.cancel();
     assert!(matches!(
         binding

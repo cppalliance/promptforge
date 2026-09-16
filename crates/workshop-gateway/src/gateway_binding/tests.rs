@@ -9,7 +9,7 @@ fn validated_connection(
     api_key: &str,
     epoch: u64,
     started_at: &str,
-) -> shared_sidecar::ValidatedConnection {
+) -> shared_gateway_discovery::ValidatedConnection {
     gateway.validate(api_key, epoch, started_at)
 }
 

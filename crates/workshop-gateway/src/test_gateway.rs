@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
+use shared_gateway_discovery::{GatewayDiscoveryFile, ValidatedConnection};
 
 #[path = "test_gateway-process.rs"]
 mod process;
@@ -262,7 +262,7 @@ fn received_shutdown_waits_for_a_delayed_marker() {
     std::thread::scope(|scope| {
         scope.spawn(move || {
             std::thread::sleep(delay);
-            shared_sidecar::request_shutdown(&validated)
+            shared_gateway_discovery::request_shutdown(&validated)
                 .expect("the delayed authenticated shutdown is accepted");
         });
         assert!(
@@ -283,7 +283,7 @@ fn a_named_fixture_releases_its_process_lease_when_terminated() {
     let run_dir = tempfile::TempDir::new().expect("create lease run directory");
     let mut gateway = ValidatedGateway::spawn_with_instance_lease("fixture-key", run_dir.path());
     assert!(
-        shared_sidecar::GatewayInstanceLease::try_acquire(run_dir.path())
+        shared_gateway_discovery::GatewayInstanceLease::try_acquire(run_dir.path())
             .expect("contend for the named fixture lease")
             .is_none(),
         "the live fixture owns the process lease"
@@ -291,7 +291,7 @@ fn a_named_fixture_releases_its_process_lease_when_terminated() {
 
     gateway.terminate_within(Duration::from_secs(5));
     assert!(
-        shared_sidecar::GatewayInstanceLease::try_acquire(run_dir.path())
+        shared_gateway_discovery::GatewayInstanceLease::try_acquire(run_dir.path())
             .expect("recover the named fixture lease")
             .is_some(),
         "the operating system releases the lease when the named fixture dies"

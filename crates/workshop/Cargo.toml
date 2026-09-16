@@ -21,7 +21,7 @@ anyhow.workspace = true
 workshop-server-api.workspace = true
 serde_json.workspace = true
 # The health wait comes from the shared gateway-discovery-file seam.
-shared-sidecar.workspace = true
+shared-gateway-discovery.workspace = true
 tauri.workspace = true
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
@@ -57,7 +57,7 @@ workshop-server-api = { workspace = true, features = ["test-fixtures"] }
 # The test-fixtures feature exposes `resolve_for_test`, so the boot
 # decision tests run the real liveness gauntlet against the test binary's
 # own process image.
-shared-sidecar = { workspace = true, features = ["test-fixtures"] }
+shared-gateway-discovery = { workspace = true, features = ["test-fixtures"] }
 
 # Not `workspace = true`: the WebView2 file-drop bridge (src/bridge.rs) is
 # raw COM and cannot be written without unsafe, and a workspace `forbid`

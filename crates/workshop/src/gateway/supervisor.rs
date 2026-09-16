@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use shared_sidecar::{
+use shared_gateway_discovery::{
     CancellationToken, GatewayDiscoveryFile, LaunchDecision, Resolution, ShutdownError,
     SidecarError, ValidatedConnection,
 };
@@ -111,7 +111,7 @@ impl RecoveryCandidate {
         debug_assert_eq!(self.child_pid, self.validated.pid());
         self.published = true;
         let deadline = Instant::now() + LATE_CHILD_SHUTDOWN_BUDGET;
-        shared_sidecar::request_shutdown_before(&self.validated, deadline)
+        shared_gateway_discovery::request_shutdown_before(&self.validated, deadline)
     }
 }
 
@@ -129,7 +129,9 @@ impl Drop for RecoveryCandidate {
             .name("gateway-late-child-shutdown".to_owned())
             .spawn(move || {
                 let deadline = Instant::now() + LATE_CHILD_SHUTDOWN_BUDGET;
-                if let Err(error) = shared_sidecar::request_shutdown_before(&validated, deadline) {
+                if let Err(error) =
+                    shared_gateway_discovery::request_shutdown_before(&validated, deadline)
+                {
                     // The detached signal has no error return channel, so
                     // diagnostics are the only place this cleanup failure
                     // can surface.
@@ -452,7 +454,8 @@ pub(crate) fn supervise(
     let Some(initial) = attachment.sidecar_identity().cloned() else {
         return Ok(None);
     };
-    let run_dir = shared_sidecar::default_run_dir().context("locate the sidecar run directory")?;
+    let run_dir =
+        shared_gateway_discovery::default_run_dir().context("locate the sidecar run directory")?;
     let exe_dir = std::env::current_exe()
         .context("locate the executable")?
         .parent()
@@ -463,7 +466,10 @@ pub(crate) fn supervise(
     GatewaySupervisor::spawn_with_publication(supervisor_publication, move |cancellation| {
         run_supervision(
             RecoveryIdentity::Stable(initial),
-            |_, cancellation| match shared_sidecar::resolve_cancellable(&run_dir, cancellation) {
+            |_, cancellation| match shared_gateway_discovery::resolve_cancellable(
+                &run_dir,
+                cancellation,
+            ) {
                 Ok(Resolution::Attach(file)) => {
                     match ValidatedConnection::validate_cancellable(file, cancellation) {
                         Ok(identity) => {
@@ -620,7 +626,7 @@ fn launch_and_attach_cancellable(
         run_dir,
         exe,
         cancellation,
-        shared_sidecar::launch_or_attach_cancellable,
+        shared_gateway_discovery::launch_or_attach_cancellable,
         |exe, _| boot::spawn_detached(exe),
         wait_for_launched_file_cancellable,
     )
@@ -686,8 +692,8 @@ fn wait_for_launched_file_cancellable(
         run_dir,
         timeout,
         cancellation,
-        shared_sidecar::wait_for_health_cancellable,
-        shared_sidecar::resolve_cancellable,
+        shared_gateway_discovery::wait_for_health_cancellable,
+        shared_gateway_discovery::resolve_cancellable,
     )
 }
 
@@ -700,7 +706,11 @@ pub(super) fn wait_for_launched_file_cancellable_with<Health, Resolve>(
     mut resolve: Resolve,
 ) -> anyhow::Result<GatewayDiscoveryFile>
 where
-    Health: FnMut(&str, Duration, &CancellationToken) -> Result<(), shared_sidecar::HealthError>,
+    Health: FnMut(
+        &str,
+        Duration,
+        &CancellationToken,
+    ) -> Result<(), shared_gateway_discovery::HealthError>,
     Resolve: FnMut(&Path, &CancellationToken) -> Result<Resolution, SidecarError>,
 {
     let deadline = Instant::now() + timeout;

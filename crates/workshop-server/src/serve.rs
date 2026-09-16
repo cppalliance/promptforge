@@ -51,7 +51,7 @@ pub enum Termination {
 pub struct ServerHandle {
     url: String,
     gateway: GatewayUpdater,
-    initial_gateway_identity: Option<shared_sidecar::ValidatedConnection>,
+    initial_gateway_identity: Option<shared_gateway_discovery::ValidatedConnection>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     stopped: mpsc::Receiver<Termination>,
     thread: Option<JoinHandle<std::io::Result<()>>>,
@@ -76,7 +76,9 @@ impl ServerHandle {
     /// Returns the validated local Gateway identity initially published into
     /// server state, or `None` when explicit configuration won resolution.
     #[must_use]
-    pub fn initial_gateway_identity(&self) -> Option<&shared_sidecar::ValidatedConnection> {
+    pub fn initial_gateway_identity(
+        &self,
+    ) -> Option<&shared_gateway_discovery::ValidatedConnection> {
         self.initial_gateway_identity.as_ref()
     }
 

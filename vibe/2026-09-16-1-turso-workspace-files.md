@@ -430,7 +430,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-3>
 
-### Step 3: Rename `shared-sidecar` to `shared-gateway-discovery`
+### Step 3: Rename `shared-sidecar` to `shared-gateway-discovery` [completed]
 
 - Component: `shell-boundary`
 - Piece: rename (joint-capable with api-crate; sequenced after it)

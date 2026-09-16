@@ -20,7 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 # The serde feature decodes the gateway's progress event stream.
 shared-progress = { workspace = true, features = ["serde"] }
-shared-sidecar.workspace = true
+shared-gateway-discovery.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
@@ -36,7 +36,7 @@ axum.workspace = true
 # The test-fixtures feature exposes `resolve_for_test`, so the resolution
 # tests can run the real liveness gauntlet against the test binary's own
 # process image.
-shared-sidecar = { workspace = true, features = ["test-fixtures"] }
+shared-gateway-discovery = { workspace = true, features = ["test-fixtures"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

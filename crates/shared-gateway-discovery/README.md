@@ -1,8 +1,8 @@
-# shared-sidecar
+# shared-gateway-discovery
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](../../LICENSE)
 
-The shared sidecar discovery seam for PromptForge: the `gateway.json` gateway discovery file the gateway writes after a successful bind, Jupyter-style - port, bearer key, pid, boot epoch, version, start time - plus everything a reader needs to attach to a running gateway instead of launching a second one: validation, stale detection (one stable OS process boot bracketing same-socket health and bearer proofs) with stale-file cleanup, the `gateway.json.lock` launch-race lock with loser-attaches-to-winner semantics, and the raw-`TcpStream` health wait. Synchronous and runtime-agnostic: no tokio, axum, or reqwest, so the gateway's lean builds and the workshop readers share one contract.
+The shared gateway discovery seam for PromptForge: the `gateway.json` gateway discovery file the gateway writes after a successful bind, Jupyter-style - port, bearer key, pid, boot epoch, version, start time - plus everything a reader needs to attach to a running gateway instead of launching a second one: validation, stale detection (one stable OS process boot bracketing same-socket health and bearer proofs) with stale-file cleanup, the `gateway.json.lock` launch-race lock with loser-attaches-to-winner semantics, and the raw-`TcpStream` health wait. Synchronous and runtime-agnostic: no tokio, axum, or reqwest, so the gateway's lean builds and the workshop readers share one contract.
 
 ## Public surface
 

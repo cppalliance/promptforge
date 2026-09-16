@@ -222,8 +222,8 @@ fn wait_for_test_start_rendezvous() -> anyhow::Result<()> {
 /// be opened warns on stdout and never stops the gateway. The returned
 /// runtime must be shut down last.
 fn init_logging() -> Option<LogRuntime> {
-    let state_dir =
-        shared_sidecar::default_run_dir().and_then(|run_dir| run_dir.parent().map(PathBuf::from));
+    let state_dir = shared_gateway_discovery::default_run_dir()
+        .and_then(|run_dir| run_dir.parent().map(PathBuf::from));
     init_logging_for_state(state_dir)
 }
 

@@ -1037,7 +1037,7 @@ fn cloud_models_cache_path(options: &ServeOptions) -> Option<PathBuf> {
     options
         .run_dir
         .clone()
-        .or_else(shared_sidecar::default_run_dir)
+        .or_else(shared_gateway_discovery::default_run_dir)
         .and_then(|run_dir| run_dir.parent().map(Path::to_path_buf))
         .map(|state_dir| state_dir.join(crate::cloud_models::CACHE_FILE_NAME))
 }
@@ -1053,7 +1053,7 @@ struct GatewayDiscoveryFileGuard {
 
 impl Drop for GatewayDiscoveryFileGuard {
     fn drop(&mut self) {
-        if let Err(error) = shared_sidecar::remove_if_mine(&self.run_dir, self.pid) {
+        if let Err(error) = shared_gateway_discovery::remove_if_mine(&self.run_dir, self.pid) {
             tracing::warn!("could not remove the gateway discovery file: {error}");
         }
     }
@@ -1071,13 +1071,13 @@ fn gateway_discovery_file_guard(
     let Some(run_dir) = options
         .run_dir
         .clone()
-        .or_else(shared_sidecar::default_run_dir)
+        .or_else(shared_gateway_discovery::default_run_dir)
     else {
         tracing::warn!("no user profile directory found; no gateway discovery file written");
         return None;
     };
     let now = time::OffsetDateTime::now_utc();
-    let file = shared_sidecar::GatewayDiscoveryFile {
+    let file = shared_gateway_discovery::GatewayDiscoveryFile {
         port: address.port(),
         api_key: config.server_key().expose().to_owned(),
         pid: std::process::id(),

@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use shared_sidecar::{
+use shared_gateway_discovery::{
     GatewayDiscoveryFile, GatewayInstanceLease, LaunchDecision, Resolution, SidecarError,
     StaleReason, gateway_discovery_file_path, instance_lock_file_path, launch_or_attach,
     lock_file_path, resolve, wait_for_health,
@@ -118,13 +118,14 @@ fn remove_if_mine_spares_a_foreign_pid_and_removes_the_owning_one() {
     let file = valid_file();
     file.write_to(dir.path()).expect("write");
 
-    shared_sidecar::remove_if_mine(dir.path(), file.pid + 1).expect("a foreign pid is tolerated");
+    shared_gateway_discovery::remove_if_mine(dir.path(), file.pid + 1)
+        .expect("a foreign pid is tolerated");
     assert!(
         gateway_discovery_file_path(dir.path()).exists(),
         "a foreign pid's removal spares the file"
     );
 
-    shared_sidecar::remove_if_mine(dir.path(), file.pid).expect("the owning pid removes");
+    shared_gateway_discovery::remove_if_mine(dir.path(), file.pid).expect("the owning pid removes");
     assert!(
         !gateway_discovery_file_path(dir.path()).exists(),
         "the owning pid's removal deletes the file"

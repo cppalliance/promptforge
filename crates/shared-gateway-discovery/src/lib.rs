@@ -1,4 +1,4 @@
-//! The shared sidecar discovery seam: the `gateway.json` gateway discovery
+//! The shared gateway discovery seam: the `gateway.json` gateway discovery
 //! file.
 //!
 //! The gateway writes `gateway.json` into the run directory
