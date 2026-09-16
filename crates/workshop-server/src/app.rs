@@ -216,6 +216,25 @@ impl AppState {
             .require::<AgentSessions>()
             .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone())
     }
+
+    /// Reopens the workspace file that was open when the server last
+    /// ran, and returns whether one was reopened. Boot awaits this after
+    /// composing state and before the listener serves, so the first
+    /// request already sees the restored grants. It never fails: a
+    /// missing or corrupt pointer, a vanished target, or a refused file
+    /// logs and leaves the workspace ephemeral.
+    ///
+    /// # Panics
+    /// Panics when the composition root never registered the workspace -
+    /// a bug boot already refuses: [`state_with_gateway`] requires every
+    /// contribution before sharing state.
+    pub async fn reopen_last_workspace(&self) -> bool {
+        let workspace = self
+            .registry
+            .require::<Workspace>()
+            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone());
+        workspace.reopen_last().await
+    }
 }
 
 /// One subsystem's `register` call, named so a boot-composition test can
@@ -360,7 +379,10 @@ fn compose(
     );
     registrations.hold(heartbeat);
     registrations.hold(subscriber);
-    let workspace = Workspace::new();
+    // The workspace remembers its last-used file in the state directory;
+    // boot follows that memory through `reopen_last_workspace` once the
+    // runtime is up, since the reopen is async and composition is not.
+    let workspace = Workspace::with_state_dir(state_dir);
     if omit != Some(Omit::Workspace) {
         let (routes, state, roots) = workshop_workspace::register(&registry, &workspace);
         registrations.hold(routes);

@@ -276,9 +276,10 @@ impl Workspace {
             .map(|backing| (backing.file.clone(), backing.path.clone()))
     }
 
-    /// Installs `file` at `path` as the backing and closes the previous
-    /// one, if any, waiting for its connection to go so the old file is
-    /// left complete with no sidecar.
+    /// Installs `file` at `path` as the backing, records it as the
+    /// last-used workspace, and closes the previous backing, if any,
+    /// waiting for its connection to go so the old file is left complete
+    /// with no sidecar.
     async fn swap_backing(&self, file: WorkspaceFile, path: &Path) {
         let previous = self
             .backing
@@ -288,6 +289,7 @@ impl Workspace {
                 file,
                 path: path.to_path_buf(),
             });
+        self.remember(path);
         if let Some(previous) = previous {
             previous.file.close().await;
         }

@@ -256,6 +256,10 @@ fn serve_thread(
                 return (Termination::Graceful, Ok(()));
             }
         };
+        // The last-used workspace is restored before the listener binds,
+        // so readiness means the grants are already in place; a pointer
+        // that cannot be followed starts ephemeral and never fails boot.
+        state.reopen_last_workspace().await;
         let app = router(state.clone());
         let listener = match reuse_bind(&config.server.bind) {
             Ok(listener) => listener,

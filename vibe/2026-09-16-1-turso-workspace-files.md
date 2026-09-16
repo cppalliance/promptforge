@@ -529,7 +529,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-9>
 
-### Step 9: Last-workspace pointer and boot reopen
+### Step 9: Last-workspace pointer and boot reopen [completed]
 
 - Component: `workspace-file`
 - Piece: pointer

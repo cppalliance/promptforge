@@ -344,6 +344,21 @@ pub(crate) async fn open_database(path: &Path) -> Result<turso::Connection, Work
     Ok(database.connect()?)
 }
 
+/// Creates a database at `path` that is not a workspace - one foreign
+/// table and no stamp - and closes it, so tests in dependent crates can
+/// exercise the refusal path without a database dependency of their own.
+///
+/// # Errors
+/// Returns [`WorkspaceFileError`] when the file cannot be created or the
+/// table cannot be written.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub async fn create_alien_database_for_test(path: &Path) -> Result<(), WorkspaceFileError> {
+    let conn = open_database(path).await?;
+    conn.execute_batch("CREATE TABLE notes (body TEXT NOT NULL);")
+        .await?;
+    Ok(())
+}
+
 /// Checks the stamp of an opened database without writing anything:
 /// the `meta` table must exist and carry the format name, and both the
 /// `user_version` pragma and `meta.version` must be the supported version.

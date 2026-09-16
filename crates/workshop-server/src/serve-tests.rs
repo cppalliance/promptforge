@@ -68,6 +68,48 @@ async fn the_server_boots_and_serves_the_ui_with_an_unreachable_gateway() {
     server.shutdown().expect("graceful shutdown succeeds");
 }
 
+/// The boot wiring itself, not a re-implementation of it: `serve_thread`
+/// must follow the `last-workspace` pointer before it binds, so the first
+/// request over the real listener already sees the reopened file and its
+/// grants. Deleting the `reopen_last_workspace` call in `serve_thread`
+/// fails this test and nothing else.
+#[tokio::test]
+async fn spawn_reopens_the_pointed_workspace_before_readiness() {
+    let state_dir = tempfile::TempDir::new().expect("tempdir");
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let file = home.path().join("mine.pfwork");
+    // Author the file in a previous "run", then let go of it.
+    let author = workshop_workspace::Workspace::new();
+    let granted = author.grant(root.path()).expect("grant the root");
+    author.save_as(&file).await.expect("save as creates");
+    author.close_backing_for_test().await;
+    std::fs::write(
+        state_dir.path().join("last-workspace"),
+        file.to_string_lossy().as_bytes(),
+    )
+    .expect("the pointer writes");
+
+    let server = spawn_with_grace(test_config("127.0.0.1:0", state_dir.path()), SHUTDOWN_GRACE)
+        .expect("server spawns");
+    let url = server.url().to_string();
+
+    let response = reqwest::get(format!("{url}/workspace/file/current"))
+        .await
+        .expect("the workspace file endpoint answers once spawn returns");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let current: serde_json::Value = response.json().await.expect("the body is JSON");
+    assert_eq!(current["path"], serde_json::json!(file));
+    assert_eq!(current["name"], "mine");
+    assert_eq!(
+        current["grants"],
+        serde_json::json!([{ "path": granted, "exists": true }]),
+        "the file's grants are live on the first request after readiness"
+    );
+
+    server.shutdown().expect("graceful shutdown succeeds");
+}
+
 /// A grace window short enough that the forced path proves itself in
 /// milliseconds instead of stalling the suite.
 const TEST_GRACE: Duration = Duration::from_millis(200);

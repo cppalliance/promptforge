@@ -53,6 +53,7 @@ test-fixtures = [
     "workshop-menu/test-fixtures",
     "workshop-sessions/test-fixtures",
     "workshop-support/test-fixtures",
+    "workshop-workspace/test-fixtures",
 ]
 
 [dev-dependencies]

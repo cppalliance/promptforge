@@ -27,6 +27,8 @@ use crate::error::WorkspaceError;
 
 #[path = "workspace-backing.rs"]
 mod backing;
+#[path = "workspace-pointer.rs"]
+mod pointer;
 
 use backing::Backing;
 pub use backing::{GrantEntry, WorkspaceSummary};
@@ -94,7 +96,7 @@ pub struct FileContents {
 /// see grants registered through `POST /workspace/grant` immediately. The
 /// grant set is the confinement source of truth; the backing file, when
 /// present, is its persistent mirror and is swapped at runtime by open,
-/// save-as, and duplicate.
+/// save-as, and duplicate, each recorded in the last-workspace pointer.
 #[derive(Debug, Clone, Default)]
 pub struct Workspace {
     /// The granted roots, in canonical form. Read-hot: its own lock.
@@ -102,6 +104,9 @@ pub struct Workspace {
     /// The backing workspace file; `None` while the workspace is
     /// ephemeral.
     backing: Arc<RwLock<Option<Backing>>>,
+    /// Where the last-used file is remembered between runs; `None` when
+    /// built without a state directory (see [`Workspace::with_state_dir`]).
+    pointer: Option<pointer::LastWorkspacePointer>,
 }
 
 impl Workspace {

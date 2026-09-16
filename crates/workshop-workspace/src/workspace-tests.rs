@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "workspace-tests-backing.rs"]
 mod backing;
+#[path = "workspace-tests-pointer.rs"]
+mod pointer;
 
 /// A workspace with one granted tempdir, returned alongside so the
 /// directory outlives the test.
