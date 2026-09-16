@@ -683,7 +683,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-3>
 
-### Step 3: Command and menu registries move to services
+### Step 3: Command and menu registries move to services [completed]
 
 - Component: services
 - Artifacts: `ui/menu/command-registry.ts` and `ui/menu/menu-registry.ts` moved to `src/services/` with the new shapes (`CommandAction` without `label`/`shortcut`/`enabled`; `MenuId` const object; `MenuItem`/`SubmenuItem`; `appendMenuItem`; `setProvider`; `getMenuItems` sort; `registerMenu` deleted); one-line re-export shims at the old paths.
