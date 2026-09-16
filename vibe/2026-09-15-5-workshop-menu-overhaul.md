@@ -727,7 +727,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-7>
 
-### Step 7: Menu popover widget
+### Step 7: Menu popover widget [completed]
 
 - Component: menubar
 - Artifacts: `src/ui/menu/menu.ts` replacing `menu-renderer.ts` (one popover rebuilt at open from `getMenuItems`, command versus submenu rows, recursive nested flyouts, group-boundary separators, empty submenus dropped, `when`/`precondition`/`toggled` rendering, registry-derived shortcut labels, self-owned dismissal, anchor plus context-value signature).
