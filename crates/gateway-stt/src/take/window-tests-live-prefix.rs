@@ -1,4 +1,4 @@
-use super::super::WholeWindowState;
+use super::WholeWindowState;
 use crate::take::live_prefix::LivePrefixSnapshot;
 
 fn prefix(
