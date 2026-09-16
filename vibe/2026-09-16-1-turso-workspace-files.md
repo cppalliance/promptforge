@@ -479,7 +479,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-6>
 
-### Step 6: `workspace_file` mutations and duplicate
+### Step 6: `workspace_file` mutations and duplicate [completed]
 
 - Component: `workspace-file`
 - Piece: module

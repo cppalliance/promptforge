@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use super::actor::SCHEMA_V1;
 use super::*;
 
+#[path = "workspace-file-tests-mutations.rs"]
+mod mutations;
+
 #[tokio::test]
 async fn turso_opens_a_tempdir_database_and_round_trips_user_version() {
     let dir = tempfile::TempDir::new().expect("tempdir");

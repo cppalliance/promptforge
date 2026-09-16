@@ -13,7 +13,7 @@
 //! `documents`.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::Arc;
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
@@ -21,8 +21,11 @@ use tokio::sync::{mpsc, oneshot};
 
 #[path = "workspace_file-actor.rs"]
 mod actor;
+#[path = "workspace_file-siblings.rs"]
+mod siblings;
 
 use actor::{COMMAND_QUEUE_DEPTH, Command, SCHEMA_V1};
+use siblings::{copy_siblings, plan_siblings, remove_sibling};
 
 /// Meta key naming the file format; always [`FORMAT_NAME`].
 pub(crate) const META_FORMAT: &str = "format";
@@ -139,6 +142,7 @@ pub(crate) struct WindowState {
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceFile {
     tx: mpsc::Sender<Command>,
+    path: Arc<Path>,
 }
 
 impl WorkspaceFile {
@@ -155,12 +159,7 @@ impl WorkspaceFile {
         contents: &WorkspaceContents,
     ) -> Result<Self, WorkspaceFileError> {
         if path.exists() {
-            return Err(WorkspaceFileError::Io {
-                source: io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "workspace file path is already taken",
-                ),
-            });
+            return Err(already_taken("workspace file path is already taken"));
         }
         let conn = open_database(path).await?;
         if let Err(error) = initialize(&conn, contents).await {
@@ -199,14 +198,78 @@ impl WorkspaceFile {
         Ok(Self::spawn(conn, path))
     }
 
+    /// Where the file lives on disk.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Reads everything the file holds.
     pub(crate) async fn contents(&self) -> Result<WorkspaceContents, WorkspaceFileError> {
-        let (reply, response) = oneshot::channel();
-        self.tx
-            .send(Command::Contents { reply })
+        self.request(|reply| Command::Contents { reply }).await
+    }
+
+    /// Persists one grant at one past the file's current maximum
+    /// position, so grants reopen in the order they were made. The
+    /// row's own `position` is not consulted; only the file knows its
+    /// maximum. Re-granting a held path moves it to the end.
+    pub(crate) async fn add_grant(&self, row: GrantRow) -> Result<(), WorkspaceFileError> {
+        self.request(|reply| Command::AddGrant { row, reply }).await
+    }
+
+    /// Forgets the grant at `path`; the other grants keep their
+    /// positions. Removing a path the file does not hold succeeds.
+    pub(crate) async fn remove_grant(&self, path: &Path) -> Result<(), WorkspaceFileError> {
+        let path = path.to_path_buf();
+        self.request(|reply| Command::RemoveGrant { path, reply })
             .await
-            .map_err(|_| WorkspaceFileError::Closed)?;
-        response.await.map_err(|_| WorkspaceFileError::Closed)?
+    }
+
+    /// Saves the window geometry, replacing any earlier save.
+    pub(crate) async fn put_window_state(
+        &self,
+        state: WindowState,
+    ) -> Result<(), WorkspaceFileError> {
+        self.request(|reply| Command::PutWindowState { state, reply })
+            .await
+    }
+
+    /// Copies this workspace to `destination` and opens the copy.
+    ///
+    /// The actor drains every pending write, checkpoints the WAL into
+    /// the main file, and copies the file in one command, so no write
+    /// lands between the checkpoint and the copy and the copy is
+    /// complete without a sidecar. The siblings the workspace has grown
+    /// then follow (never the derived index, never anything else in the
+    /// folder), and the copy is opened through the usual validation.
+    /// Like create, this writes exactly the file at the chosen path and
+    /// refuses a path already taken; a destination folder that already
+    /// holds a sibling of the same name is refused too, before anything
+    /// is written, so another workspace's data is never merged into. A
+    /// failure after the copy appears removes the file and every
+    /// sibling this call created.
+    pub(crate) async fn duplicate_to(
+        &self,
+        destination: &Path,
+    ) -> Result<Self, WorkspaceFileError> {
+        if destination.exists() {
+            return Err(already_taken("workspace file path is already taken"));
+        }
+        let siblings = plan_siblings(&self.path, destination)?;
+        let target = destination.to_path_buf();
+        self.request(|reply| Command::Snapshot {
+            destination: target,
+            reply,
+        })
+        .await?;
+        if let Err(source) = copy_siblings(&siblings) {
+            // A failed removal cannot say more than the copy failure did.
+            for (_, to) in &siblings {
+                let _ = remove_sibling(to);
+            }
+            let _ = fs::remove_file(destination);
+            return Err(WorkspaceFileError::Io { source });
+        }
+        Self::open(destination).await
     }
 
     /// Stops the actor and waits for the connection to close, so the
@@ -219,12 +282,30 @@ impl WorkspaceFile {
         }
     }
 
+    /// Sends the command `make` builds around a fresh reply slot and
+    /// awaits the answer; a stopped actor answers [`WorkspaceFileError::Closed`]
+    /// from either side of the exchange.
+    async fn request<T>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, WorkspaceFileError>>) -> Command,
+    ) -> Result<T, WorkspaceFileError> {
+        let (reply, response) = oneshot::channel();
+        self.tx
+            .send(make(reply))
+            .await
+            .map_err(|_| WorkspaceFileError::Closed)?;
+        response.await.map_err(|_| WorkspaceFileError::Closed)?
+    }
+
     /// Starts the actor over `conn`, the connection to the file at
     /// `path`, and returns its handle.
     fn spawn(conn: turso::Connection, path: &Path) -> Self {
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_DEPTH);
         tokio::spawn(actor::run(rx, conn, path.to_path_buf()));
-        Self { tx }
+        Self {
+            tx,
+            path: Arc::from(path),
+        }
     }
 }
 
@@ -235,7 +316,7 @@ async fn initialize(
     contents: &WorkspaceContents,
 ) -> Result<(), WorkspaceFileError> {
     conn.execute_batch(SCHEMA_V1).await?;
-    write_contents(conn, contents).await
+    actor::write_contents(conn, contents).await
 }
 
 /// Opens the database at `path`, creating the file when absent, and
@@ -318,59 +399,11 @@ async fn has_meta_table(conn: &turso::Connection) -> Result<bool, WorkspaceFileE
     }
 }
 
-/// Writes the stamp, the grants, and the window state into a freshly
-/// schema'd database, all in one transaction.
-async fn write_contents(
-    conn: &turso::Connection,
-    contents: &WorkspaceContents,
-) -> Result<(), WorkspaceFileError> {
-    conn.execute("BEGIN", ()).await?;
-    let result = write_contents_rows(conn, contents).await;
-    if result.is_err() {
-        // A failed rollback cannot say more than the write failure did.
-        let _ = conn.execute("ROLLBACK", ()).await;
-        return result;
+/// An `AlreadyExists` I/O refusal carrying `message`.
+fn already_taken(message: &'static str) -> WorkspaceFileError {
+    WorkspaceFileError::Io {
+        source: io::Error::new(io::ErrorKind::AlreadyExists, message),
     }
-    conn.execute("COMMIT", ()).await?;
-    Ok(())
-}
-
-/// The row inserts behind [`write_contents`].
-async fn write_contents_rows(
-    conn: &turso::Connection,
-    contents: &WorkspaceContents,
-) -> Result<(), WorkspaceFileError> {
-    const INSERT_META: &str = "INSERT INTO meta (key, value) VALUES (?1, ?2)";
-    conn.execute(INSERT_META, (META_FORMAT, FORMAT_NAME))
-        .await?;
-    conn.execute(INSERT_META, (META_VERSION, SUPPORTED_VERSION))
-        .await?;
-    conn.execute(INSERT_META, (META_NAME, contents.name.as_str()))
-        .await?;
-    conn.execute(INSERT_META, (META_CREATED_AT, now_rfc3339()))
-        .await?;
-    for grant in &contents.grants {
-        conn.execute(
-            "INSERT INTO grants (path, position, added_at) VALUES (?1, ?2, ?3)",
-            (
-                grant.path.to_string_lossy().into_owned(),
-                grant.position,
-                grant.added_at.as_str(),
-            ),
-        )
-        .await?;
-    }
-    if let Some(window) = &contents.window_state {
-        // A five-field struct of plain numbers and a bool always
-        // serializes; the Result is a trait artifact.
-        let json = serde_json::to_string(window).unwrap_or_default();
-        conn.execute(
-            "INSERT INTO kv (key, value) VALUES (?1, ?2)",
-            (KV_WINDOW, json),
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 /// Whether an engine failure says the file is not a database at all.
@@ -388,11 +421,6 @@ fn stem_of(path: &Path) -> String {
     path.file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default()
-}
-
-/// The current time as RFC 3339 in UTC, whole seconds.
-fn now_rfc3339() -> String {
-    humantime::format_rfc3339_seconds(SystemTime::now()).to_string()
 }
 
 #[cfg(test)]
