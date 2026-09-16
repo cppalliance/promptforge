@@ -67,6 +67,12 @@ export interface EditorSurface {
   setReadOnly(readOnly: boolean): void;
   /** Registers a listener fired on dirty-state transitions; returns an unsubscribe. */
   onDirtyChange(listener: (dirty: boolean) => void): () => void;
+  /**
+   * The live EditorView, or null before the first open(). Exposed for
+   * the editor directory's command layer (editor-commands.ts); nothing
+   * outside the editor directory should consume it.
+   */
+  editorView(): EditorView | null;
   focus(): void;
   dispose(): void;
 }
@@ -314,6 +320,10 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
 
   text(): string {
     return this.view?.state.doc.toString() ?? "";
+  }
+
+  editorView(): EditorView | null {
+    return this.view;
   }
 
   markSaved(text: string): void {

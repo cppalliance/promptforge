@@ -9,6 +9,7 @@
 import "./editor-panel.css";
 
 import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
+import type { EditorView } from "@codemirror/view";
 
 import { toDisposable } from "../../base/lifecycle";
 import { WorkshopPart } from "../../base/workshop-part";
@@ -90,6 +91,11 @@ export class EditorPanel extends WorkshopPart {
   /** The panel's dirty state, for close prompts and save shortcuts. */
   isDirty(): boolean {
     return this.surface.isDirty();
+  }
+
+  /** The surface's live EditorView, for the editor command layer. */
+  editorView(): EditorView | null {
+    return this.surface.editorView();
   }
 
   focus(): void {

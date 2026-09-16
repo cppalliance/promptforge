@@ -793,7 +793,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-13>
 
-### Step 13: Editor commands catalog
+### Step 13: Editor commands catalog [completed]
 
 - Component: editor
 - Artifacts: `src/ui/editor/editor.contribution.ts` plus `editor-commands.ts` additions: `runInActiveEditor`, `withActiveEditor`, every CodeMirror-backed catalog row (find, replace, comment toggles, smart select with its selection stack, line copy/move, duplicate selection, cursor add rows, occurrence rows, bracket jump, diagnostic navigation), and the custom `StateCommand`s.
