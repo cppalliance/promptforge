@@ -112,6 +112,43 @@ fn workspace_failures_keep_their_wire_mapping() {
     }
 }
 
+/// A refused ui-state put is the client's mistake: a foreign key or
+/// non-JSON text is a bad request, an oversized value is too large, and
+/// each message names what was required.
+#[test]
+fn ui_state_refusals_map_to_client_errors() {
+    let key = WorkspaceError::UiStateKey("window".to_string());
+    assert_eq!(key.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(key.code(), "ui_state_key");
+    let message = render_message(&key, false);
+    assert_eq!(
+        message,
+        "ui-state key \"window\" is not allowed; one of layout, tree, closed_editors is required"
+    );
+    for allowed in crate::workspace_file::UI_STATE_KEYS {
+        assert!(
+            message.contains(allowed),
+            "the message names every allow-listed key; missing {allowed}"
+        );
+    }
+
+    let large = WorkspaceError::UiStateTooLarge { actual: 9, cap: 8 };
+    assert_eq!(large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(large.code(), "ui_state_too_large");
+    assert_eq!(
+        render_message(&large, false),
+        "ui-state value is 9 bytes; at most 8 bytes are allowed"
+    );
+
+    let not_json = WorkspaceError::UiStateNotJson;
+    assert_eq!(not_json.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(not_json.code(), "ui_state_not_json");
+    assert_eq!(
+        render_message(&not_json, false),
+        "ui-state value is not JSON"
+    );
+}
+
 /// The file-backed failures map to their own statuses and codes: a
 /// refused file is the client's mistake, a taken path is a conflict,
 /// and everything else is the server's problem.

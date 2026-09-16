@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use tokio::sync::{mpsc, oneshot};
 
+use super::ui_state::{put_ui_state_row, read_ui_state_rows};
 use super::{
     FORMAT_NAME, GrantRow, KV_WINDOW, META_CREATED_AT, META_FORMAT, META_NAME, META_VERSION,
     SUPPORTED_VERSION, WindowState, WorkspaceContents, WorkspaceFileError,
@@ -22,7 +23,7 @@ const WAL_HEADER_SIZE: u64 = 32;
 /// The v1 schema, exactly as applied at create time. `user_version` is
 /// the migration counter; `meta` carries the format stamp and display
 /// name; `grants` mirrors the in-memory grant set in tree order; `kv`
-/// holds JSON values keyed by name (v1 defines only `window`).
+/// holds JSON values keyed by name (`window` and the ui-state keys).
 pub(crate) const SCHEMA_V1: &str = "\
 PRAGMA user_version = 1;
 
@@ -79,6 +80,16 @@ pub(crate) enum Command {
         /// Fires once the value is written.
         reply: Ack,
     },
+    /// Insert or replace one opaque ui-state value. The key is already
+    /// allow-listed and the text already validated by the handle.
+    PutUiState {
+        /// The allow-listed kv key.
+        key: &'static str,
+        /// The JSON text to store verbatim.
+        json_text: String,
+        /// Fires once the row is written.
+        reply: Ack,
+    },
     /// Fold the WAL into the main file, then copy the main file to
     /// `destination`, all on the actor so no write lands in between and
     /// no checkpoint runs during the copy.
@@ -115,6 +126,13 @@ pub(crate) async fn run(mut rx: mpsc::Receiver<Command>, conn: turso::Connection
             }
             Command::PutWindowState { state, reply } => {
                 let _ = reply.send(put_window_state(&conn, state).await);
+            }
+            Command::PutUiState {
+                key,
+                json_text,
+                reply,
+            } => {
+                let _ = reply.send(put_ui_state_row(&conn, key, &json_text).await);
             }
             Command::Snapshot { destination, reply } => {
                 let _ = reply.send(snapshot(&conn, &path, &destination).await);
@@ -172,8 +190,8 @@ async fn snapshot(
         .map_err(|source| WorkspaceFileError::Io { source })
 }
 
-/// Writes the stamp, the grants, and the window state into a freshly
-/// schema'd database, all in one transaction.
+/// Writes the stamp, the grants, the window state, and any ui-state
+/// values into a freshly schema'd database, all in one transaction.
 pub(crate) async fn write_contents(
     conn: &turso::Connection,
     contents: &WorkspaceContents,
@@ -213,6 +231,11 @@ async fn write_contents_rows(
             (KV_WINDOW, window_json(window)),
         )
         .await?;
+    }
+    for (key, value) in &contents.ui_state {
+        if let Some(value) = value {
+            put_ui_state_row(conn, key, &value.to_string()).await?;
+        }
     }
     Ok(())
 }
@@ -326,8 +349,8 @@ pub(crate) fn wal_sidecar_of(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Reads the display name, the grants in position order, and the saved
-/// window from an already validated connection.
+/// Reads the display name, the grants in position order, the saved
+/// window, and the ui-state values from an already validated connection.
 pub(crate) async fn read_contents(
     conn: &turso::Connection,
     default_name: &str,
@@ -337,10 +360,12 @@ pub(crate) async fn read_contents(
         .unwrap_or_else(|| default_name.to_string());
     let grants = read_grants(conn).await?;
     let window_state = read_window(conn).await?;
+    let ui_state = read_ui_state_rows(conn).await?;
     Ok(WorkspaceContents {
         name,
         grants,
         window_state,
+        ui_state,
     })
 }
 

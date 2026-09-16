@@ -6,6 +6,8 @@ use super::*;
 
 #[path = "workspace-file-tests-mutations.rs"]
 mod mutations;
+#[path = "workspace-file-tests-ui-state.rs"]
+mod ui_state;
 
 #[tokio::test]
 async fn turso_opens_a_tempdir_database_and_round_trips_user_version() {
@@ -84,6 +86,7 @@ fn sample_contents() -> WorkspaceContents {
             y: 60,
             maximized: false,
         }),
+        ui_state: empty_ui_state(),
     }
 }
 

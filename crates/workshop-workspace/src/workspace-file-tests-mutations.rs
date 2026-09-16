@@ -22,6 +22,7 @@ fn empty_contents(name: &str) -> WorkspaceContents {
         name: name.to_string(),
         grants: Vec::new(),
         window_state: None,
+        ui_state: empty_ui_state(),
     }
 }
 

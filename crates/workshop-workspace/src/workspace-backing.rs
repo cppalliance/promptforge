@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::error::WorkspaceError;
 use crate::workspace_file::{
-    GrantRow, WindowState, WorkspaceContents, WorkspaceFile, now_rfc3339, stem_of,
+    GrantRow, WindowState, WorkspaceContents, WorkspaceFile, empty_ui_state, now_rfc3339, stem_of,
 };
 
 use super::Workspace;
@@ -132,7 +132,8 @@ impl Workspace {
     /// and the previous backing's window state, and makes it the backing.
     /// The previous file, if any, keeps its contents and is closed; its
     /// siblings stay where they are. Save-as moves preferences to a new
-    /// name, not the world.
+    /// name, not the world. The ui-state keys are not carried: the SPA
+    /// is their one writer and writes them after a save-as itself.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileTaken`] when something
@@ -157,6 +158,7 @@ impl Workspace {
             name: stem_of(path),
             grants: self.grant_rows(),
             window_state,
+            ui_state: empty_ui_state(),
         };
         let file = WorkspaceFile::create(path, &contents).await?;
         self.swap_backing(file, path).await;

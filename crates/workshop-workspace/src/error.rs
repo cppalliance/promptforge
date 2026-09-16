@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 
 use workshop_protocol::ErrorEnvelope;
 
-use crate::workspace_file::WorkspaceFileError;
+use crate::workspace_file::{UI_STATE_KEYS, WorkspaceFileError};
 
 /// Whether wire bodies carry internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at
@@ -147,6 +147,28 @@ pub enum WorkspaceError {
         #[source]
         source: WorkspaceFileError,
     },
+
+    /// A ui-state put named a key outside the allow-list. The message
+    /// lists the allow-list itself so it cannot drift from the keys.
+    #[error(
+        "ui-state key {0:?} is not allowed; one of {allowed} is required",
+        allowed = UI_STATE_KEYS.join(", ")
+    )]
+    UiStateKey(String),
+
+    /// A ui-state value exceeds the size cap.
+    #[non_exhaustive]
+    #[error("ui-state value is {actual} bytes; at most {cap} bytes are allowed")]
+    UiStateTooLarge {
+        /// The size of the refused value.
+        actual: usize,
+        /// The cap it exceeded.
+        cap: usize,
+    },
+
+    /// A ui-state value does not parse as JSON.
+    #[error("ui-state value is not JSON")]
+    UiStateNotJson,
 }
 
 impl From<WorkspaceFileError> for WorkspaceError {
@@ -180,13 +202,17 @@ impl WorkspaceError {
     /// The one HTTP status this failure answers with.
     pub(crate) fn status(&self) -> StatusCode {
         match self {
-            Self::NotADirectory | Self::NotAFile | Self::WorkspaceFileRefused { .. } => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::NotADirectory
+            | Self::NotAFile
+            | Self::WorkspaceFileRefused { .. }
+            | Self::UiStateKey(_)
+            | Self::UiStateNotJson => StatusCode::BAD_REQUEST,
             Self::OutsideGrants | Self::ForbiddenComponent => StatusCode::FORBIDDEN,
             Self::NotFound | Self::NotGranted => StatusCode::NOT_FOUND,
             Self::BinaryFile | Self::NotUtf8 => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            Self::FileTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::FileTooLarge { .. } | Self::UiStateTooLarge { .. } => {
+                StatusCode::PAYLOAD_TOO_LARGE
+            }
             Self::ModifiedConflict | Self::WorkspaceFileTaken => StatusCode::CONFLICT,
             Self::ResolveGrant { .. }
             | Self::ResolvePath { .. }
@@ -220,6 +246,9 @@ impl WorkspaceError {
             Self::WorkspaceFileRefused { .. } => "workspace_file_refused",
             Self::WorkspaceFileTaken => "workspace_file_taken",
             Self::WorkspaceFileFailed { .. } => "workspace_file_failed",
+            Self::UiStateKey(_) => "ui_state_key",
+            Self::UiStateTooLarge { .. } => "ui_state_too_large",
+            Self::UiStateNotJson => "ui_state_not_json",
         }
     }
 }

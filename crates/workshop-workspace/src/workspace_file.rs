@@ -7,11 +7,13 @@
 //! API is async-native, and it all runs on one actor task that owns the
 //! one connection ([`actor::run`]): channel order is disk order.
 //!
-//! Schema v1 holds three tables: `meta`, `grants`, and `kv`. These table
-//! names are reserved for follow-on projects and unused in v1:
-//! `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`,
-//! `documents`.
+//! Schema v1 holds three tables: `meta`, `grants`, and `kv`. The `kv`
+//! table holds the window geometry and the opaque ui-state values the
+//! SPA owns ([`ui_state`]). These table names are reserved for
+//! follow-on projects and unused in v1: `agent_windows`, `run_presets`,
+//! `runs`, `run_events`, `agents`, `documents`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io};
@@ -23,10 +25,13 @@ use tokio::sync::{mpsc, oneshot};
 mod actor;
 #[path = "workspace_file-siblings.rs"]
 mod siblings;
+#[path = "workspace_file-ui-state.rs"]
+mod ui_state;
 
 pub(crate) use actor::now_rfc3339;
 use actor::{COMMAND_QUEUE_DEPTH, Command, SCHEMA_V1};
 use siblings::{copy_siblings, plan_siblings, remove_sibling};
+pub(crate) use ui_state::{UI_STATE_KEYS, empty_ui_state};
 
 /// Meta key naming the file format; always [`FORMAT_NAME`].
 pub(crate) const META_FORMAT: &str = "format";
@@ -37,7 +42,8 @@ pub(crate) const META_VERSION: &str = "version";
 pub(crate) const META_NAME: &str = "name";
 /// Meta key carrying the RFC 3339 creation time.
 pub(crate) const META_CREATED_AT: &str = "created_at";
-/// The one kv key v1 defines: the shell's saved geometry as JSON.
+/// The kv key holding the shell's saved geometry as JSON; the other kv
+/// keys are the opaque ui-state values in [`UI_STATE_KEYS`].
 pub(crate) const KV_WINDOW: &str = "window";
 
 /// The value every workspace file carries under [`META_FORMAT`].
@@ -113,6 +119,9 @@ pub(crate) struct WorkspaceContents {
     pub(crate) grants: Vec<GrantRow>,
     /// Saved window geometry (kv 'window'), absent when never saved.
     pub(crate) window_state: Option<WindowState>,
+    /// The opaque ui-state values (kv rows named by [`UI_STATE_KEYS`]),
+    /// one entry per key, `None` when never saved.
+    pub(crate) ui_state: BTreeMap<&'static str, Option<serde_json::Value>>,
 }
 
 /// One row of the grants table.
@@ -157,8 +166,8 @@ impl WorkspaceFile {
     ///
     /// Writes exactly one file at the chosen path: the parent directory
     /// must exist and the path must not. The schema is applied first;
-    /// the `meta` stamp, the grants, and the window state then land in
-    /// one transaction. A failure after the file appears removes it
+    /// the `meta` stamp, the grants, the window state, and any ui-state
+    /// values then land in one transaction. A failure after the file appears removes it
     /// again, so a retry at the same path is not refused.
     pub(crate) async fn create(
         path: &Path,
