@@ -67,12 +67,13 @@ pub(crate) struct FilePathRequest {
     path: String,
 }
 
-/// The JSON body of a `PUT /workspace/file/window-state` answer.
+/// The JSON body of a `PUT /workspace/file/window-state` or
+/// `PUT /workspace/file/state/{key}` answer.
 #[derive(Debug, Serialize)]
-pub(crate) struct WindowStateResponse {
-    /// Whether the geometry was written; `false` when the workspace is
+pub(crate) struct SavedResponse {
+    /// Whether the value was written; `false` when the workspace is
     /// ephemeral and has nowhere to keep it.
-    saved: bool,
+    pub(super) saved: bool,
 }
 
 /// Reports the workspace as it stands: its file, name, grants, and
@@ -125,7 +126,7 @@ pub(crate) async fn put_window_state(
         workspace
             .put_window_state(state)
             .await
-            .map(|saved| WindowStateResponse { saved }),
+            .map(|saved| SavedResponse { saved }),
     )
 }
 

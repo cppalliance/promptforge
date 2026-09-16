@@ -261,7 +261,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-3>
 
-### Step 3: `/workspace/file/state` routes
+### Step 3: `/workspace/file/state` routes [completed]
 
 - Component: `workspace-bucket`
 - Piece: HTTP layer (sequential after the storage layer)
