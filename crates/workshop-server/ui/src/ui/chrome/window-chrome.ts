@@ -10,6 +10,8 @@ import "./window-chrome.css";
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
+import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
+import { getService } from "../../services/service-registry";
 
 declare global {
   interface Window {
@@ -55,6 +57,13 @@ export function closeWindow(): void {
   runWindowCommand((win) => win.close());
 }
 
+/** Toggles native fullscreen. The Appearance menu's Full Screen row and F11 dispatch here. */
+export function toggleFullScreen(): void {
+  runWindowCommand(async (win) => {
+    await win.setFullscreen(!(await win.isFullscreen()));
+  });
+}
+
 /**
  * Reveals the custom title bar in every mode: the bar carries the
  * application menus, so it must show in a plain browser too. The drag
@@ -78,6 +87,12 @@ export function setupWindowChrome(): IDisposable {
   bar.hidden = false;
 
   const win = currentWindow();
+  // The platform context keys the menu rows read: isWeb gates the
+  // desktop-only rows (Full Screen, Close Window), isFullscreen drives
+  // the Full Screen checkbox. Both bind at boot, before any menu opens.
+  const contextKeys = getService(CONTEXT_KEY_SERVICE);
+  const fullscreenKey = contextKeys.createKey("isFullscreen", false);
+  contextKeys.createKey("isWeb", win === null);
   if (win === null) {
     // No native window exists for the buttons to act on; showing them
     // would present dead controls.
@@ -135,8 +150,15 @@ export function setupWindowChrome(): IDisposable {
     restoreGlyph.toggleAttribute("hidden", !maximized);
   };
   void syncMaximized();
+  // The fullscreen checkbox follows the window the same way: every
+  // transition (F11, the macOS green light, the menu row) is a resize.
+  const syncFullscreen = async (): Promise<void> => {
+    fullscreenKey.set(await win.isFullscreen());
+  };
+  void syncFullscreen();
   const unlisten = win.onResized(() => {
     void syncMaximized();
+    void syncFullscreen();
   });
   store.add(
     toDisposable(() => {

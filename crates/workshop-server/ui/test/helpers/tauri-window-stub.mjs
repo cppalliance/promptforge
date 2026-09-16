@@ -9,7 +9,7 @@
 
 function state() {
   if (window.__TAURI_STUB__ === undefined) {
-    window.__TAURI_STUB__ = { calls: [], maximized: false, resizeHandlers: [] };
+    window.__TAURI_STUB__ = { calls: [], maximized: false, fullscreen: false, resizeHandlers: [] };
   }
   return window.__TAURI_STUB__;
 }
@@ -36,6 +36,16 @@ export function getCurrentWindow() {
     },
     isMaximized() {
       return Promise.resolve(state().maximized);
+    },
+    // Reads stay unrecorded (isMaximized sets the precedent); only the
+    // state-changing write lands in calls.
+    isFullscreen() {
+      return Promise.resolve(state().fullscreen);
+    },
+    setFullscreen(fullscreen) {
+      state().fullscreen = fullscreen;
+      state().calls.push("set-fullscreen");
+      return Promise.resolve();
     },
     onResized(handler) {
       state().resizeHandlers.push(handler);

@@ -321,15 +321,16 @@ export class WorkshopTreePanel extends WorkshopPart {
   }
 }
 
-/** Ctrl+B: toggle the Workshop tree panel. */
-export function toggleWorkshopPanel(): void {
+/** Ctrl+B: toggle the Workshop tree panel; answers the new visibility. */
+export function toggleWorkshopPanel(): boolean {
   const dock = getService(DOCK);
   const existing = dock.getPanel(panelIdFor("tree", {}));
   if (existing) {
     dock.removePanel(existing);
-  } else {
-    openInZone("tree", {});
+    return false;
   }
+  openInZone("tree", {});
+  return true;
 }
 
 /** Ctrl+Shift+F: open or activate the Workshop tree and focus it. */

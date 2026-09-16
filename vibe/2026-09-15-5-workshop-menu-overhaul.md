@@ -859,7 +859,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-19>
 
-### Step 19: Chrome, layout, status, agent, and gateway contributions
+### Step 19: Chrome, layout, status, agent, and gateway contributions [completed]
 
 - Component: shell
 - Artifacts: one `<feature>.contribution.ts` each for chrome (full screen, close window, zoom triple, about), layout (explorer, sidebar toggles including `toggleAuxiliaryBar` via `group.api.setVisible`), status (status bar toggle), agent (new agents window), gateway (settings).

@@ -128,6 +128,23 @@ function liveGroup(zone: ZoneName): IDockviewGroupPanel | undefined {
 }
 
 /**
+ * Hides or shows a zone's live group and answers the new visibility.
+ * Hiding goes through the group's own setVisible, so its panels - and
+ * the agent session's socket, for the right zone - survive; nothing is
+ * removed. Answers undefined when the zone has no live group, leaving
+ * the caller to open the zone's anchor panel instead.
+ */
+export function toggleZoneVisibility(zone: ZoneName): boolean | undefined {
+  const group = liveGroup(zone);
+  if (group === undefined) {
+    return undefined;
+  }
+  const visible = !group.api.isVisible;
+  group.api.setVisible(visible);
+  return visible;
+}
+
+/**
  * Placement for rebuilding a zone whose group is gone: the zone's own
  * side of the dock, anchored to a surviving group. "main" regrows beside
  * the left zone when it can, else beside the right zone. Returns undefined

@@ -10,8 +10,9 @@
 import { createStatusBarShell, type StatusBarShell } from "shared-ui/status-bar";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
+import { CONTEXT_KEY_SERVICE, type ContextKey } from "../../services/context-key-service";
 import type { StatusFrame } from "../../services/protocol";
-import { createServiceToken, type ServiceToken } from "../../services/service-registry";
+import { createServiceToken, getService, type ServiceToken } from "../../services/service-registry";
 
 type PulseActivity = "thinking" | "generating";
 
@@ -26,9 +27,14 @@ export class StatusBar extends Disposable {
   private readonly lit = new Set<PulseActivity>();
   private sustained: PulseActivity | null = null;
   private ledTimer: ReturnType<typeof setTimeout> | null = null;
+  // The bar's own visibility key: the Appearance menu's Status Bar row
+  // reads it for its checkbox. Bound here because the bar owns the
+  // element; visible by default, matching the boot layout.
+  private readonly visibleKey: ContextKey<boolean>;
 
   constructor() {
     super();
+    this.visibleKey = getService(CONTEXT_KEY_SERVICE).createKey("statusBarVisible", true);
     this.shell = createStatusBarShell();
     // The workshop's indicators: the recording LED carries the --rec
     // marker; the activity LED is the unmarked one.
@@ -108,6 +114,21 @@ export class StatusBar extends Disposable {
   /** Shows a locally-originated message (e.g. dictation errors). The next observer frame overwrites it. */
   showLocal(label: string, severity: "info" | "error"): void {
     this.shell.setText(label, { error: severity === "error" });
+  }
+
+  /** Whether the bar is currently shown. */
+  get isVisible(): boolean {
+    return !this.shell.element.hidden;
+  }
+
+  /**
+   * Shows or hides the bar (the Appearance menu's Status Bar row),
+   * mirroring the state into the statusBarVisible context key so the
+   * row's checkbox follows.
+   */
+  setVisible(visible: boolean): void {
+    this.shell.element.hidden = !visible;
+    this.visibleKey.set(visible);
   }
 
   /**

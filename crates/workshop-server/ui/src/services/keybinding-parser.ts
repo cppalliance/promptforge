@@ -251,6 +251,10 @@ function keyLabel(key: string): string {
   if (key.length === 1 && key >= "a" && key <= "z") {
     return key.toUpperCase();
   }
+  // Function keys render in VS Code's form: F11, not f11.
+  if (/^f(?:[1-9]|1[0-2])$/.test(key)) {
+    return key.toUpperCase();
+  }
   if (key.startsWith("numpad")) {
     return `NumPad${key.slice(6)}`;
   }
