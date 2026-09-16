@@ -694,7 +694,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-4>
 
-### Step 4: Action registry
+### Step 4: Action registry [completed]
 
 - Component: services
 - Artifacts: `src/services/action-registry.ts` (`registerAction` writing the command, one menu item per `menu` entry plus a `CommandPalette` item when `f1`, and the keybinding rule with `precondition` ANDed into `when`; one `DisposableStore`; parse failures returned at registration).
