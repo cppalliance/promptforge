@@ -9700,6 +9700,7 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "dunce",
+ "humantime",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -9707,6 +9708,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tower",
+ "tracing",
  "turso",
  "workshop-protocol",
  "workshop-registry",

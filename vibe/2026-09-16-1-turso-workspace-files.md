@@ -463,7 +463,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-5>
 
-### Step 5: `workspace_file` schema, create, open, validate
+### Step 5: `workspace_file` schema, create, open, validate [completed]
 
 - Component: `workspace-file`
 - Piece: module (sequential: Step 6 mutates what this step creates)

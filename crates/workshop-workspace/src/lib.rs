@@ -23,6 +23,13 @@ mod error;
 mod handlers;
 pub mod handles;
 mod workspace;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "wired into the Workspace backing by the steps that follow"
+    )
+)]
 mod workspace_file;
 
 pub use error::WorkspaceError;
