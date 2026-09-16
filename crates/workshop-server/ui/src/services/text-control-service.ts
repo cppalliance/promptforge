@@ -43,10 +43,12 @@ function isTextInput(element: Element | null): element is HTMLElement {
   if (!(element instanceof HTMLElement)) {
     return false;
   }
-  if (element instanceof HTMLTextAreaElement) {
+  // The constructor globals are probed: a partial-DOM host (a jsdom test
+  // shimming only the keys it needs) may lack them.
+  if (typeof HTMLTextAreaElement !== "undefined" && element instanceof HTMLTextAreaElement) {
     return !element.disabled && !element.readOnly;
   }
-  if (element instanceof HTMLInputElement) {
+  if (typeof HTMLInputElement !== "undefined" && element instanceof HTMLInputElement) {
     const textLike = ["text", "search", "url", "tel", "email", "password"];
     return !element.disabled && !element.readOnly && textLike.includes(element.type);
   }

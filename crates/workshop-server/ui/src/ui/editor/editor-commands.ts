@@ -52,7 +52,7 @@ export {
 };
 
 /** The panel's content as an EditorPanel, or null for other panel kinds. */
-function asEditor(panel: IDockviewPanel | undefined): EditorPanel | null {
+export function asEditor(panel: IDockviewPanel | undefined): EditorPanel | null {
   if (panel === undefined) {
     return null;
   }
@@ -121,6 +121,25 @@ export function withActiveEditor(fn: (panel: EditorPanel) => void): void {
   if (editor !== null) {
     fn(editor);
   }
+}
+
+/**
+ * Go to Line/Column: moves the cursor to the 1-based line (and column)
+ * in the active editor, clamped into the document, and focuses the view.
+ */
+export function goToLine(line: number, column?: number): void {
+  const view = asEditor(getService(DOCK).activePanel)?.editorView() ?? null;
+  if (view === null) {
+    return;
+  }
+  const docLine = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
+  const head = column === undefined ? docLine.from : Math.min(docLine.from + column - 1, docLine.to);
+  view.dispatch({
+    selection: EditorSelection.cursor(head),
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  view.focus();
 }
 
 /** Replace: opens the search panel and moves focus to the replace field. */

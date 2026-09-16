@@ -52,7 +52,16 @@ function zoneState(): ZoneStateService {
 export function panelIdFor(type: PanelType, params: PanelParams): string {
   if (type === "editor") {
     const path = params.path;
-    return `editor:${typeof path === "string" ? path : ""}`;
+    if (typeof path === "string") {
+      return `editor:${path}`;
+    }
+    // Untitled buffers key by their allocated serial, so each new buffer
+    // is its own panel instead of reactivating the previous one.
+    const untitled = params.untitled;
+    if (typeof untitled === "number") {
+      return `editor:untitled-${untitled}`;
+    }
+    return "editor:";
   }
   if (type === "agent" && typeof params.instance === "string") {
     return `agent:${params.instance}`;

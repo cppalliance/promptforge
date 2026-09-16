@@ -18,8 +18,11 @@ import type { ParseError } from "../../services/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingWeight } from "../../services/keybinding-registry";
 import { MenuId } from "../../services/menu-registry";
+import { QuickAccessRegistry } from "../../services/quick-access-registry";
 import { getService } from "../../services/service-registry";
+import { QUICK_INPUT_SERVICE } from "../quickinput/quick-input";
 import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "./editor-settings-service";
+import { createGotoLineProvider } from "./goto-line";
 
 /** The editor-commands module as a type only; the runtime import stays lazy. */
 type EditorCommands = typeof import("./editor-commands");
@@ -131,3 +134,48 @@ for (const row of editorToggles) {
     },
   });
 }
+
+// The lifecycle rows (plan step 15). New Text File and Reopen Closed
+// Editor bind no `when`: both must work with no editor open. Go to
+// Line keeps the editor-owned default - keybinding when
+// editorTextFocus, menu precondition activeEditor - and opens quick
+// input at the ":" prefix. The run bodies lazy-import the lifecycle
+// module, so this file stays out of the editor chunk's graph.
+addAction({
+  id: "workbench.action.files.newUntitledFile",
+  title: "New Text File",
+  f1: true,
+  keybinding: { keybinding: "ctrlcmd+n", weight: KeybindingWeight.WorkbenchContrib },
+  menu: [{ id: MenuId.MenubarFileMenu, group: "1_new" }],
+  run: () => import("./editor-lifecycle").then((lifecycle) => lifecycle.newUntitledFile()),
+});
+
+addAction({
+  id: "workbench.action.reopenClosedEditor",
+  title: "Reopen Closed Editor",
+  f1: true,
+  keybinding: { keybinding: "ctrlcmd+shift+t", weight: KeybindingWeight.WorkbenchContrib },
+  menu: [{ id: MenuId.MenubarRecentMenu, group: "1_editor" }],
+  run: () => import("./editor-lifecycle").then((lifecycle) => lifecycle.reopenClosedEditor()),
+});
+
+addAction({
+  id: "workbench.action.gotoLine",
+  title: "Go to Line/Column...",
+  f1: true,
+  precondition: "activeEditor",
+  keybinding: { keybinding: "ctrlcmd+g", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
+  menu: [{ id: MenuId.MenubarGoMenu, group: "5_infile_nav" }],
+  run: () => {
+    getService(QUICK_INPUT_SERVICE).quickAccess.show(":");
+  },
+});
+
+// The ":" go-to-line provider. The factory is CodeMirror-free; only the
+// row's accept path lazy-imports the command layer.
+QuickAccessRegistry.registerQuickAccessProvider({
+  prefix: ":",
+  placeholder: "Go to line",
+  helpEntries: [{ description: "Go to Line/Column in Editor", prefix: ":" }],
+  factory: () => createGotoLineProvider(),
+});

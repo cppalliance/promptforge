@@ -815,7 +815,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-15>
 
-### Step 15: Editor lifecycle integration
+### Step 15: Editor lifecycle integration [completed]
 
 - Component: editor
 - Artifacts: untitled buffers (`EditorPanel` `{ untitled: true }`, `Untitled-N` titles, save-runs-Save-As), the closed-editor stack with `reopenClosedEditor`, the CodeMirror text-control adapter, the `:` go-to-line provider, recent-files recording on open, and the `activeEditor`/`editorLangId` context keys.

@@ -11,10 +11,14 @@ import "./editor-panel.css";
 import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
 import type { EditorView } from "@codemirror/view";
 
+import { Emitter } from "../../base/event";
 import { toDisposable } from "../../base/lifecycle";
 import { WorkshopPart } from "../../base/workshop-part";
+import { Commands } from "../../services/command-registry";
+import { RECENT_FILES_STORE } from "../../services/recent-files-store";
+import { getServiceOrNull } from "../../services/service-registry";
 import { showPanelDialog } from "./editor-dialog";
-import { CodeMirrorSurface, type EditorSurface } from "./editor-surface";
+import { CodeMirrorSurface, languageIdForPath, type EditorSurface } from "./editor-surface";
 import {
   fetchFile,
   isModifiedConflict,
@@ -39,15 +43,35 @@ function filePathParam(params: Record<string, unknown>): string | null {
   return typeof path === "string" && path.length > 0 ? path : null;
 }
 
+/**
+ * Reads the untitled serial out of panel params: a positive integer
+ * marks the panel as an untitled buffer and numbers its Untitled-N
+ * title and its panel id.
+ */
+function untitledSerialParam(params: Record<string, unknown>): number | null {
+  const untitled = params.untitled;
+  return typeof untitled === "number" && Number.isInteger(untitled) && untitled > 0 ? untitled : null;
+}
+
 /** The file's base name, for the tab title. */
 function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+const didInitEmitter = new Emitter<EditorPanel>();
+
+/**
+ * Fires as each EditorPanel finishes init. The lifecycle module's
+ * context-key binder hooks it: the lazy chunk swap that mounts the real
+ * panel fires no dock event, so dock subscriptions alone would miss it.
+ */
+export const onDidInitEditorPanel = didInitEmitter.event;
+
 export class EditorPanel extends WorkshopPart {
   private readonly surface: EditorSurface;
   private panelApi: DockviewPanelApi | null = null;
   private path: string | null = null;
+  private untitled = false;
   private title = "Editor";
   private token: string | null = null;
   private saving = false;
@@ -76,16 +100,57 @@ export class EditorPanel extends WorkshopPart {
     super.init(parameters);
     this.panelApi = parameters.api;
     const path = filePathParam(parameters.params);
-    if (path === null) {
-      this.showError("No file path was provided for this editor.");
-      return;
+    if (path !== null) {
+      this.path = path;
+      this.title = baseName(path);
+      this.updateTitle();
+      void this.load(path)
+        .then(() => {
+          // Every opened path feeds File > Open Recent and quick open.
+          getServiceOrNull(RECENT_FILES_STORE)?.add(path);
+        })
+        .catch((error: unknown) => {
+          this.showError(error);
+        });
+    } else {
+      const serial = untitledSerialParam(parameters.params);
+      if (serial === null) {
+        this.showError("No file path was provided for this editor.");
+        return;
+      }
+      // An untitled buffer: no read, no write target - save runs Save As.
+      this.untitled = true;
+      this.title = `Untitled-${serial}`;
+      this.updateTitle();
+      const text = typeof parameters.params.text === "string" ? parameters.params.text : "";
+      this.surface.open({ path: "", text });
+      if (text !== "") {
+        // A restored untitled buffer (Reopen Closed Editor) is dirty
+        // against the empty baseline: its content was never persisted.
+        this.surface.markSaved("");
+      }
     }
-    this.path = path;
-    this.title = baseName(path);
-    this.updateTitle();
-    void this.load(path).catch((error: unknown) => {
-      this.showError(error);
-    });
+    didInitEmitter.fire(this);
+  }
+
+  /** The panel's file path, or null for an untitled buffer. */
+  filePath(): string | null {
+    return this.path;
+  }
+
+  /** Whether the panel is an untitled buffer (no path; save runs Save As). */
+  isUntitled(): boolean {
+    return this.untitled;
+  }
+
+  /** The live editor text - what a save or an untitled reopen carries. */
+  currentText(): string {
+    return this.surface.text();
+  }
+
+  /** The document's language id, for the editorLangId context key. */
+  languageId(): string {
+    return this.path === null ? "plaintext" : languageIdForPath(this.path);
   }
 
   /** The panel's dirty state, for close prompts and save shortcuts. */
@@ -105,10 +170,18 @@ export class EditorPanel extends WorkshopPart {
   /**
    * Saves through the workspace API with the token from the last read.
    * A stale token means the file changed on disk: rather than overwriting
-   * silently, the conflict dialog offers reload or overwrite.
+   * silently, the conflict dialog offers reload or overwrite. An
+   * untitled buffer has no write target, so its save runs Save As,
+   * which resolves this panel through the dock's active panel.
    */
   async save(): Promise<void> {
-    if (this.path === null || this.saving) {
+    if (this.path === null) {
+      if (this.untitled) {
+        await Commands.execute("workbench.action.files.saveAs");
+      }
+      return;
+    }
+    if (this.saving) {
       return;
     }
     this.saving = true;

@@ -1,5 +1,9 @@
 // Unit test for the editor commands catalog (plan step 13,
-// src/ui/editor/editor-commands.ts and editor.contribution.ts). Every
+// src/ui/editor/editor-commands.ts and editor.contribution.ts) and the
+// editor lifecycle (plan step 15: untitled buffers, the closed-editor
+// stack, the CodeMirror text-control adapter, the ":" go-to-line
+// provider, recent-files recording, and the activeEditor/editorLangId
+// context keys). Every
 // CodeMirror-backed catalog row is driven against a real EditorState -
 // comment toggles, line copy/move, duplicate selection, cursor add rows,
 // occurrence rows, bracket jump - or against a real EditorView in jsdom
@@ -24,18 +28,25 @@ const bundle = await esbuild.build({
     contents: `
       import "./src/ui/editor/editor.contribution.ts";
       export * as editorCommands from "./src/ui/editor/editor-commands.ts";
+      export * as editorLifecycle from "./src/ui/editor/editor-lifecycle.ts";
+      export { parseLineColumn, createGotoLineProvider } from "./src/ui/editor/goto-line.ts";
       export { EditorState, EditorSelection } from "@codemirror/state";
       export { EditorView } from "@codemirror/view";
       export { javascript } from "@codemirror/lang-javascript";
       export { ensureSyntaxTree } from "@codemirror/language";
       export { setDiagnostics } from "@codemirror/lint";
-      export { registerService } from "./src/services/service-registry.ts";
+      export { registerService, getService } from "./src/services/service-registry.ts";
       export { DOCK } from "./src/services/panel-registry.ts";
       export { EditorPanel } from "./src/ui/editor/editor-panel.ts";
       export { CodeMirrorSurface } from "./src/ui/editor/editor-surface.ts";
       export { Commands } from "./src/services/command-registry.ts";
       export { Menus, MenuId } from "./src/services/menu-registry.ts";
       export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { QuickAccessRegistry } from "./src/services/quick-access-registry.ts";
+      export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
+      export { RECENT_FILES_STORE } from "./src/services/recent-files-store.ts";
+      export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
+      export { initZones } from "./src/ui/layout/zones.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -84,6 +95,7 @@ for (const key of [
   "Window",
   "HTMLElement",
   "HTMLInputElement",
+  "HTMLTextAreaElement",
   "Node",
   "Element",
   "Range",
@@ -113,6 +125,9 @@ const bundlePath = path.join(os.tmpdir(), "promptforge-editor-commands-test.mjs"
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   editorCommands,
+  editorLifecycle,
+  parseLineColumn,
+  createGotoLineProvider,
   EditorState,
   EditorSelection,
   EditorView,
@@ -120,6 +135,7 @@ const {
   ensureSyntaxTree,
   setDiagnostics,
   registerService,
+  getService,
   DOCK,
   EditorPanel,
   CodeMirrorSurface,
@@ -127,12 +143,23 @@ const {
   Menus,
   MenuId,
   KeybindingsRegistry,
+  QuickAccessRegistry,
+  CONTEXT_KEY_SERVICE,
+  RECENT_FILES_STORE,
+  TEXT_CONTROL_SERVICE,
+  initZones,
 } = await import(pathToFileURL(bundlePath).href);
 console.error = realConsoleError;
 
 const failures = [];
 function check(name, condition) {
   if (!condition) failures.push(name);
+}
+
+async function flush() {
+  for (let i = 0; i < 5; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 /** Runs a StateCommand against a real EditorState, capturing the dispatch. */
@@ -405,6 +432,9 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "editor.action.jumpToBracket",
     "editor.action.marker.nextInFiles",
     "editor.action.marker.prevInFiles",
+    "workbench.action.files.newUntitledFile",
+    "workbench.action.reopenClosedEditor",
+    "workbench.action.gotoLine",
   ];
   check("the contribution registered without errors", consoleErrors.length === 0);
   check(
@@ -412,7 +442,8 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     EXPECTED_IDS.every((id) => Commands.lookup(id) !== undefined),
   );
   const palette = Menus.getMenuItems(MenuId.CommandPalette).map((row) => row.command);
-  // The twenty catalog rows plus step 14's four settings toggles.
+  // The catalog rows plus step 14's four settings toggles; EXPECTED_IDS
+  // includes step 15's three lifecycle actions.
   check(
     "every catalog row reaches the palette",
     palette.length === EXPECTED_IDS.length + 4 && EXPECTED_IDS.every((id) => palette.includes(id)),
@@ -436,11 +467,26 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
   );
   const goMenu = Menus.getMenuItems(MenuId.MenubarGoMenu).map((row) => row.command);
   check(
-    "the Go menu carries bracket jump and problem navigation",
-    goMenu.length === 3 &&
-      ["editor.action.jumpToBracket", "editor.action.marker.nextInFiles", "editor.action.marker.prevInFiles"]
+    "the Go menu carries bracket jump, problem navigation, and go-to-line",
+    goMenu.length === 4 &&
+      ["editor.action.jumpToBracket", "editor.action.marker.nextInFiles", "editor.action.marker.prevInFiles", "workbench.action.gotoLine"]
         .every((id) => goMenu.includes(id)),
   );
+  const fileMenu = Menus.getMenuItems(MenuId.MenubarFileMenu).map((row) => row.command);
+  check(
+    "the File menu carries New Text File",
+    fileMenu.length === 1 && fileMenu.includes("workbench.action.files.newUntitledFile"),
+  );
+  const recentMenu = Menus.getMenuItems(MenuId.MenubarRecentMenu).map((row) => row.command);
+  check(
+    "Open Recent carries Reopen Closed Editor",
+    recentMenu.length === 1 && recentMenu.includes("workbench.action.reopenClosedEditor"),
+  );
+  check("Go to Line carries the activeEditor precondition", Commands.lookup("workbench.action.gotoLine")?.precondition === "activeEditor");
+  check("New Text File has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.files.newUntitledFile") !== undefined);
+  check("Reopen Closed Editor has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.reopenClosedEditor") !== undefined);
+  check("Go to Line has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.gotoLine") !== undefined);
+  check("the contribution registers the ':' go-to-line provider", QuickAccessRegistry.getQuickAccessProvider(":12")?.prefix === ":");
 
   check("a keybound row gets a keybinding label", KeybindingsRegistry.lookupKeybinding("editor.action.commentLine") !== undefined);
   check("Duplicate Selection has no keybinding", KeybindingsRegistry.lookupKeybinding("editor.action.duplicateSelection") === undefined);
@@ -465,6 +511,322 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
   );
   unregisterDock.dispose();
   panel.dispose();
+}
+
+// --- Step 15: editor lifecycle --------------------------------------------
+// A stub surface with the EditorSurface contract's dirty semantics, for
+// panel-level tests that never touch CodeMirror.
+function createStubSurface() {
+  const listeners = new Set();
+  return {
+    element: window.document.createElement("div"),
+    currentText: "",
+    dirty: false,
+    opened: [],
+    open(document) {
+      this.opened.push(document);
+      this.currentText = document.text;
+      this.setDirty(false);
+    },
+    text() {
+      return this.currentText;
+    },
+    markSaved(text) {
+      this.setDirty(this.currentText !== text);
+    },
+    isDirty() {
+      return this.dirty;
+    },
+    setReadOnly() {},
+    onDirtyChange(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    editorView() {
+      return null;
+    },
+    focus() {},
+    dispose() {},
+    setDirty(dirty) {
+      if (dirty === this.dirty) return;
+      this.dirty = dirty;
+      for (const listener of listeners) listener(dirty);
+    },
+  };
+}
+
+// A fake dock good enough for zones and the lifecycle: panel opens are
+// recorded, and the add/remove/active listeners are test-driven.
+function makeFakeDock() {
+  const listeners = { add: [], remove: [], active: [], move: [] };
+  const added = [];
+  const dock = {
+    panels: [],
+    groups: [],
+    activePanel: undefined,
+    onDidMovePanel: (fn) => {
+      listeners.move.push(fn);
+      return { dispose() {} };
+    },
+    onDidAddPanel: (fn) => {
+      listeners.add.push(fn);
+      return { dispose() {} };
+    },
+    onDidRemovePanel: (fn) => {
+      listeners.remove.push(fn);
+      return { dispose() {} };
+    },
+    onDidActivePanelChange: (fn) => {
+      listeners.active.push(fn);
+      return { dispose() {} };
+    },
+    getPanel: () => undefined,
+    getGroup: () => undefined,
+    addPanel: (options) => {
+      added.push(options);
+      const panel = {
+        id: options.id,
+        params: options.params,
+        group: { id: "g1" },
+        api: { setActive() {} },
+        view: { content: {} },
+      };
+      dock.panels.push(panel);
+      return panel;
+    },
+  };
+  return { dock, listeners, added };
+}
+
+const { dock, listeners, added } = makeFakeDock();
+initZones(dock);
+
+{
+  // Untitled buffers: the panel titles itself, reads nothing, and its
+  // save delegates to the Save As command.
+  const recentsBefore = getService(RECENT_FILES_STORE).list.length;
+  let reads = 0;
+  const untitledStub = createStubSurface();
+  const untitledPanel = new EditorPanel({
+    createSurface: () => untitledStub,
+    readFile: async () => {
+      reads += 1;
+      throw new Error("an untitled buffer must not read");
+    },
+  });
+  const untitledTitles = [];
+  untitledPanel.init({
+    params: { untitled: 7 },
+    api: { setTitle: (title) => untitledTitles.push(title), close() {} },
+  });
+  check("an untitled panel titles itself Untitled-N", untitledTitles.at(-1) === "Untitled-7");
+  check(
+    "an untitled panel opens an empty buffer without reading",
+    reads === 0 && untitledStub.opened.length === 1 && untitledStub.opened[0].text === "",
+  );
+  check("a fresh untitled buffer is not dirty", !untitledPanel.isDirty());
+  check("an untitled buffer reports no file path", untitledPanel.filePath() === null && untitledPanel.isUntitled());
+  check(
+    "an untitled buffer records no recent-files entry",
+    getService(RECENT_FILES_STORE).list.length === recentsBefore,
+  );
+
+  let saveAsCalls = 0;
+  const saveAsRegistration = Commands.register("workbench.action.files.saveAs", {
+    run: () => {
+      saveAsCalls += 1;
+    },
+  });
+  await untitledPanel.save();
+  check("save on an untitled buffer runs Save As", saveAsCalls === 1);
+  saveAsRegistration.dispose();
+  untitledPanel.dispose();
+
+  // A reopened untitled buffer restores its text, dirty against the
+  // empty baseline: the content was never persisted.
+  const restoredStub = createStubSurface();
+  const restoredPanel = new EditorPanel({ createSurface: () => restoredStub });
+  const restoredTitles = [];
+  restoredPanel.init({
+    params: { untitled: 8, text: "draft" },
+    api: { setTitle: (title) => restoredTitles.push(title), close() {} },
+  });
+  check("a reopened untitled buffer keeps its text", restoredStub.text() === "draft");
+  check("a reopened untitled buffer with content is dirty", restoredPanel.isDirty());
+  check("a dirty untitled title carries the dot", restoredTitles.at(-1) === "● Untitled-8");
+  restoredPanel.dispose();
+}
+
+{
+  // newUntitledFile opens an untitled editor panel per call.
+  editorLifecycle.newUntitledFile();
+  editorLifecycle.newUntitledFile();
+  check(
+    "newUntitledFile opens an untitled editor panel",
+    added.length === 2 && typeof added[0].params.untitled === "number",
+  );
+  check(
+    "untitled panel ids are unique per buffer",
+    added[0].id !== added[1].id && added[0].id.startsWith("editor:untitled-"),
+  );
+  const beforeCommand = added.length;
+  const executed = await Commands.execute("workbench.action.files.newUntitledFile");
+  check(
+    "executing New Text File runs through the lazy lifecycle import",
+    executed === true && added.length === beforeCommand + 1,
+  );
+}
+
+{
+  // The closed-editor stack: file editors reopen by path, untitled
+  // buffers reopen with their text under a fresh serial.
+  const tracking = editorLifecycle.installClosedEditorTracking(dock);
+
+  const fileStub = createStubSurface();
+  const filePanel = new EditorPanel({
+    createSurface: () => fileStub,
+    readFile: async () => ({ path: "C:\\p\\x.txt", size: 1, token: "t1", text: "x" }),
+  });
+  filePanel.init({ params: { path: "C:\\p\\x.txt" }, api: { setTitle() {}, close() {} } });
+  await flush();
+  for (const listener of listeners.remove) listener({ id: "editor:C:\\p\\x.txt", view: { content: filePanel } });
+  const beforeFileReopen = added.length;
+  editorLifecycle.reopenClosedEditor();
+  check(
+    "reopenClosedEditor reopens the last closed file editor by path",
+    added.length === beforeFileReopen + 1 && added.at(-1).params.path === "C:\\p\\x.txt",
+  );
+
+  const untitledStub = createStubSurface();
+  const untitledPanel = new EditorPanel({ createSurface: () => untitledStub });
+  untitledPanel.init({ params: { untitled: 3, text: "unsaved draft" }, api: { setTitle() {}, close() {} } });
+  for (const listener of listeners.remove) listener({ id: "editor:untitled-3", view: { content: untitledPanel } });
+  editorLifecycle.reopenClosedEditor();
+  check(
+    "a closed untitled editor reopens with its text under a fresh serial",
+    added.at(-1).params.text === "unsaved draft" &&
+      typeof added.at(-1).params.untitled === "number" &&
+      added.at(-1).params.untitled !== 3,
+  );
+
+  const beforeEmpty = added.length;
+  editorLifecycle.reopenClosedEditor();
+  check("reopenClosedEditor on an empty stack is a no-op", added.length === beforeEmpty);
+
+  // A non-editor panel close records nothing.
+  for (const listener of listeners.remove) listener({ id: "tree", view: { content: {} } });
+  editorLifecycle.reopenClosedEditor();
+  check("closing a non-editor panel pushes nothing onto the stack", added.length === beforeEmpty);
+  tracking.dispose();
+  filePanel.dispose();
+  untitledPanel.dispose();
+}
+
+{
+  // The editor-sourced context keys follow the dock's active panel.
+  const binding = editorLifecycle.bindEditorContextKeys(dock);
+  const context = getService(CONTEXT_KEY_SERVICE);
+
+  const markdownStub = createStubSurface();
+  const markdownPanel = new EditorPanel({
+    createSurface: () => markdownStub,
+    readFile: async () => ({ path: "C:\\p\\notes.md", size: 4, token: "t1", text: "# hi" }),
+  });
+  markdownPanel.init({ params: { path: "C:\\p\\notes.md" }, api: { setTitle() {}, close() {} } });
+  await flush();
+  check(
+    "opening a file records it in the recent-files store",
+    getService(RECENT_FILES_STORE).list.includes("C:\\p\\notes.md"),
+  );
+
+  const markdownDockPanel = { id: "editor:C:\\p\\notes.md", view: { content: markdownPanel } };
+  dock.activePanel = markdownDockPanel;
+  for (const listener of listeners.active) listener({ panel: markdownDockPanel });
+  check(
+    "activeEditor is the active editor panel's id",
+    context.getValue("activeEditor") === "editor:C:\\p\\notes.md",
+  );
+  check("editorLangId comes from the active editor's language", context.getValue("editorLangId") === "markdown");
+
+  dock.activePanel = { id: "tree", view: { content: {} } };
+  for (const listener of listeners.active) listener({ panel: dock.activePanel });
+  check("a non-editor active panel clears activeEditor", context.getValue("activeEditor") === undefined);
+  check("a non-editor active panel clears editorLangId", context.getValue("editorLangId") === undefined);
+  binding.dispose();
+  markdownPanel.dispose();
+}
+
+{
+  // The CodeMirror text-control adapter: the surface registers itself,
+  // and the Edit menu's undo/select-all route to its history.
+  const adapterSurface = new CodeMirrorSurface();
+  window.document.body.appendChild(adapterSurface.element);
+  adapterSurface.open({ path: "C:\\p\\t.txt", text: "one\ntwo\n" });
+  const textControls = getService(TEXT_CONTROL_SERVICE);
+  adapterSurface.focus();
+  check("a focused editor surface activates its codemirror adapter", textControls.active?.kind === "codemirror");
+  check(
+    "editorTextFocus follows the focused editor",
+    getService(CONTEXT_KEY_SERVICE).getValue("editorTextFocus") === true,
+  );
+  const adapterView = adapterSurface.editorView();
+  adapterView.dispatch({ changes: { from: 0, insert: "x" } });
+  textControls.undo();
+  check("undo routes through the adapter to the editor's history", adapterSurface.text() === "one\ntwo\n");
+  textControls.selectAll();
+  check(
+    "selectAll routes through the adapter",
+    adapterView.state.selection.main.from === 0 &&
+      adapterView.state.selection.main.to === adapterView.state.doc.length,
+  );
+  adapterSurface.dispose();
+  check("disposing the surface unregisters its adapter", textControls.active === null);
+}
+
+{
+  // The ":" go-to-line provider: parse, guidance row, and accept.
+  const bare = parseLineColumn("12");
+  check("parseLineColumn parses a bare line", bare?.line === 12 && bare?.column === undefined);
+  const withColon = parseLineColumn("12:5");
+  check("parseLineColumn parses line:column", withColon?.line === 12 && withColon?.column === 5);
+  const withComma = parseLineColumn("12,5");
+  check("parseLineColumn parses line,column", withComma?.line === 12 && withComma?.column === 5);
+  check("parseLineColumn rejects non-numeric input", parseLineColumn("abc") === null);
+  check("parseLineColumn rejects empty input", parseLineColumn("") === null);
+  check("parseLineColumn rejects a zero line", parseLineColumn("0") === null);
+
+  const provider = createGotoLineProvider();
+  const guidance = provider.getItems("");
+  check("an empty filter shows a guidance row", guidance.length === 1 && guidance[0].label.length > 0);
+  const rows = provider.getItems("12");
+  check("a line filter offers a go-to row", rows.length === 1 && rows[0].label.includes("12"));
+
+  const gotoSurface = new CodeMirrorSurface();
+  window.document.body.appendChild(gotoSurface.element);
+  gotoSurface.open({
+    path: "C:\\p\\g.txt",
+    text: Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n"),
+  });
+  const gotoPanel = new EditorPanel({ createSurface: () => gotoSurface });
+  dock.activePanel = { id: "editor:C:\\p\\g.txt", view: { content: gotoPanel } };
+  rows[0].accept();
+  await flush();
+  const gotoView = gotoSurface.editorView();
+  check(
+    "accepting a go-to row moves the cursor to the line",
+    gotoView.state.selection.main.head === gotoView.state.doc.line(12).from,
+  );
+  editorCommands.goToLine(5, 2);
+  check(
+    "goToLine honors the column",
+    gotoView.state.selection.main.head === gotoView.state.doc.line(5).from + 1,
+  );
+  editorCommands.goToLine(999);
+  check(
+    "goToLine clamps past the last line",
+    gotoView.state.selection.main.head === gotoView.state.doc.line(20).from,
+  );
+  gotoPanel.dispose();
 }
 
 if (failures.length > 0) {

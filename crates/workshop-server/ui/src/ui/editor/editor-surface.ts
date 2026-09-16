@@ -34,7 +34,7 @@ import {
   type Extension,
   type Transaction,
 } from "@codemirror/state";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, redo, redoDepth, selectAll, undo, undoDepth } from "@codemirror/commands";
 import {
   bracketMatching,
   defaultHighlightStyle,
@@ -52,6 +52,7 @@ import { tags } from "@lezer/highlight";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { getServiceOrNull } from "../../services/service-registry";
+import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
 import {
   DEFAULT_EDITOR_SETTINGS,
   EDITOR_SETTINGS_SERVICE,
@@ -201,61 +202,63 @@ function extensionOf(path: string): string | null {
   return dot <= 0 ? null : name.slice(dot + 1).toLowerCase();
 }
 
+/** One language mode: its editorLangId and its lazy extension loader. */
+interface LanguageMode {
+  readonly id: string;
+  readonly load: () => Promise<Extension>;
+}
+
+async function javascriptMode(typescript: boolean, jsx: boolean): Promise<Extension> {
+  const { javascript } = await import("@codemirror/lang-javascript");
+  return javascript({ typescript, jsx });
+}
+
 /**
- * The language mode for a file extension, loaded on demand. First-party
- * packs cover JavaScript/TypeScript, Python, Rust, JSON, Markdown, and
- * YAML; TOML comes through the legacy-modes stream parser. Unknown
- * extensions get plain text. (The single-file esbuild bundle inlines
- * these dynamic imports; the structure keeps the load boundary explicit.)
+ * The language modes by file extension. First-party packs cover
+ * JavaScript/TypeScript, Python, Rust, JSON, Markdown, and YAML; TOML
+ * comes through the legacy-modes stream parser. Unknown extensions get
+ * plain text. (The single-file esbuild bundle inlines these dynamic
+ * imports; the structure keeps the load boundary explicit.) The id is
+ * the value the editorLangId context key publishes.
  */
-async function languageFor(path: string): Promise<Extension | null> {
-  switch (extensionOf(path)) {
-    case "js":
-    case "mjs":
-    case "cjs":
-    case "jsx": {
-      const { javascript } = await import("@codemirror/lang-javascript");
-      return javascript({ jsx: true });
-    }
-    case "ts":
-    case "mts":
-    case "cts": {
-      const { javascript } = await import("@codemirror/lang-javascript");
-      return javascript({ typescript: true });
-    }
-    case "tsx": {
-      const { javascript } = await import("@codemirror/lang-javascript");
-      return javascript({ typescript: true, jsx: true });
-    }
-    case "py": {
-      const { python } = await import("@codemirror/lang-python");
-      return python();
-    }
-    case "rs": {
-      const { rust } = await import("@codemirror/lang-rust");
-      return rust();
-    }
-    case "json": {
-      const { json } = await import("@codemirror/lang-json");
-      return json();
-    }
-    case "md":
-    case "markdown": {
-      const { markdown } = await import("@codemirror/lang-markdown");
-      return markdown();
-    }
-    case "yaml":
-    case "yml": {
-      const { yaml } = await import("@codemirror/lang-yaml");
-      return yaml();
-    }
-    case "toml": {
-      const { toml } = await import("@codemirror/legacy-modes/mode/toml");
-      return StreamLanguage.define(toml);
-    }
-    default:
-      return null;
+const LANGUAGE_MODES: Record<string, LanguageMode> = {
+  js: { id: "javascript", load: () => javascriptMode(false, true) },
+  mjs: { id: "javascript", load: () => javascriptMode(false, true) },
+  cjs: { id: "javascript", load: () => javascriptMode(false, true) },
+  jsx: { id: "javascriptreact", load: () => javascriptMode(false, true) },
+  ts: { id: "typescript", load: () => javascriptMode(true, false) },
+  mts: { id: "typescript", load: () => javascriptMode(true, false) },
+  cts: { id: "typescript", load: () => javascriptMode(true, false) },
+  tsx: { id: "typescriptreact", load: () => javascriptMode(true, true) },
+  py: { id: "python", load: async () => (await import("@codemirror/lang-python")).python() },
+  rs: { id: "rust", load: async () => (await import("@codemirror/lang-rust")).rust() },
+  json: { id: "json", load: async () => (await import("@codemirror/lang-json")).json() },
+  md: { id: "markdown", load: async () => (await import("@codemirror/lang-markdown")).markdown() },
+  markdown: { id: "markdown", load: async () => (await import("@codemirror/lang-markdown")).markdown() },
+  yaml: { id: "yaml", load: async () => (await import("@codemirror/lang-yaml")).yaml() },
+  yml: { id: "yaml", load: async () => (await import("@codemirror/lang-yaml")).yaml() },
+  toml: {
+    id: "toml",
+    load: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/toml")).toml),
+  },
+};
+
+/** The editorLangId for a path's extension; "plaintext" when it has no mode. */
+export function languageIdForPath(path: string): string {
+  const extension = extensionOf(path);
+  if (extension === null) {
+    return "plaintext";
   }
+  return LANGUAGE_MODES[extension]?.id ?? "plaintext";
+}
+
+/** The language mode for a path, loaded on demand; null for plain text. */
+async function languageFor(path: string): Promise<Extension | null> {
+  const extension = extensionOf(path);
+  if (extension === null) {
+    return null;
+  }
+  return (await LANGUAGE_MODES[extension]?.load()) ?? null;
 }
 
 // EditorState.readOnly gates commands and transaction filters;
@@ -320,6 +323,34 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
       this._register(
         settingsService.onDidChange((next) => {
           this.applySettings(next);
+        }),
+      );
+    }
+    // The surface is its own text-control adapter: the Edit menu's
+    // undo/redo/select-all route here whenever this subtree holds focus.
+    // The view is lazy, so the adapter guards against a pre-open state.
+    const textControls = getServiceOrNull(TEXT_CONTROL_SERVICE);
+    if (textControls !== null) {
+      this._register(
+        textControls.register(this.element, {
+          kind: "codemirror",
+          undo: () => {
+            if (this.view !== null) {
+              undo(this.view);
+            }
+          },
+          redo: () => {
+            if (this.view !== null) {
+              redo(this.view);
+            }
+          },
+          selectAll: () => {
+            if (this.view !== null) {
+              selectAll(this.view);
+            }
+          },
+          canUndo: () => this.view !== null && undoDepth(this.view.state) > 0,
+          canRedo: () => this.view !== null && redoDepth(this.view.state) > 0,
         }),
       );
     }
