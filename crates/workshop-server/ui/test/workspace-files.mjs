@@ -1,22 +1,29 @@
-// Unit test for the workspace-file actions (plan step 10:
+// Unit test for the workspace-file actions (plan steps 10 and 11:
 // src/ui/workspace-files/workspace-files.contribution.ts over
 // src/services/workspace-file-client.ts). Bundles the contribution with
 // esbuild - "@tauri-apps/plugin-dialog" and "@tauri-apps/api/event"
 // aliased to the recording stubs in test/helpers - and drives the Open
-// Workspace from File... command through the shared registries against
-// jsdom with a scripted fetch. Covers: the catalog wiring (the stub
-// row's id and label, now wired: File > 2_open, in the palette, no
-// always-false precondition); a cancelled picker performing no fetch; a
-// successful open posting the picked path to /workspace/file/open,
-// firing the promptforge:workspace-changed invalidation, emitting the
+// Workspace from File..., Save Workspace As..., and Duplicate
+// Workspace... commands through the shared registries against jsdom
+// with a scripted fetch. Covers: the catalog wiring (the stub rows' ids
+// and labels, now wired: File > 2_open and 3_workspace, in the palette,
+// no always-false precondition, Duplicate gaining its ellipsis); a
+// cancelled picker performing no fetch; a successful open posting the
+// picked path to /workspace/file/open, firing the
+// promptforge:workspace-changed invalidation, emitting the
 // promptforge:workspace-opened Tauri event with the path, and recording
 // the path in the recent-files store, with nothing painted on the status
 // bar; a shell that rejects the emit leaving the open committed (the
 // recent recorded, the invalidation fired, a console.warn and no
 // unhandled rejection); a server refusal painting the error on the
 // status bar while emitting nothing, recording nothing, and
-// invalidating nothing; and the client's typed parse of the wire shape
-// (snake_case window_state) with a malformed answer refused.
+// invalidating nothing; Save As and Duplicate seeding the save picker
+// with "<current name>.pfwork", appending .pfwork to a bare name exactly
+// once (never doubling an existing extension, any case), posting to
+// save_as or duplicate, then invalidating, emitting, and recording the
+// new path, with a cancel posting nothing and a refusal painting the
+// error; and the client's typed parse of the wire shape (snake_case
+// window_state) with a malformed answer refused.
 // Run: node --test test/workspace-files.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -111,17 +118,26 @@ registerService(STATUS_BAR, () => ({
 const recentStore = new RecentFilesStore(null);
 registerService(RECENT_FILES_STORE, () => recentStore);
 
-// Scripted server: every fetch is logged; the next answer is set per case.
+// Scripted server: every fetch is logged. A case that makes one kind of
+// request sets nextAnswer, repeated for every fetch; a case that chains
+// requests (Save As and Duplicate GET current before they POST) queues
+// them in answerQueue, consumed in order before nextAnswer is consulted.
 const fetches = [];
 let nextAnswer = null;
+const answerQueue = [];
 globalThis.fetch = async (url, init) => {
   fetches.push({ url, method: init?.method ?? "GET", body: init?.body === undefined ? null : JSON.parse(init.body) });
-  if (nextAnswer === null) {
+  const answer = answerQueue.length > 0 ? answerQueue.shift() : nextAnswer;
+  if (answer === null) {
     throw new Error(`unexpected fetch in the workspace-files test: ${url}`);
   }
-  const answer = nextAnswer;
   return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
 };
+
+/** The POST fetches made since the given count; the switch routes are all POSTs. */
+function postsSince(count) {
+  return fetches.slice(count).filter((f) => f.method === "POST");
+}
 
 let workspaceChanges = 0;
 window.addEventListener("promptforge:workspace-changed", () => {
@@ -156,6 +172,27 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   );
   const activation = register();
   check("the feature barrel's register() answers a disposable", typeof activation?.dispose === "function");
+}
+
+{
+  const fileRows = Menus.getMenuItems("menubar/file");
+  const saveAs = Commands.lookup("workbench.action.saveWorkspaceAs");
+  check("Save Workspace As keeps the stub row's command id", saveAs !== undefined);
+  check("Save Workspace As keeps the stub row's label", saveAs?.title === "Save Workspace As...");
+  check("Save Workspace As is no longer always disabled", saveAs?.precondition !== "false");
+  const saveAsRow = fileRows.find((r) => r.command === "workbench.action.saveWorkspaceAs");
+  check("Save Workspace As sits in File > 3_workspace at the stub's position", saveAsRow?.group === "3_workspace" && saveAsRow?.order === 2);
+
+  const duplicate = Commands.lookup("workbench.action.duplicateWorkspace");
+  check("Duplicate Workspace keeps the stub row's command id", duplicate !== undefined);
+  check("Duplicate Workspace gains its ellipsis", duplicate?.title === "Duplicate Workspace...");
+  check("Duplicate Workspace is no longer always disabled", duplicate?.precondition !== "false");
+  const duplicateRow = fileRows.find((r) => r.command === "workbench.action.duplicateWorkspace");
+  check("Duplicate Workspace sits in File > 3_workspace at the stub's position", duplicateRow?.group === "3_workspace" && duplicateRow?.order === 3);
+
+  const palette = Menus.getMenuItems("commandPalette").map((r) => r.command);
+  check("Save Workspace As reaches the command palette", palette.includes("workbench.action.saveWorkspaceAs"));
+  check("Duplicate Workspace reaches the command palette", palette.includes("workbench.action.duplicateWorkspace"));
 }
 
 // --- A cancelled picker performs no fetch -------------------------------------
@@ -273,7 +310,166 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   check("a transport failure emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
 }
 
+// --- Save As: cancel posts nothing --------------------------------------------
+
+{
+  const fetchesBefore = fetches.length;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  const recentBefore = recentStore.list.length;
+  const changesBefore = workspaceChanges;
+  window.__TAURI_DIALOG__.answer = null;
+  answerQueue.push({ status: 200, body: OPENED });
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  const pick = window.__TAURI_DIALOG__.calls.at(-1);
+  check("Save Workspace As opens the native save picker", pick?.kind === "save");
+  check("the save picker is seeded with the current name plus .pfwork", pick?.defaultPath === "Alpha.pfwork");
+  check(
+    "the save picker filters to .pfwork files",
+    Array.isArray(pick?.filters) &&
+      pick.filters.some((f) => f.name === "PromptForge Workspace" && f.extensions.join(",") === "pfwork"),
+  );
+  check("a cancelled save picker posts nothing", postsSince(fetchesBefore).length === 0);
+  check("a cancelled save picker emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
+  check("a cancelled save picker records nothing", recentStore.list.length === recentBefore);
+  check("a cancelled save picker invalidates nothing", workspaceChanges === changesBefore);
+}
+
+// --- Save As: a bare name gains .pfwork once and switches ------------------------
+
+{
+  const fetchesBefore = fetches.length;
+  const changesBefore = workspaceChanges;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  const statusBefore = statusMessages.length;
+  const BARE = "C:\\work\\Beta";
+  const SAVED = `${BARE}.pfwork`;
+  window.__TAURI_DIALOG__.answer = BARE;
+  answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: SAVED, name: "Beta" } });
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  const posts = postsSince(fetchesBefore);
+  check("a picked name is posted once to /workspace/file/save_as", posts.length === 1 && posts[0].url === "/workspace/file/save_as");
+  check("a bare name is posted with .pfwork appended", posts[0]?.body?.path === SAVED);
+  check("a successful save-as fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
+  const emitted = window.__TAURI_EVENTS__.emitted;
+  check(
+    "a successful save-as emits promptforge:workspace-opened with the new path",
+    emitted.length === emittedBefore + 1 && emitted.at(-1).event === "promptforge:workspace-opened" && emitted.at(-1).payload?.path === SAVED,
+  );
+  check("a successful save-as records the new path as recent", recentStore.list[0] === SAVED);
+  check("a successful save-as paints nothing on the status bar", statusMessages.length === statusBefore);
+}
+
+// --- Save As: an existing extension is never doubled ------------------------------
+
+{
+  const fetchesBefore = fetches.length;
+  const NAMED = "C:\\work\\Gamma.pfwork";
+  window.__TAURI_DIALOG__.answer = NAMED;
+  answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: NAMED, name: "Gamma" } });
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  check("a name already ending in .pfwork is posted unchanged", postsSince(fetchesBefore)[0]?.body?.path === NAMED);
+
+  const fetchesBeforeUpper = fetches.length;
+  const UPPER = "C:\\work\\Delta.PFWORK";
+  window.__TAURI_DIALOG__.answer = UPPER;
+  answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: UPPER, name: "Delta" } });
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  check("an upper-case .PFWORK extension is recognized and not doubled", postsSince(fetchesBeforeUpper)[0]?.body?.path === UPPER);
+}
+
+// --- Save As: a refusal paints the error and switches nothing ----------------------
+
+{
+  const changesBefore = workspaceChanges;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  const recentBefore = recentStore.list.length;
+  const TAKEN = "C:\\work\\Alpha.pfwork";
+  window.__TAURI_DIALOG__.answer = TAKEN;
+  answerQueue.push(
+    { status: 200, body: OPENED },
+    { status: 409, body: { error: { code: "conflict", message: "workspace file already exists: C:\\work\\Alpha.pfwork" } } },
+  );
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  check(
+    "a refused save-as paints the server's message on the status bar as error",
+    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("already exists"),
+  );
+  check("a refused save-as emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
+  check("a refused save-as records nothing", recentStore.list.length === recentBefore);
+  check("a refused save-as invalidates nothing", workspaceChanges === changesBefore);
+}
+
+// --- Save As: an unreachable current still offers a default name --------------------
+
+{
+  const fetchesBefore = fetches.length;
+  const statusBefore = statusMessages.length;
+  window.__TAURI_DIALOG__.answer = null;
+  answerQueue.push({ status: 500, body: { error: { code: "internal", message: "draining" } } });
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  const pick = window.__TAURI_DIALOG__.calls.at(-1);
+  check("a failed current lookup still opens the save picker", pick?.kind === "save");
+  check("a failed current lookup seeds the picker with Untitled.pfwork", pick?.defaultPath === "Untitled.pfwork");
+  check("a failed current lookup paints nothing by itself", statusMessages.length === statusBefore && postsSince(fetchesBefore).length === 0);
+}
+
+// --- Duplicate: copies, switches, emits, records -----------------------------------
+
+{
+  const fetchesBefore = fetches.length;
+  const changesBefore = workspaceChanges;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  const statusBefore = statusMessages.length;
+  const COPY = "C:\\work\\Alpha copy.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Alpha copy";
+  answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: COPY, name: "Alpha copy" } });
+  await Commands.execute("workbench.action.duplicateWorkspace");
+  await flush();
+  const pick = window.__TAURI_DIALOG__.calls.at(-1);
+  check("Duplicate Workspace opens the native save picker seeded with the current name", pick?.kind === "save" && pick?.defaultPath === "Alpha.pfwork");
+  const posts = postsSince(fetchesBefore);
+  check("a picked name is posted once to /workspace/file/duplicate", posts.length === 1 && posts[0].url === "/workspace/file/duplicate");
+  check("duplicate appends .pfwork to a bare name", posts[0]?.body?.path === COPY);
+  check("a successful duplicate fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
+  const emitted = window.__TAURI_EVENTS__.emitted;
+  check(
+    "a successful duplicate emits promptforge:workspace-opened with the copy's path",
+    emitted.length === emittedBefore + 1 && emitted.at(-1).payload?.path === COPY,
+  );
+  check("a successful duplicate records the copy's path as recent", recentStore.list[0] === COPY);
+  check("a successful duplicate paints nothing on the status bar", statusMessages.length === statusBefore);
+}
+
+// --- Duplicate: a refusal (ephemeral workspace) paints the error ----------------------
+
+{
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  const recentBefore = recentStore.list.length;
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Nothing.pfwork";
+  answerQueue.push(
+    { status: 200, body: { path: null, name: "Untitled", grants: [], window_state: null } },
+    { status: 400, body: { error: { code: "refused", message: "no workspace file to duplicate: the workspace is ephemeral" } } },
+  );
+  await Commands.execute("workbench.action.duplicateWorkspace");
+  await flush();
+  check(
+    "a refused duplicate paints the server's message on the status bar as error",
+    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("ephemeral"),
+  );
+  check("a refused duplicate emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
+  check("a refused duplicate records nothing", recentStore.list.length === recentBefore);
+}
+
 // --- The client's typed parse of the wire shape ----------------------------------
+
+check("every queued server answer was consumed by the actions above", answerQueue.length === 0);
+answerQueue.length = 0;
 
 {
   nextAnswer = { status: 200, body: OPENED };

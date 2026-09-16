@@ -561,7 +561,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-11>
 
-### Step 11: SPA Save As and Duplicate actions
+### Step 11: SPA Save As and Duplicate actions [completed]
 
 - Component: `spa-workspace-actions`
 - Piece: actions

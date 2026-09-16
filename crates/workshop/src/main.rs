@@ -70,6 +70,7 @@ const WINDOW_PERMISSIONS: &[&str] = &[
     "core:webview:allow-set-webview-zoom",
     "core:event:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "updater:default",
     "process:allow-restart",
     "allow-desktop-update-supported",
@@ -392,6 +393,19 @@ mod tests {
             assert!(
                 permissions.contains(permission),
                 "the capability carries {permission}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_window_grants_both_native_pickers() {
+        // Open Workspace from File... uses the open picker; Save Workspace
+        // As... and Duplicate Workspace... use the save picker. A missing
+        // grant fails silently in the webview as a cancelled dialog.
+        for permission in ["dialog:allow-open", "dialog:allow-save"] {
+            assert!(
+                WINDOW_PERMISSIONS.contains(&permission),
+                "the page needs {permission} for its File menu pickers"
             );
         }
     }
