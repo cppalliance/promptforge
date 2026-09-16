@@ -40,11 +40,11 @@ export interface TextControl {
 
 /** The native text inputs and textareas: what inputFocus means. */
 function isTextInput(element: Element | null): element is HTMLElement {
-  if (!(element instanceof HTMLElement)) {
-    return false;
-  }
   // The constructor globals are probed: a partial-DOM host (a jsdom test
   // shimming only the keys it needs) may lack them.
+  if (typeof HTMLElement === "undefined" || !(element instanceof HTMLElement)) {
+    return false;
+  }
   if (typeof HTMLTextAreaElement !== "undefined" && element instanceof HTMLTextAreaElement) {
     return !element.disabled && !element.readOnly;
   }
@@ -74,7 +74,9 @@ function isEditable(element: Element | null): element is HTMLElement {
   if (isTextInput(element)) {
     return true;
   }
-  return element instanceof HTMLElement && isContentEditable(element);
+  return (
+    typeof HTMLElement !== "undefined" && element instanceof HTMLElement && isContentEditable(element)
+  );
 }
 
 /** The page's document, or null where none exists (a DOM-free host). */
@@ -154,6 +156,16 @@ export class TextControlService implements IDisposable {
       return;
     }
     this.runFallback("selectAll");
+  }
+
+  /**
+   * Cut/copy/paste: always the native path, on the remembered editable.
+   * CodeMirror and ProseMirror serve the command through the clipboard
+   * events the execCommand fires; native editables keep their own
+   * semantics.
+   */
+  execCommand(command: "cut" | "copy" | "paste"): void {
+    this.runFallback(command);
   }
 
   private readonly onFocusIn = (event: FocusEvent): void => {

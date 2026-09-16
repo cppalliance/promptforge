@@ -848,7 +848,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-18>
 
-### Step 18: Edit contribution over TextControlService
+### Step 18: Edit contribution over TextControlService [completed]
 
 - Component: shell
 - Artifacts: `src/ui/menu/edit.contribution.ts` (`undo`, `redo`, cut/copy/paste, `selectAll`, all `precondition: "textInputFocus"`, routing through `TextControlService` with the `execCommand` fallback); the agent prompt's ProseMirror adapter registration with history-depth `canUndo`/`canRedo`.

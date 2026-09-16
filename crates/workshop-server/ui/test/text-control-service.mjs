@@ -4,6 +4,10 @@
 // the inputFocus / editorTextFocus / textInputFocus context keys, and the
 // execCommand fallback for native editables (including the remembered
 // target, since a menu click steals focus before the command runs).
+// Also covers the edit contribution (src/ui/menu/edit.contribution.ts):
+// the six edit rows register with the textInputFocus precondition and
+// their commands route through the shared service singleton - adapter
+// when one is active, the native path otherwise.
 // Bundles the modules with esbuild and drives them against jsdom.
 // Run: node --test test/text-control-service.mjs
 import path from "node:path";
@@ -19,6 +23,9 @@ const bundle = await esbuild.build({
       export { TextControlService, TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
       export { ContextKeyService } from "./src/services/context-key-service.ts";
       export { getService } from "./src/services/service-registry.ts";
+      export { Commands } from "./src/services/command-registry.ts";
+      export { Menus, MenuId } from "./src/services/menu-registry.ts";
+      import "./src/ui/menu/edit.contribution.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -43,7 +50,7 @@ globalThis.HTMLInputElement = window.HTMLInputElement;
 globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
 globalThis.Node = window.Node;
 
-const { TextControlService, TEXT_CONTROL_SERVICE, ContextKeyService, getService } = await import(
+const { TextControlService, TEXT_CONTROL_SERVICE, ContextKeyService, getService, Commands, Menus, MenuId } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 
@@ -221,6 +228,105 @@ textarea.focus();
 check("a disposed service stops tracking focus", allClear());
 
 contextKeys.dispose();
+
+// --- Edit contribution (src/ui/menu/edit.contribution.ts) ------------------------
+
+// The contribution registers the six edit rows into the shared
+// registries at module scope; the commands route through the shared
+// text-control singleton.
+const editService = getService(TEXT_CONTROL_SERVICE);
+
+const editCommands = [
+  ["undo", "Undo"],
+  ["redo", "Redo"],
+  ["editor.action.clipboardCutAction", "Cut"],
+  ["editor.action.clipboardCopyAction", "Copy"],
+  ["editor.action.clipboardPasteAction", "Paste"],
+  ["editor.action.selectAll", "Select All"],
+];
+for (const [id, title] of editCommands) {
+  const action = Commands.lookup(id);
+  check(`the edit contribution registers '${id}' titled '${title}'`, action !== undefined && action.title === title);
+  check(`'${id}' gates on the textInputFocus precondition`, action !== undefined && action.precondition === "textInputFocus");
+}
+
+const inMenu = (menuId, command, group) =>
+  Menus.getMenuItems(menuId).some((row) => row.command === command && row.group === group);
+check(
+  "undo and redo land in the Edit menu's 1_do group",
+  inMenu(MenuId.MenubarEditMenu, "undo", "1_do") && inMenu(MenuId.MenubarEditMenu, "redo", "1_do"),
+);
+check(
+  "cut, copy, and paste land in the Edit menu's 2_ccp group",
+  inMenu(MenuId.MenubarEditMenu, "editor.action.clipboardCutAction", "2_ccp") &&
+    inMenu(MenuId.MenubarEditMenu, "editor.action.clipboardCopyAction", "2_ccp") &&
+    inMenu(MenuId.MenubarEditMenu, "editor.action.clipboardPasteAction", "2_ccp"),
+);
+check(
+  "select-all lands in the Selection menu's 1_basic group",
+  inMenu(MenuId.MenubarSelectionMenu, "editor.action.selectAll", "1_basic"),
+);
+
+// Command routing: a focused adapter takes undo/redo/select-all.
+const editHost = addElement("div");
+const editInner = window.document.createElement("div");
+editInner.tabIndex = 0;
+editHost.appendChild(editInner);
+
+const routed = { undo: 0, redo: 0, selectAll: 0 };
+let promptUndoDepth = 1;
+editInner.focus();
+const editAdapter = editService.register(editHost, {
+  kind: "prosemirror",
+  undo: () => {
+    routed.undo += 1;
+  },
+  redo: () => {
+    routed.redo += 1;
+  },
+  selectAll: () => {
+    routed.selectAll += 1;
+  },
+  canUndo: () => promptUndoDepth > 0,
+});
+
+const routedExecBefore = execCalls.length;
+await Commands.execute("undo");
+check("the undo command routes to the focused adapter", routed.undo === 1);
+await Commands.execute("redo");
+check("the redo command routes to the focused adapter", routed.redo === 1);
+await Commands.execute("editor.action.selectAll");
+check("the select-all command routes to the focused adapter", routed.selectAll === 1);
+check("adapter routing never touches execCommand", execCalls.length === routedExecBefore);
+
+// A native editable focused earlier stays the remembered fallback
+// target while the adapter holds focus.
+const nativeBox = addElement("input");
+nativeBox.focus();
+editInner.focus();
+promptUndoDepth = 0;
+await Commands.execute("undo");
+check(
+  "the undo command falls back to execCommand on an empty adapter history",
+  routed.undo === 1 && execCalls[execCalls.length - 1] === "undo",
+);
+check("the undo fallback refocuses the remembered editable", window.document.activeElement === nativeBox);
+
+// Cut/copy/paste are always the native path, refocused onto the
+// remembered editable (a menu click has moved focus since).
+const chromeButton = addElement("button");
+chromeButton.focus();
+await Commands.execute("editor.action.clipboardCutAction");
+check(
+  "the cut command execCommands on the remembered editable",
+  execCalls[execCalls.length - 1] === "cut" && window.document.activeElement === nativeBox,
+);
+await Commands.execute("editor.action.clipboardCopyAction");
+check("the copy command execCommands on the remembered editable", execCalls[execCalls.length - 1] === "copy");
+await Commands.execute("editor.action.clipboardPasteAction");
+check("the paste command execCommands on the remembered editable", execCalls[execCalls.length - 1] === "paste");
+
+editAdapter.dispose();
 
 if (failures.length > 0) {
   console.error(`text-control-service: ${failures.length} failure(s)`);

@@ -8,7 +8,9 @@
 // reports scrollHeight 0, so the test stubs it to drive the clamp, and
 // pins the exported clamp directly); getText returns paragraphs and
 // breaks as single newlines; clear empties; setEditable toggles
-// contenteditable; dispose destroys the editor. Runs under the shared
+// contenteditable; the box registers a prosemirror text-control adapter
+// whose canUndo/canRedo track the history plugin's depth; dispose
+// destroys the editor. Runs under the shared
 // leak check: a PromptInput that is never disposed fails.
 // Run: node test/prompt-input.mjs
 import { writeFile } from "node:fs/promises";
@@ -26,6 +28,8 @@ const bundle = await esbuild.build({
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { PromptInput, clampPromptInputHeight } from "./src/ui/agent/prompt-input.ts";
+      export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
+      export { getService } from "./src/services/service-registry.ts";
     `,
     resolveDir: path.join(testDir, ".."),
     loader: "ts",
@@ -51,10 +55,25 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
+// The text-control service probes these constructor globals when it
+// classifies the focused element.
+globalThis.Element = dom.window.Element;
+globalThis.HTMLElement = dom.window.HTMLElement;
+globalThis.HTMLInputElement = dom.window.HTMLInputElement;
+globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
+globalThis.Node = dom.window.Node;
+// Tiptap's focus command schedules with the bare globals.
+globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+// jsdom has no layout: a focused editor's scroll-to-selection measures
+// the cursor through range geometry, so stub it to zero rects.
+const zeroRect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
+dom.window.Range.prototype.getClientRects = () => [];
+dom.window.Range.prototype.getBoundingClientRect = () => zeroRect;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-prompt-input-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, PromptInput, clampPromptInputHeight } = await import(
+const { lifecycle, PromptInput, clampPromptInputHeight, TEXT_CONTROL_SERVICE, getService } = await import(
   pathToFileURL(bundlePath).href
 );
 
@@ -78,7 +97,7 @@ function editorElement(input) {
   return input.element.querySelector(".ws-prompt-input__editor");
 }
 
-await assertNoLeaks(lifecycle, () => {
+await assertNoLeaks(lifecycle, async () => {
   // --- Mount ----------------------------------------------------------------
 
   {
@@ -452,6 +471,36 @@ await assertNoLeaks(lifecycle, () => {
       editorElement(input).querySelector("p")?.classList.contains("is-editor-empty") === true,
     );
     input.dispose();
+  }
+
+  // --- The text-control adapter (Edit menu routing) ----------------------------
+
+  {
+    const textControls = getService(TEXT_CONTROL_SERVICE);
+    const input = new PromptInput();
+    document.body.appendChild(input.element);
+    input.focus();
+    // Tiptap defers the DOM focus to the next animation frame.
+    await new Promise((resolve) => globalThis.requestAnimationFrame(resolve));
+    const active = textControls.active;
+    check(
+      "the prompt registers a prosemirror text-control adapter",
+      active !== null && active.kind === "prosemirror",
+    );
+    check(
+      "a fresh prompt reports an empty undo and redo history",
+      active !== null && active.canUndo() === false && active.canRedo() === false,
+    );
+    input.setText("hello");
+    check("an edit deepens the adapter's undo history", active !== null && active.canUndo() === true);
+    textControls.undo();
+    check("routing undo through the service reverts the edit", input.getText() === "");
+    check("the reverted edit reports redo depth", active !== null && active.canRedo() === true);
+    textControls.redo();
+    check("routing redo through the service replays the edit", input.getText() === "hello");
+    input.dispose();
+    check("disposing the prompt unregisters its adapter", textControls.active === null);
+    input.element.remove();
   }
 
   // --- Dispose -----------------------------------------------------------------------

@@ -11,8 +11,11 @@ import "./prompt-input.css";
 
 import { Editor, type JSONContent } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
+import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Disposable, toDisposable } from "../../base/lifecycle";
+import { getServiceOrNull } from "../../services/service-registry";
+import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
 import type { SttInputTarget, SttInsertionContext } from "../stt/stt";
 import { MentionChip, MentionSuggestionPluginKey } from "./mention-chip";
 
@@ -94,8 +97,12 @@ export class PromptInput extends Disposable implements SttInputTarget {
       element: this.element,
       extensions: [
         // Plain-text schema: everything in StarterKit is off except the
-        // document scaffolding (document, paragraph, text, gapcursor)
-        // and hardBreak, whose Shift-Enter binding supplies newlines.
+        // document scaffolding (document, paragraph, text, gapcursor),
+        // hardBreak, whose Shift-Enter binding supplies newlines, and
+        // undoRedo, whose history plugin backs the text-control
+        // adapter's undo/redo (its Mod-z keymap never fires in the app:
+        // the keybinding dispatcher claims the chord in the capture
+        // phase).
         StarterKit.configure({
           blockquote: false,
           bold: false,
@@ -113,7 +120,6 @@ export class PromptInput extends Disposable implements SttInputTarget {
           strike: false,
           trailingNode: false,
           underline: false,
-          undoRedo: false,
         }),
         Placeholder.configure({
           placeholder: options.placeholder ?? "Plan, Build, / for skills, @ for context",
@@ -180,6 +186,35 @@ export class PromptInput extends Disposable implements SttInputTarget {
         this.editor.destroy();
       }),
     );
+    // The prompt is its own text-control adapter: the Edit menu's
+    // undo/redo/select-all route here whenever the box holds focus. The
+    // adapter registers only when the history plugin is present -
+    // without it the commands would no-op, and the native execCommand
+    // fallback is the better path. canUndo/canRedo read the history
+    // depth so an empty stack falls back instead of swallowing the
+    // command.
+    const hasHistory = this.editor.extensionManager.extensions.some(
+      (extension) => extension.name === "undoRedo",
+    );
+    const textControls = hasHistory ? getServiceOrNull(TEXT_CONTROL_SERVICE) : null;
+    if (textControls !== null) {
+      this._register(
+        textControls.register(this.element, {
+          kind: "prosemirror",
+          undo: () => {
+            this.editor.commands.undo();
+          },
+          redo: () => {
+            this.editor.commands.redo();
+          },
+          selectAll: () => {
+            this.editor.commands.selectAll();
+          },
+          canUndo: () => undoDepth(this.editor.state) > 0,
+          canRedo: () => redoDepth(this.editor.state) > 0,
+        }),
+      );
+    }
     const initialMeasure = window.requestAnimationFrame(() => this.syncHeight());
     this._register(toDisposable(() => window.cancelAnimationFrame(initialMeasure)));
   }
