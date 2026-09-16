@@ -28,6 +28,7 @@ use workshop_registry::{Push, Registration, Registry, WorkspaceRoots};
 use workshop_sessions::{AgentSessions, SessionHost, SessionsState};
 use workshop_status::StatusBus;
 use workshop_support::{Config, DEFAULT_DEADLINE, ReconnectBackoff, with_deadline};
+use workshop_user_state::UserStateStore;
 use workshop_workspace::Workspace;
 
 use crate::catalog::CatalogBus;
@@ -389,6 +390,13 @@ fn compose(
         registrations.hold(state);
         registrations.hold(roots);
     }
+    // The account-scoped UI state lives beside the menu memory in the
+    // state directory; a bad or missing file costs the state, never
+    // startup.
+    let user_state = Arc::new(UserStateStore::new(state_dir));
+    let (routes, state) = workshop_user_state::register(&registry, user_state);
+    registrations.hold(routes);
+    registrations.hold(state);
     let agents = AgentSessions::new(
         config.agents.path.clone(),
         state_dir.join("sessions"),
@@ -413,6 +421,7 @@ fn compose(
     registry.require::<AgentSessions>()?;
     registry.require::<Workspace>()?;
     registry.require::<dyn WorkspaceRoots>()?;
+    registry.require::<UserStateStore>()?;
     push.push_idle();
     Ok(AppState {
         backoff,

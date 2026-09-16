@@ -29,15 +29,24 @@ pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 /// every state file is closed before the tempdir is deleted.
 pub(crate) struct TestServer {
     handle: Option<ServerHandle>,
-    _state_dir: tempfile::TempDir,
+    /// Held as an `Option` only so [`TestServer::shutdown_keeping_state_dir`]
+    /// can move it out past the `Drop` impl; it is `Some` until then.
+    state_dir: Option<tempfile::TempDir>,
 }
 
 impl TestServer {
-    /// Spawns the server against the gateway at `gateway_base_url`.
-    /// Discovery is bypassed: a test never consults the real run
-    /// directory.
+    /// Spawns the server against the gateway at `gateway_base_url` over a
+    /// fresh state directory. Discovery is bypassed: a test never
+    /// consults the real run directory.
     pub(crate) fn spawn(gateway_base_url: &str) -> Self {
-        let state_dir = tempfile::TempDir::new().expect("tempdir");
+        Self::spawn_in(gateway_base_url, tempfile::TempDir::new().expect("tempdir"))
+    }
+
+    /// Spawns the server against the gateway at `gateway_base_url` over
+    /// `state_dir`, which the fixture then owns: the relaunch seam, fed
+    /// by [`TestServer::shutdown_keeping_state_dir`] of a previous
+    /// server.
+    pub(crate) fn spawn_in(gateway_base_url: &str, state_dir: tempfile::TempDir) -> Self {
         let config = Config {
             gateway: GatewayConfig {
                 base_url: gateway_base_url.to_string(),
@@ -53,8 +62,27 @@ impl TestServer {
         let handle = workshop_server::fixtures::spawn(config).expect("the workshop server spawns");
         Self {
             handle: Some(handle),
-            _state_dir: state_dir,
+            state_dir: Some(state_dir),
         }
+    }
+
+    /// The state directory this server persists into.
+    pub(crate) fn state_dir(&self) -> &std::path::Path {
+        self.state_dir
+            .as_ref()
+            .expect("the state dir is held until shutdown")
+            .path()
+    }
+
+    /// Shuts the server down, waits for its thread, and hands back the
+    /// state directory intact so a second server can boot over it.
+    pub(crate) fn shutdown_keeping_state_dir(mut self) -> tempfile::TempDir {
+        if let Some(handle) = self.handle.take() {
+            handle.shutdown().expect("the server shuts down cleanly");
+        }
+        self.state_dir
+            .take()
+            .expect("the state dir is held until shutdown")
     }
 
     /// The `ws://` URL of `path` on this server, for example `/ws` or

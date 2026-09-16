@@ -9617,6 +9617,7 @@ dependencies = [
  "workshop-sessions",
  "workshop-status",
  "workshop-support",
+ "workshop-user-state",
  "workshop-workspace",
 ]
 
@@ -9684,10 +9685,12 @@ dependencies = [
 name = "workshop-user-state"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "serde_json",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tower",
  "tracing",
  "workshop-protocol",
  "workshop-registry",

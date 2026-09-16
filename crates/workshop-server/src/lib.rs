@@ -10,7 +10,7 @@
 //!
 //! The crate is the composition root of the workshop server
 //! decomposition: the feature subsystems (`workshop-sessions`,
-//! `workshop-workspace`), the domain services (`workshop-gateway`,
+//! `workshop-user-state`, `workshop-workspace`), the domain services (`workshop-gateway`,
 //! `workshop-status`, `workshop-menu`), and the vocabulary crates
 //! (`workshop-protocol`, `workshop-registry`, `workshop-support`) are
 //! assembled in `app.rs`, where every subsystem self-registers its
@@ -22,7 +22,8 @@
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), and the feature crates (`workshop-sessions`,
-//!   `workshop-workspace`). Read `AGENTS.md` before adding an import.
+//!   `workshop-user-state`, `workshop-workspace`). Read `AGENTS.md`
+//!   before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 

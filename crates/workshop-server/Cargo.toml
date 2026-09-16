@@ -38,6 +38,7 @@ workshop-registry.workspace = true
 workshop-sessions.workspace = true
 workshop-status.workspace = true
 workshop-support.workspace = true
+workshop-user-state.workspace = true
 workshop-workspace.workspace = true
 tempfile = { workspace = true, optional = true }
 

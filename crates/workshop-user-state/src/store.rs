@@ -80,7 +80,9 @@ impl UserStateStore {
     /// [`UserStateError::Io`] when the write fails.
     pub async fn put(&self, key: &str, value: Value) -> Result<(), UserStateError> {
         let key = user_state_key(key)?;
-        check_value_cap(&value)?;
+        // The compact serialization is what the document holds, so its
+        // length is the size the cap governs.
+        check_text_cap(value.to_string().len())?;
         let mut state = self.state.lock().await;
         state.insert(key.to_owned(), value);
         // Serializing a map of already-parsed values cannot fail; a
@@ -110,7 +112,7 @@ impl UserStateStore {
 /// # Errors
 /// Returns [`UserStateError::Key`] when `key` is not one of
 /// [`USER_STATE_KEYS`].
-fn user_state_key(key: &str) -> Result<&'static str, UserStateError> {
+pub(crate) fn user_state_key(key: &str) -> Result<&'static str, UserStateError> {
     USER_STATE_KEYS
         .iter()
         .copied()
@@ -118,14 +120,13 @@ fn user_state_key(key: &str) -> Result<&'static str, UserStateError> {
         .ok_or_else(|| UserStateError::Key(key.to_owned()))
 }
 
-/// Checks that `value`'s JSON text fits under the cap.
+/// Checks that a value's JSON text of `actual` bytes fits under the cap.
+/// The route boundary judges the raw body's length with this before
+/// parsing it, so an oversized body is refused without being parsed.
 ///
 /// # Errors
 /// Returns [`UserStateError::TooLarge`] past the cap.
-fn check_value_cap(value: &Value) -> Result<(), UserStateError> {
-    // The compact serialization is what the document holds, so its
-    // length is the size the cap governs.
-    let actual = value.to_string().len();
+pub(crate) fn check_text_cap(actual: usize) -> Result<(), UserStateError> {
     if actual > USER_STATE_VALUE_CAP {
         return Err(UserStateError::TooLarge {
             actual,

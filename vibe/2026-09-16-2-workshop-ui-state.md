@@ -291,7 +291,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-5>
 
-### Step 5: `/user/state` routes, registration, and boot test
+### Step 5: `/user/state` routes, registration, and boot test [completed]
 
 - Component: `user-bucket`
 - Piece: HTTP layer and composition (sequential after the store)

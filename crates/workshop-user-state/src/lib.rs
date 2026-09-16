@@ -22,22 +22,32 @@
 //! - Zone two throughout: a missing, unreadable, or corrupt file reads as
 //!   "no state yet" - logged and tolerated; a refused put is a value
 //!   returned to the caller and writes nothing.
+//! - The crate maps its own [`UserStateError`] to the wire envelope at
+//!   its route boundary; no shell error type appears here.
 
 mod error;
+mod handlers;
 mod store;
 
 use std::sync::Arc;
 
-use workshop_registry::{Registration, Registry};
+use workshop_registry::{Registration, Registry, RouteRegistrarAdapter};
 
 pub use error::UserStateError;
+pub use handlers::routes;
 pub use store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
 
-/// Registers the user-state subsystem into the registry: the store as
-/// the subsystem's state handle, so the composition root fetches it by
-/// slot instead of holding it by name. The returned guard keeps the
-/// registration alive; the composition root holds it for the process
-/// lifetime.
-pub fn register(registry: &Registry, store: Arc<UserStateStore>) -> Registration {
-    registry.register_state::<UserStateStore>(store)
+/// Registers the user-state subsystem into the registry: its
+/// `/user/state` routes, merged into the shell's API router, and the
+/// store as the subsystem's state handle, so the composition root
+/// fetches it by slot instead of holding it by name. The returned guards
+/// keep the registrations alive; the composition root holds them for the
+/// process lifetime.
+pub fn register(registry: &Registry, store: Arc<UserStateStore>) -> (Registration, Registration) {
+    let routes = registry.register_routes(Arc::new(RouteRegistrarAdapter::new({
+        let store = Arc::clone(&store);
+        move || handlers::routes(Arc::clone(&store))
+    })));
+    let state = registry.register_state::<UserStateStore>(store);
+    (routes, state)
 }
