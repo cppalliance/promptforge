@@ -25,6 +25,7 @@ Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gatew
 - Gateway crates are named gateway-* and must not depend on promptforge or workshop crates
 - PromptForge crates are named promptforge-* and must not depend on gateway or workshop crates
 - PromptForge is one door: crates outside the promptforge-* family may depend only on promptforge-api, never on the internal promptforge-* substrate crates
+- The Workshop shell (the `workshop` crate) depends on `workshop-server-api` and never on `workshop-server`; the facade is the shell's entire view of the server
 - Shared crates are named shared-*, contain the public API surface across products and downstream crates, and must not depend on any product crates
 - Crates named build-* are for building specific outputs
 - Dependency rules bind all kinds: normal, dev, build, and target-specific dependencies

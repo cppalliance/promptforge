@@ -11,6 +11,8 @@
 //! - `shared-*` crates must not depend on any product crate.
 //! - One door: a crate outside the promptforge family may depend on
 //!   `promptforge-*` only through `promptforge-api`.
+//! - Shell boundary: the `workshop` shell depends on `workshop-server-api`
+//!   and never on `workshop-server`.
 
 use std::fs;
 use std::path::Path;
@@ -59,7 +61,7 @@ pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
             if !members.contains(&dep.as_str()) {
                 continue;
             }
-            if let Some(reason) = boundary_breach(family(package), family(dep), dep) {
+            if let Some(reason) = boundary_breach(package, dep) {
                 violations.push(format!("{package} depends on {dep}: {reason}"));
             }
         }
@@ -67,9 +69,18 @@ pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// The reason a dependency from `from` to `to` breaches the matrix, or
-/// `None` when the edge is legal.
-fn boundary_breach(from: Family, to: Family, dep: &str) -> Option<&'static str> {
+/// The Tauri shell crate, bound by the shell-boundary rule.
+const SHELL: &str = "workshop";
+/// The server crate the shell must never name directly.
+const SERVER: &str = "workshop-server";
+
+/// The reason a dependency from `package` to `dep` breaches the matrix,
+/// or `None` when the edge is legal.
+fn boundary_breach(package: &str, dep: &str) -> Option<&'static str> {
+    if package == SHELL && dep == SERVER {
+        return Some("the workshop shell depends on workshop-server-api, never on workshop-server");
+    }
+    let (from, to) = (family(package), family(dep));
     let family_rule = match (from, to) {
         (Family::Promptforge, Family::Gateway | Family::Workshop) => {
             Some("promptforge crates must not depend on gateway or workshop crates")
@@ -230,6 +241,67 @@ mod tests {
             violations.is_empty(),
             "product-boundary violations:\n{}",
             violations.join("\n")
+        );
+    }
+
+    #[test]
+    fn workshop_depends_on_workshop_server_api_only() {
+        let (crates, violations) = workspace_crates(&workspace_root());
+        assert!(violations.is_empty(), "{violations:?}");
+        let (_, deps) = crates
+            .iter()
+            .find(|(package, _)| package == "workshop")
+            .expect("the workshop shell crate is a workspace member");
+        assert!(
+            deps.iter().any(|dep| dep == "workshop-server-api"),
+            "the shell reaches the server through the api crate: {deps:?}"
+        );
+        assert!(
+            !deps.iter().any(|dep| dep == "workshop-server"),
+            "the shell never depends on workshop-server directly: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn the_shell_re_adding_workshop_server_is_reported() {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        write_crate(
+            root.path(),
+            "workshop",
+            "workshop",
+            "[dependencies]\nworkshop-server-api = { path = \"../workshop-server-api\" }\n\
+             [dev-dependencies]\nworkshop-server = { path = \"../workshop-server\" }\n",
+        );
+        write_crate(
+            root.path(),
+            "workshop-server-api",
+            "workshop-server-api",
+            "",
+        );
+        write_crate(root.path(), "workshop-server", "workshop-server", "");
+        let violations = product_boundary_violations(root.path());
+        assert_eq!(violations.len(), 1, "{violations:?}");
+        assert!(
+            violations[0].starts_with("workshop depends on workshop-server:")
+                && violations[0].contains("workshop-server-api"),
+            "the violation names the shell, the forbidden dep, and the facade: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn other_workshop_crates_may_depend_on_workshop_server() {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        write_crate(
+            root.path(),
+            "workshop-server-api",
+            "workshop-server-api",
+            "[dependencies]\nworkshop-server = { path = \"../workshop-server\" }\n",
+        );
+        write_crate(root.path(), "workshop-server", "workshop-server", "");
+        let violations = product_boundary_violations(root.path());
+        assert!(
+            violations.is_empty(),
+            "the rule binds only the shell crate: {violations:?}"
         );
     }
 

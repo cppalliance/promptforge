@@ -415,7 +415,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-2>
 
-### Step 2: Enforce the shell boundary in build-xtask
+### Step 2: Enforce the shell boundary in build-xtask [completed]
 
 - Component: `shell-boundary`
 - Piece: api-crate
