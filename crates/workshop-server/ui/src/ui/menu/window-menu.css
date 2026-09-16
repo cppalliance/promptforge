@@ -126,3 +126,48 @@
   margin: var(--ws-size-5) 0;
   background: var(--border);
 }
+
+/* Title-bar regions: the bar splits into left (icon + menubar), center
+   (the drag surface, which the command center mounts into), and right
+   (the window controls). The center keeps the __drag class, whose
+   flex: 1 in window-chrome.css makes it absorb the spare width. */
+.ws-window-titlebar__left {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ws-window-titlebar__center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.ws-window-titlebar__right {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+}
+
+/* Submenu rows: the chevron marks the flyout, muted like a shortcut
+   hint; the row's space-between layout already pins it to the edge. */
+.ws-window-titlebar__chevron {
+  color: var(--text-muted);
+}
+
+/* A flyout opens beside its parent row; the negative top margin cancels
+   the popover's vertical padding so the flyout's first row aligns with
+   the parent row. */
+.ws-window-titlebar__popover--flyout {
+  margin-top: calc(-1 * var(--space-xs));
+}
+
+/* The popover fade-in is decorative; users asking for reduced motion
+   get instant surfaces. */
+@media (prefers-reduced-motion: reduce) {
+  .ws-window-titlebar__popover {
+    animation: none;
+  }
+}

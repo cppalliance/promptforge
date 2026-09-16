@@ -738,7 +738,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-8>
 
-### Step 8: Menubar and title-bar restructure
+### Step 8: Menubar and title-bar restructure [completed]
 
 - Component: menubar
 - Artifacts: `src/ui/menu/menubar.ts` (buttons generated from `MenubarMainMenu` in sort order, `data-menu` last-segment selectors, rollover, ArrowLeft/Right), `index.html` title-bar restructure into `__left`/`__center`/`__right` with an empty menubar nav, `window-menu.css` additions (chevron, child-popover offset, title-bar regions, `:focus-visible`, reduced-motion wrap).

@@ -1,31 +1,43 @@
-// Unit test for the pluggable menu system (src/ui/menu/command-registry.ts,
-// menu-registry.ts, menu-renderer.ts): the window-menu.ts split. Commands
-// are descriptors keyed by id in the command registry; menu placements are
-// items per menu id in the menu registry; the renderer reads both and
-// knows nothing about what is registered. Bundles the three modules with
-// esbuild and drives them against jsdom built from the real index.html.
-// Covers: command registration, lookup, execution, upsert, and disposal;
-// menu ordering, item upsert keeping position, and provider registration;
-// the renderer building popovers from the registries, dispatching rows,
-// keyboard dismissal, dynamic provider rows rebuilding on open and on
-// change while open, and the missing-button diagnostic.
-// Run: node test/menu-registries.mjs
-import { readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
+// Unit test for the workbench menu registries
+// (src/services/command-registry.ts, src/services/menu-registry.ts) and
+// the menubar's button generation (src/ui/menu/menubar.ts). Commands are
+// actions keyed by id in the command registry; menu rows are command
+// references or submenu pointers per menu id in the menu registry; the
+// menubar generates the title bar's buttons from the root menu's
+// submenu rows. Bundles the modules with esbuild and drives them
+// against jsdom built from the real index.html. Covers: command
+// registration, lookup, execution with arguments, upsert, and disposal;
+// menu row sort order, upsert by id, submenu rows, provider rows merged
+// with static rows and re-read at every call; button generation with
+// data-menu last-segment selectors, registry sort order, command rows
+// on the root menu not becoming buttons, and disposal.
+// Run: node --test test/menu-registries.mjs
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 
+const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
+const { window } = dom;
+globalThis.window = window;
+globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
+globalThis.HTMLButtonElement = window.HTMLButtonElement;
+globalThis.Element = window.Element;
+globalThis.Node = window.Node;
+
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { CommandRegistry } from "./src/ui/menu/command-registry.ts";
-      export { MenuRegistry } from "./src/ui/menu/menu-registry.ts";
-      export { MenuRenderer } from "./src/ui/menu/menu-renderer.ts";
+      export { CommandRegistry } from "./src/services/command-registry.ts";
+      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
+      export { ContextKeyService } from "./src/services/context-key-service.ts";
+      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { Menubar, appendMenubarButtons } from "./src/ui/menu/menubar.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -36,195 +48,163 @@ const bundle = await esbuild.build({
   platform: "browser",
   target: "es2022",
   logLevel: "silent",
+  // The modules under test import their colocated CSS; strip it - the
+  // test drives only the JS, and jsdom applies no stylesheets anyway.
   loader: { ".css": "empty" },
 });
-const bundlePath = path.join(os.tmpdir(), "menu-registries-test.mjs");
-await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { CommandRegistry, MenuRegistry, MenuRenderer } = await import(pathToFileURL(bundlePath).href);
+const { CommandRegistry, MenuRegistry, MenuId, ContextKeyService, createKeybindingsRegistry, Menubar, appendMenubarButtons } =
+  await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 const failures = [];
 function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// A fresh jsdom per renderer scenario: the renderer reads the globals and
-// attaches listeners to the DOM it finds at construction time.
-function scenario() {
-  const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
-  globalThis.window = dom.window;
-  globalThis.document = dom.window.document;
-  globalThis.Element = dom.window.Element;
-  globalThis.HTMLElement = dom.window.HTMLElement;
-  globalThis.Node = dom.window.Node;
-  return dom.window;
-}
-
-// --- Command registry -----------------------------------------------------------
+// --- Command registry ---------------------------------------------------------
 
 {
   const commands = new CommandRegistry();
-  let runs = 0;
-  const registration = commands.register("test.run", { label: "Run", run: () => (runs += 1) });
-  check("a registered command is found by lookup", commands.lookup("test.run")?.label === "Run");
+  const runs = [];
+  const registration = commands.register("test.run", { title: "Run", run: (...args) => runs.push(args) });
+  check("a registered command is found by lookup", commands.lookup("test.run")?.title === "Run");
   check("an unknown command is not found", commands.lookup("test.nope") === undefined);
-  check("execute runs the command and reports it", commands.execute("test.run") === true && runs === 1);
-  check("execute reports an unknown command as not run", commands.execute("test.nope") === false);
-  commands.register("test.run", { label: "Run Again", run: () => (runs += 10) });
-  commands.execute("test.run");
-  check("re-registering upserts the descriptor", runs === 11 && commands.lookup("test.run").label === "Run Again");
-  registration.dispose();
-  commands.execute("test.run");
-  check("disposing the original registration leaves the upsert in place", runs === 21);
-}
-
-// --- Menu registry ----------------------------------------------------------------
-
-{
-  const menus = new MenuRegistry();
-  menus.registerMenu("edit", "Edit", 2);
-  menus.registerMenu("file", "File", 1);
   check(
-    "menus come out in registration order by position",
-    menus.menusInOrder().map((menu) => menu.id).join(",") === "file,edit",
+    "execute runs the command with its arguments and reports it",
+    (await commands.execute("test.run", 1, "x")) === true && runs.length === 1 && runs[0].join(",") === "1,x",
   );
-  menus.setMenuItem("file", "file.a", { kind: "command", command: "a" });
-  menus.setMenuItem("file", "file.b", { kind: "command", command: "b" });
-  menus.setMenuItem("file", "file.sep", { kind: "separator" });
-  menus.setMenuItem("file", "file.c", { kind: "command", command: "c" });
-  menus.setMenuItem("file", "file.b", { kind: "command", command: "b2" });
-  check(
-    "an item upsert keeps its position",
-    menus.itemSpecs("file").map((item) => item.id).join(",") === "file.a,file.b,file.sep,file.c" &&
-      menus.itemSpecs("file")[1].spec.command === "b2",
-  );
-  const provider = { items: () => [] };
-  menus.setProvider("model", provider);
-  check("the provider round-trips", menus.providerFor("model") === provider);
-  check("a menu without a provider has none", menus.providerFor("file") === undefined);
-}
+  check("execute reports an unknown command as not run", (await commands.execute("test.nope")) === false);
 
-// --- Renderer: static menus ---------------------------------------------------------
-
-{
-  const window = scenario();
-  const commands = new CommandRegistry();
-  const menus = new MenuRegistry();
-  let newAgentRuns = 0;
-  let closeRuns = 0;
-  commands.register("file.newAgent", { label: "New Agent", run: () => (newAgentRuns += 1) });
-  commands.register("file.close", {
-    label: "Close Window",
-    shortcut: "Alt+F4",
-    run: () => (closeRuns += 1),
-  });
-  menus.registerMenu("file", "File", 1);
-  menus.setMenuItem("file", "file.newAgent", { kind: "command", command: "file.newAgent" });
-  menus.setMenuItem("file", "file.sep", { kind: "separator" });
-  menus.setMenuItem("file", "file.close", { kind: "command", command: "file.close" });
-
-  const nav = window.document.querySelector(".ws-window-titlebar__menus");
-  const renderer = new MenuRenderer(nav, commands, menus);
-  const button = window.document.querySelector('[data-menu="file"]');
-  const popover = button.nextElementSibling;
-  check("the renderer builds a popover per registered menu", popover?.classList.contains("ws-window-titlebar__popover"));
-  check("the popover starts hidden", popover.hidden === true);
-
-  button.click();
-  check("clicking the button opens the menu", popover.hidden === false);
-  const rows = [...popover.querySelectorAll(".ws-window-titlebar__item")];
-  check(
-    "the rows render in placement order",
-    rows.map((row) => row.querySelector(".ws-window-titlebar__item-label").textContent).join(",") ===
-      "New Agent,Close Window",
-  );
-  check(
-    "the separator renders between the rows",
-    popover.querySelectorAll(".ws-window-titlebar__separator").length === 1,
-  );
-  check(
-    "the shortcut hint renders",
-    rows[1].querySelector(".ws-window-titlebar__shortcut")?.textContent === "Alt+F4",
-  );
-
-  rows[0].click();
-  check("clicking a row runs its command", newAgentRuns === 1 && closeRuns === 0);
-  check("activating a row closes the menu", popover.hidden === true);
-
-  button.click();
-  window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  check("Escape closes the open menu", popover.hidden === true);
-
-  renderer.dispose();
-  check(
-    "disposal removes the popovers",
-    window.document.querySelectorAll(".ws-window-titlebar__popover").length === 0,
-  );
-}
-
-// --- Renderer: a provider menu rebuilds dynamically ----------------------------------
-
-{
-  const window = scenario();
-  const commands = new CommandRegistry();
-  const menus = new MenuRegistry();
-  menus.registerMenu("model", "Model", 3);
-  let models = ["alpha"];
-  const listeners = new Set();
-  menus.setProvider("model", {
-    items: () =>
-      models.map((id) => ({
-        kind: "command",
-        key: `model:${id}`,
-        label: id,
-        checked: id === "alpha",
-        run: () => {},
-      })),
-    onDidChange: (listener) => {
-      listeners.add(listener);
-      return { dispose: () => listeners.delete(listener) };
+  let asyncDone = false;
+  commands.register("test.async", {
+    run: async () => {
+      await Promise.resolve();
+      asyncDone = true;
     },
   });
-  const nav = window.document.querySelector(".ws-window-titlebar__menus");
-  const renderer = new MenuRenderer(nav, commands, menus);
-  const button = window.document.querySelector('[data-menu="model"]');
-  const popover = button.nextElementSibling;
+  await commands.execute("test.async");
+  check("execute awaits an async run", asyncDone === true);
 
-  button.click();
-  const labels = () =>
-    [...popover.querySelectorAll(".ws-window-titlebar__item-label")].map((row) => row.textContent).join(",");
-  check("the provider's rows render at open", labels() === "alpha");
+  commands.register("test.run", { title: "Run Again", run: () => runs.push(["again"]) });
+  await commands.execute("test.run");
   check(
-    "a checked row renders as a checked radio",
-    popover.querySelector(".ws-window-titlebar__item")?.getAttribute("aria-checked") === "true",
+    "re-registering upserts the action",
+    runs.length === 2 && runs[1][0] === "again" && commands.lookup("test.run").title === "Run Again",
   );
-
-  models = ["alpha", "beta"];
-  for (const listener of [...listeners]) listener();
-  check("a change while open rebuilds the rows", labels() === "alpha,beta");
-
-  button.click(); // close
-  models = ["gamma"];
-  button.click(); // reopen
-  check("the rows re-read the provider at open", labels() === "gamma");
-  renderer.dispose();
+  registration.dispose();
+  await commands.execute("test.run");
+  check("disposing the original registration leaves the upsert in place", runs.length === 3);
 }
 
-// --- Renderer: a missing button is a loud error ----------------------------------------
+// --- Menu registry --------------------------------------------------------------
 
 {
-  const window = scenario();
   const menus = new MenuRegistry();
-  menus.registerMenu("bogus", "Bogus", 1);
-  let threw = null;
-  try {
-    new MenuRenderer(window.document.querySelector(".ws-window-titlebar__menus"), new CommandRegistry(), menus);
-  } catch (error) {
-    threw = error;
-  }
+  menus.appendMenuItem("menubar/file", { command: "b.two", group: "1_b", order: 2 });
+  menus.appendMenuItem("menubar/file", { command: "a.one" });
+  menus.appendMenuItem("menubar/file", { command: "b.one", group: "1_b", order: 1 });
+  menus.appendMenuItem("menubar/file", { command: "c.one", group: "2_c" });
+  const ids = (rows) => rows.map((row) => ("submenu" in row ? row.submenu : row.command)).join(",");
   check(
-    "a menu without a title-bar button fails construction naming the menu",
-    threw !== null && threw.message.includes("Bogus"),
+    "rows sort navigation first, then groups lexically, then order",
+    ids(menus.getMenuItems("menubar/file")) === "a.one,b.one,b.two,c.one",
   );
+
+  menus.appendMenuItem("menubar/file", { command: "a.one", title: "Renamed" });
+  const rows = menus.getMenuItems("menubar/file");
+  check(
+    "an upsert by command id keeps one row with the new data",
+    rows.length === 4 && rows[0].title === "Renamed",
+  );
+
+  menus.appendMenuItem("menubar/file", { submenu: "menubar/file/recent", title: "Recent", group: "3_z" });
+  const last = menus.getMenuItems("menubar/file").at(-1);
+  check(
+    "a submenu row round-trips its menu id and title",
+    last !== undefined && "submenu" in last && last.submenu === "menubar/file/recent" && last.title === "Recent",
+  );
+
+  let dynamic = [{ command: "p.one" }];
+  const providerReg = menus.setProvider("menubar/file", () => dynamic);
+  check(
+    "provider rows merge with static rows in sort order",
+    ids(menus.getMenuItems("menubar/file")) === "a.one,p.one,b.one,b.two,c.one,menubar/file/recent",
+  );
+  dynamic = [{ command: "p.two", group: "2_c" }];
+  check(
+    "provider rows are re-read at every call",
+    ids(menus.getMenuItems("menubar/file")) === "a.one,b.one,b.two,c.one,p.two,menubar/file/recent",
+  );
+  providerReg.dispose();
+  check(
+    "disposing the provider drops its rows",
+    ids(menus.getMenuItems("menubar/file")) === "a.one,b.one,b.two,c.one,menubar/file/recent",
+  );
+
+  const rowReg = menus.appendMenuItem("menubar/file", { command: "d.one" });
+  menus.appendMenuItem("menubar/file", { command: "d.one", title: "Replacement" });
+  rowReg.dispose();
+  check(
+    "disposing a stale row registration leaves its replacement in place",
+    menus.getMenuItems("menubar/file").some((row) => !("submenu" in row) && row.command === "d.one" && row.title === "Replacement"),
+  );
+}
+
+// --- Button generation -----------------------------------------------------------
+
+{
+  const nav = window.document.createElement("nav");
+  const buttons = appendMenubarButtons(nav, [
+    { submenu: "menubar/file", title: "File" },
+    { submenu: "menubar/view/appearance", title: "Appearance" },
+  ]);
+  check("one button per submenu row", buttons.length === 2 && nav.children.length === 2);
+  check(
+    "data-menu carries the menu id's last segment",
+    buttons[0].dataset.menu === "file" && buttons[1].dataset.menu === "appearance",
+  );
+  check(
+    "buttons are type=button with the popup aria state",
+    buttons.every(
+      (button) =>
+        button.type === "button" &&
+        button.getAttribute("aria-haspopup") === "menu" &&
+        button.getAttribute("aria-expanded") === "false",
+    ),
+  );
+  check("the button label is the row title", buttons[0].textContent === "File");
+}
+
+// --- Menubar: buttons from the root menu in sort order ----------------------------
+
+{
+  const menus = new MenuRegistry();
+  const commands = new CommandRegistry();
+  commands.register("file.new", { title: "New File", run: () => {} });
+  // Registered out of order on purpose; a command row on the root menu
+  // is not a top-level menu and must not become a button.
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/view", title: "View", order: 3 });
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { command: "file.new" });
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/file", title: "File", order: 1 });
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/edit", title: "Edit", order: 2 });
+
+  const nav = window.document.querySelector(".ws-window-titlebar__menus");
+  const menubar = new Menubar(nav, {
+    menus,
+    commands,
+    contextKeys: new ContextKeyService(),
+    keybindings: createKeybindingsRegistry("linux"),
+  });
+  const buttons = [...nav.querySelectorAll(".ws-window-titlebar__menu")];
+  check(
+    "the menubar generates the root menu's submenu rows in sort order",
+    buttons.map((button) => button.textContent).join(",") === "File,Edit,View",
+  );
+  check(
+    "the generated buttons carry the last-segment selectors",
+    buttons.map((button) => button.dataset.menu).join(",") === "file,edit,view",
+  );
+  menubar.dispose();
+  check("disposal removes the generated buttons", nav.querySelectorAll(".ws-window-titlebar__menu").length === 0);
 }
 
 if (failures.length > 0) {
@@ -233,4 +213,3 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("menu-registries: all assertions passed");
-process.exit(0);

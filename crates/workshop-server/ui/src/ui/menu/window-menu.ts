@@ -30,6 +30,7 @@ import { closeWindow, minimizeWindow, toggleWindowMaximize } from "../chrome/win
 import { resetZoom, zoomIn, zoomOut } from "../chrome/zoom";
 import { Commands, type CommandDescriptor } from "./command-registry";
 import { Menus, type ResolvedMenuItem } from "./menu-registry";
+import { appendMenubarButtons } from "./menubar";
 import { MenuRenderer } from "./menu-renderer";
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */
@@ -381,6 +382,23 @@ export function setupWindowMenus(options: {
     items: () => modelMenuItems(options.modelMenu, options.profileMenu),
     onDidChange: options.profileMenu?.onDidChange,
   });
+
+  // The shipped nav is empty: the buttons are generated from the
+  // declared menus through the new menubar's generator, keeping the
+  // data-menu selectors this renderer and the tests key on. The
+  // Menubar widget itself replaces this renderer in the
+  // composition-root step.
+  const buttons = appendMenubarButtons(
+    nav,
+    Menus.menusInOrder().map((menu) => ({ submenu: menu.id, title: menu.label })),
+  );
+  store.add(
+    toDisposable(() => {
+      for (const button of buttons) {
+        button.remove();
+      }
+    }),
+  );
 
   store.add(new MenuRenderer(nav));
 

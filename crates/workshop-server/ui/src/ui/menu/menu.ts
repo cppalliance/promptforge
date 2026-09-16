@@ -97,6 +97,22 @@ export class Menu extends Disposable {
     return this.openMenuId !== null;
   }
 
+  /** True while a submenu flyout is open; the flyout holds the keyboard. */
+  get hasOpenFlyout(): boolean {
+    return this.child !== null;
+  }
+
+  /** True when focus sits on one of this menu's own submenu rows. */
+  get focusIsOnSubmenuRow(): boolean {
+    const handle = this.focusedHandle();
+    return handle !== null && "submenu" in handle.row;
+  }
+
+  /** Moves focus to the first row, after a keyboard-driven open. */
+  focusFirstRow(): void {
+    this.focusRow(0);
+  }
+
   /**
    * Shows the menu's popover anchored to `anchor`, rebuilding its rows
    * from the registry. `context` becomes the first run argument of every
@@ -159,6 +175,11 @@ export class Menu extends Disposable {
     if (this.popover === null) {
       const popover = document.createElement("div");
       popover.className = "ws-window-titlebar__popover";
+      if (this.parentRow !== null) {
+        // A flyout opens beside its parent row; the class carries the
+        // alignment offset (window-menu.css).
+        popover.classList.add("ws-window-titlebar__popover--flyout");
+      }
       popover.setAttribute("role", "menu");
       popover.hidden = true;
       document.body.appendChild(popover);
@@ -430,6 +451,12 @@ export class Menu extends Disposable {
 
   private containsInChain(target: Node): boolean {
     if (this.popover?.contains(target) === true) {
+      return true;
+    }
+    // The anchor is the menu's own chrome: pressing it toggles the menu
+    // (the menubar's click handler), so it must not read as an outside
+    // press that dismisses the popover first.
+    if (this.anchor instanceof HTMLElement && this.anchor.contains(target)) {
       return true;
     }
     return this.child?.containsInChain(target) ?? false;

@@ -1,11 +1,14 @@
 // Title-bar built-artifact contract: loads the bundled stylesheet and
-// shipped markup into jsdom, then checks the DOM, visibility, sizing, glyph,
-// and keyboard-focus behavior that jsdom can execute without a layout
-// engine.
-// Run after `npm run build`: `node test/titlebar-style.mjs`.
+// shipped markup into jsdom, mounts the menubar (src/ui/menu/menubar.ts)
+// over the shipped empty nav with the eight top-level menus registered,
+// then checks the region structure, the generated buttons, visibility,
+// sizing, glyph, and keyboard-focus behavior that jsdom can execute
+// without a layout engine.
+// Run after `npm run build`: `node --test test/titlebar-style.mjs`.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +36,102 @@ window.document.head.appendChild(style);
 
 const barEl = window.document.querySelector(".ws-window-titlebar");
 check("title bar present in the shipped markup", barEl !== null);
+
+// --- Region structure: __left (icon + menus), __center (drag), __right (controls) ---
+
+if (barEl) {
+  const left = barEl.querySelector(":scope > .ws-window-titlebar__left");
+  const center = barEl.querySelector(":scope > .ws-window-titlebar__center");
+  const right = barEl.querySelector(":scope > .ws-window-titlebar__right");
+  check("the bar splits into left, center, and right regions", left !== null && center !== null && right !== null);
+  if (left) {
+    check("the left region carries the program icon", left.querySelector(".ws-window-titlebar__icon") !== null);
+    const nav = left.querySelector(".ws-window-titlebar__menus");
+    check(
+      "the left region carries the menubar nav as a menubar landmark",
+      nav !== null && nav.getAttribute("role") === "menubar" && nav.getAttribute("aria-label") === "Application menus",
+    );
+    check("the menubar nav ships empty; the buttons are generated", nav !== null && nav.children.length === 0);
+  }
+  if (center) {
+    check("the center region is the drag surface", center.classList.contains("ws-window-titlebar__drag"));
+  }
+  if (right) {
+    check("the right region carries the window controls", right.querySelector(".ws-window-titlebar__controls") !== null);
+  }
+}
+
+// --- The menubar generates the eight top-level buttons ------------------------------
+
+// The shipped nav is empty; mount the real Menubar over it with the
+// eight top-level menus registered, as the menubar contribution does at
+// boot. The bundle reads the globals, so point them at this jsdom first.
+globalThis.window = window;
+globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
+globalThis.HTMLButtonElement = window.HTMLButtonElement;
+globalThis.Element = window.Element;
+globalThis.Node = window.Node;
+
+const bundle = await esbuild.build({
+  stdin: {
+    contents: `
+      export { Menubar } from "./src/ui/menu/menubar.ts";
+      export { CommandRegistry } from "./src/services/command-registry.ts";
+      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
+      export { ContextKeyService } from "./src/services/context-key-service.ts";
+      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+    `,
+    resolveDir: path.join(uiDir, ".."),
+    loader: "ts",
+  },
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  logLevel: "silent",
+  loader: { ".css": "empty" },
+});
+const { Menubar, CommandRegistry, MenuRegistry, MenuId, ContextKeyService, createKeybindingsRegistry } = await import(
+  `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
+);
+
+if (barEl) {
+  const menus = new MenuRegistry();
+  const topLevel = [
+    [MenuId.MenubarFileMenu, "File"],
+    [MenuId.MenubarEditMenu, "Edit"],
+    [MenuId.MenubarSelectionMenu, "Selection"],
+    [MenuId.MenubarViewMenu, "View"],
+    [MenuId.MenubarGoMenu, "Go"],
+    [MenuId.MenubarRunMenu, "Run"],
+    [MenuId.MenubarTerminalMenu, "Terminal"],
+    [MenuId.MenubarHelpMenu, "Help"],
+  ];
+  topLevel.forEach(([id, title], index) => {
+    menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: id, title, order: index + 1 });
+  });
+  const nav = barEl.querySelector(".ws-window-titlebar__menus");
+  new Menubar(nav, {
+    menus,
+    commands: new CommandRegistry(),
+    contextKeys: new ContextKeyService(),
+    keybindings: createKeybindingsRegistry("linux"),
+  });
+  const buttons = [...nav.querySelectorAll(".ws-window-titlebar__menu")];
+  check(
+    "the menubar generates the eight top-level buttons in order",
+    buttons.map((button) => button.textContent).join(",") === "File,Edit,Selection,View,Go,Run,Terminal,Help",
+  );
+  check(
+    "the buttons carry the last-segment data-menu selectors",
+    buttons.map((button) => button.dataset.menu).join(",") === "file,edit,selection,view,go,run,terminal,help",
+  );
+}
+
+// --- Visibility, sizing, controls, glyphs, focus -------------------------------------
+
 if (barEl) {
   const order = [...barEl.querySelectorAll(".ws-window-titlebar__control")].map((button) =>
     button.getAttribute("aria-label"),

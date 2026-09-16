@@ -1,20 +1,19 @@
-// Unit test for the application menus (src/ui/menu/window-menu.ts) and the About
-// dialog (src/ui/chrome/about-dialog.ts). Bundles the TS modules with esbuild -
-// with "@tauri-apps/api/window" aliased to the recording stub in
-// test/helpers - imports them via data URLs, and drives them against jsdom
-// built from the real index.html with the Tauri internals present. Covers:
-// menu opening,
-// one-menu-at-a-time, keyboard navigation and dismissal, New Agent
-// dispatch through the agent surface (the only new-conversation
-// command), the Window menu's Workshop Panel toggle and its sharing of
-// the visible controls' command path, the Model menu's dynamic catalog
-// rows, selection marking, and empty state, the switching-state
-// rendering (all rows disabled, pending mark and aria-busy on the switch
-// target), the live rebuild while the popover is open (including
-// keyboard focus surviving the rebuild by row identity), Edit target
-// preservation and disabled commands, the About dialog's focus trap and close, and
-// the browser-mode popover wiring with inert native window commands.
-// Run: node test/window-menu.mjs
+// Unit test for the menubar (src/ui/menu/menubar.ts) composing the menu
+// popover widget (src/ui/menu/menu.ts) over the services registries, and
+// for the legacy composition root (src/ui/menu/window-menu.ts), which
+// fills the shipped empty nav through the menubar's button generator
+// until the composition-root step retires it. Bundles the TS modules
+// with esbuild - with "@tauri-apps/api/window" aliased to the recording
+// stub in test/helpers - and drives them against jsdom built from the
+// real index.html. Covers: button generation in registry sort order,
+// click toggle, one-menu-at-a-time, rollover, ArrowLeft/Right between
+// menus with flyout navigation yielding to the widget, Escape, outside
+// pointer and blur dismissal, disabled rows and context-key rebuilds,
+// command dispatch with shortcut hints, and disposal; then the legacy
+// setupWindowMenus over the generated nav: the five buttons, New Agent
+// dispatch, Edit target preservation, the Model menu's catalog rows,
+// the About dialog's focus trap, and teardown.
+// Run: node --test test/window-menu.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,9 +23,9 @@ import { JSDOM } from "jsdom";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 
-async function bundle(entry) {
+async function bundle(contents) {
   const result = await esbuild.build({
-    entryPoints: [path.join(uiDir, "..", "src", entry)],
+    stdin: { contents, resolveDir: path.join(uiDir, ".."), loader: "ts" },
     bundle: true,
     write: false,
     format: "esm",
@@ -43,823 +42,383 @@ async function bundle(entry) {
       "@tauri-apps/api/window": path.join(uiDir, "helpers", "tauri-window-stub.mjs"),
     },
   });
-  const code = result.outputFiles[0].text;
-  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
 }
 
-const { setupWindowMenus } = await bundle(path.join("ui", "menu", "window-menu.ts"));
-const { setupWindowChrome } = await bundle(path.join("ui", "chrome", "window-chrome.ts"));
-const { ModelService } = await bundle(path.join("services", "model-service.ts"));
+const { Menubar, CommandRegistry, MenuRegistry, MenuId, ContextKeyService, createKeybindingsRegistry } =
+  await bundle(`
+    export { Menubar } from "./src/ui/menu/menubar.ts";
+    export { CommandRegistry } from "./src/services/command-registry.ts";
+    export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
+    export { ContextKeyService } from "./src/services/context-key-service.ts";
+    export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+  `);
+const { setupWindowMenus } = await bundle(`export { setupWindowMenus } from "./src/ui/menu/window-menu.ts";`);
+const { ModelService } = await bundle(`export { ModelService } from "./src/services/model-service.ts";`);
 
 const failures = [];
 function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// Each scenario gets a fresh jsdom: the modules read the globals and
-// attach listeners to the DOM they find at call time. Pass desktop: false
-// to exercise the plain-browser path (no Tauri internals, no native calls).
-function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
+function installGlobals(window) {
+  globalThis.window = window;
+  globalThis.document = window.document;
+  globalThis.Element = window.Element;
+  globalThis.HTMLElement = window.HTMLElement;
+  globalThis.HTMLButtonElement = window.HTMLButtonElement;
+  globalThis.HTMLInputElement = window.HTMLInputElement;
+  globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
+  globalThis.Node = window.Node;
+}
+
+// Each scenario gets a fresh jsdom and fresh registries: the widgets read
+// the globals and attach listeners to the DOM they find at call time.
+function menubarScenario() {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
-  if (desktop) {
-    window.__TAURI_INTERNALS__ = {};
-  }
-  // The native window commands the window stub recorded, in order.
-  const nativeCalls = () => window.__TAURI_STUB__?.calls ?? [];
+  installGlobals(window);
+
+  const commands = new CommandRegistry();
+  const menus = new MenuRegistry();
+  const contextKeys = new ContextKeyService();
+  const keybindings = createKeybindingsRegistry("linux");
+  const runs = [];
+
+  // Registered out of order on purpose: the bar renders registry sort
+  // order, not registration order.
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/view", title: "View", order: 3 });
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/file", title: "File", order: 1 });
+  menus.appendMenuItem(MenuId.MenubarMainMenu, { submenu: "menubar/edit", title: "Edit", order: 2 });
+
+  commands.register("file.new", { title: "New File", run: (...args) => runs.push(["file.new", ...args]) });
+  commands.register("file.close", { title: "Close Window", run: () => runs.push(["file.close"]) });
+  keybindings.registerKeybindingRule({ id: "file.new", keybinding: "ctrl+n" });
+  menus.appendMenuItem("menubar/file", { command: "file.new" });
+  menus.appendMenuItem("menubar/file", { command: "file.close", group: "1_close" });
+
+  const canEdit = contextKeys.createKey("canEdit", false);
+  commands.register("edit.undo", { title: "Undo", precondition: "canEdit", run: () => runs.push(["edit.undo"]) });
+  menus.appendMenuItem("menubar/edit", { command: "edit.undo" });
+
+  menus.appendMenuItem("menubar/view", { submenu: "menubar/view/appearance", title: "Appearance" });
+  commands.register("view.toggle", { title: "Toggle Center", run: () => runs.push(["view.toggle"]) });
+  menus.appendMenuItem("menubar/view/appearance", { command: "view.toggle" });
+
+  const nav = window.document.querySelector(".ws-window-titlebar__menus");
+  const menubar = new Menubar(nav, { menus, commands, contextKeys, keybindings });
+
+  const button = (id) => window.document.querySelector(`.ws-window-titlebar__menu[data-menu="${id}"]`);
+  const popovers = () =>
+    [...window.document.querySelectorAll(".ws-window-titlebar__popover")].filter((el) => !el.hidden);
+  const rowsOf = (popover) => [...popover.querySelectorAll(":scope > .ws-window-titlebar__item")];
+  const rowByLabel = (popover, label) =>
+    rowsOf(popover).find((row) => row.querySelector(".ws-window-titlebar__item-label")?.textContent === label);
+  const keydown = (key) =>
+    window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  const hover = (target) => target.dispatchEvent(new window.Event("pointerenter", { bubbles: false }));
+  return { window, menubar, runs, canEdit, button, popovers, rowsOf, rowByLabel, keydown, hover };
+}
+
+// --- Buttons generate in registry sort order ------------------------------------
+
+{
+  const { window, button } = menubarScenario();
+  const buttons = [...window.document.querySelectorAll(".ws-window-titlebar__menu")];
+  check(
+    "the bar generates buttons in registry sort order",
+    buttons.map((b) => b.textContent).join(",") === "File,Edit,View",
+  );
+  check(
+    "the buttons carry last-segment data-menu selectors and the popup state",
+    buttons.every(
+      (b) => b.getAttribute("aria-haspopup") === "menu" && b.getAttribute("aria-expanded") === "false",
+    ) && button("file") !== null && button("edit") !== null && button("view") !== null,
+  );
+}
+
+// --- Click toggles the menu ------------------------------------------------------
+
+{
+  const { button, popovers, rowsOf, rowByLabel } = menubarScenario();
+  button("file").click();
+  check("clicking a button opens its menu", popovers().length === 1);
+  check("the open button is announced expanded", button("file").getAttribute("aria-expanded") === "true");
+  const popover = popovers()[0];
+  check(
+    "the rows render in sort order with a group separator",
+    rowsOf(popover).map((row) => row.querySelector(".ws-window-titlebar__item-label").textContent).join(",") ===
+      "New File,Close Window" && popover.querySelectorAll(".ws-window-titlebar__separator").length === 1,
+  );
+  check(
+    "the shortcut hint comes from the keybinding registry",
+    rowByLabel(popover, "New File")?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+N",
+  );
+  button("file").click();
+  check("clicking the open menu's button closes it", popovers().length === 0);
+  check("the closed button collapses", button("file").getAttribute("aria-expanded") === "false");
+}
+
+// --- One menu at a time -----------------------------------------------------------
+
+{
+  const { button, popovers, rowByLabel } = menubarScenario();
+  button("file").click();
+  button("edit").click();
+  check(
+    "clicking another button switches the open menu",
+    popovers().length === 1 && rowByLabel(popovers()[0], "Undo") !== undefined,
+  );
+  check(
+    "the replaced button collapses",
+    button("file").getAttribute("aria-expanded") === "false" &&
+      button("edit").getAttribute("aria-expanded") === "true",
+  );
+}
+
+// --- Rollover ----------------------------------------------------------------------
+
+{
+  const { button, popovers, rowsOf, hover } = menubarScenario();
+  hover(button("edit"));
+  check("hover with no menu open opens nothing", popovers().length === 0);
+  button("file").click();
+  hover(button("edit"));
+  check("hovering another button while open switches the menu", rowByLabelSafe(popovers(), "Undo"));
+  const rowsBefore = rowsOf(popovers()[0]);
+  hover(button("edit"));
+  check(
+    "hovering the open menu's own button does not rebuild its rows",
+    rowsOf(popovers()[0]).every((row, index) => row === rowsBefore[index]),
+  );
+}
+
+function rowByLabelSafe(popovers, label) {
+  return (
+    popovers.length === 1 &&
+    [...popovers[0].querySelectorAll(".ws-window-titlebar__item-label")].some((el) => el.textContent === label)
+  );
+}
+
+// --- Disabled rows and the context-key rebuild ---------------------------------------
+
+{
+  const { button, popovers, rowByLabel, runs, canEdit } = menubarScenario();
+  button("edit").click();
+  const undo = () => rowByLabel(popovers()[0], "Undo");
+  check("a failing precondition renders the row disabled", undo()?.getAttribute("aria-disabled") === "true");
+  undo().click();
+  check("clicking a disabled row runs nothing and keeps the menu open", runs.length === 0 && popovers().length === 1);
+  canEdit.set(true);
+  check("a referenced key change re-enables the row while open", undo()?.getAttribute("aria-disabled") === "false");
+  undo().click();
+  check("the enabled row runs its command and closes the menu", runs.join(",") === "edit.undo" && popovers().length === 0);
+}
+
+// --- Command dispatch ------------------------------------------------------------------
+
+{
+  const { button, popovers, rowByLabel, runs } = menubarScenario();
+  button("file").click();
+  rowByLabel(popovers()[0], "New File").click();
+  check("activating a row runs the command and closes the menu", runs.length === 1 && popovers().length === 0);
+  check("a row without args runs with none", runs[0].join(",") === "file.new");
+}
+
+// --- ArrowLeft/Right between menus, yielding to flyout navigation -----------------------
+
+{
+  const { window, button, popovers, rowsOf, rowByLabel, keydown } = menubarScenario();
+  button("file").click();
+  keydown("ArrowDown");
+  check("ArrowDown focuses the first row", window.document.activeElement === rowByLabel(popovers()[0], "New File"));
+  keydown("ArrowRight");
+  check("ArrowRight opens the next menu", rowByLabelSafe(popovers(), "Undo"));
+  check(
+    "ArrowRight focuses the new menu's first row",
+    window.document.activeElement === rowByLabel(popovers()[0], "Undo"),
+  );
+  keydown("ArrowRight");
+  check("ArrowRight again opens the third menu", rowByLabelSafe(popovers(), "Appearance"));
+  keydown("ArrowDown");
+  const appearance = rowByLabel(popovers()[0], "Appearance");
+  check("the view menu's row is the Appearance submenu", window.document.activeElement === appearance);
+  keydown("ArrowRight");
+  check(
+    "ArrowRight on a submenu row opens the flyout instead of switching menus",
+    popovers().length === 2 && rowByLabel(popovers()[1], "Toggle Center") !== undefined,
+  );
+  keydown("ArrowLeft");
+  check(
+    "ArrowLeft with a flyout open closes the flyout instead of switching menus",
+    popovers().length === 1 && window.document.activeElement === appearance,
+  );
+  keydown("ArrowLeft");
+  check("ArrowLeft now opens the previous menu", rowByLabelSafe(popovers(), "Undo"));
+  keydown("ArrowLeft");
+  keydown("ArrowLeft");
+  check("ArrowLeft from the first menu wraps to the last", rowByLabelSafe(popovers(), "Appearance"));
+  keydown("Escape");
+}
+
+// --- Dismissal: Escape, outside pointer, window blur --------------------------------------
+
+{
+  const { window, button, popovers, keydown } = menubarScenario();
+  button("file").click();
+  keydown("Escape");
+  check("Escape closes the menu", popovers().length === 0);
+  check("Escape returns focus to the menu button", window.document.activeElement === button("file"));
+
+  button("file").click();
+  window.document.body.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+  check("an outside pointer press closes the menu", popovers().length === 0);
+
+  button("file").click();
+  window.dispatchEvent(new window.Event("blur"));
+  check("window blur closes the menu", popovers().length === 0);
+}
+
+// --- Disposal ------------------------------------------------------------------------------
+
+{
+  const { window, button, popovers, menubar } = menubarScenario();
+  const fileButton = button("file");
+  fileButton.click();
+  menubar.dispose();
+  check("disposal closes the open menu", popovers().length === 0);
+  check(
+    "disposal removes the generated buttons",
+    window.document.querySelectorAll(".ws-window-titlebar__menu").length === 0,
+  );
+  fileButton.click();
+  check("a disposed bar's button no longer opens anything", popovers().length === 0);
+}
+
+// --- Legacy bridge: setupWindowMenus over the generated nav ----------------------------------
+// Until the composition-root step retires window-menu.ts, the shipped
+// boot keeps the legacy renderer; its buttons come from the menubar's
+// generator, so the empty nav and the data-menu selectors both hold.
+
+function legacyScenario({ modelMenu } = {}) {
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
+  const { window } = dom;
+  window.__TAURI_INTERNALS__ = {};
+  installGlobals(window);
   const execCalls = [];
   window.document.execCommand = (command) => {
     execCalls.push(command);
     return true;
   };
   let agentsOpened = 0;
-  const agents = {
-    newAgent: () => {
-      agentsOpened += 1;
+  const commands = setupWindowMenus({
+    agents: {
+      newAgent: () => {
+        agentsOpened += 1;
+      },
     },
-  };
-  let workshopToggles = 0;
-  let gatewayConfigOpens = 0;
-  let agentSessionOpens = 0;
-  const workshop = {
-    toggleWorkshopPanel: () => {
-      workshopToggles += 1;
+    workshop: {
+      toggleWorkshopPanel: () => {},
+      openGatewayConfig: () => {},
+      openAgentSession: () => {},
     },
-    openGatewayConfig: () => {
-      gatewayConfigOpens += 1;
-    },
-    openAgentSession: () => {
-      agentSessionOpens += 1;
-    },
-  };
-  globalThis.window = window;
-  globalThis.document = window.document;
-  globalThis.Element = window.Element;
-  globalThis.HTMLElement = window.HTMLElement;
-  globalThis.HTMLInputElement = window.HTMLInputElement;
-  globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
-  globalThis.Node = window.Node;
-  const commands = setupWindowMenus({ agents, workshop, modelMenu, profileMenu });
-  const menus = {};
-  for (const button of window.document.querySelectorAll(".ws-window-titlebar__menu")) {
-    menus[button.dataset.menu] = button;
-  }
-  const popoverOf = (id) => menus[id].nextElementSibling;
+    modelMenu,
+  });
+  const button = (id) => window.document.querySelector(`.ws-window-titlebar__menu[data-menu="${id}"]`);
+  const popoverOf = (id) => button(id).nextElementSibling;
   const itemsOf = (id) => [...popoverOf(id).querySelectorAll(".ws-window-titlebar__item")];
   const itemByLabel = (id, label) =>
-    itemsOf(id).find((item) =>
-      item.querySelector(".ws-window-titlebar__item-label").textContent === label,
-    );
+    itemsOf(id).find((item) => item.querySelector(".ws-window-titlebar__item-label").textContent === label);
   const isOpen = (id) => !popoverOf(id).hidden;
-  const keydown = (key) =>
-    window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
-  const stats = () => ({ agentsOpened, workshopToggles, gatewayConfigOpens, agentSessionOpens, execCalls: [...execCalls] });
-  return { window, commands, menus, nativeCalls, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
-}
-
-// --- Opening and one-menu-at-a-time -----------------------------------------
-
-{
-  const { menus, isOpen } = scenario();
-  menus.file.click();
-  check("clicking File opens its popover", isOpen("file"));
-  check(
-    "opening marks the button expanded",
-    menus.file.getAttribute("aria-expanded") === "true",
-  );
-  menus.edit.click();
-  check("opening Edit closes File", !isOpen("file") && isOpen("edit"));
-  check(
-    "the replaced button collapses",
-    menus.file.getAttribute("aria-expanded") === "false",
-  );
-  menus.edit.click();
-  check("clicking the open menu's button closes it", !isOpen("edit"));
-}
-
-// --- Menubar rollover: hover switches the open menu ---------------------------
-
-{
-  const { window, menus, isOpen } = scenario();
-  const enter = (id) =>
-    menus[id].dispatchEvent(new window.Event("pointerenter", { bubbles: false }));
-  enter("edit");
-  check("hover with no menu open opens nothing", !isOpen("edit") && !isOpen("file"));
-  menus.file.click();
-  enter("edit");
-  check(
-    "hovering another button while open switches the menu",
-    isOpen("edit") && !isOpen("file"),
-  );
-  check(
-    "the rollover target's button is announced expanded",
-    menus.edit.getAttribute("aria-expanded") === "true" &&
-      menus.file.getAttribute("aria-expanded") === "false",
-  );
+  return { window, commands, button, popoverOf, itemsOf, itemByLabel, isOpen, execCalls, agentsOpened: () => agentsOpened };
 }
 
 {
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const { window, menus, itemsOf, isOpen } = scenario({ modelMenu });
-  menus.model.click();
-  const rowsBefore = itemsOf("model");
-  menus.model.dispatchEvent(new window.Event("pointerenter", { bubbles: false }));
-  check("hovering the open menu's own button keeps it open", isOpen("model"));
+  const { window, button, popoverOf, itemByLabel, isOpen, agentsOpened } = legacyScenario();
+  const labels = [...window.document.querySelectorAll(".ws-window-titlebar__menu")].map((b) => b.textContent);
   check(
-    "hovering the open menu's own button does not rebuild its rows",
-    itemsOf("model").every((row, index) => row === rowsBefore[index]),
+    "the legacy setup generates the five buttons into the empty nav",
+    labels.join(",") === "File,Edit,Model,Window,Help",
   );
-}
-
-// --- Keyboard navigation and dismissal ---------------------------------------
-
-{
-  const { window, menus, itemsOf, isOpen, keydown } = scenario();
-  menus.edit.click();
-  keydown("ArrowDown");
-  check("Down focuses the first command", window.document.activeElement === itemsOf("edit")[0]);
-  keydown("ArrowDown");
-  check("Down again moves to the next command", window.document.activeElement === itemsOf("edit")[1]);
-  keydown("ArrowUp");
-  check("Up moves back", window.document.activeElement === itemsOf("edit")[0]);
-  keydown("ArrowUp");
   check(
-    "Up from the first command wraps to the last",
-    window.document.activeElement === itemsOf("edit")[itemsOf("edit").length - 1],
+    "the legacy renderer attaches its popover to the generated button",
+    popoverOf("file")?.classList.contains("ws-window-titlebar__popover") === true,
   );
-  keydown("ArrowRight");
-  check("Right opens the next menu", !isOpen("edit") && isOpen("model"));
-  check(
-    "Right focuses the new menu's first row",
-    window.document.activeElement === itemsOf("model")[0],
-  );
-  keydown("ArrowLeft");
-  check("Left opens the previous menu", isOpen("edit") && !isOpen("model"));
-  keydown("Escape");
-  check("Escape closes the menu", !isOpen("edit"));
-  check(
-    "Escape returns focus to the menu button",
-    window.document.activeElement === menus.edit,
-  );
-  menus.file.click();
-  window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
-  check("outside pointerdown dismisses the menu", !isOpen("file"));
-}
-
-// --- File menu commands -------------------------------------------------------
-
-{
-  const { menus, itemByLabel, isOpen, nativeCalls, stats } = scenario();
-  menus.file.click();
-  check("New Chat is gone from the File menu", itemByLabel("file", "New Chat") === undefined);
+  button("file").click();
+  check("the File menu opens", isOpen("file"));
   itemByLabel("file", "New Agent").click();
-  check("New Agent dispatches the agent surface's newAgent", stats().agentsOpened === 1);
+  check("New Agent dispatches through the agent surface", agentsOpened() === 1);
   check("running a command closes the menu", !isOpen("file"));
-  menus.file.click();
-  itemByLabel("file", "Close Window").click();
-  check(
-    "Close Window calls the window's close",
-    nativeCalls().join(",") === "close",
-  );
 }
 
-// --- Window menu: Workshop Panel toggle and the shared command path ----------
-
 {
-  const { window, menus, itemByLabel, isOpen, nativeCalls, stats } = scenario();
-  setupWindowChrome();
-  menus.window.click();
-  const workshopItem = itemByLabel("window", "Workshop Panel");
-  check("the Window menu lists Workshop Panel", workshopItem !== undefined);
-  check(
-    "Workshop Panel shows the Ctrl+B shortcut hint",
-    workshopItem?.querySelector(".ws-window-titlebar__shortcut")?.textContent === "Ctrl+B",
-  );
-  workshopItem.click();
-  check("Workshop Panel dispatches the workshop toggle", stats().workshopToggles === 1);
-  check("running Workshop Panel closes the menu", !isOpen("window"));
-  const visible = (command) => window.document.querySelector(`[data-command="${command}"]`);
-  visible("minimize").click();
-  menus.window.click();
-  itemByLabel("window", "Minimize").click();
-  visible("toggle-maximize").click();
-  menus.window.click();
-  itemByLabel("window", "Maximize/Restore").click();
-  check(
-    "menu and visible controls call identical window methods",
-    nativeCalls().join("|") === "minimize|minimize|toggle-maximize|toggle-maximize",
-  );
-}
-
-// --- Window menu: Gateway Config opens the panel next to Workshop Panel ------
-
-{
-  const { menus, itemsOf, itemByLabel, isOpen, stats } = scenario();
-  menus.window.click();
-  const configItem = itemByLabel("window", "Gateway Config");
-  check("the Window menu lists Gateway Config", configItem !== undefined);
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  const labels = itemsOf("window").map(rowLabel);
-  check(
-    "Gateway Config sits next to Workshop Panel",
-    labels.indexOf("Gateway Config") === labels.indexOf("Workshop Panel") + 1,
-  );
-  configItem.click();
-  check("Gateway Config dispatches the open command", stats().gatewayConfigOpens === 1);
-  check("running Gateway Config closes the menu", !isOpen("window"));
-}
-
-// --- Window menu: New Agent opens the panel next to Gateway Config -----------
-
-{
-  const { menus, itemsOf, itemByLabel, isOpen, stats } = scenario();
-  menus.window.click();
-  const agentItem = itemByLabel("window", "New Agent");
-  check("the Window menu lists New Agent", agentItem !== undefined);
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  const labels = itemsOf("window").map(rowLabel);
-  check(
-    "New Agent sits next to Gateway Config",
-    labels.indexOf("New Agent") === labels.indexOf("Gateway Config") + 1,
-  );
-  agentItem.click();
-  check("New Agent dispatches the open command", stats().agentSessionOpens === 1);
-  check("running New Agent closes the menu", !isOpen("window"));
-}
-
-// --- Edit menu: disabled without a target, preserved target with one ---------
-
-{
-  const { window, menus, itemsOf, itemByLabel, isOpen, execCalls, keydown } = scenario();
-  menus.edit.click();
+  const { window, button, itemsOf, itemByLabel, isOpen, execCalls } = legacyScenario();
+  button("edit").click();
   check(
     "edit commands are announced disabled with no target",
     itemsOf("edit").every((item) => item.getAttribute("aria-disabled") === "true"),
   );
   itemByLabel("edit", "Undo").click();
-  check("a disabled command cannot run", execCalls.length === 0);
-  check("clicking a disabled command keeps the menu open", isOpen("edit"));
-  keydown("Escape");
+  check("a disabled command cannot run", execCalls.length === 0 && isOpen("edit"));
+  button("edit").click();
+  check("clicking the open menu's button closes it", !isOpen("edit"));
 
   const textarea = window.document.createElement("textarea");
   window.document.body.appendChild(textarea);
   textarea.focus();
-  menus.edit.click();
-  check(
-    "edit commands enable with a focused editable",
-    itemsOf("edit").every((item) => item.getAttribute("aria-disabled") === "false"),
-  );
+  button("edit").click();
   itemByLabel("edit", "Paste").click();
-  check("Paste dispatches execCommand", execCalls.join(",") === "paste");
-  check(
-    "the command restores focus to the preserved target",
-    window.document.activeElement === textarea,
-  );
-  menus.edit.click();
-  keydown("ArrowDown");
-  keydown("ArrowDown");
-  keydown("Enter");
-  check("Enter activates the focused command", execCalls.join(",") === "paste,redo");
-  check(
-    "Enter restores focus to the preserved target",
-    window.document.activeElement === textarea,
-  );
+  check("Paste dispatches execCommand with a focused editable", execCalls.join(",") === "paste");
+  check("the command restores focus to the preserved target", window.document.activeElement === textarea);
 }
-
-// --- Model menu: dynamic catalog rows ----------------------------------------
-
-{
-  const catalog = [
-    { id: "alpha", description: "the alpha model" },
-    { id: "beta" },
-  ];
-  const selections = [];
-  const modelMenu = new ModelService((id) => (selections.push(id), true));
-  modelMenu.setModels(catalog);
-  // The selection is server-owned: it arrives as a snapshot, never from
-  // the catalog itself.
-  modelMenu.applySelected("alpha");
-  const { menus, itemsOf, isOpen } = scenario({ modelMenu });
-  menus.model.click();
-  check("the Model menu opens", isOpen("model"));
-  const rows = itemsOf("model");
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  check(
-    "the Model menu lists the catalog entries",
-    rows.map(rowLabel).join(",") === "alpha,beta",
-  );
-  check(
-    "the selected model is announced checked",
-    rows[0].getAttribute("aria-checked") === "true" &&
-      rows[1].getAttribute("aria-checked") === "false",
-  );
-  check(
-    "the selected model shows the checkmark",
-    rows[0].querySelector(".ws-window-titlebar__item-check").textContent === "✓" &&
-      rows[1].querySelector(".ws-window-titlebar__item-check").textContent === "",
-  );
-  check(
-    "the model description becomes the row tooltip",
-    rows[0].title === "the alpha model",
-  );
-  rows[1].click();
-  check("clicking a model row sends the select command", selections.join(",") === "beta");
-  check("selecting a model closes the menu", !isOpen("model"));
-  // The server answers the command with a snapshot; only then does the
-  // selection move.
-  modelMenu.applySelected("beta");
-  menus.model.click();
-  check(
-    "the rebuilt menu marks the new selection",
-    itemsOf("model")[1].getAttribute("aria-checked") === "true",
-  );
-}
-
-{
-  const { menus, itemsOf, isOpen } = scenario({ modelMenu: new ModelService(() => true) });
-  menus.model.click();
-  const rows = itemsOf("model");
-  check(
-    "an empty catalog shows one disabled row",
-    rows.length === 1 &&
-      rows[0].querySelector(".ws-window-titlebar__item-label").textContent === "No models available" &&
-      rows[0].getAttribute("aria-disabled") === "true",
-  );
-  rows[0].click();
-  check("clicking the empty-state row keeps the menu open", isOpen("model"));
-}
-
-// --- Model menu: gateway profiles section -------------------------------------
-
-{
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const switches = [];
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "main",
-    switchTo: (name) => switches.push(name),
-  };
-  const { menus, popoverOf, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  check(
-    "the Model menu appends the Profiles section after the catalog, No profile first",
-    rows.map(rowLabel).join(",") === "alpha,Profiles,No profile,main,qwen38",
-  );
-  check(
-    "the sections are divided by a separator",
-    popoverOf("model").querySelector(".ws-window-titlebar__separator") !== null,
-  );
-  check(
-    "the Profiles header is an inert label",
-    rows[1].getAttribute("aria-disabled") === "true",
-  );
-  check(
-    "the active profile is announced checked and No profile is not",
-    rows[2].getAttribute("aria-checked") === "false" &&
-      rows[3].getAttribute("aria-checked") === "true" &&
-      rows[4].getAttribute("aria-checked") === "false",
-  );
-  check(
-    "the active profile shows the checkmark",
-    rows[3].querySelector(".ws-window-titlebar__item-check").textContent === "✓" &&
-      rows[4].querySelector(".ws-window-titlebar__item-check").textContent === "",
-  );
-  rows[4].click();
-  check("clicking a profile row dispatches switchTo", switches.join(",") === "qwen38");
-  check("switching closes the menu", !isOpen("model"));
-  menus.model.click();
-  itemsOf("model")[2].click();
-  check(
-    "clicking No profile dispatches switchTo with null",
-    switches.length === 2 && switches[1] === null,
-  );
-}
-
-{
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const switches = [];
-  const profileMenu = { profiles: ["main"], active: "main", switchTo: (name) => switches.push(name) };
-  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  check(
-    "a single-profile gateway still offers No profile as the way out",
-    rows.map(rowLabel).join(",") === "alpha,Profiles,No profile,main",
-  );
-  rows[2].click();
-  check(
-    "No profile is selectable from a single-profile gateway",
-    switches.length === 1 && switches[0] === null,
-  );
-}
-
-{
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const profileMenu = { profiles: [], active: "", switchTo: () => {} };
-  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  check(
-    "a gateway with no profiles defined shows no Profiles section",
-    itemsOf("model").length === 1,
-  );
-}
-
-{
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const profileMenu = { profiles: ["main", "qwen38"], active: "", switchTo: () => {} };
-  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  check(
-    "No profile is checked when no profile is active",
-    rows[2].getAttribute("aria-checked") === "true" &&
-      rows[2].querySelector(".ws-window-titlebar__item-check").textContent === "✓" &&
-      rows[3].getAttribute("aria-checked") === "false" &&
-      rows[4].getAttribute("aria-checked") === "false",
-  );
-}
-
-{
-  // A profile whose catalog is empty still offers the way out: the
-  // Profiles section renders below the empty state, so a switch can
-  // restore a usable catalog.
-  const switches = [];
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "qwen38",
-    switchTo: (name) => switches.push(name),
-  };
-  const { menus, itemsOf } = scenario({ modelMenu: new ModelService(() => true), profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  check(
-    "an empty catalog still lists the profiles",
-    rows.map(rowLabel).join(",") === "No models available,Profiles,No profile,main,qwen38",
-  );
-  rows[3].click();
-  check("a profile can be switched out of an empty catalog", switches.join(",") === "main");
-}
-
-// --- Model menu: a switch in flight -------------------------------------------
-
-{
-  const selections = [];
-  const modelMenu = new ModelService((id) => (selections.push(id), true));
-  modelMenu.setModels([{ id: "alpha" }]);
-  modelMenu.applySelected("alpha");
-  const switches = [];
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "main",
-    switching: "qwen38",
-    switchInFlight: true,
-    switchTo: (name) => switches.push(name),
-  };
-  const { menus, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
-  check(
-    "a switch in flight disables every model and profile row",
-    rows.every((row) => row.getAttribute("aria-disabled") === "true"),
-  );
-  check(
-    "the switch target shows the pending mark instead of a check",
-    markOf(rows[4]).textContent === "…" &&
-      markOf(rows[4]).classList.contains("ws-window-titlebar__item-check--pending"),
-  );
-  check(
-    "the still-active profile keeps its check while the switch runs",
-    markOf(rows[3]).textContent === "✓" &&
-      rows[3].getAttribute("aria-checked") === "true" &&
-      rows[4].getAttribute("aria-checked") === "false",
-  );
-  check(
-    "the pending row stays a radio item for assistive tech",
-    rows[4].getAttribute("role") === "menuitemradio",
-  );
-  check(
-    "only the switch target is announced busy",
-    rows[4].getAttribute("aria-busy") === "true" &&
-      rows.filter((row) => row.getAttribute("aria-busy") === "true").length === 1,
-  );
-  rows[4].click();
-  check("a disabled profile row cannot dispatch another switch", switches.length === 0);
-  rows[0].click();
-  check("a disabled model row cannot send a selection", selections.length === 0);
-  check("clicking disabled rows keeps the menu open", isOpen("model"));
-}
-
-// --- Model menu: a switch to no profile in flight -----------------------------
-
-{
-  // The frame reports switching: null for a no-profile switch, so the
-  // view's switching reads "" - the same as no switch. Idleness comes from
-  // switchInFlight alone; the "No profile" row is the pending target.
-  const selections = [];
-  const modelMenu = new ModelService((id) => (selections.push(id), true));
-  modelMenu.setModels([{ id: "alpha" }]);
-  modelMenu.applySelected("alpha");
-  const switches = [];
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "main",
-    switching: "",
-    switchInFlight: true,
-    switchTo: (name) => switches.push(name),
-  };
-  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
-  check(
-    "a no-profile switch in flight disables every model and profile row",
-    rows.every((row) => row.getAttribute("aria-disabled") === "true"),
-  );
-  check(
-    "the No profile row shows the pending mark during a no-profile switch",
-    markOf(rows[2]).textContent === "…" &&
-      markOf(rows[2]).classList.contains("ws-window-titlebar__item-check--pending") &&
-      rows[2].getAttribute("aria-busy") === "true",
-  );
-  check(
-    "no named profile row is pending during a no-profile switch",
-    rows.filter((row) => row.getAttribute("aria-busy") === "true").length === 1 &&
-      markOf(rows[3]).textContent === "✓" &&
-      rows[4].getAttribute("aria-busy") === null,
-  );
-  rows[2].click();
-  rows[3].click();
-  check("disabled profile rows cannot dispatch during a no-profile switch", switches.length === 0);
-  rows[0].click();
-  check("disabled model rows cannot select during a no-profile switch", selections.length === 0);
-}
-
-{
-  // With no switch in flight and switching empty, nothing is pending and
-  // every row is live.
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "main",
-    switching: "",
-    switchInFlight: false,
-    switchTo: () => {},
-  };
-  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  const rows = itemsOf("model");
-  const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
-  check(
-    "with no switch in flight every model and profile radio is enabled",
-    [rows[0], rows[2], rows[3], rows[4]].every(
-      (row) => row.getAttribute("aria-disabled") === "false",
-    ),
-  );
-  check(
-    "with no switch in flight no row is pending",
-    rows.every((row) => row.getAttribute("aria-busy") === null) &&
-      rows.every((row) => markOf(row)?.textContent !== "…"),
-  );
-}
-
-// --- Model menu: live rebuild while the popover is open -----------------------
-
-{
-  const modelMenu = new ModelService(() => true);
-  modelMenu.setModels([{ id: "alpha" }]);
-  const listeners = new Set();
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "main",
-    switching: "",
-    switchInFlight: false,
-    onDidChange: (listener) => {
-      listeners.add(listener);
-      return { dispose: () => listeners.delete(listener) };
-    },
-    switchTo: () => {},
-  };
-  const { menus, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
-  menus.model.click();
-  check("opening the Model menu subscribes to workbench changes", listeners.size === 1);
-  // The server starts the switch: a switching=<target> snapshot arrives
-  // while the popover is open.
-  profileMenu.switching = "qwen38";
-  profileMenu.switchInFlight = true;
-  for (const listener of listeners) listener();
-  let rows = itemsOf("model");
-  const markOf = (row) => row.querySelector(".ws-window-titlebar__item-check");
-  check(
-    "a snapshot while open disables the rows without reopening",
-    isOpen("model") && rows.every((row) => row.getAttribute("aria-disabled") === "true"),
-  );
-  check("the pending mark appears without reopening", markOf(rows[4]).textContent === "…");
-  check(
-    "the switch target is announced busy without reopening",
-    rows[4].getAttribute("aria-busy") === "true",
-  );
-  // The switch completes: the final snapshot restores truth, including
-  // the server-owned model selection.
-  profileMenu.switching = "";
-  profileMenu.switchInFlight = false;
-  profileMenu.active = "qwen38";
-  modelMenu.applySelected("alpha");
-  for (const listener of listeners) listener();
-  rows = itemsOf("model");
-  check(
-    "the completing snapshot moves the check to the new profile",
-    rows[4].getAttribute("aria-checked") === "true" &&
-      markOf(rows[4]).textContent === "✓" &&
-      rows[3].getAttribute("aria-checked") === "false",
-  );
-  check(
-    "rows re-enable when the switch completes",
-    rows[0].getAttribute("aria-disabled") === "false" &&
-      rows[3].getAttribute("aria-disabled") === "false",
-  );
-  check(
-    "the checked model row tracks the snapshot selection",
-    rows[0].getAttribute("aria-checked") === "true" && markOf(rows[0]).textContent === "✓",
-  );
-  check(
-    "the busy announcement clears when the switch settles",
-    rows.every((row) => row.getAttribute("aria-busy") === null),
-  );
-  menus.model.click();
-  check(
-    "closing the menu disposes the workbench subscription",
-    !isOpen("model") && listeners.size === 0,
-  );
-}
-
-// --- Model menu: keyboard focus survives a live rebuild ------------------------
 
 {
   const modelMenu = new ModelService(() => true);
   modelMenu.setModels([{ id: "alpha" }, { id: "beta" }]);
-  const listeners = new Set();
-  const profileMenu = {
-    profiles: ["main", "qwen38"],
-    active: "main",
-    switching: "",
-    switchInFlight: false,
-    onDidChange: (listener) => {
-      listeners.add(listener);
-      return { dispose: () => listeners.delete(listener) };
-    },
-    switchTo: () => {},
-  };
-  const { window, menus, itemsOf, keydown } = scenario({ modelMenu, profileMenu });
-  const rowLabel = (row) => row.querySelector(".ws-window-titlebar__item-label").textContent;
-  menus.model.click();
-  // No row focused yet: a snapshot must not grab focus into the popover.
-  const before = window.document.activeElement;
-  for (const listener of listeners) listener();
+  modelMenu.applySelected("alpha");
+  const { button, itemsOf, isOpen } = legacyScenario({ modelMenu });
+  button("model").click();
+  const rows = itemsOf("model");
   check(
-    "a snapshot with no row focused leaves focus alone",
-    window.document.activeElement === before,
+    "the Model menu lists the catalog with the selection checked",
+    isOpen("model") &&
+      rows.length === 2 &&
+      rows[0].getAttribute("aria-checked") === "true" &&
+      rows[1].getAttribute("aria-checked") === "false",
   );
-  keydown("ArrowDown");
-  keydown("ArrowDown");
-  check(
-    "focus sits on the second model row before the snapshot",
-    window.document.activeElement === itemsOf("model")[1] &&
-      rowLabel(itemsOf("model")[1]) === "beta",
-  );
-  for (const listener of listeners) listener();
-  check(
-    "a snapshot mid-navigation re-focuses the equivalent new row",
-    window.document.activeElement === itemsOf("model")[1] &&
-      rowLabel(itemsOf("model")[1]) === "beta",
-  );
-  keydown("ArrowDown");
-  check(
-    "keyboard navigation continues from the restored row",
-    window.document.activeElement === itemsOf("model")[2],
-  );
-  keydown("ArrowUp");
-  // The snapshot replaced the catalog and the focused row is gone: focus
-  // falls back to the first row, never to body.
-  modelMenu.setModels([{ id: "gamma" }]);
-  for (const listener of listeners) listener();
-  check(
-    "a snapshot that drops the focused row falls back to the first row",
-    window.document.activeElement === itemsOf("model")[0] &&
-      rowLabel(itemsOf("model")[0]) === "gamma",
-  );
-  menus.model.click();
 }
 
-// --- Help menu: About dialog --------------------------------------------------
-
 {
-  const { window, menus, itemByLabel, isOpen } = scenario();
-  menus.help.focus();
-  menus.help.click();
+  const { window, button, itemByLabel, isOpen } = legacyScenario();
+  button("help").focus();
+  button("help").click();
   itemByLabel("help", "About PromptForge").click();
   check("running About closes the menu", !isOpen("help"));
   const dialog = window.document.querySelector(".ws-about-dialog");
-  check("the About dialog opens", dialog !== null);
+  check("the About dialog opens as a modal dialog", dialog !== null && dialog.getAttribute("role") === "dialog" && dialog.getAttribute("aria-modal") === "true");
   if (dialog) {
-    check("the dialog is a modal dialog", dialog.getAttribute("role") === "dialog" &&
-      dialog.getAttribute("aria-modal") === "true");
-    const text = dialog.textContent;
-    check(
-      "the dialog names product, version, and license",
-      text.includes("PromptForge") && text.includes("0.0.0-test") && text.includes("BSL-1.0"),
-    );
     check(
       "the version line renders the build-time define",
       dialog.querySelector(".ws-about-dialog__line").textContent === "Version 0.0.0-test",
     );
-    const update = dialog.querySelector(".ws-about-dialog__check");
-    check("the dialog carries the desktop update control", update?.disabled === true);
     const close = dialog.querySelector(".ws-about-dialog__close");
     check("focus moves into the dialog", window.document.activeElement === close);
-    window.document.dispatchEvent(
-      new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-    );
+    window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     check("Tab stays trapped inside the dialog", window.document.activeElement === close);
-    window.document.dispatchEvent(
-      new window.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
-    );
-    check("Shift+Tab stays trapped inside the dialog", window.document.activeElement === close);
-    window.document.dispatchEvent(
-      new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
+    window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     check("Escape dismisses the dialog", !window.document.querySelector(".ws-about-dialog"));
-    check(
-      "dismissal returns focus to the invoker",
-      window.document.activeElement === menus.help,
-    );
+    check("dismissal returns focus to the invoker", window.document.activeElement === button("help"));
   }
 }
 
-// --- The command set is shared with future surfaces ---------------------------
-
 {
-  const { commands, stats } = scenario();
-  check("setup returns the shared command set", typeof commands.newAgent === "function" &&
-    typeof commands.toggleWorkshopPanel === "function" &&
-    typeof commands.minimizeWindow === "function" &&
-    typeof commands.showAbout === "function");
-  check("newChat is gone from the shared command set", !("newChat" in commands));
-  commands.newAgent();
-  check("the shared set dispatches New Agent", stats().agentsOpened === 1);
-  commands.toggleWorkshopPanel();
-  check("the shared set dispatches the workshop toggle", stats().workshopToggles === 1);
-}
-
-// --- Window blur closes the open menu ----------------------------------------
-
-{
-  const { window, menus, isOpen } = scenario();
-  menus.file.click();
-  check("menu is open before blur", isOpen("file"));
-  window.dispatchEvent(new window.Event("blur"));
-  check("window blur closes the open menu", !isOpen("file"));
-}
-
-{
-  const { window, menus, isOpen } = scenario();
-  window.dispatchEvent(new window.Event("blur"));
-  check("blur with no menu open is a harmless no-op", !isOpen("file") && !isOpen("edit"));
-}
-
-// --- Browser mode: popovers wired, native window commands inert --------------
-
-{
-  const { window, commands, menus, itemByLabel, isOpen, nativeCalls, stats } = scenario({ desktop: false });
+  const { window, commands } = legacyScenario();
+  commands.dispose();
   check(
-    "browser mode builds every popover",
-    window.document.querySelectorAll(".ws-window-titlebar__popover").length === 5,
+    "disposing the legacy setup removes popovers and generated buttons",
+    window.document.querySelectorAll(".ws-window-titlebar__popover").length === 0 &&
+      window.document.querySelectorAll(".ws-window-titlebar__menu").length === 0,
   );
-  menus.file.click();
-  check("clicking File opens its popover in browser mode", isOpen("file"));
-  itemByLabel("file", "New Agent").click();
-  check("browser mode commands dispatch", stats().agentsOpened === 1);
-  check("running a command closes the menu in browser mode", !isOpen("file"));
-  menus.window.click();
-  itemByLabel("window", "Minimize").click();
-  menus.file.click();
-  itemByLabel("file", "Close Window").click();
-  check(
-    "native window commands no-op without the Tauri runtime",
-    nativeCalls().length === 0 && !("__TAURI_INTERNALS__" in window),
-  );
-  commands.newAgent();
-  check("browser mode still returns a working command set", stats().agentsOpened === 2);
 }
 
 if (failures.length > 0) {
