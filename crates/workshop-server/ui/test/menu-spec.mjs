@@ -33,6 +33,7 @@ const bundle = await esbuild.build({
       import "./src/ui/menu/edit.contribution.ts";
       import "./src/ui/editor/editor.contribution.ts";
       import "./src/ui/workspace/files.contribution.ts";
+      import "./src/ui/workspace-files/workspace-files.contribution.ts";
       import "./src/ui/chrome/chrome.contribution.ts";
       import "./src/ui/layout/layout.contribution.ts";
       import "./src/ui/status/status.contribution.ts";
@@ -59,6 +60,7 @@ const bundle = await esbuild.build({
   loader: { ".css": "empty" },
   alias: {
     "@tauri-apps/plugin-dialog": path.join(uiDir, "helpers", "tauri-dialog-stub.mjs"),
+    "@tauri-apps/api/event": path.join(uiDir, "helpers", "tauri-event-stub.mjs"),
     "@tauri-apps/api/window": path.join(uiDir, "helpers", "tauri-window-stub.mjs"),
     "@tauri-apps/api/webviewWindow": path.join(uiDir, "helpers", "tauri-webview-stub.mjs"),
   },
@@ -124,7 +126,7 @@ const SPEC = {
     ["menubar/file/newWindowWithProfile", "1_new", "sub", "New Window with Profile"],
     ["workbench.action.files.openFile", "2_open", "wired"],
     ["workbench.action.files.openFolder", "2_open", "wired"],
-    ["workbench.action.openWorkspace", "2_open", "stub", "Open Workspace from File..."],
+    ["workbench.action.openWorkspace", "2_open", "wired", "Open Workspace from File..."],
     ["menubar/file/recent", "2_open", "sub", "Open Recent"],
     ["workbench.action.addRootFolder", "3_workspace", "wired"],
     ["workbench.action.saveWorkspaceAs", "3_workspace", "stub", "Save Workspace As..."],

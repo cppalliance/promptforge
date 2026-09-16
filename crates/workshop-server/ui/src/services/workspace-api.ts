@@ -4,9 +4,11 @@
 // fetchTree; the editor panel reads and writes files through fetchFile
 // and writeFile, which carry the server's opaque conflict token. Failures
 // throw typed CatalogError variants (services/error-catalog.ts); callers
-// match on the ErrorCatalog code, never on message text.
+// match on the ErrorCatalog code, never on message text. The fetch and
+// JSON mechanics are the shared floor in json-request.ts.
 
-import { CatalogError, ErrorCatalog, errorText, isCatalogError } from "./error-catalog";
+import { CatalogError, ErrorCatalog, isCatalogError } from "./error-catalog";
+import { errorCode, errorMessage, isRecord, readJson, request } from "./json-request";
 
 /** One entry in a directory listing. */
 export interface TreeEntry {
@@ -41,10 +43,6 @@ export interface WorkspaceFile {
 /** Narrows a caught error to a modified-time conflict from writeFile. */
 export function isModifiedConflict(error: unknown): error is CatalogError {
   return isCatalogError(error, ErrorCatalog.ModifiedConflict);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function parseEntry(value: unknown): TreeEntry | null {
@@ -87,45 +85,6 @@ function parseListing(body: unknown): TreeListing | null {
     parsed.push(parsedEntry);
   }
   return { path: path ?? null, entries: parsed };
-}
-
-/** Extracts the server's error message from a failed workspace response. */
-function errorMessage(body: unknown, status: number, route: string): string {
-  if (isRecord(body) && isRecord(body.error) && typeof body.error.message === "string") {
-    return body.error.message;
-  }
-  return `${route} answered ${status}`;
-}
-
-/** The server's machine-readable error code, when the body carries one. */
-function errorCode(body: unknown): string | null {
-  if (isRecord(body) && isRecord(body.error) && typeof body.error.code === "string") {
-    return body.error.code;
-  }
-  return null;
-}
-
-/** Performs one fetch, wrapping transport failures as typed errors. */
-async function request(url: string, route: string, init?: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (error) {
-    throw new CatalogError(ErrorCatalog.Transport, `${route}: ${errorText(error)}`, {
-      cause: error,
-    });
-  }
-}
-
-/** Parses one response body; a non-JSON answer is a shape failure. */
-async function readJson(response: Response, route: string): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch (error) {
-    throw new CatalogError(ErrorCatalog.UnexpectedShape, `${route} returned a non-JSON answer`, {
-      status: response.status,
-      cause: error,
-    });
-  }
 }
 
 /** Throws the typed failure for one non-OK response. */

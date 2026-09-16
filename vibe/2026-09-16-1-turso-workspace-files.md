@@ -545,7 +545,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-10>
 
-### Step 10: SPA Open Workspace from File action
+### Step 10: SPA Open Workspace from File action [completed]
 
 - Component: `spa-workspace-actions`
 - Piece: actions (sequential: Step 11 reuses this step's client, contribution, and test harness)

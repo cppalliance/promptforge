@@ -26,6 +26,7 @@ import { setupWindowMenus } from "./ui/menu/index";
 import { KeybindingDispatcher } from "./ui/layout/keybinding-dispatcher";
 import { QuickInputService, QUICK_INPUT_SERVICE } from "./ui/quickinput/quick-input";
 import { setupWorkspaceDrops } from "./ui/workspace/workspace-drops";
+import { register as registerWorkspaceFiles } from "./ui/workspace-files/index";
 import { restoreZoom } from "./ui/chrome/zoom";
 import { restoreLayout, startLayoutPersistence } from "./ui/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./ui/layout/panel-types";
@@ -179,6 +180,10 @@ disposables.add(new KeybindingDispatcher());
 // dispatcher. The bar generates its buttons from the MenubarMainMenu
 // submenu rows.
 disposables.add(setupWindowMenus());
+// The workspace-document actions (Open Workspace from File...) register
+// eagerly with the contribution surface above; the feature's activation
+// hands their registrations to the ownership tree.
+disposables.add(registerWorkspaceFiles());
 
 // The server-owned selection and the rest of the workbench state arrive
 // in the same snapshot: the model service takes the selection, the
