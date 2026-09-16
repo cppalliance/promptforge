@@ -760,7 +760,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-10>
 
-### Step 10: Quick input widget
+### Step 10: Quick input widget [completed]
 
 - Component: quickinput
 - Artifacts: `src/ui/quickinput/quick-input.ts` and `quick-input.css` (`QuickInputService` with `quickAccess.show(value, options)`, floating panel under the title bar, WAI-ARIA combobox pattern, ArrowUp/Down/Enter/Escape, in-place prefix re-route).

@@ -1,0 +1,100 @@
+/* Styles for quick-input.ts, which imports this file; esbuild bundles it
+   into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
+
+/* The panel floats under the title bar, horizontally centered, above
+   every other surface. */
+.ws-quick-input {
+  position: fixed;
+  top: var(--titlebar-height);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  width: var(--ws-size-560);
+  max-width: 90vw;
+  padding: var(--space-xs);
+  background: var(--bg-raised);
+  border: var(--ws-border-width) solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--titlebar-popover-shadow);
+}
+
+.ws-quick-input[hidden] {
+  display: none;
+}
+
+/* The accessible name: present for assistive tech, invisible on screen. */
+.ws-quick-input__label {
+  position: absolute;
+  width: var(--ws-size-1);
+  height: var(--ws-size-1);
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ws-quick-input__input {
+  height: var(--ws-control-height);
+  padding: 0 var(--space-md);
+  background: none;
+  border: none;
+  border-bottom: var(--ws-border-width) solid var(--border);
+  border-radius: 0;
+  color: var(--text);
+  font: inherit;
+}
+
+.ws-quick-input__input::placeholder {
+  color: var(--text-muted);
+}
+
+.ws-quick-input__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-size-1);
+  max-height: var(--ws-size-320);
+  overflow-y: auto;
+}
+
+/* Rows: label left, muted description filling the middle, keybinding
+   hint pinned to the right edge. */
+.ws-quick-input__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--ws-menu-item-radius);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ws-quick-input__option[aria-selected="true"] {
+  background: var(--bg-hover);
+}
+
+.ws-quick-input__option-label {
+  flex: none;
+}
+
+.ws-quick-input__option-description {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.ws-quick-input__option-keybinding {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
