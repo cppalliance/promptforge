@@ -6,7 +6,7 @@ This chapter teaches you what the Workshop desktop application is, how to instal
 
 PromptForge Workshop is a desktop application for Windows, macOS, and Linux. You launch one program named Workshop. That program boots a small server inside itself and then opens a single window titled "PromptForge". The window shows the Workshop interface, which the built-in server serves on your own machine. There is no separate web server to install and no files to download before the interface can appear; the interface ships bundled inside the application.
 
-The Workshop talks to a PromptForge gateway. The gateway is the part of the system that supplies the model catalog, the profiles, and the model rounds that power chat. The gateway runs as its own program, separate from the Workshop window: the application's built-in server attaches to a running gateway over HTTP, so closing the window never unloads the gateway or its loaded models. The window opens at 1024 by 768 pixels the first time, and it remembers its size, position, and maximized state across launches.
+The Workshop talks to a PromptForge gateway. The gateway is the part of the system that supplies the model catalog, the profiles, and the model rounds that power chat. The gateway runs as its own program, separate from the Workshop window: the application's built-in server attaches to a running gateway over HTTP, so closing the window never unloads the gateway or its loaded models. The window opens at 1024 by 768 pixels the first time. Once you have saved a workspace file, it remembers its size, position, and maximized state there across launches; the Workspace Files chapter explains how.
 
 The application shows the PromptForge program icon in its custom title bar.
 

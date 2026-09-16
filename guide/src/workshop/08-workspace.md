@@ -13,7 +13,7 @@ You can also add a folder without dragging. Click the header "+" button labeled 
 
 The outcome of adding or removing a folder is always announced on the status bar, as a success or an error. Grants registered through any session are visible to every open session immediately, and open panels such as the Workshop tree refresh automatically to show new grants.
 
-Folder grants last only for the current session. They are held in memory and are not saved to the profile.
+Folder grants are held in memory. Until you save a workspace they last only for the current session; once a workspace file is open, every grant and removal is written into it as it happens. The next chapter covers workspace files.
 
 ## Browsing the tree
 
@@ -54,5 +54,5 @@ To take access away:
 
 Files under the removed folder lose access on their next operation. Removing an unknown root reports "path is not a granted root". A root deleted from disk stays removable, so you can always clean up a missing entry.
 
-You can now grant folders and browse them. The next chapter teaches the editor, where you open and change the files those folders contain.
+You can now grant folders and browse them. The next chapter teaches workspace files, which remember those grants between launches.
 

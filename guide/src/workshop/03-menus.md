@@ -9,6 +9,7 @@ The title bar carries five menus: File, Edit, Model, Window, and Help. Click a m
 The File menu:
 
 - New Agent starts a fresh agent session; it opens or focuses the agent-session panel. New Agent is the only new-conversation command. There is no New Chat.
+- Open Workspace from File..., Save Workspace As..., and Duplicate Workspace... manage the `.pfwork` workspace file; Add Folder to Workspace... grants a folder. The Workspace Files chapter covers them.
 - Close Window closes the window, also with Alt+F4.
 
 The Edit menu runs Undo, Redo, Cut, Copy, Paste, and Select All with the standard shortcuts Ctrl+Z, Ctrl+Y, Ctrl+X, Ctrl+C, Ctrl+V, and Ctrl+A. After an Edit command runs, focus returns to the field that had it.

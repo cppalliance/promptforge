@@ -593,7 +593,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-13>
 
-### Step 13: Docs, full gates, manual smoke
+### Step 13: Docs, full gates, manual smoke [completed]
 
 - Component: `docs-and-verification`
 - Piece: docs (one piece, one step)

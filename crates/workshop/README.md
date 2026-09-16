@@ -26,6 +26,10 @@ Development against the standalone `workshop-server` binary flow is unchanged.
 
 The shell drives its own window and never opens a browser tab. The `open_browser` flag belongs to the standalone `workshop-server` binary.
 
+## Window state
+
+The shell no longer uses `tauri-plugin-window-state`. Window geometry (logical size, position, and the maximized flag) lives in the open workspace file, the same `.pfwork` database that holds the granted folders, and the shell reaches it only over HTTP through the in-process server: `GET /workspace/file/current` before the window shows, to restore; `PUT /workspace/file/window-state` to save, debounced while the user drags and once more on close with a short timeout; and a refetch and reapply when the SPA emits `promptforge:workspace-opened` after opening, saving as, or duplicating a workspace. An ephemeral workspace has nowhere to keep geometry: the server answers `saved: false`, the window opens at the default size, and nothing persists until the first Save Workspace As. Every failure on this path logs and continues; geometry never blocks or fails boot.
+
 ## Native runtimes
 
 The desktop build has no native-backend feature flags. At run time the artifact store downloads the pinned whisper.cpp bundle for the host - CUDA on Windows, Metal on Apple Silicon, and CPU on the other supported targets - alongside the managed `llama-server`.
