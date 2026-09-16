@@ -23,6 +23,7 @@
   --ws-size-320: 320px;
   --ws-size-360: 360px;
   --ws-size-560: 560px;
+  --ws-size-600: 600px;
 
   /* Size scale (rem primitives, named by value) */
   --ws-size-rem-0-55: 0.55rem;

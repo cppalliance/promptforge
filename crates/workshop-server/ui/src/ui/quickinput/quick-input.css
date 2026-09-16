@@ -2,7 +2,9 @@
    into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
 
 /* The panel floats under the title bar, horizontally centered, above
-   every other surface. */
+   every other surface. Its width ceiling is the command center pill's
+   600px clamp (the panel anchors to the pill), with the 90vw guard
+   kept for narrow viewports. */
 .ws-quick-input {
   position: fixed;
   top: var(--titlebar-height);
@@ -13,7 +15,7 @@
   flex-direction: column;
   gap: var(--space-xs);
   width: var(--ws-size-560);
-  max-width: 90vw;
+  max-width: min(90vw, var(--ws-size-600));
   padding: var(--space-xs);
   background: var(--bg-raised);
   border: var(--ws-border-width) solid var(--border);

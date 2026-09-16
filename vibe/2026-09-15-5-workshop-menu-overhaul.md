@@ -782,7 +782,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-12>
 
-### Step 12: Command center pill
+### Step 12: Command center pill [completed]
 
 - Component: command-center
 - Artifacts: `src/ui/chrome/command-center.ts` (toolbar over `MenuId.CommandCenter`, the pill with search icon, window title, `?` chevron, 38vw/600px clamp, `aria-label`, `no-drag` inside the drag region) and the `WindowTitle` helper (first granted root's folder else `PromptForge`, re-renders on grant changes, sets `document.title`); quick input anchors to the pill.

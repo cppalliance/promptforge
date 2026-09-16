@@ -1,0 +1,89 @@
+/* Styles for command-center.ts, which imports this file; esbuild bundles it
+   into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
+
+/* The no-drag marker: the center region initiates a native drag only when
+   the pointer lands on the region itself (window-chrome.ts), so this class
+   is the styling hook that makes the exemption explicit. */
+.ws-window-titlebar__no-drag {
+  user-select: none;
+}
+
+/* The command center centers itself in the drag region and never drags. */
+.ws-command-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  block-size: 100%;
+  min-inline-size: 0;
+}
+
+/* The pill: search icon, window title, then the ? chevron as a sibling
+   button, together reading as one control. Inline size is clamped to 38vw
+   with a 600px ceiling, matching the quick input panel that opens from it. */
+.ws-command-center__pill,
+.ws-command-center__chevron,
+.ws-command-center__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  block-size: var(--ws-control-height);
+  padding: 0 var(--space-md);
+  background: var(--bg-raised);
+  border: var(--ws-border-width) solid var(--border);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ws-command-center__pill {
+  inline-size: 38vw;
+  max-inline-size: var(--ws-size-600);
+  min-inline-size: 0;
+  border-start-start-radius: var(--radius);
+  border-end-start-radius: var(--radius);
+  border-inline-end: none;
+}
+
+.ws-command-center__chevron {
+  flex: none;
+  border-start-end-radius: var(--radius);
+  border-end-end-radius: var(--radius);
+  color: var(--text-muted);
+}
+
+/* Extra MenuId.CommandCenter rows: plain toolbar buttons beside the pill. */
+.ws-command-center__item {
+  flex: none;
+  border-radius: var(--radius);
+}
+
+.ws-command-center__pill:hover,
+.ws-command-center__chevron:hover,
+.ws-command-center__item:hover {
+  background: var(--bg-hover);
+}
+
+.ws-command-center__pill:focus-visible,
+.ws-command-center__chevron:focus-visible,
+.ws-command-center__item:focus-visible {
+  outline: var(--ws-border-width) solid var(--titlebar-accent);
+  outline-offset: calc(-1 * var(--ws-border-width));
+}
+
+.ws-command-center__search {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+/* The window title truncates with an ellipsis inside the clamped pill. */
+.ws-command-center__title {
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
