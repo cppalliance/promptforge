@@ -8,9 +8,13 @@
 
 import { open, save } from "@tauri-apps/plugin-dialog";
 
+import { errorText } from "../../services/error-catalog";
 import { DOCK } from "../../services/panel-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
+import { TREE_STATE } from "../../services/tree-state-service";
+import { fetchTree } from "../../services/workspace-api";
 import { asEditor } from "../editor/editor-commands";
+import { focusWorkshopTree } from "../layout/workshop-panel";
 import { openInZone } from "../layout/zones";
 import { STATUS_BAR } from "../status/status-bar";
 import { addFolderToWorkspace } from "./add-folder";
@@ -102,4 +106,36 @@ export async function saveAllEditors(): Promise<void> {
 /** Revert File: reload the active editor from disk, prompting on unsaved changes. */
 export function revertActiveEditor(): void {
   asEditor(getService(DOCK).activePanel)?.requestRevert();
+}
+
+/**
+ * vscode.open: an editor on an already-granted path. The path comes from
+ * an Open Recent row or the "" quick-access list, so unlike openFile
+ * there is no picker and no grant.
+ */
+export function openPath(path: string): void {
+  openInZone("editor", { path });
+}
+
+/**
+ * vscode.openFolder: re-focus the Workshop tree on one granted root. The
+ * root's listing is fetched and cached when missing, so the expanded row
+ * has children to render; the workspace-changed event makes an open tree
+ * re-render with the root expanded, and the tree panel opens or
+ * activates with focus. A fetch failure reports and leaves the tree as
+ * it is.
+ */
+export async function focusWorkspaceRoot(path: string): Promise<void> {
+  const state = getService(TREE_STATE);
+  if (state.listing(path) === undefined) {
+    try {
+      state.cacheListing(path, await fetchTree(path));
+    } catch (error) {
+      report(`Could not open ${path}: ${errorText(error)}`, "error");
+      return;
+    }
+  }
+  state.expand(path);
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  focusWorkshopTree();
 }

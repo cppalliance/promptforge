@@ -11,6 +11,9 @@ import type { IDisposable } from "../base/lifecycle";
 import { createServiceToken, registerService } from "./service-registry";
 import type { TreeListing } from "./workspace-api";
 
+/** Cache key for the synthetic granted-roots listing, which has no path. */
+export const ROOTS_KEY = "";
+
 /**
  * The Workshop tree's expansion and listing state. The synthetic
  * granted-roots listing has no path; it caches under the empty-string
@@ -39,6 +42,11 @@ export class TreeStateService implements IDisposable {
   /** The cached listing for a path, if one was fetched this session. */
   listing(path: string): TreeListing | undefined {
     return this.listingCache.get(path);
+  }
+
+  /** Every listing fetched this session; the quick-open file provider reads them. */
+  cachedListings(): readonly TreeListing[] {
+    return [...this.listingCache.values()];
   }
 
   /** Caches one fetched listing. */

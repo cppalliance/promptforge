@@ -12,6 +12,7 @@ import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
 import type { EditorView } from "@codemirror/view";
 
 import { Emitter } from "../../base/event";
+import { baseName } from "../../base/paths";
 import { toDisposable } from "../../base/lifecycle";
 import { WorkshopPart } from "../../base/workshop-part";
 import { Commands } from "../../services/command-registry";
@@ -51,11 +52,6 @@ function filePathParam(params: Record<string, unknown>): string | null {
 function untitledSerialParam(params: Record<string, unknown>): number | null {
   const untitled = params.untitled;
   return typeof untitled === "number" && Number.isInteger(untitled) && untitled > 0 ? untitled : null;
-}
-
-/** The file's base name, for the tab title. */
-function baseName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
 const didInitEmitter = new Emitter<EditorPanel>();

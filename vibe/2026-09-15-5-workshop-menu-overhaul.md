@@ -837,7 +837,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-17>
 
-### Step 17: Open Recent and quick-open file providers
+### Step 17: Open Recent and quick-open file providers [completed]
 
 - Component: files
 - Artifacts: `MenuRegistry.setProvider(MenuId.MenubarRecentMenu, ...)` dynamic rows (roots, recent files, empty-submenu drop), the `""` quick-access provider over fetched tree listings plus recent files, `vscode.open` with string-narrowed args, `openRecent`, `clearRecentFiles`.

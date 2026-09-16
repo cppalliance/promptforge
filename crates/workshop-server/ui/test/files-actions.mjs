@@ -11,7 +11,15 @@
 // the target's parent before writing and retargeting the panel, with
 // cancel a no-op; Save All writing every dirty editor sequentially and
 // skipping clean ones; and Revert File prompting on unsaved changes
-// before reloading from disk.
+// before reloading from disk. Plan step 17 adds: the Open Recent menu's
+// dynamic root and recent-file rows merged with the static More... and
+// Clear Recently Opened... rows; the "" quick-access provider over the
+// recent-files store and the tree's fetched listings, deduped and
+// substring-filtered, whose accept opens an editor through vscode.open;
+// vscode.open and vscode.openFolder narrowing their path argument;
+// vscode.openFolder fetching, caching, and expanding an uncached root
+// before focusing the tree; clearRecentFiles emptying the store; and
+// openRecent showing quick open at the "" list.
 // Run: node --test test/files-actions.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -29,8 +37,12 @@ const bundle = await esbuild.build({
       export { Commands } from "./src/services/command-registry.ts";
       export { Menus } from "./src/services/menu-registry.ts";
       export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { QuickAccessRegistry } from "./src/services/quick-access-registry.ts";
+      export { RECENT_FILES_STORE, RecentFilesStore } from "./src/services/recent-files-store.ts";
+      export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
       export { registerService } from "./src/services/service-registry.ts";
       export { DOCK } from "./src/services/panel-registry.ts";
+      export { QUICK_INPUT_SERVICE } from "./src/ui/quickinput/quick-input.ts";
       export { EditorPanel } from "./src/ui/editor/editor-panel.ts";
       export { initZones } from "./src/ui/layout/zones.ts";
       export { STATUS_BAR } from "./src/ui/status/status-bar.ts";
@@ -121,8 +133,14 @@ const {
   Commands,
   Menus,
   KeybindingsRegistry,
+  QuickAccessRegistry,
+  RECENT_FILES_STORE,
+  RecentFilesStore,
+  TREE_STATE,
+  TreeStateService,
   registerService,
   DOCK,
+  QUICK_INPUT_SERVICE,
   EditorPanel,
   initZones,
   STATUS_BAR,
@@ -152,12 +170,22 @@ registerService(STATUS_BAR, () => ({
 // pinned to grant-the-parent-before-write.
 const events = [];
 const grants = [];
+// Scripted GET /workspace/tree answers, keyed by directory path ("" is
+// the synthetic granted-roots listing). vscode.openFolder reads these.
+const treeListings = new Map();
+let treeFetches = 0;
 globalThis.fetch = async (url, init) => {
   if (url === "/workspace/grant") {
     const granted = JSON.parse(init.body).path;
     grants.push(granted);
     events.push(`grant:${granted}`);
     return { ok: true, status: 200, json: async () => ({ granted }) };
+  }
+  if (url === "/workspace/tree" || url.startsWith("/workspace/tree?")) {
+    treeFetches += 1;
+    const dir = new URL(url, "http://127.0.0.1").searchParams.get("path") ?? "";
+    const listing = treeListings.get(dir) ?? { path: dir === "" ? null : dir, entries: [] };
+    return { ok: true, status: 200, json: async () => listing };
   }
   throw new Error(`unexpected fetch in the files-actions test: ${url}`);
 };
@@ -272,8 +300,18 @@ initZones({
   panels: [],
   groups: [],
   getPanel: (id) => addedPanels.find((p) => p.id === id),
+  // The stub tracks no live groups; a recorded zone group reads as closed
+  // away, and openInZone rebuilds the zone - dockview's own self-healing.
+  getGroup: () => undefined,
   addPanel: (opts) => {
-    const panel = { id: opts.id, params: opts.params, group: { id: "g-main" }, api: { setActive() {} } };
+    const panel = {
+      id: opts.id,
+      params: opts.params,
+      group: { id: "g-main" },
+      api: { setActive() {} },
+      // focusWorkshopTree unwraps view.content before its instanceof check.
+      view: { content: {} },
+    };
     addedPanels.push(panel);
     return panel;
   },
@@ -497,6 +535,155 @@ initZones({
   );
   unregister.dispose();
   panel.dispose();
+}
+
+// --- Step 17: Open Recent catalog wiring -------------------------------------
+
+// Real DOM-free service instances bound over the self-registered defaults;
+// the contribution's provider and run bodies resolve them at call time.
+const treeState = new TreeStateService();
+const recentStore = new RecentFilesStore(null);
+registerService(TREE_STATE, () => treeState);
+registerService(RECENT_FILES_STORE, () => recentStore);
+
+{
+  const recentRows = Menus.getMenuItems("menubar/file/recent");
+  check(
+    "More... sits in Open Recent's y_more group",
+    recentRows.some((r) => r.command === "workbench.action.openRecent" && r.group === "y_more"),
+  );
+  check(
+    "Clear Recently Opened... sits in Open Recent's z_clear group",
+    recentRows.some((r) => r.command === "workbench.action.clearRecentFiles" && r.group === "z_clear"),
+  );
+  check(
+    "More... binds Ctrl+R",
+    KeybindingsRegistry.lookupKeybinding("workbench.action.openRecent")?.getLabel() === "Ctrl+R",
+  );
+  const paletteRows = Menus.getMenuItems("commandPalette");
+  check(
+    "Open Recent's More... reaches the palette",
+    paletteRows.some((r) => r.command === "workbench.action.openRecent"),
+  );
+  check(
+    "Clear Recently Opened reaches the palette",
+    paletteRows.some((r) => r.command === "workbench.action.clearRecentFiles"),
+  );
+  check(
+    "vscode.open is registered but stays out of the palette",
+    Commands.lookup("vscode.open") !== undefined && !paletteRows.some((r) => r.command === "vscode.open"),
+  );
+}
+
+// --- Step 17: provider rows and the "" quick-access provider -----------------
+
+{
+  // Seed: one granted root with a fetched listing, two recent files.
+  treeState.cacheListing("", {
+    path: null,
+    entries: [{ name: "project", path: "C:\\project", kind: "directory", size: 0, modifiedMs: 1, exists: true }],
+  });
+  treeState.cacheListing("C:\\project", {
+    path: "C:\\project",
+    entries: [
+      { name: "a.txt", path: "C:\\project\\a.txt", kind: "file", size: 3, modifiedMs: 2, exists: true },
+      { name: "b.txt", path: "C:\\project\\b.txt", kind: "file", size: 3, modifiedMs: 3, exists: true },
+    ],
+  });
+  // Most recent first: a.txt was "opened" after notes.txt.
+  recentStore.add("C:\\picked\\notes.txt");
+  recentStore.add("C:\\project\\a.txt");
+
+  // Action rows carry no title; the widget falls back to the command's.
+  const titles = Menus.getMenuItems("menubar/file/recent").map(
+    (r) => r.title ?? Commands.lookup(r.command)?.title,
+  );
+  check(
+    "Open Recent lists roots, then recent files, then the static rows",
+    titles.join(",") === "project,a.txt,notes.txt,More...,Clear Recently Opened...",
+  );
+
+  const descriptor = QuickAccessRegistry.getQuickAccessProvider("b.txt");
+  check("an unprefixed query routes to the '' provider", descriptor?.prefix === "");
+  const provider = descriptor.factory();
+  const items = provider.getItems("");
+  check(
+    "the '' provider lists recent files first, then tree files, deduped",
+    items.map((i) => i.description).join(",") === "C:\\project\\a.txt,C:\\picked\\notes.txt,C:\\project\\b.txt",
+  );
+  check(
+    "the '' provider labels rows with the file's base name",
+    items.map((i) => i.label).join(",") === "a.txt,notes.txt,b.txt",
+  );
+  check(
+    "the '' provider filters by case-insensitive substring",
+    provider.getItems("NOTES").map((i) => i.label).join(",") === "notes.txt",
+  );
+
+  const panelsBefore = addedPanels.length;
+  items.find((i) => i.description === "C:\\project\\b.txt").accept();
+  await flush();
+  check(
+    "accepting a '' row opens an editor on the file",
+    addedPanels.length === panelsBefore + 1 && addedPanels.some((p) => p.id === "editor:C:\\project\\b.txt"),
+  );
+
+  await Commands.execute("vscode.open");
+  await Commands.execute("vscode.open", 42);
+  await flush();
+  check(
+    "vscode.open narrows its argument: a missing or non-string path opens nothing",
+    addedPanels.length === panelsBefore + 1,
+  );
+
+  await Commands.execute("workbench.action.clearRecentFiles");
+  await flush();
+  check("Clear Recently Opened empties the store", recentStore.list.length === 0);
+  check(
+    "the cleared store drops the recent-file rows",
+    !Menus.getMenuItems("menubar/file/recent").some((r) => r.title === "notes.txt"),
+  );
+}
+
+// --- Step 17: More... opens quick open; vscode.openFolder focuses a root ----
+
+{
+  const shown = [];
+  registerService(QUICK_INPUT_SERVICE, () => ({ quickAccess: { show: (value) => shown.push(value) } }));
+  await Commands.execute("workbench.action.openRecent");
+  await flush();
+  check("More... opens quick open at the '' file list", shown.length === 1 && shown[0] === "");
+
+  // The wire shape: modified_ms, snake_case, as the server answers.
+  treeListings.set("C:\\picked-dir", {
+    path: "C:\\picked-dir",
+    entries: [{ name: "notes.txt", path: "C:\\picked-dir\\notes.txt", kind: "file", size: 5, modified_ms: 4, exists: true }],
+  });
+  const changesBefore = workspaceChanges;
+  await Commands.execute("vscode.openFolder", "C:\\picked-dir");
+  await flush();
+  check(
+    "vscode.openFolder fetches and caches an uncached root's listing",
+    treeState.listing("C:\\picked-dir") !== undefined,
+  );
+  check("vscode.openFolder expands the root in the tree state", treeState.isExpanded("C:\\picked-dir"));
+  check(
+    "vscode.openFolder announces the workspace change so an open tree re-renders",
+    workspaceChanges === changesBefore + 1,
+  );
+  check("vscode.openFolder focuses the tree panel", addedPanels.some((p) => p.id === "tree"));
+
+  const fetchesBefore = treeFetches;
+  await Commands.execute("vscode.openFolder", "C:\\picked-dir");
+  await flush();
+  check(
+    "vscode.openFolder reuses the cached listing on a second focus",
+    treeFetches === fetchesBefore,
+  );
+
+  await Commands.execute("vscode.openFolder", 42);
+  await flush();
+  check("vscode.openFolder narrows its argument", treeState.listing("42") === undefined);
 }
 
 if (failures.length > 0) {

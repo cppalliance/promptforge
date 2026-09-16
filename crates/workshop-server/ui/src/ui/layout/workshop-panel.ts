@@ -17,7 +17,7 @@ import { toDisposable } from "../../base/lifecycle";
 import { WorkshopPart } from "../../base/workshop-part";
 import { DOCK, resolvePanelContent } from "../../services/panel-registry";
 import { getService } from "../../services/service-registry";
-import { TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
+import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
 import { addFolderToWorkspace } from "../workspace/add-folder";
 import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
@@ -29,9 +29,6 @@ import { openInZone, panelIdFor } from "./zones";
 export interface TreeStatusSink {
   showLocal(label: string, severity: "info" | "error"): void;
 }
-
-// Cache key for the synthetic granted-roots listing, which has no path.
-const ROOTS_KEY = "";
 
 const CHEVRON_SVG =
   '<svg class="ws-workshop-tree__chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 1.5l3.5 3.5-3.5 3.5" /></svg>';

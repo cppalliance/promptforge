@@ -7,8 +7,11 @@
 // setProvider dynamic rows merged with static rows, and getMenuItems
 // sorting (navigation group first, then groups lexically, then order,
 // then title) so group boundaries - never a separator item kind - fall
-// between contiguous group clusters. Bundles the modules with esbuild
-// and drives them DOM-free.
+// between contiguous group clusters. Also covers the workspace feature's
+// Open Recent provider (plan step 17): dynamic root and recent-file rows
+// merged with the static Reopen/More/Clear rows in sort order, and no
+// rows when roots and history are both empty. Bundles the modules with
+// esbuild and drives them DOM-free.
 // Run: node --test test/menus.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +24,7 @@ const bundle = await esbuild.build({
     contents: `
       export { CommandRegistry, Commands, registerCommand, executeCommand } from "./src/services/command-registry.ts";
       export { MenuRegistry, Menus, MenuId, appendMenuItem } from "./src/services/menu-registry.ts";
+      export { createRecentMenuProvider } from "./src/ui/workspace/open-recent.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -31,8 +35,11 @@ const bundle = await esbuild.build({
   platform: "browser",
   target: "es2022",
   logLevel: "silent",
+  // The provider's accept path imports the status-bar token, whose module
+  // pulls colocated CSS; the test drives only the JS.
+  loader: { ".css": "empty" },
 });
-const { CommandRegistry, MenuRegistry, MenuId } = await import(
+const { CommandRegistry, MenuRegistry, MenuId, createRecentMenuProvider } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 
@@ -183,6 +190,65 @@ function check(name, condition) {
   check(
     "disposing a live row removes only it",
     menus.getMenuItems("menu/disp").map((row) => row.title).join(",") === "One Again",
+  );
+}
+
+// --- Open Recent: the workspace provider's dynamic rows (step 17) -------------
+
+{
+  const menus = new MenuRegistry();
+  menus.appendMenuItem(MenuId.MenubarRecentMenu, {
+    command: "workbench.action.reopenClosedEditor",
+    title: "Reopen Closed Editor",
+    group: "1_editor",
+  });
+  menus.appendMenuItem(MenuId.MenubarRecentMenu, {
+    command: "workbench.action.openRecent",
+    title: "More...",
+    group: "y_more",
+  });
+  menus.appendMenuItem(MenuId.MenubarRecentMenu, {
+    command: "workbench.action.clearRecentFiles",
+    title: "Clear Recently Opened...",
+    group: "z_clear",
+  });
+
+  const rootsListing = {
+    path: null,
+    entries: [
+      { name: "alpha", path: "C:\\alpha", kind: "directory", size: 0, modifiedMs: 1, exists: true },
+      { name: "beta", path: "C:\\beta", kind: "directory", size: 0, modifiedMs: 2, exists: true },
+    ],
+  };
+  const treeState = { listing: (path) => (path === "" ? rootsListing : undefined) };
+  const recentFiles = { list: ["C:\\alpha\\one.ts", "C:\\beta\\two.ts"] };
+  menus.setProvider(MenuId.MenubarRecentMenu, createRecentMenuProvider({ treeState, recentFiles }));
+
+  const rows = menus.getMenuItems(MenuId.MenubarRecentMenu);
+  check(
+    "Open Recent merges roots and recent files with the static rows in sort order",
+    rows.map((row) => row.title).join(",") ===
+      "Reopen Closed Editor,alpha,beta,one.ts,two.ts,More...,Clear Recently Opened...",
+  );
+  const rootRow = rows.find((row) => row.title === "alpha");
+  check(
+    "a root row dispatches vscode.openFolder with the root path",
+    rootRow?.command === "vscode.openFolder" && rootRow?.args?.[0] === "C:\\alpha" && rootRow?.group === "2_roots",
+  );
+  const fileRow = rows.find((row) => row.title === "one.ts");
+  check(
+    "a recent-file row dispatches vscode.open with the file path",
+    fileRow?.command === "vscode.open" && fileRow?.args?.[0] === "C:\\alpha\\one.ts" && fileRow?.group === "3_files",
+  );
+
+  const empty = new MenuRegistry();
+  empty.setProvider(
+    MenuId.MenubarRecentMenu,
+    createRecentMenuProvider({ treeState: { listing: () => undefined }, recentFiles: { list: [] } }),
+  );
+  check(
+    "the provider answers no rows when roots and history are both empty",
+    empty.getMenuItems(MenuId.MenubarRecentMenu).length === 0,
   );
 }
 
