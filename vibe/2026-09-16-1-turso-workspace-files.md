@@ -513,7 +513,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-8>
 
-### Step 8: `/workspace/file/*` routes
+### Step 8: `/workspace/file/*` routes [completed]
 
 - Component: `workspace-file`
 - Piece: routes

@@ -13,8 +13,9 @@ use crate::handlers;
 use crate::workspace::Workspace;
 
 /// Registers the workspace subsystem into the registry: its
-/// `/workspace/*` routes, merged into the shell's API router, the
-/// workspace itself as its state handle set, and its granted-roots
+/// `/workspace/*` routes (the confined filesystem and the
+/// `/workspace/file/*` document routes), merged into the shell's API
+/// router, the workspace itself as its state handle set, and its granted-roots
 /// view, which same-tier subsystems read instead of naming this crate.
 /// The returned guards keep the registrations alive; the composition
 /// root holds them for the process lifetime.

@@ -16,9 +16,13 @@ use workshop_support::{DEFAULT_DEADLINE, with_deadline};
 use crate::error::WorkspaceError;
 use crate::workspace::Workspace;
 
+#[path = "handlers-file.rs"]
+mod file;
+
 /// The workspace routes, narrowed to the [`Workspace`] service - the only
-/// state their handlers use. Every route carries the default deadline
-/// tier.
+/// state their handlers use: the confined filesystem routes here and the
+/// `/workspace/file/*` document routes from the `file` module. Every
+/// route carries the default deadline tier.
 pub fn routes(state: Workspace) -> axum::Router {
     with_deadline(
         axum::Router::new()
@@ -26,6 +30,7 @@ pub fn routes(state: Workspace) -> axum::Router {
             .route("/workspace/file", get(read_file).put(write_file))
             .route("/workspace/grant", post(grant))
             .route("/workspace/revoke", post(revoke))
+            .merge(file::routes())
             .with_state(state),
         DEFAULT_DEADLINE,
     )
