@@ -13,6 +13,7 @@ import { ModelService, MODEL_SERVICE } from "./services/model-service";
 import { getService, registerService } from "./services/service-registry";
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
 import { TEXT_CONTROL_SERVICE } from "./services/text-control-service";
+import { createUiStorage, UI_STORAGE } from "./services/ui-storage";
 import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
@@ -45,6 +46,18 @@ disposables.add(
     document.removeEventListener("contextmenu", suppressNativeContextMenu, { capture: true }),
   ),
 );
+
+// The UI-state adapter: the server-backed replacement for browser storage,
+// which the per-launch loopback port made session-scoped. Both buckets
+// (the user's ui-state.json, the open workspace file) preload here, ahead
+// of every service resolution and the dock, so each store reads its
+// initial value synchronously from the cache when it is built. The
+// preload never rejects: a bucket that fails or hangs past the timeout
+// reads as empty with one warning, and boot continues on defaults, so a
+// slow or dead server delays the page by at most the timeout.
+const storage = createUiStorage();
+await storage.preload(3000);
+registerService(UI_STORAGE, () => storage);
 
 // One persistent socket carries the server's downstream JSON - status
 // updates the status bar renders as they arrive, catalog pushes, and

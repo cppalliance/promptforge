@@ -319,7 +319,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-7>
 
-### Step 7: `main.ts` preloads before store construction
+### Step 7: `main.ts` preloads before store construction [completed]
 
 - Component: `spa-adapter`
 - Piece: boot wiring (sequential after the adapter)

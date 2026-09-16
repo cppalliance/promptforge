@@ -38,6 +38,29 @@ interface Registration {
 const registrations = new Map<ServiceToken<unknown>, Registration>();
 
 /**
+ * Receives one notification per getService call while installed via
+ * setServiceObserver. Test-only seam: the boot test helper is its only
+ * consumer, recording where the first resolution falls in the boot
+ * sequence relative to the fetches around it.
+ */
+export interface IServiceObserver {
+  /** Called on every resolution, before the factory may run. */
+  serviceResolved(id: string): void;
+}
+
+let observer: IServiceObserver | undefined;
+
+/**
+ * Installs `next` as the resolution observer, or clears it with undefined.
+ * Off by default, so production pays one undefined check per resolution.
+ * Test-only seam: the shared boot test helper (test/helpers/boot.mjs) is
+ * its only consumer.
+ */
+export function setServiceObserver(next: IServiceObserver | undefined): void {
+  observer = next;
+}
+
+/**
  * Registers `factory` as the producer for `token`. Re-registering a token
  * replaces the factory and drops any cached instance - the next get
  * rebuilds from the new factory - which is how tests rebind a service
@@ -61,6 +84,7 @@ export function registerService<T>(token: ServiceToken<T>, factory: () => T): ID
  * loud throw naming the token beats a downstream null dereference.
  */
 export function getService<T>(token: ServiceToken<T>): T {
+  observer?.serviceResolved(token.id);
   const registration = registrations.get(token as ServiceToken<unknown>);
   if (registration === undefined) {
     throw new Error(`no service registered for ${token.id}`);

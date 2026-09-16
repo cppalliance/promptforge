@@ -6,18 +6,60 @@
 // bundle (which lazy-loads its feature chunks from dist/chunks/),
 // waits for the app to settle, then runs `run` under the shared
 // disposable-leak check and reports the verdict through the
-// process exit code. Run after `npm run build`.
+// process exit code. The optional third argument scripts the two UI-state
+// buckets the app preloads (see `uiStateOptions`); every fetch the app
+// makes, and every service resolution (method RESOLVE), lands in
+// ctx.fetchLog in order. Run after `npm run build`.
 // Export-only module: the node --test runner discovers every file under
 // test/, so running this file directly must (and does) exit 0.
-import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
+import { attachSeams, distDir } from "./bundle-seams.mjs";
 import { assertNoLeaks } from "./leak-check.mjs";
 
-const distDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "dist");
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The UI-state routes the composition root preloads at boot and the stores
+// write through (src/services/ui-storage.ts). GET answers the bucket's
+// document; PUT /{key} answers `{ saved: true }`.
+const UI_STATE_ROUTES = {
+  "/user/state": "user",
+  "/workspace/file/state": "workspace",
+};
+
+const jsonResponse = (body, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
+/**
+ * Normalizes `options.uiState` into one entry per bucket. Each bucket is
+ * scripted as `"resolve"` (the default: an empty document, every key
+ * absent), `"reject"` (the fetch rejects with a network error), `"hang"`
+ * (the fetch never settles, so the app's preload timeout decides), or an
+ * object (the fetch resolves with that object as the bucket's document, the
+ * way a test seeds stores with values). Unknown modes fail loudly: a typo
+ * would otherwise silently boot on defaults.
+ */
+function uiStateOptions(uiState = {}) {
+  const buckets = {};
+  for (const bucket of ["user", "workspace"]) {
+    const mode = uiState[bucket] ?? "resolve";
+    if (typeof mode === "object" && mode !== null) {
+      buckets[bucket] = { mode: "resolve", body: mode };
+    } else if (mode === "resolve") {
+      buckets[bucket] = { mode, body: {} };
+    } else if (mode === "reject" || mode === "hang") {
+      buckets[bucket] = { mode, body: null };
+    } else {
+      throw new Error(`uiState.${bucket} must be resolve, reject, hang, or an object; got ${mode}`);
+    }
+  }
+  return buckets;
+}
 
 /**
  * Boots the bundled workbench in jsdom and runs `run(ctx)` - the test body -
@@ -27,13 +69,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * boot settles); it lives for the page lifetime by design.
  *
  * `ctx` carries the window, the scripted-socket registry, the status bar
- * elements, and the push helpers; `run` records failed expectations by
- * pushing plain-English messages onto ctx.failures.
+ * elements, the fetch log, and the push helpers; `run` records failed
+ * expectations by pushing plain-English messages onto ctx.failures.
+ * `options.uiState` scripts the two UI-state buckets (see uiStateOptions).
  * This function never returns: it prints the verdict and exits the process,
  * because pending app timers (the status-bar LED pulse, reconnect backoffs)
  * outlive the assertions.
  */
-export async function bootWorkbench(name, run) {
+export async function bootWorkbench(name, run, options = {}) {
+  const uiState = uiStateOptions(options.uiState);
   const html = await readFile(path.join(distDir, "index.html"), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/", pretendToBeVisual: true });
   const { window } = dom;
@@ -187,18 +231,41 @@ export async function bootWorkbench(name, run) {
   globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
   // The workbench state (models, profiles, selection) arrives only over
-  // the socket, so a booted workbench fetches nothing but the Workshop
-  // tree's roots listing (answered empty: no grants yet). Any other fetch,
-  // including the retired /v1/models and /profiles boot fetches, rejects
-  // the test.
-  globalThis.fetch = (url) => {
+  // the socket, so a booted workbench fetches nothing but the two UI-state
+  // buckets the composition root preloads (scripted per `options.uiState`)
+  // and the Workshop tree's roots listing (answered empty: no grants yet).
+  // Store writes PUT to the state routes and are answered saved. Any other
+  // fetch, including the retired /v1/models and /profiles boot fetches,
+  // rejects the test. Every call is recorded in order, with a timestamp
+  // and the parsed PUT body, so a test can assert what the app fetched and
+  // when relative to the rest of boot; the service observer installed
+  // below interleaves getService resolutions into the same log.
+  const fetchLog = [];
+  const bootStart = Date.now();
+  globalThis.fetch = (url, init = {}) => {
+    const method = init.method ?? "GET";
+    const entry = { url, method, at: Date.now() - bootStart };
+    if (method === "PUT" && typeof init.body === "string") {
+      entry.body = JSON.parse(init.body);
+    }
+    fetchLog.push(entry);
     if (url === "/workspace/tree") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ path: null, entries: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
+      return Promise.resolve(jsonResponse({ path: null, entries: [] }));
+    }
+    const bucket = UI_STATE_ROUTES[url];
+    if (bucket !== undefined && method === "GET") {
+      const script = uiState[bucket];
+      if (script.mode === "hang") {
+        return new Promise(() => {});
+      }
+      if (script.mode === "reject") {
+        return Promise.reject(new TypeError(`scripted network failure for ${url}`));
+      }
+      return Promise.resolve(jsonResponse(script.body));
+    }
+    const putRoute = Object.keys(UI_STATE_ROUTES).find((route) => url.startsWith(`${route}/`));
+    if (putRoute !== undefined && method === "PUT") {
+      return Promise.resolve(jsonResponse({ saved: true }));
     }
     return Promise.reject(new Error(`unexpected fetch in a booted workbench test: ${url}`));
   };
@@ -240,80 +307,28 @@ export async function bootWorkbench(name, run) {
   globalThis.window = window;
   globalThis.document = window.document;
 
-  // The entry bundle exports nothing (main.ts is an entry point) and esbuild
-  // tree-shakes the unused setDisposableTracker export away, so the leak
-  // check's seam is unreachable from outside the bundle. Reattach it by
-  // appending one export to the bundle text: the dist bytes execute
-  // unmodified, and the appended function assigns the bundle's own
-  // module-scope tracker variable, located by its single call site in the
-  // DisposableStore constructor. With code splitting the tracker may live
-  // in any chunk, so every dist script is scanned; the import goes
-  // through file URLs because the split bundle's relative chunk imports
-  // cannot resolve from a data: URL.
-  let trackerVar = null;
-  let seamPath = null;
-  const distScripts = (await readdir(distDir, { recursive: true }))
-    .filter((name) => name.endsWith(".js"))
-    .map((name) => path.join(distDir, name));
-  for (const scriptPath of distScripts) {
-    const source = await readFile(scriptPath, "utf8");
-    // Minified identifiers may contain $, which \w excludes.
-    const match = source.match(/([\w$]+)\?\.trackCreated\(this\)/);
-    if (match) {
-      trackerVar = match[1];
-      seamPath = scriptPath;
-      // Idempotent: dist is not rebuilt between test runs, so a previous
-      // run's appended export may already be there.
-      if (!source.includes("__setDisposableTracker")) {
-        // Atomic append: node --test runs the boot tests concurrently, and
-        // a truncate-and-write would let a concurrent scanner read a
-        // partial chunk - missing the seam entirely, or worse, appending
-        // the export to truncated bytes and corrupting the chunk. Write a
-        // per-process temp file and rename it over the chunk so readers
-        // only ever see complete content.
-        const tempPath = `${scriptPath}.${process.pid}.tmp`;
-        await writeFile(
-          tempPath,
-          `${source}\nexport function __setDisposableTracker(next) { ${trackerVar} = next; }\n`,
-        );
-        // Windows: when two boot tests lose the scan race together, both
-        // rename over the chunk, and the loser's rename fails with EPERM
-        // while the winner's freshly replaced file is still held open.
-        // The append is idempotent, so a chunk that already carries the
-        // export satisfies every concurrent appender; only a chunk still
-        // missing the seam after the retries is a real failure.
-        for (let attempt = 0; ; attempt++) {
-          try {
-            await rename(tempPath, scriptPath);
-            break;
-          } catch (error) {
-            const current = await readFile(scriptPath, "utf8").catch(() => "");
-            if (current.includes("__setDisposableTracker")) {
-              await rm(tempPath, { force: true });
-              break;
-            }
-            if (error?.code !== "EPERM" || attempt >= 4) {
-              await rm(tempPath, { force: true });
-              throw error;
-            }
-            await sleep(50);
-          }
-        }
-      }
-      break;
-    }
-  }
-  if (!trackerVar) {
-    throw new Error(
-      "boot.mjs could not locate the disposable tracker seam in dist/; rebuild dist or retune the seam regex",
-    );
-  }
+  // The bundle's test-only seams (the disposable tracker, the service
+  // observer) are tree-shaken out of the entry; bundle-seams.mjs reattaches
+  // them as appended exports and answers the chunk path carrying each.
+  const seams = await attachSeams();
+  // The service observer must be live before the entry evaluates: the
+  // resolutions it records happen during boot itself. Importing the seam's
+  // chunk first evaluates only that shared chunk (the registry and its
+  // base-layer dependencies), and the entry's later import reuses the
+  // evaluated instance. Every getService call lands in fetchLog beside the
+  // fetches, under the RESOLVE method, so a test reads one ordered log.
+  const serviceSeam = await import(pathToFileURL(seams.__setServiceObserver).href);
+  serviceSeam.__setServiceObserver({
+    serviceResolved: (id) => {
+      fetchLog.push({ url: id, method: "RESOLVE", at: Date.now() - bootStart });
+    },
+  });
   // The entry's name is content-hashed (dist/bundle/app-<hash>.js); the
   // build's manifest maps the logical name to it.
   const manifest = JSON.parse(await readFile(path.join(distDir, "manifest.json"), "utf8"));
   await import(pathToFileURL(path.join(distDir, manifest["app.js"])).href);
-  const seam = await import(pathToFileURL(seamPath).href);
-  const lifecycle = { setDisposableTracker: seam.__setDisposableTracker };
+  const trackerSeam = await import(pathToFileURL(seams.__setDisposableTracker).href);
+  const lifecycle = { setDisposableTracker: trackerSeam.__setDisposableTracker };
 
   const statusBar = window.document.querySelector(".status-bar");
   const statusText = window.document.querySelector(".status-bar__text");
@@ -443,6 +458,7 @@ export async function bootWorkbench(name, run) {
     emitStatus,
     emitModels,
     emitWorkbench,
+    fetchLog,
     sleep,
     failures,
   };
