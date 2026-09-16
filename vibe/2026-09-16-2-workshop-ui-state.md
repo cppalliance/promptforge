@@ -275,7 +275,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-4>
 
-### Step 4: `workshop-user-state` crate with `UserStateStore`
+### Step 4: `workshop-user-state` crate with `UserStateStore` [completed]
 
 - Component: `user-bucket`
 - Piece: store (sequential; routes depend on it)

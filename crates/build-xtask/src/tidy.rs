@@ -13,7 +13,11 @@ const VOCABULARY: &[&str] = &["workshop-protocol", "workshop-registry", "worksho
 /// Tier 1: domain services. Depend on vocabulary crates only.
 const SERVICES: &[&str] = &["workshop-gateway", "workshop-menu", "workshop-status"];
 /// Tier 2: features. Depend on vocabulary and service crates.
-const FEATURES: &[&str] = &["workshop-sessions", "workshop-workspace"];
+const FEATURES: &[&str] = &[
+    "workshop-sessions",
+    "workshop-user-state",
+    "workshop-workspace",
+];
 /// Tier 3: the shell. May depend on every lower tier.
 const SHELL: &[&str] = &["workshop-server"];
 

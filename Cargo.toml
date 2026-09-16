@@ -57,6 +57,7 @@ workshop-support = { path = "crates/workshop-support", version = "0.0.0" }
 workshop-registry = { path = "crates/workshop-registry", version = "0.0.0" }
 workshop-sessions = { path = "crates/workshop-sessions", version = "0.0.0" }
 workshop-workspace = { path = "crates/workshop-workspace", version = "0.0.0" }
+workshop-user-state = { path = "crates/workshop-user-state", version = "0.0.0" }
 gateway-whisper-ffi = { path = "crates/gateway-whisper-ffi", version = "0.3.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }

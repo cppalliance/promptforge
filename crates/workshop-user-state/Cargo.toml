@@ -1,0 +1,28 @@
+[package]
+name = "workshop-user-state"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "Workshop user-state subsystem: the account-scoped UI state bucket persisted as one JSON file in the state directory"
+
+[features]
+default = []
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+workshop-protocol.workspace = true
+workshop-registry.workspace = true
+workshop-support.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

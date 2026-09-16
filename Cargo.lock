@@ -9681,6 +9681,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "workshop-user-state"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "workshop-protocol",
+ "workshop-registry",
+ "workshop-support",
+]
+
+[[package]]
 name = "workshop-workspace"
 version = "0.0.0"
 dependencies = [
