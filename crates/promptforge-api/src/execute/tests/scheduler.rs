@@ -2493,12 +2493,19 @@ async fn fanout_depth_cap_reads_the_chain_field() {
 async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violation() {
     // Restructured for the leaf-yield store path: each arm's write is a
     // yield answered from the blocking pool, so two live arms writing one
-    // path genuinely race and the loser's op booms. The violation is fatal
-    // to the whole run at the answer boundary - it never resumes into Lua,
-    // so no author pcall can catch it - and both parked arms drop unarmed,
+    // path race and the loser's op booms. The violation is fatal to the
+    // whole run at the answer boundary - it never resumes into Lua, so no
+    // author pcall can catch it - and both parked arms drop unarmed,
     // reporting cancelled rather than failed.
+    //
+    // The gate makes the race deterministic: the first write to reach the
+    // backend parks with its claim held, so the second write's claim check
+    // meets it no matter how late the second blocking-pool thread starts.
+    // Without the gate the winner could write, return, and retire its
+    // claim before the loser's op ran, and the run would succeed.
     let recorder = Arc::new(Recorder::default());
-    let gateway = ScriptedGateway::start(vec![resp_text("p1"), resp_text("p2")]).await;
+    let gate = Arc::new(StoreGate::default());
+    let store = gated_store(&gate);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2509,12 +2516,11 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         ### Worker\n\n\
         ```lua\n\
         store.write('shared.txt', item)\n\
-        models.infer('pause ' .. item)\n\
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let ctx = scheduler_context_on(&prompt, &store, GateObserver::new(&gate, recorder.clone()));
+    let error = Scheduler::new(&ctx, None)
         .drive()
         .await
         .expect_err("two live arms writing one path must terminate the run");
@@ -2554,8 +2560,11 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
     // claims write intent now, so two live arms appending to one path
     // conflict exactly as two writes do - and under the leaf-yield store
     // path the conflict is the fatal determinism violation, not a
-    // per-arm store error.
-    let gateway = ScriptedGateway::start(vec![resp_text("p1"), resp_text("p2")]).await;
+    // per-arm store error. The gate holds the first append's claim until
+    // the second append has met it, so the conflict cannot depend on
+    // blocking-pool timing.
+    let gate = Arc::new(StoreGate::default());
+    let store = gated_store(&gate);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2566,12 +2575,15 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
         ### Worker\n\n\
         ```lua\n\
         store.append('evidence.md', item .. '\\n')\n\
-        models.infer('pause ' .. item)\n\
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let ctx = scheduler_context_on(
+        &prompt,
+        &store,
+        GateObserver::new(&gate, Arc::new(NullObserver::default())),
+    );
+    let error = Scheduler::new(&ctx, None)
         .drive()
         .await
         .expect_err("two live arms appending one path must terminate the run");
@@ -2589,21 +2601,21 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
     }
 }
 
-/// A one-shot gate for the winning arm's backend append: the first
-/// `append` the backend serves parks with its write claim held until the
-/// losing arm's conflict observation opens the gate, so the cross-arm
-/// conflict fires no matter how late the second op's blocking-pool thread
-/// starts. The parked wait is bounded: a claims model that stopped
-/// conflicting would otherwise strand the run-end drain on the parked op,
-/// and the test must fail, never hang.
+/// A one-shot gate for the winning arm's backend write or append: the
+/// first write-intent op the backend serves parks with its write claim
+/// held until the losing arm's conflict observation opens the gate, so
+/// the cross-arm conflict fires no matter how late the second op's
+/// blocking-pool thread starts. The parked wait is bounded: a claims
+/// model that stopped conflicting would otherwise strand the run-end
+/// drain on the parked op, and the test must fail, never hang.
 #[derive(Default)]
-struct AppendGate {
+struct StoreGate {
     released: Mutex<bool>,
     release: Condvar,
     taken: AtomicBool,
 }
 
-impl AppendGate {
+impl StoreGate {
     /// Parks the first caller until the gate opens; later callers pass.
     fn block_first(&self) {
         if self.taken.swap(true, Ordering::SeqCst) {
@@ -2627,7 +2639,7 @@ impl AppendGate {
         }
     }
 
-    /// Releases the parked append.
+    /// Releases the parked op.
     fn open(&self) {
         let mut released = self
             .released
@@ -2638,27 +2650,58 @@ impl AppendGate {
     }
 }
 
-/// Opens the gate when the losing arm's append fails: the conflict's
-/// failed observation fires before the answer posts, so the winner's
-/// parked op completes ahead of the run-end drain that awaits it.
+/// Opens the gate when the losing arm's write or append fails: the
+/// conflict's failed observation fires before the answer posts, so the
+/// winner's parked op completes ahead of the run-end drain that awaits
+/// it. Every observation also forwards to `inner`, so a test can keep
+/// its own recorder behind the gate.
 struct GateObserver {
-    gate: Arc<AppendGate>,
+    gate: Arc<StoreGate>,
+    inner: Arc<dyn Observer>,
 }
 
-impl Observer for GateObserver {
-    fn observe(&self, _execution: &str, _section: &str, event: Observation) {
-        if event == Observation::StoreAppendFailed {
-            self.gate.open();
-        }
+impl GateObserver {
+    fn new(gate: &Arc<StoreGate>, inner: Arc<dyn Observer>) -> Arc<GateObserver> {
+        Arc::new(GateObserver {
+            gate: Arc::clone(gate),
+            inner,
+        })
     }
 }
 
-/// A memory backend whose first `append` parks on the gate, so the first
-/// arm to reach the backend holds its write claim until the sibling's
-/// claim check has met it.
+impl Observer for GateObserver {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
+        if matches!(
+            event,
+            Observation::StoreWriteFailed | Observation::StoreAppendFailed
+        ) {
+            self.gate.open();
+        }
+        self.inner.observe(execution, section, event);
+    }
+}
+
+/// A memory backend whose first `write` or `append` parks on the gate, so
+/// the first arm to reach the backend holds its write claim until the
+/// sibling's claim check has met it.
 struct GatedStore {
     inner: MemoryBackend,
-    gate: Arc<AppendGate>,
+    gate: Arc<StoreGate>,
+}
+
+/// A test store mounting a [`GatedStore`] on `gate`.
+fn gated_store(gate: &Arc<StoreGate>) -> TestStore {
+    TestStore::from_vfs(
+        VfsRef::builder()
+            .mount(
+                promptforge_vfs::STORE_MOUNT,
+                GatedStore {
+                    inner: MemoryBackend::new(),
+                    gate: Arc::clone(gate),
+                },
+            )
+            .build(),
+    )
 }
 
 impl Vfs for GatedStore {
@@ -2676,7 +2719,7 @@ impl Vfs for GatedStore {
 
 struct GatedAccess {
     inner: Box<dyn VfsAccess>,
-    gate: Arc<AppendGate>,
+    gate: Arc<StoreGate>,
 }
 
 impl VfsAccess for GatedAccess {
@@ -2685,6 +2728,7 @@ impl VfsAccess for GatedAccess {
     }
 
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> std::result::Result<(), VfsError> {
+        self.gate.block_first();
         self.inner.write(path, contents)
     }
 
@@ -2739,18 +2783,8 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
     // how late its thread starts; the conflict's failed observation then
     // opens the gate, so the winner's op completes ahead of the run-end
     // drain that awaits it.
-    let gate = Arc::new(AppendGate::default());
-    let store = TestStore::from_vfs(
-        VfsRef::builder()
-            .mount(
-                promptforge_vfs::STORE_MOUNT,
-                GatedStore {
-                    inner: MemoryBackend::new(),
-                    gate: Arc::clone(&gate),
-                },
-            )
-            .build(),
-    );
+    let gate = Arc::new(StoreGate::default());
+    let store = gated_store(&gate);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2767,9 +2801,7 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
     let ctx = scheduler_context_on(
         &prompt,
         &store,
-        Arc::new(GateObserver {
-            gate: Arc::clone(&gate),
-        }),
+        GateObserver::new(&gate, Arc::new(NullObserver::default())),
     );
     let error = Scheduler::new(&ctx, None)
         .drive()
