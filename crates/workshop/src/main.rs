@@ -32,6 +32,7 @@ mod gateway;
 mod linux_media;
 mod menu;
 mod navigation;
+mod quit;
 
 use std::ffi::OsStr;
 use std::process::ExitCode;
@@ -72,6 +73,7 @@ const WINDOW_PERMISSIONS: &[&str] = &[
     "updater:default",
     "process:allow-restart",
     "allow-desktop-update-supported",
+    "allow-quit",
 ];
 
 fn main() -> ExitCode {
@@ -132,7 +134,10 @@ fn run() -> anyhow::Result<()> {
                 )
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![desktop_update_supported])
+        .invoke_handler(tauri::generate_handler![
+            desktop_update_supported,
+            quit::quit
+        ])
         .on_menu_event(menu::handle_event)
         .setup(boot_and_open);
     // Off Windows, OS file drops arrive as Tauri's own drag-drop event and
@@ -280,8 +285,10 @@ fn window_capability(url: &url::Url) -> CapabilityBuilder {
 
 /// Creates the workshop window on `url`: hidden while built so the
 /// window-state restore never flashes, undecorated on Windows where the
-/// custom HTML title bar replaces the native frame (macOS and Linux keep
-/// their decorated windows), then shown.
+/// custom HTML title bar replaces the native frame, overlay-titled on
+/// macOS where the native traffic lights float over the custom bar's left
+/// edge (the bar hides its Windows-style control cluster there), decorated
+/// on Linux as today, then shown.
 fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::error::Error>> {
     let server_origin = url.origin();
     let opener = app.handle().clone();
@@ -306,6 +313,14 @@ fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::
     // web-message bridge instead (bridge.rs).
     #[cfg(target_os = "windows")]
     let builder = builder.disable_drag_drop_handler();
+    // macOS gets VS Code's overlay treatment: the native traffic lights
+    // float over the webview's top-left with no native title bar, and the
+    // custom HTML bar hides its Windows-style control cluster
+    // (window-chrome.ts) and insets its left region clear of the lights.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
     let window = builder.build()?;
     // An attach failure only degrades Explorer drops and the mic grant,
     // never the app.

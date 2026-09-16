@@ -37,6 +37,14 @@
   margin-inline: var(--space-lg) var(--space-xs);
 }
 
+/* macOS overlay chrome (the shell's titleBarStyle Overlay + hiddenTitle):
+   the native traffic lights float over the bar's left edge, so the icon
+   and menus shift right clear of them - VS Code's hiddenInset spacing.
+   window-chrome.ts adds the modifier class only in the desktop app. */
+.ws-window-titlebar--macos .ws-window-titlebar__left {
+  padding-inline-start: var(--titlebar-macos-inset);
+}
+
 /* The empty center: the only surface that initiates a native drag. */
 .ws-window-titlebar__drag {
   flex: 1;

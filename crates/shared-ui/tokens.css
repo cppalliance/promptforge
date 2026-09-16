@@ -254,6 +254,8 @@
   --titlebar-close-glyph-hover: #ffffff;
   --titlebar-icon-size: 20px;
   --titlebar-font-size: 13px;
+  /* left inset clearing the native traffic lights under macOS overlay chrome */
+  --titlebar-macos-inset: 78px;
   --titlebar-popover-min-width: 160px;
   --titlebar-popover-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 

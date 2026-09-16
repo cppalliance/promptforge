@@ -11,6 +11,7 @@ import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/wi
 
 import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
+import { detectPlatform } from "../../services/keybinding-parser";
 import { getService } from "../../services/service-registry";
 
 declare global {
@@ -98,6 +99,18 @@ export function setupWindowChrome(): IDisposable {
     // would present dead controls.
     controls.hidden = true;
     return store;
+  }
+  // macOS overlay chrome: the shell runs the window with titleBarStyle
+  // Overlay and a hidden title, so the native traffic lights float over
+  // the bar's left edge and cover close/minimize/zoom. The custom
+  // Windows-style cluster would double them, so it hides, and the bar
+  // takes the class whose CSS insets the left region clear of the lights.
+  // The drag region and the state syncs stay: the empty center still
+  // drags, and the green light's native fullscreen is what isFullscreen
+  // tracks.
+  if (detectPlatform() === "mac") {
+    controls.hidden = true;
+    bar.classList.add("ws-window-titlebar--macos");
   }
   const drag = bar.querySelector<HTMLElement>(".ws-window-titlebar__drag");
   const minimize = bar.querySelector<HTMLButtonElement>('[data-command="minimize"]');
