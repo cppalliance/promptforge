@@ -412,17 +412,19 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     EXPECTED_IDS.every((id) => Commands.lookup(id) !== undefined),
   );
   const palette = Menus.getMenuItems(MenuId.CommandPalette).map((row) => row.command);
+  // The twenty catalog rows plus step 14's four settings toggles.
   check(
     "every catalog row reaches the palette",
-    palette.length === EXPECTED_IDS.length && EXPECTED_IDS.every((id) => palette.includes(id)),
+    palette.length === EXPECTED_IDS.length + 4 && EXPECTED_IDS.every((id) => palette.includes(id)),
   );
   check("find carries the activeEditor precondition", Commands.lookup("actions.find")?.precondition === "activeEditor");
   check("commentLine keeps its catalog title", Commands.lookup("editor.action.commentLine")?.title === "Toggle Line Comment");
 
   const selectionMenu = Menus.getMenuItems(MenuId.MenubarSelectionMenu).map((row) => row.command);
+  // The thirteen catalog rows plus step 14's Column Selection Mode toggle.
   check(
     "the Selection menu carries its thirteen rows",
-    selectionMenu.length === 13 &&
+    selectionMenu.length === 14 &&
       ["editor.action.smartSelect.expand", "editor.action.smartSelect.shrink"].every((id) => selectionMenu.includes(id)),
   );
   const editMenu = Menus.getMenuItems(MenuId.MenubarEditMenu).map((row) => row.command);

@@ -804,7 +804,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-14>
 
-### Step 14: Editor settings service and compartments
+### Step 14: Editor settings service and compartments [completed]
 
 - Component: editor
 - Artifacts: `EditorSettingsService` (localStorage, `onDidChange`, `wordWrap`/`renderWhitespace`/`renderControlCharacters`/`columnSelection`), one `Compartment` per setting in `EditorSurface`, the four `config.editor.*` context keys, and the four toggle actions with `toggled` metadata.
@@ -884,7 +884,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 ### Step 21: Composition root and main.ts cleanup
 
 - Component: shell
-- Artifacts: `src/ui/workbench.contributions.ts` (flat side-effect imports), `window-menu.ts` moved to `cabinet/_trash/` with `setupWindowMenus` surviving as a thin bootstrap in `ui/menu/index.ts`, `main.ts` cleanup (drop `modelMenu`/`profileMenu`/`ModelMenuService`/`ProfileMenuService` and the `onModels` wiring; import `workbench.contributions.ts`; resolve `TEXT_CONTROL_SERVICE` at boot), the `export *` strip in every touched feature `index.ts`.
+- Artifacts: `src/ui/workbench.contributions.ts` (flat side-effect imports), `window-menu.ts` moved to `cabinet/_trash/` with `setupWindowMenus` surviving as a thin bootstrap in `ui/menu/index.ts`, `main.ts` cleanup (drop `modelMenu`/`profileMenu`/`ModelMenuService`/`ProfileMenuService` and the `onModels` wiring; import `workbench.contributions.ts`; resolve `TEXT_CONTROL_SERVICE` and `EDITOR_SETTINGS_SERVICE` at boot so the `inputFocus`/`editorTextFocus`/`textInputFocus` and `config.editor.*` keys exist from first paint - the settings module must stay CodeMirror-free so the lazy chunk split holds, and the bundle guards prove it), the `export *` strip in every touched feature `index.ts`.
 - Tests: `model-select-socket-down.mjs` and `models-push-refresh.mjs` re-pointed at the agent toolbar's model picker or moved to `cabinet/_trash/`; full suite green.
 - Placement reason: removes the old entry point, so every row's action must already exist (steps 13-20).
 

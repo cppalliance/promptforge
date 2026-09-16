@@ -6,11 +6,27 @@
 // updateListener comparing the live document against the last opened or
 // saved text; markSaved takes the exact text a write persisted, so
 // keystrokes that land while the write is in flight stay dirty.
-// Runtime-reconfigurables (language, readOnly) sit behind Compartments on
-// the surface; the externalUpdate annotation marks server-originated
-// reloads so listeners can tell them from local typing.
+// Runtime-reconfigurables (language, readOnly, and the four editor
+// settings) sit behind Compartments on the surface; the externalUpdate
+// annotation marks server-originated reloads so listeners can tell them
+// from local typing. The base extension set is basicSetup spelled out,
+// because two of its members - highlightSpecialChars and
+// rectangularSelection - move into settings compartments, and a bundle
+// cannot be picked apart.
 
-import { basicSetup } from "codemirror";
+import {
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  highlightWhitespace,
+  keymap,
+  lineNumbers,
+  rectangularSelection,
+} from "@codemirror/view";
 import {
   Annotation,
   Compartment,
@@ -18,12 +34,30 @@ import {
   type Extension,
   type Transaction,
 } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
-import { search } from "@codemirror/search";
-import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  HighlightStyle,
+  indentOnInput,
+  StreamLanguage,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
+import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { lintKeymap } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
+import { getServiceOrNull } from "../../services/service-registry";
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  EDITOR_SETTINGS_SERVICE,
+  type EditorSettings,
+  type EditorSettingsService,
+} from "./editor-settings-service";
 
 /** A document handed to the surface: the path it came from and its text. */
 export interface EditorDocument {
@@ -231,6 +265,30 @@ function readOnlyExtension(readOnly: boolean): Extension {
   return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
 }
 
+/** Word wrap: lineWrapping when on, nothing when off. */
+function wordWrapExtension(on: boolean): Extension {
+  return on ? EditorView.lineWrapping : [];
+}
+
+/** Render Whitespace: the cm-highlightSpace decorator when on. */
+function whitespaceExtension(on: boolean): Extension {
+  return on ? highlightWhitespace() : [];
+}
+
+/** Render Control Characters: the cm-specialChar decorator when on. */
+function controlCharactersExtension(on: boolean): Extension {
+  return on ? highlightSpecialChars() : [];
+}
+
+/**
+ * Column Selection Mode: on makes every left drag rectangular; off keeps
+ * basicSetup's stock alt-drag rectangular selection, so the gesture that
+ * shipped with the surface survives in both states.
+ */
+function columnSelectionExtension(on: boolean): Extension {
+  return on ? rectangularSelection({ eventFilter: () => true }) : rectangularSelection();
+}
+
 /** The CodeMirror 6 EditorSurface. */
 export class CodeMirrorSurface extends Disposable implements EditorSurface {
   readonly element = document.createElement("div");
@@ -243,13 +301,28 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
   // that would drop history, selection, and scroll position.
   private readonly language = new Compartment();
   private readonly readOnly = new Compartment();
+  private readonly wordWrap = new Compartment();
+  private readonly whitespace = new Compartment();
+  private readonly controlCharacters = new Compartment();
+  private readonly columnSelection = new Compartment();
   private readOnlyState = false;
+  private settings: EditorSettings;
   // Discards a lazy language load that resolves after a newer open().
   private openGeneration = 0;
 
-  constructor() {
+  constructor(settingsService: EditorSettingsService | null = getServiceOrNull(EDITOR_SETTINGS_SERVICE)) {
     super();
     this.element.className = "ws-editor-surface";
+    // The surface follows the editor settings service: the current values
+    // seed the first state, and every change reconfigures the live view.
+    this.settings = settingsService?.settings ?? DEFAULT_EDITOR_SETTINGS;
+    if (settingsService !== null) {
+      this._register(
+        settingsService.onDidChange((next) => {
+          this.applySettings(next);
+        }),
+      );
+    }
     // The view is created lazily by open(), so its teardown is registered
     // here once, against whichever view is live at dispose time.
     this._register(
@@ -271,12 +344,41 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
         state: EditorState.create({
           doc: document.text,
           extensions: [
-            basicSetup,
+            // basicSetup spelled out, minus highlightSpecialChars and
+            // rectangularSelection, which live in settings compartments.
+            lineNumbers(),
+            highlightActiveLineGutter(),
+            history(),
+            foldGutter(),
+            drawSelection(),
+            dropCursor(),
+            EditorState.allowMultipleSelections.of(true),
+            indentOnInput(),
+            syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+            bracketMatching(),
+            closeBrackets(),
+            autocompletion(),
+            crosshairCursor(),
+            highlightActiveLine(),
+            highlightSelectionMatches(),
+            keymap.of([
+              ...closeBracketsKeymap,
+              ...defaultKeymap,
+              ...searchKeymap,
+              ...historyKeymap,
+              ...foldKeymap,
+              ...completionKeymap,
+              ...lintKeymap,
+            ]),
             search(),
             promptforgeTheme,
             syntaxHighlighting(promptforgeHighlight),
             this.language.of([]),
             this.readOnly.of(readOnlyExtension(this.readOnlyState)),
+            this.wordWrap.of(wordWrapExtension(this.settings.wordWrap)),
+            this.whitespace.of(whitespaceExtension(this.settings.renderWhitespace)),
+            this.controlCharacters.of(controlCharactersExtension(this.settings.renderControlCharacters)),
+            this.columnSelection.of(columnSelectionExtension(this.settings.columnSelection)),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
                 this.setDirty(update.state.doc.toString() !== this.savedText);
@@ -316,6 +418,23 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
     }
     this.readOnlyState = readOnly;
     this.view?.dispatch({ effects: this.readOnly.reconfigure(readOnlyExtension(readOnly)) });
+  }
+
+  /**
+   * Applies new editor settings: one reconfigure dispatch across the
+   * four settings compartments, so history, selection, and scroll
+   * position survive. Stored for the first open() when no view exists.
+   */
+  private applySettings(settings: EditorSettings): void {
+    this.settings = settings;
+    this.view?.dispatch({
+      effects: [
+        this.wordWrap.reconfigure(wordWrapExtension(settings.wordWrap)),
+        this.whitespace.reconfigure(whitespaceExtension(settings.renderWhitespace)),
+        this.controlCharacters.reconfigure(controlCharactersExtension(settings.renderControlCharacters)),
+        this.columnSelection.reconfigure(columnSelectionExtension(settings.columnSelection)),
+      ],
+    });
   }
 
   text(): string {

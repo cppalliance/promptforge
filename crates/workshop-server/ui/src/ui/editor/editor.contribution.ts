@@ -18,6 +18,8 @@ import type { ParseError } from "../../services/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingWeight } from "../../services/keybinding-registry";
 import { MenuId } from "../../services/menu-registry";
+import { getService } from "../../services/service-registry";
+import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "./editor-settings-service";
 
 /** The editor-commands module as a type only; the runtime import stays lazy. */
 type EditorCommands = typeof import("./editor-commands");
@@ -83,5 +85,49 @@ for (const row of editorActions) {
         : { keybinding: row.keybinding, when: "editorTextFocus", weight: KeybindingWeight.EditorContrib },
     menu: [{ id: row.menu, group: row.group }],
     run: runEditorCommand(row.pick),
+  });
+}
+
+/** One settings toggle row: the action flips a setting on the editor settings service. */
+interface EditorToggleRow {
+  readonly id: string;
+  readonly title: string;
+  readonly menu: MenuId;
+  readonly group: string;
+  readonly setting: EditorSettingName;
+  readonly keybinding?: string;
+  readonly precondition?: string;
+}
+
+// The four editor settings toggles (plan step 14). Each carries its
+// `toggled` expression naming the config.editor.* key the settings
+// service publishes, and its run body flips the setting - the surfaces
+// follow through their compartments. The Appearance rows target the
+// submenu id the menubar contribution declares; MenuId is a plain
+// string, so the literal is the id. Word Wrap and the render toggles
+// carry no precondition (they toggle global state, no editor needed);
+// Column Selection Mode keeps the editor default, activeEditor.
+const editorToggles = [
+  { id: "editor.action.toggleColumnSelection", title: "Column Selection Mode", menu: MenuId.MenubarSelectionMenu, group: "4_config", setting: "columnSelection", precondition: "activeEditor" },
+  { id: "editor.action.toggleWordWrap", title: "Word Wrap", menu: MenuId.MenubarViewMenu, group: "5_editor", setting: "wordWrap", keybinding: "alt+z" },
+  { id: "editor.action.toggleRenderWhitespace", title: "Render Whitespace", menu: "menubar/view/appearance", group: "4_editor", setting: "renderWhitespace" },
+  { id: "editor.action.toggleRenderControlCharacter", title: "Render Control Characters", menu: "menubar/view/appearance", group: "4_editor", setting: "renderControlCharacters" },
+] satisfies readonly EditorToggleRow[];
+
+for (const row of editorToggles) {
+  addAction({
+    id: row.id,
+    title: row.title,
+    f1: true,
+    precondition: row.precondition,
+    toggled: `config.editor.${row.setting}`,
+    keybinding:
+      row.keybinding === undefined
+        ? undefined
+        : { keybinding: row.keybinding, when: "editorTextFocus", weight: KeybindingWeight.EditorContrib },
+    menu: [{ id: row.menu, group: row.group }],
+    run: () => {
+      getService(EDITOR_SETTINGS_SERVICE).toggle(row.setting);
+    },
   });
 }
