@@ -19,6 +19,13 @@ anyhow.workspace = true
 # window at it. Never depend on `workshop-server` directly: the facade is
 # the shell's sole view of the server.
 workshop-server-api.workspace = true
+# Window geometry lives in the workspace file (src/window_state.rs): the
+# shell reads and writes it over the server's loopback HTTP API with the
+# workspace's reqwest feature set (json, rustls-tls), the same set the
+# gateway builds with, so cargo deny and the static-CRT Windows build see
+# nothing new.
+reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 # The health wait comes from the shared gateway-discovery-file seam.
 shared-gateway-discovery.workspace = true
@@ -28,7 +35,6 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-process.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-updater.workspace = true
-tauri-plugin-window-state.workspace = true
 url.workspace = true
 
 # Explorer path drops and the microphone permission grant (src/bridge.rs):

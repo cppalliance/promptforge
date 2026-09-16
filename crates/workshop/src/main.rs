@@ -33,6 +33,7 @@ mod linux_media;
 mod menu;
 mod navigation;
 mod quit;
+mod window_state;
 
 use std::ffi::OsStr;
 use std::process::ExitCode;
@@ -126,15 +127,6 @@ fn run() -> anyhow::Result<()> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_window_state::Builder::new()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::POSITION
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
-                .build(),
-        )
         .invoke_handler(tauri::generate_handler![
             desktop_update_supported,
             quit::quit
@@ -290,7 +282,9 @@ fn window_capability(url: &url::Url) -> CapabilityBuilder {
 /// custom HTML title bar replaces the native frame, overlay-titled on
 /// macOS where the native traffic lights float over the custom bar's left
 /// edge (the bar hides its Windows-style control cluster there), decorated
-/// on Linux as today, then shown.
+/// on Linux as today, restored to the open workspace file's saved
+/// geometry, then shown. The saver that writes geometry back into the
+/// file is installed before the show, so the first layout pass is saved.
 fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::error::Error>> {
     let server_origin = url.origin();
     let opener = app.handle().clone();
@@ -342,6 +336,19 @@ fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::
     // Groupy-compatible title bar pattern proven by other Tauri apps.
     #[cfg(target_os = "windows")]
     window.set_decorations(false)?;
+    // Geometry comes from the workspace file through the server. The
+    // server is healthy by now (boot waited on it), so the fetch is a
+    // loopback round trip; a failure leaves the default geometry and is
+    // reported, never fatal.
+    match window_state::ServerClient::new(url) {
+        Ok(client) => {
+            let restored = window_state::restore(&window, &client);
+            window_state::spawn_saver(&window, client, restored);
+        }
+        Err(error) => {
+            eprintln!("window geometry will not be restored or saved: {error:#}");
+        }
+    }
     window.show()?;
     Ok(())
 }

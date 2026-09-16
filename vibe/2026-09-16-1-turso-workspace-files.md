@@ -577,7 +577,7 @@ Conventions binding every step: `--locked` on cargo, `unwrap`/`expect` denied, e
 
 <step-12>
 
-### Step 12: Shell window state through the server
+### Step 12: Shell window state through the server [completed]
 
 - Component: `shell-window-state`
 - Piece: geometry (one piece, one step: restore, save, and the reopen listener share one client and one test set)
