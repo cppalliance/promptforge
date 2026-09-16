@@ -49,17 +49,17 @@ fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_at
     let replacement =
         gateway.gateway_discovery_file("new-key", 1_757_000_001, "2026-09-03T12:00:01Z");
     let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
-    let server = workshop_server::fixtures::spawn(workshop_server::Config {
-        gateway: workshop_server::GatewayConfig {
+    let server = workshop_server_api::fixtures::spawn(workshop_server_api::Config {
+        gateway: workshop_server_api::GatewayConfig {
             base_url: format!("http://127.0.0.1:{}", original.port),
             api_key: original.api_key.clone(),
         },
-        server: workshop_server::ServerConfig {
+        server: workshop_server_api::ServerConfig {
             bind: "127.0.0.1:0".to_owned(),
             open_browser: false,
             state_dir: state_dir.path().to_owned(),
         },
-        agents: workshop_server::AgentsConfig::default(),
+        agents: workshop_server_api::AgentsConfig::default(),
     })
     .expect("spawn Workshop against the original same-port key");
     let updater = server.gateway_updater();

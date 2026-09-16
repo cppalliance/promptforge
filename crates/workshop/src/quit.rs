@@ -11,7 +11,7 @@
 use std::sync::PoisonError;
 
 use tauri::{AppHandle, Manager as _, Wry};
-use workshop_server::GatewayUpdater;
+use workshop_server_api::GatewayUpdater;
 
 use crate::ServerSlot;
 
@@ -38,7 +38,7 @@ pub(crate) fn quit_everything(app: &AppHandle<Wry>) {
         slot.lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-            .map(workshop_server::ServerHandle::gateway_updater)
+            .map(workshop_server_api::ServerHandle::gateway_updater)
     });
     request_gateway_shutdown(gateway);
     app.exit(0);

@@ -76,7 +76,7 @@ jobs:
         run: cargo test -p gateway-stt --test it architecture
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -106,10 +106,10 @@ jobs:
           npm ci --prefix crates/gateway-config-ui/ui
 
       - name: Test (concurrent via nextest)
-        run: cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features
+        run: cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc
+        run: cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc
 
       - name: Check headless gateway
         run: cargo check -p gateway --no-default-features
@@ -152,7 +152,7 @@ jobs:
           npm ci --prefix crates/gateway-config-ui/ui
 
       - name: Docs
-        run: cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server
+        run: cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api
 
   check-workshop:
     runs-on: windows-latest
@@ -189,11 +189,14 @@ jobs:
       - name: Stage Gateway sidecar
         run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe
 
+      # workshop-server-api is the shell's re-export view of workshop-server,
+      # so it rides in this partition with the crates it fronts and stays
+      # out of the workspace-wide jobs like them.
       - name: Clippy (workshop)
-        run: cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings
+        run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings
 
       - name: Test (workshop, concurrent via nextest)
-        run: cargo nextest run --locked -p workshop -p workshop-server
+        run: cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api
 
       # The headless feature swaps the webview asset layer for a no-op so
       # server-only integration tests run without the UI bundle. It is not
@@ -204,7 +207,7 @@ jobs:
       # nextest does not run doctests; the workspace doctest step in the
       # `test` job excludes both workshop crates, so cover them here.
       - name: Doctests (workshop)
-        run: cargo test --doc -p workshop -p workshop-server
+        run: cargo test --doc -p workshop -p workshop-server -p workshop-server-api
 
       - name: Test Gateway process ownership races
         run: |

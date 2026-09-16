@@ -191,7 +191,7 @@ pub(crate) struct GatewaySupervisor {
     stop_bridge_completion: Completion,
     thread: Option<std::thread::JoinHandle<()>>,
     stop_bridge: Option<std::thread::JoinHandle<()>>,
-    publication: Option<workshop_server::GatewayUpdater>,
+    publication: Option<workshop_server_api::GatewayUpdater>,
     shutdown_budget: Duration,
 }
 
@@ -323,7 +323,7 @@ impl GatewaySupervisor {
     }
 
     pub(super) fn spawn_with_publication(
-        publication: workshop_server::GatewayUpdater,
+        publication: workshop_server_api::GatewayUpdater,
         supervise: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> anyhow::Result<Self> {
         Self::spawn_inner(Some(publication), SUPERVISOR_SHUTDOWN_BUDGET, supervise)
@@ -338,7 +338,7 @@ impl GatewaySupervisor {
     }
 
     fn spawn_inner(
-        publication: Option<workshop_server::GatewayUpdater>,
+        publication: Option<workshop_server_api::GatewayUpdater>,
         shutdown_budget: Duration,
         supervise: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> anyhow::Result<Self> {
@@ -447,7 +447,7 @@ impl Drop for GatewaySupervisor {
 /// spawn its owned thread.
 pub(crate) fn supervise(
     attachment: &GatewayAttachment,
-    updater: workshop_server::GatewayUpdater,
+    updater: workshop_server_api::GatewayUpdater,
 ) -> anyhow::Result<Option<GatewaySupervisor>> {
     let Some(initial) = attachment.sidecar_identity().cloned() else {
         return Ok(None);

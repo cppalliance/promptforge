@@ -15,12 +15,12 @@ const NO_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(250);
 #[test]
 #[ignore = "runs only as a named child process"]
 fn validated_gateway_fixture_process() {
-    workshop_server::fixtures::run_validated_gateway_fixture_process();
+    workshop_server_api::fixtures::run_validated_gateway_fixture_process();
 }
 
 /// Starts the shared named-process Gateway stub in this test binary.
-fn stubbed_gateway(expected_key: &str) -> workshop_server::fixtures::ValidatedGateway {
-    workshop_server::fixtures::ValidatedGateway::spawn_in(
+fn stubbed_gateway(expected_key: &str) -> workshop_server_api::fixtures::ValidatedGateway {
+    workshop_server_api::fixtures::ValidatedGateway::spawn_in(
         expected_key,
         "quit::tests::validated_gateway_fixture_process",
     )
@@ -29,19 +29,22 @@ fn stubbed_gateway(expected_key: &str) -> workshop_server::fixtures::ValidatedGa
 /// Spawns a Workshop fixture server configured against the gateway at
 /// `port` - an explicit configuration, which alone grants no shutdown
 /// authority.
-fn workshop_server(port: u16, api_key: &str) -> (tempfile::TempDir, workshop_server::ServerHandle) {
+fn workshop_server(
+    port: u16,
+    api_key: &str,
+) -> (tempfile::TempDir, workshop_server_api::ServerHandle) {
     let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
-    let server = workshop_server::fixtures::spawn(workshop_server::Config {
-        gateway: workshop_server::GatewayConfig {
+    let server = workshop_server_api::fixtures::spawn(workshop_server_api::Config {
+        gateway: workshop_server_api::GatewayConfig {
             base_url: format!("http://127.0.0.1:{port}"),
             api_key: api_key.to_owned(),
         },
-        server: workshop_server::ServerConfig {
+        server: workshop_server_api::ServerConfig {
             bind: "127.0.0.1:0".to_owned(),
             open_browser: false,
             state_dir: state_dir.path().to_owned(),
         },
-        agents: workshop_server::AgentsConfig::default(),
+        agents: workshop_server_api::AgentsConfig::default(),
     })
     .expect("spawn Workshop fixture");
     (state_dir, server)

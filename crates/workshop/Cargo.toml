@@ -14,9 +14,11 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-# The in-process workshop server: the shell spawns it on an OS-assigned
-# loopback port and points the window at it.
-workshop-server.workspace = true
+# The in-process workshop server, seen only through its re-export facade:
+# the shell spawns it on an OS-assigned loopback port and points the
+# window at it. Never depend on `workshop-server` directly: the facade is
+# the shell's sole view of the server.
+workshop-server-api.workspace = true
 serde_json.workspace = true
 # The health wait comes from the shared gateway-discovery-file seam.
 shared-sidecar.workspace = true
@@ -51,7 +53,7 @@ default = []
 
 [dev-dependencies]
 tempfile.workspace = true
-workshop-server = { workspace = true, features = ["test-fixtures"] }
+workshop-server-api = { workspace = true, features = ["test-fixtures"] }
 # The test-fixtures feature exposes `resolve_for_test`, so the boot
 # decision tests run the real liveness gauntlet against the test binary's
 # own process image.

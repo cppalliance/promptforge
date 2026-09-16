@@ -8579,7 +8579,7 @@ dependencies = [
  "webkit2gtk",
  "webview2-com",
  "windows-core 0.61.2",
- "workshop-server",
+ "workshop-server-api",
 ]
 
 [[package]]
@@ -8676,6 +8676,14 @@ dependencies = [
  "workshop-status",
  "workshop-support",
  "workshop-workspace",
+]
+
+[[package]]
+name = "workshop-server-api"
+version = "0.0.0"
+dependencies = [
+ "workshop-server",
+ "workshop-server-api",
 ]
 
 [[package]]

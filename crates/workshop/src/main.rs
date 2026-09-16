@@ -43,7 +43,7 @@ use anyhow::Context as _;
 use tauri::ipc::CapabilityBuilder;
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt as _;
-use workshop_server::ServerHandle;
+use workshop_server_api::ServerHandle;
 
 /// How long the app waits for the in-process server's health endpoint
 /// before giving up.
@@ -169,7 +169,7 @@ fn run() -> anyhow::Result<()> {
             continue_teardown(supervisor_outcome, || {
                 if let Some(Some(server)) = server {
                     match server.shutdown() {
-                        Ok(workshop_server::Termination::Graceful) => {}
+                        Ok(workshop_server_api::Termination::Graceful) => {}
                         Ok(termination) => {
                             eprintln!("the workshop server was forced down past its drain window: {termination:?}");
                         }
@@ -239,7 +239,8 @@ fn boot() -> anyhow::Result<(
 )> {
     let config = config::load().context("load the workshop configuration")?;
     let attachment = gateway::ensure_gateway(&config).context("connect to the gateway")?;
-    let server = workshop_server::spawn(config).context("start the in-process workshop server")?;
+    let server =
+        workshop_server_api::spawn(config).context("start the in-process workshop server")?;
     let attachment = attachment.reconcile_publication(server.initial_gateway_identity().cloned());
     match shared_sidecar::wait_for_health(server.url(), HEALTH_TIMEOUT)
         .context("wait for the in-process workshop server")

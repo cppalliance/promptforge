@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use workshop_server::Config;
+use workshop_server_api::Config;
 
 /// Canonical file name searched for at each candidate location.
 const CONFIG_FILE_NAME: &str = "workshop.toml";
@@ -97,16 +97,16 @@ fn shape_for_shell(config: &mut Config) {
 /// state and agent-program paths anchored at the profile directory.
 fn default_config(home: Option<&Path>) -> Config {
     let mut config = Config {
-        gateway: workshop_server::GatewayConfig {
+        gateway: workshop_server_api::GatewayConfig {
             base_url: String::new(),
             api_key: String::new(),
         },
-        server: workshop_server::ServerConfig {
+        server: workshop_server_api::ServerConfig {
             bind: SHELL_BIND.to_string(),
             open_browser: false,
             state_dir: PathBuf::new(),
         },
-        agents: workshop_server::AgentsConfig::default(),
+        agents: workshop_server_api::AgentsConfig::default(),
     };
     let anchor = home.map_or_else(|| PathBuf::from("."), profile_dir);
     config.anchor_path_defaults(&anchor);

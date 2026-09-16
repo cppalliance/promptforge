@@ -107,8 +107,8 @@ fn accepts_bearer(request: &str, expected_key: &str) -> bool {
 }
 
 /// Starts the shared named-process Gateway fixture in this test binary.
-fn validated_gateway(expected_key: &str) -> workshop_server::fixtures::ValidatedGateway {
-    workshop_server::fixtures::ValidatedGateway::spawn_in(
+fn validated_gateway(expected_key: &str) -> workshop_server_api::fixtures::ValidatedGateway {
+    workshop_server_api::fixtures::ValidatedGateway::spawn_in(
         expected_key,
         "gateway::tests::validated_gateway_fixture_process",
     )
@@ -117,7 +117,7 @@ fn validated_gateway(expected_key: &str) -> workshop_server::fixtures::Validated
 #[test]
 #[ignore = "runs only as a named child process"]
 fn validated_gateway_fixture_process() {
-    workshop_server::fixtures::run_validated_gateway_fixture_process();
+    workshop_server_api::fixtures::run_validated_gateway_fixture_process();
 }
 
 /// Sends one plain GET to the Workshop fixture.

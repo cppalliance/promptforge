@@ -1,0 +1,24 @@
+[package]
+name = "workshop-server-api"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "The desktop shell's view of the workshop server: re-exports only, so server internals never resolve in the shell"
+
+[features]
+default = []
+# Forwards the server's integration-test seams (`fixtures`) to the shell's
+# tests without the shell depending on `workshop-server` itself.
+test-fixtures = ["workshop-server/test-fixtures"]
+
+[dependencies]
+workshop-server.workspace = true
+
+[dev-dependencies]
+workshop-server-api = { path = ".", features = ["test-fixtures"] }
+
+[lints]
+workspace = true

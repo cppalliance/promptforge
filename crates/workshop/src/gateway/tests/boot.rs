@@ -86,19 +86,22 @@ fn windows_detached_spawn_does_not_retry_other_errors() {
     assert_eq!(attempts, 1);
 }
 
-fn workshop_server(port: u16, api_key: &str) -> (tempfile::TempDir, workshop_server::ServerHandle) {
+fn workshop_server(
+    port: u16,
+    api_key: &str,
+) -> (tempfile::TempDir, workshop_server_api::ServerHandle) {
     let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
-    let server = workshop_server::fixtures::spawn(workshop_server::Config {
-        gateway: workshop_server::GatewayConfig {
+    let server = workshop_server_api::fixtures::spawn(workshop_server_api::Config {
+        gateway: workshop_server_api::GatewayConfig {
             base_url: format!("http://127.0.0.1:{port}"),
             api_key: api_key.to_owned(),
         },
-        server: workshop_server::ServerConfig {
+        server: workshop_server_api::ServerConfig {
             bind: "127.0.0.1:0".to_owned(),
             open_browser: false,
             state_dir: state_dir.path().to_owned(),
         },
-        agents: workshop_server::AgentsConfig::default(),
+        agents: workshop_server_api::AgentsConfig::default(),
     })
     .expect("spawn Workshop fixture");
     (state_dir, server)
@@ -300,7 +303,7 @@ fn matching_boot_publication_survives_closure_and_server_teardown() {
     drop(attachment);
     let outcome = server.shutdown().expect("server teardown continues");
 
-    assert_eq!(outcome, workshop_server::Termination::Graceful);
+    assert_eq!(outcome, workshop_server_api::Termination::Graceful);
     assert!(
         !launched.received_shutdown(Duration::from_millis(100)),
         "closure cannot clean up the exact child already published at boot"
@@ -327,6 +330,6 @@ fn closed_boot_publication_cleans_unpublished_owner_then_continues_teardown() {
     );
     assert_eq!(
         server.shutdown().expect("server teardown continues"),
-        workshop_server::Termination::Graceful
+        workshop_server_api::Termination::Graceful
     );
 }

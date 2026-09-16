@@ -7,7 +7,7 @@ use anyhow::Context as _;
 use shared_sidecar::{
     GatewayDiscoveryFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
 };
-use workshop_server::Config;
+use workshop_server_api::Config;
 
 use super::identity::GatewayAttachment;
 use super::supervisor::{RecoveryCandidate, RecoveryOwnership};

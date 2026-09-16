@@ -94,17 +94,17 @@ fn dropping_a_supervisor_signals_and_detaches_without_waiting() {
 #[test]
 fn shutdown_revokes_publication_before_waking_a_late_worker() {
     let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
-    let server = workshop_server::fixtures::spawn(workshop_server::Config {
-        gateway: workshop_server::GatewayConfig {
+    let server = workshop_server_api::fixtures::spawn(workshop_server_api::Config {
+        gateway: workshop_server_api::GatewayConfig {
             base_url: "http://127.0.0.1:54375".to_owned(),
             api_key: "old-key".to_owned(),
         },
-        server: workshop_server::ServerConfig {
+        server: workshop_server_api::ServerConfig {
             bind: "127.0.0.1:0".to_owned(),
             open_browser: false,
             state_dir: state_dir.path().to_owned(),
         },
-        agents: workshop_server::AgentsConfig::default(),
+        agents: workshop_server_api::AgentsConfig::default(),
     })
     .expect("spawn Workshop");
     let updater = server.gateway_updater();
@@ -119,7 +119,7 @@ fn shutdown_revokes_publication_before_waking_a_late_worker() {
         worker_rejected.store(
             matches!(
                 worker_updater.replace_sidecar(&replacement),
-                Err(workshop_server::GatewayPublicationError::PublicationClosed)
+                Err(workshop_server_api::GatewayPublicationError::PublicationClosed)
             ),
             Ordering::SeqCst,
         );
