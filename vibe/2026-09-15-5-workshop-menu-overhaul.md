@@ -903,7 +903,7 @@ Steps are in dependency order; each lands as one commit with its code and tests,
 
 <step-23>
 
-### Step 23: Shim removal and noUncheckedIndexedAccess
+### Step 23: Shim removal and noUncheckedIndexedAccess [completed]
 
 - Component: sweep
 - Artifacts: the legacy `ui/menu/command-registry.ts` and `ui/menu/menu-registry.ts` files and `shortcuts.ts` removed (to `cabinet/_trash/`), `noUncheckedIndexedAccess` enabled in `tsconfig.json`, fallout fixed.

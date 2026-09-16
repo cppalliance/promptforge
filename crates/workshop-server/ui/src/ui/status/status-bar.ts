@@ -178,7 +178,7 @@ export class StatusBar extends Disposable {
   private pulseMs(): number {
     const raw = getComputedStyle(this.led).getPropertyValue("--led-pulse-ms").trim();
     const match = /^(\d+(?:\.\d+)?)(ms|s)$/.exec(raw);
-    if (!match) {
+    if (match === null || match[1] === undefined) {
       return DEFAULT_LED_PULSE_MS;
     }
     const value = Number.parseFloat(match[1]);

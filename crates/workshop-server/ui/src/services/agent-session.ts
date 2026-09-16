@@ -356,7 +356,7 @@ export class AgentSessionService extends Disposable {
       );
     } else {
       const existing = this.transcript[index];
-      if (existing.kind === "reply" || existing.kind === "reasoning") {
+      if (existing !== undefined && (existing.kind === "reply" || existing.kind === "reasoning")) {
         // Replaced, not mutated: the view diffs items by identity.
         this.transcript[index] = { ...existing, text: existing.text + frame.content };
       }
@@ -403,7 +403,7 @@ export class AgentSessionService extends Disposable {
   private findPending(reply: number, kind: StreamKind): number {
     for (let index = this.transcript.length - 1; index >= 0; index--) {
       const item = this.transcript[index];
-      if (item.kind === kind && item.pending && item.reply === reply) {
+      if (item !== undefined && item.kind === kind && item.pending && item.reply === reply) {
         return index;
       }
     }

@@ -274,11 +274,12 @@ function applySnapshot(
     const unbound = reduction.state.takes.filter(
       (candidate) => candidate.itemId === null,
     );
-    if (unbound.length !== 1) {
+    const candidate = unbound[0];
+    if (unbound.length !== 1 || candidate === undefined) {
       return;
     }
-    bindItem(reduction.state, unbound[0].id, itemId);
-    take = takeById(reduction.state, unbound[0].id);
+    bindItem(reduction.state, candidate.id, itemId);
+    take = takeById(reduction.state, candidate.id);
   }
   if (take === null) {
     return;

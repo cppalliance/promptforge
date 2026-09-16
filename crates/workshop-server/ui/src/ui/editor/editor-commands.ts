@@ -315,6 +315,9 @@ export const selectPreviousOccurrence: StateCommand = ({ state, dispatch }) => {
     return false;
   }
   const first = ranges[0];
+  if (first === undefined) {
+    return false;
+  }
   const searched = state.sliceDoc(first.from, first.to);
   if (ranges.some((range) => state.sliceDoc(range.from, range.to) !== searched)) {
     return false;

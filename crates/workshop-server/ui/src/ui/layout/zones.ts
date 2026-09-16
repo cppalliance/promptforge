@@ -156,7 +156,8 @@ function rebuildPosition(zone: ZoneName): AddPanelPositionOptions | undefined {
     return undefined;
   }
   const groups = dock.groups;
-  if (groups.length === 0) {
+  const first = groups[0];
+  if (first === undefined) {
     return undefined;
   }
   if (zone === "main") {
@@ -168,10 +169,10 @@ function rebuildPosition(zone: ZoneName): AddPanelPositionOptions | undefined {
     if (right) {
       return { referenceGroup: right.id, direction: "left" };
     }
-    return { referenceGroup: groups[0].id, direction: "right" };
+    return { referenceGroup: first.id, direction: "right" };
   }
   const direction: Direction = zone;
-  return { referenceGroup: groups[0].id, direction };
+  return { referenceGroup: first.id, direction };
 }
 
 /** The tab title for one open: editors take the file's base name. */

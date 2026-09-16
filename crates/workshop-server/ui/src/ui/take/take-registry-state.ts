@@ -71,6 +71,9 @@ export function replaceTake(
     return;
   }
   const take = reduction.state.takes[index];
+  if (take === undefined) {
+    return;
+  }
   const oldEnd = take.to;
   const nextEnd = take.from + text.length;
   const delta = nextEnd - oldEnd;
@@ -150,14 +153,16 @@ export function bindItem(
   itemId: string,
 ): void {
   const index = state.takes.findIndex((take) => take.id === takeId);
+  const take = state.takes[index];
   if (
     index < 0 ||
+    take === undefined ||
     isRetiredItem(state, state.activeGeneration, itemId)
   ) {
     return;
   }
   state.takes[index] = {
-    ...state.takes[index],
+    ...take,
     itemId,
     itemGeneration: state.activeGeneration,
   };

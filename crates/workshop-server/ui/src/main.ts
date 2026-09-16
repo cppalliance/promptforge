@@ -16,7 +16,6 @@ import { TEXT_CONTROL_SERVICE } from "./services/text-control-service";
 import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
-import { register as registerChrome } from "./ui/chrome/index";
 import { CommandCenter } from "./ui/chrome/command-center";
 import { EDITOR_SETTINGS_SERVICE } from "./ui/editor/editor-settings-service";
 import { setupGatewayConfigBridge } from "./ui/gateway/gateway-config-bridge";
@@ -122,10 +121,9 @@ if (!titleCenter) {
 }
 disposables.add(new CommandCenter(titleCenter));
 
-// The eager directories' registrations: chrome's zoom commands. The lazy
-// directories register through the panel registry when their chunks load.
-disposables.add(registerChrome());
-
+// The lazy directories register through the panel registry when their
+// chunks load; every action, menu row, and keybinding registers eagerly
+// from the contribution surface the menu bootstrap imports.
 disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // A dropped socket means every in-flight status is stale; the bar returns
 // to its reconnecting state until the observer speaks again.

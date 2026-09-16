@@ -1,5 +1,6 @@
 // Integration test for layout boot, persistence, and shortcuts
-// (src/ui/layout/layout-persistence.ts, shortcuts.ts, the zone-state
+// (src/ui/layout/layout-persistence.ts, the keybinding dispatcher
+// resolving the contribution surface's chords, the zone-state
 // serialization in zones.ts, and EditorPanel.requestClose). Bundles the
 // modules with esbuild, mounts real Dockview docks in jsdom against the
 // real index.html, and drives the public API. Covers: the layout
@@ -37,7 +38,11 @@ const bundle = await esbuild.build({
         LAYOUT_STORAGE_KEY,
         LAYOUT_SCHEMA_VERSION,
       } from "./src/ui/layout/layout-persistence.ts";
-      export { installShortcuts } from "./src/ui/layout/shortcuts.ts";
+      export { KeybindingDispatcher } from "./src/ui/layout/keybinding-dispatcher.ts";
+      export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
+      export { getService } from "./src/services/service-registry.ts";
+      import "./src/ui/editor/editor.contribution.ts";
+      import "./src/ui/layout/layout.contribution.ts";
       export { EditorPanel } from "./src/ui/editor/editor-panel.ts";
       export { StatusBar } from "./src/ui/status/status-bar.ts";
     `,
@@ -214,7 +219,9 @@ const {
   startLayoutPersistence,
   LAYOUT_STORAGE_KEY,
   LAYOUT_SCHEMA_VERSION,
-  installShortcuts,
+  KeybindingDispatcher,
+  CONTEXT_KEY_SERVICE,
+  getService,
   EditorPanel,
   StatusBar,
 } = await import(pathToFileURL(bundlePath).href);
@@ -342,26 +349,38 @@ check("the debounced write carries the new panel",
 check("the debounced write carries no lock state",
   debounced !== null && !("locked" in JSON.parse(debounced)));
 
-// --- Shortcuts: one keydown listener dispatching to the commands ----------
+// --- Shortcuts: the dispatcher resolves the contributions' chords -----
 
-const uninstall = installShortcuts(dock2);
-const press = (key, options = {}) =>
-  window.document.dispatchEvent(
-    new window.KeyboardEvent("keydown", { key, ctrlKey: true, cancelable: true, ...options }),
+// The real contribution surface (imported into the bundle above)
+// registered every action and keybinding rule into the shared
+// registries; one dispatcher over them replaces the old shortcuts.ts
+// listener. Chords resolve through event.code, so each press carries
+// the physical key's code.
+const dispatcher = new KeybindingDispatcher();
+const contextKeys = getService(CONTEXT_KEY_SERVICE);
+const press = (key, code, options = {}) =>
+  window.document.body.dispatchEvent(
+    new window.KeyboardEvent("keydown", { key, code, ctrlKey: true, bubbles: true, cancelable: true, ...options }),
   );
 
-// Ctrl+S saves the active editor.
+// Ctrl+S saves the active editor. The rule's when reads
+// editorTextFocus, which the text-control service owns; with no real
+// focus traversal in jsdom the test sets the key the way a focused
+// CodeMirror surface would.
 dock2.getPanel(editorAId).api.setActive();
 await flush();
+contextKeys.createKey("editorTextFocus", false).set(true);
 const putsBeforeSave = puts.length;
-press("s");
+press("s", "KeyS");
 await flush();
 check("Ctrl+S saves the active editor",
   puts.length === putsBeforeSave + 1 && puts.at(-1).path === FILE_A);
 
-// Ctrl+W closes the now-clean editor without prompting.
-press("w");
-check("Ctrl+W closes the active editor", dock2.getPanel(editorAId) === undefined);
+// Ctrl+F4 closes the now-clean editor without prompting. The run body
+// lazy-imports the command layer, so let the microtasks land.
+press("F4", "F4");
+await flush();
+check("Ctrl+F4 closes the active editor", dock2.getPanel(editorAId) === undefined);
 check("a clean close does not prompt",
   window.document.querySelector(".ws-editor-close-overlay") === null);
 
@@ -369,27 +388,29 @@ check("a clean close does not prompt",
 openInZone("editor", { path: FILE_A });
 await flush();
 dock2.getPanel(editorBId).api.setActive();
-press("Tab");
+press("Tab", "Tab");
+await flush();
 check("Ctrl+Tab cycles to the next editor", dock2.activePanel?.id === editorAId);
-press("Tab", { shiftKey: true });
+press("Tab", "Tab", { shiftKey: true });
+await flush();
 check("Ctrl+Shift+Tab cycles back", dock2.activePanel?.id === editorBId);
 
 // Ctrl+B toggles the Workshop panel.
-press("b");
+press("b", "KeyB");
 check("Ctrl+B closes the Workshop panel", dock2.getPanel("tree") === undefined);
-press("b");
+press("b", "KeyB");
 check("Ctrl+B reopens the Workshop panel", !!dock2.getPanel("tree"));
 // The reopened tree's chunk resolves asynchronously (the panel registry
 // lazy-loads feature directories); let the swap land before focusing.
 await flush();
 
-// Ctrl+Shift+F activates and focuses the Workshop tree.
-press("f", { shiftKey: true });
+// Ctrl+Shift+E activates and focuses the Workshop tree.
+press("e", "KeyE", { shiftKey: true });
 const treeContent = dock2.getPanel("tree").view.content;
-check("Ctrl+Shift+F activates the Workshop tree", dock2.activePanel?.id === "tree");
-check("Ctrl+Shift+F focuses inside the tree",
+check("Ctrl+Shift+E activates the Workshop tree", dock2.activePanel?.id === "tree");
+check("Ctrl+Shift+E focuses inside the tree",
   treeContent.element.contains(window.document.activeElement));
-uninstall.dispose();
+dispatcher.dispose();
 
 // --- Restore failures fall back to the default layout ---------------------
 

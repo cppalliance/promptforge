@@ -294,7 +294,7 @@ function wireResult(
     return;
   }
   const [request] = reduction.state.pendingWire.splice(index, 1);
-  if (request.generation !== reduction.state.activeGeneration) {
+  if (request === undefined || request.generation !== reduction.state.activeGeneration) {
     return;
   }
   const take = takeById(reduction.state, request.takeId);
