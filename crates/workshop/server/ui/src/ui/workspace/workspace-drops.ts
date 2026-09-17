@@ -30,6 +30,14 @@ import type { StatusBar } from "../status/status-bar";
 /** The native event the app dispatches when files land on the window. */
 const FILE_DROP_EVENT = "promptforge:file-drop";
 
+/**
+ * Fired on a drop target element (one marked data-ws-file-drop) after
+ * the dropped paths have been granted, so the owning panel can load
+ * them. Dispatched only when the HTML5 drop landed on the target; a
+ * drop anywhere else grants without dispatching, as before.
+ */
+export const WORKSPACE_FILE_DROP_EVENT = "workshop:file-drop";
+
 /** Fired on window after grants change, so open panels can refresh. */
 export const WORKSPACE_CHANGED_EVENT = "promptforge:workspace-changed";
 
@@ -191,9 +199,16 @@ export function setupWorkspaceDrops(statusBar: StatusBar): IDisposable {
   };
   window.addEventListener("dragover", onDragOver);
   store.add(toDisposable(() => window.removeEventListener("dragover", onDragOver)));
+  // The element under an OS drop, when it is (or is inside) a marked
+  // drop target; the matching promptforge:file-drop answers with the
+  // paths, and the target gets them after the grants complete.
+  let pendingDropTarget: Element | null = null;
   const onDrop = (event: DragEvent): void => {
     if (isFileDrag(event)) {
       event.preventDefault();
+      const target = event.target;
+      pendingDropTarget =
+        target instanceof Element ? target.closest("[data-ws-file-drop]") : null;
       postDroppedFiles(event);
     }
   };
@@ -207,9 +222,17 @@ export function setupWorkspaceDrops(statusBar: StatusBar): IDisposable {
     if (paths === null || paths.length === 0) {
       return;
     }
-    void grantDroppedPaths(paths, statusBar).catch((error: unknown) => {
-      statusBar.showLocal(`Could not open the dropped files: ${(error as Error).message}`, "error");
-    });
+    const target = pendingDropTarget;
+    pendingDropTarget = null;
+    void grantDroppedPaths(paths, statusBar)
+      .then(() => {
+        target?.dispatchEvent(
+          new CustomEvent(WORKSPACE_FILE_DROP_EVENT, { detail: { paths } }),
+        );
+      })
+      .catch((error: unknown) => {
+        statusBar.showLocal(`Could not open the dropped files: ${(error as Error).message}`, "error");
+      });
   };
   window.addEventListener(FILE_DROP_EVENT, onFileDrop);
   store.add(toDisposable(() => window.removeEventListener(FILE_DROP_EVENT, onFileDrop)));

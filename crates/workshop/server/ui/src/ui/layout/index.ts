@@ -7,6 +7,7 @@ import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
 import { registerPanelFactory } from "../../services/panel-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { STATUS_BAR } from "../status/status-bar";
+import { PlaceholderPanel } from "./placeholder-panel";
 import { WorkshopTreePanel } from "./workshop-panel";
 
 /**
@@ -27,5 +28,8 @@ export function register(): IDisposable {
   store.add(
     registerPanelFactory("tree", () => new WorkshopTreePanel(getServiceOrNull(STATUS_BAR))),
   );
+  // The placeholder rides this chunk: it is the layout layer's own
+  // panel, installed beside the tree's factory.
+  store.add(registerPanelFactory("placeholder", () => new PlaceholderPanel()));
   return store;
 }

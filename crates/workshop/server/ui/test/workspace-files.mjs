@@ -114,6 +114,8 @@ console.error = realConsoleError;
     groups: [],
     onDidMovePanel: () => ({ dispose() {} }),
     onDidLayoutChange: () => ({ dispose() {} }),
+    onDidRemovePanel: () => ({ dispose() {} }),
+    onDidRemoveGroup: () => ({ dispose() {} }),
     getPanel: (id) => panels.get(id),
     getGroup: (id) => dock.groups.find((group) => group.id === id),
     addPanel: (options) => {

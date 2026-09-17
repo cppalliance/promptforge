@@ -3,9 +3,22 @@
 // "main" holds document editors, "right" holds the agent session
 // ("bottom" is reserved for later). Placement for a new panel resolves as
 // the per-panel override recorded when the user last moved that panel,
-// then the panel type's declared affinity from the panel registry. When
-// every panel in a zone has been closed its Dockview group is gone; the
-// next open into the zone rebuilds the group on its side of the dock.
+// then the panel type's declared affinity from the panel registry.
+//
+// Zones never die from panel closes. Dockview's removePanel defaults
+// removeEmptyGroup: true, so a group's last panel leaving dissolves the
+// group and the zone's space with it; every close path funnels through
+// that removal. This module keeps each zone's last known size, and when
+// a zone's group dies because its last real panel closed, it re-creates
+// the group in the same tick at the zone's rebuilt position hosting the
+// inert placeholder panel, then restores the recorded sizes. An explicit
+// close of a group holding only its placeholder lets the zone die (an
+// explicit close of real panels is indistinguishable from closing those
+// panels - dockview's removeGroup funnels through the same per-panel
+// path - and resurrects, the plan's accepted fallback). Placeholders are
+// ordinary serialized panels, so the saved layout keeps the zones and a
+// relaunch restores them. Restores and resets suppress resurrection
+// through withZoneRestore.
 //
 // The zone state itself (the group map and the placement overrides) lives
 // in the ZoneStateService, resolved through the service registry; this
@@ -25,6 +38,7 @@ import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { DOCK, isPanelType, panelTypeEntry, type PanelType } from "../../services/panel-registry";
 import { getService, registerService } from "../../services/service-registry";
 import {
+  ZONE_NAMES,
   ZoneStateService,
   ZONE_STATE,
   type ZoneName,
@@ -45,9 +59,107 @@ function zoneState(): ZoneStateService {
   return getService(ZONE_STATE);
 }
 
+/** One zone group's last known dimensions, kept for resurrection. */
+interface ZoneSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+// The size memory: each zone group's last known dimensions, refreshed on
+// every layout change. Session-scoped placement behavior (like the dock
+// reference above), not application state; the persisted sizes ride the
+// layout envelope through the placeholder panels themselves.
+const zoneSizes = new Map<ZoneName, ZoneSize>();
+
+// The explicit-close heuristic: the last panel removal seen, consumed by
+// the next group removal. A group that dies right after its final panel's
+// removal event died because that panel closed. Dockview's removeGroup
+// closes each panel through the same path a tab close takes, so an
+// explicit close of a group holding real panels is indistinguishable
+// from closing those panels and resurrects (the plan's accepted
+// fallback); an explicit close of a group holding only its placeholder
+// removes no real panel, and lets the zone die.
+let lastPanelRemoval: {
+  readonly groupId: string;
+  readonly wasLast: boolean;
+  readonly wasPlaceholder: boolean;
+} | null = null;
+
+// Set while a layout restore or reset runs: fromJSON and clear() remove
+// every live group, and those removals must never spawn placeholders.
+let restoring = false;
+
+/**
+ * Runs `run` with resurrection suppressed. Wraps the fromJSON in
+ * layout-persistence's restoreLayout (the one caller) so layout reloads
+ * and workspace switches never spawn placeholders.
+ */
+export function withZoneRestore<T>(run: () => T): T {
+  restoring = true;
+  try {
+    return run();
+  } finally {
+    restoring = false;
+  }
+}
+
+/** Records every zone group's current dimensions. */
+function recordZoneSizes(): void {
+  if (dock === null) {
+    return;
+  }
+  for (const zone of ZONE_NAMES) {
+    const group = liveGroup(zone);
+    if (group !== undefined) {
+      zoneSizes.set(zone, { width: group.api.width, height: group.api.height });
+    }
+  }
+}
+
+/**
+ * Re-creates a zone's group after its last panel closed: a fresh group
+ * at the zone's rebuilt position hosting the inert placeholder, sized
+ * back to the recorded dimensions. The surviving zones' recorded sizes
+ * are re-asserted as well - the splitview redistributes space on the
+ * removal and the re-add, and the side zones must stay pixel-identical.
+ */
+function resurrectZone(zone: ZoneName): void {
+  if (dock === null) {
+    return;
+  }
+  const entry = panelTypeEntry("placeholder");
+  if (entry === undefined) {
+    return;
+  }
+  const panel = dock.addPanel({
+    id: panelIdFor("placeholder", { zone }),
+    component: entry.type,
+    tabComponent: entry.tabComponent,
+    title: entry.title,
+    params: { zone },
+    position: rebuildPosition(zone),
+  });
+  zoneState().setGroup(zone, panel.group.id);
+  const size = zoneSizes.get(zone);
+  if (size !== undefined) {
+    panel.group.api.setSize(size);
+  }
+  for (const other of ZONE_NAMES) {
+    if (other === zone) {
+      continue;
+    }
+    const recorded = zoneSizes.get(other);
+    const group = liveGroup(other);
+    if (recorded !== undefined && group !== undefined) {
+      group.api.setSize(recorded);
+    }
+  }
+}
+
 /**
  * The panel id for one open: editors key by path, new agent panels key by
- * their instance id, and every other panel kind is a singleton.
+ * their instance id, Run windows key by their instance id, placeholders
+ * key by their zone, and every other panel kind is a singleton.
  */
 export function panelIdFor(type: PanelType, params: PanelParams): string {
   if (type === "editor") {
@@ -65,6 +177,12 @@ export function panelIdFor(type: PanelType, params: PanelParams): string {
   }
   if (type === "agent" && typeof params.instance === "string") {
     return `agent:${params.instance}`;
+  }
+  if (type === "run" && typeof params.instance === "string") {
+    return `run:${params.instance}`;
+  }
+  if (type === "placeholder" && typeof params.zone === "string") {
+    return `placeholder:${params.zone}`;
   }
   return type;
 }
@@ -113,6 +231,52 @@ export function initZones(dockview: DockviewApi): IDisposable {
       if (zone !== undefined) {
         setZoneOverride(panel.id, zone);
       }
+    }),
+  );
+  // The size memory refreshes on every layout change, so a resurrection
+  // restores the dimensions the zone last had, not the ones it booted
+  // with.
+  store.add(dockview.onDidLayoutChange(() => recordZoneSizes()));
+  // The explicit-close heuristic's first half: remember each panel
+  // removal (and whether it emptied its group) for the group removal
+  // that may follow in the same close path.
+  store.add(
+    dockview.onDidRemovePanel((panel) => {
+      lastPanelRemoval = {
+        groupId: panel.group.id,
+        wasLast: panel.group.panels.length === 0,
+        wasPlaceholder: panelTypeFromId(panel.id) === "placeholder",
+      };
+    }),
+  );
+  store.add(
+    dockview.onDidRemoveGroup((group) => {
+      const removal = lastPanelRemoval;
+      lastPanelRemoval = null;
+      if (restoring) {
+        return;
+      }
+      const zone = zoneState().zoneForGroupId(group.id);
+      if (zone === undefined) {
+        return;
+      }
+      // Let the zone die when the group did not die of its last real
+      // panel closing: an empty group's explicit removal, or the
+      // explicit close of a group holding only its placeholder.
+      if (
+        removal === null ||
+        removal.groupId !== group.id ||
+        !removal.wasLast ||
+        removal.wasPlaceholder
+      ) {
+        return;
+      }
+      // The dock's last group standing is never resurrected: with no
+      // survivors there is no zone layout left to preserve.
+      if (dock === null || dock.groups.length === 0) {
+        return;
+      }
+      resurrectZone(zone);
     }),
   );
   return store;
@@ -177,12 +341,12 @@ function rebuildPosition(zone: ZoneName): AddPanelPositionOptions | undefined {
 
 /** The tab title for one open: editors take the file's base name. */
 function titleFor(type: PanelType, params: PanelParams): string {
-  if (type === "editor") {
+  if (type === "editor" || type === "run") {
     const path = params.path;
     if (typeof path === "string") {
       const name = path.split(/[\\/]/).filter(Boolean).pop();
       if (name !== undefined) {
-        return name;
+        return type === "run" ? `Run: ${name}` : name;
       }
     }
   }
@@ -219,6 +383,16 @@ export function openInZone(type: PanelType, params: PanelParams): IDockviewPanel
     params,
     position: group ? { referenceGroup: group.id } : rebuildPosition(zone),
   });
+  // A zone holding only its placeholder hands the group over: the real
+  // panel joins first (so the group never empties), then the placeholder
+  // leaves. The zone keeps its space and its recorded size.
+  if (group !== undefined && type !== "placeholder") {
+    for (const occupant of [...group.panels]) {
+      if (occupant !== panel && panelTypeFromId(occupant.id) === "placeholder") {
+        dock.removePanel(occupant);
+      }
+    }
+  }
   state.setGroup(zone, panel.group.id);
   return panel;
 }

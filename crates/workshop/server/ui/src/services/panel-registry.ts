@@ -22,9 +22,11 @@ import type { ZoneName } from "./zone-state-service";
 export const PERMANENT_TAB = "permanent";
 /** The registered name of the agent tab renderer with an SPA context menu. */
 export const AGENT_TAB = "agent-tab";
+/** The registered name of the Run window's shimmering-title tab renderer. */
+export const RUN_TAB = "run-tab";
 
 /** The panel kinds the workbench knows. */
-export type PanelType = "tree" | "editor" | "config" | "agent";
+export type PanelType = "tree" | "editor" | "config" | "agent" | "run" | "placeholder";
 
 /**
  * The contract a lazy feature directory's barrel (index.ts) satisfies.
@@ -211,4 +213,22 @@ registerPanelType({
   title: "Agent Session",
   tabComponent: AGENT_TAB,
   load: () => import("../ui/agent/index"),
+});
+registerPanelType({
+  type: "run",
+  defaultZone: "main",
+  title: "Run",
+  tabComponent: RUN_TAB,
+  load: () => import("../ui/run/index"),
+});
+// The placeholder holds a zone's resurrected group after its last real
+// panel closes. Its tab is permanent: closing it would just resurrect
+// the zone again. It rides the layout directory's chunk - it is the
+// layout layer's own panel, so it needs no chunk of its own.
+registerPanelType({
+  type: "placeholder",
+  defaultZone: "main",
+  title: "Placeholder",
+  tabComponent: PERMANENT_TAB,
+  load: () => import("../ui/layout/index"),
 });

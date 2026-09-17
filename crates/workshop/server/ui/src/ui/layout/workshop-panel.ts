@@ -283,6 +283,12 @@ export class WorkshopTreePanel extends WorkshopPart {
       row.addEventListener("click", () => {
         openInZone("editor", { path: entry.path });
       });
+      // Files drag out of the tree: the Run window's drop zone accepts
+      // the workshop-path payload and loads the file as its prompt.
+      row.draggable = true;
+      row.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("application/x-workshop-path", entry.path);
+      });
     }
     return item;
   }

@@ -53,6 +53,7 @@ function scenario({ desktop, responder }) {
   const local = [];
   globalThis.window = window;
   globalThis.CustomEvent = window.CustomEvent;
+  globalThis.Element = window.Element;
   globalThis.fetch = async (url, init) => {
     calls.push({ url, init, body: JSON.parse(init.body) });
     const respond =
@@ -264,6 +265,51 @@ for (const desktop of [false, true]) {
     "the surviving grant still confirms as info",
     local.some((entry) => entry.severity === "info" && entry.label.includes("C:\\allowed")),
   );
+}
+
+// --- The drop-target dispatch: workshop:file-drop after granting -------------
+
+{
+  const { window, calls } = scenario({ desktop: true });
+  const target = window.document.createElement("div");
+  target.setAttribute("data-ws-file-drop", "");
+  const child = window.document.createElement("div");
+  target.appendChild(child);
+  window.document.body.appendChild(target);
+  const received = [];
+  target.addEventListener("workshop:file-drop", (event) => received.push(event.detail.paths));
+
+  // The HTML5 drop lands on the target's child; the native event then
+  // answers with the real paths.
+  const drop = syntheticDrag(window, "drop", ["Files"]);
+  child.dispatchEvent(drop);
+  window.dispatchEvent(
+    new window.CustomEvent("promptforge:file-drop", {
+      detail: { paths: ["C:\\a.md", "C:\\b.txt"] },
+    }),
+  );
+  await flush();
+  check("a drop on a marked target still grants every path", calls.length === 2);
+  check(
+    "the target receives workshop:file-drop after the grants",
+    received.length === 1 && received[0].join("|") === "C:\\a.md|C:\\b.txt",
+  );
+}
+
+{
+  const { window, calls } = scenario({ desktop: true });
+  const dispatched = [];
+  window.addEventListener("workshop:file-drop", () => dispatched.push(true));
+  // A drop on an unmarked element grants exactly as today, with no
+  // workshop:file-drop dispatch.
+  const drop = syntheticDrag(window, "drop", ["Files"]);
+  window.document.body.dispatchEvent(drop);
+  window.dispatchEvent(
+    new window.CustomEvent("promptforge:file-drop", { detail: { paths: ["C:\\c.md"] } }),
+  );
+  await flush();
+  check("a drop on a non-target grants its paths", calls.length === 1);
+  check("a drop on a non-target dispatches nothing", dispatched.length === 0);
 }
 
 if (failures.length > 0) {

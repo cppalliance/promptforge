@@ -19,14 +19,17 @@ import { Disposable } from "../../base/lifecycle";
 import {
   AGENT_TAB,
   PERMANENT_TAB,
+  RUN_TAB,
   loadPanelType,
   panelTypeEntry,
 } from "../../services/panel-registry";
 import { DropdownMenu } from "shared-ui/dropdown";
+import { RunTab } from "./run-tab";
 
 export {
   AGENT_TAB,
   PERMANENT_TAB,
+  RUN_TAB,
   isPanelType,
   panelTypeEntry,
   registerPanelFactory,
@@ -217,6 +220,9 @@ class AgentTab extends Disposable implements ITabRenderer {
 export function createPanelTabComponent(options: CreateComponentOptions): ITabRenderer | undefined {
   if (options.name === PERMANENT_TAB) {
     return new PermanentTab();
+  }
+  if (options.name === RUN_TAB) {
+    return new RunTab();
   }
   return options.name === AGENT_TAB ? new AgentTab() : undefined;
 }

@@ -24,4 +24,5 @@ import "./layout/layout.contribution";
 import "./status/status.contribution";
 import "./agent/agent.contribution";
 import "./gateway/gateway.contribution";
+import "./run/run.contribution";
 import "./quickinput/quickinput.contribution";

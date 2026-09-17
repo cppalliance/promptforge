@@ -16,7 +16,7 @@
 import type { DockviewApi, SerializedDockview } from "dockview";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
-import { resetZones, restoreZoneState, serializeZoneState } from "./zones";
+import { resetZones, restoreZoneState, serializeZoneState, withZoneRestore } from "./zones";
 
 // v3: panels serialize their tabComponent; a v2 snapshot would restore
 // the Workshop tree with a closable default tab.
@@ -95,7 +95,9 @@ export function restoreLayout(dock: DockviewApi, envelope: unknown): boolean {
     return false;
   }
   try {
-    dock.fromJSON(persisted.layout);
+    // fromJSON tears every live group down before rebuilding; those
+    // removals are a restore, not closes, so resurrection stays off.
+    withZoneRestore(() => dock.fromJSON(persisted.layout));
   } catch (error: unknown) {
     console.error("layout persistence: restore failed, falling back to defaults:", error);
     resetZones();

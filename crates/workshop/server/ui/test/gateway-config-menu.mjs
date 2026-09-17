@@ -194,6 +194,9 @@ initZones({
     if (index !== -1) addedPanels.splice(index, 1);
   },
   onDidMovePanel: () => ({ dispose() {} }),
+  onDidRemovePanel: () => ({ dispose() {} }),
+  onDidRemoveGroup: () => ({ dispose() {} }),
+  onDidLayoutChange: () => ({ dispose() {} }),
 });
 
 const contextKeys = getService(CONTEXT_KEY_SERVICE);

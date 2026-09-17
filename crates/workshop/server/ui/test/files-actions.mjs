@@ -316,6 +316,9 @@ initZones({
     return panel;
   },
   onDidMovePanel: () => ({ dispose() {} }),
+  onDidRemovePanel: () => ({ dispose() {} }),
+  onDidRemoveGroup: () => ({ dispose() {} }),
+  onDidLayoutChange: () => ({ dispose() {} }),
 });
 
 {

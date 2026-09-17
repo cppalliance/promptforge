@@ -41,6 +41,7 @@ try {
     editor: "ws-editor-panel",
     gateway: "ws-gateway-config-panel",
     stt: "ws-stt-mic",
+    run: "ws-run-panel",
   };
 
   const failures = [];

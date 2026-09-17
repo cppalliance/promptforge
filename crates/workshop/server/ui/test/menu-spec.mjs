@@ -39,6 +39,7 @@ const bundle = await esbuild.build({
       import "./src/ui/status/status.contribution.ts";
       import "./src/ui/agent/agent.contribution.ts";
       import "./src/ui/gateway/gateway.contribution.ts";
+      import "./src/ui/run/run.contribution.ts";
       import "./src/ui/quickinput/quickinput.contribution.ts";
       export { Commands } from "./src/services/command-registry.ts";
       export { Menus, MenuId } from "./src/services/menu-registry.ts";
@@ -328,6 +329,7 @@ const SPEC = {
     ["workbench.action.focusBelowGroup", "3_directional", "stub", "Group Below"],
   ],
   "menubar/run": [
+    ["workbench.action.newRunWindow", "0_run", "wired", "New Run Window"],
     ["workbench.action.debug.start", "1_debug", "stub", "Start Debugging"],
     ["workbench.action.debug.run", "1_debug", "stub", "Run Without Debugging"],
     ["workbench.action.debug.stop", "1_debug", "stub", "Stop Debugging"],
@@ -410,7 +412,15 @@ for (const rows of Object.values(SPEC)) {
   }
 }
 
+// Wired rows that deliberately carry no f1: menu-only commands. New Run
+// Window is one menu row by design (no palette row, no keybinding).
+const WIRED_WITHOUT_F1 = new Set(["workbench.action.newRunWindow"]);
+
 for (const id of wiredIds) {
+  if (WIRED_WITHOUT_F1.has(id)) {
+    check(`menu-only row '${id}' stays out of the palette`, !palette.has(id));
+    continue;
+  }
   check(`wired row '${id}' reaches the palette (f1)`, palette.has(id));
 }
 for (const id of stubIds) {

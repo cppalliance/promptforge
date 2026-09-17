@@ -154,6 +154,8 @@ function makeFakeDock() {
       return [...panels.values()];
     },
     onDidMovePanel: () => ({ dispose() {} }),
+    onDidRemovePanel: () => ({ dispose() {} }),
+    onDidRemoveGroup: () => ({ dispose() {} }),
     onDidLayoutChange: (fn) => {
       layoutListeners.add(fn);
       return { dispose: () => layoutListeners.delete(fn) };

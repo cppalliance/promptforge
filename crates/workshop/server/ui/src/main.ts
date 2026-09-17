@@ -1,4 +1,6 @@
 import "shared-ui/tokens.css";
+import "shared-ui/controls.css";
+import "shared-ui/shimmer.css";
 import "dockview/dist/styles/dockview.css";
 
 import "./tokens/base.css";

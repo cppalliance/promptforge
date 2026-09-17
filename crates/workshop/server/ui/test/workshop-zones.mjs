@@ -401,29 +401,46 @@ check(
   zoneOfPanel(editorB3) === "main" && editorB3.group.id === editorA.group.id,
 );
 
-// --- A zone group rebuilds after its last panel closes ----------------------
+// --- A zone group resurrects with a placeholder after its last panel closes ---
 
 const mainGroupId = editorA.group.id;
 dock.removePanel(editorA);
 dock.removePanel(editorB3);
-check("closing every main panel removes its group", dock.getGroup(mainGroupId) === undefined);
-check("only the agent and tree groups remain", dock.groups.length === 2);
-const editorC = openInZone("editor", { path: `${ROOT}\\c.txt` });
-check("the next main-zone open rebuilds the group", dock.groups.length === 3);
+await flush();
+check("closing every main panel retires the old group", dock.getGroup(mainGroupId) === undefined);
 check(
-  "the rebuilt group is a fresh group in the main zone",
-  editorC.group.id !== mainGroupId && zoneOfPanel(editorC) === "main",
+  "the main zone resurrects with a placeholder instead of dying",
+  dock.groups.length === 3 && !!dock.getPanel("placeholder:main"),
+);
+const mainPlaceholder = dock.getPanel("placeholder:main");
+check(
+  "the placeholder holds the main zone",
+  !!mainPlaceholder && zoneOfPanel(mainPlaceholder) === "main",
+);
+const editorC = openInZone("editor", { path: `${ROOT}\\c.txt` });
+check("the next main-zone open keeps the group count", dock.groups.length === 3);
+check(
+  "the reopened editor reuses the placeholder's group and drops it",
+  editorC.group.id === mainPlaceholder?.group.id &&
+    dock.getPanel("placeholder:main") === undefined,
 );
 
 // --- Tree reopen: expansion state survives for the session ------------------
 
 const callsBeforeReopen = treeCalls().length;
 dock.removePanel(treePanel);
-check("closing the tree removes the left zone group", dock.groups.length === 2);
+await flush();
+check(
+  "closing the tree resurrects the left zone with a placeholder",
+  dock.groups.length === 3 && !!dock.getPanel("placeholder:left"),
+);
 const treePanel2 = openInZone("tree", {});
 await flush();
 check("the tree reopens in the left zone", zoneOfPanel(treePanel2) === "left");
-check("the left zone group rebuilds on reopen", dock.groups.length === 3);
+check(
+  "the reopened tree reuses the placeholder's group",
+  dock.groups.length === 3 && dock.getPanel("placeholder:left") === undefined,
+);
 check(
   "a reopened tree renders from the session cache without refetching",
   treeCalls().length === callsBeforeReopen,

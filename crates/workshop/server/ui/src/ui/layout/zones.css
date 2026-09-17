@@ -290,3 +290,18 @@
   color: var(--danger-text);
   font-size: var(--font-size-sm);
 }
+
+/* The placeholder panel: the inert content a resurrected zone group
+   holds until a real panel arrives (zones.ts, placeholder-panel.ts). */
+.ws-placeholder-panel {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ws-placeholder-panel__hint {
+  margin: var(--space-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}

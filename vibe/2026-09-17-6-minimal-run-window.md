@@ -228,7 +228,7 @@ Add the ten contract-type re-exports (`ArgsDecl, ArgDecl, ArgType, CapabilityDec
 
 <step-2>
 
-### Step 2: Run window SPA and zone stability
+### Step 2: Run window SPA and zone stability [completed]
 
 - Component: `none`
 

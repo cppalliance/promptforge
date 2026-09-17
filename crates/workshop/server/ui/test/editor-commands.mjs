@@ -668,6 +668,8 @@ function makeFakeDock() {
       listeners.remove.push(fn);
       return { dispose() {} };
     },
+    onDidRemoveGroup: () => ({ dispose() {} }),
+    onDidLayoutChange: () => ({ dispose() {} }),
     onDidActivePanelChange: (fn) => {
       listeners.active.push(fn);
       return { dispose() {} };
@@ -789,7 +791,7 @@ initZones(dock);
   });
   filePanel.init({ params: { path: "C:\\p\\x.txt" }, api: { setTitle() {}, close() {} } });
   await flush();
-  for (const listener of listeners.remove) listener({ id: "editor:C:\\p\\x.txt", view: { content: filePanel } });
+  for (const listener of listeners.remove) listener({ id: "editor:C:\\p\\x.txt", view: { content: filePanel }, group: { id: "g1", panels: [] } });
   check(
     "closing a file editor prepends its path and writes the snapshot",
     closedWrites.length === 1 && closedWrites[0].paths.join(",") === "C:\\p\\x.txt,C:\\p\\seeded.txt",
@@ -808,7 +810,7 @@ initZones(dock);
   const untitledStub = createStubSurface();
   const untitledPanel = new EditorPanel({ createSurface: () => untitledStub });
   untitledPanel.init({ params: { untitled: 3, text: "unsaved draft" }, api: { setTitle() {}, close() {} } });
-  for (const listener of listeners.remove) listener({ id: "editor:untitled-3", view: { content: untitledPanel } });
+  for (const listener of listeners.remove) listener({ id: "editor:untitled-3", view: { content: untitledPanel }, group: { id: "g1", panels: [] } });
   check(
     "a closed untitled buffer never persists its text",
     closedWrites.length === 3 && closedWrites[2].paths.join(",") === "C:\\p\\seeded.txt",
@@ -833,7 +835,7 @@ initZones(dock);
   check("reopenClosedEditor on an empty stack is a no-op", added.length === beforeEmpty);
 
   // A non-editor panel close records nothing.
-  for (const listener of listeners.remove) listener({ id: "tree", view: { content: {} } });
+  for (const listener of listeners.remove) listener({ id: "tree", view: { content: {} }, group: { id: "g1", panels: [{}] } });
   editorLifecycle.reopenClosedEditor();
   check("closing a non-editor panel pushes nothing onto the stack", added.length === beforeEmpty);
   tracking.dispose();
