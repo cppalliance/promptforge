@@ -1,21 +1,23 @@
 // The editor settings service: the four user-facing editor toggles
 // (word wrap, render whitespace, render control characters, column
-// selection), persisted to localStorage so they survive a reload and
-// published as the config.editor.* context keys so the menus' `toggled`
-// expressions follow them. EditorSurface subscribes to onDidChange and
-// reconfigures one Compartment per setting; the toggle actions in
-// editor.contribution.ts call toggle().
+// selection), seeded from the UI-state adapter's user bucket at
+// construction and written back through it on every change so they
+// survive a relaunch, and published as the config.editor.* context keys
+// so the menus' `toggled` expressions follow them. EditorSurface
+// subscribes to onDidChange and reconfigures one Compartment per setting;
+// the toggle actions in editor.contribution.ts call toggle().
 //
 // The persisted value arrives as unknown and passes a hand-written shape
 // check - a malformed or hostile payload reads as the defaults, never
-// as a cast. Storage access itself can throw (denied access, quota), so
-// every read and write is guarded and the service degrades to in-memory.
+// as a cast. The writer is fire-and-forget: a write that throws is
+// swallowed and the in-memory values stay authoritative.
 //
-// The service self-registers with a default factory, so any bundle that
-// touches it gets the singleton without composition-root wiring.
+// The service self-registers with a default factory (empty initial,
+// no-op writer), so any bundle that touches it gets a working singleton;
+// the composition root re-registers it bound to the live adapter before
+// the first consumer resolves it.
 //
-// DOM-free: storage is injectable and defaults to the page's
-// localStorage when one exists.
+// DOM-free: the initial value and the writer are injected.
 
 import { Emitter } from "../../base/event";
 import type { Event } from "../../base/event";
@@ -62,29 +64,20 @@ export const EDITOR_SETTING_CONTEXT_KEYS: { readonly [K in EditorSettingName]: `
   columnSelection: "config.editor.columnSelection",
 };
 
-/** The localStorage key holding the persisted settings object. */
-const STORAGE_KEY = "workshop.editorSettings";
+/** The writer the service hands each new settings object to. */
+export type EditorSettingsWriter = (value: unknown) => void;
 
 /**
- * Narrows a persisted payload to EditorSettings: it must be a JSON
+ * Narrows a persisted payload to EditorSettings: it must be a plain
  * object, each known key keeps its value only when it is a boolean, and
  * missing or mistyped keys fall back to the defaults. Anything else
- * reads as the defaults.
+ * (null, an array, a string, a number) reads as the defaults.
  */
-function readSettings(raw: string | null): EditorSettings {
-  if (raw === null) {
+function readSettings(initial: unknown): EditorSettings {
+  if (typeof initial !== "object" || initial === null || Array.isArray(initial)) {
     return DEFAULT_EDITOR_SETTINGS;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return DEFAULT_EDITOR_SETTINGS;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return DEFAULT_EDITOR_SETTINGS;
-  }
-  const record: Record<string, unknown> = parsed as Record<string, unknown>;
+  const record: Record<string, unknown> = initial as Record<string, unknown>;
   const settings = { ...DEFAULT_EDITOR_SETTINGS };
   for (const name of SETTING_NAMES) {
     const value: unknown = record[name];
@@ -95,19 +88,10 @@ function readSettings(raw: string | null): EditorSettings {
   return settings;
 }
 
-/** The page's localStorage, or null where none exists (a DOM-free host). */
-function defaultStorage(): Storage | null {
-  try {
-    return typeof globalThis.localStorage === "undefined" ? null : globalThis.localStorage;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * The editor settings. Mutations persist eagerly, update the
+ * The editor settings. Mutations write through eagerly, update the
  * config.editor.* context keys, and fire onDidChange with the new
- * settings; a storage failure leaves the in-memory values authoritative
+ * settings; a writer failure leaves the in-memory values authoritative
  * for the rest of the page lifetime.
  */
 export class EditorSettingsService implements IDisposable {
@@ -118,12 +102,17 @@ export class EditorSettingsService implements IDisposable {
   /** Fires when a setting changes; the editor surfaces hook it. */
   readonly onDidChange: Event<EditorSettings> = this.changeEmitter.event;
 
+  /**
+   * `initial` is the value the user bucket held at boot (any shape; see
+   * readSettings); `write` receives the whole settings object after each
+   * change.
+   */
   constructor(
-    private readonly storage: Storage | null = defaultStorage(),
-    private readonly storageKey: string = STORAGE_KEY,
+    initial: unknown = null,
+    private readonly write: EditorSettingsWriter = () => {},
     contextKeys: ContextKeyService | null = getServiceOrNull(CONTEXT_KEY_SERVICE),
   ) {
-    this.current = readSettings(this.readRaw());
+    this.current = readSettings(initial);
     if (contextKeys !== null) {
       for (const name of SETTING_NAMES) {
         const key = contextKeys.createKey<boolean>(EDITOR_SETTING_CONTEXT_KEYS[name], DEFAULT_EDITOR_SETTINGS[name]);
@@ -158,25 +147,12 @@ export class EditorSettingsService implements IDisposable {
     this.set(name, !this.current[name]);
   }
 
-  private readRaw(): string | null {
-    if (this.storage === null) {
-      return null;
-    }
-    try {
-      return this.storage.getItem(this.storageKey);
-    } catch {
-      return null;
-    }
-  }
-
   private persist(): void {
-    if (this.storage === null) {
-      return;
-    }
     try {
-      this.storage.setItem(this.storageKey, JSON.stringify(this.current));
+      this.write(this.current);
     } catch {
-      // Quota or denied access: the in-memory values stay authoritative.
+      // The adapter reports its own failures; a throwing writer leaves
+      // the in-memory values authoritative.
     }
   }
 
@@ -188,6 +164,8 @@ export class EditorSettingsService implements IDisposable {
 /** The registry token for the editor-settings singleton. */
 export const EDITOR_SETTINGS_SERVICE = createServiceToken<EditorSettingsService>("workshop.editorSettings");
 
-// Self-registration: the default instance is shared by every consumer in
-// the process. The composition root may re-register to rebind.
+// Self-registration with the defaults and a no-op writer: a consumer that
+// resolves the token before the composition root re-registers it bound to
+// the live adapter gets working, unpersisted settings rather than a wrong
+// instance cached for the page lifetime.
 registerService(EDITOR_SETTINGS_SERVICE, () => new EditorSettingsService());

@@ -333,7 +333,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-8>
 
-### Step 8: Editor settings and zoom read from and write through the adapter
+### Step 8: Editor settings and zoom read from and write through the adapter [completed]
 
 - Component: `spa-user-stores`
 - Piece: scalar stores (sequential; both stores and Step 9 edit `main.ts`, so one at a time)

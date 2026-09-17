@@ -7,10 +7,11 @@
 // "@tauri-apps/api/webviewWindow" aliased to recording stubs in
 // test/helpers, and drives them against jsdom built from the real
 // index.html. Covers: the zoom math (0.1 steps, clamped to 0.5-2.0, reset
-// to 1.0), the browser fallback's CSS zoom application, persistence
-// across a reload, corrupt and out-of-range stored values falling back to
-// the default, a storage failure leaving the zoom applied and logged,
-// the Appearance flyout's zoom rows with their shortcut hints, and the
+// to 1.0), the browser fallback's CSS zoom application, the write-through
+// to the UI-state adapter's user bucket and the restore from it across a
+// reload, corrupt and out-of-range stored values falling back to the
+// default, a failing writer leaving the zoom applied and logged, the
+// Appearance flyout's zoom rows with their shortcut hints, and the
 // desktop path routing zoom to the native webview. The Ctrl+= /
 // Ctrl+Shift+= / Ctrl+- / Ctrl+NumPad0 / Ctrl+0 keybinding assertions
 // live in test/gateway-config-menu.mjs with the dispatcher.
@@ -22,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+import { createFakeUiStorage } from "./helpers/ui-storage.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
@@ -33,11 +35,11 @@ const bundle = await esbuild.build({
       export { Menu } from "./src/ui/menu/menu.ts";
       export {
         getZoom,
+        persistZoom,
         restoreZoom,
         resetZoom,
         zoomIn,
         zoomOut,
-        ZOOM_STORAGE_KEY,
       } from "./src/ui/chrome/zoom.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
@@ -74,9 +76,20 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// Each scenario gets a fresh jsdom (fresh localStorage, fresh DOM) plus a
-// fresh module instance. Pass desktop: true to exercise the native
-// webview path through the recording stub.
+// The user-bucket key the composition root binds the zoom to.
+const KEY = "zoom";
+
+// Binds a module instance's zoom writer to a fake adapter the way main.ts
+// binds the live one; the fake's `sets` records every write.
+function bindStorage(module, initial = {}) {
+  const storage = createFakeUiStorage(initial);
+  module.persistZoom((value) => storage.set("user", KEY, value));
+  return storage;
+}
+
+// Each scenario gets a fresh jsdom (fresh DOM) plus a fresh module
+// instance. Pass desktop: true to exercise the native webview path
+// through the recording stub.
 async function scenario({ desktop = false } = {}) {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
@@ -126,52 +139,68 @@ async function scenario({ desktop = false } = {}) {
 
 {
   const first = await scenario();
+  const storage = bindStorage(first.module);
   first.module.zoomIn();
   first.module.zoomIn();
   check(
-    "zooming persists the factor to localStorage",
-    first.window.localStorage.getItem(first.module.ZOOM_STORAGE_KEY) === "1.2",
+    "each zoom step writes the bare factor to the user bucket",
+    storage.sets.length === 2 &&
+      storage.sets.every((entry) => entry.bucket === "user" && entry.key === KEY) &&
+      storage.sets.map((entry) => entry.value).join(",") === "1.1,1.2",
   );
-  // A reload: a fresh module instance over the same window and storage.
+  // A reload: a fresh module instance over the same window, seeded from
+  // the value the last write stored.
   const reloaded = await freshModule();
   check("a reload boots at the default until restored", reloaded.getZoom() === 1);
-  reloaded.restoreZoom();
+  const reloadedStorage = bindStorage(reloaded, { user: { [KEY]: storage.get("user", KEY) } });
+  reloaded.restoreZoom(reloadedStorage.get("user", KEY));
   check("a reload restores the persisted factor", reloaded.getZoom() === 1.2);
   check(
     "the restore re-applies CSS zoom to the root element",
     first.window.document.documentElement.style.zoom === "1.2",
+  );
+  check("the restore does not echo the factor back to the writer", reloadedStorage.sets.length === 0);
+}
+
+// --- Persistence: the writer installed with persistZoom is replaceable -----
+
+{
+  const { module } = await scenario();
+  const first = bindStorage(module);
+  const disposable = module.persistZoom(() => {
+    throw new Error("must not be called after dispose");
+  });
+  disposable.dispose();
+  module.zoomIn();
+  check(
+    "disposing an installed writer restores the no-op, not an earlier writer",
+    first.sets.length === 0 && module.getZoom() === 1.1,
   );
 }
 
 // --- Persistence: corrupt and out-of-range values fall back -----------------
 
 {
-  const { window, module } = await scenario();
-  for (const bad of ["garbage", "5", "0.1", "NaN"]) {
-    window.localStorage.setItem(module.ZOOM_STORAGE_KEY, bad);
-    module.restoreZoom();
+  const { module } = await scenario();
+  for (const bad of ["garbage", "1.2", 5, 0.1, Number.NaN, null, undefined, { factor: 1.2 }, [1.2]]) {
+    module.restoreZoom(bad);
     check(
-      `a corrupt stored value (${JSON.stringify(bad)}) falls back to 100%`,
+      `a corrupt stored value (${String(bad)}) falls back to 100%`,
       module.getZoom() === 1,
     );
   }
+  module.restoreZoom(0.5);
+  check("the lower bound restores", module.getZoom() === 0.5);
+  module.restoreZoom(2);
+  check("the upper bound restores", module.getZoom() === 2);
 }
 
-// --- Persistence: a storage failure does not block the zoom ------------------
+// --- Persistence: a failing writer does not block the zoom -------------------
 
 {
   const { window, module } = await scenario();
-  // jsdom's Storage is a legacy platform object: assigning setItem on the
-  // instance stores a "setItem" key instead of overriding the method, so
-  // the throwing stub replaces window.localStorage itself.
-  Object.defineProperty(window, "localStorage", {
-    configurable: true,
-    value: {
-      getItem: () => null,
-      setItem: () => {
-        throw new Error("denied");
-      },
-    },
+  module.persistZoom(() => {
+    throw new Error("denied");
   });
   const errors = [];
   const originalError = console.error;
@@ -185,13 +214,13 @@ async function scenario({ desktop = false } = {}) {
     escaped = true;
   }
   console.error = originalError;
-  check("a storage failure does not escape the zoom", escaped === false);
-  check("the zoom still applies when storage fails", module.getZoom() === 1.1);
+  check("a writer failure does not escape the zoom", escaped === false);
+  check("the zoom still applies when the writer fails", module.getZoom() === 1.1);
   check(
-    "the CSS fallback still applies when storage fails",
+    "the CSS fallback still applies when the writer fails",
     window.document.documentElement.style.zoom === "1.1",
   );
-  check("a storage failure is logged", errors.length === 1);
+  check("a writer failure is logged", errors.length === 1);
 }
 
 // --- Appearance flyout: the zoom rows dispatch the registered actions --------
@@ -240,6 +269,7 @@ async function scenario({ desktop = false } = {}) {
 
 {
   const { window, module, webviewZooms } = await scenario({ desktop: true });
+  const storage = bindStorage(module);
   module.zoomIn();
   check("desktop zoom goes to the native webview", webviewZooms().join(",") === "1.1");
   check(
@@ -249,10 +279,10 @@ async function scenario({ desktop = false } = {}) {
   );
   check(
     "desktop zoom still persists the factor",
-    window.localStorage.getItem(module.ZOOM_STORAGE_KEY) === "1.1",
+    storage.sets.length === 1 && storage.get("user", KEY) === 1.1,
   );
   const reloaded = await freshModule();
-  reloaded.restoreZoom();
+  reloaded.restoreZoom(storage.get("user", KEY));
   check(
     "a desktop boot restores zoom through the native webview",
     webviewZooms().join(",") === "1.1,1.1",

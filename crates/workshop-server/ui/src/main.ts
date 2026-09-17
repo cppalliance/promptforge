@@ -18,7 +18,7 @@ import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
 import { CommandCenter } from "./ui/chrome/command-center";
-import { EDITOR_SETTINGS_SERVICE } from "./ui/editor/editor-settings-service";
+import { EDITOR_SETTINGS_SERVICE, EditorSettingsService } from "./ui/editor/editor-settings-service";
 import { setupGatewayConfigBridge } from "./ui/gateway/gateway-config-bridge";
 import { StatusBar, STATUS_BAR } from "./ui/status/status-bar";
 import { UpdateView } from "./ui/chrome/update-view";
@@ -28,7 +28,7 @@ import { KeybindingDispatcher } from "./ui/layout/keybinding-dispatcher";
 import { QuickInputService, QUICK_INPUT_SERVICE } from "./ui/quickinput/quick-input";
 import { setupWorkspaceDrops } from "./ui/workspace/workspace-drops";
 import { register as registerWorkspaceFiles } from "./ui/workspace-files/index";
-import { restoreZoom } from "./ui/chrome/zoom";
+import { persistZoom, restoreZoom } from "./ui/chrome/zoom";
 import { restoreLayout, startLayoutPersistence } from "./ui/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./ui/layout/panel-types";
 import { initZones, openInZone } from "./ui/layout/zones";
@@ -59,6 +59,19 @@ const storage = createUiStorage();
 await storage.preload(3000);
 registerService(UI_STORAGE, () => storage);
 
+// The user-scoped stores rebind to the live adapter here, ahead of their
+// first resolution: each is built from its user-bucket value and writes
+// every change back to the same key. The import-time default factories
+// (defaults, no-op writer) stay behind only for a consumer that resolves
+// a token before this line, which none does at boot.
+registerService(
+  EDITOR_SETTINGS_SERVICE,
+  () =>
+    new EditorSettingsService(storage.get("user", "editor_settings"), (value) =>
+      storage.set("user", "editor_settings", value),
+    ),
+);
+
 // One persistent socket carries the server's downstream JSON - status
 // updates the status bar renders as they arrive, catalog pushes, and
 // workbench snapshots. Chat rides the agent panel's own /agents/ws
@@ -77,8 +90,10 @@ updates.startAutoCheck();
 // when the desktop shell sets its initialization flag.
 disposables.add(setupWindowChrome());
 // Native webview zoom does not persist across sessions, so the stored
-// factor is re-applied on every boot.
-restoreZoom();
+// factor is re-applied on every boot from the user bucket; the writer
+// installs after the restore so the restore never echoes the factor back.
+restoreZoom(storage.get("user", "zoom"));
+disposables.add(persistZoom((value) => storage.set("user", "zoom", value)));
 // Native Explorer drops arrive as a typed event from the desktop shell;
 // each path becomes a workspace grant. Inert in a plain browser.
 disposables.add(setupWorkspaceDrops(statusBar));

@@ -1,8 +1,9 @@
 // Unit test for the editor settings service and its surface wiring
 // (plan step 14, src/ui/editor/editor-settings-service.ts,
-// editor-surface.ts, editor.contribution.ts). The service persists four
-// boolean settings to localStorage behind a shape check, publishes them
-// as the config.editor.* context keys, and fires onDidChange; the
+// editor-surface.ts, editor.contribution.ts). The service seeds four
+// boolean settings from the UI-state adapter's user bucket behind a
+// shape check, writes every change back through the adapter, publishes
+// them as the config.editor.* context keys, and fires onDidChange; the
 // CodeMirror surface carries one Compartment per setting and follows
 // the service in place - no state rebuild. The contribution's four
 // toggle actions are asserted on the shared registries. Bundles the
@@ -15,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+import { createFakeUiStorage } from "./helpers/ui-storage.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -130,26 +132,34 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-/** An in-memory Storage stand-in; `map` exposes the persisted payloads. */
-function fakeStorage() {
-  const map = new Map();
-  return {
-    getItem: (key) => (map.has(key) ? map.get(key) : null),
-    setItem: (key, value) => { map.set(key, String(value)); },
-    removeItem: (key) => { map.delete(key); },
-    map,
-  };
+/** The user-bucket key the composition root binds the service to. */
+const KEY = "editor_settings";
+
+/**
+ * Builds a service over a fake adapter the way main.ts binds the live one:
+ * the initial value read from the user bucket, every change written back
+ * to the same key. Returns the service and the fake, whose `sets` records
+ * the writes.
+ */
+function serviceOver(initial, contextKeys = null) {
+  const storage = createFakeUiStorage(initial === undefined ? {} : { user: { [KEY]: initial } });
+  const service = new EditorSettingsService(
+    storage.get("user", KEY),
+    (value) => storage.set("user", KEY, value),
+    contextKeys,
+  );
+  return { service, storage };
 }
 
 {
-  // Defaults, toggle, persistence, and the no-op set.
-  const storage = fakeStorage();
-  const service = new EditorSettingsService(storage, "test.settings", null);
+  // Defaults, toggle, the write-through, and the no-op set.
+  const { service, storage } = serviceOver();
   check("wordWrap defaults off", service.settings.wordWrap === false);
   check("renderWhitespace defaults off", service.settings.renderWhitespace === false);
   check("renderControlCharacters defaults on, as in Cursor", service.settings.renderControlCharacters === true);
   check("columnSelection defaults off", service.settings.columnSelection === false);
   check("the exported defaults match", DEFAULT_EDITOR_SETTINGS.renderControlCharacters === true);
+  check("construction writes nothing", storage.sets.length === 0);
 
   let fired = 0;
   let last = null;
@@ -157,23 +167,30 @@ function fakeStorage() {
   service.toggle("wordWrap");
   check("toggle flips the setting", service.settings.wordWrap === true);
   check("toggle fires onDidChange with the new settings", fired === 1 && last !== null && last.wordWrap === true);
-  check("toggle persists to storage", JSON.parse(storage.map.get("test.settings")).wordWrap === true);
+  check(
+    "toggle writes the whole settings object to the user bucket",
+    storage.sets.length === 1 &&
+      storage.sets[0].bucket === "user" &&
+      storage.sets[0].key === KEY &&
+      storage.sets[0].value.wordWrap === true &&
+      storage.sets[0].value.renderControlCharacters === true,
+  );
 
   service.set("wordWrap", true);
-  check("set to the current value is a no-op - no event, no write", fired === 1);
+  check("set to the current value is a no-op - no event, no write", fired === 1 && storage.sets.length === 1);
 
-  const reloaded = new EditorSettingsService(storage, "test.settings", null);
-  check("a new service over the same storage reads the persisted values", reloaded.settings.wordWrap === true);
+  // A relaunch: a new service seeded from what the last write stored.
+  const reloaded = new EditorSettingsService(storage.get("user", KEY), () => {}, null);
+  check("a new service over the written value reads it back", reloaded.settings.wordWrap === true);
 
-  const malformed = fakeStorage();
-  malformed.map.set("test.settings", "{not json");
-  const fromMalformed = new EditorSettingsService(malformed, "test.settings", null);
+  const { service: fromMalformed } = serviceOver("{not json");
   check(
-    "malformed JSON reads as the defaults, never a cast",
+    "a non-object initial value reads as the defaults, never a cast",
     fromMalformed.settings.wordWrap === false && fromMalformed.settings.renderControlCharacters === true,
   );
-  malformed.map.set("test.settings", JSON.stringify({ wordWrap: "yes", columnSelection: 1, renderWhitespace: true }));
-  const fromWrongTypes = new EditorSettingsService(malformed, "test.settings", null);
+  const { service: fromArray } = serviceOver([true, true, true, true]);
+  check("an array initial value reads as the defaults", fromArray.settings.wordWrap === false);
+  const { service: fromWrongTypes } = serviceOver({ wordWrap: "yes", columnSelection: 1, renderWhitespace: true });
   check(
     "non-boolean fields drop to defaults while real booleans survive",
     fromWrongTypes.settings.wordWrap === false &&
@@ -183,15 +200,41 @@ function fakeStorage() {
   service.dispose();
   reloaded.dispose();
   fromMalformed.dispose();
+  fromArray.dispose();
   fromWrongTypes.dispose();
+}
+
+{
+  // A writer that fails leaves the in-memory settings authoritative: the
+  // toggle still lands, the event still fires, and nothing escapes.
+  let writes = 0;
+  const service = new EditorSettingsService(
+    null,
+    () => {
+      writes += 1;
+      throw new Error("denied");
+    },
+    null,
+  );
+  let fired = 0;
+  service.onDidChange(() => { fired += 1; });
+  let escaped = false;
+  try {
+    service.toggle("columnSelection");
+  } catch {
+    escaped = true;
+  }
+  check("a failing writer does not escape the toggle", escaped === false);
+  check("a failing writer still receives the attempt", writes === 1);
+  check("a failing writer leaves the new value in place", service.settings.columnSelection === true);
+  check("a failing writer still fires onDidChange", fired === 1);
+  service.dispose();
 }
 
 {
   // The config.editor.* context keys follow the service.
   const contextKeys = new ContextKeyService();
-  const storage = fakeStorage();
-  storage.map.set("test.keys", JSON.stringify({ wordWrap: true }));
-  const service = new EditorSettingsService(storage, "test.keys", contextKeys);
+  const { service } = serviceOver({ wordWrap: true }, contextKeys);
   check(
     "construction publishes the defaults",
     contextKeys.getValue("config.editor.renderControlCharacters") === true &&
@@ -212,7 +255,7 @@ function fakeStorage() {
 {
   // The surface's compartments follow the service in place.
   const contextKeys = new ContextKeyService();
-  const service = new EditorSettingsService(fakeStorage(), "test.surface", contextKeys);
+  const { service } = serviceOver(undefined, contextKeys);
   const surface = new CodeMirrorSurface(service);
   window.document.body.appendChild(surface.element);
   surface.open({ path: "C:\\project\\c.txt", text: "alpha beta\nthird line\n" });
