@@ -16,6 +16,6 @@ pub(crate) async fn admin_config(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let live = state.live.read().await;
-    Ok(Json(live.config.to_json()))
+    let config = state.config().await;
+    Ok(Json(config.to_json()))
 }

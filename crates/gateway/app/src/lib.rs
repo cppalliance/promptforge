@@ -88,6 +88,12 @@
 //! root outside the route table in `build_router`: the handler goes in
 //! its area's module, and its tests in that module's kebab `-tests.rs`
 //! sibling, wired with `#[path]`.
+//!
+//! Handlers read live state through the `AppState` accessors
+//! (`config()`, `routing()`, `profile_name()`), never by naming the
+//! lock. A handler that needs several fields atomically takes one
+//! scoped `state.live.read().await`; only commands and writers take the
+//! write guard.
 
 mod admin;
 mod api_error;
@@ -449,6 +455,21 @@ impl AppState {
     #[cfg(feature = "web-search")]
     pub(crate) async fn web_search(&self) -> Option<Arc<WebSearchState>> {
         self.live.read().await.web_search.clone()
+    }
+
+    /// The live routing table, shared by reference.
+    pub(crate) async fn routing(&self) -> Arc<Routing> {
+        Arc::clone(&self.live.read().await.routing)
+    }
+
+    /// The running configuration, shared by reference.
+    pub(crate) async fn config(&self) -> Arc<Config> {
+        Arc::clone(&self.live.read().await.config)
+    }
+
+    /// The running profile's name, when one is selected.
+    pub(crate) async fn profile_name(&self) -> Option<String> {
+        self.live.read().await.profile_name.clone()
     }
 
     /// The active profile's `[local].cache_dir` setting, for the cache routes.

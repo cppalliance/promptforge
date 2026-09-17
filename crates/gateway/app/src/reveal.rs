@@ -105,10 +105,7 @@ pub(crate) async fn admin_reveal(
     #[cfg(feature = "local")]
     let roots = {
         let mut roots = Vec::new();
-        let config = {
-            let live = state.live.read().await;
-            Arc::clone(&live.config)
-        };
+        let config = state.config().await;
         // An unresolvable cache root (no cache_dir configured and no home
         // directory) contributes no safe root.
         if let Ok(root) = crate::local::resolve_cache_root(config.local().cache_dir()) {

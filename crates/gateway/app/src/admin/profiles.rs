@@ -23,9 +23,8 @@ pub(crate) async fn admin_list_profiles(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let live = state.live.read().await;
-    let profiles: Vec<&str> = live
-        .config
+    let config = state.config().await;
+    let profiles: Vec<&str> = config
         .profiles()
         .iter()
         .map(gateway_config::ProfileConfig::name)

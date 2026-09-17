@@ -7,8 +7,6 @@
 //! The diff itself lives in the local crate beside the blob cache, which owns
 //! the slot layout and the sidecar records.
 
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::State;
 
@@ -37,10 +35,7 @@ pub(crate) async fn admin_orphans(
     // and `[[stt_model]]` the document declares, whether or not the running
     // profile selects it. The catalog does not move on an apply, which
     // republishes the document with no profile selected.
-    let config = {
-        let live = state.live.read().await;
-        Arc::clone(&live.config)
-    };
+    let config = state.config().await;
     let entries = tokio::task::spawn_blocking(move || {
         let root = resolve_cache_root(config.local().cache_dir())?;
         let stt_sources: Vec<&str> = config

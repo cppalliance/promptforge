@@ -165,10 +165,7 @@ pub(crate) async fn admin_system(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<SystemSnapshot>, GatewayError> {
-    let cache_dir = {
-        let live = state.live.read().await;
-        live.config.local().cache_dir().map(str::to_owned)
-    };
+    let cache_dir = state.config().await.local().cache_dir().map(str::to_owned);
     let metrics = Arc::clone(&state.metrics);
     let snapshot = tokio::task::spawn_blocking(move || {
         let cache_root = disk_target(cache_dir.as_deref());

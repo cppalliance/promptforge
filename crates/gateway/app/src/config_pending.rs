@@ -40,7 +40,7 @@ pub(crate) async fn admin_config_pending(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
-    let running_profile = state.live.read().await.profile_name.clone();
+    let running_profile = state.profile_name().await;
     let reply = tokio::task::spawn_blocking(move || {
         let config = load_pending_for_running(&config_path, running_profile.as_deref())?;
         let mut profile = config.to_json();

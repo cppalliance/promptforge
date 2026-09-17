@@ -301,9 +301,8 @@ pub(crate) async fn audio_voices(
     State(state): State<AppState>,
     _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let live = state.live.read().await;
-    let voices = live
-        .routing
+    let routing = state.routing().await;
+    let voices = routing
         .models()
         .iter()
         .filter(|model| model.kind == ModelKind::Speech)
@@ -312,7 +311,6 @@ pub(crate) async fn audio_voices(
         .into_iter()
         .map(|voice| serde_json::json!({ "id": voice, "name": voice }))
         .collect::<Vec<_>>();
-    drop(live);
     Ok(Json(serde_json::json!({ "voices": voices })))
 }
 

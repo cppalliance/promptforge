@@ -8,10 +8,6 @@
 //! owns GGUF domain knowledge.
 
 #[cfg(feature = "local")]
-use std::path::PathBuf;
-#[cfg(feature = "local")]
-use std::sync::Arc;
-
 #[cfg(feature = "local")]
 use axum::Json;
 #[cfg(feature = "local")]
@@ -21,6 +17,8 @@ use axum::extract::{Query, State};
 #[cfg(feature = "local")]
 use serde::Deserialize;
 use serde::Serialize;
+#[cfg(feature = "local")]
+use std::path::PathBuf;
 
 #[cfg(feature = "local")]
 use crate::AppState;
@@ -108,10 +106,7 @@ pub(crate) async fn admin_model_info(
         query.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     // The retained running config carries the `[local].cache_dir` the path
     // is confined to, so the boundary and the store agree on the root.
-    let config = {
-        let live = state.live.read().await;
-        Arc::clone(&live.config)
-    };
+    let config = state.config().await;
     let info = tokio::task::spawn_blocking(move || {
         let root = resolve_cache_root(config.local().cache_dir())?;
         gguf::read_model_info(&root, &PathBuf::from(query.path))
