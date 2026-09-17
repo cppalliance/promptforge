@@ -113,6 +113,7 @@ test("stages and removes the real source file under Tauri's target name", () => 
         root,
         "crates",
         "workshop",
+        "shell",
         "binaries",
         "promptforge-gateway-x86_64-pc-windows-msvc.exe",
       ),

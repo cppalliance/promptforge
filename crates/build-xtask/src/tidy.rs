@@ -60,6 +60,13 @@ fn allowed_dependencies(name: &str) -> Option<Vec<&'static str>> {
     Some(allowed)
 }
 
+/// The crate directory for a tiered workshop package: the family lives in
+/// the `crates/workshop/` container, with the shell at `shell/`.
+fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
+    let short = name.strip_prefix("workshop-").unwrap_or("shell");
+    root.join("crates").join("workshop").join(short)
+}
+
 /// Check that tiered `workshop-*` crates depend only on lower tiers.
 ///
 /// Every tiered crate has landed, so a missing manifest is a violation,
@@ -71,7 +78,7 @@ pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
         let Some(allowed) = allowed_dependencies(name) else {
             continue;
         };
-        let manifest_path = root.join("crates").join(name).join("Cargo.toml");
+        let manifest_path = tiered_crate_dir(root, name).join("Cargo.toml");
         let Ok(text) = fs::read_to_string(&manifest_path) else {
             violations.push(format!(
                 "{name}: tiered crate has no manifest at {}",

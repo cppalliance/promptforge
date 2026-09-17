@@ -119,6 +119,9 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             .dir
             .starts_with(Path::new("crates").join(&container));
         let named = container_named_exception(&container) == Some(package.package.as_str());
+        // The build-* crates are meta tooling, not a product family: they
+        // may depend into any container.
+        let meta = family(&package.package) == Family::Build;
         // A container's public member is visible one level higher: to the
         // crates under the container's parent scope only.
         let public = container_public_member(&container) == Some(dep.package.as_str())
@@ -126,7 +129,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
                 Some(parent) => package.dir.starts_with(Path::new("crates").join(parent)),
                 None => package.dir.starts_with("crates"),
             };
-        if !inside && !named && !public {
+        if !inside && !named && !meta && !public {
             return Some(match container_face(&container) {
                 Some(face) => format!(
                     "crates/{container} is private to its family; only {face} may depend into it"
@@ -340,6 +343,12 @@ fn collect_deps(table: &toml::map::Map<String, toml::Value>, names: &mut Vec<Str
     }
 }
 
+#[cfg(test)]
+#[path = "product-container-tests.rs"]
+mod container_tests;
+#[cfg(test)]
+#[path = "product-test-support.rs"]
+pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "product-tests.rs"]
 mod tests;

@@ -48,7 +48,7 @@ const ICON_SIZE: u32 = 32;
 
 /// The brand icon as raw RGBA, derived from the workshop's `32x32.png`
 /// brand asset (PIL: `Image.open(...).convert("RGBA").tobytes()`;
-/// regenerate from `crates/workshop/icons/32x32.png` when the brand
+/// regenerate from `crates/workshop/shell/icons/32x32.png` when the brand
 /// changes).
 const BRAND_RGBA: &[u8] = include_bytes!("../../assets/tray-icon.rgba");
 
@@ -601,7 +601,7 @@ fn open_settings(tray: &Tray) {
 /// through the gateway discovery file and outlives it.
 fn launch_workshop(tray: &Tray) {
     // The same detach the shell uses for its own gateway spawn
-    // (crates/workshop/src/gateway.rs): broken out of any job object whose
+    // (crates/workshop/shell/src/gateway.rs): broken out of any job object whose
     // kill-on-close would reap the workshop with the gateway, no inherited
     // stdio, and a new process group.
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;

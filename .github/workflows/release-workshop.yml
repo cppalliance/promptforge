@@ -115,9 +115,10 @@ jobs:
           cache-dependency-path: |
             crates/*/ui/package-lock.json
             crates/gateway/*/ui/package-lock.json
+            crates/workshop/*/ui/package-lock.json
 
       - name: Install UI dependencies
-        working-directory: crates/workshop-server/ui
+        working-directory: crates/workshop/server/ui
         run: npm ci
 
       # The gateway sidecar build needs the config UI's esbuild pipeline
@@ -168,8 +169,8 @@ jobs:
               src="target/release/promptforge-gateway$ext"
               ;;
           esac
-          mkdir -p crates/workshop/binaries
-          staged="crates/workshop/binaries/promptforge-gateway-$triple$ext"
+          mkdir -p crates/workshop/shell/binaries
+          staged="crates/workshop/shell/binaries/promptforge-gateway-$triple$ext"
           cp "$src" "$staged"
           output=$("$staged" --version)
           version="${{ needs.prepare.outputs.version }}"
@@ -184,7 +185,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: crates/workshop
+          projectPath: crates/workshop/shell
           args: ${{ matrix.args }}
 
       - name: Build the unsigned temporary app
@@ -192,7 +193,7 @@ jobs:
         id: temporary-build
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
-          projectPath: crates/workshop
+          projectPath: crates/workshop/shell
           args: ${{ matrix.args }} --config tauri.nightly.conf.json
 
       - name: The signed build has the workspace version

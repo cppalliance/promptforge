@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 
 /// The icon, relative to this crate's manifest directory.
-const ICON: &str = "../../workshop/icons/icon.ico";
+const ICON: &str = "../../workshop/shell/icons/icon.ico";
 
 /// The application manifest: the common-controls v6 dependency that
 /// `muda`'s `common-controls-v6` feature requires. The resource script

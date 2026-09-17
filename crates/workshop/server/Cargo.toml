@@ -1,0 +1,86 @@
+[package]
+name = "workshop-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop shell"
+
+[[bin]]
+name = "workshop-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+futures-util.workspace = true
+open.workspace = true
+reqwest.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shared-loopback.workspace = true
+shared-progress.workspace = true
+gateway-api-discovery.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+workshop-gateway.workspace = true
+workshop-menu.workspace = true
+workshop-protocol.workspace = true
+workshop-registry.workspace = true
+workshop-sessions.workspace = true
+workshop-status.workspace = true
+workshop-support.workspace = true
+workshop-user-state.workspace = true
+workshop-workspace.workspace = true
+tempfile = { workspace = true, optional = true }
+workspace-hack.workspace = true
+
+[features]
+default = []
+# Drops the webview asset layer: the build script skips the esbuild UI
+# build, and the asset routes serve through a no-op implementation, so
+# server-only integration tests run without Node.js or the UI bundle.
+headless = []
+test-fixtures = [
+    "dep:tempfile",
+    "workshop-gateway/test-fixtures",
+    "workshop-menu/test-fixtures",
+    "workshop-sessions/test-fixtures",
+    "workshop-support/test-fixtures",
+    "workshop-workspace/test-fixtures",
+]
+
+[dev-dependencies]
+workshop-server = { path = ".", features = ["test-fixtures"] }
+# The test-fixtures feature exposes `resolve_for_test`, so the resolution
+# tests can run the real liveness gauntlet against the test binary's own
+# process image.
+gateway-api-discovery = { workspace = true, features = ["test-fixtures"] }
+# The socket integration tests drive agent programs on the runtime engine
+# directly, so the engine crates are test-only dependencies of the shell.
+promptforge-api-runtime.workspace = true
+promptforge-api-types.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tower.workspace = true
+
+# The build script bundles the UI with esbuild into OUT_DIR through the
+# shared helper; nothing UI-built lands in the repository.
+[build-dependencies]
+build-ui = { path = "../../build-ui" }
+
+[lints]
+workspace = true
+
+# Not released through cargo-dist; the gateway is the only disted package
+# (see dist-workspace.toml).
+[package.metadata.dist]
+dist = false

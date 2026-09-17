@@ -38,7 +38,8 @@ fn ico_images(ico: &[u8]) -> Vec<&[u8]> {
 #[test]
 fn the_exe_carries_every_image_of_the_program_icon() {
     let exe = std::fs::read(env!("CARGO_BIN_EXE_promptforge-gateway")).unwrap();
-    let ico_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../workshop/icons/icon.ico");
+    let ico_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../workshop/shell/icons/icon.ico");
     let ico = std::fs::read(&ico_path).unwrap();
 
     let images = ico_images(&ico);

@@ -1,15 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/tool-picker", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi"]
+members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/tool-picker", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/sessions", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace"]
 # crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
 # package both esbuild-built UIs consume, so the crates/* glob skips it.
-# crates/promptforge and crates/gateway are manifestless containers holding
-# their families' private crates (the gateway's STT subsystem nests one
-# level deeper under crates/gateway/stt). Cargo prunes excluded subtrees
-# from member globs, so a "crates/gateway/*" glob beside the exclude below
-# would match nothing; the container crates are enumerated explicitly
-# instead.
-exclude = ["crates/shared-ui", "crates/promptforge", "crates/gateway", "crates/gateway/stt"]
+# crates/promptforge, crates/gateway, and crates/workshop are manifestless
+# containers holding their families' private crates (the gateway's STT
+# subsystem nests one level deeper under crates/gateway/stt). Cargo prunes
+# excluded subtrees from member globs, so a "crates/gateway/*" glob beside
+# the exclude below would match nothing; the container crates are
+# enumerated explicitly instead.
+exclude = ["crates/shared-ui", "crates/promptforge", "crates/gateway", "crates/gateway/stt", "crates/workshop"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:
@@ -53,17 +53,17 @@ gateway-stt-engine = { path = "crates/gateway/stt/engine", version = "0.3.0" }
 gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper", version = "0.3.0" }
 promptforge-web-search = { path = "crates/promptforge/web-search", version = "0.3.0" }
 gateway-web-search = { path = "crates/gateway/web-search", version = "0.3.0" }
-workshop-server = { path = "crates/workshop-server", version = "0.3.0" }
-workshop-server-api = { path = "crates/workshop-server-api", version = "0.0.0" }
-workshop-gateway = { path = "crates/workshop-gateway", version = "0.0.0" }
-workshop-menu = { path = "crates/workshop-menu", version = "0.0.0" }
-workshop-protocol = { path = "crates/workshop-protocol", version = "0.0.0" }
-workshop-status = { path = "crates/workshop-status", version = "0.0.0" }
-workshop-support = { path = "crates/workshop-support", version = "0.0.0" }
-workshop-registry = { path = "crates/workshop-registry", version = "0.0.0" }
-workshop-sessions = { path = "crates/workshop-sessions", version = "0.0.0" }
-workshop-workspace = { path = "crates/workshop-workspace", version = "0.0.0" }
-workshop-user-state = { path = "crates/workshop-user-state", version = "0.0.0" }
+workshop-server = { path = "crates/workshop/server", version = "0.3.0" }
+workshop-server-api = { path = "crates/workshop/server-api", version = "0.0.0" }
+workshop-gateway = { path = "crates/workshop/gateway", version = "0.0.0" }
+workshop-menu = { path = "crates/workshop/menu", version = "0.0.0" }
+workshop-protocol = { path = "crates/workshop/protocol", version = "0.0.0" }
+workshop-status = { path = "crates/workshop/status", version = "0.0.0" }
+workshop-support = { path = "crates/workshop/support", version = "0.0.0" }
+workshop-registry = { path = "crates/workshop/registry", version = "0.0.0" }
+workshop-sessions = { path = "crates/workshop/sessions", version = "0.0.0" }
+workshop-workspace = { path = "crates/workshop/workspace", version = "0.0.0" }
+workshop-user-state = { path = "crates/workshop/user-state", version = "0.0.0" }
 gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi", version = "0.3.0" }
 # cargo-hakari's feature-unification crate; every member inherits it.
 workspace-hack = { path = "crates/workspace-hack", version = "0.1" }

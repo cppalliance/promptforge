@@ -63,7 +63,7 @@ const ICON_SIZE: u32 = 36;
 /// The brand glyph as raw RGBA, derived from the workshop's `64x64.png`
 /// brand asset (PIL: `Image.open(...).convert("RGBA").resize((36, 36),
 /// Image.LANCZOS).tobytes()`; regenerate from
-/// `crates/workshop/icons/64x64.png` when the brand changes).
+/// `crates/workshop/shell/icons/64x64.png` when the brand changes).
 const BRAND_RGBA: &[u8] = include_bytes!("../../assets/tray-icon-template.rgba");
 
 // The asset is exactly one 36x36 RGBA image.
@@ -463,7 +463,7 @@ fn launch_workshop(tray: &Tray) {
         command
     } else {
         // The unbundled dev fallback detaches the way the shell's own
-        // gateway spawn does (crates/workshop/src/gateway.rs): its own
+        // gateway spawn does (crates/workshop/shell/src/gateway.rs): its own
         // process group, so a terminal Ctrl-C on the gateway does not
         // SIGINT the workshop.
         let mut command = std::process::Command::new(exe);

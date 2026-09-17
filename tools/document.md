@@ -102,7 +102,7 @@ The `intro` lens runs a reduced pipeline. It has no extract stage and no tier st
 
 <lens-workshop>
 Audience: the end user of the Workshop desktop application.
-Targets: `crates/workshop/`, `crates/workshop-server/`, including `crates/workshop-server/ui/src/`.
+Targets: `crates/workshop/shell/`, `crates/workshop/server/`, including `crates/workshop/server/ui/src/`.
 Extract: what the user sees and operates. The chat and agent surface. The editor. The status bar. The menus. Voice input. The update flow. Routes and protocol only where they produce user-visible behavior.
 Noise: Rust internals, wire protocol details, test infrastructure.
 Output: `guide/src/workshop/`.
@@ -129,7 +129,7 @@ Template: the Tour. Frontmatter first, fanout last.
 
 <lens-agent>
 Audience: the agent program author.
-Targets: `crates/promptforge-agent/`, `crates/promptforge-lua/`, `crates/workshop-server/agents/`.
+Targets: `crates/promptforge-agent/`, `crates/promptforge-lua/`, `crates/workshop/sessions/agents/`.
 Extract: the .lua host surface. models.chat. tools.call. runtime.events. ui(). user_input. The agent loop. Context building from the event log.
 Noise: document-prompt syntax, the Rust API.
 Output: `guide/src/agent/`.

@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 /// the crate directory already exists, or when any file cannot be written.
 pub(crate) fn scaffold(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
     validate_name(name)?;
-    let dir = root.join("crates").join(name);
+    let short = name
+        .strip_prefix("workshop-")
+        .expect("validate_name passed");
+    let dir = root.join("crates").join("workshop").join(short);
     anyhow::ensure!(
         !dir.exists(),
         "crate directory already exists: {}",
@@ -84,17 +87,17 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn scaffold_scratch() -> (tempfile::TempDir, PathBuf) {
+    fn scaffold_scratch() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("repo");
         fs::create_dir_all(root.join("crates")).expect("crates dir");
         let dir = scaffold(&root, "workshop-scratch").expect("scaffold");
-        (temp, dir)
+        (temp, root, dir)
     }
 
     #[test]
     fn scaffold_creates_manifest_lib_and_test_binary() {
-        let (_temp, dir) = scaffold_scratch();
+        let (_temp, _root, dir) = scaffold_scratch();
         let manifest = fs::read_to_string(dir.join("Cargo.toml")).expect("manifest");
         assert!(manifest.contains("name = \"workshop-scratch\""));
         assert!(manifest.contains("version = \"0.0.0\""));
@@ -107,7 +110,7 @@ mod tests {
 
     #[test]
     fn scaffolded_manifest_parses_and_inherits_workspace_metadata() {
-        let (_temp, dir) = scaffold_scratch();
+        let (_temp, _root, dir) = scaffold_scratch();
         let text = fs::read_to_string(dir.join("Cargo.toml")).expect("manifest");
         let manifest: toml::Value = toml::from_str(&text).expect("valid toml");
         let workspace_bool = |key: &str| {
@@ -129,9 +132,8 @@ mod tests {
 
     #[test]
     fn scaffold_refuses_to_overwrite_an_existing_crate() {
-        let (_temp, dir) = scaffold_scratch();
-        let root = dir.parent().and_then(Path::parent).expect("workspace root");
-        assert!(scaffold(root, "workshop-scratch").is_err());
+        let (_temp, root, _dir) = scaffold_scratch();
+        assert!(scaffold(&root, "workshop-scratch").is_err());
     }
 
     #[test]

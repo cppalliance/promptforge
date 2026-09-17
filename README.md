@@ -71,7 +71,7 @@ Every build needs Rust and Node.js 22. The two web UIs are bundled with esbuild 
 ```bash
 git clone git@github.com:cppalliance/promptforge.git
 cd promptforge
-npm ci --prefix crates/workshop-server/ui
+npm ci --prefix crates/workshop/server/ui
 npm ci --prefix crates/gateway/config-ui/ui
 ```
 
@@ -81,7 +81,7 @@ npm ci --prefix crates/gateway/config-ui/ui
 - **macOS**: `xcode-select --install` and `brew install cmake node`, then `cargo workshop`.
 - **Windows**: install Visual Studio with the "Desktop development with C++" workload and Node.js 22, then `cargo workshop`.
 
-`cargo build -p workshop` is a low-level package build. It requires a real gateway executable to have already been staged at `crates/workshop/binaries/promptforge-gateway-<target-triple>` and does not clean that staging afterward. Bundling with `cargo tauri build` has the same staging requirement; the release workflows under `.github/workflows/` show the exact packaging commands per platform.
+`cargo build -p workshop` is a low-level package build. It requires a real gateway executable to have already been staged at `crates/workshop/shell/binaries/promptforge-gateway-<target-triple>` and does not clean that staging afterward. Bundling with `cargo tauri build` has the same staging requirement; the release workflows under `.github/workflows/` show the exact packaging commands per platform.
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 

@@ -70,9 +70,10 @@ jobs:
           cache-dependency-path: |
             crates/*/ui/package-lock.json
             crates/gateway/*/ui/package-lock.json
+            crates/workshop/*/ui/package-lock.json
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop-server/ui
+          npm ci --prefix crates/workshop/server/ui
           npm ci --prefix crates/gateway/config-ui/ui
       - name: Build
         run: cargo build --release --locked -p gateway
@@ -105,9 +106,10 @@ jobs:
           cache-dependency-path: |
             crates/*/ui/package-lock.json
             crates/gateway/*/ui/package-lock.json
+            crates/workshop/*/ui/package-lock.json
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop-server/ui
+          npm ci --prefix crates/workshop/server/ui
           npm ci --prefix crates/gateway/config-ui/ui
       - name: Build
         run: cargo build --release --locked -p gateway
@@ -169,9 +171,10 @@ jobs:
           cache-dependency-path: |
             crates/*/ui/package-lock.json
             crates/gateway/*/ui/package-lock.json
+            crates/workshop/*/ui/package-lock.json
 
       - name: Install UI dependencies
-        working-directory: crates/workshop-server/ui
+        working-directory: crates/workshop/server/ui
         run: npm ci
 
       - name: Install config UI dependencies
@@ -211,13 +214,13 @@ jobs:
               src="target/release/promptforge-gateway$ext"
               ;;
           esac
-          mkdir -p crates/workshop/binaries
-          cp "$src" "crates/workshop/binaries/promptforge-gateway-$triple$ext"
+          mkdir -p crates/workshop/shell/binaries
+          cp "$src" "crates/workshop/shell/binaries/promptforge-gateway-$triple$ext"
 
       - name: Build the app
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
-          projectPath: crates/workshop
+          projectPath: crates/workshop/shell
           args: ${{ matrix.args }} --config tauri.nightly.conf.json
 
       - name: Upload the installers
