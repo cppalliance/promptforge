@@ -294,9 +294,10 @@ async fn save_as_carries_the_current_grants_and_the_previous_window_state() {
     workspace.close_backing_for_test().await;
     let mut expected = vec![a_root, b_root];
     expected.sort();
+    let mut in_second = file_grants(&second_path).await;
+    in_second.sort();
     assert_eq!(
-        file_grants(&second_path).await,
-        expected,
+        in_second, expected,
         "the new file holds every current grant"
     );
     let mut in_first = file_grants(&first_path).await;

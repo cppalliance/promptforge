@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "workspace-tests-backing.rs"]
 mod backing;
+#[path = "workspace-tests-grants.rs"]
+mod grants;
 #[path = "workspace-tests-pointer.rs"]
 mod pointer;
 #[path = "workspace-tests-ui-state.rs"]

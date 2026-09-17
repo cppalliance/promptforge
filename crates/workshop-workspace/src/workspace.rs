@@ -13,7 +13,7 @@
 //! gateway's artifact-cache `confine.rs`, with canonicalization performing
 //! the resolution that module's component walk performs by hand.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -23,6 +23,7 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 
 use crate::error::WorkspaceError;
+use crate::workspace_file::now_rfc3339;
 
 #[path = "workspace-backing.rs"]
 mod backing;
@@ -94,6 +95,21 @@ pub struct FileContents {
     text: String,
 }
 
+/// What memory keeps beside each granted root so the file holds the
+/// workspace's true history: the grant's order among its peers and when
+/// it was made. Confinement never reads it. Its two readers are in the
+/// backing module: the grant mirror in [`Workspace::grant_and_persist`],
+/// which sends a new grant's row to the open file, and the save-as row
+/// builder, which writes every grant into a new file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GrantMeta {
+    /// Stable tree order: the file's `position` when the grant was loaded
+    /// from one, one past the current maximum when granted in session.
+    pub(crate) position: u32,
+    /// RFC 3339 grant time.
+    pub(crate) added_at: String,
+}
+
 /// The workspace: the granted roots and the optional backing file.
 ///
 /// Cloning shares the same state, so the router state and every handler
@@ -103,8 +119,9 @@ pub struct FileContents {
 /// save-as, and duplicate, each recorded in the last-workspace pointer.
 #[derive(Debug, Clone, Default)]
 pub struct Workspace {
-    /// The granted roots, in canonical form. Read-hot: its own lock.
-    grants: Arc<RwLock<BTreeSet<PathBuf>>>,
+    /// The granted roots, in canonical form, each with its grant order
+    /// and time. Read-hot: its own lock.
+    grants: Arc<RwLock<BTreeMap<PathBuf, GrantMeta>>>,
     /// The backing workspace file; `None` while the workspace is
     /// ephemeral.
     backing: Arc<RwLock<Option<Backing>>>,
@@ -124,9 +141,11 @@ impl Workspace {
     }
 
     /// Registers `path` as a granted root in memory only: a directory
-    /// grants itself, a file grants its parent directory. Handlers use
-    /// [`Workspace::grant_and_persist`], which also mirrors the grant into
-    /// the backing file.
+    /// grants itself, a file grants its parent directory. A new grant
+    /// takes the position one past the current maximum and the current
+    /// time; a path already granted keeps the order and time it has.
+    /// Handlers use [`Workspace::grant_and_persist`], which also mirrors
+    /// the grant into the backing file.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::ForbiddenComponent`] when the path carries
@@ -134,6 +153,15 @@ impl Workspace {
     /// cannot be canonicalized, and [`WorkspaceError::NotFound`] when a
     /// file path has no parent directory.
     pub fn grant(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+        self.grant_with_meta(path).map(|(root, _)| root)
+    }
+
+    /// [`Workspace::grant`], also returning the order and time memory
+    /// holds for the root afterwards: the meta just assigned to a new
+    /// grant, or the one an already-granted path keeps. Read under the
+    /// same write lock as the insert, so the caller sees the row memory
+    /// holds rather than a later snapshot.
+    fn grant_with_meta(&self, path: &Path) -> Result<(PathBuf, GrantMeta), WorkspaceError> {
         reject_forbidden(path)?;
         let canonical = canonicalize_simplified(path)
             .map_err(|source| WorkspaceError::ResolveGrant { source })?;
@@ -145,11 +173,20 @@ impl Workspace {
                 .map(Path::to_owned)
                 .ok_or(WorkspaceError::NotFound)?
         };
-        self.grants
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(root.clone());
-        Ok(root)
+        let mut grants = self.grants.write().unwrap_or_else(PoisonError::into_inner);
+        let position = grants
+            .values()
+            .map(|meta| meta.position)
+            .max()
+            .map_or(0, |max| max.saturating_add(1));
+        let meta = grants
+            .entry(root.clone())
+            .or_insert_with(|| GrantMeta {
+                position,
+                added_at: now_rfc3339(),
+            })
+            .clone();
+        Ok((root, meta))
     }
 
     /// Removes `path` from the granted roots in memory only, by exact
@@ -180,7 +217,8 @@ impl Workspace {
             .grants
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .remove(&canonical);
+            .remove(&canonical)
+            .is_some();
         if removed {
             Ok(canonical)
         } else {
@@ -188,13 +226,14 @@ impl Workspace {
         }
     }
 
-    /// The granted roots in stable sorted order.
+    /// The granted roots in canonical (path) order. Grant order is kept
+    /// beside each root and reaches the file through save-as, not here.
     #[must_use]
     pub fn granted_roots(&self) -> Vec<PathBuf> {
         self.grants
             .read()
             .unwrap_or_else(PoisonError::into_inner)
-            .iter()
+            .keys()
             .cloned()
             .collect()
     }
@@ -417,7 +456,7 @@ impl Workspace {
     /// Admits a canonical path that starts with a granted root.
     fn check_confined(&self, canonical: PathBuf) -> Result<PathBuf, WorkspaceError> {
         let grants = self.grants.read().unwrap_or_else(PoisonError::into_inner);
-        if grants.iter().any(|root| canonical.starts_with(root)) {
+        if grants.keys().any(|root| canonical.starts_with(root)) {
             Ok(canonical)
         } else {
             Err(WorkspaceError::OutsideGrants)

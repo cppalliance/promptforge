@@ -196,7 +196,7 @@ Verify: `cargo nextest run --locked -p workshop-workspace`, `cargo nextest run -
 
 <step-3>
 
-### Step 3: Grant order and time kept in memory (TWF-004)
+### Step 3: Grant order and time kept in memory (TWF-004) [completed]
 
 - Component: `workshop-workspace`
 - Piece: grant metadata (one step; sequential after Step 2 because it edits the same `workspace-backing.rs` and `workspace.rs`)

@@ -14,10 +14,10 @@ use serde::Serialize;
 
 use crate::error::WorkspaceError;
 use crate::workspace_file::{
-    GrantRow, WindowState, WorkspaceContents, WorkspaceFile, empty_ui_state, now_rfc3339, stem_of,
+    GrantRow, WindowState, WorkspaceContents, WorkspaceFile, empty_ui_state, stem_of,
 };
 
-use super::{Workspace, canonicalize_simplified};
+use super::{GrantMeta, Workspace, canonicalize_simplified};
 
 #[path = "workspace-ui-state.rs"]
 mod ui_state;
@@ -65,17 +65,19 @@ impl Workspace {
     /// Registers `path` as a granted root and mirrors the grant into the
     /// backing file when one is open. Memory is updated first and stands
     /// whatever the file does: a persist that fails is logged, and the
-    /// grant still returns success.
+    /// grant still returns success. The row carries the order and time
+    /// memory assigned; the file assigns its own stored position on
+    /// insert, and the in-memory one is what a later save-as writes.
     ///
     /// # Errors
     /// The same as [`Workspace::grant`]; persistence never fails the call.
     pub async fn grant_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
-        let root = self.grant(path)?;
+        let (root, meta) = self.grant_with_meta(path)?;
         if let Some(file) = self.backing_file() {
             let row = GrantRow {
                 path: root.clone(),
-                position: 0,
-                added_at: now_rfc3339(),
+                position: meta.position,
+                added_at: meta.added_at,
             };
             if let Err(error) = file.add_grant(row).await {
                 tracing::warn!(
@@ -272,15 +274,22 @@ impl Workspace {
     }
 
     /// Replaces every grant with `grants`, the contents of a file being
-    /// opened. Rows are stored as they come: the file holds canonical
-    /// paths, and a root that has vanished from disk still loads (it
-    /// lists as `exists: false`) so the user can see it and revoke it.
+    /// opened. Rows are stored as they come, position and time included:
+    /// the file holds canonical paths, and a root that has vanished from
+    /// disk still loads (it lists as `exists: false`) so the user can see
+    /// it and revoke it.
     pub(crate) fn replace_all(&self, grants: Vec<GrantRow>) {
-        let mut set = self.grants.write().unwrap_or_else(PoisonError::into_inner);
-        set.clear();
+        let mut map = self.grants.write().unwrap_or_else(PoisonError::into_inner);
+        map.clear();
         for row in grants {
             tracing::info!(root = %row.path.display(), "workspace grant restored from file");
-            set.insert(row.path);
+            map.insert(
+                row.path,
+                GrantMeta {
+                    position: row.position,
+                    added_at: row.added_at,
+                },
+            );
         }
     }
 
@@ -387,18 +396,22 @@ impl Workspace {
         Ok(())
     }
 
-    /// The in-memory grants as file rows in canonical order, all stamped
-    /// with the current time: memory keeps no grant times of its own.
+    /// The in-memory grants as file rows in grant order, each with its
+    /// own position and time, so a save-as writes the workspace's true
+    /// history rather than a fresh stamp over a path-sorted list.
     fn grant_rows(&self) -> Vec<GrantRow> {
-        let added_at = now_rfc3339();
-        self.granted_roots()
-            .into_iter()
-            .enumerate()
-            .map(|(index, path)| GrantRow {
-                path,
-                position: u32::try_from(index).unwrap_or(u32::MAX),
-                added_at: added_at.clone(),
+        let mut rows: Vec<GrantRow> = self
+            .grants
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(path, meta)| GrantRow {
+                path: path.clone(),
+                position: meta.position,
+                added_at: meta.added_at.clone(),
             })
-            .collect()
+            .collect();
+        rows.sort_by_key(|row| row.position);
+        rows
     }
 }
