@@ -136,15 +136,25 @@ export function setupWindowChrome(): IDisposable {
   store.add(toDisposable(() => close.removeEventListener("click", closeWindow)));
 
   // Only the empty center drags; the buttons handle their own presses.
-  const onDragPointerDown = (event: PointerEvent): void => {
-    if (event.button === 0 && event.target === drag) {
+  // `startDragging` hands the mouse to the OS move loop, so the webview
+  // never sees the release and a `dblclick` can never be synthesized.
+  // The double-click is therefore read from the press itself: `mousedown`
+  // carries the click count in `detail` (a `pointerdown` always reports
+  // 0), and the second press toggles maximize instead of starting a drag.
+  // This mirrors the drag-region script Tauri injects for
+  // `data-tauri-drag-region`.
+  const onDragMouseDown = (event: MouseEvent): void => {
+    if (event.button !== 0 || event.target !== drag) {
+      return;
+    }
+    if (event.detail === 2) {
+      toggleWindowMaximize();
+    } else {
       runWindowCommand((win) => win.startDragging());
     }
   };
-  drag.addEventListener("pointerdown", onDragPointerDown);
-  store.add(toDisposable(() => drag.removeEventListener("pointerdown", onDragPointerDown)));
-  drag.addEventListener("dblclick", toggleWindowMaximize);
-  store.add(toDisposable(() => drag.removeEventListener("dblclick", toggleWindowMaximize)));
+  drag.addEventListener("mousedown", onDragMouseDown);
+  store.add(toDisposable(() => drag.removeEventListener("mousedown", onDragMouseDown)));
 
   // The maximize/restore glyph follows the window's maximized state, read
   // back after every resize (every maximize path - button, double-click,

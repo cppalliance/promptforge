@@ -120,14 +120,20 @@ function scenario({ desktop }) {
 
   const drag = bar.querySelector(".ws-window-titlebar__drag");
   stub().calls.length = 0;
-  drag.dispatchEvent(new window.MouseEvent("pointerdown", { button: 0, bubbles: true }));
-  check("primary pointerdown in the empty center starts the drag", stub().calls.join(",") === "drag");
+  drag.dispatchEvent(new window.MouseEvent("mousedown", { button: 0, detail: 1, bubbles: true }));
+  check("primary press in the empty center starts the drag", stub().calls.join(",") === "drag");
   stub().calls.length = 0;
-  drag.dispatchEvent(new window.MouseEvent("pointerdown", { button: 2, bubbles: true }));
-  check("non-primary pointerdown does not drag", stub().calls.length === 0);
+  drag.dispatchEvent(new window.MouseEvent("mousedown", { button: 2, detail: 1, bubbles: true }));
+  check("non-primary press does not drag", stub().calls.length === 0);
+  // The OS move loop started by the first press swallows the release, so
+  // no dblclick ever reaches the page; the second press (detail 2) is the
+  // only signal and must toggle maximize without starting another drag.
+  stub().calls.length = 0;
+  drag.dispatchEvent(new window.MouseEvent("mousedown", { button: 0, detail: 2, bubbles: true }));
+  check("second press toggles maximize instead of dragging", stub().calls.join(",") === "toggle-maximize");
   stub().calls.length = 0;
   drag.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
-  check("double-click toggles maximize", stub().calls.join(",") === "toggle-maximize");
+  check("a dblclick event alone triggers nothing", stub().calls.length === 0);
 
   // The glyphs are SVG, so visibility is the hidden *attribute* - an
   // SVGSVGElement has no `hidden` IDL property, and assigning one would

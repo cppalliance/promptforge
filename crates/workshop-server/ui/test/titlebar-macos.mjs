@@ -104,7 +104,7 @@ function scenario({ desktop, platform }) {
 
   // The empty center still drags the window.
   const drag = bar.querySelector(".ws-window-titlebar__drag");
-  drag.dispatchEvent(new window.MouseEvent("pointerdown", { button: 0, bubbles: true }));
+  drag.dispatchEvent(new window.MouseEvent("mousedown", { button: 0, detail: 1, bubbles: true }));
   check("macOS keeps the drag region live", stub().calls.join(",") === "drag");
 
   // The maximized/fullscreen sync stays wired: the green light's native
