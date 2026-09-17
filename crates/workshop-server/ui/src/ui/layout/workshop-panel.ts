@@ -5,11 +5,15 @@
 // through the validated workspace-api boundary. Expansion state and
 // fetched listings live in the TreeStateService (resolved through the
 // service registry), so closing and reopening the Workshop panel restores
-// the tree as the user left it. The panel also manages the grants
-// themselves: a root row's context menu revokes it, and a header "+"
-// button (or the empty-space context menu) adds a folder - through the
-// native folder picker in the desktop app, through a typed-path dialog in
-// a plain browser.
+// the tree as the user left it; the expansion also comes back from the
+// workspace file on relaunch, without listings, so a folder that renders
+// expanded with nothing cached fetches its listing then and there. A
+// wholesale replacement of the expanded set (a workspace switch) fires
+// the service's change event and the panel re-renders. The panel also
+// manages the grants themselves: a root row's context menu revokes it,
+// and a header "+" button (or the empty-space context menu) adds a
+// folder - through the native folder picker in the desktop app, through
+// a typed-path dialog in a plain browser.
 
 import type { GroupPanelPartInitParameters } from "dockview";
 
@@ -42,6 +46,12 @@ export class WorkshopTreePanel extends WorkshopPart {
   private pointerAnchor: HTMLElement | null = null;
   // The open Add Folder dialog, dismissed with the panel.
   private dialog: { dispose(): void } | null = null;
+  // Bumped by every loadRoots; a roots fetch that settles after a later
+  // load started is stale and dropped. A workspace switch fires
+  // WORKSPACE_CHANGED_EVENT and then replaceExpanded a round-trip later,
+  // so two loads overlap with the cache empty; without this, both would
+  // append the roots and every root would render twice.
+  private rootsGeneration = 0;
   // A dropped folder grants a new root after this panel rendered; the
   // change event refetches the roots so the drop is visible immediately.
   private readonly onWorkspaceChanged = (): void => {
@@ -68,6 +78,9 @@ export class WorkshopTreePanel extends WorkshopPart {
     this._register(
       toDisposable(() => window.removeEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged)),
     );
+    // A replaced expanded set (Open Workspace from File) re-renders from
+    // the cache; folders newly expanded with no listing fetch on render.
+    this._register(this.state.onDidChange(() => this.reload()));
     void this.loadRoots().catch((error: unknown) => {
       this.showError(this.list, error);
     });
@@ -138,9 +151,21 @@ export class WorkshopTreePanel extends WorkshopPart {
 
   /** Renders the granted roots, from the session cache when present. */
   private async loadRoots(): Promise<void> {
+    const generation = ++this.rootsGeneration;
     let listing = this.state.listing(ROOTS_KEY);
     if (listing === undefined) {
-      listing = await fetchTree(null);
+      try {
+        listing = await fetchTree(null);
+      } catch (error) {
+        // A stale failure belongs to a render a later load replaced.
+        if (generation !== this.rootsGeneration) {
+          return;
+        }
+        throw error;
+      }
+      if (generation !== this.rootsGeneration) {
+        return;
+      }
       this.state.cacheListing(ROOTS_KEY, listing);
     }
     this.renderListing(this.list, listing, true);
@@ -212,11 +237,19 @@ export class WorkshopTreePanel extends WorkshopPart {
           this.showError(children, error);
         });
       });
-      // An expanded directory always has a cached listing: expansion and
-      // caching happen together in toggle().
-      const cached = this.state.listing(entry.path);
-      if (expanded && cached !== undefined) {
-        this.renderListing(children, cached);
+      // An interactively expanded directory always has a cached listing:
+      // expansion and caching happen together in toggle(). One restored
+      // from the workspace file (or replaced on a workspace switch) has
+      // none yet, so it fetches here and fills in when the listing lands.
+      if (expanded) {
+        const cached = this.state.listing(entry.path);
+        if (cached !== undefined) {
+          this.renderListing(children, cached);
+        } else {
+          void this.fillRestored(entry, row, children).catch((error: unknown) => {
+            this.showError(children, error);
+          });
+        }
       }
     } else {
       row.appendChild(name);
@@ -262,6 +295,34 @@ export class WorkshopTreePanel extends WorkshopPart {
     this.state.expand(entry.path);
     children.hidden = false;
     row.setAttribute("aria-expanded", "true");
+  }
+
+  /**
+   * Fetches and renders the listing of a directory that renders expanded
+   * with nothing cached (a restored expansion). The row is disabled
+   * while the fetch is in flight, as toggle() does, so a click cannot
+   * race it into a second fetch; the children list is already visible.
+   */
+  private async fillRestored(
+    entry: TreeEntry,
+    row: HTMLButtonElement,
+    children: HTMLUListElement,
+  ): Promise<void> {
+    row.disabled = true;
+    let listing: TreeListing;
+    try {
+      listing = await fetchTree(entry.path);
+    } finally {
+      row.disabled = false;
+    }
+    this.state.cacheListing(entry.path, listing);
+    // The user may have collapsed the folder, or a reload may have
+    // replaced the rows, while the fetch was in flight; render only into
+    // a still-attached, still-expanded, still-empty list.
+    if (!row.isConnected || !this.state.isExpanded(entry.path) || children.childElementCount !== 0) {
+      return;
+    }
+    this.renderListing(children, listing);
   }
 
   /** Paints a load failure as a row in the affected list. */

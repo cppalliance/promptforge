@@ -14,6 +14,7 @@ import { RECENT_FILES_STORE, RecentFilesStore } from "./services/recent-files-st
 import { getService, registerService } from "./services/service-registry";
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
 import { TEXT_CONTROL_SERVICE } from "./services/text-control-service";
+import { TREE_STATE, TreeStateService } from "./services/tree-state-service";
 import { createUiStorage, UI_STORAGE } from "./services/ui-storage";
 import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
@@ -86,6 +87,15 @@ registerService(
   () =>
     new CommandsHistory(storage.get("user", "commands_history"), (value) =>
       storage.set("user", "commands_history", value),
+    ),
+);
+// The tree's expanded folders belong to the workspace: they seed from
+// the open file's "tree" value and write back to the same key, debounced.
+registerService(
+  TREE_STATE,
+  () =>
+    new TreeStateService(storage.get("workspace", "tree"), (value) =>
+      storage.set("workspace", "tree", value),
     ),
 );
 

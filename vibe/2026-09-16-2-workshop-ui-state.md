@@ -377,7 +377,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-11>
 
-### Step 11: Tree expansion persisted and restored with listings fetched
+### Step 11: Tree expansion persisted and restored with listings fetched [completed]
 
 - Component: `spa-workspace-stores`
 - Piece: tree state (sequential after Step 10, shares `main.ts`)
