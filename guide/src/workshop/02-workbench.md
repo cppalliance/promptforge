@@ -34,7 +34,7 @@ You can scale the whole interface to a comfortable size. Zoom applies uniformly 
 - Press Ctrl+- to zoom out one step.
 - Press Ctrl+0 to reset to 100%.
 
-Zoom changes in fixed steps of 10 percent, clamped between 50% and 200%. Your chosen level persists across sessions and is re-applied on every boot. A missing, corrupt, or out-of-range saved value leaves the default 100% in place. Zoom keeps working even when storage is blocked, such as in private mode; only the persistence is skipped. In a plain browser, zoom uses CSS zoom instead of native window zoom.
+Zoom changes in fixed steps of 10 percent, clamped between 50% and 200%. Your chosen level persists across sessions and is re-applied on every boot. A missing, corrupt, or out-of-range saved value leaves the default 100% in place. Zoom keeps working even when the saved value cannot be read or written; only the persistence is skipped. In a plain browser, zoom uses CSS zoom instead of native window zoom.
 
 ## Panels
 

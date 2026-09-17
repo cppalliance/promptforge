@@ -10,6 +10,8 @@ A dropped folder becomes a granted root; a dropped file grants its parent direct
 
 A workspace is one user-visible file, `Name.pfwork`: an embedded Turso database the user opens, saves as, and duplicates from the SPA File menu. Until the first Save As the workspace is ephemeral - grants live in memory only, nothing persists, and the display name is `Untitled`. Once a file backs the workspace, every grant and revoke lands in it as it happens, so there is no dirty state to save or lose: the file is a live mirror, not a snapshot.
 
+While a file backs the workspace, turso runs it in write-ahead-log mode, so a `Name.pfwork-wal` sidecar sits beside the file and holds recent writes. `Workspace::close_backing` stops the actor and closes the connection, which checkpoints the log into the main file and removes the sidecar; graceful shutdown runs it through the subsystem's registered task, so a normal quit leaves exactly one file. A crash skips the close and leaves the sidecar; turso replays it into the main file on the next open, so nothing is lost. Because turso keeps a process-wide registry keyed by path, the same file is never opened twice in one process: an open of the already-open path reloads the existing backing instead (see `Workspace::open_file`).
+
 Save As and Duplicate both create exactly one file at the chosen path. No directory is created around it; follow-on projects grow plain-named sibling directories (`agents/`, `runs/`) beside the file lazily, only when there is something to put in them. Two `.pfwork` files in one folder would share those siblings, so the convention is one workspace per folder. It is a convention, not an enforced rule.
 
 Save As and Duplicate differ by what travels. Save As writes the current grants and the saved window state into a new file and switches to it; siblings stay beside the original. Duplicate drains pending writes, checkpoints the write-ahead log into the main file so the copy is complete without a `-wal` sidecar, copies the file plus any existing sibling directories except the derived `index.db`, and switches to the copy. In v1 no siblings exist, so both are the same file operation.
@@ -36,7 +38,7 @@ CREATE TABLE kv (
 );
 ```
 
-`meta` carries `format` (always `promptforge-workspace`), `version` (`1`), `name` (the display name; absent means the file stem), and `created_at`. `grants.position` is one past the file's maximum at insert time and removal never renumbers; the tree still lists grants in canonical path order, so the column records history for future ordering and does not change display. The table names `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`, and `documents` are reserved for follow-on projects and unused.
+`meta` carries `format` (always `promptforge-workspace`), `version` (`1`), `name` (the display name; absent means the file stem), and `created_at`. `grants.position` and `added_at` record insertion order from both producers: a `grant()` on the live workspace assigns one past the current maximum and the current time, and Save As writes the in-memory grants with the `position` and `added_at` they were loaded or granted with, so the new file carries the true history rather than a renumbering. Removal never renumbers. The tree still lists grants in canonical path order, so the columns record history and do not change display. The table names `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`, and `documents` are reserved for follow-on projects and unused.
 
 #### The `kv` table
 

@@ -30,6 +30,8 @@ To start remembering, save the workspace once. From then on there is nothing mor
 
 The Workshop creates exactly one file at the path you chose. It does not create a folder around it. The current grants and window layout are written into it, the Workshop switches to it, and the file appears under File > Open Recent.
 
+While the Workshop has a workspace open, a second file named `Name.pfwork-wal` may sit beside it. It is the database's write-ahead log, holding the most recent changes until they are folded into the workspace file, which happens when you quit. It is not a stray: leave it alone while the Workshop is running. If you want to copy or back up a workspace, quit first so the workspace is one complete file.
+
 From now on every change is saved as it happens. Grant a folder and it lands in the file; remove one and it leaves the file; move or resize the window and the new geometry is saved a moment after you stop dragging, and once more when you close the window. There is no unsaved state, no dirty marker, and no Save command, because the file is a live mirror of what you see.
 
 If you save while a workspace is already open, you get a second file with the same grants and layout and the Workshop switches to the new one. The original stays where it is, unchanged from that point on.
@@ -50,7 +52,7 @@ The file's grants replace your current grants entirely, the tree refreshes, and 
 
 A file that is not a PromptForge workspace is refused with a message naming the file, and a workspace saved by a newer version of the Workshop is refused with the version it needs. In both cases nothing changes: your current grants stay, and the refused file is not touched.
 
-Recently opened and saved workspaces are listed under File > Open Recent alongside recently opened files, so you can see which workspaces you have used. In this version the list is a record only: to open one of them, use "Open Workspace from File..." and pick the file.
+Recently opened and saved workspaces are listed under File > Open Recent in their own group above recently opened files. Choosing a workspace there opens it directly, with no file dialog, exactly as if you had picked it under "Open Workspace from File...". The same refusals apply: a damaged or newer-version file is declined with a message and your current workspace stays.
 
 ## Duplicating a workspace
 

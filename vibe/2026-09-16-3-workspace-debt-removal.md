@@ -280,7 +280,7 @@ Verify: `node --test test/workshop-panel-restore.mjs`, `node --test test/workspa
 
 <step-7>
 
-### Step 7: Docs describe the shipped behavior; exit gates and manual reproductions (UM-002, OP-002, TWF-002, TWF-003)
+### Step 7: Docs describe the shipped behavior; exit gates and manual reproductions (UM-002, OP-002, TWF-002, TWF-003) [completed]
 
 - Component: docs and gates
 - Piece: documentation and exit (one step; depends on Steps 1 to 6 having landed)
