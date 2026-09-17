@@ -9,12 +9,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
+use std::sync::atomic::Ordering;
 
 use serde::Serialize;
 
 use crate::error::WorkspaceError;
 use crate::workspace_file::{
-    GrantRow, WindowState, WorkspaceContents, WorkspaceFile, empty_ui_state, stem_of,
+    GrantRow, WindowState, WorkspaceContents, WorkspaceFile, WorkspaceFileError, empty_ui_state,
+    stem_of,
 };
 
 use super::{GrantMeta, Workspace, canonicalize_simplified};
@@ -123,12 +125,20 @@ impl Workspace {
     /// and ui-state through the existing handle and leaves the backing
     /// as it is: no second handle is opened and nothing is closed.
     ///
+    /// Switches run one at a time (see the `switches` field): a second
+    /// open of a path the first just made current takes the reload
+    /// branch, and an open that arrives after the shutdown close is
+    /// refused.
+    ///
     /// # Errors
     /// Returns [`WorkspaceError::NotFound`] when the path does not exist,
     /// [`WorkspaceError::WorkspaceFileRefused`] when it is not a workspace
     /// at a supported version, and [`WorkspaceError::WorkspaceFileFailed`]
-    /// when it cannot be read.
+    /// when it cannot be read or the workspace has been closed for
+    /// shutdown.
     pub async fn open_file(&self, path: &Path) -> Result<(), WorkspaceError> {
+        let _switch = self.switches.lock().await;
+        self.refuse_if_closed("open")?;
         // A second opener of the current file must never exist. turso
         // 0.7.2 keys its process-wide `DATABASE_MANAGER` on OS file
         // identity and hands every connection to the same file one shared
@@ -168,8 +178,17 @@ impl Workspace {
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileTaken`] when something
     /// already exists at `path`, and [`WorkspaceError::WorkspaceFileFailed`]
-    /// when the file cannot be created.
+    /// when the file cannot be created or the workspace has been closed
+    /// for shutdown.
     pub async fn save_as(&self, path: &Path) -> Result<(), WorkspaceError> {
+        let _switch = self.switches.lock().await;
+        self.refuse_if_closed("save as")?;
+        self.save_as_switched(path).await
+    }
+
+    /// [`Workspace::save_as`] with the switch guard already held, so
+    /// [`Workspace::duplicate`] can fall back to it without reacquiring.
+    async fn save_as_switched(&self, path: &Path) -> Result<(), WorkspaceError> {
         let window_state = match self.backing_file() {
             Some(previous) => match previous.contents().await {
                 Ok(contents) => contents.window_state,
@@ -207,10 +226,13 @@ impl Workspace {
     /// Returns [`WorkspaceError::WorkspaceFileTaken`] when something
     /// already exists at `path` or a sibling of the copy is already in
     /// the destination folder, and [`WorkspaceError::WorkspaceFileFailed`]
-    /// when the copy cannot be made or opened.
+    /// when the copy cannot be made or opened or the workspace has been
+    /// closed for shutdown.
     pub async fn duplicate(&self, path: &Path) -> Result<(), WorkspaceError> {
+        let _switch = self.switches.lock().await;
+        self.refuse_if_closed("duplicate")?;
         let Some(previous) = self.backing_file() else {
-            return self.save_as(path).await;
+            return self.save_as_switched(path).await;
         };
         let file = previous.duplicate_to(path).await?;
         let ui_state = self.ui_state();
@@ -302,7 +324,14 @@ impl Workspace {
     /// [`crate::handles::register_tasks`]) so a quit leaves exactly one
     /// file to copy or back up. An ephemeral workspace has nothing to
     /// close and returns at once.
+    ///
+    /// The close is a switch: it waits for any open, save-as, or
+    /// duplicate in flight, then marks the workspace closed so no later
+    /// switch installs a backing nobody would close. A second call is a
+    /// no-op.
     pub async fn close_backing(&self) {
+        let _switch = self.switches.lock().await;
+        self.closed.store(true, Ordering::Release);
         let previous = self
             .backing
             .write()
@@ -311,6 +340,17 @@ impl Workspace {
         if let Some(previous) = previous {
             previous.file.close().await;
         }
+    }
+
+    /// Refuses a switch once [`Workspace::close_backing`] has run. Called
+    /// with the switch guard held, so the flag cannot flip underneath.
+    /// Expected during teardown, so it logs at debug.
+    fn refuse_if_closed(&self, what: &str) -> Result<(), WorkspaceError> {
+        if self.closed.load(Ordering::Acquire) {
+            tracing::debug!(what, "workspace switch refused: closed for shutdown");
+            return Err(WorkspaceFileError::Closed.into());
+        }
+        Ok(())
     }
 
     /// Stops the backing file's actor while leaving the backing in place,
@@ -332,6 +372,14 @@ impl Workspace {
         self.backing_file()
     }
 
+    /// Holds the switch guard so a test can queue two switches behind it
+    /// and release them in a known order; the guard is acquired in
+    /// arrival order.
+    #[cfg(test)]
+    pub(super) async fn hold_switches_for_test(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.switches.lock().await
+    }
+
     /// A handle to the backing file, if any. The lock is released before
     /// the caller awaits anything.
     fn backing_file(&self) -> Option<WorkspaceFile> {
@@ -350,7 +398,8 @@ impl Workspace {
     /// Installs `file` at `path` as the backing holding `ui_state` in
     /// memory, records it as the last-used workspace, and closes the
     /// previous backing, if any, waiting for its connection to go so the
-    /// old file is left complete with no sidecar.
+    /// old file is left complete with no sidecar. Called only with the
+    /// switch guard held.
     async fn swap_backing(
         &self,
         file: WorkspaceFile,
@@ -376,7 +425,8 @@ impl Workspace {
     /// the grants replace every current grant wholesale and the ui-state
     /// map is replaced in place, under the same contract as an open of
     /// any other file. The handle stays where it is. A file that cannot
-    /// be read changes nothing.
+    /// be read changes nothing. Called only with the switch guard held,
+    /// so the backing it re-reads is still the backing when it applies.
     async fn reload_current(
         &self,
         file: &WorkspaceFile,

@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use serde::Serialize;
@@ -130,6 +131,20 @@ pub struct Workspace {
     /// Serializes ui-state puts so values reach the backing file's actor
     /// in the order they reached memory; see [`Workspace::put_ui_state`].
     ui_state_puts: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes the switch operations: open, save-as, duplicate, and
+    /// the shutdown close. Each is two phases, open or create a handle
+    /// and then swap it in, with awaits between them, and the same-file
+    /// guard in [`Workspace::open_file`] reads state a concurrent switch
+    /// would change. One guard held across the whole switch keeps two
+    /// openers of one file from ever existing (turso shares one WAL
+    /// handle per file process-wide, so the second swap's close would
+    /// unlink the sidecar the survivor writes to) and keeps a reload of
+    /// the current file from landing after the backing moved on.
+    switches: Arc<tokio::sync::Mutex<()>>,
+    /// Set once by [`Workspace::close_backing`] and never cleared: after
+    /// the shutdown close no switch may install a backing nobody would
+    /// close, so a switch that loses the race to quit is refused.
+    closed: Arc<AtomicBool>,
     /// Where the last-used file is remembered between runs; `None` when
     /// built without a state directory (see [`Workspace::with_state_dir`]).
     pointer: Option<pointer::LastWorkspacePointer>,
@@ -423,3 +438,6 @@ mod tests_close;
 #[cfg(test)]
 #[path = "workspace-tests-reopen.rs"]
 mod tests_reopen;
+#[cfg(test)]
+#[path = "workspace-tests-switch.rs"]
+mod tests_switch;

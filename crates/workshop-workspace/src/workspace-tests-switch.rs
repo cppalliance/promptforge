@@ -1,0 +1,218 @@
+//! The switch operations (open, save-as, duplicate, and the shutdown
+//! close) run one at a time. Each is two phases, open or create a handle
+//! and then swap it in, with awaits between them; left unserialized, two
+//! overlapping switches can open two handles to one file (and the second
+//! swap's close unlinks the WAL the survivor writes to), cross-apply
+//! another file's grants after the backing moved on, or install a
+//! backing after the shutdown close took the previous one.
+
+use super::*;
+
+use crate::workspace_file::WorkspaceFile;
+
+/// The `-wal` sidecar the engine keeps beside `path`.
+fn wal_of(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push("-wal");
+    PathBuf::from(name)
+}
+
+/// A workspace file at `path` holding exactly the grants in `roots`,
+/// written through its own workspace and closed, so the file is complete
+/// on disk with no opener left behind.
+async fn file_with_grants(path: &Path, roots: &[&Path]) {
+    let writer = Workspace::new();
+    writer.save_as(path).await.expect("save as creates");
+    for root in roots {
+        writer
+            .grant_and_persist(root)
+            .await
+            .expect("the grant lands");
+    }
+    writer.close_backing().await;
+}
+
+/// The grant paths the file at `path` holds, read straight from disk
+/// through a fresh handle, sorted.
+async fn grants_on_disk(path: &Path) -> Vec<PathBuf> {
+    let file = WorkspaceFile::open(path)
+        .await
+        .expect("the workspace file reopens from disk");
+    let contents = file.contents().await.expect("contents read");
+    file.close().await;
+    let mut grants: Vec<PathBuf> = contents
+        .grants
+        .into_iter()
+        .map(|grant| grant.path)
+        .collect();
+    grants.sort();
+    grants
+}
+
+#[tokio::test]
+async fn concurrent_opens_of_one_new_file_share_one_handle_and_keep_the_wal() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let b = home.path().join("b.pfwork");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    file_with_grants(&b, &[]).await;
+    let workspace = Workspace::new();
+    workspace.save_as(&a).await.expect("save as creates");
+
+    // Both pass the same-file guard before either swaps: without one
+    // switch at a time, two handles to `b` exist and the second swap's
+    // close of the first unlinks the WAL the second keeps writing to.
+    let (first, second) = tokio::join!(workspace.open_file(&b), workspace.open_file(&b));
+    first.expect("the first open succeeds");
+    second.expect("the second open succeeds");
+    assert_eq!(
+        workspace.current().await.path.as_deref(),
+        Some(b.as_path()),
+        "the backing is b"
+    );
+
+    let root = workspace
+        .grant_and_persist(dir.path())
+        .await
+        .expect("the grant lands after the opens");
+    let live = workspace
+        .backing_file_for_test()
+        .expect("the backing is installed");
+    drop(workspace);
+    assert!(
+        wal_of(&b).is_file(),
+        "the wal sidecar was unlinked from under the live backing"
+    );
+    live.close().await;
+    assert_eq!(
+        grants_on_disk(&b).await,
+        vec![root],
+        "the grant made after the concurrent opens survives on disk"
+    );
+}
+
+#[tokio::test]
+async fn reloading_the_current_file_cannot_outlive_a_switch_to_another() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let b = home.path().join("b.pfwork");
+    let in_a = tempfile::TempDir::new().expect("tempdir");
+    let in_b = tempfile::TempDir::new().expect("tempdir");
+    file_with_grants(&a, &[in_a.path()]).await;
+    file_with_grants(&b, &[in_b.path()]).await;
+    let expected_a = grants_on_disk(&a).await;
+    let expected_b = grants_on_disk(&b).await;
+
+    // The interleaving depends on where each open first yields, so run
+    // both orders several times; the invariant must hold after each.
+    for round in 0..8 {
+        let workspace = Workspace::new();
+        workspace.open_file(&a).await.expect("a opens");
+        let (reload, switch) = if round % 2 == 0 {
+            tokio::join!(workspace.open_file(&a), workspace.open_file(&b))
+        } else {
+            let (switch, reload) = tokio::join!(workspace.open_file(&b), workspace.open_file(&a));
+            (reload, switch)
+        };
+        reload.expect("reopening the current file succeeds");
+        switch.expect("opening the other file succeeds");
+
+        let current = workspace
+            .current()
+            .await
+            .path
+            .expect("a backing is installed");
+        let expected = if current == a {
+            &expected_a
+        } else {
+            assert_eq!(current, b, "the backing is one of the two files");
+            &expected_b
+        };
+        let mut roots = workspace.granted_roots();
+        roots.sort();
+        assert_eq!(
+            &roots, expected,
+            "round {round}: memory holds the grants of the file that is the backing"
+        );
+        workspace.close_backing().await;
+    }
+}
+
+#[tokio::test]
+async fn a_switch_after_close_backing_is_refused_and_opens_nothing() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let b = home.path().join("b.pfwork");
+    let c = home.path().join("c.pfwork");
+    let d = home.path().join("d.pfwork");
+    file_with_grants(&b, &[]).await;
+    let workspace = Workspace::new();
+    workspace.save_as(&a).await.expect("save as creates");
+
+    workspace.close_backing().await;
+
+    let refused = |result: Result<(), WorkspaceError>, what: &str| {
+        assert!(
+            matches!(result, Err(WorkspaceError::WorkspaceFileFailed { .. })),
+            "{what} after the shutdown close must answer the closed mapping"
+        );
+    };
+    refused(workspace.open_file(&b).await, "open");
+    refused(workspace.save_as(&c).await, "save as");
+    refused(workspace.duplicate(&d).await, "duplicate");
+
+    assert_eq!(
+        workspace.current().await.path,
+        None,
+        "no switch installed a backing after the close"
+    );
+    assert!(!c.exists(), "save as after the close created a file");
+    assert!(!d.exists(), "duplicate after the close created a file");
+    assert!(
+        !wal_of(&b).exists(),
+        "open after the close left b's wal sidecar behind"
+    );
+}
+
+#[tokio::test]
+async fn close_backing_waits_for_an_in_flight_open() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let b = home.path().join("b.pfwork");
+    file_with_grants(&a, &[]).await;
+    file_with_grants(&b, &[]).await;
+
+    // Queue the open and then the close behind a held guard, so the open
+    // is provably in flight when the close is issued; releasing hands
+    // the guard over in arrival order. The open must complete first and
+    // the close must then take `b`, leaving the workspace ephemeral with
+    // no sidecar beside either file. A close that did not wait would
+    // take `a`, and the open would then install `b` for nobody to close.
+    let workspace = Workspace::new();
+    workspace.open_file(&a).await.expect("a opens");
+    let held = workspace.hold_switches_for_test().await;
+    let opener = workspace.clone();
+    let target = b.clone();
+    let open = tokio::spawn(async move { opener.open_file(&target).await });
+    tokio::task::yield_now().await;
+    let closer = workspace.clone();
+    let close = tokio::spawn(async move { closer.close_backing().await });
+    tokio::task::yield_now().await;
+    drop(held);
+
+    open.await
+        .expect("the open task completes")
+        .expect("the open queued ahead of the close completes");
+    close.await.expect("the close task completes");
+
+    assert_eq!(
+        workspace.current().await.path,
+        None,
+        "a backing outlived the shutdown close"
+    );
+    assert!(
+        !wal_of(&b).exists(),
+        "b's wal sidecar remains after the shutdown close"
+    );
+    assert!(!wal_of(&a).exists(), "a's wal sidecar remains");
+}
