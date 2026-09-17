@@ -20,6 +20,8 @@ use crate::workspace::Workspace;
 mod file;
 #[path = "handlers-file-state.rs"]
 mod file_state;
+#[path = "handlers-prompts.rs"]
+mod prompts;
 
 /// The workspace routes, narrowed to the [`Workspace`] service - the only
 /// state their handlers use: the confined filesystem routes here, the
@@ -35,6 +37,7 @@ pub fn routes(state: Workspace) -> axum::Router {
             .route("/workspace/revoke", post(revoke))
             .merge(file::routes())
             .merge(file_state::routes())
+            .merge(prompts::routes())
             .with_state(state),
         DEFAULT_DEADLINE,
     )
