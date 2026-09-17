@@ -17,7 +17,7 @@ use crate::workspace_file::{
     GrantRow, WindowState, WorkspaceContents, WorkspaceFile, empty_ui_state, now_rfc3339, stem_of,
 };
 
-use super::Workspace;
+use super::{Workspace, canonicalize_simplified};
 
 #[path = "workspace-ui-state.rs"]
 mod ui_state;
@@ -117,12 +117,31 @@ impl Workspace {
     /// previous backing, if any, is closed. A file that fails validation
     /// changes nothing; the current grants and backing stay as they were.
     ///
+    /// Opening the file that is already the backing reloads its grants
+    /// and ui-state through the existing handle and leaves the backing
+    /// as it is: no second handle is opened and nothing is closed.
+    ///
     /// # Errors
     /// Returns [`WorkspaceError::NotFound`] when the path does not exist,
     /// [`WorkspaceError::WorkspaceFileRefused`] when it is not a workspace
     /// at a supported version, and [`WorkspaceError::WorkspaceFileFailed`]
     /// when it cannot be read.
     pub async fn open_file(&self, path: &Path) -> Result<(), WorkspaceError> {
+        // A second opener of the current file must never exist. turso
+        // 0.7.2 keys its process-wide `DATABASE_MANAGER` on OS file
+        // identity and hands every connection to the same file one shared
+        // WAL handle, so a fresh `WorkspaceFile::open` here would share the
+        // live WAL, and `swap_backing` closing the first handle would
+        // checkpoint, drop, and unlink the sidecar the survivor keeps
+        // appending to: every write after that would be lost at quit.
+        // Compare canonical forms so a respelling of the same path (a `.`
+        // segment, a case difference on Windows) takes the same branch.
+        if let Some((file, current)) = self.backing_parts()
+            && let Ok(requested) = canonicalize_simplified(path)
+            && canonicalize_simplified(&current).is_ok_and(|current| current == requested)
+        {
+            return self.reload_current(&file, path).await;
+        }
         let file = WorkspaceFile::open(path).await?;
         let contents = match file.contents().await {
             Ok(contents) => contents,
@@ -276,6 +295,13 @@ impl Workspace {
         }
     }
 
+    /// The backing file's handle, if any, so a test can tell whether an
+    /// operation kept or replaced it.
+    #[cfg(test)]
+    pub(super) fn backing_file_for_test(&self) -> Option<WorkspaceFile> {
+        self.backing_file()
+    }
+
     /// A handle to the backing file, if any. The lock is released before
     /// the caller awaits anything.
     fn backing_file(&self) -> Option<WorkspaceFile> {
@@ -314,6 +340,30 @@ impl Workspace {
         if let Some(previous) = previous {
             previous.file.close().await;
         }
+    }
+
+    /// Re-reads `file`, the current backing, and applies what it holds:
+    /// the grants replace every current grant wholesale and the ui-state
+    /// map is replaced in place, under the same contract as an open of
+    /// any other file. The handle stays where it is. A file that cannot
+    /// be read changes nothing.
+    async fn reload_current(
+        &self,
+        file: &WorkspaceFile,
+        path: &Path,
+    ) -> Result<(), WorkspaceError> {
+        let contents = file.contents().await?;
+        self.replace_all(contents.grants);
+        if let Some(backing) = self
+            .backing
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
+            backing.ui_state = contents.ui_state;
+        }
+        self.remember(path);
+        Ok(())
     }
 
     /// The in-memory grants as file rows in canonical order, all stamped

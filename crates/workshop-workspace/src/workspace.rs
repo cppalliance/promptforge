@@ -465,3 +465,6 @@ fn modified_ms(metadata: &fs::Metadata) -> u64 {
 #[cfg(test)]
 #[path = "workspace-tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workspace-tests-reopen.rs"]
+mod tests_reopen;

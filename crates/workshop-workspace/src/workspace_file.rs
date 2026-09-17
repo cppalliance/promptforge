@@ -220,6 +220,13 @@ impl WorkspaceFile {
         &self.path
     }
 
+    /// Whether `other` is a clone of this handle: both feed the same
+    /// actor, so the same connection to the file.
+    #[cfg(test)]
+    pub(crate) fn is_same_handle(&self, other: &Self) -> bool {
+        self.tx.same_channel(&other.tx)
+    }
+
     /// Reads everything the file holds.
     pub(crate) async fn contents(&self) -> Result<WorkspaceContents, WorkspaceFileError> {
         self.request(|reply| Command::Contents { reply }).await
