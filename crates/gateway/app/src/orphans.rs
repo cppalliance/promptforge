@@ -15,8 +15,7 @@ use axum::extract::State;
 use gateway_config::SttModelConfig;
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use crate::local::{cache::orphans, resolve_cache_root};
 
@@ -31,9 +30,8 @@ use crate::local::{cache::orphans, resolve_cache_root};
 /// reports an empty list.
 pub(crate) async fn admin_orphans(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     // The retained running config carries both the `[local].cache_dir` the
     // scan resolves and the catalog it diffs against: every `[[local_model]]`
     // and `[[stt_model]]` the document declares, whether or not the running

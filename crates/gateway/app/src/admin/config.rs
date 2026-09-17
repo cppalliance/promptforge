@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::State;
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// The `GET /admin/config` route: bearer-authed, renders the running global
@@ -14,9 +14,8 @@ use crate::error::GatewayError;
 /// through `PUT /admin/config` unchanged.
 pub(crate) async fn admin_config(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     Ok(Json(live.config.to_json()))
 }

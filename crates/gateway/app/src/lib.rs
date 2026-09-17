@@ -167,9 +167,9 @@ use tokio::sync::RwLock;
 
 use crate::admin::AdminConfig;
 #[cfg(feature = "web-search")]
-use crate::auth::Caller;
+use crate::auth::AuthedCaller;
 #[cfg(feature = "web-search")]
-use crate::error::GatewayError;
+use crate::error::{GatewayError, WireJson};
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
@@ -627,10 +627,9 @@ async fn config_ui_redirect() -> axum::response::Redirect {
 #[cfg(feature = "web-search")]
 async fn web_search(
     State(state): State<AppState>,
-    caller: Caller,
-    Json(request): Json<WebSearchRequest>,
+    _caller: AuthedCaller,
+    WireJson(request): WireJson<WebSearchRequest>,
 ) -> Result<Json<WebSearchResponse>, GatewayError> {
-    crate::auth::check_auth(&state, &caller).await?;
     let service = state
         .web_search()
         .await

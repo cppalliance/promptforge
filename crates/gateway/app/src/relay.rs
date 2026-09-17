@@ -12,8 +12,8 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
-use crate::error::GatewayError;
+use crate::auth::AuthedCaller;
+use crate::error::{GatewayError, WireJson};
 use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
 };
@@ -64,10 +64,9 @@ pub(crate) async fn resolve_routed_model(
 /// The chat route to a backend.
 pub(crate) async fn chat_completions(
     State(state): State<AppState>,
-    caller: Caller,
-    Json(request): Json<ChatRequest>,
+    caller: AuthedCaller,
+    WireJson(request): WireJson<ChatRequest>,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -203,10 +202,9 @@ pub(crate) fn relay_sse(
 /// dominion queue admission as chat, for `kind = "embedding"` models.
 pub(crate) async fn embeddings(
     State(state): State<AppState>,
-    caller: Caller,
-    Json(request): Json<EmbeddingRequest>,
+    caller: AuthedCaller,
+    WireJson(request): WireJson<EmbeddingRequest>,
 ) -> Result<Json<EmbeddingResponse>, GatewayError> {
-    check_auth(&state, &caller).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -233,10 +231,9 @@ pub(crate) async fn embeddings(
 /// dominion queue admission as chat, for `kind = "classifier"` models.
 pub(crate) async fn rerank(
     State(state): State<AppState>,
-    caller: Caller,
-    Json(request): Json<RerankRequest>,
+    caller: AuthedCaller,
+    WireJson(request): WireJson<RerankRequest>,
 ) -> Result<Json<RerankResponse>, GatewayError> {
-    check_auth(&state, &caller).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -258,3 +255,7 @@ pub(crate) async fn rerank(
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
     Ok(Json(response))
 }
+
+#[cfg(test)]
+#[path = "relay-tests.rs"]
+mod tests;

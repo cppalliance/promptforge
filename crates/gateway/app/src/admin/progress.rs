@@ -8,7 +8,7 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::Response;
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use crate::shutdown;
 use shared_progress::{EventState, ProgressEvent, ProgressHub};
@@ -36,9 +36,8 @@ pub(crate) const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::
 /// through the graceful drain and pin the process.
 pub(crate) async fn admin_progress(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
     Ok(progress_sse_response(&state.hub, state.shutdown.clone()))
 }
 

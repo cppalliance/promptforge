@@ -13,8 +13,8 @@ use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
-use crate::error::GatewayError;
+use crate::auth::AuthedCaller;
+use crate::error::{GatewayError, WireJson};
 use crate::relay::{CLIENT_HEADER, resolve_routed_model};
 use crate::wire::{SpeechRequest, SpeechResponseFormat, SpeechStreamFormat, SpeechVoice};
 use gateway_config::ModelKind;
@@ -24,29 +24,26 @@ use gateway_protocol::ProtocolError;
 /// dominion queue admission as chat, for `kind = "speech"` models.
 ///
 /// Two deliberate departures from the other routes. First, auth runs before
-/// body extraction: the handler takes the ungated [`Caller`] parts
-/// extractor and a raw [`Request`], runs [`crate::auth::check_auth`], and
-/// only then extracts `Json<SpeechRequest>` by hand, so an unauthorized
-/// caller never makes the gateway parse a body. Second, the reply is a
-/// byte passthrough, not a typed relay: audio frames are opaque bytes the
-/// gateway cannot re-validate per chunk, so the upstream body is forwarded
-/// unread - the one departure from the gateway's typed-relay norm, the
-/// same trade [`crate::relay::relay_sse`] documents for its own design.
-/// Because the response is a long-lived byte stream, this route must never
-/// sit under a `CompressionLayer` or a whole-request `TimeoutLayer`: both
-/// buffer or kill long-lived streams. The stream runs under the bounded
-/// background relay [`relay_audio`] documents, so every early end - a
-/// tripped bound or an upstream failure - fails the client's body read
-/// rather than truncating it.
+/// body extraction: the handler takes the [`AuthedCaller`] parts extractor,
+/// which runs the auth rules while the parts are extracted, and only then
+/// extracts `WireJson<SpeechRequest>` from the raw [`Request`] by hand, so
+/// an unauthorized caller never makes the gateway parse a body. Second, the
+/// reply is a byte passthrough, not a typed relay: audio frames are opaque
+/// bytes the gateway cannot re-validate per chunk, so the upstream body is
+/// forwarded unread - the one departure from the gateway's typed-relay
+/// norm, the same trade [`crate::relay::relay_sse`] documents for its own
+/// design. Because the response is a long-lived byte stream, this route
+/// must never sit under a `CompressionLayer` or a whole-request
+/// `TimeoutLayer`: both buffer or kill long-lived streams. The stream runs
+/// under the bounded background relay [`relay_audio`] documents, so every
+/// early end - a tripped bound or an upstream failure - fails the client's
+/// body read rather than truncating it.
 pub(crate) async fn audio_speech(
     State(state): State<AppState>,
-    caller: Caller,
+    caller: AuthedCaller,
     request: Request,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
-    let Json(request) = Json::<SpeechRequest>::from_request(request, &state)
-        .await
-        .map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    let WireJson(request) = WireJson::<SpeechRequest>::from_request(request, &state).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -302,9 +299,8 @@ fn speech_fallback_mime(
 /// display name.
 pub(crate) async fn audio_voices(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     let voices = live
         .routing

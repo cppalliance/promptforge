@@ -32,8 +32,7 @@ use shared_progress::ProgressTree;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
 use crate::config_pending::{canonical_form, config_root, relative_name, shadow_census};
 use crate::config_write::{config_write_error, error_chain};
@@ -76,9 +75,8 @@ const RESTART_SECTIONS: [&str; 6] = [
 /// still staged, so a retry of Apply re-runs the whole thing.
 pub(crate) async fn admin_config_apply(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let (enqueued, applied, restart_required) = {
         // The lock spans the census, the parse, and the capture (or the
@@ -142,9 +140,8 @@ pub(crate) async fn admin_config_apply(
 /// [`GatewayError::ApplyCancelled`].
 pub(crate) async fn admin_config_revert(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     // A revert issued during an apply wins: cancel the apply before its
     // commit can write the snapshot over the files being reverted. The
     // commit re-checks the token under the apply lock, so an apply already

@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::State;
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use crate::models::endpoint_status;
 #[cfg(feature = "stt")]
@@ -31,9 +31,8 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
 /// readiness entry per capability endpoint the gateway can serve.
 pub(crate) async fn admin_status(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let active = state.commands.active_command();
     let pending = state.commands.pending_commands();
     let live = state.live.read().await;

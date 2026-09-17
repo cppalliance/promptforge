@@ -20,8 +20,7 @@ use serde::Serialize;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// Generic speech lifecycle facts included in Gateway operational status.
@@ -164,9 +163,8 @@ impl fmt::Debug for SystemSampler {
 /// rather than link time.
 pub(crate) async fn admin_system(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<SystemSnapshot>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let cache_dir = {
         let live = state.live.read().await;
         live.config.local().cache_dir().map(str::to_owned)

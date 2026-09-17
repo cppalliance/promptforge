@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
-use crate::auth::Caller;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// The process-shutdown signal shared by the `POST /shutdown` route, the
@@ -54,9 +54,8 @@ impl ShutdownSignal {
 /// deliberately credential-free empty-key configuration.
 pub(crate) async fn admin_shutdown(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<StatusCode, GatewayError> {
-    crate::auth::check_auth(&state, &caller).await?;
     // Cancel the active queue command first: a shutdown during provisioning
     // stops the download, so the serve loop's drain and the process exit
     // stay prompt.

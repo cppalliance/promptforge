@@ -20,8 +20,7 @@ use gateway_protocol::ProtocolError;
 use gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// Whole-request deadline for one hub call, applied per request; reqwest's
@@ -164,9 +163,8 @@ pub(crate) struct HfSearchQuery {
 pub(crate) async fn admin_hf_search(
     State(state): State<AppState>,
     RawQuery(query): RawQuery,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
     let query = parse_search_query(query.as_deref())?;
     let renames = [("search", &query.q)];
     let passthrough = [
@@ -271,9 +269,8 @@ fn validate_search_value(
 pub(crate) async fn admin_hf_model(
     State(state): State<AppState>,
     repo: Result<Path<(String, String)>, PathRejection>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
     let Path((owner, name)) =
         repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let repo = format!("{owner}/{name}");
@@ -290,9 +287,8 @@ pub(crate) async fn admin_hf_model(
 pub(crate) async fn admin_hf_readme(
     State(state): State<AppState>,
     repo: Result<Path<(String, String)>, PathRejection>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
     let Path((owner, name)) =
         repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let repo = format!("{owner}/{name}");

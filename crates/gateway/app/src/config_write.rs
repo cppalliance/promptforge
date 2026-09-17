@@ -15,8 +15,7 @@ use axum::extract::rejection::JsonRejection;
 use gateway_config::{ConfigErrorKind, save_config_shadow};
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// The `PUT /admin/config` route: bearer-authed, stages the global config.
@@ -29,10 +28,9 @@ use crate::error::GatewayError;
 /// config-write error: selection belongs to `POST /admin/switch-profile`.
 pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
     body: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     // Deferring the extractor keeps auth first and puts the rejection in
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(body) =

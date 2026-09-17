@@ -6,8 +6,8 @@ use axum::extract::State;
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
-use crate::error::GatewayError;
+use crate::auth::AuthedCaller;
+use crate::error::{GatewayError, WireJson};
 
 /// The `POST /admin/queue/cancel` route: bearer-authed, fires the active
 /// command's cancellation token. The reply reports whether a command was
@@ -15,9 +15,8 @@ use crate::error::GatewayError;
 /// or phase boundary.
 pub(crate) async fn admin_queue_cancel(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let cancelled = state.commands.cancel_active();
     Ok(Json(serde_json::json!({ "cancelled": cancelled })))
 }
@@ -33,10 +32,9 @@ pub(crate) struct CancelPendingRequest {
 /// reply reports whether an entry was removed.
 pub(crate) async fn admin_queue_cancel_pending(
     State(state): State<AppState>,
-    caller: Caller,
-    Json(request): Json<CancelPendingRequest>,
+    _caller: AuthedCaller,
+    WireJson(request): WireJson<CancelPendingRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let cancelled = state.commands.cancel_pending(request.index);
     Ok(Json(serde_json::json!({ "cancelled": cancelled })))
 }

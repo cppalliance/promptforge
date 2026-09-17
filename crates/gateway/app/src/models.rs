@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::State;
 
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use crate::model_info;
 use crate::wire::ModelInfo;
@@ -13,9 +13,8 @@ use crate::wire::ModelInfo;
 /// Bearer-authed catalog of configured models for host bind.
 pub(crate) async fn list_models(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<model_info::CatalogModelsResponse>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     let data = live
         .routing

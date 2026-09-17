@@ -562,6 +562,30 @@ impl IntoResponse for GatewayError {
     }
 }
 
+/// A JSON body extractor whose rejections render in the OpenAI error
+/// envelope: a malformed body, a wrong content type, or a failed
+/// deserialize all answer [`GatewayError::MalformedRequest`] carrying the
+/// rejection's detail, never axum's plain-text rejection.
+pub(crate) struct WireJson<T>(pub(crate) T);
+
+impl<T, S> axum::extract::FromRequest<S> for WireJson<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = GatewayError;
+
+    async fn from_request(
+        request: axum::extract::Request,
+        state: &S,
+    ) -> Result<WireJson<T>, GatewayError> {
+        match Json::<T>::from_request(request, state).await {
+            Ok(Json(value)) => Ok(WireJson(value)),
+            Err(rejection) => Err(GatewayError::MalformedRequest(rejection.body_text())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

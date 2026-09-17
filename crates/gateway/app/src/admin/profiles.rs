@@ -7,8 +7,8 @@ use serde::Deserialize;
 
 use super::config_path;
 use crate::AppState;
-use crate::auth::{Caller, check_auth};
-use crate::error::GatewayError;
+use crate::auth::AuthedCaller;
+use crate::error::{GatewayError, WireJson};
 use gateway_config::ProfileName;
 
 /// The `POST /admin/switch-profile` body: a profile name, or `null` (or
@@ -21,9 +21,8 @@ pub(crate) struct SwitchProfileRequest {
 /// Lists profile names from the loaded global catalog.
 pub(crate) async fn admin_list_profiles(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     let profiles: Vec<&str> = live
         .config
@@ -50,10 +49,9 @@ pub(crate) async fn admin_list_profiles(
 /// state write is the config-write error. Every refusal changes nothing.
 pub(crate) async fn admin_switch_profile(
     State(state): State<AppState>,
-    caller: Caller,
-    Json(request): Json<SwitchProfileRequest>,
+    _caller: AuthedCaller,
+    WireJson(request): WireJson<SwitchProfileRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let selected = request
         .name
         .as_deref()

@@ -33,8 +33,7 @@ use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capp
 use time::OffsetDateTime;
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// The release artifact the sheet downloads from.
@@ -385,9 +384,8 @@ fn write_cache_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// arrived, or the last download error.
 pub(crate) async fn admin_cloud_models(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
     if let Some(sheet) = state.cloud_models.sheet() {
         return Ok(Json(Sheet::clone(&sheet)).into_response());
     }
@@ -404,9 +402,8 @@ pub(crate) async fn admin_cloud_models(
 /// awaits the same download rather than starting a second one.
 pub(crate) async fn admin_cloud_models_refresh(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<Sheet>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let sheet = state.cloud_models.refresh().await?;
     Ok(Json(Sheet::clone(&sheet)))
 }

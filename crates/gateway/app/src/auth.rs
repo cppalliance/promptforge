@@ -82,6 +82,35 @@ where
     }
 }
 
+/// A [`Caller`] that has already passed [`check_auth`]: extraction runs the
+/// three auth rules, so a handler's first line is never `check_auth`.
+///
+/// The rejection fires while the request parts are extracted, before any
+/// body extractor runs: an unauthenticated caller never makes the gateway
+/// parse a body, the ordering the speech route once arranged by hand.
+pub(crate) struct AuthedCaller(Caller);
+
+impl Deref for AuthedCaller {
+    type Target = Caller;
+
+    fn deref(&self) -> &Caller {
+        &self.0
+    }
+}
+
+impl FromRequestParts<AppState> for AuthedCaller {
+    type Rejection = GatewayError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<AuthedCaller, GatewayError> {
+        let Ok(caller) = Caller::from_request_parts(parts, state).await;
+        check_auth(state, &caller).await?;
+        Ok(AuthedCaller(caller))
+    }
+}
+
 #[cfg(test)]
 #[path = "auth-tests.rs"]
 mod secret_tests;

@@ -25,9 +25,7 @@ use serde::Serialize;
 #[cfg(feature = "local")]
 use crate::AppState;
 #[cfg(feature = "local")]
-use crate::auth::Caller;
-#[cfg(feature = "local")]
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 #[cfg(feature = "local")]
 use crate::error::GatewayError;
 #[cfg(feature = "local")]
@@ -102,9 +100,8 @@ pub(crate) struct ModelInfoQuery {
 pub(crate) async fn admin_model_info(
     State(state): State<AppState>,
     query: Result<Query<ModelInfoQuery>, QueryRejection>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<gguf::ModelInfo>, GatewayError> {
-    check_auth(&state, &caller).await?;
     // Deferring the extractor keeps auth first and puts the rejection in
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Query(query) =

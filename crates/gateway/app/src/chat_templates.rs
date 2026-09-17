@@ -14,8 +14,7 @@ use gateway_local::{
 use serde::Serialize;
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::config_pending::load_pending_for_running;
 use crate::error::GatewayError;
 
@@ -50,9 +49,8 @@ struct CatalogReply {
 /// Serves bundled families, exact model mappings, and pending-model decisions.
 pub(crate) async fn admin_chat_templates(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let (running, running_profile) = {
         let live = state.live.read().await;
         (Arc::clone(&live.config), live.profile_name.clone())

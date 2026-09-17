@@ -28,8 +28,7 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 
 /// The `POST /admin/reveal` body: the filesystem path to reveal.
@@ -95,10 +94,9 @@ impl RevealLauncher for SpawnLauncher {
 /// [`GatewayError::RevealFailed`] when the file manager cannot spawn.
 pub(crate) async fn admin_reveal(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
     body: Result<Json<RevealRequest>, JsonRejection>,
 ) -> Result<StatusCode, GatewayError> {
-    check_auth(&state, &caller).await?;
     // Deferring the extractor keeps the guards first and puts the rejection
     // in the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(request) =

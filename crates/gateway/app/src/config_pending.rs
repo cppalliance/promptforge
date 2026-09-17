@@ -15,8 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppState;
-use crate::auth::Caller;
-use crate::auth::check_auth;
+use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use axum::Json;
 use axum::extract::State;
@@ -37,9 +36,8 @@ use gateway_config::{
 /// redacted.
 pub(crate) async fn admin_config_pending(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let running_profile = state.live.read().await.profile_name.clone();
@@ -106,9 +104,8 @@ fn persisted_selection(config_path: &Path) -> Result<Option<String>, GatewayErro
 /// or `active_profile`.
 pub(crate) async fn admin_config_dirty(
     State(state): State<AppState>,
-    caller: Caller,
+    _caller: AuthedCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &caller).await?;
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let reply = tokio::task::spawn_blocking(move || dirty_reply(&config_path))
