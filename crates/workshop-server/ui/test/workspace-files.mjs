@@ -13,7 +13,9 @@
 // promptforge:workspace-changed invalidation, emitting the
 // promptforge:workspace-opened Tauri event with the path, and recording
 // the path in the recent-files store, with nothing painted on the status
-// bar; a shell that rejects the emit leaving the open committed (the
+// bar; a run with a path argument (Open Recent, Ctrl+P; TWF-003) posting
+// that path without ever reaching the picker, a non-string or absent
+// argument still reaching it; a shell that rejects the emit leaving the open committed (the
 // recent recorded, the invalidation fired, a console.warn and no
 // unhandled rejection); a server refusal painting the error on the
 // status bar while emitting nothing, recording nothing, and
@@ -267,6 +269,66 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   );
   check("a successful open records the path as recent", recentStore.list[0] === OPENED.path);
   check("a successful open paints nothing on the status bar", statusMessages.length === 0);
+}
+
+// --- A path argument skips the picker (Open Recent, Ctrl+P) ------------------
+
+{
+  const picksBefore = window.__TAURI_DIALOG__.calls.length;
+  const changesBefore = workspaceChanges;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  const statusBefore = statusMessages.length;
+  const RECENT = "C:\\work\\Recent.pfwork";
+  // A picker answer that must never be posted: a run with a path argument
+  // never reaches the dialog.
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Wrong.pfwork";
+  nextAnswer = { status: 200, body: { ...OPENED, path: RECENT, name: "Recent" } };
+  await Commands.execute("workbench.action.openWorkspace", RECENT);
+  await flush();
+  check("a run with a path argument never opens the picker", window.__TAURI_DIALOG__.calls.length === picksBefore);
+  const post = fetches.at(-1);
+  check(
+    "a run with a path argument posts that path to /workspace/file/open",
+    post?.url === "/workspace/file/open" && post?.method === "POST" && post?.body?.path === RECENT,
+  );
+  check("a run with a path argument fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
+  check(
+    "a run with a path argument emits promptforge:workspace-opened with that path",
+    window.__TAURI_EVENTS__.emitted.length === emittedBefore + 1 && window.__TAURI_EVENTS__.emitted.at(-1).payload?.path === RECENT,
+  );
+  check("a run with a path argument records that path as recent", recentStore.list[0] === RECENT);
+  check("a run with a path argument paints nothing on the status bar", statusMessages.length === statusBefore);
+
+  // A non-string argument is not a path: the picker flow runs as before.
+  const fetchesBefore = fetches.length;
+  window.__TAURI_DIALOG__.answer = null;
+  await Commands.execute("workbench.action.openWorkspace", 42);
+  await flush();
+  check("a run with a non-string argument still reaches the picker", window.__TAURI_DIALOG__.calls.length === picksBefore + 1);
+  check("a cancelled picker after a non-string argument posts nothing", postsSince(fetchesBefore).length === 0);
+
+  await Commands.execute("workbench.action.openWorkspace");
+  await flush();
+  check("a run without an argument still reaches the picker", window.__TAURI_DIALOG__.calls.length === picksBefore + 2);
+}
+
+// --- A path argument whose open is refused paints the error -----------------------
+
+{
+  const picksBefore = window.__TAURI_DIALOG__.calls.length;
+  const changesBefore = workspaceChanges;
+  const recentBefore = recentStore.list.length;
+  const GONE = "C:\\work\\Gone.pfwork";
+  nextAnswer = { status: 404, body: { error: { code: "not_found", message: "workspace file not found: C:\\work\\Gone.pfwork" } } };
+  await Commands.execute("workbench.action.openWorkspace", GONE);
+  await flush();
+  check("a refused open by path never opens the picker", window.__TAURI_DIALOG__.calls.length === picksBefore);
+  check(
+    "a refused open by path paints the server's message naming the path",
+    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("Gone.pfwork"),
+  );
+  check("a refused open by path records nothing", recentStore.list.length === recentBefore);
+  check("a refused open by path invalidates nothing", workspaceChanges === changesBefore);
 }
 
 // --- A rejected emit never undoes the open ------------------------------------

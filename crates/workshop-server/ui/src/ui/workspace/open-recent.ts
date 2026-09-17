@@ -8,11 +8,15 @@
 //
 // The dynamic rows carry their own groups so they sort with the static
 // Reopen Closed Editor (1_editor), More... (y_more), and Clear Recently
-// Opened... (z_clear) rows: roots land in 2_roots and dispatch
-// vscode.openFolder with the root path, recent files land in 3_files and
-// dispatch vscode.open. When roots and history are both empty the
-// provider answers no rows, which is what lets the menu widget drop the
-// empty submenu.
+// Opened... (z_clear) rows: recent workspace files (a .pfwork suffix,
+// any case) land in 1_workspaces and dispatch
+// workbench.action.openWorkspace with the file path, roots land in
+// 2_roots and dispatch vscode.openFolder with the root path, the other
+// recent files land in 3_files and dispatch vscode.open. The recent
+// store records one flat path list; a row's kind is inferred from its
+// extension at render time, so no store shape changes. When roots and
+// history are both empty the provider answers no rows, which is what
+// lets the menu widget drop the empty submenu.
 //
 // Every factory takes its stores as optional deps defaulting to the
 // shared singletons, resolved at call time; tests inject their own.
@@ -33,6 +37,22 @@ export interface RecentProviderDeps {
   readonly commands?: CommandRegistry;
 }
 
+/** The workspace file extension; the same suffix the workspace-files pickers filter on. */
+const WORKSPACE_EXTENSION = ".pfwork";
+
+/** The command an Open Recent workspace row and a Ctrl+P workspace hit dispatch. */
+const OPEN_WORKSPACE_COMMAND = "workbench.action.openWorkspace";
+
+/** Whether a recorded path is a workspace file: a `.pfwork` suffix, any case. */
+export function isWorkspaceFilePath(path: string): boolean {
+  return path.toLowerCase().endsWith(WORKSPACE_EXTENSION);
+}
+
+/** The command a recent path dispatches: the workspace open for a .pfwork, the editor otherwise. */
+function openCommandFor(path: string): string {
+  return isWorkspaceFilePath(path) ? OPEN_WORKSPACE_COMMAND : "vscode.open";
+}
+
 /** Reports a rejected command run to the status bar, as the menu does. */
 function reportCommandFailure(commandId: string, error: unknown): void {
   const statusBar = getServiceOrNull(STATUS_BAR);
@@ -46,10 +66,11 @@ function reportCommandFailure(commandId: string, error: unknown): void {
 }
 
 /**
- * The dynamic rows of File > Open Recent: one row per granted root
- * (2_roots; re-focuses the tree on it) and one per recent file, most
- * recent first (3_files; opens an editor). Empty when both sources are
- * empty.
+ * The dynamic rows of File > Open Recent: one row per recent workspace
+ * file, most recent first (1_workspaces; switches onto it), one per
+ * granted root (2_roots; re-focuses the tree on it), and one per other
+ * recent file, most recent first (3_files; opens an editor). Empty when
+ * both sources are empty.
  */
 export function createRecentMenuProvider(deps: RecentProviderDeps = {}): MenuItemsProvider {
   return (): readonly MenuItem[] => {
@@ -65,10 +86,22 @@ export function createRecentMenuProvider(deps: RecentProviderDeps = {}): MenuIte
       rows.push({ command: "vscode.openFolder", args: [root.path], title: root.name, group: "2_roots", order });
       order += 1;
     }
-    order = 0;
+    let workspaceOrder = 0;
+    let fileOrder = 0;
     for (const path of recentFiles.list) {
-      rows.push({ command: "vscode.open", args: [path], title: baseName(path), group: "3_files", order });
-      order += 1;
+      if (isWorkspaceFilePath(path)) {
+        rows.push({
+          command: OPEN_WORKSPACE_COMMAND,
+          args: [path],
+          title: baseName(path),
+          group: "1_workspaces",
+          order: workspaceOrder,
+        });
+        workspaceOrder += 1;
+        continue;
+      }
+      rows.push({ command: "vscode.open", args: [path], title: baseName(path), group: "3_files", order: fileOrder });
+      fileOrder += 1;
     }
     return rows;
   };
@@ -78,8 +111,9 @@ export function createRecentMenuProvider(deps: RecentProviderDeps = {}): MenuIte
  * The "" quick-access provider: recent files first in recency order,
  * then every file in the tree's fetched listings, deduped by path. The
  * filter is a case-insensitive substring match on the base name or the
- * full path. Accepting dispatches vscode.open, the same command the
- * Open Recent rows carry.
+ * full path. Accepting dispatches the same command the matching Open
+ * Recent row carries: workbench.action.openWorkspace for a .pfwork hit,
+ * vscode.open otherwise.
  */
 export function createFileQuickAccessProvider(deps: RecentProviderDeps = {}): QuickAccessProvider {
   return {
@@ -103,8 +137,9 @@ export function createFileQuickAccessProvider(deps: RecentProviderDeps = {}): Qu
           label: name,
           description: path,
           accept: () => {
-            void commands.execute("vscode.open", path).catch((error: unknown) => {
-              reportCommandFailure("vscode.open", error);
+            const command = openCommandFor(path);
+            void commands.execute(command, path).catch((error: unknown) => {
+              reportCommandFailure(command, error);
             });
           },
         });

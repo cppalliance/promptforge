@@ -218,7 +218,7 @@ Verify: `cargo nextest run --locked -p workshop-workspace` (including the confin
 
 <step-4>
 
-### Step 4: Open Recent and Ctrl+P open `.pfwork` entries directly (TWF-003)
+### Step 4: Open Recent and Ctrl+P open `.pfwork` entries directly (TWF-003) [completed]
 
 - Component: `workshop-server/ui` SPA
 - Piece: Open Recent workspace rows (one step; lands before Steps 5 and 6 because those also edit `workspace-files.contribution.ts`)

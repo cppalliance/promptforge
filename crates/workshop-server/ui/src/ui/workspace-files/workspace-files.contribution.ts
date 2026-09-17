@@ -174,26 +174,37 @@ function writeLiveWorkspaceState(): void {
 }
 
 /**
- * Open Workspace from File...: the native picker filtered to .pfwork,
- * the open on the server, the file's UI state applied to the live
- * stores, then the invalidation, the shell event, and the recent entry.
- * A cancelled picker answers a non-string and is a no-op; a refusal
- * reports and changes nothing on the page.
+ * The native picker filtered to .pfwork. Answers the picked path, or
+ * null when the picker was cancelled (it answers a non-string then).
  */
-async function openWorkspaceFromFile(): Promise<void> {
+async function pickWorkspaceFile(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const picked = await open({ title: "Open Workspace from File", filters: WORKSPACE_FILTERS });
-  if (typeof picked !== "string") {
+  return typeof picked === "string" ? picked : null;
+}
+
+/**
+ * Open Workspace from File...: the open on the server, the file's UI
+ * state applied to the live stores, then the invalidation, the shell
+ * event, and the recent entry. With a string `path` argument (an Open
+ * Recent row or a Ctrl+P hit) the picker is skipped and the argument is
+ * the file; otherwise the native picker filtered to .pfwork supplies it.
+ * A cancelled picker is a no-op; a refusal reports and changes nothing
+ * on the page.
+ */
+async function openWorkspaceFromFile(path?: unknown): Promise<void> {
+  const target = typeof path === "string" ? path : await pickWorkspaceFile();
+  if (target === null) {
     return;
   }
   try {
-    await openWorkspaceFile(picked);
+    await openWorkspaceFile(target);
   } catch (error) {
-    reportError(`Could not open ${picked}: ${errorText(error)}`);
+    reportError(`Could not open ${target}: ${errorText(error)}`);
     return;
   }
   await applyOpenedWorkspaceState();
-  await announceSwitched(picked);
+  await announceSwitched(target);
 }
 
 /**
