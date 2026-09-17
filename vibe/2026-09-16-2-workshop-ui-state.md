@@ -418,7 +418,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-14>
 
-### Step 14: Docs, full gates, and manual smoke
+### Step 14: Docs, full gates, and manual smoke [completed]
 
 - Component: `docs-gates`
 - Piece: documentation and verification (single piece)

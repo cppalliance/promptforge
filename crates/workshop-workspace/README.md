@@ -1,6 +1,6 @@
 # workshop-workspace
 
-The PromptForge Workshop's workspace subsystem: confined filesystem access behind `/workspace/*` - directory trees, file reads, and file writes jailed to roots the user explicitly granted - plus the workspace file that keeps those grants and the window geometry between sessions.
+The PromptForge Workshop's workspace subsystem: confined filesystem access behind `/workspace/*` - directory trees, file reads, and file writes jailed to roots the user explicitly granted - plus the workspace file that keeps those grants, the window geometry, and the workspace-scoped UI state (dock layout, expanded folders, closed editors) between sessions.
 
 ## Confinement
 
@@ -36,7 +36,20 @@ CREATE TABLE kv (
 );
 ```
 
-`meta` carries `format` (always `promptforge-workspace`), `version` (`1`), `name` (the display name; absent means the file stem), and `created_at`. `grants.position` is one past the file's maximum at insert time and removal never renumbers; the tree still lists grants in canonical path order, so the column records history for future ordering and does not change display. `kv` defines one key in v1, `window`, holding the shell's geometry as JSON: `{ width, height, x, y, maximized }` in logical pixels. The table names `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`, and `documents` are reserved for follow-on projects and unused.
+`meta` carries `format` (always `promptforge-workspace`), `version` (`1`), `name` (the display name; absent means the file stem), and `created_at`. `grants.position` is one past the file's maximum at insert time and removal never renumbers; the tree still lists grants in canonical path order, so the column records history for future ordering and does not change display. The table names `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`, and `documents` are reserved for follow-on projects and unused.
+
+#### The `kv` table
+
+`kv` holds one JSON text per key. `window` is typed and written by the shell's own route; the other three are the opaque workspace-scoped UI state bucket - stored verbatim, checked only for an allow-listed key, a 1 MiB cap on the JSON text, and that it parses - whose schemas the SPA owns. Keys are additive, so `user_version` stays `1` and an older file reads every missing key as `null`.
+
+| Key | Shape | Holds |
+|---|---|---|
+| `window` | `{ width, height, x, y, maximized }` in logical pixels | The shell's geometry. |
+| `layout` | `{ version, zones, overrides, layout }` | The dock layout envelope exactly as the SPA's layout persistence builds it (schema version 3 today). |
+| `tree` | `{ "expanded": ["<absolute path>", ...] }` | The folders expanded in the Workshop tree. Paths are absolute, matching the grants table. |
+| `closed_editors` | `{ "paths": ["<absolute path>", ...] }` | The closed-editor stack, most recent first, capped at 50. |
+| `scroll` | reserved | Unused. |
+| `agent_sessions` | reserved | Unused. |
 
 Opening validates `user_version`, `meta.format`, and `meta.version` before reading anything else and writes nothing. A file that is not a database, or a database without the stamp, is refused as "not a promptforge workspace file" and left byte-identical; a stamp at another version is refused with the found-versus-supported versions. A refusal never wipes or partially loads a workspace.
 
@@ -53,8 +66,12 @@ Registered through `workshop_registry::Registry` beside the tree and file routes
 | `POST /workspace/file/save_as` | `{ path }` | Creates a new file from the current grants and window state and switches to it. |
 | `POST /workspace/file/duplicate` | `{ path }` | Copies the current file and its siblings to `path` and switches to the copy. While ephemeral there is no file to copy, so it behaves as `save_as`: a new file from the current grants. |
 | `PUT /workspace/file/window-state` | `{ width, height, x, y, maximized }` | Saves geometry; answers `{ saved: false }` and writes nothing while ephemeral. |
+| `GET /workspace/file/state` | none | Answers every allow-listed `kv` state key (`layout`, `tree`, `closed_editors`) with its value, `null` where nothing has been put or while ephemeral. |
+| `PUT /workspace/file/state/{key}` | any JSON value | Stores the body verbatim under `key`; answers `{ saved: false }` and writes nothing while ephemeral. |
 
-Failures reach the wire through the crate's `WorkspaceError` envelope: a refused file is a client error carrying the required-versus-actual text with grants unchanged, a missing path is the ordinary not-found, a path already taken is a conflict.
+Every write to the file, the state keys included, funnels through the one actor task, so there is a single writer per `.pfwork`. Save As copies grants and window state into the new file but not the state keys; the SPA writes them after the switch so that fact has one writer too.
+
+Failures reach the wire through the crate's `WorkspaceError` envelope: a refused file is a client error carrying the required-versus-actual text with grants unchanged, a missing path is the ordinary not-found, a path already taken is a conflict. A state put with an unknown key or a body that is not JSON is `400`, a body over the cap is `413`; either changes nothing, ephemeral or not.
 
 ### The last-workspace pointer
 

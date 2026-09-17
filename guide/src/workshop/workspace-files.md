@@ -6,12 +6,13 @@ You can grant folders and browse them. This chapter teaches you to keep that arr
 
 A workspace is a single file with the extension `.pfwork`. It is an ordinary file you can see in your file manager, copy, move, back up, and delete. Inside, it is a small embedded database; you never need to look inside it, but if you are curious, any Turso or SQLite inspector opens it.
 
-A workspace file holds two things:
+A workspace file holds your arrangement of that workspace:
 
 - The granted folders, in the order you granted them. The folders themselves are not copied; the file remembers their paths.
 - The window's size, position, and maximized state.
+- The panel layout, which folders are expanded in the tree, and the list of editors you have closed (for Reopen Closed Editor).
 
-That is all. Your files stay where they are on disk, and your agent sessions are unaffected. The workspace is a bag of preferences, not a project archive.
+That is all. Your files stay where they are on disk, and your agent sessions are unaffected. The workspace is a bag of preferences, not a project archive. The "What persists" section below spells out what lives in the workspace and what follows you between workspaces.
 
 The workspace commands use native file dialogs, so they are desktop only. In a plain browser the three File menu rows are disabled.
 
@@ -67,11 +68,35 @@ A workspace file may in future gain sibling folders beside it, created only when
 
 Because siblings are named for their role rather than for the workspace, two `.pfwork` files in the same folder would share them. Keep one workspace per folder. The Workshop does not stop you from doing otherwise, but you will find the arrangement confusing later.
 
+## What persists
+
+The Workshop remembers your interface state in two buckets, split by whether the state belongs to a workspace or to you.
+
+The workspace bucket lives in the `.pfwork` file and comes back whenever that workspace is open:
+
+- The granted folders and the window geometry, as described above.
+- The panel layout: which panels are open, where they sit, and their sizes.
+- Which folders are expanded in the Workshop tree. Restored folders load their listings on demand, so an expanded folder shows its children.
+- The closed-editor list, so Reopen Closed Editor works across launches.
+
+The user bucket lives in the Workshop's own state directory and follows you from workspace to workspace:
+
+- Editor toggles: word wrap, rendered whitespace, control characters, column selection.
+- The zoom level.
+- Recent files and recent workspaces under File > Open Recent.
+- The command palette's history.
+
+Both buckets save as you go. There is no Save command for either. While a workspace is ephemeral, the workspace bucket has nowhere to go and lasts only for the session; the user bucket saves regardless.
+
+Opening a workspace applies its bucket in place of what you see. The live layout is replaced by the file's layout, and every open editor is disposed, including editors with unsaved text, so save your work before you open another workspace. The tree collapses to the file's expanded folders. A restored agent panel is a panel, not a conversation: it starts a fresh session, and your earlier sessions stay in the state directory as before. Saving a workspace under a new name copies the live layout, tree, and closed-editor list into the new file so it opens as you left it.
+
+If either bucket cannot be read or written, the Workshop starts from defaults for that bucket, notes the reason in its log, and keeps working; nothing you do in the interface is blocked by a persistence failure.
+
 ## What is not in the workspace
 
 - Your files. The workspace remembers paths, not contents.
 - Agent sessions and their transcripts. Those live in the Workshop's own state directory, as before.
 - Anything from before this version. Existing state is not imported; save a workspace to start one.
-- Settings such as zoom, editor toggles, and recent-file lists. Those remain application-wide for now.
+- Editor toggles, zoom, recent files, and command history. Those are yours, not the workspace's, and stay the same as you move between workspaces.
 
-You can now save, open, and duplicate workspaces, and you know that a workspace remembers your grants and window layout and nothing more. The next chapter teaches the editor, where you open and change the files those folders contain.
+You can now save, open, and duplicate workspaces, and you know which of your settings travel with a workspace and which follow you. The next chapter teaches the editor, where you open and change the files those folders contain.
