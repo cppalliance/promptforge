@@ -10,6 +10,7 @@ import { createToastStack } from "shared-ui/toast";
 
 import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService, MODEL_SERVICE } from "./services/model-service";
+import { RECENT_FILES_STORE, RecentFilesStore } from "./services/recent-files-store";
 import { getService, registerService } from "./services/service-registry";
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
 import { TEXT_CONTROL_SERVICE } from "./services/text-control-service";
@@ -25,6 +26,7 @@ import { UpdateView } from "./ui/chrome/update-view";
 import { setupWindowChrome } from "./ui/chrome/window-chrome";
 import { setupWindowMenus } from "./ui/menu/index";
 import { KeybindingDispatcher } from "./ui/layout/keybinding-dispatcher";
+import { COMMANDS_HISTORY, CommandsHistory } from "./ui/quickinput/commands-history";
 import { QuickInputService, QUICK_INPUT_SERVICE } from "./ui/quickinput/quick-input";
 import { setupWorkspaceDrops } from "./ui/workspace/workspace-drops";
 import { register as registerWorkspaceFiles } from "./ui/workspace-files/index";
@@ -69,6 +71,20 @@ registerService(
   () =>
     new EditorSettingsService(storage.get("user", "editor_settings"), (value) =>
       storage.set("user", "editor_settings", value),
+    ),
+);
+registerService(
+  RECENT_FILES_STORE,
+  () =>
+    new RecentFilesStore(storage.get("user", "recent_files"), (value) =>
+      storage.set("user", "recent_files", value),
+    ),
+);
+registerService(
+  COMMANDS_HISTORY,
+  () =>
+    new CommandsHistory(storage.get("user", "commands_history"), (value) =>
+      storage.set("user", "commands_history", value),
     ),
 );
 

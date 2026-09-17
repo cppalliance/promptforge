@@ -11,15 +11,18 @@
 // the active provider's rows with a help row re-routing to its prefix.
 // The provider half covers the command palette provider (Category: Title
 // labels, keybinding labels, precondition filtering, substring filter,
-// CommandsHistory recency and persistence), the ? help provider, the
-// not-available placeholder providers, and the real provider
-// descriptors' modes list rendering before the recent files.
+// CommandsHistory recency over the fake UI-state adapter, the
+// COMMANDS_HISTORY registry token the provider resolves when no history
+// is injected), the ? help provider, the not-available placeholder
+// providers, and the real provider descriptors' modes list rendering
+// before the recent files.
 // Bundles the module with esbuild and drives it against jsdom.
 // Run: node --test test/quick-input.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+import { createFakeUiStorage } from "./helpers/ui-storage.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,7 +40,8 @@ const bundle = await esbuild.build({
     contents: `
       export { QuickInputService } from "./src/ui/quickinput/quick-input.ts";
       export { createQuickAccessRegistry } from "./src/services/quick-access-registry.ts";
-      export { CommandsHistory } from "./src/ui/quickinput/commands-history.ts";
+      export { CommandsHistory, COMMANDS_HISTORY } from "./src/ui/quickinput/commands-history.ts";
+      export { getService, registerService } from "./src/services/service-registry.ts";
       export {
         createCommandPaletteProvider,
         createHelpProvider,
@@ -64,6 +68,9 @@ const {
   QuickInputService,
   createQuickAccessRegistry,
   CommandsHistory,
+  COMMANDS_HISTORY,
+  getService,
+  registerService,
   createCommandPaletteProvider,
   createHelpProvider,
   createPlaceholderProvider,
@@ -254,22 +261,29 @@ check("dispose removes the panel", window.document.querySelector(".ws-quick-inpu
 
 // --- Provider half: the command palette provider --------------------------------
 
-function memoryStorage() {
-  const entries = new Map();
-  return {
-    getItem: (key) => (entries.has(key) ? entries.get(key) : null),
-    setItem: (key, value) => entries.set(key, String(value)),
-    removeItem: (key) => entries.delete(key),
-  };
+/** The user-bucket key the composition root binds the history to. */
+const HISTORY_KEY = "commands_history";
+
+/**
+ * Builds a history over a fake adapter the way main.ts binds the live
+ * one: the initial value read from the user bucket, every change written
+ * back to the same key. Returns the history and the fake, whose `sets`
+ * records the writes.
+ */
+function historyOver(initial) {
+  const storage = createFakeUiStorage(initial === undefined ? {} : { user: { [HISTORY_KEY]: initial } });
+  const history = new CommandsHistory(storage.get("user", HISTORY_KEY), (value) =>
+    storage.set("user", HISTORY_KEY, value),
+  );
+  return { history, storage };
 }
 
-function paletteSetup() {
+function paletteSetup(initialHistory) {
   const commands = new CommandRegistry();
   const menus = new MenuRegistry();
   const keybindings = createKeybindingsRegistry("windows");
   const context = new ContextKeyService();
-  const storage = memoryStorage();
-  const history = new CommandsHistory(storage, "test.commandsHistory");
+  const { history, storage } = historyOver(initialHistory);
   const provider = createCommandPaletteProvider({ commands, menus, keybindings, context, history });
   return { commands, menus, keybindings, context, storage, history, provider };
 }
@@ -332,11 +346,81 @@ function paletteSetup() {
   provider.getItems("")[1]?.accept();
   await Promise.resolve();
   check("accept records the command in the history", history.list[0] === "a.one");
-  const reloaded = new CommandsHistory(storage, "test.commandsHistory");
-  check("the history survives a reload", reloaded.list.join(",") === "a.one,b.two");
-  const hostile = memoryStorage();
-  hostile.setItem("test.commandsHistory", '{"not":"a list"}');
-  check("a malformed payload reads as no history", new CommandsHistory(hostile, "test.commandsHistory").list.length === 0);
+  check(
+    "each add writes the full id list to the user bucket",
+    storage.sets.length === 2 &&
+      storage.sets.every((entry) => entry.bucket === "user" && entry.key === HISTORY_KEY) &&
+      storage.sets[0].value.join(",") === "b.two" &&
+      storage.sets[1].value.join(",") === "a.one,b.two",
+  );
+  const reloaded = new CommandsHistory(storage.get("user", HISTORY_KEY), () => {});
+  check("a new history over the written value reads it back", reloaded.list.join(",") === "a.one,b.two");
+  check("a malformed initial value reads as no history", historyOver({ not: "a list" }).history.list.length === 0);
+  check("a string initial value reads as no history, never a cast", historyOver('["x"]').history.list.length === 0);
+  check("a null initial value reads as no history", historyOver(null).history.list.length === 0);
+  check(
+    "non-string, empty, and duplicate initial entries drop out",
+    historyOver(["ok", 7, "", "ok", "two"]).history.list.join(",") === "ok,two",
+  );
+}
+
+{
+  // The initial list drives recency before any command runs; construction writes nothing.
+  const { commands, menus, storage, provider } = paletteSetup(["b.two"]);
+  commands.register("a.one", { title: "One", run: () => {} });
+  commands.register("b.two", { title: "Two", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "a.one" });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "b.two" });
+  check("the initial history list sorts its command first", provider.getItems("").map((row) => row.label).join(",") === "Two,One");
+  check("construction writes nothing", storage.sets.length === 0);
+}
+
+{
+  // The cap, the empty id, and a writer that throws.
+  const { history, storage } = historyOver();
+  history.add("");
+  check("an empty id is ignored and writes nothing", history.list.length === 0 && storage.sets.length === 0);
+  for (let i = 0; i < 55; i += 1) {
+    history.add(`cmd.${i}`);
+  }
+  check("the history is capped at 50", history.list.length === 50 && history.list[0] === "cmd.54");
+  check("the written list is the capped list", storage.sets[storage.sets.length - 1].value.length === 50);
+
+  let attempts = 0;
+  const degraded = new CommandsHistory(["kept"], () => {
+    attempts += 1;
+    throw new Error("denied");
+  });
+  degraded.add("fresh");
+  check("a throwing writer is still called", attempts === 1);
+  check("a rejected write leaves the in-memory list intact", degraded.list.join(",") === "fresh,kept");
+}
+
+{
+  // The registry token: an empty no-op default self-registers, and the
+  // palette provider resolves it when no history is injected, so the
+  // composition root's re-registration reaches the palette.
+  const fallback = getService(COMMANDS_HISTORY);
+  check("COMMANDS_HISTORY self-registers a CommandsHistory", fallback instanceof CommandsHistory);
+  check("the default history starts empty", fallback.list.length === 0);
+  const { history: bound } = historyOver(["b.two"]);
+  registerService(COMMANDS_HISTORY, () => bound);
+  const commands = new CommandRegistry();
+  const menus = new MenuRegistry();
+  const context = new ContextKeyService();
+  commands.register("a.one", { title: "One", run: () => {} });
+  commands.register("b.two", { title: "Two", run: () => {} });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "a.one" });
+  menus.appendMenuItem(MenuId.CommandPalette, { command: "b.two" });
+  const provider = createCommandPaletteProvider({ commands, menus, context });
+  check(
+    "without an injected history the palette resolves COMMANDS_HISTORY",
+    provider.getItems("").map((row) => row.label).join(",") === "Two,One",
+  );
+  provider.getItems("")[1]?.accept();
+  await Promise.resolve();
+  check("accept records into the registry-resolved history", bound.list[0] === "a.one");
+  context.dispose();
 }
 
 // --- Provider half: the help provider --------------------------------------------

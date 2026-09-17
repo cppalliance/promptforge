@@ -348,7 +348,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-9>
 
-### Step 9: Recent files and commands history as adapter-backed registry services
+### Step 9: Recent files and commands history as adapter-backed registry services [completed]
 
 - Component: `spa-user-stores`
 - Piece: list stores (sequential after Step 8)

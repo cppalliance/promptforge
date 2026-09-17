@@ -1,51 +1,46 @@
 // The recent-files store: the paths of the most recently opened files,
-// most-recent-first, persisted to localStorage so the File > Open Recent
-// menu and the quick-access "" provider survive a reload. The editor
-// feature records every opened path; the workspace contribution reads
-// the list for its dynamic menu rows and clears it from the Clear
-// Recently Opened command.
+// most-recent-first, seeded from the UI-state adapter's user bucket at
+// construction and written back through it on every change so the
+// File > Open Recent menu and the quick-access "" provider survive a
+// relaunch. The editor feature records every opened path; the workspace
+// contribution reads the list for its dynamic menu rows and clears it
+// from the Clear Recently Opened command.
 //
-// The persisted value arrives as unknown and passes a hand-written shape
+// The initial value arrives as unknown and passes a hand-written shape
 // check - a malformed or hostile payload reads as an empty list, never
-// as a cast. Storage access itself can throw (denied access, quota), so
-// every read and write is guarded and the store degrades to in-memory.
+// as a cast. The writer is fire-and-forget: a write that throws is
+// swallowed and the in-memory list stays authoritative.
 //
-// The service self-registers with a default factory, so any bundle that
-// touches it gets the singleton without composition-root wiring.
+// The service self-registers with a default factory (empty initial,
+// no-op writer), so any bundle that touches it gets a working singleton;
+// the composition root re-registers it bound to the live adapter before
+// the first consumer resolves it.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: the initial value and the writer are injected,
+// and nothing here may import from the app layers.
 
 import { Emitter } from "../base/event";
 import type { Event } from "../base/event";
 import type { IDisposable } from "../base/lifecycle";
 import { createServiceToken, registerService } from "./service-registry";
 
-/** The localStorage key holding the persisted path list. */
-const STORAGE_KEY = "workshop.recentFiles";
-
 /** The most paths the store keeps; adding past the cap drops the oldest. */
 const MAX_ENTRIES = 50;
 
+/** The writer the store hands the whole path list to after each change. */
+export type RecentFilesWriter = (value: unknown) => void;
+
 /**
- * Narrows a persisted payload to a path list: it must be a JSON array,
+ * Narrows a persisted payload to a path list: it must be an array,
  * non-string and empty entries drop out, and duplicates collapse keeping
  * the first (most recent) occurrence. Anything else reads as no history.
  */
-function readEntries(raw: string | null): readonly string[] {
-  if (raw === null) {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) {
+function readEntries(initial: unknown): readonly string[] {
+  if (!Array.isArray(initial)) {
     return [];
   }
   const entries: string[] = [];
-  for (const item of parsed as readonly unknown[]) {
+  for (const item of initial as readonly unknown[]) {
     if (typeof item === "string" && item !== "" && !entries.includes(item)) {
       entries.push(item);
     }
@@ -53,19 +48,10 @@ function readEntries(raw: string | null): readonly string[] {
   return entries;
 }
 
-/** The page's localStorage, or null where none exists (a DOM-free host). */
-function defaultStorage(): Storage | null {
-  try {
-    return typeof globalThis.localStorage === "undefined" ? null : globalThis.localStorage;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * The recent-files list. Mutations persist eagerly and fire onDidChange;
- * a storage failure leaves the in-memory list authoritative for the rest
- * of the page lifetime.
+ * The recent-files list. Mutations write through eagerly and fire
+ * onDidChange; a writer failure leaves the in-memory list authoritative
+ * for the rest of the page lifetime.
  */
 export class RecentFilesStore implements IDisposable {
   private entries: readonly string[];
@@ -74,11 +60,15 @@ export class RecentFilesStore implements IDisposable {
   /** Fires when the list changes; the Open Recent provider hooks it. */
   readonly onDidChange: Event<void> = this.changeEmitter.event;
 
+  /**
+   * `initial` is the value the user bucket held at boot (any shape; see
+   * readEntries); `write` receives the whole list after each change.
+   */
   constructor(
-    private readonly storage: Storage | null = defaultStorage(),
-    private readonly storageKey: string = STORAGE_KEY,
+    initial: unknown = null,
+    private readonly write: RecentFilesWriter = () => {},
   ) {
-    this.entries = readEntries(this.readRaw());
+    this.entries = readEntries(initial);
   }
 
   /** The recorded paths, most recent first. */
@@ -100,7 +90,7 @@ export class RecentFilesStore implements IDisposable {
     this.changeEmitter.fire();
   }
 
-  /** Empties the list and persists the empty state. */
+  /** Empties the list and writes the empty state. */
   clear(): void {
     if (this.entries.length === 0) {
       return;
@@ -110,25 +100,12 @@ export class RecentFilesStore implements IDisposable {
     this.changeEmitter.fire();
   }
 
-  private readRaw(): string | null {
-    if (this.storage === null) {
-      return null;
-    }
-    try {
-      return this.storage.getItem(this.storageKey);
-    } catch {
-      return null;
-    }
-  }
-
   private persist(): void {
-    if (this.storage === null) {
-      return;
-    }
     try {
-      this.storage.setItem(this.storageKey, JSON.stringify(this.entries));
+      this.write(this.entries);
     } catch {
-      // Quota or denied access: the in-memory list stays authoritative.
+      // The adapter reports its own failures; a throwing writer leaves
+      // the in-memory list authoritative.
     }
   }
 
@@ -140,6 +117,8 @@ export class RecentFilesStore implements IDisposable {
 /** The registry token for the recent-files singleton. */
 export const RECENT_FILES_STORE = createServiceToken<RecentFilesStore>("workshop.recentFiles");
 
-// Self-registration: the default instance is shared by every consumer in
-// the process. The composition root may re-register to rebind.
+// Self-registration with an empty list and a no-op writer: a consumer
+// that resolves the token before the composition root re-registers it
+// bound to the live adapter gets a working, unpersisted list rather than
+// a wrong instance cached for the page lifetime.
 registerService(RECENT_FILES_STORE, () => new RecentFilesStore());

@@ -8,8 +8,8 @@
 // The palette reads the CommandPalette menu at every open: a row whose
 // command is unregistered or whose precondition fails is absent, labels
 // are "Category: Title", each row carries the command's keybinding
-// label, and recently used commands (the localStorage CommandsHistory)
-// sort first in recency order with the rest in menu order. Accepting a
+// label, and recently used commands (the COMMANDS_HISTORY service) sort
+// first in recency order with the rest in menu order. Accepting a
 // row records the command in the history and dispatches it; a rejected
 // run posts to the status bar, matching the menu widget.
 //
@@ -19,7 +19,7 @@
 // the modes list matches Cursor's while the mode is unimplemented.
 //
 // Every factory takes its registries as optional deps defaulting to the
-// shared singletons; tests inject their own.
+// shared singletons or the service registry; tests inject their own.
 
 import { Commands, type CommandRegistry } from "../../services/command-registry";
 import { CONTEXT_KEY_SERVICE, type ContextKeyService } from "../../services/context-key-service";
@@ -28,7 +28,7 @@ import { MenuId, Menus, type MenuRegistry } from "../../services/menu-registry";
 import { QuickAccessRegistry, type QuickAccessProviderDescriptor } from "../../services/quick-access-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { STATUS_BAR } from "../status/status-bar";
-import { commandsHistory, type CommandsHistory } from "./commands-history";
+import { COMMANDS_HISTORY, type CommandsHistory } from "./commands-history";
 import { QUICK_INPUT_SERVICE, type QuickAccessProvider, type QuickInputItem } from "./quick-input";
 
 /** The registries the palette provider reads; tests inject their own. */
@@ -62,7 +62,7 @@ export function createCommandPaletteProvider(deps: CommandPaletteProviderDeps = 
   const menus = deps.menus ?? Menus;
   const keybindings = deps.keybindings ?? KeybindingsRegistry;
   const context = deps.context ?? getService(CONTEXT_KEY_SERVICE);
-  const history = deps.history ?? commandsHistory;
+  const history = deps.history ?? getService(COMMANDS_HISTORY);
   return {
     getItems(filter: string): readonly QuickInputItem[] {
       const needle = filter.trim().toLowerCase();

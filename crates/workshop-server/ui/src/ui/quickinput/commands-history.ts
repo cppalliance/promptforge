@@ -1,42 +1,41 @@
 // The commands history: the ids of the most recently accepted palette
-// commands, most-recent-first, persisted to localStorage so the command
-// palette's recency ordering survives a reload. The palette provider
-// reads the list at every open and records each accepted command.
+// commands, most-recent-first, seeded from the UI-state adapter's user
+// bucket at construction and written back through it on every change so
+// the command palette's recency ordering survives a relaunch. The
+// palette provider reads the list at every open and records each
+// accepted command.
 //
-// The persisted value arrives as unknown and passes a hand-written shape
+// The initial value arrives as unknown and passes a hand-written shape
 // check - a malformed or hostile payload reads as an empty list, never
-// as a cast. Storage access itself can throw (denied access, quota), so
-// every read and write is guarded and the store degrades to in-memory.
+// as a cast. The writer is fire-and-forget: a write that throws is
+// swallowed and the in-memory list stays authoritative.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// The history is a registry service: it self-registers under
+// COMMANDS_HISTORY with a default factory (empty initial, no-op writer),
+// and the composition root re-registers it bound to the live adapter
+// before the palette first resolves it.
+//
+// Generic and DOM-free: the initial value and the writer are injected.
 
-/** The localStorage key holding the persisted command id list. */
-const STORAGE_KEY = "workshop.commandsHistory";
+import { createServiceToken, registerService } from "../../services/service-registry";
 
 /** The most ids the store keeps; adding past the cap drops the oldest. */
 const MAX_ENTRIES = 50;
 
+/** The writer the history hands the whole id list to after each change. */
+export type CommandsHistoryWriter = (value: unknown) => void;
+
 /**
- * Narrows a persisted payload to a command id list: it must be a JSON
- * array, non-string and empty entries drop out, and duplicates collapse
- * keeping the first (most recent) occurrence. Anything else reads as no
- * history.
+ * Narrows a persisted payload to a command id list: it must be an array,
+ * non-string and empty entries drop out, and duplicates collapse keeping
+ * the first (most recent) occurrence. Anything else reads as no history.
  */
-function readIds(raw: string | null): readonly string[] {
-  if (raw === null) {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) {
+function readIds(initial: unknown): readonly string[] {
+  if (!Array.isArray(initial)) {
     return [];
   }
   const ids: string[] = [];
-  for (const item of parsed as readonly unknown[]) {
+  for (const item of initial as readonly unknown[]) {
     if (typeof item === "string" && item !== "" && !ids.includes(item)) {
       ids.push(item);
     }
@@ -44,28 +43,23 @@ function readIds(raw: string | null): readonly string[] {
   return ids;
 }
 
-/** The page's localStorage, or null where none exists (a DOM-free host). */
-function defaultStorage(): Storage | null {
-  try {
-    return typeof globalThis.localStorage === "undefined" ? null : globalThis.localStorage;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * The palette recency list. Mutations persist eagerly; a storage failure
- * leaves the in-memory list authoritative for the rest of the page
- * lifetime.
+ * The palette recency list. Mutations write through eagerly; a writer
+ * failure leaves the in-memory list authoritative for the rest of the
+ * page lifetime.
  */
 export class CommandsHistory {
   private ids: readonly string[];
 
+  /**
+   * `initial` is the value the user bucket held at boot (any shape; see
+   * readIds); `write` receives the whole list after each change.
+   */
   constructor(
-    private readonly storage: Storage | null = defaultStorage(),
-    private readonly storageKey: string = STORAGE_KEY,
+    initial: unknown = null,
+    private readonly write: CommandsHistoryWriter = () => {},
   ) {
-    this.ids = readIds(this.readRaw());
+    this.ids = readIds(initial);
   }
 
   /** The recorded command ids, most recent first. */
@@ -86,28 +80,21 @@ export class CommandsHistory {
     this.persist();
   }
 
-  private readRaw(): string | null {
-    if (this.storage === null) {
-      return null;
-    }
-    try {
-      return this.storage.getItem(this.storageKey);
-    } catch {
-      return null;
-    }
-  }
-
   private persist(): void {
-    if (this.storage === null) {
-      return;
-    }
     try {
-      this.storage.setItem(this.storageKey, JSON.stringify(this.ids));
+      this.write(this.ids);
     } catch {
-      // Quota or denied access: the in-memory list stays authoritative.
+      // The adapter reports its own failures; a throwing writer leaves
+      // the in-memory list authoritative.
     }
   }
 }
 
-/** The shared history the running app's palette provider reads. */
-export const commandsHistory = new CommandsHistory();
+/** The registry token for the commands-history singleton. */
+export const COMMANDS_HISTORY = createServiceToken<CommandsHistory>("workshop.commandsHistory");
+
+// Self-registration with an empty list and a no-op writer: a consumer
+// that resolves the token before the composition root re-registers it
+// bound to the live adapter gets a working, unpersisted history rather
+// than a wrong instance cached for the page lifetime.
+registerService(COMMANDS_HISTORY, () => new CommandsHistory());
