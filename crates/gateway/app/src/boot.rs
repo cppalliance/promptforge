@@ -849,3 +849,11 @@ mod tests {
         assert_eq!(InstallerStt::from_dword(Some(1)), InstallerStt::Included);
     }
 }
+
+#[cfg(test)]
+#[path = "boot-tests.rs"]
+mod provisioning_tests;
+
+#[cfg(all(test, feature = "stt"))]
+#[path = "boot-speech-tests.rs"]
+mod boot_speech_tests;

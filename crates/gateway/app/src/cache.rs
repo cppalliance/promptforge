@@ -25,14 +25,15 @@ use tokio::task::JoinHandle;
 
 use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHandle};
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
 use crate::local::artifacts::{
     DownloadProgress, TreeProgress, filename_from_url, parse_expected_digest,
 };
 use crate::local::cache::{BlobCache, CacheEntry, CachedBlob};
 use crate::local::{LocalError, resolve_cache_root};
-use crate::{AppState, check_auth};
 
 /// Opens the blob cache at the active profile's resolved cache root.
 fn open_cache(cache_dir: Option<&str>) -> Result<BlobCache, LocalError> {

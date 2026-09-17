@@ -922,3 +922,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "logic-tests.rs"]
+mod status_tests;

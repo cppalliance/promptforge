@@ -19,9 +19,10 @@ use gateway_config::Secret;
 use gateway_protocol::ProtocolError;
 use gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 
 /// Whole-request deadline for one hub call, applied per request; reqwest's
 /// per-request timeout replaces the bounded client's wider default.

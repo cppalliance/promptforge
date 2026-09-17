@@ -14,9 +14,10 @@ use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
 use gateway_config::{ConfigErrorKind, save_config_shadow};
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 
 /// The `PUT /admin/config` route: bearer-authed, stages the global config.
 ///
@@ -41,7 +42,7 @@ pub(crate) async fn admin_put_config(
     // save validated whole - saves serialize with apply, revert, and each
     // other.
     let _guard = state.apply.lock().await;
-    let config = crate::config_path(&state)?.to_path_buf();
+    let config = crate::admin::config_path(&state)?.to_path_buf();
     let document = toml_document(body)?;
     let shadows = tokio::task::spawn_blocking(move || save_config_shadow(&config, document))
         .await

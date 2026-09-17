@@ -27,9 +27,10 @@ use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use serde::Deserialize;
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 
 /// The `POST /admin/reveal` body: the filesystem path to reveal.
 #[derive(Debug, Deserialize)]

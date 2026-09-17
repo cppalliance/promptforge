@@ -14,10 +14,11 @@ use axum::extract::State;
 
 use gateway_config::SttModelConfig;
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
 use crate::local::{cache::orphans, resolve_cache_root};
-use crate::{AppState, check_auth};
 
 /// The `GET /admin/orphans` route: bearer-authed, scans `<cache_dir>/models/`
 /// and reports every file no `[[local_model]]` or `[[stt_model]]` declared in
@@ -63,13 +64,11 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use futures_util::future::BoxFuture;
     use gateway_config::{Config, ProfileName};
     use tokio_util::sync::CancellationToken;
 
-    use crate::commands::{Command, Outcome};
-    use crate::error::GatewayError;
-    use crate::test_support::{app_state, serve, serve_state};
+    use crate::commands::Command;
+    use crate::test_support::{app_state, parking_executor, serve, serve_state};
 
     /// A profile rooting the cache at `cache_dir` with one `[[local_model]]`
     /// whose path source is `configured`.
@@ -250,24 +249,6 @@ models = ["adopted"]
             .expect("the request sends");
         assert_eq!(response.status(), reqwest::StatusCode::OK);
         response.json().await.expect("a JSON body")
-    }
-
-    /// An executor that parks every command until its token fires, so the
-    /// status route sees an active command for as long as the test needs.
-    fn parking_executor() -> Arc<crate::commands::Executor> {
-        Arc::new(|_state, command, _tree| {
-            Box::pin(async move {
-                match command {
-                    Command::LoadProfile { name, token } => {
-                        token.cancelled().await;
-                        Err(GatewayError::CommandCancelled(format!(
-                            "load-profile: {name}"
-                        )))
-                    }
-                    _ => unreachable!("the test enqueues only LoadProfile"),
-                }
-            }) as BoxFuture<'static, Outcome>
-        })
     }
 
     /// After an apply, the live document is republished with no profile

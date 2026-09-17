@@ -23,14 +23,16 @@ use serde::Deserialize;
 use serde::Serialize;
 
 #[cfg(feature = "local")]
+use crate::AppState;
+#[cfg(feature = "local")]
 use crate::auth::Caller;
+#[cfg(feature = "local")]
+use crate::auth::check_auth;
 #[cfg(feature = "local")]
 use crate::error::GatewayError;
 #[cfg(feature = "local")]
 use crate::local::{LocalError, gguf, resolve_cache_root};
 use crate::wire::ModelInfo;
-#[cfg(feature = "local")]
-use crate::{AppState, check_auth};
 
 /// The model-list wire response, including routed and active speech models.
 #[derive(Debug, Serialize)]

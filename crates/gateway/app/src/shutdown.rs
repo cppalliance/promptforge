@@ -56,7 +56,7 @@ pub(crate) async fn admin_shutdown(
     State(state): State<AppState>,
     caller: Caller,
 ) -> Result<StatusCode, GatewayError> {
-    crate::check_auth(&state, &caller).await?;
+    crate::auth::check_auth(&state, &caller).await?;
     // Cancel the active queue command first: a shutdown during provisioning
     // stops the download, so the serve loop's drain and the process exit
     // stay prompt.

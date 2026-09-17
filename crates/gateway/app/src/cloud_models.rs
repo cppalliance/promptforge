@@ -32,9 +32,10 @@ use gateway_api::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
 use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
 use time::OffsetDateTime;
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 
 /// The release artifact the sheet downloads from.
 pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";

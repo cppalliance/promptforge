@@ -13,10 +13,11 @@ use gateway_local::{
 };
 use serde::Serialize;
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::config_pending::load_pending_for_running;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 
 #[derive(Serialize)]
 struct FamilyReply {

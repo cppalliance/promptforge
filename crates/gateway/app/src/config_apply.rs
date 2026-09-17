@@ -1,4 +1,4 @@
-﻿//! Apply and revert routes for pending config shadows:
+//! Apply and revert routes for pending config shadows:
 //! `POST /admin/config-apply` and `POST /admin/config-revert`.
 //!
 //! Apply captures the pending state under the apply lock - a census of the
@@ -31,13 +31,14 @@ use gateway_web_search::WebSearchState;
 use shared_progress::ProgressTree;
 use tokio_util::sync::CancellationToken;
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
 use crate::config_pending::{canonical_form, config_root, relative_name, shadow_census};
 use crate::config_write::{config_write_error, error_chain};
 use crate::error::GatewayError;
 use crate::routing::Routing;
-use crate::{AppState, check_auth};
 
 /// Top-level sections the process reads once at boot. A change to one of
 /// them promotes to disk but takes effect at the next start, so the apply
@@ -78,7 +79,7 @@ pub(crate) async fn admin_config_apply(
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
-    let config_path = crate::config_path(&state)?.to_path_buf();
+    let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let (enqueued, applied, restart_required) = {
         // The lock spans the census, the parse, and the capture (or the
         // inline promotion), so a save cannot land between them and the
@@ -152,7 +153,7 @@ pub(crate) async fn admin_config_revert(
     // The same guard as apply's capture and commit: a revert must not race
     // either.
     let _guard = state.apply.lock().await;
-    let config_path = crate::config_path(&state)?.to_path_buf();
+    let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let reverted = tokio::task::spawn_blocking(move || delete_all_shadows(&config_path))
         .await
         .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
@@ -423,7 +424,7 @@ mod tests {
     use crate::commands::Command;
     use crate::error::GatewayError;
     use crate::park::{Phase, PhasePark};
-    use crate::test_support::{AdminPaths, app_state, serve_state};
+    use crate::test_support::{AdminPaths, app_state, serve_state, wait_until};
 
     const CONFIG: &str = r#"
 config-version = 0
@@ -554,18 +555,6 @@ models = []
             .send()
             .await
             .expect("save sends")
-    }
-
-    /// Polls `condition` with a bounded wait, for observing the worker's
-    /// externally visible state transitions.
-    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while !condition() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
     }
 
     /// The live profile name, as `GET /admin/status` would report it.

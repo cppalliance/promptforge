@@ -8,6 +8,7 @@ use std::sync::Arc;
 use gateway_config::Config;
 use shared_progress::ProgressHub;
 
+use crate::error::GatewayError;
 use crate::routing::Routing;
 use crate::{AppState, ProfileSelection, build_router};
 
@@ -210,6 +211,94 @@ pub(crate) async fn serve_state(state: AppState) -> SocketAddr {
         .await;
     });
     addr
+}
+
+/// Polls `condition` with a bounded wait, for observing externally
+/// visible state transitions.
+pub(crate) async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !condition() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+}
+
+/// An executor that parks every command until its token fires, then
+/// settles it as cancelled - the shape of a provisioning download.
+/// Commands without a token (unloads) settle immediately.
+pub(crate) fn parking_executor() -> Arc<crate::commands::Executor> {
+    use futures_util::future::BoxFuture;
+
+    use crate::commands::Outcome;
+
+    Arc::new(|_state, command, _tree| {
+        Box::pin(async move {
+            let label = command.label();
+            let Some(token) = command.token() else {
+                return Ok(label);
+            };
+            token.cancelled().await;
+            Err(GatewayError::CommandCancelled(label))
+        }) as BoxFuture<'static, Outcome>
+    })
+}
+
+/// A fake OpenAI backend on an ephemeral loopback port answering every
+/// chat completion with a canned reply, so a routed request completes
+/// end to end.
+#[cfg(any(feature = "local", feature = "stt"))]
+pub(crate) async fn fake_chat_backend() -> SocketAddr {
+    async fn completions(
+        axum::Json(body): axum::Json<serde_json::Value>,
+    ) -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({
+            "id": "cmpl-test",
+            "object": "chat.completion",
+            "model": body["model"].as_str().unwrap_or(""),
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": "pong" },
+                "finish_reason": "stop"
+            }]
+        }))
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("the backend listener binds");
+    let addr = listener.local_addr().expect("the bound address");
+    tokio::spawn(async move {
+        let _ignored = axum::serve(
+            listener,
+            axum::Router::new().route("/chat/completions", axum::routing::post(completions)),
+        )
+        .await;
+    });
+    addr
+}
+
+/// A state whose key is `test-token` over a config carrying an empty
+/// `[workshop]` section, as the speech-route auth tests serve.
+pub(crate) fn workshop_state() -> AppState {
+    let config = Config::from_toml_str(
+        "config-version = 0\n\
+         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+         [workshop]\n",
+    )
+    .expect("config parses");
+    app_state(config, None)
+}
+
+/// A state whose key is `test-token`, with `trust_loopback` set as
+/// given (absent means the default).
+pub(crate) fn loopback_state(trust_loopback: Option<bool>) -> AppState {
+    let trust = trust_loopback.map_or(String::new(), |trust| format!("trust_loopback = {trust}\n"));
+    let config = Config::from_toml_str(&format!(
+        "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n{trust}"
+    ))
+    .expect("config parses");
+    app_state(config, None)
 }
 
 #[cfg(all(test, feature = "stt"))]

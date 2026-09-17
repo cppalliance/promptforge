@@ -111,7 +111,7 @@ impl Command {
     }
 
     /// The command's display name, for status readouts and log lines.
-    fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         match self {
             Command::LoadProfile { name, .. } => format!("load-profile: {name}"),
             Command::ApplyConfig { .. } => APPLY_CONFIG_LABEL.to_owned(),
@@ -121,7 +121,7 @@ impl Command {
     }
 
     /// The token the worker honors, when the command carries one.
-    fn token(&self) -> Option<CancellationToken> {
+    pub(crate) fn token(&self) -> Option<CancellationToken> {
         match self {
             Command::LoadProfile { token, .. }
             | Command::ApplyConfig { token, .. }
@@ -784,7 +784,7 @@ mod tests {
     use gateway_config::Config;
 
     use super::*;
-    use crate::test_support::app_state;
+    use crate::test_support::{app_state, parking_executor, wait_until};
 
     fn queue() -> CommandQueue {
         CommandQueue::new(Arc::new(ProgressHub::new()))
@@ -851,34 +851,6 @@ mod tests {
             .into_iter()
             .map(|entry| entry.name)
             .collect()
-    }
-
-    /// Polls `condition` with a bounded wait, for observing the worker's
-    /// externally visible state transitions.
-    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while !condition() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
-    }
-
-    /// An executor that parks every command until its token fires, then
-    /// settles it as cancelled - the shape of a provisioning download.
-    /// Commands without a token (unloads) settle immediately.
-    fn parking_executor() -> Arc<Executor> {
-        Arc::new(|_state, command, _tree| {
-            Box::pin(async move {
-                let label = command.label();
-                let Some(token) = command.token() else {
-                    return Ok(label);
-                };
-                token.cancelled().await;
-                Err(GatewayError::CommandCancelled(label))
-            }) as BoxFuture<'static, Outcome>
-        })
     }
 
     #[test]

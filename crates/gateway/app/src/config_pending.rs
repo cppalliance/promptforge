@@ -14,9 +14,10 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 use axum::Json;
 use axum::extract::State;
 use gateway_config::{
@@ -40,7 +41,7 @@ pub(crate) async fn admin_config_pending(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
     let _publication = state.apply.lock().await;
-    let config_path = crate::config_path(&state)?.to_path_buf();
+    let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let running_profile = state.live.read().await.profile_name.clone();
     let reply = tokio::task::spawn_blocking(move || {
         let config = load_pending_for_running(&config_path, running_profile.as_deref())?;
@@ -109,7 +110,7 @@ pub(crate) async fn admin_config_dirty(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
     let _publication = state.apply.lock().await;
-    let config_path = crate::config_path(&state)?.to_path_buf();
+    let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let reply = tokio::task::spawn_blocking(move || dirty_reply(&config_path))
         .await
         .map_err(|join| GatewayError::PendingConfig(join.to_string()))??;

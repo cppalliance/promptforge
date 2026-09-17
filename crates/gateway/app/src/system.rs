@@ -19,9 +19,10 @@ use nvml_wrapper::Nvml;
 use serde::Serialize;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
+use crate::AppState;
 use crate::auth::Caller;
+use crate::auth::check_auth;
 use crate::error::GatewayError;
-use crate::{AppState, check_auth};
 
 /// Generic speech lifecycle facts included in Gateway operational status.
 #[cfg(feature = "stt")]
