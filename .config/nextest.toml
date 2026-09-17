@@ -13,13 +13,18 @@ leak-timeout = "250ms"
 failure-output = "immediate-final"
 
 [test-groups]
-# Limit concurrency for tensor/FFI-heavy suites to prevent core thrashing.
-heavy = { max-threads = 2 }
+# Limit concurrency for tensor/FFI-heavy suites. Each test spawns its own
+# inference thread pool (whisper.cpp runs ~4 ggml workers per call; candle's
+# rayon pool sizes to all cores), so the cap plus threads-required weights
+# each heavy test as four slots against both the group and global limits.
+heavy = { max-threads = 8 }
 
 [[profile.default.overrides]]
 filter = 'package(promptforge-tool-picker) | package(gateway-stt-backend-whisper) | package(gateway-stt)'
 test-group = 'heavy'
+threads-required = 4
 
 [[profile.ci.overrides]]
 filter = 'package(promptforge-tool-picker) | package(gateway-stt-backend-whisper) | package(gateway-stt)'
 test-group = 'heavy'
+threads-required = 4
