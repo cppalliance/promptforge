@@ -9,9 +9,10 @@ publish = false
 description = "PromptForge shared virtual filesystem machinery: canonical shared paths, claims, routing, and backends"
 
 # Zero-dependency rule: std only. No dependencies, workspace or external.
-# The manifest test enforces this; never weaken it.
+# The manifest test enforces this; never weaken it. workspace-hack is
+# excluded: this crate has no third-party dependencies, so feature
+# unification has nothing to unify here.
 [dependencies]
-workspace-hack.workspace = true
 
 [lints]
 workspace = true

@@ -19,7 +19,7 @@ const fixtureDir = path.join(
   "..",
   "..",
   "..",
-  "gateway-stt",
+  "gateway", "stt", "api",
   "tests",
   "fixtures",
   "realtime",

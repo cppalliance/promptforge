@@ -10,7 +10,7 @@ import { JSDOM } from "jsdom";
 import { assertNoLeaks } from "./helpers/leak-check.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
-const fixtures = path.join(uiDir, "..", "..", "..", "gateway-stt", "tests", "fixtures", "realtime");
+const fixtures = path.join(uiDir, "..", "..", "..", "gateway", "stt", "api", "tests", "fixtures", "realtime");
 const bundle = await esbuild.build({
   stdin: {
     contents: `

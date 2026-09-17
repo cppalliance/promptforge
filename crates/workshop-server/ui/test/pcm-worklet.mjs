@@ -11,7 +11,7 @@ const fixturePath = path.join(
   uiDir,
   "..",
   "..",
-  "gateway-stt",
+  "gateway", "stt", "api",
   "tests",
   "fixtures",
   "audio",
