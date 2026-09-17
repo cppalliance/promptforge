@@ -30,6 +30,7 @@ const bundle = await esbuild.build({
       import "./src/ui/editor/editor.contribution.ts";
       export * as editorCommands from "./src/ui/editor/editor-commands.ts";
       export * as editorLifecycle from "./src/ui/editor/editor-lifecycle.ts";
+      export { ClosedEditors, CLOSED_EDITORS } from "./src/ui/editor/closed-editors.ts";
       export { parseLineColumn, createGotoLineProvider } from "./src/ui/editor/goto-line.ts";
       export { EditorState, EditorSelection } from "@codemirror/state";
       export { EditorView } from "@codemirror/view";
@@ -127,6 +128,8 @@ await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   editorCommands,
   editorLifecycle,
+  ClosedEditors,
+  CLOSED_EDITORS,
   parseLineColumn,
   createGotoLineProvider,
   EditorState,
@@ -768,7 +771,15 @@ initZones(dock);
 
 {
   // The closed-editor stack: file editors reopen by path, untitled
-  // buffers reopen with their text under a fresh serial.
+  // buffers reopen with their text under a fresh serial. The tracking
+  // and the reopen resolve the stack through the CLOSED_EDITORS token,
+  // bound here the way main.ts binds it: seeded from the workspace
+  // bucket and writing `{ paths: [...] }` back on every change.
+  const closedWrites = [];
+  registerService(
+    CLOSED_EDITORS,
+    () => new ClosedEditors({ paths: ["C:\\p\\seeded.txt"] }, (value) => closedWrites.push(value)),
+  );
   const tracking = editorLifecycle.installClosedEditorTracking(dock);
 
   const fileStub = createStubSurface();
@@ -779,23 +790,42 @@ initZones(dock);
   filePanel.init({ params: { path: "C:\\p\\x.txt" }, api: { setTitle() {}, close() {} } });
   await flush();
   for (const listener of listeners.remove) listener({ id: "editor:C:\\p\\x.txt", view: { content: filePanel } });
+  check(
+    "closing a file editor prepends its path and writes the snapshot",
+    closedWrites.length === 1 && closedWrites[0].paths.join(",") === "C:\\p\\x.txt,C:\\p\\seeded.txt",
+  );
   const beforeFileReopen = added.length;
   editorLifecycle.reopenClosedEditor();
   check(
     "reopenClosedEditor reopens the last closed file editor by path",
     added.length === beforeFileReopen + 1 && added.at(-1).params.path === "C:\\p\\x.txt",
   );
+  check(
+    "reopening removes the path and writes the snapshot",
+    closedWrites.length === 2 && closedWrites[1].paths.join(",") === "C:\\p\\seeded.txt",
+  );
 
   const untitledStub = createStubSurface();
   const untitledPanel = new EditorPanel({ createSurface: () => untitledStub });
   untitledPanel.init({ params: { untitled: 3, text: "unsaved draft" }, api: { setTitle() {}, close() {} } });
   for (const listener of listeners.remove) listener({ id: "editor:untitled-3", view: { content: untitledPanel } });
+  check(
+    "a closed untitled buffer never persists its text",
+    closedWrites.length === 3 && closedWrites[2].paths.join(",") === "C:\\p\\seeded.txt",
+  );
   editorLifecycle.reopenClosedEditor();
   check(
     "a closed untitled editor reopens with its text under a fresh serial",
     added.at(-1).params.text === "unsaved draft" &&
       typeof added.at(-1).params.untitled === "number" &&
       added.at(-1).params.untitled !== 3,
+  );
+
+  // The seeded entry from the workspace file reopens last.
+  editorLifecycle.reopenClosedEditor();
+  check(
+    "the stack seeded from the workspace bucket reopens by path",
+    added.at(-1).params.path === "C:\\p\\seeded.txt",
   );
 
   const beforeEmpty = added.length;

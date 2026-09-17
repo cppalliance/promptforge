@@ -20,6 +20,7 @@ import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
 import { CommandCenter } from "./ui/chrome/command-center";
+import { CLOSED_EDITORS, ClosedEditors } from "./ui/editor/closed-editors";
 import { EDITOR_SETTINGS_SERVICE, EditorSettingsService } from "./ui/editor/editor-settings-service";
 import { setupGatewayConfigBridge } from "./ui/gateway/gateway-config-bridge";
 import { StatusBar, STATUS_BAR } from "./ui/status/status-bar";
@@ -96,6 +97,17 @@ registerService(
   () =>
     new TreeStateService(storage.get("workspace", "tree"), (value) =>
       storage.set("workspace", "tree", value),
+    ),
+);
+// The closed-editor stack belongs to the workspace too: it seeds from the
+// file's "closed_editors" value and writes back on every close and
+// reopen. Bound here, ahead of the dock, so the editor chunk's tracking
+// (installed when the chunk first loads) resolves the live-bound stack.
+registerService(
+  CLOSED_EDITORS,
+  () =>
+    new ClosedEditors(storage.get("workspace", "closed_editors"), (value) =>
+      storage.set("workspace", "closed_editors", value),
     ),
 );
 

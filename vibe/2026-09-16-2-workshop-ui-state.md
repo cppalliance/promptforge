@@ -391,7 +391,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-12>
 
-### Step 12: Closed-editor stack persisted and restored
+### Step 12: Closed-editor stack persisted and restored [completed]
 
 - Component: `spa-workspace-stores`
 - Piece: closed editors (sequential after Step 11, shares `main.ts`)
@@ -409,7 +409,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 - Component: `spa-workspace-stores`
 - Piece: workspace switch (sequential; needs Steps 10 through 12)
 - Artifacts:
-  - `crates/workshop-server/ui/src/ui/workspace-files/workspace-files.contribution.ts`: resolves `getService(UI_STORAGE)`, `getService(DOCK)` (`src/services/panel-registry.ts`), `getService(TREE_STATE)`, and `getService(CLOSED_EDITORS)` inside the lazy `run` bodies; after Open succeeds, `await storage.reloadWorkspace()` then `storage.suppressWrites(() => { applyLayoutOrDefault(dock, storage.get("workspace", "layout")); tree.replaceExpanded(expandedFrom(storage.get("workspace", "tree"))); closed.replaceClosedEditors(pathsFrom(storage.get("workspace", "closed_editors"))); })`; after Save As succeeds, `storage.set("workspace", "layout", buildLayoutEnvelope(dock))`, `storage.set("workspace", "tree", { expanded: [...tree.expandedPaths] })`, `storage.set("workspace", "closed_editors", closed.snapshot())` once each; Duplicate unchanged.
+  - `crates/workshop-server/ui/src/ui/workspace-files/workspace-files.contribution.ts`: resolves `getService(UI_STORAGE)`, `getService(DOCK)` (`src/services/panel-registry.ts`), `getService(TREE_STATE)`, and `getService(CLOSED_EDITORS)` (`src/ui/editor/closed-editors.ts`) inside the lazy `run` bodies; after Open succeeds, `await storage.reloadWorkspace()` then `storage.suppressWrites(() => { applyLayoutOrDefault(dock, storage.get("workspace", "layout")); tree.replaceExpanded(expandedFrom(storage.get("workspace", "tree"))); closed.replaceClosedEditors(pathsFrom(storage.get("workspace", "closed_editors"))); })`; after Save As succeeds, `storage.set("workspace", "layout", buildLayoutEnvelope(dock))`, `storage.set("workspace", "tree", { expanded: [...tree.expandedPaths] })`, `storage.set("workspace", "closed_editors", closed.snapshot())` once each; Duplicate unchanged.
   - `crates/workshop-server/ui/test/no-local-storage.mjs`: walks `src/` and fails on any file matching `localStorage`.
 - Behavior: opening a workspace replaces the live arrangement with the file's; Save As makes the new file carry the current arrangement; the apply never echoes to the server.
 - Tests (`crates/workshop-server/ui/test/workspace-switch.mjs`, jsdom with the Step 7 fixture): after a mocked Open, `dock.fromJSON` receives the file's envelope, the expanded set is replaced, the closed stack is replaced, and no workspace PUT occurs during the apply; after a mocked Save As, exactly three workspace PUTs are made with the live values; the SPA boot test asserts every store holds its bucket value, one failed bucket yields defaults for its stores only, and both hanging past the timeout completes boot with defaults; `no-local-storage.mjs` passes; existing workspace-files tests pass.
