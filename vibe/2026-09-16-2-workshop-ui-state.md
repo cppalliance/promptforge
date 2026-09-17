@@ -363,7 +363,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-10>
 
-### Step 10: Layout persistence through the adapter and `applyLayoutOrDefault`
+### Step 10: Layout persistence through the adapter and `applyLayoutOrDefault` [completed]
 
 - Component: `spa-workspace-stores`
 - Piece: dock layout (sequential; Open in Step 13 calls `applyLayoutOrDefault`)

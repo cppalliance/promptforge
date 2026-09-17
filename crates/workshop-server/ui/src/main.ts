@@ -31,9 +31,10 @@ import { QuickInputService, QUICK_INPUT_SERVICE } from "./ui/quickinput/quick-in
 import { setupWorkspaceDrops } from "./ui/workspace/workspace-drops";
 import { register as registerWorkspaceFiles } from "./ui/workspace-files/index";
 import { persistZoom, restoreZoom } from "./ui/chrome/zoom";
-import { restoreLayout, startLayoutPersistence } from "./ui/layout/layout-persistence";
+import { applyLayoutOrDefault } from "./ui/layout/layout-boot";
+import { startLayoutPersistence } from "./ui/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./ui/layout/panel-types";
-import { initZones, openInZone } from "./ui/layout/zones";
+import { initZones } from "./ui/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
 // so the whole composition tears down with one dispose() call.
@@ -197,22 +198,13 @@ disposables.add(dock);
 disposables.add(speechCapture);
 disposables.add(initZones(dock));
 
-// Restore the persisted layout; any failure falls back to the known-good
-// default: the tree anchors the left zone first, then the agent session
-// opens right, and main stays empty until a document opens. Panels
-// re-create through their registered factories - only identity is stored.
-if (!restoreLayout(dock)) {
-  const treePanel = openInZone("tree", {});
-  treePanel.group.api.setSize({ width: 280 });
-  openInZone("agent", {});
-}
-// The workbench never boots without its anchors: a restored layout that
-// lost the Workshop tree (a stale snapshot from before the tree became
-// non-closable) or carries no agent-session panel gets them back. Both
-// panels are singletons, so re-opening an existing one only focuses it.
-openInZone("tree", {});
-openInZone("agent", {});
-disposables.add(startLayoutPersistence(dock));
+// The dock layout belongs to the workspace: the preloaded workspace
+// bucket's "layout" value restores, or any failure falls back to the
+// known-good default (layout-boot.ts). The debounced saver installs after
+// the boot layout is in place, so the restore never echoes the same
+// envelope back to the file.
+applyLayoutOrDefault(dock, storage.get("workspace", "layout"));
+disposables.add(startLayoutPersistence(dock, (value) => storage.set("workspace", "layout", value)));
 // The keybinding dispatcher owns every registered chord: one
 // capture-phase listener resolving through the keybinding registry the
 // contributions populate.

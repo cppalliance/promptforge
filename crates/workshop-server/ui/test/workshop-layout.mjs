@@ -1,22 +1,30 @@
 // Integration test for layout boot, persistence, and shortcuts
-// (src/ui/layout/layout-persistence.ts, the keybinding dispatcher
-// resolving the contribution surface's chords, the zone-state
-// serialization in zones.ts, and EditorPanel.requestClose). Bundles the
-// modules with esbuild, mounts real Dockview docks in jsdom against the
-// real index.html, and drives the public API. Covers: the layout
-// survives a reload (serialize -> restore), including the tree's
-// close-button-free tab; the envelope carries no lock state; stale
-// schema versions (1 and 2) are rejected; corrupt, version-mismatched,
-// and unloadable layouts fall back to defaults; re-ensuring the tree
-// after a restore never duplicates it; each shortcut dispatches its
-// command; the status bar never enters the serialized layout.
+// (src/ui/layout/layout-persistence.ts, src/ui/layout/layout-boot.ts,
+// the keybinding dispatcher resolving the contribution surface's chords,
+// the zone-state serialization in zones.ts, and EditorPanel.requestClose).
+// Bundles the modules with esbuild, mounts real Dockview docks in jsdom
+// against the real index.html, and drives the public API with a fake
+// UI-state adapter (test/helpers/ui-storage.mjs) standing in for the
+// workspace bucket. Covers: the layout survives a reload (build the
+// envelope -> restore it), including the tree's close-button-free tab;
+// the envelope carries no lock state; a burst of layout changes coalesces
+// into one debounced write; a throwing writer is logged, never escapes;
+// stale schema versions (1 and 2) are rejected; a null, non-object,
+// version-mismatched, or unloadable envelope falls back to defaults;
+// applyLayoutOrDefault builds the default zones from null (clearing a live
+// dock's panels first, the Open path) and restores a valid envelope
+// through fromJSON; re-ensuring the tree after a restore
+// never duplicates it; each shortcut dispatches its command; the status
+// bar never enters the serialized layout.
 // Run: node test/workshop-layout.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+import { createFakeUiStorage } from "./helpers/ui-storage.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,16 +36,17 @@ const bundle = await esbuild.build({
         initZones,
         openInZone,
         panelIdFor,
+        resetZones,
         zoneOfPanel,
       } from "./src/ui/layout/zones.ts";
       export { createPanelComponent, createPanelTabComponent } from "./src/ui/layout/panel-types.ts";
       export {
         restoreLayout,
-        persistLayout,
+        buildLayoutEnvelope,
         startLayoutPersistence,
-        LAYOUT_STORAGE_KEY,
         LAYOUT_SCHEMA_VERSION,
       } from "./src/ui/layout/layout-persistence.ts";
+      export { applyLayoutOrDefault } from "./src/ui/layout/layout-boot.ts";
       export { KeybindingDispatcher } from "./src/ui/layout/keybinding-dispatcher.ts";
       export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
       export { getService } from "./src/services/service-registry.ts";
@@ -113,6 +122,7 @@ window.HTMLElement.prototype.getClientRects = function getClientRects() {
 const ROOT = "C:\\project";
 const FILE_A = `${ROOT}\\a.txt`;
 const FILE_B = `${ROOT}\\b.txt`;
+const FILE_C = `${ROOT}\\c.txt`;
 const puts = [];
 let tokenSeq = 100;
 globalThis.fetch = async (url, options) => {
@@ -211,14 +221,15 @@ const {
   initZones,
   openInZone,
   panelIdFor,
+  resetZones,
   zoneOfPanel,
   createPanelComponent,
   createPanelTabComponent,
   restoreLayout,
-  persistLayout,
+  buildLayoutEnvelope,
   startLayoutPersistence,
-  LAYOUT_STORAGE_KEY,
   LAYOUT_SCHEMA_VERSION,
+  applyLayoutOrDefault,
   KeybindingDispatcher,
   CONTEXT_KEY_SERVICE,
   getService,
@@ -237,7 +248,26 @@ async function flush() {
   }
 }
 
-window.localStorage.clear();
+// A structural copy with every undefined-valued key removed, and nothing
+// else changed: plain objects and arrays recurse, every other value
+// (including a Map, a Date, or NaN) passes through untouched so a deep
+// comparison against the JSON form still flags it.
+function withoutUndefined(value) {
+  if (Array.isArray(value)) {
+    return value.map(withoutUndefined);
+  }
+  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, withoutUndefined(item)]),
+    );
+  }
+  return value;
+}
+
+// The workspace-bucket key the composition root binds the layout to.
+const KEY = "layout";
 
 // Builds a dock wired exactly as main.ts wires it, on a fresh element.
 function createDock(element) {
@@ -256,6 +286,7 @@ function createDock(element) {
 
 const editorAId = panelIdFor("editor", { path: FILE_A });
 const editorBId = panelIdFor("editor", { path: FILE_B });
+const editorCId = panelIdFor("editor", { path: FILE_C });
 
 // --- Boot: the default layout is three-zone, always unlocked --------------
 
@@ -271,7 +302,7 @@ const dock = createDockview(dockEl, {
 });
 initZones(dock);
 
-check("empty storage has nothing to restore", restoreLayout(dock) === false);
+check("a null envelope has nothing to restore", restoreLayout(dock, null) === false);
 
 const treePanel = openInZone("tree", {});
 treePanel.group.api.setSize({ width: 280 });
@@ -289,10 +320,17 @@ check("app placement lands the editor in main", zoneOfPanel(editorA) === "main")
 
 // --- Persistence: the envelope is versioned and carries placement ---------
 
-persistLayout(dock);
-const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-check("the layout persists to localStorage", raw !== null);
-const envelope = JSON.parse(raw);
+const built = buildLayoutEnvelope(dock);
+// The adapter PUTs JSON.stringify(value) and the boot preload hands back
+// response.json(): a wire round trip must reproduce every defined value.
+// Dockview's toJSON emits its optional panel fields (params, renderer,
+// pinned, size limits, tabComponent) as explicit undefined, which JSON
+// drops and fromJSON reads identically, so those keys are ignored; deep
+// equality over the rest catches a non-JSON type (a Map, a Date, NaN) in
+// the builder that a stringify-to-stringify comparison never could.
+const envelope = JSON.parse(JSON.stringify(built));
+check("the envelope survives the JSON wire round trip",
+  isDeepStrictEqual(envelope, withoutUndefined(built)));
 check("the envelope carries the schema version", envelope.version === LAYOUT_SCHEMA_VERSION);
 check("the envelope carries no lock state", !("locked" in envelope));
 check("the envelope carries zones and overrides",
@@ -317,7 +355,7 @@ check("the status bar never enters the serialized layout",
 const dockEl2 = window.document.createElement("div");
 const dock2 = createDock(dockEl2);
 initZones(dock2);
-check("the persisted layout restores", restoreLayout(dock2) === true);
+check("the persisted layout restores", restoreLayout(dock2, envelope) === true);
 await flush();
 check("the agent panel is restored through its factory", !!dock2.getPanel(agentPanel.id));
 check("the tree panel is restored through its factory", !!dock2.getPanel("tree"));
@@ -336,18 +374,29 @@ const panelsAfterRestore = dock2.panels.length;
 check("ensuring the tree after restore never duplicates it",
   openInZone("tree", {}) === dock2.getPanel("tree") && dock2.panels.length === panelsAfterRestore);
 
-// Debounced writes off onDidLayoutChange.
-startLayoutPersistence(dock2);
-window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
+// Debounced writes off onDidLayoutChange, through the writer the
+// composition root binds to the workspace bucket. A burst of changes
+// inside the debounce window - open B, open C, close C - coalesces into
+// one write carrying the settled layout: B present, C gone.
+const storage = createFakeUiStorage();
+startLayoutPersistence(dock2, (value) => storage.set("workspace", KEY, value));
 openInZone("editor", { path: FILE_B });
+openInZone("editor", { path: FILE_C });
+dock2.removePanel(dock2.getPanel(editorCId));
+check("no write lands before the debounce elapses", storage.sets.length === 0);
 await new Promise((resolve) => setTimeout(resolve, 400));
-const debounced = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-check("layout changes persist debounced", debounced !== null);
-check("the debounced write carries the new panel",
+check("a burst of layout changes coalesces into one write", storage.sets.length === 1);
+const debounced = storage.get("workspace", KEY);
+check("the debounced write lands on the workspace layout key",
+  storage.sets[0]?.bucket === "workspace" && storage.sets[0]?.key === KEY);
+check("the debounced write carries the settled layout",
   debounced !== null &&
-    Object.keys(JSON.parse(debounced).layout.panels).includes(editorBId));
+    Object.keys(debounced.layout.panels).includes(editorBId) &&
+    !Object.keys(debounced.layout.panels).includes(editorCId));
+check("the debounced write carries the schema version",
+  debounced !== null && debounced.version === LAYOUT_SCHEMA_VERSION);
 check("the debounced write carries no lock state",
-  debounced !== null && !("locked" in JSON.parse(debounced)));
+  debounced !== null && !("locked" in debounced));
 
 // --- Shortcuts: the dispatcher resolves the contributions' chords -----
 
@@ -414,47 +463,158 @@ dispatcher.dispose();
 
 // --- Restore failures fall back to the default layout ---------------------
 
-// Corrupt JSON.
-window.localStorage.setItem(LAYOUT_STORAGE_KEY, "not json{");
+// A stored value that is not an envelope object at all (the server hands
+// back whatever JSON was stored; a string is the closest thing to the old
+// corrupt-text case).
 const dock3 = createDock(window.document.createElement("div"));
 initZones(dock3);
-check("corrupt storage fails the restore", restoreLayout(dock3) === false);
+check("a non-object value fails the restore", restoreLayout(dock3, "not json{") === false);
+check("an array value fails the restore", restoreLayout(dock3, [envelope]) === false);
 openInZone("agent", {});
 openInZone("tree", {});
-check("the corrupt-storage fallback mounts the default layout", dock3.panels.length === 2);
+check("the non-object fallback mounts the default layout", dock3.panels.length === 2);
 
 // Stale schema versions are rejected: v1 (the locked-era envelope) and
 // v2 (before panels serialized their tabComponent).
-window.localStorage.setItem(
-  LAYOUT_STORAGE_KEY,
-  JSON.stringify({ version: 1, locked: false, zones: {}, overrides: {}, layout: { grid: {} } }),
-);
 const dock4 = createDock(window.document.createElement("div"));
 initZones(dock4);
-check("a version 1 snapshot fails the restore", restoreLayout(dock4) === false);
-window.localStorage.setItem(
-  LAYOUT_STORAGE_KEY,
-  JSON.stringify({ version: 2, zones: {}, overrides: {}, layout: { grid: {} } }),
-);
-check("a version 2 snapshot fails the restore", restoreLayout(dock4) === false);
+check("a version 1 snapshot fails the restore",
+  restoreLayout(dock4, { version: 1, locked: false, zones: {}, overrides: {}, layout: { grid: {} } }) ===
+    false);
+check("a version 2 snapshot fails the restore",
+  restoreLayout(dock4, { version: 2, zones: {}, overrides: {}, layout: { grid: {} } }) === false);
 
 // A structurally valid envelope whose layout fromJSON rejects.
-window.localStorage.setItem(
-  LAYOUT_STORAGE_KEY,
-  JSON.stringify({
+const dock5 = createDock(window.document.createElement("div"));
+initZones(dock5);
+check("an unloadable layout fails the restore",
+  restoreLayout(dock5, {
     version: LAYOUT_SCHEMA_VERSION,
     zones: {},
     overrides: {},
     layout: { grid: { root: { type: "leaf", data: [] } } },
-  }),
-);
-const dock5 = createDock(window.document.createElement("div"));
-initZones(dock5);
-check("an unloadable layout fails the restore", restoreLayout(dock5) === false);
+  }) === false);
 openInZone("agent", {});
 openInZone("tree", {});
 check("the unloadable-layout fallback mounts the default layout", dock5.panels.length === 2);
-window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
+
+// --- Persistence: a throwing writer is logged, never escapes ---------------
+
+// An uncaught throw inside the debounce timer would take the page down;
+// the save logs and the dock stands. Disposing cancels an armed save.
+{
+  const dockFail = createDock(window.document.createElement("div"));
+  initZones(dockFail);
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => {
+    errors.push(args);
+  };
+  const failing = startLayoutPersistence(dockFail, () => {
+    throw new Error("denied");
+  });
+  openInZone("tree", {});
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  console.error = originalError;
+  failing.dispose();
+  check("a throwing writer is logged once", errors.length === 1);
+  check("a throwing writer leaves the dock intact", dockFail.panels.length === 1);
+  let lateWrites = 0;
+  const disposed = startLayoutPersistence(dockFail, () => {
+    lateWrites += 1;
+  });
+  openInZone("agent", {});
+  disposed.dispose();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  check("disposing persistence cancels the armed write", lateWrites === 0);
+}
+
+// --- applyLayoutOrDefault: the boot decision main.ts and Open share -------
+
+// Null (no stored layout): the default zones open, tree left and sized,
+// agent right, main empty. The fallback resets the zone map itself, so
+// the stale group ids the earlier docks left behind are cleared the same
+// way a live dock's would be on Open.
+{
+  const dockDefault = createDock(window.document.createElement("div"));
+  initZones(dockDefault);
+  let fromJsonCalls = 0;
+  const realFromJson = dockDefault.fromJSON.bind(dockDefault);
+  dockDefault.fromJSON = (data) => {
+    fromJsonCalls += 1;
+    return realFromJson(data);
+  };
+  applyLayoutOrDefault(dockDefault, null);
+  await flush();
+  check("applyLayoutOrDefault with null never calls fromJSON", fromJsonCalls === 0);
+  check("applyLayoutOrDefault with null opens the default zones",
+    dockDefault.panels.length === 2 && dockDefault.groups.length === 2);
+  check("applyLayoutOrDefault with null places tree left and agent right",
+    zoneOfPanel(dockDefault.getPanel("tree")) === "left" &&
+      zoneOfPanel(dockDefault.getPanel(panelIdFor("agent", {}))) === "right");
+}
+
+// The Open path: the dock already holds the previous workspace's panels
+// and the newly opened file has no stored layout. The fallback must
+// replace the live arrangement with the default, not layer the anchors
+// onto it, so boot and Open share one behavior.
+{
+  const dockLive = createDock(window.document.createElement("div"));
+  initZones(dockLive);
+  resetZones();
+  openInZone("tree", {});
+  openInZone("agent", {});
+  openInZone("editor", { path: FILE_A });
+  openInZone("editor", { path: FILE_B });
+  await flush();
+  check("the live dock holds editors before the null apply", dockLive.panels.length === 4);
+  applyLayoutOrDefault(dockLive, null);
+  await flush();
+  check("applyLayoutOrDefault with null clears a live dock's editors",
+    dockLive.getPanel(editorAId) === undefined && dockLive.getPanel(editorBId) === undefined);
+  check("applyLayoutOrDefault with null leaves a live dock at the default layout",
+    dockLive.panels.length === 2 && dockLive.groups.length === 2 &&
+      zoneOfPanel(dockLive.getPanel("tree")) === "left" &&
+      zoneOfPanel(dockLive.getPanel(panelIdFor("agent", {}))) === "right");
+}
+
+// A valid envelope: fromJSON receives it once and the anchors are not
+// duplicated by the re-ensure step.
+{
+  const dockRestore = createDock(window.document.createElement("div"));
+  initZones(dockRestore);
+  resetZones();
+  const received = [];
+  const realFromJson = dockRestore.fromJSON.bind(dockRestore);
+  dockRestore.fromJSON = (data) => {
+    received.push(data);
+    return realFromJson(data);
+  };
+  applyLayoutOrDefault(dockRestore, envelope);
+  await flush();
+  check("applyLayoutOrDefault with a valid envelope calls fromJSON once with it",
+    received.length === 1 && received[0] === envelope.layout);
+  check("applyLayoutOrDefault restores every persisted panel without duplicates",
+    dockRestore.panels.length === Object.keys(envelope.layout.panels).length &&
+      !!dockRestore.getPanel("tree") && !!dockRestore.getPanel(editorAId));
+}
+
+// An unloadable envelope: the failed restore clears the dock and the
+// default zones take over.
+{
+  const dockBad = createDock(window.document.createElement("div"));
+  initZones(dockBad);
+  resetZones();
+  applyLayoutOrDefault(dockBad, {
+    version: LAYOUT_SCHEMA_VERSION,
+    zones: {},
+    overrides: {},
+    layout: { grid: { root: { type: "leaf", data: [] } } },
+  });
+  await flush();
+  check("applyLayoutOrDefault with an unloadable envelope mounts the default layout",
+    dockBad.panels.length === 2 && dockBad.groups.length === 2 && !!dockBad.getPanel("tree"));
+}
 
 // --- EditorPanel.requestClose: the dirty close prompt ---------------------
 
