@@ -8,7 +8,9 @@
 // workspace bucket. Covers: the layout survives a reload (build the
 // envelope -> restore it), including the tree's close-button-free tab;
 // the envelope carries no lock state; a burst of layout changes coalesces
-// into one debounced write; a throwing writer is logged, never escapes;
+// into one debounced write; a mid-session restore (the Open path) writes
+// nothing while the next real change still saves; a throwing writer is
+// logged, never escapes;
 // stale schema versions (1 and 2) are rejected; a null, non-object,
 // version-mismatched, or unloadable envelope falls back to defaults;
 // applyLayoutOrDefault builds the default zones from null (clearing a live
@@ -397,6 +399,31 @@ check("the debounced write carries the schema version",
   debounced !== null && debounced.version === LAYOUT_SCHEMA_VERSION);
 check("the debounced write carries no lock state",
   debounced !== null && !("locked" in debounced));
+
+// A mid-session restore is not a change to save. Open Workspace applies
+// the opened file's envelope onto the live dock through
+// applyLayoutOrDefault; real Dockview delivers the resulting
+// onDidLayoutChange on a microtask, after any synchronous suppression
+// around the apply has lifted, and the saver's debounce defers the write
+// further still. The saver must drop that echo on its own, then keep
+// saving real changes as before.
+{
+  const setsBefore = storage.sets.length;
+  const opened = JSON.parse(JSON.stringify(buildLayoutEnvelope(dock2)));
+  applyLayoutOrDefault(dock2, opened);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  check("a mid-session restore writes nothing, even past the debounce",
+    storage.sets.length === setsBefore);
+  openInZone("editor", { path: FILE_C });
+  dock2.removePanel(dock2.getPanel(editorCId));
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  check("a real change after a restore still saves once",
+    storage.sets.length === setsBefore + 1);
+  check("the save after a restore carries the live layout, not a stale one",
+    Object.keys(storage.sets.at(-1).value.layout.panels).includes(editorBId) &&
+      !Object.keys(storage.sets.at(-1).value.layout.panels).includes(editorCId));
+  await flush();
+}
 
 // --- Shortcuts: the dispatcher resolves the contributions' chords -----
 

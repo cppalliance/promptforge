@@ -9,7 +9,8 @@
 // process exit code. The optional third argument scripts the two UI-state
 // buckets the app preloads (see `uiStateOptions`); every fetch the app
 // makes, and every service resolution (method RESOLVE), lands in
-// ctx.fetchLog in order. Run after `npm run build`.
+// ctx.fetchLog in order, and ctx.resolveService(id) reads any registry
+// service the boot bound. Run after `npm run build`.
 // Export-only module: the node --test runner discovers every file under
 // test/, so running this file directly must (and does) exit 0.
 import { readFile } from "node:fs/promises";
@@ -330,6 +331,23 @@ export async function bootWorkbench(name, run, options = {}) {
   const trackerSeam = await import(pathToFileURL(seams.__setDisposableTracker).href);
   const lifecycle = { setDisposableTracker: trackerSeam.__setDisposableTracker };
 
+  // Resolves a registry service by token id the way the bundle's own
+  // getService does (building it on first use from the current factory),
+  // so a test can read a store the boot bound - including one no consumer
+  // has resolved yet - without a seam per store. Throws on an unknown id.
+  const registrySeam = await import(pathToFileURL(seams.__serviceRegistrations).href);
+  function resolveService(id) {
+    for (const [token, registration] of registrySeam.__serviceRegistrations()) {
+      if (token.id !== id) continue;
+      if (!registration.built) {
+        registration.instance = registration.factory();
+        registration.built = true;
+      }
+      return registration.instance;
+    }
+    throw new Error(`no service registered for ${id}`);
+  }
+
   const statusBar = window.document.querySelector(".status-bar");
   const statusText = window.document.querySelector(".status-bar__text");
   const statusSlot = window.document.querySelector(".status-bar__slot");
@@ -459,6 +477,7 @@ export async function bootWorkbench(name, run, options = {}) {
     emitModels,
     emitWorkbench,
     fetchLog,
+    resolveService,
     sleep,
     failures,
   };

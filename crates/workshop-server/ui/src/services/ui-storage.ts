@@ -14,8 +14,9 @@
 // hangs past the preload timeout reads as all-null (every store falls
 // back to its defaults) with one console warning; a failed write warns
 // once and the in-memory value stands. `suppressWrites` exists for the
-// moment a pulled layout is applied on Open, when the resulting change
-// events would otherwise echo the same values straight back to the file.
+// moment a pulled workspace bucket is applied on Open, when a store's
+// synchronous reaction would otherwise echo the same values straight back
+// to the file; it covers only the synchronous span of the callback.
 //
 // Stores never import fetch; they take the adapter (or a fake) and tests
 // inject `fetchImpl` here.

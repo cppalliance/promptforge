@@ -4,7 +4,9 @@
 // adapter's contract - `get` answers null for an absent key, `set` updates
 // the cache and records the call, `suppressWrites` drops workspace-bucket
 // writes for the duration of the callback - without any fetch, so a store
-// under test never touches the network.
+// under test never touches the network. `replaceWorkspace` stands in for
+// what the real adapter's `reloadWorkspace` does after Open: it swaps the
+// workspace bucket for another file's values without recording a write.
 // Export-only module: the node --test runner discovers every file under
 // test/, so running this file directly must (and does) exit 0.
 
@@ -43,6 +45,9 @@ export function createFakeUiStorage(initial = {}) {
     },
     reloadWorkspace() {
       return Promise.resolve();
+    },
+    replaceWorkspace(values) {
+      buckets.workspace = new Map(Object.entries(values ?? {}));
     },
     suppressWrites(fn) {
       suppressDepth += 1;

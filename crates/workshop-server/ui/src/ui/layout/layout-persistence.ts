@@ -5,7 +5,8 @@
 // composition root hands restoreLayout the preloaded value and
 // startLayoutPersistence a writer, so the same code serves boot, the
 // debounced live saves, and the Open and Save As paths that apply or
-// write a workspace's layout. Writes are debounced off onDidLayoutChange.
+// write a workspace's layout. Writes are debounced off onDidLayoutChange;
+// the change a mid-session fromJSON produces is dropped, not written.
 // Only identity is stored - panels re-create through their registered
 // factories on load. A restore that fails for any reason (a value that is
 // not an envelope, a schema version bump, a fromJSON throw) clears the
@@ -116,18 +117,51 @@ export function restoreLayout(dock: DockviewApi, envelope: unknown): boolean {
  * in-memory layout stands and the next change tries again. Call once,
  * after the boot layout (restored or default) is in place. Returns the
  * disposable that stops persisting.
+ *
+ * A mid-session `fromJSON` (Open Workspace applying the opened file's
+ * layout) is not a change to save: the values came from the file, and
+ * writing them back would echo them into it. Dockview delivers the
+ * resulting onDidLayoutChange on a microtask (AsapEvent in dockview-core),
+ * after any synchronous write suppression around the apply has lifted,
+ * so the saver drops that echo itself rather than relying on the caller.
  */
 export function startLayoutPersistence(
   dock: DockviewApi,
   write: (envelope: PersistedLayout) => void,
 ): IDisposable {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // Set while a restore's own layout-change event is in flight.
+  let restoring = false;
   const store = new DisposableStore();
+  const cancel = (): void => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  // fromJSON fires onDidLayoutFromJSON synchronously at its end, after the
+  // panel removes and adds inside it have queued Dockview's one coalesced
+  // onDidLayoutChange microtask. Cancel any save armed by an earlier change
+  // (its snapshot would now be the restored layout) and drop the restore's
+  // own event, which runs before the microtask queued here. The flag clears
+  // there as well, so a restore that produced no event cannot swallow the
+  // next real change.
+  store.add(
+    dock.onDidLayoutFromJSON(() => {
+      cancel();
+      restoring = true;
+      queueMicrotask(() => {
+        restoring = false;
+      });
+    }),
+  );
   store.add(
     dock.onDidLayoutChange(() => {
-      if (timer !== null) {
-        clearTimeout(timer);
+      if (restoring) {
+        restoring = false;
+        return;
       }
+      cancel();
       timer = setTimeout(() => {
         timer = null;
         try {
@@ -138,16 +172,9 @@ export function startLayoutPersistence(
       }, SAVE_DEBOUNCE_MS);
     }),
   );
-  // Teardown order matters: the subscription dies first so no layout
+  // Teardown order matters: the subscriptions die first so no layout
   // change can re-arm the timer between the two steps; then any armed
   // save is cancelled unsaved.
-  store.add(
-    toDisposable(() => {
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-    }),
-  );
+  store.add(toDisposable(cancel));
   return store;
 }

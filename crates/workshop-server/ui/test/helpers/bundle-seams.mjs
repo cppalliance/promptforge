@@ -20,13 +20,29 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Each seam is a module-scope variable the built code reads through one
 // distinctive call site (minified identifiers change per build, property
 // names do not; identifiers may contain $, which \w excludes). The
-// appended export named `name` assigns that variable.
+// appended export named `name` assigns that variable, or, for a `read`
+// seam, answers it.
 const SEAMS = [
   // src/base/lifecycle.ts: the DisposableStore constructor's tracker call.
   { name: "__setDisposableTracker", callSite: /([\w$]+)\?\.trackCreated\(this\)/ },
   // src/services/service-registry.ts: getService's observer call.
   { name: "__setServiceObserver", callSite: /([\w$]+)\?\.serviceResolved\([\w$]+\.id\)/ },
+  // src/services/service-registry.ts: getService's lookup in the
+  // registrations map, followed by its unregistered-token throw. Read
+  // seam: a boot test resolves any registered store by token id.
+  {
+    name: "__serviceRegistrations",
+    read: true,
+    callSite: /([\w$]+)\.get\([\w$]+\);if\([\w$]+===void 0\)throw new Error\(`no service registered for/,
+  },
 ];
+
+/** The appended export for one located seam. */
+function seamExport(seam, variable) {
+  return seam.read
+    ? `export function ${seam.name}() { return ${variable}; }`
+    : `export function ${seam.name}(next) { ${variable} = next; }`;
+}
 
 /**
  * Scans every dist script for the SEAMS call sites and appends the missing
@@ -48,7 +64,7 @@ export async function attachSeams() {
       if (!match) continue;
       found[seam.name] = scriptPath;
       if (!source.includes(seam.name)) {
-        exports.push(`export function ${seam.name}(next) { ${match[1]} = next; }`);
+        exports.push(seamExport(seam, match[1]));
       }
     }
     if (exports.length > 0) {

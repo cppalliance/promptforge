@@ -23,7 +23,11 @@
 // save_as or duplicate, then invalidating, emitting, and recording the
 // new path, with a cancel posting nothing and a refusal painting the
 // error; and the client's typed parse of the wire shape (snake_case
-// window_state) with a malformed answer refused.
+// window_state) with a malformed answer refused. The UI state the switch
+// carries (plan step 13) is covered by test/workspace-switch.mjs; here a
+// minimal dock is bound through initZones so the actions' state apply and
+// snapshot have something to run against, and the UI-state adapter stays
+// the empty default.
 // Run: node --test test/workspace-files.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -45,6 +49,7 @@ const bundle = await esbuild.build({
       export { registerService } from "./src/services/service-registry.ts";
       export { currentWorkspaceFile, putWindowState } from "./src/services/workspace-file-client.ts";
       export { STATUS_BAR } from "./src/ui/status/status-bar.ts";
+      export { initZones } from "./src/ui/layout/zones.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -94,8 +99,37 @@ const {
   currentWorkspaceFile,
   putWindowState,
   STATUS_BAR,
+  initZones,
 } = await import(pathToFileURL(bundlePath).href);
 console.error = realConsoleError;
+
+// A dock good enough for the zone registry: the default-layout fallback
+// after an Open clears it and opens the two anchors; a Save As snapshots
+// it. Nothing here asserts on the layout.
+{
+  const panels = new Map();
+  const dock = {
+    groups: [],
+    onDidMovePanel: () => ({ dispose() {} }),
+    onDidLayoutChange: () => ({ dispose() {} }),
+    getPanel: (id) => panels.get(id),
+    getGroup: (id) => dock.groups.find((group) => group.id === id),
+    addPanel: (options) => {
+      const group = { id: `g-${options.id}`, api: { setSize() {}, isVisible: true, setVisible() {} } };
+      dock.groups.push(group);
+      const panel = { id: options.id, params: options.params, group, api: { setActive() {} } };
+      panels.set(options.id, panel);
+      return panel;
+    },
+    clear: () => {
+      panels.clear();
+      dock.groups.length = 0;
+    },
+    fromJSON: () => {},
+    toJSON: () => ({ grid: { root: { type: "leaf", data: { views: [], id: "1" }, size: 1 }, width: 1, height: 1, orientation: "HORIZONTAL" }, panels: {} }),
+  };
+  initZones(dock);
+}
 
 const failures = [];
 function check(name, condition) {

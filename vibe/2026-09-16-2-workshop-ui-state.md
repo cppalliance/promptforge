@@ -404,7 +404,7 @@ Each step is one commit containing its code and its tests. Rust unit tests go in
 
 <step-13>
 
-### Step 13: Open and Save As carry workspace state; `localStorage` grep test
+### Step 13: Open and Save As carry workspace state; `localStorage` grep test [completed]
 
 - Component: `spa-workspace-stores`
 - Piece: workspace switch (sequential; needs Steps 10 through 12)

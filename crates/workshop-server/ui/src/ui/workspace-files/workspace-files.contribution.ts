@@ -18,14 +18,30 @@
 // the recent-files store. Failures paint the status bar, exactly as the
 // other file actions do; success is silent, the refreshed tree being
 // its own confirmation; a cancelled picker is a no-op.
+//
+// The workspace-scoped UI state (plan step 13) rides the switch too. The
+// .pfwork file carries the dock layout, the tree's expanded folders, and
+// the closed-editor stack in its workspace bucket. Open pulls the file's
+// bucket through the UI-state adapter and applies all three to the live
+// stores with writes suppressed, so a store that writes synchronously on
+// replace never echoes the values straight back to the file they came
+// from; the layout saver, whose change event arrives on a microtask and
+// whose write is debounced, drops a restore's echo itself. Save As writes the three live
+// values once each into the new file, which the server created with
+// grants only; the page is the single writer of that fact. Duplicate
+// copies the file wholesale, state included, and touches nothing here.
 
 import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { registerAction, type ActionDescriptor } from "../../services/action-registry";
 import type { ParseError } from "../../services/context-key-expr";
 import { errorText, type Result } from "../../services/error-catalog";
+import { isRecord } from "../../services/json-request";
 import { MenuId } from "../../services/menu-registry";
+import { DOCK } from "../../services/panel-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getService, getServiceOrNull } from "../../services/service-registry";
+import { TREE_STATE } from "../../services/tree-state-service";
+import { UI_STORAGE } from "../../services/ui-storage";
 import {
   currentWorkspaceFile,
   duplicateWorkspaceFile,
@@ -33,6 +49,9 @@ import {
   saveWorkspaceFileAs,
   type WorkspaceFileResponse,
 } from "../../services/workspace-file-client";
+import { CLOSED_EDITORS } from "../editor/closed-editors";
+import { applyLayoutOrDefault } from "../layout/layout-boot";
+import { buildLayoutEnvelope } from "../layout/layout-persistence";
 import { STATUS_BAR } from "../status/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
 
@@ -95,11 +114,71 @@ async function announceSwitched(path: string): Promise<void> {
   getService(RECENT_FILES_STORE).add(path);
 }
 
+/** The string entries of `value[key]` when it is an array; empty otherwise. */
+function stringsUnder(value: unknown, key: string): string[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  const items: unknown = value[key];
+  return Array.isArray(items) ? items.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** The expanded paths of a stored `tree` value, `{ expanded: [...] }`. */
+function expandedFrom(value: unknown): string[] {
+  return stringsUnder(value, "expanded");
+}
+
+/** The paths of a stored `closed_editors` value, `{ paths: [...] }`. */
+function pathsFrom(value: unknown): string[] {
+  return stringsUnder(value, "paths");
+}
+
+/**
+ * Pulls the newly opened file's workspace bucket and applies it to the
+ * live stores: the dock layout (or the default when the file has none),
+ * the tree's expanded folders, and the closed-editor stack. Writes stay
+ * suppressed throughout, so no store's synchronous reaction to its
+ * replace echoes the file's own values back into it; the layout saver's
+ * deferred reaction is dropped by the saver (see startLayoutPersistence),
+ * because Dockview delivers it after this span ends. Runs after the server
+ * has committed the open; a failure inside the apply is logged and the
+ * page continues on whatever applied, because the open already happened.
+ */
+async function applyOpenedWorkspaceState(): Promise<void> {
+  const storage = getService(UI_STORAGE);
+  await storage.reloadWorkspace();
+  try {
+    const dock = getService(DOCK);
+    const tree = getService(TREE_STATE);
+    const closed = getService(CLOSED_EDITORS);
+    storage.suppressWrites(() => {
+      applyLayoutOrDefault(dock, storage.get("workspace", "layout"));
+      tree.replaceExpanded(expandedFrom(storage.get("workspace", "tree")));
+      closed.replaceClosedEditors(pathsFrom(storage.get("workspace", "closed_editors")));
+    });
+  } catch (error) {
+    console.error(`workspace state apply: ${errorText(error)}`);
+  }
+}
+
+/**
+ * Writes the live arrangement into the workspace bucket once each, so a
+ * file the server just created from the grants alone carries the
+ * current layout, expanded folders, and closed stack too.
+ */
+function writeLiveWorkspaceState(): void {
+  const storage = getService(UI_STORAGE);
+  storage.set("workspace", "layout", buildLayoutEnvelope(getService(DOCK)));
+  storage.set("workspace", "tree", { expanded: [...getService(TREE_STATE).expandedPaths] });
+  storage.set("workspace", "closed_editors", getService(CLOSED_EDITORS).snapshot());
+}
+
 /**
  * Open Workspace from File...: the native picker filtered to .pfwork,
- * the open on the server, then the invalidation, the shell event, and
- * the recent entry. A cancelled picker answers a non-string and is a
- * no-op; a refusal reports and changes nothing on the page.
+ * the open on the server, the file's UI state applied to the live
+ * stores, then the invalidation, the shell event, and the recent entry.
+ * A cancelled picker answers a non-string and is a no-op; a refusal
+ * reports and changes nothing on the page.
  */
 async function openWorkspaceFromFile(): Promise<void> {
   const { open } = await import("@tauri-apps/plugin-dialog");
@@ -113,6 +192,7 @@ async function openWorkspaceFromFile(): Promise<void> {
     reportError(`Could not open ${picked}: ${errorText(error)}`);
     return;
   }
+  await applyOpenedWorkspaceState();
   await announceSwitched(picked);
 }
 
@@ -143,13 +223,15 @@ async function currentWorkspaceName(): Promise<string> {
 /**
  * One save-picker switch, shared by Save As and Duplicate: the native
  * save dialog seeded with the current name, the extension normalized,
- * the switch posted, then the page's announcement. A cancelled picker
- * answers null and is a no-op; a refusal reports and changes nothing.
+ * the switch posted, `afterSwitch` run against the new file, then the
+ * page's announcement. A cancelled picker answers null and is a no-op;
+ * a refusal reports and changes nothing.
  */
 async function switchThroughSavePicker(
   title: string,
   verb: string,
   post: (path: string) => Promise<WorkspaceFileResponse>,
+  afterSwitch: () => void = () => {},
 ): Promise<void> {
   const name = await currentWorkspaceName();
   const { save } = await import("@tauri-apps/plugin-dialog");
@@ -168,15 +250,29 @@ async function switchThroughSavePicker(
     reportError(`Could not ${verb} ${target}: ${errorText(error)}`);
     return;
   }
+  afterSwitch();
   await announceSwitched(target);
 }
 
-/** Save Workspace As...: a new file holding the current grants, then the switch onto it. */
+/**
+ * Save Workspace As...: a new file holding the current grants, the switch
+ * onto it, then the live UI state written into it (the server's save_as
+ * carries grants only).
+ */
 function saveWorkspaceAs(): Promise<void> {
-  return switchThroughSavePicker("Save Workspace As", "save workspace as", saveWorkspaceFileAs);
+  return switchThroughSavePicker(
+    "Save Workspace As",
+    "save workspace as",
+    saveWorkspaceFileAs,
+    writeLiveWorkspaceState,
+  );
 }
 
-/** Duplicate Workspace...: a copy of the current file and its siblings, then the switch onto it. */
+/**
+ * Duplicate Workspace...: a copy of the current file and its siblings,
+ * then the switch onto it. The copy already carries the file's UI state,
+ * so nothing is written here.
+ */
 function duplicateWorkspace(): Promise<void> {
   return switchThroughSavePicker("Duplicate Workspace", "duplicate workspace to", duplicateWorkspaceFile);
 }
