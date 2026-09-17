@@ -11,7 +11,10 @@
 // roots themselves come from the service's shared roots() load, which
 // the window title reads too, so a boot or a workspace change fetches
 // them once. A wholesale replacement of the expanded set (a workspace
-// switch) fires the service's change event and the panel re-renders.
+// switch) fires the service's change event and the panel re-renders; on
+// that switch the roots were invalidated before this panel was
+// re-created, so its init's load is the new workspace's and the
+// workspace-changed event that follows says so rather than dropping it.
 // The panel also manages the grants themselves: a root row's context
 // menu revokes it, and a header "+" button (or the empty-space context
 // menu) adds a folder - through the native folder picker in the desktop
@@ -26,7 +29,7 @@ import { getService } from "../../services/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
 import { addFolderToWorkspace } from "../workspace/add-folder";
-import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
+import { rootsCurrentIn, WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
 import { DropdownMenu } from "shared-ui/dropdown";
 import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../shared/icons";
 import { openInZone, panelIdFor } from "./zones";
@@ -50,7 +53,14 @@ export class WorkshopTreePanel extends WorkshopPart {
   private dialog: { dispose(): void } | null = null;
   // A dropped folder grants a new root after this panel rendered; the
   // change event refetches the roots so the drop is visible immediately.
-  private readonly onWorkspaceChanged = (): void => {
+  // An event whose detail says the roots are already current (Open
+  // Workspace from File invalidated them before re-creating this panel,
+  // whose init started the new load; Save As kept the grants) leaves the
+  // load and the listing alone, so the switch fetches the roots once.
+  private readonly onWorkspaceChanged = (event: Event): void => {
+    if (rootsCurrentIn(event)) {
+      return;
+    }
     this.state.invalidateRoots();
     this.reload();
   };

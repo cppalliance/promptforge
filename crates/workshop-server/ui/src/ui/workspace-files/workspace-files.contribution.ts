@@ -11,13 +11,16 @@
 // so this module pulls neither into the initial bundle. Every action is
 // a switch: the server replaces the grants wholesale (open) or writes a
 // new file and moves onto it (save as, duplicate); the page then fires
-// the existing promptforge:workspace-changed invalidation so the tree
-// refreshes, emits the promptforge:workspace-opened Tauri event so the
-// shell can fetch and apply the file's window geometry (native geometry
-// is the shell's to apply, never the page's), and records the file in
-// the recent-files store. Failures paint the status bar, exactly as the
-// other file actions do; success is silent, the refreshed tree being
-// its own confirmation; a cancelled picker is a no-op.
+// the existing promptforge:workspace-changed event (marked roots-current:
+// open dropped the roots before re-creating the tree, save as and
+// duplicate keep the grants) so the window title and the tree refresh
+// without a second roots fetch, emits the promptforge:workspace-opened
+// Tauri event so the shell can fetch and apply the file's window
+// geometry (native geometry is the shell's to apply, never the page's),
+// and records the file in the recent-files store. Failures paint the
+// status bar, exactly as the other file actions do; success is silent,
+// the refreshed tree being its own confirmation; a cancelled picker is
+// a no-op.
 //
 // The workspace-scoped UI state (plan step 13) rides the switch too. The
 // .pfwork file carries the dock layout, the tree's expanded folders, and
@@ -53,7 +56,7 @@ import { CLOSED_EDITORS } from "../editor/closed-editors";
 import { applyLayoutOrDefault } from "../layout/layout-boot";
 import { buildLayoutEnvelope } from "../layout/layout-persistence";
 import { STATUS_BAR } from "../status/status-bar";
-import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
+import { WORKSPACE_CHANGED_EVENT, type WorkspaceChangedDetail } from "../workspace/workspace-drops";
 
 /** The Tauri event the shell listens for to re-apply window geometry. */
 export const WORKSPACE_OPENED_EVENT = "promptforge:workspace-opened";
@@ -105,11 +108,17 @@ async function announceOpened(path: string): Promise<void> {
 
 /**
  * The page's side of a committed switch, shared by every action: the
- * tree invalidation, the shell event, and the recent entry. Runs only
+ * workspace-changed event for its other listeners (the window title,
+ * the tree panel), the shell event, and the recent entry. Runs only
  * after the server has answered success, so nothing here can undo it.
+ * The tree invalidation is not its job: Open drops the roots before it
+ * applies the file's state (applyOpenedWorkspaceState), and Save As and
+ * Duplicate keep the grants, so the event says the roots are current
+ * and the tree keeps the listing it holds or the load it started.
  */
 async function announceSwitched(path: string): Promise<void> {
-  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  const detail: WorkspaceChangedDetail = { rootsCurrent: true };
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail }));
   await announceOpened(path);
   getService(RECENT_FILES_STORE).add(path);
 }
@@ -136,7 +145,12 @@ function pathsFrom(value: unknown): string[] {
 /**
  * Pulls the newly opened file's workspace bucket and applies it to the
  * live stores: the dock layout (or the default when the file has none),
- * the tree's expanded folders, and the closed-editor stack. Writes stay
+ * the tree's expanded folders, and the closed-editor stack. The roots
+ * listing goes first: it belongs to the previous workspace, and the
+ * layout apply re-creates the tree panel, whose init loads the roots
+ * from the service; dropped beforehand, that load fetches the new
+ * workspace's roots once and the tree never paints the old ones, and
+ * replaceExpanded then re-renders from the same load. Writes stay
  * suppressed throughout, so no store's synchronous reaction to its
  * replace echoes the file's own values back into it; the layout saver's
  * deferred reaction is dropped by the saver (see startLayoutPersistence),
@@ -152,6 +166,7 @@ async function applyOpenedWorkspaceState(): Promise<void> {
     const tree = getService(TREE_STATE);
     const closed = getService(CLOSED_EDITORS);
     storage.suppressWrites(() => {
+      tree.invalidateRoots();
       applyLayoutOrDefault(dock, storage.get("workspace", "layout"));
       tree.replaceExpanded(expandedFrom(storage.get("workspace", "tree")));
       closed.replaceClosedEditors(pathsFrom(storage.get("workspace", "closed_editors")));

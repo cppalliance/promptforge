@@ -10,9 +10,11 @@
 // expanded folder fetches once its parent renders; a collapsed folder is
 // not fetched; a folder whose fetch fails paints an error row and leaves
 // the rest of the tree standing; replaceExpanded on the service makes
-// the panel re-render with the new set; a replaceExpanded that lands
-// while a roots fetch from WORKSPACE_CHANGED_EVENT is still in flight
-// (the Open Workspace sequence) joins that fetch and renders each root once;
+// the panel re-render with the new set; the Open Workspace sequence
+// (invalidateRoots, the tree panel re-created by the layout apply,
+// replaceExpanded, then a WORKSPACE_CHANGED_EVENT saying the roots are
+// current) fetches the roots once and renders each root once, the
+// replaceExpanded and the event joining the re-created panel's load;
 // a roots load that invalidateRoots dropped while it was in flight and
 // that settles after a fresh load rendered neither repaints the tree with
 // its stale roots nor, when it fails, paints an error row over them.
@@ -157,7 +159,7 @@ const state = new TreeStateService(storage.get("workspace", "tree"), (value) =>
 );
 registerService(TREE_STATE, () => state);
 
-const panel = new WorkshopTreePanel(null);
+let panel = new WorkshopTreePanel(null);
 panel.init();
 window.document.body.appendChild(panel.element);
 await flush();
@@ -213,12 +215,16 @@ await flush();
   );
 }
 
-// --- replaceExpanded during an in-flight roots fetch --------------------------
+// --- The Open Workspace sequence fetches the roots once -------------------------
 
-// The Open Workspace sequence: WORKSPACE_CHANGED_EVENT invalidates the
-// roots and starts a fetch; replaceExpanded arrives a round-trip later
-// while that fetch is unresolved. The second load joins the service's
-// in-flight roots() promise rather than fetching again, and however many
+// What applyOpenedWorkspaceState and announceSwitched run, in order: the
+// roots are invalidated first, the layout apply re-creates the tree
+// panel (whose init starts the one roots load against the empty cache),
+// replaceExpanded lands while that load is in flight, and the
+// workspace-changed event follows with a detail saying the roots are
+// current. The replaceExpanded reload and the event join the panel's
+// load rather than dropping it and fetching again; a window-title
+// refresh on the event (state.roots()) joins it too; and however many
 // loads settle on it the tree holds one copy of each root.
 {
   const before = fetched.length;
@@ -226,23 +232,34 @@ await flush();
   holdRoots = new Promise((resolve) => {
     release = resolve;
   });
-  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  state.invalidateRoots();
+  check("invalidating first empties the roots cache", state.listing("") === undefined);
+  panel.dispose();
+  panel.element.remove();
+  panel = new WorkshopTreePanel(null);
+  panel.init();
+  window.document.body.appendChild(panel.element);
   await flush();
-  check("the workspace change starts a roots fetch", fetched.slice(before).filter((p) => p === null).length === 1);
+  check("the re-created panel starts the one roots fetch", fetched.slice(before).filter((p) => p === null).length === 1);
   check("the roots are not cached while the fetch is in flight", state.listing("") === undefined);
   state.replaceExpanded([ROOT, SRC]);
   await flush();
   check("replaceExpanded during the fetch joins the in-flight roots load", fetched.slice(before).filter((p) => p === null).length === 1);
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { rootsCurrent: true } }));
+  void state.roots();
+  await flush();
+  check("the event saying the roots are current does not drop the load and fetch again", fetched.slice(before).filter((p) => p === null).length === 1);
   release();
   holdRoots = null;
   await flush();
+  check("the whole switch fetched the roots exactly once", fetched.slice(before).filter((p) => p === null).length === 1);
   const roots = [...panel.element.querySelectorAll(".ws-workshop-tree__row")].filter((row) => row.title === ROOT);
   check("overlapping loads render one copy of each root", roots.length === 1);
-  check("the roots listing is cached once both loads settle", state.listing("") !== undefined);
+  check("the roots listing is cached once every load settles", state.listing("") !== undefined);
   check("the surviving render is expanded per the replaced set", roots[0]?.getAttribute("aria-expanded") === "true" && childNames(roots[0]).join(",") === "broken,docs,src");
   check("the replaced set's nested folder renders expanded", rowByPath(panel, SRC)?.getAttribute("aria-expanded") === "true");
   check("the replaced set's collapsed folder renders collapsed", rowByPath(panel, DOCS)?.getAttribute("aria-expanded") === "false");
-  check("no error row appears from the dropped load", panel.element.querySelector(".ws-workshop-tree__error") === null);
+  check("no error row appears from the joined loads", panel.element.querySelector(".ws-workshop-tree__error") === null);
 }
 
 // --- A stale roots load settling after a fresh one rendered -----------------

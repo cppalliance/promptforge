@@ -19,7 +19,13 @@
 // applies nothing; after a
 // successful Save As exactly three workspace writes carry the live
 // layout envelope, expanded set, and closed stack; a cancelled or
-// refused Save As writes nothing; and Duplicate writes nothing.
+// refused Save As writes nothing; and Duplicate writes nothing. The fake
+// dock hosts a real WorkshopTreePanel as its "tree" panel and a real
+// WindowTitle reads the roots beside it, so the switch's roots traffic
+// is the real thing (UM-001, OP-001): once /workspace/file/open has
+// resolved the tree never renders the previous workspace's roots, and
+// the panel and the title together fetch GET /workspace/tree exactly
+// once for the switch.
 // Run: node --test test/workspace-switch.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -46,6 +52,8 @@ const bundle = await esbuild.build({
       export { initZones } from "./src/ui/layout/zones.ts";
       export { LAYOUT_SCHEMA_VERSION, startLayoutPersistence } from "./src/ui/layout/layout-persistence.ts";
       export { STATUS_BAR } from "./src/ui/status/status-bar.ts";
+      export { WorkshopTreePanel } from "./src/ui/layout/workshop-panel.ts";
+      export { WindowTitle } from "./src/ui/chrome/command-center.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -72,6 +80,12 @@ globalThis.window = window;
 globalThis.document = window.document;
 globalThis.Event = window.Event;
 globalThis.CustomEvent = window.CustomEvent;
+globalThis.HTMLElement = window.HTMLElement;
+globalThis.HTMLButtonElement = window.HTMLButtonElement;
+globalThis.HTMLInputElement = window.HTMLInputElement;
+globalThis.Element = window.Element;
+globalThis.Node = window.Node;
+globalThis.MutationObserver = window.MutationObserver;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-workspace-switch-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
@@ -88,6 +102,8 @@ const {
   LAYOUT_SCHEMA_VERSION,
   startLayoutPersistence,
   STATUS_BAR,
+  WorkshopTreePanel,
+  WindowTitle,
 } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -120,11 +136,15 @@ function settleLayoutSaver() {
 // synchronous span has ended, which is what the real Open path faces.
 // toJSON answers a distinctive live grid so a Save As snapshot is
 // recognizable; fireLayoutChange stands in for a user's drag or close.
+// The "tree" panel is a real WorkshopTreePanel, created and init'd on
+// add and disposed on clear as Dockview re-creates panel content through
+// fromJSON, so the switch drives the real roots load.
 function makeFakeDock() {
   const layoutListeners = new Set();
   const fromJsonListeners = new Set();
   const panels = new Map();
   let layoutChangeQueued = false;
+  let treePanel = null;
   let liveGrid = { root: { type: "leaf", data: { views: [], activeView: undefined, id: "live" }, size: 1 }, width: 1, height: 1, orientation: "HORIZONTAL" };
   const dock = {
     fromJSONCalls: [],
@@ -158,6 +178,13 @@ function makeFakeDock() {
       if (panels.size > 0 || dock.groups.length > 0) dock.fireLayoutChange();
       panels.clear();
       dock.groups.length = 0;
+      treePanel?.dispose();
+      treePanel?.element.remove();
+      treePanel = null;
+    },
+    /** The live tree panel's element, for reading the rendered roots. */
+    get treeElement() {
+      return treePanel?.element ?? null;
     },
     fromJSON: (layout) => {
       dock.fromJSONCalls.push(layout);
@@ -183,6 +210,11 @@ function makeFakeDock() {
     }
     const panel = { id, params, group, api: { setActive() {} } };
     panels.set(id, panel);
+    if (id === "tree") {
+      treePanel = new WorkshopTreePanel(null);
+      treePanel.init();
+      window.document.body.appendChild(treePanel.element);
+    }
     dock.fireLayoutChange();
     return panel;
   }
@@ -193,14 +225,68 @@ function makeFakeDock() {
 
 const fetches = [];
 const answerQueue = [];
+// The tree's traffic sits outside the ordered queue: the roots (GET
+// /workspace/tree with no path) answer with whatever `rootsListing`
+// holds, a directory answers empty. Each roots fetch is counted in
+// `rootsFetches` so the switch's total can be asserted.
+const dir = (name, p) => ({ name, path: p, kind: "directory", size: 0, modified_ms: 1, exists: true });
+const LIVE_ROOTS = { path: null, entries: [dir("src", "C:\\work\\src")] };
+const FILE_ROOTS = { path: null, entries: [dir("beta", "C:\\beta")] };
+let rootsListing = LIVE_ROOTS;
+let rootsFetches = 0;
+// Set when the scripted server answers POST /workspace/file/open: from
+// then on the tree must never paint the previous workspace's roots.
+let openResolved = false;
+
+// Every root row the tree paints after the open resolved, by path. The
+// observer sees each render's list items as they land in the roots list
+// (the record's target); the row is the item's direct child button. Read
+// from the record, not the live tree, because a later render may already
+// have cleared the item by the time the observer's microtask runs -
+// which is exactly the flash this catches.
+const rootsRendered = [];
+function rootRowOf(item) {
+  return [...item.children].find((child) => child.classList.contains("ws-workshop-tree__row")) ?? null;
+}
+const treeRenders = new MutationObserver((records) => {
+  if (!openResolved) return;
+  for (const record of records) {
+    if (!(record.target instanceof window.Element) || !record.target.classList.contains("ws-workshop-tree__list")) continue;
+    for (const node of record.addedNodes) {
+      const row = node instanceof window.Element ? rootRowOf(node) : null;
+      if (row !== null) rootsRendered.push(row.title);
+    }
+  }
+});
+treeRenders.observe(window.document.body, { childList: true, subtree: true });
+
 globalThis.fetch = async (url, init) => {
+  const parsed = new URL(url, "http://127.0.0.1:7912/");
+  if (parsed.pathname === "/workspace/tree") {
+    const p = parsed.searchParams.get("path");
+    if (p === null) {
+      rootsFetches += 1;
+      return { ok: true, status: 200, json: async () => rootsListing };
+    }
+    return { ok: true, status: 200, json: async () => ({ path: p, entries: [] }) };
+  }
   fetches.push({ url, method: init?.method ?? "GET", body: init?.body === undefined ? null : JSON.parse(init.body) });
   const answer = answerQueue.shift();
   if (answer === undefined) {
     throw new Error(`unexpected fetch in the workspace-switch test: ${url}`);
   }
+  if (url === "/workspace/file/open" && answer.status < 400) {
+    treeRenders.takeRecords();
+    rootsRendered.length = 0;
+    openResolved = true;
+  }
   return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
 };
+
+/** The root paths the live tree panel shows right now. */
+function rootsOnScreen() {
+  return [...(dock.treeElement?.querySelectorAll(".ws-workshop-tree__list > li") ?? [])].map((item) => rootRowOf(item)?.title ?? "");
+}
 
 const statusMessages = [];
 registerService(STATUS_BAR, () => ({
@@ -247,9 +333,15 @@ const dock = makeFakeDock();
 initZones(dock);
 dock.addPanel({ id: "tree", params: {} });
 dock.addPanel({ id: "agent", params: {} });
+// The window title reads the roots through the shared load, as the
+// command center does; its default listRoots is the real one.
+const title = new WindowTitle();
 // Let the boot layout's change event pass before the saver subscribes, so
 // the only layout writes the test sees are the ones the switch causes.
 await flush();
+check("the boot tree and title share one roots fetch", rootsFetches === 1);
+check("the boot tree shows the live workspace's roots", rootsOnScreen().join(",") === "C:\\work\\src");
+check("the boot title is the first live root", window.document.title === "src");
 // The live layout saver, exactly as main.ts wires it: debounced, off the
 // dock's microtask-delivered change events, writing into the workspace
 // bucket. Nothing here is undebounced or synchronous, so the Open echo
@@ -290,11 +382,20 @@ const FILE_CLOSED = ["C:\\beta\\docs\\readme.md", "C:\\beta\\notes.md"];
 
 {
   fileState = { layout: FILE_LAYOUT, tree: { expanded: FILE_EXPANDED }, closed_editors: { paths: FILE_CLOSED } };
+  const rootsFetchesBefore = rootsFetches;
+  // The server switches its grants with the open: the roots it answers
+  // from here on are the file's.
+  rootsListing = FILE_ROOTS;
   window.__TAURI_DIALOG__.answer = OPENED_PATH;
   answerQueue.push({ status: 200, body: { ...CURRENT, path: OPENED_PATH, name: "Beta" } });
   await Commands.execute("workbench.action.openWorkspace");
   await flush();
   check("a successful open posts the picked path", fetches.at(-1)?.url === "/workspace/file/open" && fetches.at(-1)?.body?.path === OPENED_PATH);
+  check("the switch fetches the roots exactly once across the tree and the title", rootsFetches === rootsFetchesBefore + 1);
+  check("once the open resolved the tree never renders the previous workspace's roots", !rootsRendered.includes("C:\\work\\src"));
+  check("every root the tree renders after the open is the opened workspace's", rootsRendered.length > 0 && rootsRendered.every((p) => p === "C:\\beta"));
+  check("the re-created tree shows one copy of the opened workspace's root", rootsOnScreen().join(",") === "C:\\beta");
+  check("the title follows the opened workspace's first root", window.document.title === "beta");
   check("a successful open reloads the workspace bucket once", reloads === 1);
   check("dock.fromJSON receives the opened file's layout once", dock.fromJSONCalls.length === 1 && dock.fromJSONCalls[0] === FILE_LAYOUT.layout);
   check("the dock holds the file's groups after the apply", dock.groups.map((group) => group.id).join(",") === "beta-left,beta-right");
@@ -429,6 +530,9 @@ const SAVED_PATH = "C:\\work\\Gamma.pfwork";
 check("every queued server answer was consumed", answerQueue.length === 0);
 
 layoutSaver.dispose();
+treeRenders.disconnect();
+title.dispose();
+dock.clear();
 tree.dispose();
 
 if (failures.length > 0) {

@@ -24,6 +24,7 @@ import {
   ok,
   type Result,
 } from "../../services/error-catalog";
+import { isRecord } from "../../services/json-request";
 import type { StatusBar } from "../status/status-bar";
 
 /** The native event the app dispatches when files land on the window. */
@@ -31,6 +32,26 @@ const FILE_DROP_EVENT = "promptforge:file-drop";
 
 /** Fired on window after grants change, so open panels can refresh. */
 export const WORKSPACE_CHANGED_EVENT = "promptforge:workspace-changed";
+
+/**
+ * The optional detail of a workspace-changed event. A plain event means
+ * the grants changed since any roots load in flight started, and the
+ * tree drops its roots listing and fetches again. `rootsCurrent` says
+ * the listing the tree-state service holds or is loading already
+ * describes the new grants: Open Workspace from File invalidates the
+ * roots before it re-creates the tree panel, whose init starts the one
+ * load, and Save As and Duplicate keep the grants. The tree keeps that
+ * load instead of dropping it, so a switch fetches the roots once.
+ */
+export interface WorkspaceChangedDetail {
+  readonly rootsCurrent: boolean;
+}
+
+/** Whether a workspace-changed event says the roots listing is already current. */
+export function rootsCurrentIn(event: Event): boolean {
+  const detail: unknown = event instanceof CustomEvent ? event.detail : null;
+  return isRecord(detail) && detail.rootsCurrent === true;
+}
 
 /** The web message the app's file-drop bridge listens for. */
 const DROP_MESSAGE = "workspace-drop";
