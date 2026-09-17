@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use promptforge_api_types::events::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::json;
-use shared_promptforge_api::events::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
 
 use super::*;
 

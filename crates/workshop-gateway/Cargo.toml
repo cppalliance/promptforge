@@ -14,7 +14,7 @@ test-fixtures = ["dep:tempfile"]
 [dependencies]
 arc-swap.workspace = true
 futures-util.workspace = true
-shared-promptforge-api.workspace = true
+promptforge-api-types.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

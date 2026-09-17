@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api::input::{InputBroker, InputError, InputOutcome};
+use promptforge_api_runtime::input::{InputBroker, InputError, InputOutcome};
 use tokio::sync::broadcast;
 
 use workshop_protocol::InputFrame;

@@ -1,9 +1,9 @@
 use std::num::NonZeroU32;
 use std::sync::atomic::AtomicU64;
 
-use shared_promptforge_api::events::RuntimeEventKind;
-use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
-use shared_promptforge_api::observe::{Observation, Observer};
+use promptforge_api_types::events::RuntimeEventKind;
+use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_api_types::observe::{Observation, Observer};
 use workshop_protocol::Activity;
 
 use super::*;
@@ -297,9 +297,9 @@ fn test_model() -> ModelDescriptor {
 /// session wiring builds them, and the context carries the current model,
 /// because the prompt now declares its contract in frontmatter.
 async fn run_builtin_chat(
-    broker: Option<Arc<dyn promptforge_api::input::InputBroker>>,
-) -> Result<String, promptforge_api::execute::RunError> {
-    use promptforge_api::{Prompt, RunContext, RunResult};
+    broker: Option<Arc<dyn promptforge_api_runtime::input::InputBroker>>,
+) -> Result<String, promptforge_api_runtime::execute::RunError> {
+    use promptforge_api_runtime::{Prompt, RunContext, RunResult};
     let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
     let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
         .expect("the embedded chat prompt parses");
@@ -320,10 +320,10 @@ async fn run_builtin_chat(
 
 #[test]
 fn the_builtin_chat_declares_its_contract_in_frontmatter() {
-    let prompt = promptforge_api::Prompt::parse(
+    let prompt = promptforge_api_runtime::Prompt::parse(
         BUILTIN_CHAT_SOURCE,
         "chat-unit",
-        &shared_promptforge_api::observe::NullObserver::default(),
+        &promptforge_api_types::observe::NullObserver::default(),
     )
     .expect("the embedded chat prompt parses");
     let frontmatter = prompt.frontmatter();
@@ -360,8 +360,8 @@ async fn an_undersized_model_is_refused_before_the_first_turn() {
     // catalog fetch's fallback window) used to run, then fail the first
     // conversation that outgrew it. The declared minimum turns that into a
     // refusal at prepare naming the role.
-    use promptforge_api::execute::RunErrorKind;
-    use promptforge_api::{Prompt, RunContext, RunResult};
+    use promptforge_api_runtime::execute::RunErrorKind;
+    use promptforge_api_runtime::{Prompt, RunContext, RunResult};
     let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
     let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
         .expect("the embedded chat prompt parses");
@@ -403,14 +403,16 @@ async fn a_failing_broker_fails_the_builtin_chat_as_typed_input() {
     struct FailingBroker;
 
     #[async_trait::async_trait]
-    impl promptforge_api::input::InputBroker for FailingBroker {
+    impl promptforge_api_runtime::input::InputBroker for FailingBroker {
         async fn user_input(
             &self,
             _execution: &str,
             _section: &str,
-        ) -> Result<promptforge_api::input::InputOutcome, promptforge_api::input::InputError>
-        {
-            Err(promptforge_api::input::InputError::message(
+        ) -> Result<
+            promptforge_api_runtime::input::InputOutcome,
+            promptforge_api_runtime::input::InputError,
+        > {
+            Err(promptforge_api_runtime::input::InputError::message(
                 "the input device is gone",
             ))
         }
@@ -420,7 +422,10 @@ async fn a_failing_broker_fails_the_builtin_chat_as_typed_input() {
         .await
         .expect_err("the broker failure fails the run");
     assert!(
-        matches!(error.kind(), promptforge_api::execute::RunErrorKind::Input),
+        matches!(
+            error.kind(),
+            promptforge_api_runtime::execute::RunErrorKind::Input
+        ),
         "a broker failure is the typed input failure: {error}"
     );
 }

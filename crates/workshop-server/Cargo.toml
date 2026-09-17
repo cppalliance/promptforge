@@ -65,8 +65,8 @@ workshop-server = { path = ".", features = ["test-fixtures"] }
 shared-gateway-discovery = { workspace = true, features = ["test-fixtures"] }
 # The socket integration tests drive agent programs on the runtime engine
 # directly, so the engine crates are test-only dependencies of the shell.
-promptforge-api.workspace = true
-shared-promptforge-api.workspace = true
+promptforge-api-runtime.workspace = true
+promptforge-api-types.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true

@@ -2,8 +2,8 @@ use super::*;
 
 use std::sync::Arc;
 
-use promptforge_api::input::{InputBroker, InputOutcome};
-use shared_promptforge_api::observe::Observation;
+use promptforge_api_runtime::input::{InputBroker, InputOutcome};
+use promptforge_api_types::observe::Observation;
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.

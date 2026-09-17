@@ -1,12 +1,12 @@
 # workshop-sessions
 
-The PromptForge Workshop's agent session subsystem. It discovers `.md` agent prompts from the configured agents directory, launches each one as a `promptforge-api` prompt execution on the unified document runtime, and carries the session around the run: the input broker behind `user_input()`, the `ui()` host-state snapshot, streaming deltas, cancellation, and the persisting event log.
+The PromptForge Workshop's agent session subsystem. It discovers `.md` agent prompts from the configured agents directory, launches each one as a `promptforge-api-runtime` prompt execution on the unified document runtime, and carries the session around the run: the input broker behind `user_input()`, the `ui()` host-state snapshot, streaming deltas, cancellation, and the persisting event log.
 
 ## Agents
 
 An agent is one `.md` PromptForge prompt file. Discovery lists the `.md` file stems under `agents.path` (the default is `agents/` beside the config file), sorted, plus the built-in `chat`: a Markdown prompt embedded at compile time from `agents/chat.md`, so a fresh install always has a working chat with no agents directory at all. A directory file named `chat.md` shadows the embedded source, and an existing `chat.md` that cannot be read surfaces its error instead of silently serving the built-in. A missing or unreadable directory offers exactly the built-in.
 
-Discovery reads the directory per request, so a newly added agent file shows up in the agent list on the next connect, without a restart. Discovery yields bare file stems only, and launch resolves names through the discovered list: a client-sent name never reaches the filesystem unless it is the stem of a real `.md` file in the configured directory. Launching parses the file with `Prompt::parse` and runs it with `promptforge_api::run`.
+Discovery reads the directory per request, so a newly added agent file shows up in the agent list on the next connect, without a restart. Discovery yields bare file stems only, and launch resolves names through the discovered list: a client-sent name never reaches the filesystem unless it is the stem of a real `.md` file in the configured directory. Launching parses the file with `Prompt::parse` and runs it with `promptforge_api_runtime::run`.
 
 ## Sessions
 

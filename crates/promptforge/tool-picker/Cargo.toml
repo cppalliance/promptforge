@@ -1,0 +1,52 @@
+[package]
+name = "promptforge-tool-picker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge tool picker: resolve a plain-English capability need to a tool from an abstract catalog"
+readme = "README.md"
+keywords = ["tool", "semantic", "embedding", "resolution", "ai"]
+categories = ["algorithms"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+# The global naming grammar (GlobalName, the canonical ToolId) the picker's
+# catalog identities speak.
+promptforge-api-types.workspace = true
+shared-progress.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokenizers = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+hf-hub = { workspace = true }
+safetensors = { workspace = true }
+sha2 = { workspace = true }
+half = { workspace = true }
+
+[features]
+default = ["serde"]
+# Serialization support for the catalog and configuration value types. The
+# JSON Schema value type in a descriptor is core input data and is present with
+# or without this feature; only the serde trait implementations are gated.
+serde = ["dep:serde"]
+# Compiles the crate-internal test seams (the shared-encoder assertions) as
+# public re-exports for consumers' test binaries; enabled for every test build
+# by the self dev-dependency below, never by production consumers.
+test-fixtures = []
+
+[dev-dependencies]
+# The crate dev-depends on itself so every test target builds the library
+# with test-fixtures enabled, without gate commands needing a --features flag.
+promptforge-tool-picker = { path = ".", features = ["test-fixtures"] }
+
+[lints]
+workspace = true

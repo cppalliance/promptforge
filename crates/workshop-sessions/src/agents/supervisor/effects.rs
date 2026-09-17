@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use promptforge_api::client::GatewayClient as ModelClient;
-use promptforge_api::{Environment, Prompt, RunContext, RunResult};
-use shared_promptforge_api::observe::Observer;
-use shared_promptforge_api::wire::StreamDelta;
+use promptforge_api_runtime::client::GatewayClient as ModelClient;
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api_types::observe::Observer;
+use promptforge_api_types::wire::StreamDelta;
 
 use workshop_gateway::GatewaySnapshot;
 use workshop_menu::ChatCatalog;

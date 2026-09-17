@@ -27,12 +27,14 @@ use futures_util::StreamExt as _;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-use promptforge_api::client::{GatewayClient as ModelClient, GatewayEndpoint, SecretString};
-use promptforge_api::{Prompt, RunContext, RunResult};
-use shared_promptforge_api::cancel::CancelHandle;
-use shared_promptforge_api::events::{EventLog as _, RuntimeEventKind};
-use shared_promptforge_api::models::{ModelDescriptor, ModelId, ThinkingMode};
-use shared_promptforge_api::observe::Observer;
+use promptforge_api_runtime::client::{
+    GatewayClient as ModelClient, GatewayEndpoint, SecretString,
+};
+use promptforge_api_runtime::{Prompt, RunContext, RunResult};
+use promptforge_api_types::cancel::CancelHandle;
+use promptforge_api_types::events::{EventLog as _, RuntimeEventKind};
+use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_api_types::observe::Observer;
 use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,

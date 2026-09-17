@@ -7,11 +7,11 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use serde::{Deserialize, Serialize};
-use shared_promptforge_api::events::{
+use promptforge_api_types::events::{
     CallMetrics, EventLog, RuntimeEvent, RuntimeEventKind, ToolCallEvent,
 };
-use shared_promptforge_api::observe::{Observation, Observer};
+use promptforge_api_types::observe::{Observation, Observer};
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 /// The `format` field of the header line that opens every persisted log.
@@ -119,8 +119,8 @@ impl WorkshopObserver {
     ///
     /// # Examples
     /// ```
-    /// use shared_promptforge_api::events::EventLog;
-    /// use shared_promptforge_api::observe::Observer;
+    /// use promptforge_api_types::events::EventLog;
+    /// use promptforge_api_types::observe::Observer;
     /// use workshop_gateway::WorkshopObserver;
     ///
     /// let log = WorkshopObserver::new(None)?;
@@ -151,8 +151,8 @@ impl WorkshopObserver {
     ///
     /// # Examples
     /// ```
-    /// use shared_promptforge_api::events::EventLog;
-    /// use shared_promptforge_api::observe::Observer;
+    /// use promptforge_api_types::events::EventLog;
+    /// use promptforge_api_types::observe::Observer;
     /// use workshop_gateway::WorkshopObserver;
     ///
     /// let dir = tempfile::TempDir::new()?;
@@ -188,7 +188,7 @@ impl WorkshopObserver {
     ///
     /// # Examples
     /// ```
-    /// use shared_promptforge_api::observe::Observer;
+    /// use promptforge_api_types::observe::Observer;
     /// use workshop_gateway::WorkshopObserver;
     ///
     /// let log = WorkshopObserver::new(None)?;

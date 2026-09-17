@@ -6,10 +6,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use shared_promptforge_api::cancel::CancelHandle;
-use shared_promptforge_api::events::{CallMetrics, RuntimeEventKind, ToolCallEvent};
-use shared_promptforge_api::observe::{Observation, Observer};
-use shared_promptforge_api::wire::StreamDelta;
+use promptforge_api_types::cancel::CancelHandle;
+use promptforge_api_types::events::{CallMetrics, RuntimeEventKind, ToolCallEvent};
+use promptforge_api_types::observe::{Observation, Observer};
+use promptforge_api_types::wire::StreamDelta;
 use tokio::sync::broadcast;
 
 use workshop_gateway::WorkshopObserver;

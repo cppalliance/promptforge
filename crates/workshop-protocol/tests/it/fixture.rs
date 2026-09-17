@@ -20,8 +20,8 @@ fn agent_fixture() -> serde_json::Value {
 }
 
 /// The fixture's `agent_event_minimal` entry as the vocabulary type.
-fn minimal_fixture_event() -> shared_promptforge_api::events::RuntimeEvent {
-    use shared_promptforge_api::events::{RuntimeEvent, RuntimeEventKind};
+fn minimal_fixture_event() -> promptforge_api_types::events::RuntimeEvent {
+    use promptforge_api_types::events::{RuntimeEvent, RuntimeEventKind};
     RuntimeEvent {
         kind: RuntimeEventKind::UserInput,
         section: "chat".to_owned(),
@@ -38,8 +38,8 @@ fn minimal_fixture_event() -> shared_promptforge_api::events::RuntimeEvent {
 
 /// The fixture's `agent_event_stamped` entry as the vocabulary type,
 /// every metrics section populated.
-fn stamped_fixture_event() -> shared_promptforge_api::events::RuntimeEvent {
-    use shared_promptforge_api::events::{
+fn stamped_fixture_event() -> promptforge_api_types::events::RuntimeEvent {
+    use promptforge_api_types::events::{
         CallMetrics, ClientTiming, LlamaTimings, RuntimeEvent, RuntimeEventKind, Usage, VllmMetrics,
     };
     RuntimeEvent {

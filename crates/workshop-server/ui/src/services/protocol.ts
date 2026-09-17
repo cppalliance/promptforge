@@ -69,7 +69,7 @@ export interface WorkbenchFrame {
 /**
  * The kind of one runtime event, following the Agent Client Protocol
  * `sessionUpdate` names. Mirrors `RuntimeEventKind` in
- * shared-promptforge-api (src/events.rs), which is `#[non_exhaustive]`:
+ * promptforge-api-types (src/events.rs), which is `#[non_exhaustive]`:
  * future kinds (`plan`, tool-status updates) may arrive as labels outside
  * this union, so renderers matching on kinds tolerate unknown labels
  * through a wildcard arm.
@@ -128,7 +128,7 @@ export interface CallMetrics {
 
 /**
  * One durable record of something that happened during an agent run,
- * mirroring `RuntimeEvent` in shared-promptforge-api (src/events.rs).
+ * mirroring `RuntimeEvent` in promptforge-api-types (src/events.rs).
  * `content` and every other free-text field is untrusted model-, tool-, or
  * user-authored data. Absent optional fields are omitted keys on the wire,
  * never `null`.

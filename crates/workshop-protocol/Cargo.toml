@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Workshop wire protocol: every JSON frame exchanged over the workshop sockets, typed in one place, with zero I/O"
 
 [dependencies]
-shared-promptforge-api.workspace = true
+promptforge-api-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

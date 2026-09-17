@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use shared_promptforge_api::events::{
+use promptforge_api_types::events::{
     CallMetrics, ClientTiming, EventLog, LlamaTimings, RuntimeEvent, RuntimeEventKind, Usage,
     VllmMetrics,
 };

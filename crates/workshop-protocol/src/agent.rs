@@ -75,7 +75,7 @@ pub struct AgentEventFrame {
     #[serde(skip_serializing_if = "Option::is_none")]
     reply: Option<u64>,
     /// The logged entry, in its persisted vocabulary shape.
-    event: shared_promptforge_api::events::RuntimeEvent,
+    event: promptforge_api_types::events::RuntimeEvent,
 }
 
 impl AgentEventFrame {
@@ -84,7 +84,7 @@ impl AgentEventFrame {
     pub fn new(
         index: u64,
         reply: Option<u64>,
-        event: shared_promptforge_api::events::RuntimeEvent,
+        event: promptforge_api_types::events::RuntimeEvent,
     ) -> Self {
         Self {
             kind: "agent_event",

@@ -1,0 +1,37 @@
+[package]
+name = "promptforge-webfetch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
+readme = "README.md"
+keywords = ["http", "fetch", "web", "ssrf", "readability"]
+categories = ["web-programming::http-client"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+promptforge-api-types.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+reqwest = { workspace = true, features = ["gzip", "brotli"] }
+readabilityrs.workspace = true
+htmd.workspace = true
+mime.workspace = true
+encoding_rs.workspace = true
+url.workspace = true
+ipnet.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio.workspace = true
+axum.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
+
+[lints]
+workspace = true

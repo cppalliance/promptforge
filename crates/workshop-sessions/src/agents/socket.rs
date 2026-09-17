@@ -29,7 +29,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use shared_promptforge_api::events::{EventLog as _, RuntimeEvent};
+use promptforge_api_types::events::{EventLog as _, RuntimeEvent};
 use tokio::sync::broadcast;
 
 use workshop_protocol::{

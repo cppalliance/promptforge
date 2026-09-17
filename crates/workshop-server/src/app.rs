@@ -459,7 +459,7 @@ pub enum StateError {
 }
 
 /// Returns the workshop server router with every route mounted: the
-/// shell's own feature routers from [`crate::routes`], plus the extracted
+/// shell's own feature routers from `crate::routes`, plus the extracted
 /// subsystems' routers merged from the registry's route vector in
 /// registration order - an empty vector is a graceful no-op. The API
 /// routes sit behind the

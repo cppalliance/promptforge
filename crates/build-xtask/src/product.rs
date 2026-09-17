@@ -10,12 +10,17 @@
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates.
 //! - `shared-*` crates must not depend on any product crate.
 //! - One door: a crate outside the promptforge family may depend on
-//!   `promptforge-*` only through `promptforge-api`.
+//!   `promptforge-*` only through `promptforge-api-runtime` or
+//!   `promptforge-api-types`.
+//! - Container privacy: the manifestless `crates/promptforge/` directory is
+//!   private to its family; only the crates inside it and the container's
+//!   named public crate (`promptforge-api-runtime`) may depend on the
+//!   crates it holds.
 //! - Shell boundary: the `workshop` shell depends on `workshop-server-api`
 //!   and never on `workshop-server`.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The dependency tables cargo recognizes, directly and under `[target]`.
 const DEP_KINDS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
@@ -49,20 +54,30 @@ fn family(package: &str) -> Family {
     }
 }
 
+/// A workspace crate: its package name, its manifest directory relative to
+/// the workspace root, and its dependency package names.
+struct CrateInfo {
+    package: String,
+    dir: PathBuf,
+    deps: Vec<String>,
+}
+
 /// Check every workspace manifest against the product-boundary matrix.
 #[must_use]
 pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
     let (crates, mut violations) = workspace_crates(root);
-    let members: Vec<&str> = crates.iter().map(|(package, _)| package.as_str()).collect();
-    for (package, deps) in &crates {
-        for dep in deps {
+    for package in &crates {
+        for dep_name in &package.deps {
             // Only workspace members are bound by the matrix; a crates.io
             // package that happens to carry a product prefix is not.
-            if !members.contains(&dep.as_str()) {
+            let Some(dep) = crates.iter().find(|krate| &krate.package == dep_name) else {
                 continue;
-            }
+            };
             if let Some(reason) = boundary_breach(package, dep) {
-                violations.push(format!("{package} depends on {dep}: {reason}"));
+                violations.push(format!(
+                    "{} depends on {}: {reason}",
+                    package.package, dep.package
+                ));
             }
         }
     }
@@ -73,14 +88,29 @@ pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
 const SHELL: &str = "workshop";
 /// The server crate the shell must never name directly.
 const SERVER: &str = "workshop-server";
+/// The promptforge-family crates outside crates may depend on directly.
+const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge-api-runtime", "promptforge-api-types"];
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
-fn boundary_breach(package: &str, dep: &str) -> Option<&'static str> {
-    if package == SHELL && dep == SERVER {
-        return Some("the workshop shell depends on workshop-server-api, never on workshop-server");
+fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
+    if package.package == SHELL && dep.package == SERVER {
+        return Some(
+            "the workshop shell depends on workshop-server-api, never on workshop-server"
+                .to_owned(),
+        );
     }
-    let (from, to) = (family(package), family(dep));
+    if let Some(container) = container_of(&dep.dir) {
+        let inside = container_of(&package.dir) == Some(container);
+        let named = container_public_crate(container) == Some(package.package.as_str());
+        if !inside && !named {
+            return Some(format!(
+                "crates/{container} is private to its family; only {} may depend into it",
+                container_public_crate(container).unwrap_or("no outside crate")
+            ));
+        }
+    }
+    let (from, to) = (family(&package.package), family(&dep.package));
     let family_rule = match (from, to) {
         (Family::Promptforge, Family::Gateway | Family::Workshop) => {
             Some("promptforge crates must not depend on gateway or workshop crates")
@@ -96,18 +126,52 @@ fn boundary_breach(package: &str, dep: &str) -> Option<&'static str> {
         }
         _ => None,
     };
-    family_rule.or_else(|| {
-        if from != Family::Promptforge && to == Family::Promptforge && dep != "promptforge-api" {
-            Some("outside crates may depend on promptforge-* only through promptforge-api")
+    family_rule.map(str::to_owned).or_else(|| {
+        if from != Family::Promptforge
+            && to == Family::Promptforge
+            && !PUBLIC_PROMPTFORGE.contains(&dep.package.as_str())
+        {
+            Some(
+                "outside crates may depend on promptforge-* only through promptforge-api-runtime and promptforge-api-types"
+                    .to_owned(),
+            )
         } else {
             None
         }
     })
 }
 
-/// Every workspace crate's package name and dependency package names,
-/// plus violations for manifests that could not be read or parsed.
-fn workspace_crates(root: &Path) -> (Vec<(String, Vec<String>)>, Vec<String>) {
+/// The name of the manifestless `crates/<container>/` directory holding the
+/// crate whose root-relative manifest directory is `dir`, or `None` for a
+/// crate directly under `crates/`.
+fn container_of(dir: &Path) -> Option<&str> {
+    let mut components = dir.components();
+    if components.next()?.as_os_str() != "crates" {
+        return None;
+    }
+    let container = components.next()?.as_os_str().to_str()?;
+    if components.next().is_some() {
+        Some(container)
+    } else {
+        None
+    }
+}
+
+/// The one crate outside a container permitted to depend into it, when the
+/// container names one.
+fn container_public_crate(container: &str) -> Option<&'static str> {
+    match container {
+        "promptforge" => Some("promptforge-api-runtime"),
+        _ => None,
+    }
+}
+
+/// Every workspace crate's package name, manifest directory, and dependency
+/// package names, plus violations for manifests that could not be read or
+/// parsed. A directory under `crates/` containing a `Cargo.toml` is a crate
+/// and is not descended into; any other directory is a container and the
+/// walk descends one level.
+fn workspace_crates(root: &Path) -> (Vec<CrateInfo>, Vec<String>) {
     let mut crates = Vec::new();
     let mut violations = Vec::new();
     let crates_dir = root.join("crates");
@@ -135,46 +199,61 @@ fn workspace_crates(root: &Path) -> (Vec<(String, Vec<String>)>, Vec<String>) {
         if !entry.path().is_dir() {
             continue;
         }
-        let manifest_path = entry.path().join("Cargo.toml");
-        if !manifest_path.exists() {
-            // Not a crate: a manifestless directory declares no
-            // dependencies and cannot breach the boundary.
-            continue;
+        let dir = entry.path();
+        if dir.join("Cargo.toml").exists() {
+            read_crate(root, &dir, &mut crates, &mut violations);
+        } else if let Ok(inner) = fs::read_dir(&dir) {
+            // A manifestless container holds its crates one level down.
+            for entry in inner.flatten() {
+                let sub = entry.path();
+                if sub.is_dir() && sub.join("Cargo.toml").exists() {
+                    read_crate(root, &sub, &mut crates, &mut violations);
+                }
+            }
         }
-        let text = match fs::read_to_string(&manifest_path) {
-            Ok(text) => text,
-            Err(error) => {
-                violations.push(format!(
-                    "{}: unreadable manifest: {error}",
-                    manifest_path.display()
-                ));
-                continue;
-            }
-        };
-        let manifest = match toml::from_str::<toml::Value>(&text) {
-            Ok(manifest) => manifest,
-            Err(error) => {
-                violations.push(format!(
-                    "{}: unparseable manifest: {error}",
-                    manifest_path.display()
-                ));
-                continue;
-            }
-        };
-        let Some(package) = manifest
-            .get("package")
-            .and_then(|p| p.get("name"))
-            .and_then(toml::Value::as_str)
-        else {
-            violations.push(format!(
-                "{}: manifest has no package name",
-                manifest_path.display()
-            ));
-            continue;
-        };
-        crates.push((package.to_owned(), manifest_dependencies(&manifest)));
     }
     (crates, violations)
+}
+
+/// Read one crate's manifest into `crates`; failures land in `violations`.
+fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: &mut Vec<String>) {
+    let manifest_path = dir.join("Cargo.toml");
+    let text = match fs::read_to_string(&manifest_path) {
+        Ok(text) => text,
+        Err(error) => {
+            violations.push(format!(
+                "{}: unreadable manifest: {error}",
+                manifest_path.display()
+            ));
+            return;
+        }
+    };
+    let manifest = match toml::from_str::<toml::Value>(&text) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            violations.push(format!(
+                "{}: unparseable manifest: {error}",
+                manifest_path.display()
+            ));
+            return;
+        }
+    };
+    let Some(package) = manifest
+        .get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(toml::Value::as_str)
+    else {
+        violations.push(format!(
+            "{}: manifest has no package name",
+            manifest_path.display()
+        ));
+        return;
+    };
+    crates.push(CrateInfo {
+        package: package.to_owned(),
+        dir: dir.strip_prefix(root).unwrap_or(dir).to_path_buf(),
+        deps: manifest_dependencies(&manifest),
+    });
 }
 
 /// Every dependency package name declared in a manifest, across normal,
@@ -211,236 +290,5 @@ fn collect_deps(table: &toml::map::Map<String, toml::Value>, names: &mut Vec<Str
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn workspace_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("build-xtask lives at <root>/crates/build-xtask")
-            .to_path_buf()
-    }
-
-    /// Write a minimal crate manifest into a fake workspace.
-    fn write_crate(root: &Path, dir_name: &str, package: &str, deps: &str) {
-        let dir = root.join("crates").join(dir_name);
-        std::fs::create_dir_all(&dir).expect("the crate directory creates");
-        std::fs::write(
-            dir.join("Cargo.toml"),
-            format!("[package]\nname = \"{package}\"\n{deps}"),
-        )
-        .expect("the manifest writes");
-    }
-
-    #[test]
-    fn workspace_respects_the_product_boundary() {
-        let violations = product_boundary_violations(&workspace_root());
-        assert!(
-            violations.is_empty(),
-            "product-boundary violations:\n{}",
-            violations.join("\n")
-        );
-    }
-
-    #[test]
-    fn workshop_depends_on_workshop_server_api_only() {
-        let (crates, violations) = workspace_crates(&workspace_root());
-        assert!(violations.is_empty(), "{violations:?}");
-        let (_, deps) = crates
-            .iter()
-            .find(|(package, _)| package == "workshop")
-            .expect("the workshop shell crate is a workspace member");
-        assert!(
-            deps.iter().any(|dep| dep == "workshop-server-api"),
-            "the shell reaches the server through the api crate: {deps:?}"
-        );
-        assert!(
-            !deps.iter().any(|dep| dep == "workshop-server"),
-            "the shell never depends on workshop-server directly: {deps:?}"
-        );
-    }
-
-    #[test]
-    fn the_shell_re_adding_workshop_server_is_reported() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "workshop",
-            "workshop",
-            "[dependencies]\nworkshop-server-api = { path = \"../workshop-server-api\" }\n\
-             [dev-dependencies]\nworkshop-server = { path = \"../workshop-server\" }\n",
-        );
-        write_crate(
-            root.path(),
-            "workshop-server-api",
-            "workshop-server-api",
-            "",
-        );
-        write_crate(root.path(), "workshop-server", "workshop-server", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(
-            violations[0].starts_with("workshop depends on workshop-server:")
-                && violations[0].contains("workshop-server-api"),
-            "the violation names the shell, the forbidden dep, and the facade: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn other_workshop_crates_may_depend_on_workshop_server() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "workshop-server-api",
-            "workshop-server-api",
-            "[dependencies]\nworkshop-server = { path = \"../workshop-server\" }\n",
-        );
-        write_crate(root.path(), "workshop-server", "workshop-server", "");
-        let violations = product_boundary_violations(root.path());
-        assert!(
-            violations.is_empty(),
-            "the rule binds only the shell crate: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn an_outside_crate_reaching_past_the_one_door_is_reported() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "workshop-sessions",
-            "workshop-sessions",
-            "[dependencies]\npromptforge-lua = { path = \"../promptforge-lua\" }\npromptforge-api = { path = \"../promptforge-api\" }\n",
-        );
-        write_crate(root.path(), "promptforge-lua", "promptforge-lua", "");
-        write_crate(root.path(), "promptforge-api", "promptforge-api", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(
-            violations[0].contains("workshop-sessions")
-                && violations[0].contains("promptforge-lua"),
-            "the violation names the crate and the forbidden dep: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn a_gateway_crate_depending_on_promptforge_api_is_reported() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "gateway-routing",
-            "gateway-routing",
-            "[dependencies]\npromptforge-api = { path = \"../promptforge-api\" }\n",
-        );
-        write_crate(root.path(), "promptforge-api", "promptforge-api", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(
-            violations[0].contains("gateway-routing"),
-            "the violation names the gateway crate: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn a_shared_crate_depending_on_a_product_crate_is_reported() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "shared-vfs",
-            "shared-vfs",
-            "[dependencies]\nworkshop-protocol = { path = \"../workshop-protocol\" }\n",
-        );
-        write_crate(root.path(), "workshop-protocol", "workshop-protocol", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(
-            violations[0].contains("shared-vfs") && violations[0].contains("workshop-protocol"),
-            "the violation names both crates: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn dev_build_and_target_dependencies_are_checked() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "workshop-server",
-            "workshop-server",
-            "[dev-dependencies]\npromptforge-parser = { path = \"../promptforge-parser\" }\n\
-             [target.'cfg(windows)'.dependencies]\ngateway-protocol = { path = \"../gateway-protocol\" }\n",
-        );
-        write_crate(root.path(), "promptforge-parser", "promptforge-parser", "");
-        write_crate(root.path(), "gateway-protocol", "gateway-protocol", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(
-            violations.len(),
-            2,
-            "the dev-dependency and the target-specific dependency are both reported: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn package_renames_are_resolved_before_classification() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "workshop-sessions",
-            "workshop-sessions",
-            "[dependencies]\npf = { package = \"promptforge-store\", path = \"../promptforge-store\" }\n",
-        );
-        write_crate(root.path(), "promptforge-store", "promptforge-store", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(
-            violations.len(),
-            1,
-            "the renamed dependency on promptforge-store is reported: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn a_promptforge_crate_depending_on_gateway_or_workshop_is_reported() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_crate(
-            root.path(),
-            "promptforge-api",
-            "promptforge-api",
-            "[dependencies]\ngateway-protocol = { path = \"../gateway-protocol\" }\nworkshop-protocol = { path = \"../workshop-protocol\" }\n",
-        );
-        write_crate(root.path(), "gateway-protocol", "gateway-protocol", "");
-        write_crate(root.path(), "workshop-protocol", "workshop-protocol", "");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(violations.len(), 2, "{violations:?}");
-        assert!(
-            violations.iter().all(|v| v.contains("promptforge-api")),
-            "the violations name the promptforge crate: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn an_unparseable_manifest_is_reported() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        let dir = root.path().join("crates").join("broken");
-        std::fs::create_dir_all(&dir).expect("the crate directory creates");
-        std::fs::write(dir.join("Cargo.toml"), "not [valid toml").expect("the manifest writes");
-        let violations = product_boundary_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(
-            violations[0].contains("unparseable manifest"),
-            "the violation reports the parse failure: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn family_classification_follows_the_naming_rules() {
-        assert_eq!(family("promptforge-api"), Family::Promptforge);
-        assert_eq!(family("gateway"), Family::Gateway);
-        assert_eq!(family("gateway-config"), Family::Gateway);
-        assert_eq!(family("workshop"), Family::Workshop);
-        assert_eq!(family("workshop-server"), Family::Workshop);
-        assert_eq!(family("shared-vfs"), Family::Shared);
-        assert_eq!(family("build-xtask"), Family::Build);
-        assert_eq!(family("serde"), Family::Unaffiliated);
-    }
-}
+#[path = "product-tests.rs"]
+mod tests;

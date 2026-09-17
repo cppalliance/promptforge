@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (Markdown agent prompts on the unified `promptforge-api` runtime), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, workspace APIs, and a same-origin payload-opaque relay to Gateway Realtime transcription. The desktop shell (`workshop`) embeds it in-process; run standalone it is the browser-tab frame.
+The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (Markdown agent prompts on the unified `promptforge-api-runtime` runtime), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, workspace APIs, and a same-origin payload-opaque relay to Gateway Realtime transcription. The desktop shell (`workshop`) embeds it in-process; run standalone it is the browser-tab frame.
 
 ## Quick start
 
@@ -142,7 +142,7 @@ The variables:
 
 ## Agent sessions
 
-`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.md` agent prompts from `agents.path` and always offers the embedded built-in `chat` agent, a Markdown prompt running on the unified `promptforge_api` runtime (a directory `chat.md` shadows it). Every agent launches as a `promptforge_api::run` prompt execution. Every session carries the Workshop's input broker behind `user_input`, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
+`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.md` agent prompts from `agents.path` and always offers the embedded built-in `chat` agent, a Markdown prompt running on the unified `promptforge_api_runtime` runtime (a directory `chat.md` shadows it). Every agent launches as a `promptforge_api_runtime::run` prompt execution. Every session carries the Workshop's input broker behind `user_input`, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
 
 ## Minimum Rust Version
 

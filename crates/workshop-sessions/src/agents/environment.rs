@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use promptforge_api::client::fetch_model_catalog;
-use promptforge_api::{CapabilityRegistry, CompletionError, Environment, Web};
-use shared_promptforge_api::models::{ModelDescriptor, ModelId};
+use promptforge_api_runtime::client::fetch_model_catalog;
+use promptforge_api_runtime::{CapabilityRegistry, CompletionError, Environment, Web};
+use promptforge_api_types::models::{ModelDescriptor, ModelId};
 
 use super::SessionHost;
 
@@ -110,7 +110,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
-    use shared_promptforge_api::models::ThinkingMode;
+    use promptforge_api_types::models::ThinkingMode;
 
     use workshop_gateway::GatewayBinding;
     use workshop_menu::{CatalogBus, MenuBus};

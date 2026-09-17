@@ -25,4 +25,4 @@ runs:
         # Keyed on build.rs, which holds the pinned REVISION. Bumping the model
         # there invalidates this key automatically, so the two never drift.
         # An unrelated edit to build.rs costs one re-download, which is cheap.
-        key: hf-hub-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/promptforge-tool-picker/build.rs') }}
+        key: hf-hub-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/promptforge/tool-picker/build.rs') }}

@@ -24,9 +24,9 @@ Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gatew
 - Workshop crates are named workshop-* and must not depend on gateway crates
 - Gateway crates are named gateway-* and must not depend on promptforge or workshop crates
 - PromptForge crates are named promptforge-* and must not depend on gateway or workshop crates
-- PromptForge is one door: crates outside the promptforge-* family may depend only on promptforge-api, never on the internal promptforge-* substrate crates
+- PromptForge is one door: crates outside the promptforge-* family may depend only on promptforge-api-runtime and promptforge-api-types, never on the internal promptforge-* substrate crates; the crates under crates/promptforge/ are private to the family, and promptforge-api-runtime is the only outside crate permitted to depend into them
 - The Workshop shell (the `workshop` crate) depends on `workshop-server-api` and never on `workshop-server`; the facade is the shell's entire view of the server
-- Shared crates are named shared-*, contain the public API surface across products and downstream crates, and must not depend on any product crates
+- Shared crates are named shared-*, contain the public API surface across products and downstream crates, and must not depend on any product crates. PromptForge's own public surface is promptforge-api-runtime and promptforge-api-types, named promptforge-* now that the types crate has left shared-*
 - Crates named build-* are for building specific outputs
 - Dependency rules bind all kinds: normal, dev, build, and target-specific dependencies
 
@@ -53,7 +53,7 @@ Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gatew
 
 - Dependencies flow one way: shell -> features -> services -> vocabulary. Never add a dependency from a lower tier to a higher one. If Cargo rejects a cycle, the design is wrong, not the graph. On the SPA side, lazy-loaded panels never import the boot shell; shared code lives in services/ or base/.
 - Every workshop-* crate's lib.rs opens with a //! doc carrying a `## Invariants` marker that lists what the crate may depend on and what it may not. Read it before adding an import. Every SPA concern directory (ui/editor/, ui/agent/, etc.) has the same in its index.ts.
-- No file exceeds 500 lines. If an edit would push a file past 500, split first, then edit. `cargo test -p build-xtask` enforces the tier graph, the lint inheritance, the ceiling over the Rust files in the workshop crates carrying the marker, and the product-boundary matrix above (including the one-door rule) across every workspace manifest; the Tauri shell (the `workshop` crate) is exempt until the headless agent mode plan.
+- No file exceeds 500 lines. If an edit would push a file past 500, split first, then edit. `cargo test -p build-xtask` enforces the tier graph, the lint inheritance, the ceiling over the Rust files in the workshop crates carrying the marker, and the product-boundary matrix above (including the one-door rule and the crates/promptforge/ container privacy rule) across every workspace manifest; the Tauri shell (the `workshop` crate) is exempt until the headless agent mode plan.
 - Source directories are flat by default. A subdirectory of source files must contain at least three files; one or two files belong beside the parent module as `foo-bar.rs` (parent stem, dash, kebab label), wired with an explicit path attribute so the module name stays clean: `#[path = "foo-bar.rs"] mod bar;`. The two forms are convertible in both directions: when a `foo-*.rs` sibling group grows to three files, rehydrate it into a `foo/` subdirectory in standard module layout (`foo/bar.rs` beside `foo.rs`) and drop the path attributes; when a subdirectory shrinks below three files, flatten it back to kebab siblings. Apply whichever conversion applies when you touch files in a group on the wrong side of the line. Top-level `tests/` and `benches/` trees are exempt; they follow Cargo target conventions.
 
 ## SPA and CSS Rules

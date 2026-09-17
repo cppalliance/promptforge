@@ -207,7 +207,10 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Crates under `crates/` whose crate docs carry the invariant marker.
+/// Crates under `crates/` whose crate docs carry the invariant marker. A
+/// directory containing a `Cargo.toml` is a crate and is not descended
+/// into; any other directory is a container and the walk descends one
+/// level, so crates nested under `crates/promptforge/` stay visible.
 fn participating_crates(root: &Path) -> Vec<PathBuf> {
     let mut crates = Vec::new();
     let Ok(entries) = fs::read_dir(root.join("crates")) else {
@@ -218,15 +221,27 @@ fn participating_crates(root: &Path) -> Vec<PathBuf> {
         if !dir.is_dir() {
             continue;
         }
-        let marked = ["src/lib.rs", "src/main.rs"].iter().any(|candidate| {
-            fs::read_to_string(dir.join(candidate))
-                .is_ok_and(|text| text.contains(INVARIANT_MARKER))
-        });
-        if marked {
-            crates.push(dir);
+        if dir.join("Cargo.toml").exists() {
+            if carries_marker(&dir) {
+                crates.push(dir);
+            }
+        } else if let Ok(inner) = fs::read_dir(&dir) {
+            for entry in inner.flatten() {
+                let sub = entry.path();
+                if sub.is_dir() && sub.join("Cargo.toml").exists() && carries_marker(&sub) {
+                    crates.push(sub);
+                }
+            }
         }
     }
     crates
+}
+
+/// Whether a crate's `lib.rs` or `main.rs` crate docs carry the marker.
+fn carries_marker(dir: &Path) -> bool {
+    ["src/lib.rs", "src/main.rs"].iter().any(|candidate| {
+        fs::read_to_string(dir.join(candidate)).is_ok_and(|text| text.contains(INVARIANT_MARKER))
+    })
 }
 
 /// Every `.rs` file under `dir`, recursively.

@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::{broadcast, mpsc};
 
-use promptforge_api::client::{GatewayClient, GatewayEndpoint, SecretString};
+use promptforge_api_runtime::client::{GatewayClient, GatewayEndpoint, SecretString};
 use workshop_gateway::{GatewayBinding, WorkshopObserver};
 use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{Push, Registry};
@@ -366,7 +366,7 @@ pub(crate) enum LaunchRefusal {
 }
 
 /// Builds the agent completion client from one Gateway snapshot's base
-/// URL and bearer, through the `promptforge-api` client re-exports.
+/// URL and bearer, through the `promptforge-api-runtime` client re-exports.
 /// `None` - reported as [`LaunchRefusal::GatewayUnusable`] at launch and
 /// as a failed relaunch by the supervisor - when the key or URL cannot
 /// build a client.

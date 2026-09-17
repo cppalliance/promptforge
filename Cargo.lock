@@ -5361,13 +5361,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-api"
+name = "promptforge-api-runtime"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
  "criterion",
  "mlua",
+ "promptforge-api-types",
  "promptforge-lua",
  "promptforge-model-client",
  "promptforge-parser",
@@ -5379,7 +5380,6 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "shared-vfs",
  "thiserror 2.0.19",
  "time",
@@ -5389,17 +5389,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-api-types"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "shared-vfs",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "promptforge-lua"
 version = "0.3.0"
 dependencies = [
  "async-trait",
  "criterion",
  "mlua",
+ "promptforge-api-types",
  "promptforge-model-client",
  "promptforge-store",
  "promptforge-vfs",
  "serde_json",
- "shared-promptforge-api",
  "shared-vfs",
  "thiserror 2.0.19",
  "tokio",
@@ -5410,11 +5424,11 @@ name = "promptforge-model-client"
 version = "0.3.0"
 dependencies = [
  "axum",
+ "promptforge-api-types",
  "promptforge-tool-picker",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -5426,11 +5440,11 @@ name = "promptforge-parser"
 version = "0.3.0"
 dependencies = [
  "mlua",
+ "promptforge-api-types",
  "promptforge-lua",
  "pulldown-cmark",
  "serde",
  "serde_yaml_ng",
- "shared-promptforge-api",
  "thiserror 2.0.19",
 ]
 
@@ -5453,13 +5467,13 @@ dependencies = [
  "candle-transformers",
  "half",
  "hf-hub",
+ "promptforge-api-types",
  "promptforge-tool-picker",
  "safetensors",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "shared-progress",
- "shared-promptforge-api",
  "thiserror 2.0.19",
  "tokenizers",
 ]
@@ -5475,9 +5489,9 @@ dependencies = [
 name = "promptforge-web"
 version = "0.3.0"
 dependencies = [
+ "promptforge-api-types",
  "promptforge-web-search",
  "promptforge-webfetch",
- "shared-promptforge-api",
  "shared-vfs",
 ]
 
@@ -5487,10 +5501,10 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
+ "promptforge-api-types",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.19",
  "tokio",
  "url",
@@ -5508,10 +5522,10 @@ dependencies = [
  "htmd",
  "ipnet",
  "mime",
+ "promptforge-api-types",
  "readabilityrs",
  "reqwest 0.12.28",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -6776,20 +6790,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "shared-promptforge-api"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "shared-vfs",
- "thiserror 2.0.19",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -9531,12 +9531,12 @@ dependencies = [
  "arc-swap",
  "axum",
  "futures-util",
+ "promptforge-api-types",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "shared-gateway-discovery",
  "shared-progress",
- "shared-promptforge-api",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -9567,9 +9567,9 @@ dependencies = [
 name = "workshop-protocol"
 version = "0.0.0"
 dependencies = [
+ "promptforge-api-types",
  "serde",
  "serde_json",
- "shared-promptforge-api",
 ]
 
 [[package]]
@@ -9591,7 +9591,8 @@ dependencies = [
  "build-ui",
  "futures-util",
  "open",
- "promptforge-api",
+ "promptforge-api-runtime",
+ "promptforge-api-types",
  "reqwest 0.12.28",
  "rust-embed",
  "serde",
@@ -9599,7 +9600,6 @@ dependencies = [
  "shared-gateway-discovery",
  "shared-loopback",
  "shared-progress",
- "shared-promptforge-api",
  "socket2",
  "tempfile",
  "thiserror 2.0.19",
@@ -9636,11 +9636,11 @@ dependencies = [
  "async-trait",
  "axum",
  "futures-util",
- "promptforge-api",
+ "promptforge-api-runtime",
+ "promptforge-api-types",
  "rand 0.9.5",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "shared-vfs",
  "tempfile",
  "thiserror 2.0.19",

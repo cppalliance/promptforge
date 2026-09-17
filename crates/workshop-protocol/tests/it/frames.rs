@@ -159,7 +159,7 @@ fn an_agent_session_frame_serializes_its_id_and_agent() {
 
 #[test]
 fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
-    use shared_promptforge_api::events::{RuntimeEvent, RuntimeEventKind};
+    use promptforge_api_types::events::{RuntimeEvent, RuntimeEventKind};
     let event = RuntimeEvent {
         kind: RuntimeEventKind::UserInput,
         section: "chat".to_owned(),

@@ -1,9 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/tool-picker", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search"]
 # crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
 # package both esbuild-built UIs consume, so the crates/* glob skips it.
-exclude = ["crates/shared-ui"]
+# crates/promptforge is a manifestless container holding the family's nine
+# private crates. Cargo prunes excluded subtrees from member globs, so a
+# "crates/promptforge/*" glob beside the exclude below would match nothing;
+# the nine crates are enumerated explicitly instead.
+exclude = ["crates/shared-ui", "crates/promptforge"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:
@@ -19,8 +23,8 @@ repository = "https://github.com/cppalliance/promptforge"
 [workspace.dependencies]
 base64 = "0.22"
 bytes = "1"
-promptforge-api = { path = "crates/promptforge-api", version = "0.3.0" }
-shared-promptforge-api = { path = "crates/shared-promptforge-api", version = "0.3.0" }
+promptforge-api-runtime = { path = "crates/promptforge-api-runtime", version = "0.3.0" }
+promptforge-api-types = { path = "crates/promptforge-api-types", version = "0.3.0" }
 shared-gateway-api = { path = "crates/shared-gateway-api", version = "0.3.0" }
 shared-cloud-providers = { path = "crates/shared-cloud-providers", version = "0.3.0" }
 gateway = { path = "crates/gateway", version = "0.3.0" }
@@ -33,19 +37,19 @@ gateway-protocol = { path = "crates/gateway-protocol", version = "0.3.0" }
 shared-gateway-discovery = { path = "crates/shared-gateway-discovery", version = "0.3.0" }
 shared-vfs = { path = "crates/shared-vfs", version = "0.3.0" }
 gateway-routing = { path = "crates/gateway-routing", version = "0.3.0" }
-promptforge-lua = { path = "crates/promptforge-lua", version = "0.3.0" }
-promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.3.0" }
-promptforge-parser = { path = "crates/promptforge-parser", version = "0.3.0" }
+promptforge-lua = { path = "crates/promptforge/lua", version = "0.3.0" }
+promptforge-model-client = { path = "crates/promptforge/model-client", version = "0.3.0" }
+promptforge-parser = { path = "crates/promptforge/parser", version = "0.3.0" }
 shared-progress = { path = "crates/shared-progress", version = "0.3.0" }
 gateway-stt = { path = "crates/gateway-stt", version = "0.3.0" }
-promptforge-store = { path = "crates/promptforge-store", version = "0.3.0" }
-promptforge-vfs = { path = "crates/promptforge-vfs", version = "0.3.0" }
-promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.3.0" }
-promptforge-web = { path = "crates/promptforge-web", version = "0.3.0" }
-promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.3.0" }
+promptforge-store = { path = "crates/promptforge/store", version = "0.3.0" }
+promptforge-vfs = { path = "crates/promptforge/vfs", version = "0.3.0" }
+promptforge-webfetch = { path = "crates/promptforge/webfetch", version = "0.3.0" }
+promptforge-web = { path = "crates/promptforge/web", version = "0.3.0" }
+promptforge-tool-picker = { path = "crates/promptforge/tool-picker", version = "0.3.0" }
 gateway-stt-engine = { path = "crates/gateway-stt-engine", version = "0.3.0" }
 gateway-stt-backend-whisper = { path = "crates/gateway-stt-backend-whisper", version = "0.3.0" }
-promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.3.0" }
+promptforge-web-search = { path = "crates/promptforge/web-search", version = "0.3.0" }
 gateway-web-search = { path = "crates/gateway-web-search", version = "0.3.0" }
 workshop-server = { path = "crates/workshop-server", version = "0.3.0" }
 workshop-server-api = { path = "crates/workshop-server-api", version = "0.0.0" }
