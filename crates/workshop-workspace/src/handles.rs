@@ -1,12 +1,14 @@
 //! The workspace subsystem's registration: its `/workspace/*` routes,
 //! merged into the shell's API router, the workspace itself as its
-//! state handle set, and its granted-roots view, which same-tier
-//! subsystems read instead of naming this crate.
+//! state handle set, its granted-roots view, which same-tier
+//! subsystems read instead of naming this crate, and the shutdown lever
+//! that closes the workspace file inside the shell's graceful stop.
 
 use std::sync::Arc;
 
 use workshop_registry::{
-    Registration, Registry, RouteRegistrarAdapter, WorkspaceRoots, WorkspaceRootsAdapter,
+    BackgroundTaskAdapter, Registration, Registry, RouteRegistrarAdapter, ShutdownHandle,
+    WorkspaceRoots, WorkspaceRootsAdapter,
 };
 
 use crate::handlers;
@@ -34,4 +36,24 @@ pub fn register(
             move || workspace.granted_roots()
         })));
     (routes, state, roots)
+}
+
+/// Registers the subsystem's one background task: the shutdown lever
+/// that closes the workspace file. The workspace-file actor already
+/// runs from the moment a file is opened, so the task's `spawn` spawns
+/// nothing; the adapter exists only to hand the registry a
+/// [`ShutdownHandle`] the shell awaits inside its graceful-shutdown
+/// closure, where [`Workspace::close_backing`] folds the WAL into the
+/// file and removes the sidecar before the runtime tears down. The
+/// shell's grace window bounds the whole drain, so the close carries no
+/// timeout of its own. The returned guard keeps the registration alive;
+/// the composition root holds it for the process lifetime.
+pub fn register_tasks(registry: &Registry, workspace: &Workspace) -> Registration {
+    registry.register_task(Arc::new(BackgroundTaskAdapter::new({
+        let workspace = workspace.clone();
+        move || {
+            let workspace = workspace.clone();
+            ShutdownHandle::new(move || async move { workspace.close_backing().await })
+        }
+    })))
 }

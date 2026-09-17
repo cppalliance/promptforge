@@ -284,10 +284,31 @@ impl Workspace {
         }
     }
 
+    /// Closes the backing file and leaves the workspace ephemeral: the
+    /// backing is taken out under the write lock, then its actor is
+    /// stopped and awaited, so when the call returns the file on disk is
+    /// complete and the `-wal` sidecar is gone. The in-memory grants
+    /// stand; only their mirror is let go. Graceful shutdown runs this
+    /// through the subsystem's registered task (see
+    /// [`crate::handles::register_tasks`]) so a quit leaves exactly one
+    /// file to copy or back up. An ephemeral workspace has nothing to
+    /// close and returns at once.
+    pub async fn close_backing(&self) {
+        let previous = self
+            .backing
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(previous) = previous {
+            previous.file.close().await;
+        }
+    }
+
     /// Stops the backing file's actor while leaving the backing in place,
     /// so every later persist fails with a closed file and the file
     /// itself can be reopened elsewhere. Exposes the zone-two path to
-    /// tests.
+    /// tests; unlike [`Workspace::close_backing`], the workspace still
+    /// reports the file as its backing afterwards.
     #[cfg(any(test, feature = "test-fixtures"))]
     pub async fn close_backing_for_test(&self) {
         if let Some(file) = self.backing_file() {

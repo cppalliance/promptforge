@@ -13,3 +13,4 @@ mod observer;
 mod realtime_relay;
 mod session;
 mod user_state;
+mod workspace_shutdown;

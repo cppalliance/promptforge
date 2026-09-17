@@ -389,6 +389,10 @@ fn compose(
         registrations.hold(routes);
         registrations.hold(state);
         registrations.hold(roots);
+        // The shutdown lever that closes the workspace file inside the
+        // graceful stop, so a quit leaves one complete file and no
+        // sidecar.
+        registrations.hold(workshop_workspace::register_tasks(&registry, &workspace));
     }
     // The account-scoped UI state lives beside the menu memory in the
     // state directory; a bad or missing file costs the state, never

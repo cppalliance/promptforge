@@ -33,7 +33,7 @@ mod workspace_file;
 
 pub use error::WorkspaceError;
 pub use handlers::routes;
-pub use handles::register;
+pub use handles::{register, register_tasks};
 pub use workspace::{
     EntryKind, FileContents, GrantEntry, TreeEntry, TreeListing, Workspace, WorkspaceSummary,
 };

@@ -175,7 +175,7 @@ Verify: `cargo nextest run --locked -p workshop-workspace`, `cargo clippy -p wor
 
 <step-2>
 
-### Step 2: Graceful shutdown closes the backing (TWF-002)
+### Step 2: Graceful shutdown closes the backing (TWF-002) [completed]
 
 - Component: `workshop-workspace`
 - Piece: WAL safety (second of two)
