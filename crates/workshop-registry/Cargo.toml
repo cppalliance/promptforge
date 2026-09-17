@@ -13,6 +13,7 @@ axum.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 workshop-protocol.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

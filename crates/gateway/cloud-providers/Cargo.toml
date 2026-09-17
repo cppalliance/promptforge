@@ -31,6 +31,7 @@ gateway-api.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["parsing"] }
 tokio.workspace = true
+workspace-hack.workspace = true
 
 [lints]
 workspace = true

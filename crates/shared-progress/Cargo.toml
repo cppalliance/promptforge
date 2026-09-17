@@ -14,6 +14,7 @@ description = "PromptForge progress vocabulary: operation-scoped weighted trees,
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
 serde = { workspace = true, optional = true }
+workspace-hack.workspace = true
 
 [features]
 default = []

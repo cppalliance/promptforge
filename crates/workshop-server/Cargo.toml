@@ -41,6 +41,7 @@ workshop-support.workspace = true
 workshop-user-state.workspace = true
 workshop-workspace.workspace = true
 tempfile = { workspace = true, optional = true }
+workspace-hack.workspace = true
 
 [features]
 default = []

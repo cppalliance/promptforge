@@ -28,6 +28,7 @@ turso.workspace = true
 workshop-protocol.workspace = true
 workshop-registry.workspace = true
 workshop-support.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

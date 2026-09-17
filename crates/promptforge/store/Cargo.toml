@@ -16,6 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 promptforge-vfs.workspace = true
 shared-vfs.workspace = true
 thiserror.workspace = true
+workspace-hack.workspace = true
 
 [lints]
 workspace = true

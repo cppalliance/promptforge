@@ -20,6 +20,7 @@ serde_json.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true
 url.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

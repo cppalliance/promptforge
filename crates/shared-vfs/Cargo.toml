@@ -11,6 +11,7 @@ description = "PromptForge shared virtual filesystem machinery: canonical shared
 # Zero-dependency rule: std only. No dependencies, workspace or external.
 # The manifest test enforces this; never weaken it.
 [dependencies]
+workspace-hack.workspace = true
 
 [lints]
 workspace = true

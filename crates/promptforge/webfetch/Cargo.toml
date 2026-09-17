@@ -26,6 +26,7 @@ ipnet.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio = { workspace = true }
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

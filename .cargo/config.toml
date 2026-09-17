@@ -1,6 +1,9 @@
 # Link the Windows Rust binary and cc-built support crates with the static
 # CRT. Runtime-loaded native libraries keep their own CRT boundary.
+# rust-lld ships in the toolchain and links several times faster than the
+# stock MSVC linker; it resolves from the rustlib bin directory by name.
 [target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
 rustflags = ["-C", "target-feature=+crt-static"]
 
 [alias]

@@ -30,6 +30,7 @@ workshop-protocol.workspace = true
 workshop-registry.workspace = true
 workshop-support.workspace = true
 tempfile = { workspace = true, optional = true }
+workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

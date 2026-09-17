@@ -16,6 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 promptforge-api-types.workspace = true
 promptforge-webfetch.workspace = true
 promptforge-web-search.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 shared-vfs.workspace = true

@@ -17,6 +17,7 @@ gateway-config.workspace = true
 gateway-protocol.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

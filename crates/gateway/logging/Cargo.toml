@@ -11,6 +11,7 @@ description = "PromptForge gateway logging: a bounded priority queue, log rotati
 [dependencies]
 tracing.workspace = true
 tracing-subscriber.workspace = true
+workspace-hack.workspace = true
 
 [lints]
 workspace = true

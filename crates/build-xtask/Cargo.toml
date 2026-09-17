@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 toml.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

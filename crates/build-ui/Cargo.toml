@@ -10,6 +10,7 @@ description = "Build-script helper that bundles a crate's ui/ sources with esbui
 
 [dependencies]
 anyhow.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

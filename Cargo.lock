@@ -703,6 +703,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "workspace-hack",
  "zip 8.6.0",
 ]
 
@@ -712,6 +713,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "tempfile",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -719,6 +721,7 @@ name = "build-user-guide"
 version = "0.3.0"
 dependencies = [
  "tempfile",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -728,6 +731,7 @@ dependencies = [
  "anyhow",
  "ctrlc",
  "tempfile",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -737,6 +741,7 @@ dependencies = [
  "anyhow",
  "tempfile",
  "toml 0.8.2",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2333,6 +2338,7 @@ dependencies = [
  "tray-icon",
  "url",
  "windows-sys 0.61.2",
+ "workspace-hack",
  "zbus",
 ]
 
@@ -2343,6 +2349,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2355,6 +2362,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "windows-sys 0.61.2",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2372,6 +2380,7 @@ dependencies = [
  "thiserror 2.0.19",
  "time",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2387,6 +2396,7 @@ dependencies = [
  "thiserror 2.0.19",
  "toml 0.8.2",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2400,6 +2410,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2426,6 +2437,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "workspace-hack",
  "zip 8.6.0",
 ]
 
@@ -2435,6 +2447,7 @@ version = "0.3.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2453,6 +2466,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2463,6 +2477,7 @@ dependencies = [
  "gateway-protocol",
  "thiserror 2.0.19",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2490,6 +2505,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2503,6 +2519,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2512,6 +2529,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2526,6 +2544,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2535,6 +2554,7 @@ dependencies = [
  "libloading 0.8.9",
  "thiserror 2.0.19",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5423,6 +5443,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5437,6 +5458,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5454,6 +5476,7 @@ dependencies = [
  "shared-vfs",
  "thiserror 2.0.19",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5470,6 +5493,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5483,6 +5507,7 @@ dependencies = [
  "serde",
  "serde_yaml_ng",
  "thiserror 2.0.19",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5492,6 +5517,7 @@ dependencies = [
  "promptforge-vfs",
  "shared-vfs",
  "thiserror 2.0.19",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5513,6 +5539,7 @@ dependencies = [
  "shared-progress",
  "thiserror 2.0.19",
  "tokenizers",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5520,6 +5547,7 @@ name = "promptforge-vfs"
 version = "0.3.0"
 dependencies = [
  "shared-vfs",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5530,6 +5558,7 @@ dependencies = [
  "promptforge-web-search",
  "promptforge-webfetch",
  "shared-vfs",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5545,6 +5574,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5567,6 +5597,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -6779,6 +6810,7 @@ dependencies = [
  "axum",
  "tokio",
  "tower",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -6789,11 +6821,15 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "shared-vfs"
 version = "0.3.0"
+dependencies = [
+ "workspace-hack",
+]
 
 [[package]]
 name = "shellexpand"
@@ -9521,6 +9557,7 @@ dependencies = [
  "webview2-com",
  "windows-core 0.61.2",
  "workshop-server-api",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9545,6 +9582,7 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-support",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9560,6 +9598,7 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-support",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9569,6 +9608,7 @@ dependencies = [
  "promptforge-api-types",
  "serde",
  "serde_json",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9579,6 +9619,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "workshop-protocol",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9618,6 +9659,7 @@ dependencies = [
  "workshop-support",
  "workshop-user-state",
  "workshop-workspace",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9626,6 +9668,7 @@ version = "0.0.0"
 dependencies = [
  "workshop-server",
  "workshop-server-api",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9653,6 +9696,7 @@ dependencies = [
  "workshop-registry",
  "workshop-status",
  "workshop-support",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9664,6 +9708,7 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-support",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9678,6 +9723,7 @@ dependencies = [
  "toml 0.8.2",
  "tower",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9694,6 +9740,7 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-support",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -9715,6 +9762,137 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-support",
+ "workspace-hack",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "bit-set",
+ "bitflags 2.13.1",
+ "block2",
+ "brotli",
+ "bstr",
+ "bytemuck",
+ "cc",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "crypto-common 0.1.7",
+ "deranged",
+ "digest 0.11.3",
+ "dpi",
+ "either",
+ "erased-serde",
+ "errno",
+ "fastrand",
+ "flate2",
+ "foldhash",
+ "form_urlencoded",
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+ "getrandom 0.4.3",
+ "half",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "icu_locale_core",
+ "icu_normalizer",
+ "icu_properties",
+ "icu_provider",
+ "itertools 0.10.5",
+ "libc",
+ "linux-raw-sys 0.12.1",
+ "litemap",
+ "lock_api",
+ "log",
+ "markup5ever 0.38.0",
+ "memchr",
+ "mime_guess",
+ "miniz_oxide",
+ "muda",
+ "nom",
+ "num-traits",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-io-kit",
+ "once_cell",
+ "open",
+ "parking_lot",
+ "percent-encoding",
+ "potential_utf",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "rand 0.10.2",
+ "rand 0.9.5",
+ "rand_distr",
+ "regex",
+ "regex-automata",
+ "regex-syntax",
+ "reqwest 0.12.28",
+ "reqwest 0.13.4",
+ "rustix 1.1.4",
+ "rustls",
+ "rustls-webpki",
+ "schemars 0.8.22",
+ "semver",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "shellexpand",
+ "simd-adler32",
+ "slab",
+ "smallvec",
+ "stable_deref_trait",
+ "string_cache",
+ "subtle",
+ "syn 2.0.119",
+ "syn 3.0.3",
+ "sync_wrapper",
+ "sysinfo",
+ "tar",
+ "tauri-utils",
+ "time",
+ "time-macros",
+ "tinystr",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "toml 0.8.2",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+ "twox-hash",
+ "typenum",
+ "url",
+ "uuid",
+ "web_atoms",
+ "winapi",
+ "windows 0.62.2",
+ "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
+ "writeable",
+ "yoke",
+ "zbus",
+ "zbus_macros",
+ "zerocopy",
+ "zerofrom",
+ "zerotrie",
+ "zerovec",
+ "zip 8.6.0",
 ]
 
 [[package]]

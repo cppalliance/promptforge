@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 ctrlc.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

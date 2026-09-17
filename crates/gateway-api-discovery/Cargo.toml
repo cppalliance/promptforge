@@ -12,6 +12,7 @@ description = "PromptForge gateway discovery seam: the gateway.json gateway disc
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+workspace-hack.workspace = true
 
 # Process-image lookup for stale detection (src/sys/macos.rs): proc_pidpath.
 [target.'cfg(target_os = "macos")'.dependencies]

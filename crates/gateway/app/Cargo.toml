@@ -89,6 +89,7 @@ tokio = { workspace = true, features = ["signal"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+workspace-hack.workspace = true
 
 # First-run STT gating reads the installer's registry choice (src/boot.rs):
 # RegOpenKeyExW + RegQueryValueExW. The Windows tray backend (src/tray/) adds

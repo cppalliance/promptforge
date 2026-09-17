@@ -32,6 +32,7 @@ tracing.workspace = true
 mlua.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

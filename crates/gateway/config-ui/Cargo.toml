@@ -14,6 +14,7 @@ axum.workspace = true
 # gateway builds carry the same check without this crate's asset machinery.
 shared-loopback.workspace = true
 rust-embed.workspace = true
+workspace-hack.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

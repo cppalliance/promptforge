@@ -10,6 +10,7 @@ description = "PromptForge virtual filesystem policy: the /_promptforge mount la
 
 [dependencies]
 shared-vfs.workspace = true
+workspace-hack.workspace = true
 
 [lints]
 workspace = true

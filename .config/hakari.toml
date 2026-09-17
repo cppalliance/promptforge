@@ -1,0 +1,21 @@
+# cargo-hakari configuration for the workspace-hack crate, which unifies
+# third-party feature sets so -p and --workspace builds stop rebuilding
+# shared dependencies. Regenerate contents with `cargo hakari generate`
+# and apply dependency lines with `cargo hakari manage-deps`; CI verifies
+# with `cargo hakari verify`.
+hakari-package = "workspace-hack"
+# The workspace sets resolver = "3"; its feature unification is resolver
+# 2's, which is what hakari simulates.
+resolver = "2"
+dep-format-version = "4"
+# Match the workspace convention: members inherit with `workspace = true`.
+workspace-hack-line-style = "workspace-dotted"
+# The platforms the workspace ships and builds on; naming them produces
+# better feature unification than the all-platforms default.
+platforms = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
