@@ -11,10 +11,7 @@ use std::path::{Path, PathBuf};
 /// Returns an error when `name` is not a kebab-case `workshop-*` name, when
 /// the crate directory already exists, or when any file cannot be written.
 pub(crate) fn scaffold(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
-    validate_name(name)?;
-    let short = name
-        .strip_prefix("workshop-")
-        .expect("validate_name passed");
+    let short = validate_name(name)?;
     let dir = root.join("crates").join("workshop").join(short);
     anyhow::ensure!(
         !dir.exists(),
@@ -33,7 +30,8 @@ pub(crate) fn scaffold(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
 }
 
 /// Kebab-case `workshop-<name>`: the server decomposition's crate namespace.
-fn validate_name(name: &str) -> anyhow::Result<()> {
+/// Returns the validated `<name>` suffix.
+fn validate_name(name: &str) -> anyhow::Result<&str> {
     let suffix = name.strip_prefix("workshop-").unwrap_or("");
     anyhow::ensure!(
         !suffix.is_empty()
@@ -45,7 +43,7 @@ fn validate_name(name: &str) -> anyhow::Result<()> {
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'),
         "invalid crate name `{name}`: expected kebab-case `workshop-<name>`"
     );
-    Ok(())
+    Ok(suffix)
 }
 
 fn manifest(name: &str) -> String {
