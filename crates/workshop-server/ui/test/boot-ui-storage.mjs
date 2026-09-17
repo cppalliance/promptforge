@@ -10,6 +10,9 @@
 // warning per bucket. Stores are registry services, so the first
 // resolution of any token bounds the first store construction from
 // above, and the fixture's resolveService reads each one back by id.
+// Every scenario also asserts that the booted workbench fetched the
+// granted roots (GET /workspace/tree, path null) exactly once: the tree
+// panel and the window title share one load through TreeStateService.
 //
 // bootWorkbench exits the process, so each scenario boots in its own child
 // process; run without arguments this file drives them all and fails if
@@ -21,6 +24,10 @@ import { bootWorkbench } from "./helpers/boot.mjs";
 
 const USER_STATE = "/user/state";
 const WORKSPACE_STATE = "/workspace/file/state";
+// The granted-roots listing; the fixture answers it empty. fetchTree
+// sends the bare route for the roots (no ?path=), so an exact match is
+// the `path=null` request.
+const WORKSPACE_TREE = "/workspace/tree";
 // main.ts preloads with a 3000 ms timeout; the hanging scenario allows the
 // timer some slack either side.
 const PRELOAD_TIMEOUT_MS = 3000;
@@ -62,6 +69,18 @@ function checkOrdering(fetchLog, failures) {
   if (lastStateGet > resolveIndex) {
     failures.push(
       `both state GETs must precede the first getService (${fetchLog[resolveIndex].url}); log: ${JSON.stringify(fetchLog.map((e) => `${e.method} ${e.url}`))}`,
+    );
+  }
+  checkRootsFetch(fetchLog, failures);
+}
+
+// The booted workbench (tree panel mounted, title rendered) fetched the
+// roots once: the panel and the window title share TreeStateService's load.
+function checkRootsFetch(fetchLog, failures) {
+  const rootsGets = fetchLog.filter((entry) => entry.method === "GET" && entry.url === WORKSPACE_TREE);
+  if (rootsGets.length !== 1) {
+    failures.push(
+      `boot must GET ${WORKSPACE_TREE} (the roots, path null) exactly once, saw ${rootsGets.length}; log: ${JSON.stringify(fetchLog.filter((e) => e.method !== "RESOLVE").map((e) => `${e.method} ${e.url}`))}`,
     );
   }
 }

@@ -12,8 +12,11 @@
 // into one writer call carrying the same shape; a throwing writer leaving
 // the in-memory set intact; replaceExpanded replacing the set, firing
 // onDidChange, cancelling a pending write, and writing nothing itself;
-// the listing cache; and root invalidation dropping only the roots
-// listing.
+// the listing cache; root invalidation dropping only the roots listing;
+// and roots(): concurrent callers share one fetch, a cached listing
+// answers without one, an invalidation during an in-flight load makes
+// the next call fetch again and keeps the stale result out of the cache,
+// and a rejected fetch clears the slot so the next call retries.
 // Run: node test/tree-state-service.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -205,6 +208,119 @@ for (const [label, malformed] of [
   check("invalidateRoots drops the roots listing", service.listing("") === undefined);
   check("invalidateRoots keeps the directory listings", service.listing(SRC) === listing);
   service.dispose();
+}
+
+// --- roots(): one shared load ---------------------------------------------------
+
+/** A gated roots fetch: counts calls, parks each on `gate` until released. */
+function gatedFetch(listings) {
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = () => resolve();
+  });
+  const calls = [];
+  const fetch = async (path) => {
+    calls.push(path);
+    const next = listings[calls.length - 1];
+    await gate;
+    if (next instanceof Error) {
+      throw next;
+    }
+    return next;
+  };
+  return { fetch, calls, release: () => release() };
+}
+
+{
+  const { service } = bound();
+  const roots = { path: null, entries: [] };
+  const { fetch, calls, release } = gatedFetch([roots]);
+  const first = service.roots(fetch);
+  const second = service.roots(fetch);
+  check("two concurrent roots() calls share one fetch", calls.length === 1);
+  check("the shared fetch asks for the roots (path null)", calls[0] === null);
+  check("two concurrent roots() calls receive the same promise", first === second);
+  check("the roots are not cached while the load is in flight", service.listing("") === undefined);
+  release();
+  check("the shared load resolves both callers", (await first) === roots && (await second) === roots);
+  check("a settled load caches the roots listing", service.listing("") === roots);
+  check("a cached listing answers roots() without a fetch", (await service.roots(fetch)) === roots && calls.length === 1);
+  service.dispose();
+}
+
+// --- roots(): invalidation during an in-flight load --------------------------
+
+{
+  const { service } = bound();
+  const stale = { path: null, entries: [] };
+  const fresh = { path: null, entries: [] };
+  const staleFetch = gatedFetch([stale]);
+  const freshFetch = gatedFetch([fresh]);
+  const staleLoad = service.roots(staleFetch.fetch);
+  service.invalidateRoots();
+  const freshLoad = service.roots(freshFetch.fetch);
+  check("invalidateRoots during an in-flight load makes the next roots() fetch again", freshFetch.calls.length === 1);
+  check("the load after an invalidation is a new promise", staleLoad !== freshLoad);
+  freshFetch.release();
+  check("the fresh load resolves to the fresh listing", (await freshLoad) === fresh);
+  check("the fresh listing is cached", service.listing("") === fresh);
+  staleFetch.release();
+  check("the stale load still resolves for its own caller", (await staleLoad) === stale);
+  check("the stale load does not populate the cache", service.listing("") === fresh);
+  check(
+    "a later roots() reads the fresh cache without a fetch",
+    (await service.roots(staleFetch.fetch)) === fresh && staleFetch.calls.length === 1,
+  );
+  service.dispose();
+}
+
+{
+  // The stale load settles after the invalidation but before any new
+  // call: it must leave the cache empty rather than resurrect the old roots.
+  const { service } = bound();
+  const stale = { path: null, entries: [] };
+  const { fetch, release } = gatedFetch([stale]);
+  const staleLoad = service.roots(fetch);
+  service.invalidateRoots();
+  release();
+  await staleLoad;
+  check("a stale load settling into an empty cache caches nothing", service.listing("") === undefined);
+  service.dispose();
+}
+
+// --- roots(): a rejected fetch clears the slot ---------------------------------
+
+{
+  const { service } = bound();
+  const roots = { path: null, entries: [] };
+  const { fetch, calls, release } = gatedFetch([new Error("server down"), roots]);
+  const failing = service.roots(fetch);
+  release();
+  let rejected = false;
+  try {
+    await failing;
+  } catch (error) {
+    rejected = error instanceof Error && error.message === "server down";
+  }
+  check("a failed roots load rejects its caller", rejected);
+  check("a failed roots load caches nothing", service.listing("") === undefined);
+  const retried = await service.roots(fetch);
+  check("a rejected fetch clears the slot so the next roots() retries", calls.length === 2 && retried === roots);
+  check("the retried load caches its listing", service.listing("") === roots);
+  service.dispose();
+}
+
+// --- roots(): dispose drops an in-flight load ----------------------------------
+
+{
+  const { service } = bound();
+  const roots = { path: null, entries: [] };
+  const { fetch, release } = gatedFetch([roots]);
+  const load = service.roots(fetch);
+  service.dispose();
+  release();
+  await load;
+  check("a load settling after dispose caches nothing", service.listing("") === undefined);
 }
 
 if (failures.length > 0) {

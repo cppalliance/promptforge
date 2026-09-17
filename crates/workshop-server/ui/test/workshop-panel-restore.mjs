@@ -12,7 +12,10 @@
 // the rest of the tree standing; replaceExpanded on the service makes
 // the panel re-render with the new set; a replaceExpanded that lands
 // while a roots fetch from WORKSPACE_CHANGED_EVENT is still in flight
-// (the Open Workspace sequence) renders each root once.
+// (the Open Workspace sequence) joins that fetch and renders each root once;
+// a roots load that invalidateRoots dropped while it was in flight and
+// that settles after a fresh load rendered neither repaints the tree with
+// its stale roots nor, when it fails, paints an error row over them.
 // Run: node test/workshop-panel-restore.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,6 +98,11 @@ const fetched = [];
 // While set, every roots fetch (path null) parks on this promise so a test
 // can start a second load before the first resolves.
 let holdRoots = null;
+// The roots listing a roots fetch answers with; a test swaps it to stand
+// for a different workspace's grants.
+let rootsListing = listings.get(null);
+// While set, a roots fetch fails once released instead of answering.
+let failRoots = false;
 globalThis.fetch = async (url) => {
   const parsed = new URL(url, "http://127.0.0.1:7910/");
   if (parsed.pathname !== "/workspace/tree") {
@@ -102,17 +110,22 @@ globalThis.fetch = async (url) => {
   }
   const p = parsed.searchParams.get("path");
   fetched.push(p);
-  if (p === null && holdRoots !== null) {
-    await holdRoots;
+  // Captured at call time: a test parks load A, then changes the hold,
+  // the listing, or the failure flag for load B, and A must keep what it
+  // was called with.
+  const hold = p === null ? holdRoots : null;
+  const fail = p === null && failRoots;
+  const listing = p === null ? rootsListing : listings.get(p);
+  if (hold !== null) {
+    await hold;
   }
-  if (p === BROKEN) {
+  if (p === BROKEN || fail) {
     return {
       ok: false,
       status: 403,
       json: async () => ({ error: { message: "path is outside the workspace", code: "forbidden" } }),
     };
   }
-  const listing = listings.get(p);
   if (listing === undefined) {
     throw new Error(`no mocked listing for ${p}`);
   }
@@ -204,8 +217,9 @@ await flush();
 
 // The Open Workspace sequence: WORKSPACE_CHANGED_EVENT invalidates the
 // roots and starts a fetch; replaceExpanded arrives a round-trip later
-// while that fetch is unresolved and starts a second one (the cache is
-// still empty). Only the later load may render, or every root doubles.
+// while that fetch is unresolved. The second load joins the service's
+// in-flight roots() promise rather than fetching again, and however many
+// loads settle on it the tree holds one copy of each root.
 {
   const before = fetched.length;
   let release;
@@ -218,7 +232,7 @@ await flush();
   check("the roots are not cached while the fetch is in flight", state.listing("") === undefined);
   state.replaceExpanded([ROOT, SRC]);
   await flush();
-  check("replaceExpanded during the fetch starts a second roots fetch", fetched.slice(before).filter((p) => p === null).length === 2);
+  check("replaceExpanded during the fetch joins the in-flight roots load", fetched.slice(before).filter((p) => p === null).length === 1);
   release();
   holdRoots = null;
   await flush();
@@ -229,6 +243,76 @@ await flush();
   check("the replaced set's nested folder renders expanded", rowByPath(panel, SRC)?.getAttribute("aria-expanded") === "true");
   check("the replaced set's collapsed folder renders collapsed", rowByPath(panel, DOCS)?.getAttribute("aria-expanded") === "false");
   check("no error row appears from the dropped load", panel.element.querySelector(".ws-workshop-tree__error") === null);
+}
+
+// --- A stale roots load settling after a fresh one rendered -----------------
+
+// Two workspace changes back to back: load A (the old grants) is still in
+// flight when the second change invalidates the roots and load B (the new
+// grants) fetches and renders. A then resolves with the old roots. The
+// service does not cache it, and the panel must not repaint the tree with
+// it: the roots on screen stay B's.
+const OTHER = "D:\\other";
+const OLD_ROOTS = { path: null, entries: [dir("project", ROOT)] };
+const NEW_ROOTS = { path: null, entries: [dir("other", OTHER)] };
+function rootTitles(panel) {
+  return [...panel.element.querySelectorAll(".ws-workshop-tree__list > li > .ws-workshop-tree__row")].map((row) => row.title);
+}
+function cachedRootPaths(state) {
+  return (state.listing("")?.entries ?? []).map((entry) => entry.path).join(",");
+}
+{
+  const before = fetched.length;
+  let releaseA;
+  holdRoots = new Promise((resolve) => {
+    releaseA = resolve;
+  });
+  rootsListing = OLD_ROOTS;
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  await flush();
+  check("load A starts on the first workspace change", fetched.slice(before).filter((p) => p === null).length === 1);
+
+  holdRoots = null;
+  rootsListing = NEW_ROOTS;
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  await flush();
+  check("load B fetches again after the second change invalidated the roots", fetched.slice(before).filter((p) => p === null).length === 2);
+  check("load B's roots render", rootTitles(panel).join(",") === OTHER);
+  check("load B's listing is cached", cachedRootPaths(state) === OTHER);
+
+  releaseA();
+  await flush();
+  check("the stale load A does not repaint the tree with the old roots", rootTitles(panel).join(",") === OTHER);
+  check("the stale load A does not replace the cached listing", cachedRootPaths(state) === OTHER);
+  check("no error row appears from the stale load", panel.element.querySelector(".ws-workshop-tree__error") === null);
+}
+
+// --- A stale roots load failing after a fresh one rendered ------------------
+
+// The same overlap, but the dropped load fails: the panel must not paint
+// its error row over the roots the fresh load rendered.
+{
+  const before = fetched.length;
+  let releaseC;
+  holdRoots = new Promise((resolve) => {
+    releaseC = resolve;
+  });
+  failRoots = true;
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  await flush();
+  check("load C starts on the first workspace change", fetched.slice(before).filter((p) => p === null).length === 1);
+
+  holdRoots = null;
+  failRoots = false;
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  await flush();
+  check("load D fetches again and renders", fetched.slice(before).filter((p) => p === null).length === 2 && rootTitles(panel).join(",") === OTHER);
+
+  releaseC();
+  await flush();
+  check("the stale failed load C paints no error row", panel.element.querySelector(".ws-workshop-tree__error") === null);
+  check("the stale failed load C leaves load D's roots standing", rootTitles(panel).join(",") === OTHER);
+  check("the stale failed load C leaves the cached listing", cachedRootPaths(state) === OTHER);
 }
 
 panel.dispose();

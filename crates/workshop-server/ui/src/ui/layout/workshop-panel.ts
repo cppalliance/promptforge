@@ -7,13 +7,15 @@
 // service registry), so closing and reopening the Workshop panel restores
 // the tree as the user left it; the expansion also comes back from the
 // workspace file on relaunch, without listings, so a folder that renders
-// expanded with nothing cached fetches its listing then and there. A
-// wholesale replacement of the expanded set (a workspace switch) fires
-// the service's change event and the panel re-renders. The panel also
-// manages the grants themselves: a root row's context menu revokes it,
-// and a header "+" button (or the empty-space context menu) adds a
-// folder - through the native folder picker in the desktop app, through
-// a typed-path dialog in a plain browser.
+// expanded with nothing cached fetches its listing then and there. The
+// roots themselves come from the service's shared roots() load, which
+// the window title reads too, so a boot or a workspace change fetches
+// them once. A wholesale replacement of the expanded set (a workspace
+// switch) fires the service's change event and the panel re-renders.
+// The panel also manages the grants themselves: a root row's context
+// menu revokes it, and a header "+" button (or the empty-space context
+// menu) adds a folder - through the native folder picker in the desktop
+// app, through a typed-path dialog in a plain browser.
 
 import type { GroupPanelPartInitParameters } from "dockview";
 
@@ -46,12 +48,6 @@ export class WorkshopTreePanel extends WorkshopPart {
   private pointerAnchor: HTMLElement | null = null;
   // The open Add Folder dialog, dismissed with the panel.
   private dialog: { dispose(): void } | null = null;
-  // Bumped by every loadRoots; a roots fetch that settles after a later
-  // load started is stale and dropped. A workspace switch fires
-  // WORKSPACE_CHANGED_EVENT and then replaceExpanded a round-trip later,
-  // so two loads overlap with the cache empty; without this, both would
-  // append the roots and every root would render twice.
-  private rootsGeneration = 0;
   // A dropped folder grants a new root after this panel rendered; the
   // change event refetches the roots so the drop is visible immediately.
   private readonly onWorkspaceChanged = (): void => {
@@ -82,7 +78,7 @@ export class WorkshopTreePanel extends WorkshopPart {
     // the cache; folders newly expanded with no listing fetch on render.
     this._register(this.state.onDidChange(() => this.reload()));
     void this.loadRoots().catch((error: unknown) => {
-      this.showError(this.list, error);
+      this.showRootsError(error);
     });
   }
 
@@ -136,10 +132,9 @@ export class WorkshopTreePanel extends WorkshopPart {
 
   /** Clears the rendered roots (and the empty hint) and renders afresh. */
   private reload(): void {
-    this.list.textContent = "";
-    this.element.querySelector(".ws-workshop-tree__empty")?.remove();
+    this.clearRoots();
     void this.loadRoots().catch((error: unknown) => {
-      this.showError(this.list, error);
+      this.showRootsError(error);
     });
   }
 
@@ -149,25 +144,31 @@ export class WorkshopTreePanel extends WorkshopPart {
     (row ?? this.element).focus();
   }
 
-  /** Renders the granted roots, from the session cache when present. */
+  /**
+   * Renders the granted roots from the service's shared load (cached,
+   * in flight, or started here). Two loads can overlap - a workspace
+   * change and a replaceExpanded a round-trip later, with the cache
+   * empty - and both settle on the same listing, so each paints the
+   * whole list afresh rather than appending: one copy of each root
+   * however many loads settle. A listing the service did not cache is
+   * stale (invalidateRoots ran while it was in flight) and is dropped;
+   * so is a failure that a later load has since superseded with a
+   * cached listing.
+   */
   private async loadRoots(): Promise<void> {
-    const generation = ++this.rootsGeneration;
-    let listing = this.state.listing(ROOTS_KEY);
-    if (listing === undefined) {
-      try {
-        listing = await fetchTree(null);
-      } catch (error) {
-        // A stale failure belongs to a render a later load replaced.
-        if (generation !== this.rootsGeneration) {
-          return;
-        }
-        throw error;
-      }
-      if (generation !== this.rootsGeneration) {
+    let listing: TreeListing;
+    try {
+      listing = await this.state.roots();
+    } catch (error) {
+      if (this.state.listing(ROOTS_KEY) !== undefined) {
         return;
       }
-      this.state.cacheListing(ROOTS_KEY, listing);
+      throw error;
     }
+    if (this.state.listing(ROOTS_KEY) !== listing) {
+      return;
+    }
+    this.clearRoots();
     this.renderListing(this.list, listing, true);
     if (listing.entries.length === 0) {
       const empty = document.createElement("p");
@@ -175,6 +176,21 @@ export class WorkshopTreePanel extends WorkshopPart {
       empty.textContent = "Drop a folder onto the window to browse it here.";
       this.element.appendChild(empty);
     }
+  }
+
+  /** Empties the roots list and removes the empty hint. */
+  private clearRoots(): void {
+    this.list.textContent = "";
+    this.element.querySelector(".ws-workshop-tree__empty")?.remove();
+  }
+
+  /**
+   * Paints a roots load failure as the list's only row: overlapping loads
+   * that failed together report once, not once per load.
+   */
+  private showRootsError(error: unknown): void {
+    this.clearRoots();
+    this.showError(this.list, error);
   }
 
   /** Appends one row per entry; the server orders directories first. */

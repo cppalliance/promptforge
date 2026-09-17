@@ -5,7 +5,10 @@
 // `{ "expanded": [...] }`, back through a debounced writer on every
 // change, so the folders the user left open come back on relaunch. The
 // listing cache is session-only - a restored folder has no listing until
-// the tree panel fetches one on render.
+// the tree panel fetches one on render. The granted-roots listing is the
+// exception: roots() loads it here, once, so the tree panel and the
+// window title share a single GET /workspace/tree per boot and per
+// workspace change instead of each fetching their own.
 //
 // The initial value arrives as unknown and passes a hand-written shape
 // check - a malformed or hostile payload reads as nothing expanded, never
@@ -24,10 +27,13 @@ import { Emitter } from "../base/event";
 import type { Event } from "../base/event";
 import type { IDisposable } from "../base/lifecycle";
 import { createServiceToken, registerService } from "./service-registry";
-import type { TreeListing } from "./workspace-api";
+import { fetchTree, type TreeListing } from "./workspace-api";
 
 /** Cache key for the synthetic granted-roots listing, which has no path. */
 export const ROOTS_KEY = "";
+
+/** The roots fetch roots() runs; tests inject a counting one. */
+export type RootsFetch = (path: null) => Promise<TreeListing>;
 
 // Matches the layout saver: a click-through of several folders lands as
 // one write.
@@ -68,12 +74,15 @@ function readExpanded(initial: unknown): Set<string> {
 /**
  * The Workshop tree's expansion and listing state. The synthetic
  * granted-roots listing has no path; it caches under the empty-string
- * key, and invalidateRoots drops exactly that entry when the workspace
- * grants change.
+ * key, roots() loads it once for every consumer (a second caller during
+ * the load joins the same promise), and invalidateRoots drops exactly
+ * that entry, plus any load in flight, when the workspace grants change.
  */
 export class TreeStateService implements IDisposable {
   private expanded: Set<string>;
   private readonly listingCache = new Map<string, TreeListing>();
+  // The roots load consumers are waiting on, while the cache is empty.
+  private rootsInFlight: Promise<TreeListing> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly changeEmitter = new Emitter<void>();
 
@@ -152,12 +161,52 @@ export class TreeStateService implements IDisposable {
   }
 
   /**
+   * The granted roots: the cached listing when present, else the load
+   * already in flight, else a new one. Every consumer that needs the roots
+   * (the tree panel, the window title) reads them here so a boot or a
+   * workspace change costs one GET /workspace/tree. A successful load
+   * caches only if no invalidateRoots ran while it was in flight; a stale
+   * load still resolves for its own caller but never lands in the cache.
+   * A rejected load clears the slot so the next call retries. `fetch`
+   * defaults to the workspace API; tests inject a counting one.
+   */
+  roots(fetch: RootsFetch = fetchTree): Promise<TreeListing> {
+    const cached = this.listingCache.get(ROOTS_KEY);
+    if (cached !== undefined) {
+      return Promise.resolve(cached);
+    }
+    if (this.rootsInFlight !== null) {
+      return this.rootsInFlight;
+    }
+    const load: Promise<TreeListing> = fetch(null).then(
+      (listing) => {
+        if (this.rootsInFlight === load) {
+          this.listingCache.set(ROOTS_KEY, listing);
+          this.rootsInFlight = null;
+        }
+        return listing;
+      },
+      (error: unknown) => {
+        if (this.rootsInFlight === load) {
+          this.rootsInFlight = null;
+        }
+        throw error;
+      },
+    );
+    this.rootsInFlight = load;
+    return load;
+  }
+
+  /**
    * Drops the synthetic roots listing after the workspace grants changed
-   * (a drop or an Add/Remove Folder), so the next render refetches them.
-   * Directory listings survive: the folders themselves did not change.
+   * (a drop, an Add/Remove Folder, an Open), so the next roots() fetches
+   * again. A load in flight is dropped too: it started against the old
+   * grants, so it neither caches nor answers later callers. Directory
+   * listings survive: the folders themselves did not change.
    */
   invalidateRoots(): void {
     this.listingCache.delete(ROOTS_KEY);
+    this.rootsInFlight = null;
   }
 
   private scheduleWrite(): void {
@@ -185,6 +234,7 @@ export class TreeStateService implements IDisposable {
     this.cancelWrite();
     this.expanded = new Set();
     this.listingCache.clear();
+    this.rootsInFlight = null;
     this.changeEmitter.dispose();
   }
 }

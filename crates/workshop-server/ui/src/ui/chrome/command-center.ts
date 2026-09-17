@@ -14,17 +14,19 @@
 //
 // The WindowTitle helper owns the title text: the first granted root's
 // folder name, or "PromptForge" when no root is granted or the listing
-// cannot be read. It re-reads the roots on the workspace-changed event
-// (fired by workspace-drops.ts and the tree panel's Add/Remove Folder)
-// and mirrors the text into document.title.
+// cannot be read. It reads the roots through the tree-state service's
+// shared roots() load - the same load the tree panel renders from, so a
+// boot costs one GET /workspace/tree - re-reads them on the
+// workspace-changed event (fired by workspace-drops.ts and the tree
+// panel's Add/Remove Folder) and mirrors the text into document.title.
 
 import "./command-center.css";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { CommandRegistry, Commands } from "../../services/command-registry";
 import { MenuId, Menus, type MenuItem, type MenuRegistry } from "../../services/menu-registry";
-import { getServiceOrNull } from "../../services/service-registry";
-import { fetchTree } from "../../services/workspace-api";
+import { getService, getServiceOrNull } from "../../services/service-registry";
+import { TREE_STATE } from "../../services/tree-state-service";
 import { STATUS_BAR } from "../status/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
 
@@ -36,10 +38,10 @@ interface GrantedRoot {
   readonly name: string;
 }
 
-/** Reads the granted roots; defaults to the workspace tree API. */
+/** Reads the granted roots; defaults to the tree-state service's shared load. */
 export type ListRoots = () => Promise<readonly GrantedRoot[]>;
 
-const defaultListRoots: ListRoots = async () => (await fetchTree(null)).entries;
+const defaultListRoots: ListRoots = async () => (await getService(TREE_STATE).roots()).entries;
 
 /** Registry and roots overrides; tests inject their own. */
 export interface CommandCenterDependencies {

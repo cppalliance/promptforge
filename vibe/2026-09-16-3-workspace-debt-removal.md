@@ -239,7 +239,7 @@ Verify: `node --test test/open-recent.mjs`, `node --test test/workspace-files.mj
 
 <step-5>
 
-### Step 5: One shared roots load on `TreeStateService` (OP-001)
+### Step 5: One shared roots load on `TreeStateService` (OP-001) [completed]
 
 - Component: `workshop-server/ui` SPA
 - Piece: single roots load (sequential: Step 6 relies on the invalidation semantics introduced here)

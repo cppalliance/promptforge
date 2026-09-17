@@ -7,7 +7,9 @@
 // aria-label and the WindowTitle helper showing the first granted root's
 // folder name (falling back to "PromptForge" when no root is granted or
 // the listing fails), re-rendering on the workspace-changed event, and
-// tracking document.title.
+// tracking document.title. The default listRoots reads the roots through
+// TreeStateService.roots(): a listing already cached there answers with no
+// fetch, and two titles refreshing on an empty cache share one fetch.
 // Bundles the module with esbuild and drives it against jsdom.
 // Run: node --test test/command-center.mjs
 import path from "node:path";
@@ -40,6 +42,8 @@ const bundle = await esbuild.build({
       export { CommandRegistry } from "./src/services/command-registry.ts";
       export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
       export { WORKSPACE_CHANGED_EVENT } from "./src/ui/workspace/workspace-drops.ts";
+      export { TREE_STATE } from "./src/services/tree-state-service.ts";
+      export { getService } from "./src/services/service-registry.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -52,9 +56,8 @@ const bundle = await esbuild.build({
   logLevel: "silent",
   loader: { ".css": "empty" },
 });
-const { CommandCenter, WindowTitle, CommandRegistry, MenuRegistry, MenuId, WORKSPACE_CHANGED_EVENT } = await import(
-  `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
-);
+const { CommandCenter, WindowTitle, CommandRegistry, MenuRegistry, MenuId, WORKSPACE_CHANGED_EVENT, TREE_STATE, getService } =
+  await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
 const failures = [];
 function check(name, condition) {
@@ -181,6 +184,41 @@ await flush();
 check("WindowTitle exposes its element", title.element instanceof window.HTMLElement);
 check("WindowTitle sets document.title on its own", window.document.title === "solo");
 title.dispose();
+
+// --- The default listRoots reads the shared tree-state cache ------------------
+
+const rootEntry = (name) => ({ name, path: `C:\\${name}`, kind: "directory", size: 0, modified_ms: 1, exists: true });
+{
+  const tree = getService(TREE_STATE);
+  tree.cacheListing("", { path: null, entries: [rootEntry("cached-root")] });
+  let fetches = 0;
+  globalThis.fetch = async () => {
+    fetches += 1;
+    throw new Error("the title must not fetch while the roots are cached");
+  };
+  const shared = new WindowTitle();
+  await flush();
+  check("the default listRoots reads the listing cached on TREE_STATE", window.document.title === "cached-root");
+  check("the default listRoots issues no fetch when the roots are cached", fetches === 0);
+  shared.dispose();
+
+  // An empty cache: two titles refreshing at once share one roots fetch,
+  // the fetch that the tree panel's own load would also share.
+  tree.invalidateRoots();
+  globalThis.fetch = async () => {
+    fetches += 1;
+    return { ok: true, status: 200, json: async () => ({ path: null, entries: [rootEntry("fetched-root")] }) };
+  };
+  const one = new WindowTitle();
+  const two = new WindowTitle();
+  await flush();
+  check("two titles refreshing on an empty cache share one roots fetch", fetches === 1);
+  check("the shared fetch lands in the title", window.document.title === "fetched-root");
+  check("the shared fetch lands in the tree-state cache", tree.listing("")?.entries[0]?.name === "fetched-root");
+  one.dispose();
+  two.dispose();
+  tree.invalidateRoots();
+}
 
 commandCenter.dispose();
 check("disposing the command center removes its container", center.querySelector(".ws-command-center") === null);
