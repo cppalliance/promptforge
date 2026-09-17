@@ -50,7 +50,7 @@ struct FixtureUpstream {
 
 fn canonical_server_frames() -> Vec<String> {
     let fixtures: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "../../../gateway-stt/tests/fixtures/realtime/valid-sequences.json"
+        "../../../gateway/stt/api/tests/fixtures/realtime/valid-sequences.json"
     ))
     .expect("canonical Realtime sequences parse");
     [

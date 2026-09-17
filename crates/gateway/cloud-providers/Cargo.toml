@@ -1,0 +1,36 @@
+[package]
+name = "gateway-cloud-providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge shared cloud provider descriptors: the tiered provider registry, per-provider fetch and normalization behind an injected reqwest client, and the sheet-building binary"
+keywords = ["prompt", "llm", "gateway", "providers"]
+categories = ["rust-patterns"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[lib]
+name = "gateway_cloud_providers"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shared-cloud-providers"
+path = "src/main.rs"
+
+[dependencies]
+dotenvy.workspace = true
+futures-util.workspace = true
+hmac.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+gateway-api.workspace = true
+thiserror.workspace = true
+time = { workspace = true, features = ["parsing"] }
+tokio.workspace = true
+
+[lints]
+workspace = true

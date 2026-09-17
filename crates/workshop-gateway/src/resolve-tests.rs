@@ -3,7 +3,7 @@ use super::*;
 use std::io::{Read, Write as _};
 use std::net::TcpListener;
 
-use shared_gateway_discovery::GatewayDiscoveryFile;
+use gateway_api_discovery::GatewayDiscoveryFile;
 
 /// The test process's own image name, so the probe's pid and image
 /// checks pass and the test reaches the liveness probes.
@@ -19,7 +19,7 @@ fn own_image_name() -> String {
 /// A probe running the real liveness gauntlet against the test
 /// binary's own image.
 fn probe_own_image(run_dir: &Path) -> Result<Resolution, SidecarError> {
-    shared_gateway_discovery::resolve_for_test(run_dir, &own_image_name())
+    gateway_api_discovery::resolve_for_test(run_dir, &own_image_name())
 }
 
 /// A gateway discovery file pointing at the test process itself.
@@ -125,7 +125,7 @@ fn a_stale_file_is_cleaned_and_explicit_config_wins() {
     assert_eq!(resolved.api_key(), "config-key");
     assert_eq!(resolved.stale(), Some(StaleReason::ProcessDead));
     assert!(
-        !shared_gateway_discovery::gateway_discovery_file_path(dir.path()).exists(),
+        !gateway_api_discovery::gateway_discovery_file_path(dir.path()).exists(),
         "the stale file was removed"
     );
 }
@@ -229,7 +229,7 @@ fn no_file_and_explicit_config_uses_the_config() {
 /// `gateway.json` belongs, so the read errors instead of answering.
 fn probe_read_failure(run_dir: &Path) -> Result<Resolution, SidecarError> {
     std::fs::create_dir(run_dir.join("gateway.json")).expect("the unreadable file plants");
-    shared_gateway_discovery::resolve_for_test(run_dir, &own_image_name())
+    gateway_api_discovery::resolve_for_test(run_dir, &own_image_name())
 }
 
 #[test]

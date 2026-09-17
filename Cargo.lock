@@ -2292,6 +2292,8 @@ dependencies = [
  "embed-resource",
  "futures-util",
  "gateway",
+ "gateway-api",
+ "gateway-api-discovery",
  "gateway-config",
  "gateway-config-ui",
  "gateway-local",
@@ -2299,7 +2301,6 @@ dependencies = [
  "gateway-protocol",
  "gateway-routing",
  "gateway-stt",
- "gateway-stt-engine",
  "gateway-web-search",
  "hound",
  "ksni",
@@ -2315,8 +2316,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "shared-gateway-api",
- "shared-gateway-discovery",
  "shared-loopback",
  "shared-progress",
  "subtle",
@@ -2338,14 +2337,52 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-config"
+name = "gateway-api"
 version = "0.3.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
+name = "gateway-api-discovery"
+version = "0.3.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "gateway-cloud-providers"
+version = "0.3.0"
+dependencies = [
+ "dotenvy",
+ "futures-util",
+ "gateway-api",
+ "hmac",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "shared-gateway-api",
+ "thiserror 2.0.19",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "gateway-config"
+version = "0.3.0"
+dependencies = [
+ "gateway-api",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",
  "toml 0.8.2",
@@ -2407,11 +2444,11 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
+ "gateway-api",
  "gateway-config",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-gateway-api",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -6736,44 +6773,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shared-cloud-providers"
-version = "0.3.0"
-dependencies = [
- "dotenvy",
- "futures-util",
- "hmac",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "shared-gateway-api",
- "thiserror 2.0.19",
- "time",
- "tokio",
-]
-
-[[package]]
-name = "shared-gateway-api"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "time",
-]
-
-[[package]]
-name = "shared-gateway-discovery"
-version = "0.3.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "shared-loopback"
 version = "0.3.0"
 dependencies = [
@@ -9505,10 +9504,10 @@ name = "workshop"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "gateway-api-discovery",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-gateway-discovery",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -9531,11 +9530,11 @@ dependencies = [
  "arc-swap",
  "axum",
  "futures-util",
+ "gateway-api-discovery",
  "promptforge-api-types",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-gateway-discovery",
  "shared-progress",
  "tempfile",
  "thiserror 2.0.19",
@@ -9590,6 +9589,7 @@ dependencies = [
  "axum",
  "build-ui",
  "futures-util",
+ "gateway-api-discovery",
  "open",
  "promptforge-api-runtime",
  "promptforge-api-types",
@@ -9597,7 +9597,6 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
- "shared-gateway-discovery",
  "shared-loopback",
  "shared-progress",
  "socket2",

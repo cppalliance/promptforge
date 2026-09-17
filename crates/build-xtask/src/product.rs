@@ -7,15 +7,21 @@
 //! - `promptforge-*` crates must not depend on gateway or workshop crates.
 //! - `gateway`/`gateway-*` crates must not depend on promptforge or
 //!   workshop crates.
-//! - `workshop`/`workshop-*` crates must not depend on gateway crates.
+//! - `workshop`/`workshop-*` crates must not depend on gateway crates,
+//!   except the family's public pair (`gateway-api`,
+//!   `gateway-api-discovery`).
 //! - `shared-*` crates must not depend on any product crate.
 //! - One door: a crate outside the promptforge family may depend on
 //!   `promptforge-*` only through `promptforge-api-runtime` or
 //!   `promptforge-api-types`.
-//! - Container privacy: the manifestless `crates/promptforge/` directory is
-//!   private to its family; only the crates inside it and the container's
-//!   named public crate (`promptforge-api-runtime`) may depend on the
-//!   crates it holds.
+//! - Container privacy: the manifestless `crates/promptforge/` and
+//!   `crates/gateway/` directories are private to their families; only the
+//!   crates inside a container and the container's named outside exception
+//!   (`promptforge-api-runtime` for `crates/promptforge/`; the gateway
+//!   containers name none) may depend on the crates it holds. Containers
+//!   nest: `crates/gateway/stt/` is a subsystem private to the gateway
+//!   family, with `gateway-stt` as its public member - the one crate inside
+//!   the family outside the subsystem may name.
 //! - Shell boundary: the `workshop` shell depends on `workshop-server-api`
 //!   and never on `workshop-server`.
 
@@ -90,6 +96,9 @@ const SHELL: &str = "workshop";
 const SERVER: &str = "workshop-server";
 /// The promptforge-family crates outside crates may depend on directly.
 const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge-api-runtime", "promptforge-api-types"];
+/// The gateway family's public pair: the only gateway crates workshop
+/// crates may name.
+const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api", "gateway-api-discovery"];
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -101,13 +110,31 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         );
     }
     if let Some(container) = container_of(&dep.dir) {
-        let inside = container_of(&package.dir) == Some(container);
-        let named = container_public_crate(container) == Some(package.package.as_str());
-        if !inside && !named {
-            return Some(format!(
-                "crates/{container} is private to its family; only {} may depend into it",
-                container_public_crate(container).unwrap_or("no outside crate")
-            ));
+        // Inside is physical containment: a crate anywhere under
+        // crates/<container>/ may name the container's crates, so nested
+        // subsystems see their parent family's crates (gateway-stt depends
+        // on gateway-config) while the family cannot name the subsystem's
+        // private crates back.
+        let inside = package
+            .dir
+            .starts_with(Path::new("crates").join(&container));
+        let named = container_named_exception(&container) == Some(package.package.as_str());
+        // A container's public member is visible one level higher: to the
+        // crates under the container's parent scope only.
+        let public = container_public_member(&container) == Some(dep.package.as_str())
+            && match parent_scope(&container) {
+                Some(parent) => package.dir.starts_with(Path::new("crates").join(parent)),
+                None => package.dir.starts_with("crates"),
+            };
+        if !inside && !named && !public {
+            return Some(match container_face(&container) {
+                Some(face) => format!(
+                    "crates/{container} is private to its family; only {face} may depend into it"
+                ),
+                None => format!(
+                    "crates/{container} is private to its family; no outside crate may depend into it"
+                ),
+            });
         }
     }
     let (from, to) = (family(&package.package), family(&dep.package));
@@ -118,7 +145,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         (Family::Gateway, Family::Promptforge | Family::Workshop) => {
             Some("gateway crates must not depend on promptforge or workshop crates")
         }
-        (Family::Workshop, Family::Gateway) => {
+        (Family::Workshop, Family::Gateway) if !PUBLIC_GATEWAY.contains(&dep.package.as_str()) => {
             Some("workshop crates must not depend on gateway crates")
         }
         (Family::Shared, Family::Promptforge | Family::Gateway | Family::Workshop) => {
@@ -141,48 +168,79 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
     })
 }
 
-/// The name of the manifestless `crates/<container>/` directory holding the
-/// crate whose root-relative manifest directory is `dir`, or `None` for a
+/// The root-relative path of the deepest manifestless `crates/<container>/`
+/// directory holding the crate whose root-relative manifest directory is
+/// `dir` (`crates/gateway/stt/engine` is in `gateway/stt`), or `None` for a
 /// crate directly under `crates/`.
-fn container_of(dir: &Path) -> Option<&str> {
+fn container_of(dir: &Path) -> Option<String> {
     let mut components = dir.components();
     if components.next()?.as_os_str() != "crates" {
         return None;
     }
-    let container = components.next()?.as_os_str().to_str()?;
-    if components.next().is_some() {
-        Some(container)
-    } else {
-        None
+    let rest: Vec<&str> = components.filter_map(|c| c.as_os_str().to_str()).collect();
+    // The last component is the crate's own directory; everything between
+    // `crates/` and it is the container path.
+    match rest.len() {
+        0 | 1 => None,
+        _ => Some(rest[..rest.len() - 1].join("/")),
     }
+}
+
+/// The scope one level above a container: the container path with its last
+/// component dropped, or `None` when the container sits directly under
+/// `crates/`.
+fn parent_scope(container: &str) -> Option<&str> {
+    container.rsplit_once('/').map(|(parent, _)| parent)
 }
 
 /// The one crate outside a container permitted to depend into it, when the
 /// container names one.
-fn container_public_crate(container: &str) -> Option<&'static str> {
+fn container_named_exception(container: &str) -> Option<&'static str> {
     match container {
         "promptforge" => Some("promptforge-api-runtime"),
         _ => None,
     }
 }
 
+/// The container's public member: the one crate inside the container that
+/// crates under the parent scope may name.
+fn container_public_member(container: &str) -> Option<&'static str> {
+    match container {
+        "gateway/stt" => Some("gateway-stt"),
+        _ => None,
+    }
+}
+
+/// The crate a container-privacy violation names as the legal way in: the
+/// named outside exception, or the public member when there is none.
+fn container_face(container: &str) -> Option<&'static str> {
+    container_named_exception(container).or_else(|| container_public_member(container))
+}
+
 /// Every workspace crate's package name, manifest directory, and dependency
 /// package names, plus violations for manifests that could not be read or
 /// parsed. A directory under `crates/` containing a `Cargo.toml` is a crate
 /// and is not descended into; any other directory is a container and the
-/// walk descends one level.
+/// walk descends, so containers may nest (`crates/gateway/stt/`).
 fn workspace_crates(root: &Path) -> (Vec<CrateInfo>, Vec<String>) {
     let mut crates = Vec::new();
     let mut violations = Vec::new();
     let crates_dir = root.join("crates");
-    let entries = match fs::read_dir(&crates_dir) {
+    walk_crates(root, &crates_dir, &mut crates, &mut violations);
+    (crates, violations)
+}
+
+/// Walk one directory level: crates are read, manifestless containers are
+/// descended into.
+fn walk_crates(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: &mut Vec<String>) {
+    let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
             violations.push(format!(
                 "{}: unreadable crates directory: {error}",
-                crates_dir.display()
+                dir.display()
             ));
-            return (crates, violations);
+            return;
         }
     };
     for entry in entries {
@@ -191,7 +249,7 @@ fn workspace_crates(root: &Path) -> (Vec<CrateInfo>, Vec<String>) {
             Err(error) => {
                 violations.push(format!(
                     "{}: unreadable directory entry: {error}",
-                    crates_dir.display()
+                    dir.display()
                 ));
                 continue;
             }
@@ -199,20 +257,13 @@ fn workspace_crates(root: &Path) -> (Vec<CrateInfo>, Vec<String>) {
         if !entry.path().is_dir() {
             continue;
         }
-        let dir = entry.path();
-        if dir.join("Cargo.toml").exists() {
-            read_crate(root, &dir, &mut crates, &mut violations);
-        } else if let Ok(inner) = fs::read_dir(&dir) {
-            // A manifestless container holds its crates one level down.
-            for entry in inner.flatten() {
-                let sub = entry.path();
-                if sub.is_dir() && sub.join("Cargo.toml").exists() {
-                    read_crate(root, &sub, &mut crates, &mut violations);
-                }
-            }
+        let sub = entry.path();
+        if sub.join("Cargo.toml").exists() {
+            read_crate(root, &sub, crates, violations);
+        } else {
+            walk_crates(root, &sub, crates, violations);
         }
     }
-    (crates, violations)
 }
 
 /// Read one crate's manifest into `crates`; failures land in `violations`.

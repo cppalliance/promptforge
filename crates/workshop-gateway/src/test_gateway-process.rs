@@ -15,7 +15,7 @@ pub(super) fn run() {
         return;
     };
     let _instance_lease = std::env::var_os(INSTANCE_LEASE_RUN_DIR_ENV).map(|run_dir| {
-        shared_gateway_discovery::GatewayInstanceLease::try_acquire(std::path::Path::new(&run_dir))
+        gateway_api_discovery::GatewayInstanceLease::try_acquire(std::path::Path::new(&run_dir))
             .expect("acquire named fixture process lease")
             .expect("the named fixture is the process lease owner")
     });

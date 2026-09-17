@@ -2,7 +2,7 @@
 //! directory first, explicit `[gateway]` config second.
 //!
 //! The sidecar gateway writes `gateway.json` after a successful bind (see
-//! `shared-gateway-discovery`), so a workshop that finds a live file attaches to
+//! `gateway-api-discovery`), so a workshop that finds a live file attaches to
 //! that gateway - loopback, WSL, or LAN become one topology. A stale file
 //! is condemned with its reason (the probe removes it) and explicit config
 //! takes over; with no live file and no explicit config there is nothing
@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use shared_gateway_discovery::{Resolution, SidecarError, StaleReason, ValidatedConnection};
+use gateway_api_discovery::{Resolution, SidecarError, StaleReason, ValidatedConnection};
 
 use workshop_protocol::Activity;
 use workshop_registry::Push;
@@ -169,15 +169,15 @@ impl ResolveError {
 /// config carries no explicit gateway.
 pub fn resolve(config: &GatewayConfig) -> Result<ResolvedGateway, ResolveError> {
     resolve_with(
-        shared_gateway_discovery::default_run_dir().as_deref(),
+        gateway_api_discovery::default_run_dir().as_deref(),
         config,
         probe,
     )
 }
 
-/// The production probe: `shared_gateway_discovery`'s stale-detecting resolve.
+/// The production probe: `gateway_api_discovery`'s stale-detecting resolve.
 fn probe(run_dir: &Path) -> Result<Resolution, SidecarError> {
-    shared_gateway_discovery::resolve(run_dir)
+    gateway_api_discovery::resolve(run_dir)
 }
 
 /// `resolve` against an explicit run directory and probe, so tests point
@@ -233,7 +233,7 @@ fn resolve_with(
 /// Reifies the shared resolver's live result as the capability stored in
 /// Workshop's immutable Gateway snapshot.
 fn validate_resolved(
-    file: shared_gateway_discovery::GatewayDiscoveryFile,
+    file: gateway_api_discovery::GatewayDiscoveryFile,
 ) -> Result<ValidatedConnection, StaleReason> {
     ValidatedConnection::validate(file)
 }

@@ -29,7 +29,7 @@ pub struct GatewaySnapshot {
     /// Monotonic generation assigned before this snapshot is published.
     generation: u64,
     /// Proven local Gateway boot, absent for an explicitly configured endpoint.
-    identity: Option<shared_gateway_discovery::ValidatedConnection>,
+    identity: Option<gateway_api_discovery::ValidatedConnection>,
 }
 
 impl fmt::Debug for GatewaySnapshot {
@@ -124,7 +124,7 @@ impl GatewayBinding {
     pub fn new_with_identity(
         base_url: &str,
         api_key: &str,
-        identity: Option<shared_gateway_discovery::ValidatedConnection>,
+        identity: Option<gateway_api_discovery::ValidatedConnection>,
     ) -> Result<Self, GatewayError> {
         let snapshot = Arc::new(build_snapshot(base_url, api_key, 0, identity)?);
         Ok(Self {
@@ -193,7 +193,7 @@ impl GatewayBinding {
         &self,
         base_url: &str,
         api_key: &str,
-        identity: Option<shared_gateway_discovery::ValidatedConnection>,
+        identity: Option<gateway_api_discovery::ValidatedConnection>,
     ) -> Result<(), GatewayPublicationError> {
         let snapshot = build_snapshot(base_url, api_key, 0, identity)?;
         self.publish_snapshot(snapshot)
@@ -248,7 +248,7 @@ impl GatewayBinding {
 /// files cannot cross the publication boundary:
 ///
 /// ```compile_fail
-/// use shared_gateway_discovery::GatewayDiscoveryFile;
+/// use gateway_api_discovery::GatewayDiscoveryFile;
 ///
 /// # fn publish(
 /// #     updater: &workshop_gateway::GatewayUpdater,
@@ -281,7 +281,7 @@ impl GatewayUpdater {
     /// replacement publication.
     pub fn replace_sidecar(
         &self,
-        connection: &shared_gateway_discovery::ValidatedConnection,
+        connection: &gateway_api_discovery::ValidatedConnection,
     ) -> Result<(), GatewayPublicationError> {
         self.binding.replace_with_identity(
             &format!("http://127.0.0.1:{}", connection.port()),
@@ -324,7 +324,7 @@ fn build_snapshot(
     base_url: &str,
     api_key: &str,
     generation: u64,
-    identity: Option<shared_gateway_discovery::ValidatedConnection>,
+    identity: Option<gateway_api_discovery::ValidatedConnection>,
 ) -> Result<GatewaySnapshot, GatewayError> {
     let client = GatewayClient::new(base_url, api_key)?;
     let base_url = client.base_url().to_owned();

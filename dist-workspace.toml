@@ -1,7 +1,7 @@
 [workspace]
 # Only the gateway is released through cargo-dist (Linux installers); the
 # workshop desktop app has its own workflow (release-workshop.yml).
-members = ["cargo:crates/gateway"]
+members = ["cargo:crates/gateway/app"]
 
 # Config for 'dist'
 [dist]

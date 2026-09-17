@@ -119,11 +119,15 @@ fn watch(ui_dir: &Path, config: &UiBuild) {
     ] {
         println!("cargo::rerun-if-changed={}", ui_dir.join(file).display());
     }
-    // Both UIs bundle the shared-ui package (a `file:` dependency two
-    // directories up); its sources change the bundle without touching
-    // ui/src.
-    let shared_ui = ui_dir.join("..").join("..").join("shared-ui");
-    if shared_ui.is_dir() {
+    // Both UIs bundle the shared-ui package (a `file:` dependency at
+    // crates/shared-ui); its sources change the bundle without touching
+    // ui/src. The UIs sit at different depths under crates/, so search
+    // upward for the crates/ directory instead of counting parents.
+    let shared_ui = ui_dir
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "crates"))
+        .map(|crates| crates.join("shared-ui"));
+    if let Some(shared_ui) = shared_ui.filter(|dir| dir.is_dir()) {
         println!("cargo::rerun-if-changed={}", shared_ui.display());
     }
 }

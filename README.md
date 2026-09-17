@@ -72,7 +72,7 @@ Every build needs Rust and Node.js 22. The two web UIs are bundled with esbuild 
 git clone git@github.com:cppalliance/promptforge.git
 cd promptforge
 npm ci --prefix crates/workshop-server/ui
-npm ci --prefix crates/gateway-config-ui/ui
+npm ci --prefix crates/gateway/config-ui/ui
 ```
 
 `cargo build` builds only the gateway, the default workspace member. `cargo workshop` is the normal one-command Workshop build: it builds the gateway first, stages Tauri's target-suffixed temporary sidecar, builds the desktop app in the same profile and target, and removes the staged copy. Use `cargo workshop --release` for release binaries or `cargo workshop --target <triple>` for an explicit target. Ctrl+C terminates the active build subprocess, removes staging when staging has begun, and exits with failure. Platform notes:

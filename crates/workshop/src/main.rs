@@ -235,7 +235,7 @@ fn boot() -> anyhow::Result<(
     let server =
         workshop_server_api::spawn(config).context("start the in-process workshop server")?;
     let attachment = attachment.reconcile_publication(server.initial_gateway_identity().cloned());
-    match shared_gateway_discovery::wait_for_health(server.url(), HEALTH_TIMEOUT)
+    match gateway_api_discovery::wait_for_health(server.url(), HEALTH_TIMEOUT)
         .context("wait for the in-process workshop server")
     {
         Ok(()) => {

@@ -10,14 +10,14 @@
 # Standing guard: the operator's real secrets file must never be tracked.
 /secrets.env
 # Voice test fixtures, downloaded out of band (see design/design-promptforge-workshop.md).
-/crates/gateway-stt-backend-whisper/tests/fixtures/
+/crates/gateway/stt/backend-whisper/tests/fixtures/
 # UI build pipeline: npm install target and the esbuild output. The build
 # scripts write the bundle to OUT_DIR; `npm run build`/`--watch` still write
 # dist/ in place for the jsdom tests, and none of it is tracked.
 /crates/workshop-server/ui/node_modules/
-/crates/gateway-config-ui/ui/node_modules/
+/crates/gateway/config-ui/ui/node_modules/
 /crates/workshop-server/ui/dist/
-/crates/gateway-config-ui/ui/dist/
+/crates/gateway/config-ui/ui/dist/
 # tauri-build's generated ACL schemas, regenerated on every workshop build.
 /crates/workshop/gen/
 # The gateway sidecar staged for bundle.externalBin by CI before

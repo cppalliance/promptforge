@@ -4,7 +4,7 @@ use super::validated_gateway;
 use crate::gateway::identity::{GatewayAttachment, same_gateway_identity};
 use crate::gateway::supervisor::{RecoveryCandidate, RecoveryOwnership};
 
-fn owned_candidate(identity: shared_gateway_discovery::ValidatedConnection) -> RecoveryCandidate {
+fn owned_candidate(identity: gateway_api_discovery::ValidatedConnection) -> RecoveryCandidate {
     match RecoveryCandidate::authenticate(identity.pid(), identity) {
         RecoveryOwnership::Owned(candidate) => candidate,
         RecoveryOwnership::Unowned(_) => panic!("the validated child pid authenticates ownership"),

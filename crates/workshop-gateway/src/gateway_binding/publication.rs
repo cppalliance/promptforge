@@ -13,15 +13,15 @@ impl GatewayBinding {
         &self,
         base_url: &str,
         api_key: &str,
-        identity: shared_gateway_discovery::ValidatedConnection,
-        cancellation: &shared_gateway_discovery::CancellationToken,
+        identity: gateway_api_discovery::ValidatedConnection,
+        cancellation: &gateway_api_discovery::CancellationToken,
     ) -> Result<bool, GatewayPublicationError> {
         self.replace_with_identity_cancellable_with_wait(
             base_url,
             api_key,
             identity,
             cancellation,
-            shared_gateway_discovery::CancellationToken::wait_timeout,
+            gateway_api_discovery::CancellationToken::wait_timeout,
         )
     }
 
@@ -29,9 +29,9 @@ impl GatewayBinding {
         &self,
         base_url: &str,
         api_key: &str,
-        identity: shared_gateway_discovery::ValidatedConnection,
-        cancellation: &shared_gateway_discovery::CancellationToken,
-        mut wait: impl FnMut(&shared_gateway_discovery::CancellationToken, Duration) -> bool,
+        identity: gateway_api_discovery::ValidatedConnection,
+        cancellation: &gateway_api_discovery::CancellationToken,
+        mut wait: impl FnMut(&gateway_api_discovery::CancellationToken, Duration) -> bool,
     ) -> Result<bool, GatewayPublicationError> {
         if cancellation.is_cancelled() {
             return if self.publication_closed() {
@@ -91,8 +91,8 @@ impl GatewayUpdater {
     /// replacement publication.
     pub fn replace_sidecar_cancellable(
         &self,
-        connection: &shared_gateway_discovery::ValidatedConnection,
-        cancellation: &shared_gateway_discovery::CancellationToken,
+        connection: &gateway_api_discovery::ValidatedConnection,
+        cancellation: &gateway_api_discovery::CancellationToken,
     ) -> Result<bool, GatewayPublicationError> {
         self.binding.replace_with_identity_cancellable(
             &format!("http://127.0.0.1:{}", connection.port()),

@@ -9,7 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use shared_gateway_discovery::{
+use gateway_api_discovery::{
     CancellationToken, GatewayDiscoveryFile, Resolution, ValidatedConnection,
 };
 
@@ -250,7 +250,7 @@ fn explicit_candidate_shutdown_reports_a_delivery_failure() {
         .shutdown()
         .expect_err("a dead child cannot accept the shutdown");
     assert!(
-        matches!(error, shared_gateway_discovery::ShutdownError::Io { .. }),
+        matches!(error, gateway_api_discovery::ShutdownError::Io { .. }),
         "the explicit path reports the delivery failure: {error}"
     );
 }
@@ -334,7 +334,7 @@ fn a_mismatched_spawned_pid_never_claims_or_cleans_the_validated_process() {
         "an uncertain process never receives destructive cleanup"
     );
     assert!(
-        shared_gateway_discovery::gateway_discovery_file_path(run.path()).exists(),
+        gateway_api_discovery::gateway_discovery_file_path(run.path()).exists(),
         "uncertain cleanup retains the connection record"
     );
 }
@@ -361,7 +361,7 @@ fn successful_publication_disarms_late_child_cleanup() {
 #[test]
 fn launched_recovery_retains_the_spawned_pid_and_releases_launch_lock() {
     let run = tempfile::TempDir::new().expect("create run directory");
-    let decision = shared_gateway_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
+    let decision = gateway_api_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
         .expect("acquire launch election");
     let file = live_file(54_375, "candidate-key");
     let cancellation = CancellationToken::new();
@@ -388,9 +388,9 @@ fn launched_recovery_retains_the_spawned_pid_and_releases_launch_lock() {
     }
     assert!(
         matches!(
-            shared_gateway_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
+            gateway_api_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
                 .expect("reacquire launch election"),
-            shared_gateway_discovery::LaunchDecision::Launch(_)
+            gateway_api_discovery::LaunchDecision::Launch(_)
         ),
         "returning the candidate releases LaunchLock"
     );
@@ -419,7 +419,7 @@ fn failed_validation_never_claims_or_removes_a_spawned_process_record() {
         "failed validation creates no owned candidate"
     );
     assert!(
-        shared_gateway_discovery::gateway_discovery_file_path(run.path()).exists(),
+        gateway_api_discovery::gateway_discovery_file_path(run.path()).exists(),
         "failed validation retains an uncertain process record"
     );
 }
@@ -559,7 +559,7 @@ fn exit_joins_a_supervisor_blocked_in_health_wait_before_resolve() {
             |_, _, cancellation| {
                 entered.send(()).expect("announce blocked health wait");
                 let _ = cancellation.wait_timeout(Duration::from_secs(30));
-                Err(shared_gateway_discovery::HealthError::Cancelled)
+                Err(gateway_api_discovery::HealthError::Cancelled)
             },
             |_, _| {
                 worker_resolves.fetch_add(1, Ordering::SeqCst);
@@ -585,7 +585,7 @@ fn exit_joins_a_supervisor_blocked_in_health_wait_before_resolve() {
 #[test]
 fn exit_joins_a_supervisor_blocked_in_launch_race_before_spawn() {
     let run = tempfile::TempDir::new().expect("tempdir");
-    let decision = shared_gateway_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
+    let decision = gateway_api_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
         .expect("acquire a launch decision");
     let run_dir = run.path().to_owned();
     let (entered, blocked) = mpsc::channel();
@@ -629,7 +629,7 @@ fn exit_joins_a_supervisor_blocked_in_launch_race_before_spawn() {
 #[test]
 fn exit_joins_a_supervisor_blocked_inside_launch_without_process_creation() {
     let run = tempfile::TempDir::new().expect("tempdir");
-    let decision = shared_gateway_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
+    let decision = gateway_api_discovery::launch_or_attach(run.path(), Duration::from_secs(1))
         .expect("acquire a launch decision");
     let run_dir = run.path().to_owned();
     let (entered, blocked) = mpsc::channel();

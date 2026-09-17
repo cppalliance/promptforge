@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use shared_gateway_discovery::GatewayDiscoveryFile;
+use gateway_api_discovery::GatewayDiscoveryFile;
 
 use super::{dead_pid, exe_dir, fixture_gateway, live_file, probe_own_image, probe_read_failure};
 #[cfg(windows)]
@@ -16,7 +16,7 @@ use crate::gateway::supervisor::{RecoveryCandidate, RecoveryOwnership};
 
 const FIXTURE_PHASE_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn owned_candidate(identity: shared_gateway_discovery::ValidatedConnection) -> RecoveryCandidate {
+fn owned_candidate(identity: gateway_api_discovery::ValidatedConnection) -> RecoveryCandidate {
     match RecoveryCandidate::authenticate(identity.pid(), identity) {
         RecoveryOwnership::Owned(candidate) => candidate,
         RecoveryOwnership::Unowned(_) => panic!("the validated child pid authenticates ownership"),
@@ -172,7 +172,7 @@ fn a_stale_file_is_cleaned_and_the_sibling_exe_launches() {
         "a stale file must not block the relaunch: {plan:?}"
     );
     assert!(
-        !shared_gateway_discovery::gateway_discovery_file_path(run.path()).exists(),
+        !gateway_api_discovery::gateway_discovery_file_path(run.path()).exists(),
         "the stale file was cleaned"
     );
 }
@@ -194,7 +194,7 @@ fn a_stale_file_with_no_sibling_exe_falls_through_to_explicit_config() {
         "a stale file must not wedge the LAN fallback"
     );
     assert!(
-        !shared_gateway_discovery::gateway_discovery_file_path(run.path()).exists(),
+        !gateway_api_discovery::gateway_discovery_file_path(run.path()).exists(),
         "the stale file was cleaned"
     );
 }

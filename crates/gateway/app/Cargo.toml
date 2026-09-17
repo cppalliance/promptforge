@@ -1,0 +1,197 @@
+[package]
+name = "gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge inference gateway: routes OpenAI-shaped chat completions to a backend"
+readme = "README.md"
+keywords = ["llm", "gateway", "openai", "proxy", "gguf"]
+categories = ["web-programming::http-server"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[[bin]]
+name = "promptforge-gateway"
+path = "src/main.rs"
+
+# build.rs embeds the program icon (../../workshop/icons/icon.ico) into the
+# Windows exe as an RT_GROUP_ICON resource. Host-gated: the table is
+# evaluated against the build host, and the script is a no-op elsewhere.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource.workspace = true
+
+[build-dependencies]
+anyhow.workspace = true
+
+[dependencies]
+# Optional: anyhow error payloads for the test-fixture rendezvous in
+# src/main.rs, enabled only by the `test-fixtures` feature.
+anyhow = { workspace = true, optional = true }
+axum.workspace = true
+dotenvy.workspace = true
+futures-util.workspace = true
+# GPU name and VRAM for GET /admin/system; probes NVML at runtime, so builds
+# and machines without an NVIDIA driver keep working.
+nvml-wrapper.workspace = true
+gateway-config.workspace = true
+# Optional: the embedded config UI SPA served at /config/ behind the
+# `config-ui` feature; headless builds never pull rust-embed or the Node
+# esbuild pipeline.
+gateway-config-ui = { workspace = true, optional = true }
+# Optional: gateway-owned local inference (GGUF provisioning, managed
+# `llama-server` children, blob cache store). Headless builds disable it.
+gateway-local = { workspace = true, optional = true }
+# The bounded log pipeline: rotation, the priority queue, and the worker
+# thread behind the file layer's MakeWriter.
+gateway-logging.workspace = true
+# The first-run bearer key (src/boot.rs) comes from the OS-seeded CSPRNG.
+rand.workspace = true
+# The shared loopback wall for the admin config endpoints; always on,
+# because those endpoints hold secrets in every build.
+shared-loopback.workspace = true
+gateway-protocol.workspace = true
+# The provider model sheet schema (gateway-api) behind
+# `GET /admin/cloud-models` and the launch-time sheet cache
+# (src/cloud_models.rs).
+gateway-api.workspace = true
+# The gateway-discovery-file seam: gateway.json is written after every successful
+# bind, in every build, so the workshop can discover a running gateway.
+gateway-api-discovery.workspace = true
+gateway-routing.workspace = true
+# The serde feature wires the progress event stream onto HTTP.
+shared-progress = { workspace = true, features = ["serde"] }
+# Optional: gateway-hosted speech-to-text (engine lifecycle, the
+# `/v1/audio/transcriptions` route), behind the default-on `stt` feature.
+gateway-stt = { workspace = true, optional = true }
+gateway-web-search = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# Host CPU/RAM/disk metrics for GET /admin/system.
+sysinfo.workspace = true
+subtle.workspace = true
+# Opens the Settings handoff URL in the system browser: the tray's Settings
+# item on every tray platform, and the relaunch handoff on every platform.
+open.workspace = true
+# JSON-to-TOML conversion for the shadow-write admin routes; already in the
+# tree via gateway-config.
+toml.workspace = true
+url.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+thiserror.workspace = true
+# RFC 3339 rendering of the gateway discovery file's started_at.
+time.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+# CancellationToken for the command queue's per-command cancellation;
+# default-features off, the sync module is ungated.
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+# First-run STT gating reads the installer's registry choice (src/boot.rs):
+# RegOpenKeyExW + RegQueryValueExW. The Windows tray backend (src/tray/) adds
+# the Run-key write shim and the hidden-window message loop; main() adds the
+# PerMonitorV2 DPI-awareness call.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# The tray icon and its menu (muda via the tray_icon::menu re-export) on the
+# tray-icon platforms.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tray-icon.workspace = true
+
+# The Linux tray backend (src/tray/linux.rs): a pure StatusNotifierItem over
+# the session D-Bus via ksni - no GTK, no libappindicator - plus the small
+# zbus probes for the no-watcher fallback. ksni's async-io build runs its own
+# executor thread, so no GTK main thread and no tokio runtime coupling.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni.workspace = true
+zbus.workspace = true
+
+# The macOS tray backend (src/tray/macos.rs): the NSApplication run loop owns
+# the main thread, and SMAppService backs Launch at Login.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+objc2-service-management.workspace = true
+block2.workspace = true
+
+[features]
+default = ["local", "web-search", "config-ui", "stt"]
+# Gateway-owned local inference via the `gateway-local` crate.
+local = ["dep:gateway-local"]
+# The Brave-powered `POST /v1/tools/web_search` tool service.
+web-search = ["dep:gateway-web-search"]
+# Serve the embedded config UI SPA at /config/ on the gateway's own port,
+# loopback-only. Default, so plain builds need Node 22 for the SPA's esbuild
+# pipeline; --no-default-features builds skip the SPA crate entirely.
+config-ui = ["dep:gateway-config-ui"]
+# Gateway-hosted speech-to-text via the `gateway-stt` crate: the engine
+# lifecycle and `POST /v1/audio/transcriptions` on the gateway listener.
+# Default on, so every default build ships STT; a --no-default-features
+# build stubs the route and refuses a configuration declaring [[stt_model]].
+stt = ["dep:gateway-stt"]
+# Deterministic local-runtime bindings for cross-crate behavior tests.
+test-fixtures = ["local", "gateway-local/test-fixtures", "dep:anyhow"]
+
+[dev-dependencies]
+anyhow.workspace = true
+# The crate dev-depends on itself so every test target builds the library
+# with test-fixtures enabled, without gate commands needing a --features
+# flag: the integration suites drive the speech relay's test-scaled bounds.
+# default-features = false keeps `--no-default-features` test invocations
+# (the boot race jobs) headless; plain `cargo test` still gets the defaults
+# from the command line's own implicit feature request.
+gateway = { path = ".", features = ["test-fixtures"], default-features = false }
+base64.workspace = true
+hound.workspace = true
+# Encodes the generated test image for the live CUDA projector proof.
+png.workspace = true
+# test-util pauses time so the progress heartbeat test runs instantly.
+tokio = { workspace = true, features = ["test-util"] }
+tokio-tungstenite.workspace = true
+gateway-routing = { workspace = true, features = ["test-helpers"] }
+gateway-stt = { workspace = true, features = ["test-fixtures"] }
+tempfile.workspace = true
+# Drives build_router in-process with forged peer addresses, so the
+# loopback-wall tests can present a LAN peer no real TCP connection could.
+tower.workspace = true
+
+# Not `workspace = true`: the registry shim in src/boot.rs is raw Win32 FFI
+# and cannot be written without unsafe, and a workspace `forbid` cannot be
+# overridden by a module allow. The workspace lint set is mirrored with
+# unsafe_code lowered to deny, which the shim module alone opts out of.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+future_incompatible = { level = "warn", priority = -1 }
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "warn"
+doc_markdown = "allow"
+
+# Release packaging through cargo-dist (see dist-workspace.toml): the
+# sample systemd unit rides in the archive.
+[package.metadata.dist]
+dist = true
+include = ["packaging/gateway.service"]

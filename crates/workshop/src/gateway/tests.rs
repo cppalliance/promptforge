@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use shared_gateway_discovery::{GatewayDiscoveryFile, Resolution, SidecarError};
+use gateway_api_discovery::{GatewayDiscoveryFile, Resolution, SidecarError};
 
 use super::boot as gateway_boot;
 
@@ -22,15 +22,13 @@ fn probe_own_image(run_dir: &Path) -> Result<Resolution, SidecarError> {
         .expect("the exe has a file name")
         .to_string_lossy()
         .into_owned();
-    shared_gateway_discovery::resolve_for_test(run_dir, &image)
+    gateway_api_discovery::resolve_for_test(run_dir, &image)
 }
 
 /// Plants an unreadable discovery-file path before resolving.
 fn probe_read_failure(run_dir: &Path) -> Result<Resolution, SidecarError> {
-    std::fs::create_dir(shared_gateway_discovery::gateway_discovery_file_path(
-        run_dir,
-    ))
-    .expect("plant the unreadable file");
+    std::fs::create_dir(gateway_api_discovery::gateway_discovery_file_path(run_dir))
+        .expect("plant the unreadable file");
     probe_own_image(run_dir)
 }
 

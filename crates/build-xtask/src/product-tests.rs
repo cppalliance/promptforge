@@ -316,6 +316,140 @@ fn an_unparseable_manifest_is_reported() {
 }
 
 #[test]
+fn an_outside_crate_depending_into_the_gateway_container_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "promptforge-api-runtime",
+        "promptforge-api-runtime",
+        "[dependencies]\ngateway-protocol = { path = \"../gateway/protocol\" }\n",
+    );
+    write_crate(root.path(), "gateway/protocol", "gateway-protocol", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("promptforge-api-runtime depends on gateway-protocol")
+            && violations[0].contains("crates/gateway is private to its family")
+            && violations[0].contains("no outside crate"),
+        "the violation carries the gateway container privacy message: {violations:?}"
+    );
+}
+
+#[test]
+fn gateway_container_siblings_may_depend_on_each_other() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "gateway/app",
+        "gateway",
+        "[dependencies]\ngateway-protocol = { path = \"../protocol\" }\n",
+    );
+    write_crate(root.path(), "gateway/protocol", "gateway-protocol", "");
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "gateway container siblings may depend on each other: {violations:?}"
+    );
+}
+
+#[test]
+fn a_workshop_crate_depending_on_the_public_gateway_pair_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop-server",
+        "workshop-server",
+        "[dependencies]\ngateway-api = { path = \"../gateway-api\" }\n\
+         gateway-api-discovery = { path = \"../gateway-api-discovery\" }\n",
+    );
+    write_crate(root.path(), "gateway-api", "gateway-api", "");
+    write_crate(
+        root.path(),
+        "gateway-api-discovery",
+        "gateway-api-discovery",
+        "",
+    );
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "the public gateway pair is legal for workshop crates: {violations:?}"
+    );
+}
+
+#[test]
+fn a_workshop_crate_depending_into_the_gateway_container_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop-server",
+        "workshop-server",
+        "[dependencies]\ngateway-local = { path = \"../gateway/local\" }\n",
+    );
+    write_crate(root.path(), "gateway/local", "gateway-local", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("workshop-server depends on gateway-local")
+            && violations[0].contains("crates/gateway is private to its family"),
+        "the violation carries the gateway container privacy message: {violations:?}"
+    );
+}
+
+#[test]
+fn a_family_crate_depending_into_the_stt_subsystem_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "gateway/app",
+        "gateway",
+        "[dependencies]\ngateway-stt-engine = { path = \"../stt/engine\" }\n",
+    );
+    write_crate(root.path(), "gateway/stt/engine", "gateway-stt-engine", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("gateway depends on gateway-stt-engine")
+            && violations[0].contains("crates/gateway/stt is private to its family")
+            && violations[0].contains("gateway-stt"),
+        "the violation names the subsystem and its public member: {violations:?}"
+    );
+}
+
+#[test]
+fn the_stt_public_member_is_visible_to_the_gateway_family() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "gateway/app",
+        "gateway",
+        "[dependencies]\ngateway-stt = { path = \"../stt/api\" }\n",
+    );
+    write_crate(root.path(), "gateway/stt/api", "gateway-stt", "");
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "the subsystem's public member is visible one level higher: {violations:?}"
+    );
+}
+
+#[test]
+fn stt_subsystem_siblings_may_depend_on_each_other() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "gateway/stt/backend-whisper",
+        "gateway-stt-backend-whisper",
+        "[dependencies]\ngateway-stt-engine = { path = \"../engine\" }\n",
+    );
+    write_crate(root.path(), "gateway/stt/engine", "gateway-stt-engine", "");
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "subsystem siblings may depend on each other: {violations:?}"
+    );
+}
+
+#[test]
 fn family_classification_follows_the_naming_rules() {
     assert_eq!(family("promptforge-api-runtime"), Family::Promptforge);
     assert_eq!(family("gateway"), Family::Gateway);

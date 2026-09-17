@@ -1,18 +1,20 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/tool-picker", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search"]
+members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/tool-picker", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi"]
 # crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
 # package both esbuild-built UIs consume, so the crates/* glob skips it.
-# crates/promptforge is a manifestless container holding the family's nine
-# private crates. Cargo prunes excluded subtrees from member globs, so a
-# "crates/promptforge/*" glob beside the exclude below would match nothing;
-# the nine crates are enumerated explicitly instead.
-exclude = ["crates/shared-ui", "crates/promptforge"]
+# crates/promptforge and crates/gateway are manifestless containers holding
+# their families' private crates (the gateway's STT subsystem nests one
+# level deeper under crates/gateway/stt). Cargo prunes excluded subtrees
+# from member globs, so a "crates/gateway/*" glob beside the exclude below
+# would match nothing; the container crates are enumerated explicitly
+# instead.
+exclude = ["crates/shared-ui", "crates/promptforge", "crates/gateway", "crates/gateway/stt"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:
 # `cargo build -p workshop`.
-default-members = ["crates/gateway"]
+default-members = ["crates/gateway/app"]
 
 [workspace.package]
 version = "0.3.0"
@@ -25,32 +27,32 @@ base64 = "0.22"
 bytes = "1"
 promptforge-api-runtime = { path = "crates/promptforge-api-runtime", version = "0.3.0" }
 promptforge-api-types = { path = "crates/promptforge-api-types", version = "0.3.0" }
-shared-gateway-api = { path = "crates/shared-gateway-api", version = "0.3.0" }
-shared-cloud-providers = { path = "crates/shared-cloud-providers", version = "0.3.0" }
-gateway = { path = "crates/gateway", version = "0.3.0" }
-gateway-config = { path = "crates/gateway-config", version = "0.3.0" }
-gateway-config-ui = { path = "crates/gateway-config-ui", version = "0.3.0" }
-gateway-local = { path = "crates/gateway-local", version = "0.3.0" }
-gateway-logging = { path = "crates/gateway-logging", version = "0.3.0" }
+gateway-api = { path = "crates/gateway-api", version = "0.3.0" }
+gateway-cloud-providers = { path = "crates/gateway/cloud-providers", version = "0.3.0" }
+gateway = { path = "crates/gateway/app", version = "0.3.0" }
+gateway-config = { path = "crates/gateway/config", version = "0.3.0" }
+gateway-config-ui = { path = "crates/gateway/config-ui", version = "0.3.0" }
+gateway-local = { path = "crates/gateway/local", version = "0.3.0" }
+gateway-logging = { path = "crates/gateway/logging", version = "0.3.0" }
 shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
-gateway-protocol = { path = "crates/gateway-protocol", version = "0.3.0" }
-shared-gateway-discovery = { path = "crates/shared-gateway-discovery", version = "0.3.0" }
+gateway-protocol = { path = "crates/gateway/protocol", version = "0.3.0" }
+gateway-api-discovery = { path = "crates/gateway-api-discovery", version = "0.3.0" }
 shared-vfs = { path = "crates/shared-vfs", version = "0.3.0" }
-gateway-routing = { path = "crates/gateway-routing", version = "0.3.0" }
+gateway-routing = { path = "crates/gateway/routing", version = "0.3.0" }
 promptforge-lua = { path = "crates/promptforge/lua", version = "0.3.0" }
 promptforge-model-client = { path = "crates/promptforge/model-client", version = "0.3.0" }
 promptforge-parser = { path = "crates/promptforge/parser", version = "0.3.0" }
 shared-progress = { path = "crates/shared-progress", version = "0.3.0" }
-gateway-stt = { path = "crates/gateway-stt", version = "0.3.0" }
+gateway-stt = { path = "crates/gateway/stt/api", version = "0.3.0" }
 promptforge-store = { path = "crates/promptforge/store", version = "0.3.0" }
 promptforge-vfs = { path = "crates/promptforge/vfs", version = "0.3.0" }
 promptforge-webfetch = { path = "crates/promptforge/webfetch", version = "0.3.0" }
 promptforge-web = { path = "crates/promptforge/web", version = "0.3.0" }
 promptforge-tool-picker = { path = "crates/promptforge/tool-picker", version = "0.3.0" }
-gateway-stt-engine = { path = "crates/gateway-stt-engine", version = "0.3.0" }
-gateway-stt-backend-whisper = { path = "crates/gateway-stt-backend-whisper", version = "0.3.0" }
+gateway-stt-engine = { path = "crates/gateway/stt/engine", version = "0.3.0" }
+gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper", version = "0.3.0" }
 promptforge-web-search = { path = "crates/promptforge/web-search", version = "0.3.0" }
-gateway-web-search = { path = "crates/gateway-web-search", version = "0.3.0" }
+gateway-web-search = { path = "crates/gateway/web-search", version = "0.3.0" }
 workshop-server = { path = "crates/workshop-server", version = "0.3.0" }
 workshop-server-api = { path = "crates/workshop-server-api", version = "0.0.0" }
 workshop-gateway = { path = "crates/workshop-gateway", version = "0.0.0" }
@@ -62,7 +64,7 @@ workshop-registry = { path = "crates/workshop-registry", version = "0.0.0" }
 workshop-sessions = { path = "crates/workshop-sessions", version = "0.0.0" }
 workshop-workspace = { path = "crates/workshop-workspace", version = "0.0.0" }
 workshop-user-state = { path = "crates/workshop-user-state", version = "0.0.0" }
-gateway-whisper-ffi = { path = "crates/gateway-whisper-ffi", version = "0.3.0" }
+gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi", version = "0.3.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
@@ -191,7 +193,7 @@ objc2-service-management = { version = "0.3", default-features = false, features
     "objc2-foundation",
 ] }
 block2 = "0.6"
-# Thin process-image shims for shared-gateway-discovery's stale detection; both are
+# Thin process-image shims for gateway-api-discovery's stale detection; both are
 # already in the tree transitively.
 libc = "0.2"
 windows-sys = { version = "0.61", default-features = false }

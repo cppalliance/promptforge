@@ -23,7 +23,7 @@ serde.workspace = true
 serde_json.workspace = true
 shared-loopback.workspace = true
 shared-progress.workspace = true
-shared-gateway-discovery.workspace = true
+gateway-api-discovery.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -62,7 +62,7 @@ workshop-server = { path = ".", features = ["test-fixtures"] }
 # The test-fixtures feature exposes `resolve_for_test`, so the resolution
 # tests can run the real liveness gauntlet against the test binary's own
 # process image.
-shared-gateway-discovery = { workspace = true, features = ["test-fixtures"] }
+gateway-api-discovery = { workspace = true, features = ["test-fixtures"] }
 # The socket integration tests drive agent programs on the runtime engine
 # directly, so the engine crates are test-only dependencies of the shell.
 promptforge-api-runtime.workspace = true

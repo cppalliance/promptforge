@@ -112,7 +112,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: crates/*/ui/package-lock.json
+          cache-dependency-path: |
+            crates/*/ui/package-lock.json
+            crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
         working-directory: crates/workshop-server/ui
@@ -122,7 +124,7 @@ jobs:
       # (default `config-ui` feature) and the embedding model that
       # promptforge-tool-picker's build script compiles in.
       - name: Install config UI dependencies
-        working-directory: crates/gateway-config-ui/ui
+        working-directory: crates/gateway/config-ui/ui
         run: npm ci
 
       - name: Cache the embedding model
