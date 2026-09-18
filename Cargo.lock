@@ -740,7 +740,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "tempfile",
- "toml 0.8.2",
+ "toml 1.1.4+spec-1.1.0",
  "workspace-hack",
 ]
 
@@ -2331,7 +2331,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
- "toml 0.8.2",
+ "toml 1.1.4+spec-1.1.0",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -2394,7 +2394,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",
- "toml 0.8.2",
+ "toml 1.1.4+spec-1.1.0",
  "url",
  "workspace-hack",
 ]
@@ -9651,7 +9651,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
- "toml 0.8.2",
+ "toml 1.1.4+spec-1.1.0",
  "tower",
  "tracing",
  "workspace-hack",
@@ -9792,7 +9792,6 @@ dependencies = [
  "tinystr",
  "tokio",
  "tokio-util",
- "toml 0.8.2",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "tower",
@@ -9809,6 +9808,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-sys 0.59.0",
  "windows-sys 0.61.2",
+ "winnow 1.0.4",
  "writeable",
  "yoke",
  "zbus",

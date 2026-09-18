@@ -236,11 +236,11 @@ slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit-mut"] }
 tar = { version = "0.4" }
 tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
-toml = { version = "0.8" }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
+winnow = { version = "1" }
 zbus = { version = "5" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
@@ -261,11 +261,11 @@ slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
 tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
-toml = { version = "0.8" }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
+winnow = { version = "1" }
 zbus = { version = "5" }
 zbus_macros = { version = "5", features = ["blocking-api"] }
 
@@ -286,11 +286,11 @@ slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit-mut"] }
 tar = { version = "0.4" }
 tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
-toml = { version = "0.8" }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
+winnow = { version = "1" }
 zbus = { version = "5" }
 
 [target.aarch64-unknown-linux-gnu.build-dependencies]
@@ -311,11 +311,11 @@ slab = { version = "0.4" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
 tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
-toml = { version = "0.8" }
 toml_datetime = { version = "1", features = ["serde"] }
 toml_parser = { version = "1" }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6", default-features = false, features = ["decompression-br", "decompression-gzip", "follow-redirect"] }
+winnow = { version = "1" }
 zbus = { version = "5" }
 zbus_macros = { version = "5", features = ["blocking-api"] }
 

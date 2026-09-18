@@ -53,7 +53,7 @@ The PromptForge gateway is the credential boundary: the only process that holds 
   - Exactly one rustls crypto backend, `aws-lc-rs`, in the gateway, the Workshop binary, and the `promptforge-api-runtime` library closure.
   - A CI check that fails when `ring` re-enters the gateway's shipped closure.
   - One `reqwest` version in the tree.
-  - One `toml` version in the tree (the `toml 0.8` line and its exclusive `toml_edit 0.19` and `winnow 0.5` tail removed; 5 exclusive crates on Windows, 1 on Linux).
+  - One workspace-pinned `toml` version: the `toml 0.8` line leaves every shipping platform, and with it the `toml_edit 0.19` and `winnow 0.5` tail on Windows and macOS (5 exclusive crates on Windows, 1 on Linux). On Linux, `toml_edit 0.19` and `winnow 0.5` remain reachable through Tauri's GTK stack (`gtk3-macros` -> `proc-macro-crate 1` -> `toml_edit 0.19`, and `glib-macros` -> `proc-macro-crate 2` -> `toml_edit 0.20` for `winnow 0.5`), transitive pins the workspace does not own and out of scope.
 - Non-goals:
   - Changing which HTTP client the executor or gateway uses, or where vendor credentials live.
   - Reducing the `workspace-hack` unified-set floor (381 packages under every member); see Deferred.
@@ -232,15 +232,15 @@ Verification is the workspace's existing gate list plus the four `cargo tree` in
 
 <step-2>
 
-### Step 2: Unify toml on 1.x
+### Step 2: Unify toml on 1.x [completed]
 
 - Component: `none`
-- Objective: one `toml` version in the tree; the `toml 0.8` line and its exclusive `toml_edit 0.19` and `winnow 0.5` tail are gone.
+- Objective: one workspace-pinned `toml` version; the `toml 0.8` line is gone from every shipping platform, and its `toml_edit 0.19` and `winnow 0.5` tail is gone wherever nothing else pins it (Windows and macOS; on Linux the pair remains through `gtk3-macros` -> `proc-macro-crate 1` and `glib-macros` -> `proc-macro-crate 2`, transitive pins the workspace does not own).
 - Manifest change: in the root `Cargo.toml` `[workspace.dependencies]`, change `toml = "0.8"` to `toml = "1"`. `tauri-utils` already resolves `toml 1.1`, so this removes a line rather than adding one; keep or add the unification rationale comment on the pin per the repository's dependency-pin convention.
 - Compile fix: run `cargo check --workspace --all-features` once as the pin-change probe. Fix any `toml 1.x` fallout in the consumers: `crates/gateway/config/src/config/imp.rs`, `crates/gateway/config/src/shadow.rs`, `crates/gateway/config/src/profile.rs`, `crates/gateway/config/src/api_error.rs`, `crates/gateway/app/src/config_write.rs`, `crates/workshop/support/src/config.rs`, and `crates/build-xtask/src/{product,tidy,new_crate}.rs`. The API in use (`Value`, `map::Map`, `Table`, `Spanned`, `de::Error`, `from_str`, `to_string`, `to_string_pretty`) exists in 1.x.
 - Fixture review: `to_string_pretty` layout for arrays and tables changed in 1.x. Run `cargo nextest run --locked -p gateway-config --all-features` and inspect diffs in `crates/gateway/config/src/shadow.rs` (near line 344), `crates/gateway/config/src/shadow-tests.rs`, `crates/gateway/config/src/profile.rs` (near line 169), and the fixtures under `crates/gateway/config/src/config/tests/`. Update fixtures only where the difference is formatting; a round trip that loses or reorders data is the stop condition below, not a fixture update.
 - Hakari: `cargo hakari generate`, `cargo hakari manage-deps`, `cargo hakari verify`. Confirm the per-target `toml = { version = "0.8" }` lines left `crates/workspace-hack/Cargo.toml`. Commit the updated `Cargo.lock`.
-- Invariant check: `cargo tree --workspace -e normal --target all -i toml@0.8` prints nothing; `toml_edit 0.19` and `winnow 0.5` are absent from the same query form.
+- Invariant check: `cargo tree --workspace -e normal --target all -i toml@0.8` prints nothing. `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc -i toml_edit@0.19` and the same for `winnow@0.5` print nothing. Under `--target all` every remaining path to `toml_edit 0.19` or `winnow 0.5` passes through `proc-macro-crate 1` (`gtk3-macros`) or `proc-macro-crate 2` (`glib-macros`), both inside Tauri's Linux GTK stack, and `vibe/dependency-surface.md` records that residue and both owners.
 - Dependency-surface record: in `vibe/dependency-surface.md`, remove the `toml 0.8` row from the ranked exclusive-cost table and from the smaller candidates, remove its duplicate-versions entry, and refresh the shipped-shape counts and the header commit and date so they reflect the final lock with both pin changes landed.
 - Gates before commit: the same full list as Step 1.
 - Commit: one commit with a `build(deps):` message covering the pin, lock, hakari output, fixture diffs, and dependency-surface update.

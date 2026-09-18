@@ -103,7 +103,10 @@ async-trait = "0.1"
 flate2 = "1"
 futures-util = "0.3"
 mlua = { version = "0.12", features = ["lua55", "vendored", "serialize", "send"] }
-toml = "0.8"
+# 1.x rather than 0.8 so the resolver unifies with the copy tauri-utils
+# already pulls in, instead of compiling two toml lines (and the 0.8 line's
+# exclusive toml_edit 0.19 and winnow 0.5 tail).
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tower = { version = "0.5", features = ["util"] }
