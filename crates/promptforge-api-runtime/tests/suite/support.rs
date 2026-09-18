@@ -10,7 +10,6 @@ use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_types::observe::{Observation, Observer};
 use promptforge_api_types::tools::Tool;
 use promptforge_store::{StoreError, StoreExt};
-use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 use shared_vfs::{Origin, VfsRef};
 
 /// One correlated observation: which execution and section emitted it, plus the
@@ -41,25 +40,18 @@ pub(super) struct RunOptions {
     pub(super) observer: Arc<dyn Observer>,
 }
 
-/// Prepares a fixture run against a fixture environment (dummy picker)
-/// and returns the prepared context plus the run's own VFS handle - the
-/// prepared router - for seeding before the run and extraction after.
-/// The fixture tools ride the picker catalog only; contributing them to a
-/// run takes a capability and a declared slot.
+/// Prepares a fixture run against the default environment and returns the
+/// prepared context plus the run's own VFS handle - the prepared router -
+/// for seeding before the run and extraction after. The fixture tools are
+/// accepted for signature parity only; contributing them to a run takes a
+/// capability and a declared slot.
 pub(super) fn prepare_run(
     prompt: &Prompt,
     tools: &[Arc<dyn Tool>],
     opts: RunOptions,
 ) -> (RunContext, VfsRef) {
-    let picker = ToolPicker::build_with_model(
-        &promptforge_tool_picker::Model::dummy(),
-        Catalog::default(),
-        Config::default(),
-        None,
-    )
-    .expect("empty fixture picker must build");
     let _ = tools;
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let ctx = RunContext::new(opts.execution).observer(opts.observer);
     let (ctx, requirements) = env.prepare(prompt, ctx);
     assert!(

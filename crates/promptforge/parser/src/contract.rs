@@ -252,8 +252,7 @@ impl<'de> Visitor<'de> for CapabilityDeclVisitor {
 }
 
 /// One tool slot's filling posture: an exact global path filled by identity
-/// against the assembled catalog, or a fuzzy `want` description filled by
-/// the picker at prepare (every fill is journaled).
+/// against the assembled catalog (every fill is journaled).
 ///
 /// `#[non_exhaustive]`: the open host-offered posture is deferred and joins
 /// this enum when it lands.
@@ -262,35 +261,6 @@ impl<'de> Visitor<'de> for CapabilityDeclVisitor {
 pub enum ToolSlot {
     /// An exact global tool path, filled by identity against the catalog.
     Exact(ToolId),
-    /// A fuzzy slot, filled by the picker at prepare.
-    Fuzzy(FuzzySlot),
-}
-
-/// A fuzzy tool slot: a prose `want` description the picker matches against
-/// the catalog at prepare, plus optionality.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct FuzzySlot {
-    /// The prose description the picker matches against the catalog.
-    want: String,
-    /// Whether an unfillable slot skips with a log line instead of failing
-    /// preparation.
-    optional: bool,
-}
-
-impl FuzzySlot {
-    /// Returns the prose description the picker matches.
-    #[must_use]
-    pub fn want(&self) -> &str {
-        &self.want
-    }
-
-    /// Returns whether an unfillable slot skips with a log line instead of
-    /// failing preparation.
-    #[must_use]
-    pub fn is_optional(&self) -> bool {
-        self.optional
-    }
 }
 
 impl<'de> Deserialize<'de> for ToolSlot {
@@ -302,15 +272,15 @@ impl<'de> Deserialize<'de> for ToolSlot {
     }
 }
 
-/// Deserializes a tool slot: a bare string is an exact path, a map is a
-/// fuzzy slot.
+/// Deserializes a tool slot: a bare string is an exact path. Any other
+/// shape (a map, a number) is rejected with the exact-path expectation.
 struct ToolSlotVisitor;
 
-impl<'de> Visitor<'de> for ToolSlotVisitor {
+impl Visitor<'_> for ToolSlotVisitor {
     type Value = ToolSlot;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("an exact tool path string or a map with `want` and `optional`")
+        formatter.write_str("an exact tool path string")
     }
 
     fn visit_str<E>(self, text: &str) -> Result<Self::Value, E>
@@ -320,38 +290,6 @@ impl<'de> Visitor<'de> for ToolSlotVisitor {
         let id = ToolId::parse(text)
             .map_err(|error| E::custom(format!("invalid exact tool path `{text}`: {error}")))?;
         Ok(ToolSlot::Exact(id))
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut want: Option<String> = None;
-        let mut optional: Option<bool> = None;
-        while let Some(key) = map.next_key::<String>()? {
-            match key.as_str() {
-                "want" => {
-                    if want.is_some() {
-                        return Err(de::Error::duplicate_field("want"));
-                    }
-                    want = Some(map.next_value()?);
-                }
-                "optional" => {
-                    if optional.is_some() {
-                        return Err(de::Error::duplicate_field("optional"));
-                    }
-                    optional = Some(map.next_value()?);
-                }
-                other => {
-                    return Err(de::Error::unknown_field(other, &["want", "optional"]));
-                }
-            }
-        }
-        let want = want.ok_or_else(|| de::Error::missing_field("want"))?;
-        Ok(ToolSlot::Fuzzy(FuzzySlot {
-            want,
-            optional: optional.unwrap_or(false),
-        }))
     }
 }
 

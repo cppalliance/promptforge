@@ -15,8 +15,7 @@ async fn live_h1_infer_runs_once() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
         panic!("live H1 path must run");
     };
@@ -42,9 +41,7 @@ async fn the_environment_client_serves_a_run_when_the_context_carries_none() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let env = Environment::new()
-        .picker(empty_test_picker())
-        .client(gateway_client(addr));
+    let env = Environment::new().client(gateway_client(addr));
     // The context deliberately carries no client: the defaulting in
     // `Environment::run` is the only path to the gateway.
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
@@ -99,8 +96,7 @@ async fn shared_function_resolves_host_globals_when_called() {
         ## Result\n\n\
         ```lua\nreturn read_args()\n```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let RunResult::Ok(out) = env
         .run(&prompt, "later host value", to_context(silent()))
         .await
@@ -116,7 +112,6 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // The shared library replays as each section's first chunk with the full
     // host environment installed, so top-level shared code may use `store`,
     // `log`, and `args` at load.
-    let picker = empty_test_picker();
     let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Host Load\n\n\
         ```lua shared\n\
@@ -126,7 +121,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
         ## Result\n\n\
         ```lua\nreturn store.read('loaded.txt')\n```\n";
     let prompt = parse(source);
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
@@ -203,8 +198,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ## Result\n\n\
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let RunResult::Ok(out) = env
         .run(&prompt, "", to_context(gatewayed(gateway.addr())))
         .await
@@ -248,9 +242,8 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
     let recorder = Arc::new(Recorder::default());
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
 
     let RunResult::Ok(out) = env
         .run(
@@ -302,7 +295,6 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         return models.infer(writer, 'must cancel')\n\
         ```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
     let recorder = Arc::new(Recorder::default());
     let cancel = crate::cancel::CancelHandle::new();
     let canceller = cancel.clone();
@@ -316,7 +308,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         .await;
         canceller.cancel();
     });
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let result = env
         .run(
             &prompt,
@@ -398,8 +390,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         return var.first .. ':' .. var.executions\n\
         ```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
         panic!("live H1 prose infers explicitly");
     };
@@ -428,8 +419,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         return models.infer(prose)\n\
         ```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let RunResult::Ok(out) = env
         .run(&prompt, "", to_context(gatewayed(gateway.addr())))
         .await
@@ -475,8 +465,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
         return 'ok'\n\
         ```\n";
     let prompt = parse(source);
-    let picker = empty_test_picker();
-    let env = Environment::new().picker(picker);
+    let env = Environment::new();
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
         panic!("the H1 chunk keeps id 0 and the first walked section takes id 1");
     };

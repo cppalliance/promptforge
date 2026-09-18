@@ -19,7 +19,6 @@ promptforge-lua.workspace = true
 promptforge-model-client.workspace = true
 promptforge-parser.workspace = true
 promptforge-store.workspace = true
-promptforge-tool-picker.workspace = true
 promptforge-vfs.workspace = true
 promptforge-web.workspace = true
 promptforge-web-search.workspace = true
@@ -36,15 +35,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-criterion.workspace = true
 promptforge-parser = { workspace = true, features = ["test-support"] }
-promptforge-tool-picker = { workspace = true, features = ["test-fixtures"] }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber.workspace = true
-
-[[bench]]
-name = "models_loop"
-harness = false
 
 [lints]
 workspace = true

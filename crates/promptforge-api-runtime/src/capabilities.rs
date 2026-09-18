@@ -9,12 +9,7 @@
 //! rejected as a normalization collision: punctuation twins would be
 //! indistinguishable to a model reading a catalog.
 //!
-//! Registration runs an advisory near-duplicate lint over capability
-//! descriptions through the picker (the engine behind fuzzy tool slots):
-//! two installed capabilities whose descriptions are near-verbatim copies
-//! almost certainly overlap in what they offer, so the lint logs a warning
-//! naming both. The lint never fails a registration. The tool
-//! prefix-containment check is not here: tools exist only after
+//! The tool prefix-containment check is not here: tools exist only after
 //! [`Capability::create`], so containment is checked when a run's catalog
 //! is assembled, not at registration.
 //!
@@ -63,7 +58,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use promptforge_api_types::capabilities::{Capability, CapabilityId};
-use promptforge_tool_picker::{Catalog, Config, ToolDescriptor, ToolId, ToolPicker};
 
 #[cfg(test)]
 #[path = "capabilities-tests.rs"]
@@ -73,24 +67,12 @@ mod tests;
 // internal pack crate (the one-door rule).
 pub use promptforge_web::Web;
 
-/// The synthetic third segment keying a capability in the lint catalog.
-///
-/// The picker's catalog speaks three-segment tool ids, so each capability
-/// is keyed `<namespace>/<pack>/capability`; stripping the segment maps a
-/// lint pair back to the capability it names.
-const LINT_KEY_SEGMENT: &str = "capability";
-
 /// An explicit host-built registry of installed capabilities.
 ///
-/// See the [module documentation](self) for the registration rules and the
-/// near-duplicate description lint.
+/// See the [module documentation](self) for the registration rules.
 pub struct CapabilityRegistry {
     /// The installed capabilities, keyed by their stable ids.
     capabilities: BTreeMap<CapabilityId, Arc<dyn Capability>>,
-    /// The lint index over the registered descriptions, rebuilt at each
-    /// registration. `ToolPicker::empty` skips the embedding-model load, so
-    /// the lint runs on the picker's deterministic fallback embeddings.
-    lint: ToolPicker,
 }
 
 impl CapabilityRegistry {
@@ -99,14 +81,10 @@ impl CapabilityRegistry {
     pub fn new() -> CapabilityRegistry {
         CapabilityRegistry {
             capabilities: BTreeMap::new(),
-            lint: ToolPicker::empty(Config::default()),
         }
     }
 
     /// Registers an installed capability.
-    ///
-    /// The near-duplicate description lint runs after the insert; a lint
-    /// hit logs a warning and does not fail the registration.
     ///
     /// # Errors
     /// Returns [`RegistryError`] with [`RegistryErrorKind::DuplicateId`]
@@ -136,8 +114,7 @@ impl CapabilityRegistry {
                 collides_with: Some(existing.clone()),
             });
         }
-        self.capabilities.insert(id.clone(), capability);
-        self.lint_new_registration(&id);
+        self.capabilities.insert(id, capability);
         Ok(())
     }
 
@@ -145,55 +122,6 @@ impl CapabilityRegistry {
     #[must_use]
     pub fn get(&self, id: &CapabilityId) -> Option<&Arc<dyn Capability>> {
         self.capabilities.get(id)
-    }
-
-    /// Rebuilds the lint index over every registered description and warns
-    /// on each near-duplicate pair involving the capability just
-    /// registered, so a pair is reported exactly once, at the registration
-    /// that created it. Lint machinery failures degrade to a warning:
-    /// registration itself never fails on the lint.
-    fn lint_new_registration(&mut self, new_id: &CapabilityId) {
-        let descriptors = self
-            .capabilities
-            .values()
-            .map(|capability| {
-                ToolDescriptor::new(
-                    lint_key(capability.id()),
-                    capability.description(),
-                    serde_json::json!({}),
-                )
-            })
-            .collect::<Vec<_>>();
-        let picker = match self.lint.rebuild(Catalog::new(descriptors)) {
-            Ok(picker) => picker,
-            Err(error) => {
-                tracing::warn!(%error, "capability near-duplicate lint skipped: index rebuild failed");
-                return;
-            }
-        };
-        let keys = picker
-            .iter()
-            .map(|descriptor| descriptor.id().clone())
-            .collect::<Vec<_>>();
-        let new_key = lint_key(new_id);
-        match picker.near_duplicates(&keys) {
-            Ok(pairs) => {
-                for pair in &pairs {
-                    if pair.first().id() == &new_key || pair.second().id() == &new_key {
-                        tracing::warn!(
-                            first = %pair.first().id().capability(),
-                            second = %pair.second().id().capability(),
-                            similarity = pair.similarity(),
-                            "registered capability descriptions are near-duplicates"
-                        );
-                    }
-                }
-            }
-            Err(error) => {
-                tracing::warn!(%error, "capability near-duplicate lint skipped: analysis failed");
-            }
-        }
-        self.lint = picker;
     }
 }
 
@@ -214,13 +142,6 @@ impl fmt::Debug for CapabilityRegistry {
             )
             .finish_non_exhaustive()
     }
-}
-
-/// Maps a capability id onto its lint-catalog key. Valid by construction:
-/// a capability id's two segments and the key segment are all valid
-/// global-name segments.
-fn lint_key(id: &CapabilityId) -> ToolId {
-    ToolId::from_validated(&format!("{id}/{LINT_KEY_SEGMENT}"))
 }
 
 /// A stable, matchable classification of a [`RegistryError`].

@@ -3,28 +3,6 @@ use super::{
     UserDataFields, UserDataMethods, Value,
 };
 
-/// One near-duplicate clash recorded when the binding was filled.
-///
-/// The similarity score is copied onto the binding when the clash is
-/// recorded; it cannot be recomputed later.
-#[derive(Debug, Clone)]
-pub struct Conflict {
-    /// The alias of the other binding in the clashing pair.
-    pub alias: String,
-    /// The picker's cosine similarity between the two bound tools.
-    pub similarity: f64,
-}
-
-/// Bit comparison on the score keeps equality reflexive (`f64 ==` is not,
-/// at NaN), which [`ToolBinding`]'s `Eq` relies on.
-impl PartialEq for Conflict {
-    fn eq(&self, other: &Self) -> bool {
-        self.alias == other.alias && self.similarity.to_bits() == other.similarity.to_bits()
-    }
-}
-
-impl Eq for Conflict {}
-
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
 /// Declared on the binding, not the tool implementation, so a host decides
@@ -51,7 +29,7 @@ pub enum ToolOutputKind {
 pub struct ToolBinding {
     /// The exact prompt-local alias.
     pub alias: String,
-    /// The slot's description: the fuzzy `want` text or the tool's own.
+    /// The slot's description: the tool's own.
     pub description: String,
     /// The selected stable live identity.
     pub id: ToolId,
@@ -62,25 +40,20 @@ pub struct ToolBinding {
     pub model_description: Option<String>,
     /// The resolved implementation, attached at fill time.
     pub tool: Arc<dyn Tool>,
-    /// Near-duplicate clashes with sibling bindings, recorded when the slot
-    /// was filled. Binding records, never fails: a clash errors only when
-    /// both halves enter one model-visible scope.
-    pub conflicts: Vec<Conflict>,
     /// How a script-initiated `tools.call` resumes this binding's output;
     /// the model tool loop ignores it.
     pub output_kind: ToolOutputKind,
 }
 
 /// Equality is keyed on the binding's data (alias, capability text, stable
-/// identity, override, recorded clashes); the attached implementation is a
-/// trait object and takes no part in comparison.
+/// identity, override); the attached implementation is a trait object and
+/// takes no part in comparison.
 impl PartialEq for ToolBinding {
     fn eq(&self, other: &Self) -> bool {
         self.alias == other.alias
             && self.description == other.description
             && self.id == other.id
             && self.model_description == other.model_description
-            && self.conflicts == other.conflicts
             && self.output_kind == other.output_kind
     }
 }
@@ -96,7 +69,6 @@ impl std::fmt::Debug for ToolBinding {
             .field("description", &self.description)
             .field("id", &self.id)
             .field("model_description", &self.model_description)
-            .field("conflicts", &self.conflicts)
             .field("output_kind", &self.output_kind)
             .finish_non_exhaustive()
     }
@@ -104,7 +76,7 @@ impl std::fmt::Debug for ToolBinding {
 
 impl ToolBinding {
     /// Builds a binding for a test double: the identity comes from the tool,
-    /// with no override and no recorded clashes.
+    /// with no override.
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s executor
     /// tests, not host API.
@@ -117,7 +89,6 @@ impl ToolBinding {
             id: tool.id(),
             model_description: None,
             tool,
-            conflicts: Vec::new(),
             output_kind: ToolOutputKind::default(),
         }
     }
@@ -150,12 +121,6 @@ impl ToolBinding {
     #[must_use]
     pub fn tool(&self) -> &dyn Tool {
         self.tool.as_ref()
-    }
-
-    /// Returns the near-duplicate clashes recorded at bind time.
-    #[must_use]
-    pub fn conflicts(&self) -> &[Conflict] {
-        &self.conflicts
     }
 }
 

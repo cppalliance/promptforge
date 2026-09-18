@@ -4,7 +4,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use promptforge_api_types::capabilities::{Capability, CapabilityId, Contribution, RunServices};
-use promptforge_tool_picker::ToolPicker;
 
 use crate::capabilities::CapabilityRegistry;
 use crate::client::GatewayClient;
@@ -27,15 +26,11 @@ use super::requirements::{CapabilityConflict, Requirements};
 /// capabilities against the registry (rejecting co-activation conflicts),
 /// assembles the activated contributions into the run's tool catalog,
 /// builds the per-run router from `base_vfs`, fills the tool slots against
-/// the assembled catalog (fuzzy slots through the picker), and fills the
-/// model bindings from the context's current model; the `max_depth` guard
-/// lands with the sub-run adapter in the deferred prompt-pack work and is
-/// carried, not consulted, until then.
+/// the assembled catalog, and fills the model bindings from the context's
+/// current model; the `max_depth` guard lands with the sub-run adapter in
+/// the deferred prompt-pack work and is carried, not consulted, until then.
 #[non_exhaustive]
 pub struct Environment {
-    /// Semantic picker behind prepare's fuzzy tool-slot fills; `None`
-    /// leaves fuzzy slots unfilled.
-    picker: Option<Arc<ToolPicker>>,
     /// The deployment's gateway client; a run's own client overrides it.
     client: Option<GatewayClient>,
     /// The explicit host-built set of installed capabilities a prompt's
@@ -50,25 +45,16 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Builds the default environment: no picker, no client, no registry,
-    /// no host roots, and a nesting cap of 3.
+    /// Builds the default environment: no client, no registry, no host
+    /// roots, and a nesting cap of 3.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
-            picker: None,
             client: None,
             registry: None,
             base_vfs: VfsRef::builder().build(),
             max_depth: 3,
         }
-    }
-
-    /// Sets the semantic picker prepare's fuzzy tool-slot fills resolve
-    /// through.
-    #[must_use]
-    pub fn picker(mut self, picker: ToolPicker) -> Environment {
-        self.picker = Some(Arc::new(picker));
-        self
     }
 
     /// Sets the deployment's gateway client; a run's own client overrides
@@ -155,13 +141,9 @@ impl Environment {
     /// segments name its capability, so a slot whose capability is
     /// inactive lands in [`Requirements::missing_required`], while a
     /// slot whose capability is active but contributed no such tool is
-    /// warned and left unfilled - and fuzzy
-    /// slots fill through the picker re-indexed over the run's catalog,
-    /// so the fuzz can never resolve to a tool whose capability is
-    /// inactive. Every fill is journaled into the context's tool
-    /// bindings; an unfillable optional fuzzy slot skips with a log
-    /// line, and an unfillable required fuzzy slot is warned and left
-    /// unfilled (advertising an unfilled alias fails at run time).
+    /// warned and left unfilled (advertising an unfilled alias fails at
+    /// run time). Every fill is journaled into the context's tool
+    /// bindings.
     pub fn prepare(&self, prompt: &Prompt, ctx: RunContext) -> (RunContext, Requirements) {
         let mut ctx = ctx;
         if ctx.client.is_none() {
@@ -249,13 +231,8 @@ impl Environment {
         }
         ctx.tools = assemble_catalog(&activated);
         let activated_ids: Vec<CapabilityId> = activated.iter().map(|(id, _)| id.clone()).collect();
-        ctx.tool_bindings = fill_tool_bindings(
-            prompt,
-            &ctx.tools,
-            &activated_ids,
-            self.picker.as_deref(),
-            &mut requirements,
-        );
+        ctx.tool_bindings =
+            fill_tool_bindings(prompt, &ctx.tools, &activated_ids, &mut requirements);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
     }
@@ -288,7 +265,6 @@ impl Default for Environment {
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Environment")
-            .field("picker", &self.picker.is_some())
             .field("client", &self.client)
             .field("registry", &self.registry.is_some())
             .field("base_vfs", &self.base_vfs)

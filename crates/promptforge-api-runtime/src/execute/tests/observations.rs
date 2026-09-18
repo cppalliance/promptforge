@@ -283,7 +283,6 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let prompt = TestPrompt {
         prompt,
         models: test_model_catalog(),
-        picker_catalog: None,
     };
     let store = TestStore::new();
 

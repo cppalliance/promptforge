@@ -33,8 +33,8 @@ pub use build::{
 };
 use build::{Heading, build_sections, collect_headings, line_add, split_frontmatter};
 pub use contract::{
-    ArgDecl, ArgType, ArgsDecl, CapabilityDecl, FuzzySlot, ModelKeyword, ModelRole, ModelRoles,
-    ToolSlot, ToolSlots,
+    ArgDecl, ArgType, ArgsDecl, CapabilityDecl, ModelKeyword, ModelRole, ModelRoles, ToolSlot,
+    ToolSlots,
 };
 use fence::{exact_shared_openings, split_h1};
 

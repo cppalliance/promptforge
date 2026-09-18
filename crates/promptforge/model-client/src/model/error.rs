@@ -81,11 +81,6 @@ impl CompletionError {
             | Error::InvalidEnv(_)
             | Error::InvalidConfig(_)
             | Error::Config { .. }
-            | Error::ModelBind { .. }
-            | Error::ModelBindQuery { .. }
-            | Error::ModelAbsent { .. }
-            | Error::ModelDuplicate { .. }
-            | Error::ModelAmbiguous { .. }
             | Error::ModelSetLock(_) => CompletionErrorKind::Config,
         }
     }

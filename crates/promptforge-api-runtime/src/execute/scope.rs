@@ -1,12 +1,11 @@
-//! Tool-scope near-duplicate validation and schema/dispatch preparation for
-//! the model-visible tool set.
+//! Tool-scope schema/dispatch preparation for the model-visible tool set.
 
 use std::collections::BTreeMap;
 
 use crate::client::ToolSchema;
 use crate::lua::ToolBinding;
 use crate::observe::{Observer, detail};
-use crate::{Error, NearDuplicateDiagnostic, Result};
+use crate::{Error, Result};
 
 /// How the tool loop reaches the tool behind one in-scope alias.
 ///
@@ -30,8 +29,7 @@ pub(crate) fn prepare_effective_scope(
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {
     observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
-    let result = validate_effective_scope_inner(bindings)
-        .and_then(|()| prepare_scoped_tools(bindings, local_schemas));
+    let result = prepare_scoped_tools(bindings, local_schemas);
     observer.observe(
         execution,
         section,
@@ -42,33 +40,6 @@ pub(crate) fn prepare_effective_scope(
         },
     );
     result
-}
-
-/// The scope check is purely local: a clash errors when both halves of a
-/// bind-time conflict enter one model-visible scope. Conflicts were recorded
-/// symmetrically at bind time, so the first in-scope binding whose conflict
-/// list names another in-scope alias is the diagnostic's first half.
-pub(crate) fn validate_effective_scope_inner(bindings: &[ToolBinding]) -> Result<()> {
-    for binding in bindings {
-        for conflict in binding.conflicts() {
-            let Some(other) = bindings
-                .iter()
-                .find(|candidate| candidate.alias() == conflict.alias)
-            else {
-                continue;
-            };
-            return Err(Error::NearDuplicateTools {
-                diagnostic: Box::new(NearDuplicateDiagnostic {
-                    first_alias: binding.alias().to_owned(),
-                    first_id: binding.id().clone(),
-                    second_alias: other.alias().to_owned(),
-                    second_id: other.id().clone(),
-                    similarity: conflict.similarity,
-                }),
-            });
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn prepare_scoped_tools(

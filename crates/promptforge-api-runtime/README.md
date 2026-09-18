@@ -19,7 +19,7 @@ use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
 
 async fn execute(source: &str) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = Prompt::parse(source, "readme", &NullObserver::default())?;
-    // Capability-free agents use the default environment (no picker, empty
+    // Capability-free agents use the default environment (no registry, empty
     // catalogs); the store handle defaults to a stock in-memory mount.
     let env = Environment::new();
     match env.run(&prompt, "", RunContext::new("readme")).await {

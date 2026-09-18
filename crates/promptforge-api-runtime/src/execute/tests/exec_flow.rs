@@ -2331,9 +2331,9 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
 }
 
 #[tokio::test]
-async fn picker_less_context_runs_a_capability_free_prompt() {
-    // The picker is optional: a prompt with no capability binds runs under
-    // a picker-less `Environment`.
+async fn default_environment_runs_a_capability_free_prompt() {
+    // A prompt with no capability binds runs under the default
+    // `Environment`: no registry, no client, no host roots.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## Only\n\n```lua\nreturn 'no capabilities'\n```\n"
@@ -2341,7 +2341,7 @@ async fn picker_less_context_runs_a_capability_free_prompt() {
     let test = fixture(md);
     let env = Environment::new();
     let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
-        panic!("a capability-free prompt runs without a picker");
+        panic!("a capability-free prompt runs under the default environment");
     };
     assert_eq!(out, "no capabilities");
 }
@@ -2365,16 +2365,17 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
 
 #[tokio::test]
 async fn advertising_an_unfilled_slot_fails_at_run_time() {
-    // A fuzzy slot with no picker to fill it stays unfilled at prepare;
-    // advertising the alias in a section is the run-time error prepare
-    // promised.
+    // An exact slot whose capability is active but contributed no such
+    // tool stays unfilled at prepare (the capability is not missing, so
+    // the run is not refused); advertising the alias in a section is the
+    // run-time error prepare promised.
     let md = concat!(
-        "---\nname: t\ndescription: d\npromptforge: 0\ntools:\n  search:\n    want: search the web\n---\n\n",
+        "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  search: tests/tools/search\n---\n\n",
         "# Test prompt\n\n\
         ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );
     let test = fixture(md);
-    let env = Environment::new();
+    let env = Environment::new().registry(tools_registry(&[Arc::new(EchoTool) as Arc<dyn Tool>]));
     let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
     else {
         panic!("advertising an unfilled alias must fail");

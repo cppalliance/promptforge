@@ -38,6 +38,7 @@ icu_locale_core = { version = "2", default-features = false, features = ["alloc"
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_provider = { version = "2", default-features = false, features = ["alloc", "baked"] }
 itertools = { version = "0.10" }
+libc = { version = "0.2" }
 litemap = { version = "0.8", default-features = false, features = ["alloc"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
@@ -57,6 +58,7 @@ quote = { version = "1" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9" }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10" }
 rand_distr = { version = "0.5" }
+regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
 reqwest = { version = "0.13", features = ["blocking", "brotli", "gzip", "json", "multipart", "query", "socks", "stream"] }
@@ -121,6 +123,7 @@ icu_locale_core = { version = "2", default-features = false, features = ["alloc"
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_provider = { version = "2", default-features = false, features = ["alloc", "baked"] }
 itertools = { version = "0.10" }
+libc = { version = "0.2" }
 litemap = { version = "0.8", default-features = false, features = ["alloc"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
@@ -141,6 +144,7 @@ quote = { version = "1" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9" }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10" }
 rand_distr = { version = "0.5" }
+regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
 reqwest = { version = "0.13", features = ["blocking", "brotli", "gzip", "json", "multipart", "query", "socks", "stream"] }
@@ -229,7 +233,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
@@ -253,7 +257,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 shellexpand = { version = "3", features = ["path"] }
@@ -279,7 +283,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
@@ -303,7 +307,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 shellexpand = { version = "3", features = ["path"] }
@@ -330,7 +334,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 muda = { version = "0.19", default-features = false, features = ["common-controls-v6", "gtk", "libxdo", "serde"] }
 objc2 = { version = "0.6", features = ["disable-encoding-assertions", "exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSButton", "NSCell", "NSColor", "NSColorPanel", "NSControl", "NSController", "NSDragging", "NSEvent", "NSGraphics", "NSImage", "NSInputManager", "NSKeyValueBinding", "NSLayoutManager", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSSpellProtocol", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSText", "NSTextContainer", "NSTextContent", "NSTextFinder", "NSTextInputClient", "NSTextView", "NSTrackingArea", "NSUserActivity", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace", "block2", "objc2-core-foundation", "std"] }
@@ -355,7 +359,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 muda = { version = "0.19", default-features = false, features = ["common-controls-v6", "gtk", "libxdo", "serde"] }
 objc2 = { version = "0.6", features = ["disable-encoding-assertions", "exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSButton", "NSCell", "NSColor", "NSColorPanel", "NSControl", "NSController", "NSDragging", "NSEvent", "NSGraphics", "NSImage", "NSInputManager", "NSKeyValueBinding", "NSLayoutManager", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSSpellProtocol", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSText", "NSTextContainer", "NSTextContent", "NSTextFinder", "NSTextInputClient", "NSTextView", "NSTrackingArea", "NSUserActivity", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace", "block2", "objc2-core-foundation", "std"] }
@@ -381,7 +385,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 muda = { version = "0.19", default-features = false, features = ["common-controls-v6", "gtk", "libxdo", "serde"] }
 objc2 = { version = "0.6", features = ["disable-encoding-assertions", "exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSButton", "NSCell", "NSColor", "NSColorPanel", "NSControl", "NSController", "NSDragging", "NSEvent", "NSGraphics", "NSImage", "NSInputManager", "NSKeyValueBinding", "NSLayoutManager", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSSpellProtocol", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSText", "NSTextContainer", "NSTextContent", "NSTextFinder", "NSTextInputClient", "NSTextView", "NSTrackingArea", "NSUserActivity", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace", "block2", "objc2-core-foundation", "std"] }
@@ -406,7 +410,7 @@ getrandom = { version = "0.4", default-features = false, features = ["std", "sys
 hyper = { version = "1", default-features = false, features = ["client", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "service"] }
-libc = { version = "0.2", features = ["extra_traits"] }
+libc = { version = "0.2", default-features = false, features = ["extra_traits"] }
 muda = { version = "0.19", default-features = false, features = ["common-controls-v6", "gtk", "libxdo", "serde"] }
 objc2 = { version = "0.6", features = ["disable-encoding-assertions", "exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSButton", "NSCell", "NSColor", "NSColorPanel", "NSControl", "NSController", "NSDragging", "NSEvent", "NSGraphics", "NSImage", "NSInputManager", "NSKeyValueBinding", "NSLayoutManager", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSSpellProtocol", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSText", "NSTextContainer", "NSTextContent", "NSTextFinder", "NSTextInputClient", "NSTextView", "NSTrackingArea", "NSUserActivity", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace", "block2", "objc2-core-foundation", "std"] }

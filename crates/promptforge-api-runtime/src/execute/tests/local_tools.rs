@@ -240,7 +240,6 @@ models.default('writer')\n```\n\n\
 ```lua\n\
 tools.add_local('grab', 'Local grab', {}, function() return 'local' end)\n\
 ```\n",
-        Vec::new(),
     );
 
     let error = run(

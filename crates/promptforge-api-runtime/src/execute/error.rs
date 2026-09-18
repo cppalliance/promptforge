@@ -114,14 +114,7 @@ impl RunError {
             Error::Internal { .. } | Error::TimestampFormat(_) => RunErrorKind::Internal,
             Error::Store(_) => RunErrorKind::Store,
             Error::Determinism(_) => RunErrorKind::Determinism,
-            Error::BindSchema { .. }
-            | Error::NearDuplicateTools { .. }
-            | Error::ModelBind { .. }
-            | Error::ModelBindQuery { .. }
-            | Error::ModelAbsent { .. }
-            | Error::ModelDuplicate { .. }
-            | Error::ModelAmbiguous { .. }
-            | Error::ModelRequired { .. } => RunErrorKind::Binding,
+            Error::BindSchema { .. } | Error::ModelRequired { .. } => RunErrorKind::Binding,
         }
     }
 

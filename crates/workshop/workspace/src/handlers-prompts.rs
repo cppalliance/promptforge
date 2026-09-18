@@ -111,15 +111,6 @@ pub(crate) enum ToolDto {
         /// The canonical `namespace/pack/name` path.
         path: String,
     },
-    /// A fuzzy slot filled by the picker at prepare.
-    Fuzzy {
-        /// The prompt-local alias.
-        alias: String,
-        /// The prose description the picker matches.
-        want: String,
-        /// Whether an unfillable slot skips instead of failing.
-        optional: bool,
-    },
 }
 
 impl ToolDto {
@@ -130,11 +121,6 @@ impl ToolDto {
             ToolSlot::Exact(id) => Some(Self::Exact {
                 alias: alias.to_owned(),
                 path: id.to_string(),
-            }),
-            ToolSlot::Fuzzy(slot) => Some(Self::Fuzzy {
-                alias: alias.to_owned(),
-                want: slot.want().to_owned(),
-                optional: slot.is_optional(),
             }),
             // The deferred open posture has no wire form yet.
             _ => None,

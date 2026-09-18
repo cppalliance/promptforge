@@ -66,57 +66,25 @@ pub enum TemperatureError {
     },
 }
 
-/// Optional hard constraints and invocation parameters from `models.bind`.
-///
-/// `context` and `thinking` filter the catalog. `temperature`, `max_tokens`,
-/// and a requested `thinking` switch ride on each completion for the binding.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ModelBindOpts {
-    /// When set, filters models by thinking capability and freezes the switch.
-    pub thinking: Option<bool>,
-    /// Minimum context window size in tokens.
-    ///
-    /// A [`NonZeroU32`] (MODEL-003): a zero-token minimum is a nonsensical
-    /// constraint and is unrepresentable, rejected at the parse boundary.
-    pub context: Option<NonZeroU32>,
-    /// Sampling temperature for every complete under this binding.
+/// Frozen per-request fields carried by a resolved model binding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelInvocation {
+    /// Sampling temperature, when the bind declared one.
     ///
     /// A validated [`Temperature`] (PF-LM-004): a non-finite or out-of-range
     /// value is unrepresentable, so an invalid temperature can never reach the
     /// binding or the wire.
     pub temperature: Option<Temperature>,
-    /// Maximum generation tokens for every complete under this binding.
+    /// Maximum generation tokens, when the bind declared one (always non-zero).
     ///
     /// A [`NonZeroU32`] (MODEL-003): a zero-token generation cap would forbid
     /// all output, so it is unrepresentable and rejected at the parse boundary.
-    pub max_tokens: Option<NonZeroU32>,
-}
-
-// No `Eq`: `temperature` is a `Temperature` (an `f64` newtype), so equality is
-// not reflexive for a NaN placed in-crate via the private field.
-
-/// Frozen per-request fields carried by a resolved model binding.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModelInvocation {
-    /// Sampling temperature, when the bind declared one.
-    pub temperature: Option<Temperature>,
-    /// Maximum generation tokens, when the bind declared one (always non-zero).
     pub max_tokens: Option<NonZeroU32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
     pub thinking: Option<bool>,
 }
 
 // No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
-
-impl From<&ModelBindOpts> for ModelInvocation {
-    fn from(opts: &ModelBindOpts) -> Self {
-        Self {
-            temperature: opts.temperature,
-            max_tokens: opts.max_tokens,
-            thinking: opts.thinking,
-        }
-    }
-}
 
 /// One prompt-local alias bound to a model identity and frozen invocation.
 // No `Eq`: the frozen invocation carries an `f64` temperature.

@@ -93,7 +93,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         local text = models.infer(writer, 'say hello')\n\
         return text\n\
         ```\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
         "",
@@ -143,7 +143,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
         ### Worker\n\n\
         Reply about {{ item }}.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
         "",
@@ -211,7 +211,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
         return 'ok'\n\
         ```\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
         "",
@@ -293,7 +293,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         return 'unreached'\n```\n";
     let search = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
     let other = ScopedFixtureTool::new("other", "canonical_other", "Other things.");
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let error = run(
         &prompt,
         "",
@@ -324,7 +324,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
         ```lua\nlocal _ = tools.calls['serach']\n\
         return 'unreached'\n```\n";
     let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let error = run(
         &prompt,
         "",
@@ -530,7 +530,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
             'infer must not touch sys')\n\
         return text\n\
         ```\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(&prompt, "", &[], &TestStore::new(), gatewayed(addr))
         .await
         .expect("handle-form infer must return text");

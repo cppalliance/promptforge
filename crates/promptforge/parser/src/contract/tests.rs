@@ -28,9 +28,6 @@ fn the_full_contract_declaration_parses_and_round_trips() {
         "tools:\n",
         "  search: promptforge/web/search\n",
         "  fetch: promptforge/web/fetch\n",
-        "  wiki:\n",
-        "    want: searches private wikis\n",
-        "    optional: true\n",
         "args:\n",
         "  use_mcp:\n",
         "    type: boolean\n",
@@ -63,7 +60,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
     );
 
     let tools = fm.tools();
-    assert_eq!(tools.len(), 3);
+    assert_eq!(tools.len(), 2);
     match tools.get("search") {
         Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "promptforge/web/search"),
         other => panic!("expected an exact slot, got {other:?}"),
@@ -71,13 +68,6 @@ fn the_full_contract_declaration_parses_and_round_trips() {
     match tools.get("fetch") {
         Some(ToolSlot::Exact(id)) => assert_eq!(id.to_string(), "promptforge/web/fetch"),
         other => panic!("expected an exact slot, got {other:?}"),
-    }
-    match tools.get("wiki") {
-        Some(ToolSlot::Fuzzy(slot)) => {
-            assert_eq!(slot.want(), "searches private wikis");
-            assert!(slot.is_optional());
-        }
-        other => panic!("expected a fuzzy slot, got {other:?}"),
     }
 
     let arg = fm.args().get("use_mcp").expect("the arg is declared");
@@ -192,16 +182,23 @@ fn a_capability_entry_must_be_a_string_or_a_ref_map() {
 }
 
 #[test]
-fn a_fuzzy_slot_is_required_unless_flagged_optional() {
-    let prompt = parse("name: x\ndescription: d\ntools:\n  wiki:\n    want: searches wikis\n")
-        .expect("a fuzzy slot must parse");
-    match prompt.frontmatter().tools().get("wiki") {
-        Some(ToolSlot::Fuzzy(slot)) => {
-            assert_eq!(slot.want(), "searches wikis");
-            assert!(!slot.is_optional());
-        }
-        other => panic!("expected a fuzzy slot, got {other:?}"),
-    }
+fn a_map_valued_tool_slot_is_rejected_naming_the_exact_path_expectation() {
+    // Exact paths are the only slot form: the former fuzzy `{ want, optional }`
+    // map is no longer a slot, so it fails to parse rather than binding a
+    // picker that no longer exists.
+    let error = parse(concat!(
+        "name: x\ndescription: d\n",
+        "tools:\n",
+        "  wiki:\n",
+        "    want: searches private wikis\n",
+        "    optional: true\n",
+    ))
+    .expect_err("a map-valued tool slot must be rejected");
+    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
+    assert!(
+        error.to_string().contains("an exact tool path string"),
+        "the error must name the exact-path expectation: {error}"
+    );
 }
 
 #[test]

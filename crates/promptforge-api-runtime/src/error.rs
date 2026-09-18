@@ -14,20 +14,6 @@ use promptforge_parser::Error as ParserError;
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// A cloneable, shareable error cause.
-///
-/// Some caches re-produce a typed [`Error`] on every lookup (for example the
-/// resolver decision cache), so a non-`Clone` dependency error cannot be moved
-/// into a fresh [`Error`] each time. Wrapping it in a reference-counted
-/// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
-/// cheaply per lookup instead of being flattened to a string (resolve F4).
-///
-/// The type lives in `promptforge-lua`'s substrate (the `ToolResolver`
-/// contract's error channel needs it) and is aliased here unchanged, so the
-/// `BindQuery`/`ModelBindQuery` sources cross the crate boundary without
-/// re-wrapping.
-pub(crate) use promptforge_lua::SharedSource;
-
 /// The crate's internal error substrate, spanning parsing, HTTP, and execution
 /// failures.
 ///
@@ -253,74 +239,6 @@ pub(crate) enum Error {
         /// The originating schema validation failure, kept as the cause.
         #[source]
         source: BoxedSource,
-    },
-
-    /// Two tools in one model-visible scope are semantic near-duplicates.
-    #[error(
-        "tool aliases {first_alias:?} ({first_id:?}) and {second_alias:?} ({second_id:?}) are near-duplicates with similarity {similarity}",
-        first_alias = diagnostic.first_alias,
-        first_id = diagnostic.first_id,
-        second_alias = diagnostic.second_alias,
-        second_id = diagnostic.second_id,
-        similarity = diagnostic.similarity,
-    )]
-    #[non_exhaustive]
-    NearDuplicateTools {
-        /// The complete pair diagnostic, boxed to keep every crate error small.
-        /// The diagnostic vocabulary lives in tool-scope validation (F10).
-        diagnostic: Box<crate::tools::NearDuplicateDiagnostic>,
-    },
-
-    /// The concrete picker failed while resolving a model capability declaration.
-    #[error("model capability binding failure for {capability:?}: {detail}")]
-    #[non_exhaustive]
-    ModelBind {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The picker failure without exposing its concrete error type.
-        detail: String,
-    },
-
-    /// The picker's rebuild or resolve failed while binding a model capability,
-    /// retaining the picker's own typed error as the private `#[source]` cause
-    /// (model/resolver F5) rather than flattening it into a `detail` string, so
-    /// the failure chain survives the resolution path.
-    #[error("model capability binding failure for {capability:?}: {source}")]
-    #[non_exhaustive]
-    ModelBindQuery {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The picker's typed rebuild/resolve failure, kept as a shareable cause.
-        #[source]
-        source: SharedSource,
-    },
-
-    /// No catalog entry matched a declared model capability under its constraints.
-    #[error("no model matches capability {capability:?}")]
-    #[non_exhaustive]
-    ModelAbsent {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-    },
-
-    /// One server published duplicate model matches for a declared capability.
-    #[error("duplicate models match capability {capability:?}: {candidates:?}")]
-    #[non_exhaustive]
-    ModelDuplicate {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<crate::model::ModelId>,
-    },
-
-    /// The picker could not choose uniquely among model capability matches.
-    #[error("ambiguous models match capability {capability:?}: {candidates:?}")]
-    #[non_exhaustive]
-    ModelAmbiguous {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<crate::model::ModelId>,
     },
 
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
@@ -576,28 +494,6 @@ impl From<GatewayClientError> for Error {
                 detail,
                 finish_reason,
             },
-            GatewayClientError::ModelBind { capability, detail } => {
-                Error::ModelBind { capability, detail }
-            }
-            GatewayClientError::ModelBindQuery { capability, source } => Error::ModelBindQuery {
-                capability,
-                source: SharedSource::new(source),
-            },
-            GatewayClientError::ModelAbsent { capability } => Error::ModelAbsent { capability },
-            GatewayClientError::ModelDuplicate {
-                capability,
-                candidates,
-            } => Error::ModelDuplicate {
-                capability,
-                candidates,
-            },
-            GatewayClientError::ModelAmbiguous {
-                capability,
-                candidates,
-            } => Error::ModelAmbiguous {
-                capability,
-                candidates,
-            },
             GatewayClientError::ModelSetLock(message) => Error::Lua(message),
         }
     }
@@ -677,25 +573,6 @@ impl From<LuaError> for Error {
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
             LuaError::Internal(message) => Error::internal(message),
-            LuaError::ModelBind { capability, detail } => Error::ModelBind { capability, detail },
-            LuaError::ModelBindQuery { capability, source } => {
-                Error::ModelBindQuery { capability, source }
-            }
-            LuaError::ModelAbsent { capability } => Error::ModelAbsent { capability },
-            LuaError::ModelDuplicate {
-                capability,
-                candidates,
-            } => Error::ModelDuplicate {
-                capability,
-                candidates,
-            },
-            LuaError::ModelAmbiguous {
-                capability,
-                candidates,
-            } => Error::ModelAmbiguous {
-                capability,
-                candidates,
-            },
         }
     }
 }
@@ -837,18 +714,6 @@ mod tests {
             std::error::Error::source(&url_error).is_some(),
             "the url::ParseError cause must survive"
         );
-    }
-
-    #[test]
-    fn model_bind_query_preserves_the_picker_cause() {
-        // model/resolver F5: a picker rebuild/resolve failure keeps the concrete
-        // picker error as a shareable private source rather than a `detail`
-        // string.
-        let bind = Error::ModelBindQuery {
-            capability: "a fast model".to_owned(),
-            source: SharedSource::new(std::io::Error::other("picker rebuild failed")),
-        };
-        assert_source_survives_run_error(bind);
     }
 
     #[test]

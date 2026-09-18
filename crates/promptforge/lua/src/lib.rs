@@ -129,7 +129,7 @@ pub use coro::{
 pub use dispatch::{ScriptReport, ToolDispatch, dispatch_tool};
 #[doc(hidden)]
 pub use handles::{
-    Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolSet, ToolView,
+    LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolSet, ToolView,
 };
 #[doc(hidden)]
 pub use host::run_store_op;

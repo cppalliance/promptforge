@@ -225,7 +225,7 @@ pub struct RunContext {
     /// The run's tool bindings, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s slot
     /// fill against the assembled catalog: which concrete tool each
-    /// declared alias is bound to, with every fuzzy fill journaled.
+    /// declared alias is bound to, with every fill journaled.
     pub(crate) tool_bindings: ToolBindings,
 }
 
@@ -397,7 +397,7 @@ impl RunContext {
     /// Returns the run's tool bindings, written by
     /// [`Environment::prepare`](super::Environment::prepare)'s slot
     /// fill: which concrete tool each declared alias is bound to, with
-    /// every fuzzy fill journaled. Handles resolve alias -> id -> tool.
+    /// every fill journaled. Handles resolve alias -> id -> tool.
     /// Empty on a caller-built context that was never prepared.
     #[must_use]
     pub fn tool_bindings(&self) -> &ToolBindings {

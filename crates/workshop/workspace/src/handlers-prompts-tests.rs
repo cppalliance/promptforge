@@ -47,9 +47,6 @@ capabilities:
     optional: true
 tools:
   search: web/search/query
-  reader:
-    want: reads files
-    optional: true
 args:
   topic:
     type: string
@@ -101,7 +98,6 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
     assert_eq!(
         json["tools"],
         serde_json::json!([
-            { "alias": "reader", "kind": "fuzzy", "want": "reads files", "optional": true },
             { "alias": "search", "kind": "exact", "path": "web/search/query" },
         ])
     );
@@ -166,15 +162,15 @@ async fn a_lua_error_answers_parse_lua() {
 
 #[tokio::test]
 async fn the_dto_serializes_kind_tags_and_nulls() {
-    let text = "---\nname: tags\ndescription: kind tags\ntools:\n  exact_one: ns/pack/tool\n  fuzzy_one:\n    want: something\n---\n\n# Tags\n\n## S\n\np\n";
+    let text = "---\nname: tags\ndescription: kind tags\ntools:\n  exact_one: ns/pack/tool\n  other_one: ns/pack/other\n---\n\n# Tags\n\n## S\n\np\n";
     let body = serde_json::json!({ "name": "tags", "text": text });
     let (status, json) = post_contract(body).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["tools"][0]["kind"], "exact");
     assert_eq!(json["tools"][0]["path"], "ns/pack/tool");
-    assert_eq!(json["tools"][1]["kind"], "fuzzy");
-    assert_eq!(json["tools"][1]["want"], "something");
-    assert_eq!(json["tools"][1]["optional"], false);
+    assert_eq!(json["tools"][1]["kind"], "exact");
+    assert_eq!(json["tools"][1]["path"], "ns/pack/other");
+    assert!(json["tools"][1].get("want").is_none());
     // Absent declarations serialize as explicit nulls, not missing keys.
     assert!(json["input"].is_null());
     assert!(json["output"].is_null());

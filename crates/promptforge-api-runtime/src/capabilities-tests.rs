@@ -1,8 +1,7 @@
 //! Registry tests: duplicate-id rejection, exact lookup, and the
-//! registration-time near-duplicate description lint.
+//! punctuation-twin normalization collision.
 
-use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use promptforge_api_types::capabilities::{
     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
@@ -42,42 +41,6 @@ fn stub(id: &str, description: &str) -> Arc<dyn Capability> {
     })
 }
 
-/// A shared buffer a fmt subscriber writes lint warnings into.
-#[derive(Clone, Default)]
-struct Buffer {
-    bytes: Arc<Mutex<Vec<u8>>>,
-}
-
-impl io::Write for Buffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.bytes
-            .lock()
-            .expect("the buffer lock is not poisoned")
-            .extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Runs `f` under a fmt subscriber writing into a shared buffer and
-/// returns everything the subscriber captured.
-fn captured_warnings(f: impl FnOnce()) -> String {
-    let buffer = Buffer::default();
-    let writer = buffer.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .finish();
-    tracing::subscriber::with_default(subscriber, f);
-    let bytes = buffer
-        .bytes
-        .lock()
-        .expect("the buffer lock is not poisoned");
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-
 #[test]
 fn registering_a_second_capability_under_the_same_id_is_rejected() {
     let mut registry = CapabilityRegistry::new();
@@ -112,31 +75,6 @@ fn a_registered_capability_resolves_by_exact_id_lookup() {
         .expect("the registered id resolves");
     assert_eq!(found.description(), "Core tools.");
     assert!(registry.get(&capability_id("promptforge/fs")).is_none());
-}
-
-#[test]
-fn registering_a_near_duplicate_description_fires_the_lint() {
-    let warnings = captured_warnings(|| {
-        let mut registry = CapabilityRegistry::new();
-        registry
-            .register(stub("promptforge/web", "Fetch and render a web page."))
-            .expect("the first registration succeeds");
-        registry
-            .register(stub("org.rustalliance/web", "Fetch and render a web page."))
-            .expect("a near-duplicate description warns without rejecting");
-    });
-    assert!(
-        warnings.contains("near-duplicates"),
-        "the lint fired: {warnings}"
-    );
-    assert!(
-        warnings.contains("promptforge/web"),
-        "the warning names the first capability: {warnings}"
-    );
-    assert!(
-        warnings.contains("org.rustalliance/web"),
-        "the warning names the second capability: {warnings}"
-    );
 }
 
 #[test]
@@ -182,25 +120,5 @@ fn punctuation_distinct_non_twins_register() {
         registry
             .get(&capability_id("acme/web-search-extra"))
             .is_some()
-    );
-}
-
-#[test]
-fn distinct_descriptions_do_not_fire_the_lint() {
-    let warnings = captured_warnings(|| {
-        let mut registry = CapabilityRegistry::new();
-        registry
-            .register(stub("promptforge/web", "Fetch and render a web page."))
-            .expect("the first registration succeeds");
-        registry
-            .register(stub(
-                "promptforge/fs",
-                "Read and write files in the run store.",
-            ))
-            .expect("a distinct description registers");
-    });
-    assert!(
-        !warnings.contains("near-duplicates"),
-        "no lint fired: {warnings}"
     );
 }

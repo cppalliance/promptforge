@@ -78,7 +78,7 @@ pub struct Frontmatter {
     /// Capabilities the prompt activates at prepare, in declaration order.
     #[serde(default)]
     pub(crate) capabilities: Vec<CapabilityDecl>,
-    /// Declared tool slots: alias to exact path or fuzzy `want`.
+    /// Declared tool slots: alias to exact path.
     #[serde(default)]
     pub(crate) tools: ToolSlots,
     /// The typed args declaration; an absent `args:` key yields the default
@@ -221,7 +221,7 @@ impl Frontmatter {
         &self.capabilities
     }
 
-    /// Returns the declared tool slots (alias to exact path or fuzzy `want`).
+    /// Returns the declared tool slots (alias to exact path).
     #[must_use]
     pub fn tools(&self) -> &ToolSlots {
         &self.tools

@@ -21,9 +21,9 @@
 //! paths keep working.
 
 pub use promptforge_parser::{
-    ArgDecl, ArgType, ArgsDecl, Block, CapabilityDecl, FileDecl, Frontmatter, FuzzySlot,
-    MAX_TOOL_ITERATIONS, MaxToolIterations, ModelKeyword, ModelRole, ModelRoles, ParseError,
-    ParseErrorKind, Prompt, Section, ToolSlot, ToolSlots, promptforge_version,
+    ArgDecl, ArgType, ArgsDecl, Block, CapabilityDecl, FileDecl, Frontmatter, MAX_TOOL_ITERATIONS,
+    MaxToolIterations, ModelKeyword, ModelRole, ModelRoles, ParseError, ParseErrorKind, Prompt,
+    Section, ToolSlot, ToolSlots, promptforge_version,
 };
 
 pub use promptforge_lua::LuaProgram;

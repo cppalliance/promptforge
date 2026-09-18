@@ -425,7 +425,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
 models.default('writer')\n```\n\n\
 ## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\nModel id is {{ sys.model }}.\n\n\
 ```lua\nreturn prose\n```\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
         "",
@@ -444,7 +444,7 @@ async fn epilog_sees_model_catalog_id_not_alias_after_the_scope_install() {
 # Test prompt\n\n```lua shared\n\
 models.default('writer')\n```\n\n\
 ## Only\n\n```lua\ntools.call('echo', { value = 'x' })\n```\n\n```lua\nreturn sys.model\n```\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
         "",
@@ -466,7 +466,7 @@ models.default('writer')\n```\n\n\
 ### Worker\n\n```lua\ntools.call('echo', { value = item })\n```\n\n\
 ```lua\nreturn sys.model .. ':' .. item\n```\n\n\
 ### Items\n\n- a\n";
-    let prompt = bound_with_tools(md, Vec::new());
+    let prompt = bound_with_tools(md);
     let out = run(
         &prompt,
         "",

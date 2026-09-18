@@ -11,11 +11,10 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
-use promptforge_tool_picker::{Catalog, Config as PickerConfig, ToolDescriptor, ToolPicker};
 use serde_json::{Value, json};
 
 use super::gateway::{GatewaySource, env_client_with_limits};
-use super::scope::{DispatchTarget, prepare_effective_scope, prepare_scoped_tools};
+use super::scope::{DispatchTarget, prepare_scoped_tools};
 use super::support::{advance_turn, now_rfc3339_checked};
 use super::tool_loop::{LocalDispatch, run_prose_inference};
 use super::*;
@@ -101,7 +100,6 @@ fn parse(md: &str) -> Prompt {
 struct TestPrompt {
     prompt: Prompt,
     models: ModelCatalog,
-    picker_catalog: Option<Catalog>,
 }
 
 impl TestPrompt {
@@ -115,7 +113,6 @@ fn fixture(md: &str) -> TestPrompt {
     TestPrompt {
         prompt: parse(md),
         models: ModelCatalog::empty(),
-        picker_catalog: None,
     }
 }
 
@@ -173,18 +170,15 @@ fn bound_for_model(md: &str) -> TestPrompt {
     TestPrompt {
         prompt: parse(&ensure_model_h1(md)),
         models: test_model_catalog(),
-        picker_catalog: None,
     }
 }
 
 // PFCORE-EXEC-TESTS-001: the former `resolver` parameter was a fake seam - it was
-// accepted and discarded because live tool binding actually resolves through the
-// `ToolPicker` built from the catalog in `run`. It has been removed so the test
-// helper cannot imply a resolution path it does not exercise.
-fn bound_with_tools(
-    md: &str,
-    near_duplicates: Vec<(ToolDescriptor, ToolDescriptor)>,
-) -> TestPrompt {
+// accepted and discarded because live tool binding resolved elsewhere. It has
+// been removed so the test helper cannot imply a resolution path it does not
+// exercise; exact slots fill by identity against the fixture capability's
+// contributed tools at prepare.
+fn bound_with_tools(md: &str) -> TestPrompt {
     let mut live_source = md.to_owned();
     if let Some(marker) = live_source.find("```lua shared\n")
         && live_source
@@ -194,16 +188,6 @@ fn bound_with_tools(
         live_source.replace_range(marker..marker + "```lua shared".len(), "```lua");
     }
     let source = ensure_model_h1(&live_source);
-    let picker_catalog = if near_duplicates.is_empty() {
-        None
-    } else {
-        Some(Catalog::new(
-            near_duplicates
-                .into_iter()
-                .flat_map(|pair| [pair.0, pair.1])
-                .collect(),
-        ))
-    };
     TestPrompt {
         prompt: parse(&source),
         models: if source.contains("models.") {
@@ -211,7 +195,6 @@ fn bound_with_tools(
         } else {
             ModelCatalog::empty()
         },
-        picker_catalog,
     }
 }
 
@@ -357,22 +340,7 @@ async fn run(
     store: &TestStore,
     opts: RunOptions,
 ) -> Result<String> {
-    let catalog = test.picker_catalog.clone().unwrap_or_else(|| {
-        Catalog::new(
-            tools
-                .iter()
-                .map(|tool| {
-                    ToolDescriptor::new(tool.id(), tool.description(), tool.parameters_schema())
-                })
-                .collect(),
-        )
-    });
-    let config = PickerConfig::default()
-        .with_similarity_floor(0.0)
-        .and_then(|config| config.with_margin(0.0))
-        .expect("test thresholds are in the supported domain");
-    let picker = build_test_picker(catalog, config);
-    let mut env = Environment::new().picker(picker);
+    let mut env = Environment::new();
     if !tools.is_empty() {
         // The fixture capability contributes the test's tools, so the
         // prompt's declared slots fill against them at prepare.
@@ -405,36 +373,6 @@ async fn run(
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
     }
-}
-
-pub(super) fn empty_test_picker() -> ToolPicker {
-    ToolPicker::build_with_model(
-        &promptforge_tool_picker::Model::dummy(),
-        Catalog::default(),
-        PickerConfig::default(),
-        None,
-    )
-    .expect("empty test picker must build")
-}
-
-pub(super) fn build_test_picker(catalog: Catalog, config: PickerConfig) -> ToolPicker {
-    if catalog.is_empty() {
-        ToolPicker::build_with_model(
-            &promptforge_tool_picker::Model::dummy(),
-            catalog,
-            config,
-            None,
-        )
-        .expect("empty test picker must build")
-    } else {
-        ToolPicker::build_with_model(shared_test_model(), catalog, config, None)
-            .expect("test picker must build")
-    }
-}
-
-pub(super) fn shared_test_model() -> &'static promptforge_tool_picker::Model {
-    static MODEL: std::sync::OnceLock<promptforge_tool_picker::Model> = std::sync::OnceLock::new();
-    MODEL.get_or_init(|| promptforge_tool_picker::Model::load().expect("the test model loads"))
 }
 
 /// The fixture capability: contributes the test's tools under
@@ -485,7 +423,7 @@ async fn run_with_context(
     test: &TestPrompt,
     configure: impl FnOnce(RunContext) -> RunContext,
 ) -> std::result::Result<String, RunError> {
-    let env = Environment::new().picker(empty_test_picker());
+    let env = Environment::new();
     let mut ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs());
     if ctx.model.is_none()
         && let Some(model) = test.models.models().first()
@@ -1298,7 +1236,6 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             id: ToolId::parse("tests/tools/echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
             tool: Arc::new(EchoTool),
-            conflicts: Vec::new(),
             output_kind: crate::lua::ToolOutputKind::Plain,
         }],
         Vec::new(),
@@ -1830,7 +1767,7 @@ async fn untrusted_nonce_differs_across_runs() {
     let mut run_nonces = Vec::new();
     for _ in 0..2 {
         let out = run(
-            &bound_with_tools(md, Vec::new()),
+            &bound_with_tools(md),
             "",
             &[Arc::new(UntrustedEchoTool) as Arc<dyn Tool>],
             &TestStore::new(),

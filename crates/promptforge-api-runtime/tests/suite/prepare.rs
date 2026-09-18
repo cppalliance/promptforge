@@ -23,7 +23,6 @@ use promptforge_api_types::capabilities::{
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::NullObserver;
 use promptforge_api_types::tools::{Tool, ToolError, ToolId, ToolOutput};
-use promptforge_tool_picker::{Catalog, Config, ToolDescriptor, ToolPicker};
 use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
 
 /// A prompt declaring `promptforge/web` as a required capability.
@@ -630,9 +629,7 @@ const DECLARES_TWO: &str = concat!(
 );
 
 /// A fixture tool: a static id and description, its name segment as the
-/// wire name, and an empty trusted output. The description matters: the
-/// fuzzy slot fill indexes it, so picker-backed tests need a tool whose
-/// description says what the tool does.
+/// wire name, and an empty trusted output.
 struct FixtureTool {
     id: ToolId,
     description: String,
@@ -717,8 +714,7 @@ fn fixture_tool(id: &str) -> Arc<dyn Tool> {
     })
 }
 
-/// Builds a fixture tool arc under `id` whose description says what the
-/// tool does, so the picker's fuzzy fill has real prose to index.
+/// Builds a fixture tool arc under `id` with an explicit description.
 fn described_tool(id: &str, description: &str) -> Arc<dyn Tool> {
     Arc::new(FixtureTool {
         id: ToolId::parse(id).expect("the fixture tool id is valid"),
@@ -994,9 +990,7 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
 // ToolBindings and slot filling: exact slots fill by identity against
 // the assembled catalog (an exact path's first two segments name its
 // capability, so a slot whose capability is inactive is reported as
-// missing), fuzzy slots fill through the picker over the assembled
-// catalog with every fill journaled into the run's tool bindings, and
-// an unfillable optional fuzzy slot skips with a log line.
+// missing), with every fill journaled into the run's tool bindings.
 
 /// A prompt declaring `promptforge/web` and one exact tool slot.
 const DECLARES_EXACT_SLOT: &str = concat!(
@@ -1028,85 +1022,6 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "## Only\n\n",
     "Done.\n",
 );
-
-/// A prompt declaring `promptforge/web` and one fuzzy tool slot.
-const DECLARES_FUZZY_SLOT: &str = concat!(
-    "---\n",
-    "name: declares-fuzzy-slot\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "capabilities:\n",
-    "  - promptforge/web\n",
-    "tools:\n",
-    "  fetch:\n",
-    "    want: Fetch a web page over HTTP\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// A prompt declaring `promptforge/web` and one optional fuzzy tool slot
-/// nothing in the assembled catalog matches.
-const DECLARES_OPTIONAL_FUZZY: &str = concat!(
-    "---\n",
-    "name: declares-optional-fuzzy\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "capabilities:\n",
-    "  - promptforge/web\n",
-    "tools:\n",
-    "  email:\n",
-    "    want: Send an email to the team\n",
-    "    optional: true\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// A prompt declaring two twin capabilities and two exact slots bound
-/// to their same-named, same-described tools.
-const DECLARES_TWIN_EXACT_SLOTS: &str = concat!(
-    "---\n",
-    "name: declares-twin-slots\n",
-    "description: d\n",
-    "promptforge: 0\n",
-    "capabilities:\n",
-    "  - promptforge/web\n",
-    "  - promptforge/web-mirror\n",
-    "tools:\n",
-    "  fetch: promptforge/web/fetch\n",
-    "  getter: promptforge/web-mirror/fetch\n",
-    "---\n\n",
-    "# Title\n\n",
-    "## Only\n\n",
-    "Done.\n",
-);
-
-/// The one loaded picker model for this test binary: the fuzzy fill
-/// rebuilds the environment picker's model over the run's assembled
-/// catalog, so the picker must carry real weights.
-fn picker_model() -> &'static promptforge_tool_picker::Model {
-    static MODEL: std::sync::OnceLock<promptforge_tool_picker::Model> = std::sync::OnceLock::new();
-    MODEL.get_or_init(|| {
-        promptforge_tool_picker::Model::load().expect("the compiled-in model must load")
-    })
-}
-
-/// Builds the environment's deployment picker over the shared model. Its
-/// catalog content is irrelevant to the fill - prepare re-indexes the
-/// run's own assembled catalog - but the build needs one entry so the
-/// real model, not a dummy, rides along.
-fn test_picker() -> ToolPicker {
-    let catalog = Catalog::new(vec![ToolDescriptor::new(
-        ToolId::parse("promptforge/web/fetch").expect("the id is valid"),
-        "Fetch a web page over HTTP",
-        serde_json::json!({"type": "object", "properties": {}}),
-    )]);
-    ToolPicker::build_with_model(picker_model(), catalog, Config::default(), None)
-        .expect("the test picker builds")
-}
 
 /// Registers `promptforge/web` contributing one described fetch tool.
 fn web_registry() -> CapabilityRegistry {
@@ -1188,100 +1103,4 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
         logs.contains("fetch"),
         "the warning names the unfilled alias: {logs}"
     );
-}
-
-#[test]
-fn a_fuzzy_slot_fills_via_the_picker_and_the_fill_is_journaled() {
-    let prompt = parse(DECLARES_FUZZY_SLOT, "declares-fuzzy-slot");
-    let env = Environment::new()
-        .registry(web_registry())
-        .picker(test_picker());
-    let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-fuzzy"));
-        assert!(requirements.is_satisfied());
-        let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
-        let bindings = ctx.tool_bindings();
-        // The journaled fill: the alias resolves to the picked tool.
-        assert_eq!(bindings.alias_id("fetch"), Some(&id));
-        assert!(bindings.resolve("fetch").is_some());
-    });
-    assert!(
-        logs.contains("promptforge/web/fetch"),
-        "the journal records what the fuzz resolved to: {logs}"
-    );
-}
-
-#[test]
-fn an_optional_fuzzy_slot_with_no_match_is_skipped_and_logged() {
-    let prompt = parse(DECLARES_OPTIONAL_FUZZY, "declares-optional-fuzzy");
-    let env = Environment::new()
-        .registry(web_registry())
-        .picker(test_picker());
-    let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-optional-fuzzy"));
-        // An unfillable optional slot is a log line, not a report field.
-        assert!(requirements.is_satisfied());
-        assert!(ctx.tool_bindings().is_empty());
-    });
-    assert!(
-        logs.contains("email"),
-        "the skip log line names the alias: {logs}"
-    );
-}
-
-#[test]
-fn filled_slots_record_near_duplicate_conflicts_symmetrically() {
-    // The bind-time conflict scan lives at prepare's slot fill: two
-    // filled slots whose tools are near-verbatim copies record the clash
-    // on both aliases, so the scope check fires when both halves enter
-    // one model-visible scope. The twins share name segment and
-    // description, so their enriched texts - and vectors - are
-    // identical: a similarity of 1.0 against the 0.98 twin threshold.
-    let tools = [
-        described_tool("promptforge/web/fetch", "Fetch a web page over HTTP"),
-        described_tool("promptforge/web-mirror/fetch", "Fetch a web page over HTTP"),
-    ];
-    let catalog = Catalog::new(
-        tools
-            .iter()
-            .map(|tool| {
-                ToolDescriptor::new(
-                    tool.id(),
-                    tool.description().to_owned(),
-                    tool.parameters_schema(),
-                )
-            })
-            .collect(),
-    );
-    let picker = ToolPicker::build_with_model(picker_model(), catalog, Config::default(), None)
-        .expect("the test picker builds");
-    let mut registry = CapabilityRegistry::new();
-    for (capability, tool) in [("promptforge/web", 0), ("promptforge/web-mirror", 1)] {
-        registry
-            .register(Arc::new(ToolFixture::new(
-                capability,
-                &[],
-                vec![Arc::clone(&tools[tool])],
-            )))
-            .expect("the twin capability registers");
-    }
-    let prompt = parse(DECLARES_TWIN_EXACT_SLOTS, "declares-twin-slots");
-    let env = Environment::new().registry(registry).picker(picker);
-    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-twins"));
-    assert!(requirements.is_satisfied());
-    let bindings = ctx.tool_bindings();
-    for (alias, other) in [("fetch", "getter"), ("getter", "fetch")] {
-        let conflicts = bindings.conflicts(alias);
-        assert_eq!(
-            conflicts.len(),
-            1,
-            "{alias} records one clash, with {other}"
-        );
-        assert_eq!(conflicts[0].alias, other);
-        assert!(
-            conflicts[0].similarity >= 0.98,
-            "the recorded score is the picker's similarity: {}",
-            conflicts[0].similarity
-        );
-    }
 }

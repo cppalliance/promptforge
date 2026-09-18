@@ -43,8 +43,8 @@
 //! ```
 //!
 //! Executing a parsed prompt goes through [`run`] with a [`RunContext`]
-//! built from an [`Environment`] (which holds the optional picker, the
-//! model catalog, and the tool catalog); the store handle rides on the
+//! built from an [`Environment`] (which holds the capability registry and
+//! the deployment's client); the store handle rides on the
 //! context, defaulting to the stock in-memory mount. That path can perform
 //! gateway I/O, so it is shown as `no_run`:
 //!
@@ -56,7 +56,7 @@
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
 //! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
 //!
-//! // Capability-free agents use the default environment: no picker, empty
+//! // Capability-free agents use the default environment: no registry, empty
 //! // catalogs.
 //! let env = Environment::new();
 //! let answer = env.run(&prompt, "", RunContext::new("run-example")).await;
@@ -88,7 +88,6 @@ pub(crate) mod tools;
 pub(crate) mod untrusted;
 
 pub(crate) use crate::error::{Error, Result};
-pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
 pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind, Web};
 pub use crate::client::{CompletionError, CompletionErrorKind};

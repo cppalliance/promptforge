@@ -12,38 +12,8 @@
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// A cloneable, shareable error cause.
-///
-/// Some caches re-produce a typed [`Error`] on every lookup (for example the
-/// resolver decision cache), so a non-`Clone` dependency error cannot be moved
-/// into a fresh [`Error`] each time. Wrapping it in a reference-counted
-/// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
-/// cheaply per lookup instead of being flattened to a string (resolve F4).
-#[derive(Debug, Clone)]
-#[doc(hidden)]
-pub struct SharedSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
-
-impl SharedSource {
-    /// Wraps a concrete error as a shareable cause.
-    pub(crate) fn new(source: impl std::error::Error + Send + Sync + 'static) -> SharedSource {
-        SharedSource(std::sync::Arc::new(source))
-    }
-}
-
-impl std::fmt::Display for SharedSource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, formatter)
-    }
-}
-
-impl std::error::Error for SharedSource {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
-    }
-}
-
-/// The crate's internal error substrate, spanning client transport, catalog
-/// transport, and model-binding resolution failures.
+/// The crate's internal error substrate, spanning client transport and
+/// catalog transport failures.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
 /// companion `promptforge-api-runtime` crate can convert it back onto its own
@@ -147,53 +117,6 @@ pub enum Error {
         detail: &'static str,
         /// The choice's `finish_reason`, when the backend supplied one.
         finish_reason: Option<String>,
-    },
-
-    /// The concrete picker failed while resolving a model capability declaration.
-    #[error("model capability binding failure for {capability:?}: {detail}")]
-    ModelBind {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The picker failure without exposing its concrete error type.
-        detail: String,
-    },
-
-    /// The picker's rebuild or resolve failed while binding a model capability,
-    /// retaining the picker's own typed error as the private `#[source]` cause
-    /// (model/resolver F5) rather than flattening it into a `detail` string, so
-    /// the failure chain survives the resolution path.
-    #[error("model capability binding failure for {capability:?}: {source}")]
-    ModelBindQuery {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The picker's typed rebuild/resolve failure, kept as a shareable cause.
-        #[source]
-        source: SharedSource,
-    },
-
-    /// No catalog entry matched a declared model capability under its constraints.
-    #[error("no model matches capability {capability:?}")]
-    ModelAbsent {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-    },
-
-    /// One server published duplicate model matches for a declared capability.
-    #[error("duplicate models match capability {capability:?}: {candidates:?}")]
-    ModelDuplicate {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<crate::model::ModelId>,
-    },
-
-    /// The picker could not choose uniquely among model capability matches.
-    #[error("ambiguous models match capability {capability:?}: {candidates:?}")]
-    ModelAmbiguous {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<crate::model::ModelId>,
     },
 
     /// A lock on the shared model set was poisoned.

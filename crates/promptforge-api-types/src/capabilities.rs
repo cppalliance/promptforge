@@ -286,8 +286,7 @@ pub trait Capability: Send + Sync {
     /// Returns the capability's stable identity (`namespace/pack`).
     fn id(&self) -> &CapabilityId;
 
-    /// A one-sentence description, surfaced to hosts and to the
-    /// registration-time near-duplicate lint.
+    /// A one-sentence description, surfaced to hosts.
     fn description(&self) -> &str;
 
     /// Returns the capabilities this one cannot be activated with in one

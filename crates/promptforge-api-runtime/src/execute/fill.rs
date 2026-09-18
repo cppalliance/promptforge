@@ -6,8 +6,7 @@ use std::sync::Arc;
 
 use promptforge_api_types::capabilities::{CapabilityId, Contribution};
 use promptforge_api_types::tools::Tool;
-use promptforge_parser::{FuzzySlot, ModelKeyword, ToolSlot, ToolSlots};
-use promptforge_tool_picker::{Catalog as PickerCatalog, Outcome, ToolDescriptor, ToolPicker};
+use promptforge_parser::{ModelKeyword, ToolSlot};
 
 use crate::model::ThinkingMode;
 use crate::parser::Prompt;
@@ -83,29 +82,15 @@ pub(super) fn assemble_catalog(activated: &[(CapabilityId, Contribution)]) -> To
 /// tool is absent from the catalog - the contribution was rejected at
 /// assembly, or the capability never contributed that name - is not a
 /// missing capability: installing changes nothing. It is warned and
-/// left unfilled, and advertising the unfilled alias fails at run time,
-/// exactly like an unfillable required fuzzy slot.
-/// Fuzzy slots fill through the picker rebuilt over the run's assembled
-/// catalog - never the deployment catalog - so the fuzz can only resolve
-/// to a tool an activated capability contributed. An unfillable optional
-/// fuzzy slot skips with a log line; an unfillable required fuzzy slot
-/// is warned and left unfilled, and advertising the unfilled alias fails
-/// at run time.
-///
-/// After the fills, the bind-time conflict scan records near-duplicate
-/// pairs among the filled tools symmetrically on the bindings, so the
-/// scope check errors when both halves of a clash enter one
-/// model-visible scope. Binding records, never fails.
+/// left unfilled, and advertising the unfilled alias fails at run time.
 pub(super) fn fill_tool_bindings(
     prompt: &Prompt,
     catalog: &ToolCatalog,
     activated: &[CapabilityId],
-    picker: Option<&ToolPicker>,
     requirements: &mut Requirements,
 ) -> ToolBindings {
     let mut bindings = ToolBindings::default();
     let slots = prompt.frontmatter().tools();
-    let run_picker = fuzzy_fill_picker(slots, catalog, picker);
     for (alias, slot) in slots.iter() {
         match slot {
             ToolSlot::Exact(id) => {
@@ -142,37 +127,6 @@ pub(super) fn fill_tool_bindings(
                     }
                 }
             }
-            ToolSlot::Fuzzy(fuzzy) => {
-                let filled = run_picker
-                    .as_ref()
-                    .and_then(|picker| fill_fuzzy_slot(alias, fuzzy, catalog, picker));
-                match filled {
-                    Some(tool) => {
-                        tracing::info!(
-                            alias,
-                            want = fuzzy.want(),
-                            tool = %tool.id(),
-                            "fuzzy tool slot filled"
-                        );
-                        bindings.bind(alias, tool);
-                    }
-                    None if fuzzy.is_optional() => {
-                        tracing::info!(
-                            alias,
-                            want = fuzzy.want(),
-                            "optional fuzzy tool slot unfilled; skipped"
-                        );
-                    }
-                    None => {
-                        tracing::warn!(
-                            alias,
-                            want = fuzzy.want(),
-                            "required fuzzy tool slot unfilled; \
-                             advertising the alias fails at run time"
-                        );
-                    }
-                }
-            }
             // The open host-offered posture is deferred; a posture this
             // fill does not model leaves its alias unbound.
             _ => {
@@ -180,118 +134,7 @@ pub(super) fn fill_tool_bindings(
             }
         }
     }
-    record_near_duplicate_conflicts(&mut bindings, run_picker.as_ref().or(picker));
     bindings
-}
-
-/// The bind-time conflict scan: near-duplicate pairs among the filled
-/// tools, recorded symmetrically on the bindings so the scope check
-/// errors when both halves of a clash enter one model-visible scope.
-/// The scan prefers the run's fuzzy-fill picker - indexed over exactly
-/// the run's catalog - and falls back to the environment picker's stored
-/// vectors when no fuzzy slot needed the re-index; a similarity is a
-/// property of the tools' descriptions, so both indexes agree on a pair
-/// they both carry. Binding records, never fails: an unanalyzable set
-/// (no picker, or a filled tool the picker never indexed) logs and
-/// records nothing.
-fn record_near_duplicate_conflicts(bindings: &mut ToolBindings, picker: Option<&ToolPicker>) {
-    let ids = bindings.bound_ids();
-    if ids.len() < 2 {
-        return;
-    }
-    let Some(picker) = picker else {
-        return;
-    };
-    match picker.near_duplicates(&ids) {
-        Ok(pairs) => {
-            for pair in &pairs {
-                bindings.record_conflict(
-                    pair.first().id(),
-                    pair.second().id(),
-                    f64::from(pair.similarity()),
-                );
-            }
-        }
-        Err(error) => {
-            tracing::warn!(%error, "the near-duplicate conflict scan failed; none recorded");
-        }
-    }
-}
-
-/// Builds the run's fuzzy-fill picker: the environment picker's loaded
-/// model re-indexed over the assembled catalog, so a fuzzy slot resolves
-/// only among tools the activated capabilities contributed. Returns
-/// `None` - leaving every fuzzy slot unfilled - when no fuzzy slot is
-/// declared (the re-index is skipped entirely), when the environment has
-/// no picker, or when the re-index fails.
-fn fuzzy_fill_picker(
-    slots: &ToolSlots,
-    catalog: &ToolCatalog,
-    picker: Option<&ToolPicker>,
-) -> Option<ToolPicker> {
-    if !slots
-        .iter()
-        .any(|(_, slot)| matches!(slot, ToolSlot::Fuzzy(_)))
-    {
-        return None;
-    }
-    let Some(picker) = picker else {
-        tracing::warn!(
-            "fuzzy tool slots declared but the environment has no picker; they go unfilled"
-        );
-        return None;
-    };
-    let descriptors: Vec<ToolDescriptor> = catalog
-        .tools()
-        .iter()
-        .map(|tool| ToolDescriptor::new(tool.id(), tool.description(), tool.parameters_schema()))
-        .collect();
-    match picker.rebuild(PickerCatalog::new(descriptors)) {
-        Ok(rebuilt) => Some(rebuilt),
-        Err(error) => {
-            tracing::warn!(%error, "the run's fuzzy-fill picker failed to build; fuzzy slots go unfilled");
-            None
-        }
-    }
-}
-
-/// Resolves one fuzzy slot through the run's picker and looks the picked
-/// identity up in the assembled catalog (it must be there - the picker
-/// indexed exactly those tools). A non-bind outcome or a failed query
-/// fills nothing; the caller applies the slot's optionality.
-fn fill_fuzzy_slot(
-    alias: &str,
-    fuzzy: &FuzzySlot,
-    catalog: &ToolCatalog,
-    picker: &ToolPicker,
-) -> Option<Arc<dyn Tool>> {
-    match picker.resolve(fuzzy.want()) {
-        Ok(Outcome::Bind(descriptor)) => catalog.get(descriptor.id()),
-        Ok(Outcome::Absent) => None,
-        Ok(Outcome::Duplicate(candidates) | Outcome::Ambiguous(candidates)) => {
-            let ids: Vec<String> = candidates
-                .iter()
-                .map(|tool| tool.id().to_string())
-                .collect();
-            tracing::warn!(
-                alias,
-                candidates = ?ids,
-                "fuzzy tool slot matched several tools; unfilled"
-            );
-            None
-        }
-        Ok(_) => {
-            tracing::warn!(
-                alias,
-                "the picker reported an unrecognized outcome; unfilled"
-            );
-            None
-        }
-        Err(error) => {
-            tracing::warn!(alias, %error, "the fuzzy fill query failed; unfilled");
-            None
-        }
-    }
 }
 
 /// v1's deliberately trivial fill: binds every declared role to the

@@ -31,10 +31,9 @@
 //!
 //! Rust installs the run's filled tool and model slots - bound at prepare
 //! from the frontmatter - into each section VM. Prompt-wide aliases and
-//! section additions form the effective model-visible scope,
-//! which is checked for semantic near-duplicates before concrete tools are
-//! advertised under their local aliases and dispatched through the
-//! implementation each binding carries.
+//! section additions form the effective model-visible scope, whose
+//! concrete tools are advertised under their local aliases and dispatched
+//! through the implementation each binding carries.
 //!
 //! Lua `call()` starts a contained chain at a visible section (fresh VM,
 //! recursion capped at 8): the chain runs from the target

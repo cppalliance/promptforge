@@ -42,7 +42,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
         assert(reply == nil, 'a call hands off args, never a reply register')\n\
         return 'delivered: ' .. args\n\
         ```\n";
-    let test = bound_with_tools(source, Vec::new());
+    let test = bound_with_tools(source);
     let out = super::run(
         &test,
         "quantum",

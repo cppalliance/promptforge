@@ -10,7 +10,6 @@
 //! mapping stays total.
 
 use promptforge_model_client::Error as GatewayClientError;
-use promptforge_model_client::model::ModelId;
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -22,10 +21,8 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// into a fresh [`Error`] each time. Wrapping it in a reference-counted
 /// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
 /// cheaply per lookup instead of being flattened to a string (resolve F4).
-///
-/// `promptforge-api-runtime`'s substrate carries this same type in its
-/// `BindQuery`/`ModelBindQuery` variants, so the cross-crate mapping needs no
-/// re-wrapping.
+/// The compiled-program statics (the coroutine shim and the messages
+/// library) are the callers.
 #[derive(Debug, Clone)]
 #[doc(hidden)]
 pub struct SharedSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
@@ -152,53 +149,6 @@ pub enum Error {
     /// successful fall-through.
     #[error("internal invariant violated: {0}")]
     Internal(&'static str),
-
-    /// The concrete picker failed while resolving a model capability declaration.
-    #[error("model capability binding failure for {capability:?}: {detail}")]
-    ModelBind {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The picker failure without exposing its concrete error type.
-        detail: String,
-    },
-
-    /// The picker's rebuild or resolve failed while binding a model capability,
-    /// retaining the picker's own typed error as the private `#[source]` cause
-    /// (model/resolver F5) rather than flattening it into a `detail` string, so
-    /// the failure chain survives the resolution path.
-    #[error("model capability binding failure for {capability:?}: {source}")]
-    ModelBindQuery {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The picker's typed rebuild/resolve failure, kept as a shareable cause.
-        #[source]
-        source: SharedSource,
-    },
-
-    /// No catalog entry matched a declared model capability under its constraints.
-    #[error("no model matches capability {capability:?}")]
-    ModelAbsent {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-    },
-
-    /// One server published duplicate model matches for a declared capability.
-    #[error("duplicate models match capability {capability:?}: {candidates:?}")]
-    ModelDuplicate {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<ModelId>,
-    },
-
-    /// The picker could not choose uniquely among model capability matches.
-    #[error("ambiguous models match capability {capability:?}: {candidates:?}")]
-    ModelAmbiguous {
-        /// The exact capability description passed to `models.bind`.
-        capability: String,
-        /// The stable identities reported by the picker, in picker order.
-        candidates: Vec<ModelId>,
-    },
 }
 
 /// Stable messages emitted by Lua host-quota refusals.
@@ -245,38 +195,14 @@ impl Error {
     }
 }
 
-/// Maps the gateway-client substrate onto this substrate. The model-binding
-/// variants map variant-for-variant (they are the only ones a
-/// `models.bind`/`models.default` resolution can produce), and
-/// `ModelSetLock` flattens to [`Error::Lua`], matching the mapping
-/// `promptforge-api-runtime` has always applied. Any remaining transport variant is
-/// unreachable on the model-resolution path and degrades to its display
-/// string rather than fabricating a classification.
+/// Maps the gateway-client substrate onto this substrate. `ModelSetLock`
+/// flattens to [`Error::Lua`], matching the mapping `promptforge-api-runtime`
+/// has always applied. Any remaining transport variant is unreachable on the
+/// model-resolution path and degrades to its display string rather than
+/// fabricating a classification.
 impl From<GatewayClientError> for Error {
     fn from(error: GatewayClientError) -> Error {
         match error {
-            GatewayClientError::ModelBind { capability, detail } => {
-                Error::ModelBind { capability, detail }
-            }
-            GatewayClientError::ModelBindQuery { capability, source } => Error::ModelBindQuery {
-                capability,
-                source: SharedSource::new(source),
-            },
-            GatewayClientError::ModelAbsent { capability } => Error::ModelAbsent { capability },
-            GatewayClientError::ModelDuplicate {
-                capability,
-                candidates,
-            } => Error::ModelDuplicate {
-                capability,
-                candidates,
-            },
-            GatewayClientError::ModelAmbiguous {
-                capability,
-                candidates,
-            } => Error::ModelAmbiguous {
-                capability,
-                candidates,
-            },
             GatewayClientError::ModelSetLock(message) => Error::Lua(message),
             other => Error::Lua(other.to_string()),
         }

@@ -10,7 +10,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
-use promptforge_parser::{ModelKeyword, ToolSlot};
+use promptforge_parser::ModelKeyword;
 
 use crate::Result;
 use crate::debug::DebugCapture;
@@ -33,23 +33,18 @@ use super::support::{now_rfc3339_checked, sys_json};
 /// time, exactly as prepare's report promised.
 fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
     let mut set = ToolSet::default();
-    for (alias, slot) in prompt.frontmatter().tools().iter() {
+    for (alias, _) in prompt.frontmatter().tools().iter() {
         let Some(tool) = ctx.tool_bindings.resolve(alias) else {
             continue;
         };
-        let description = match slot {
-            ToolSlot::Fuzzy(fuzzy) => fuzzy.want().to_owned(),
-            // The exact path says nothing prose-like; the tool's own
-            // catalog text stands in.
-            _ => tool.description().to_owned(),
-        };
+        // The exact path says nothing prose-like; the tool's own catalog
+        // text stands in as the binding's description.
         set.bindings.push(ToolBinding {
             alias: alias.to_owned(),
-            description,
+            description: tool.description().to_owned(),
             id: tool.id(),
             model_description: None,
             tool: Arc::clone(tool),
-            conflicts: ctx.tool_bindings.conflicts(alias).to_vec(),
             output_kind: crate::lua::ToolOutputKind::Plain,
         });
     }

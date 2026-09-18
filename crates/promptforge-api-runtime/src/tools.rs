@@ -21,26 +21,6 @@ pub(crate) use promptforge_api_types::tools::{ToolCatalog, ToolId};
 #[cfg(test)]
 pub(crate) use promptforge_web_search::WebSearch;
 
-/// Diagnostics for two semantic near-duplicates exposed in one model turn.
-///
-/// The near-duplicate check is part of tool-scope validation, so the diagnostic
-/// vocabulary lives here (F10); the internal error substrate references this
-/// type rather than owning it.
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) struct NearDuplicateDiagnostic {
-    /// The first prompt-local alias in scope order.
-    pub(crate) first_alias: String,
-    /// The first stable identity.
-    pub(crate) first_id: ToolId,
-    /// The second prompt-local alias in scope order.
-    pub(crate) second_alias: String,
-    /// The second stable identity.
-    pub(crate) second_id: ToolId,
-    /// The cosine similarity the picker reported at bind time.
-    pub(crate) similarity: f64,
-}
-
 #[cfg(test)]
 #[path = "tools-tests.rs"]
 mod tests;
