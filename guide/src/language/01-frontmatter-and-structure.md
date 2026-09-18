@@ -35,7 +35,7 @@ The parser is strict here. A leading UTF-8 byte-order mark is dropped. Malformed
 Four optional frontmatter keys declare what the prompt needs from its host. Together they form the prompt's contract, and the host satisfies it before anything runs (see [The Run](02-the-run.md)):
 
 - `capabilities:` lists the capabilities the prompt activates, by global id. A capability id has exactly two segments, `namespace/pack`. A bare id declares a required capability; the map form, `{ ref: namespace/pack, optional: true }`, declares one the run skips when absent, and may carry prompt-side `config` data. See [Tools](07-tools.md).
-- `tools:` declares the run's tool slots, keyed by a prompt-local alias. A bare string is an exact global tool path (`namespace/pack/name`, exactly three segments); the map form, `{ want: "prose description" }`, is a fuzzy slot filled at prepare. See [Tools](07-tools.md).
+- `tools:` declares the run's tool slots, keyed by a prompt-local alias. Each value is a string holding an exact global tool path (`namespace/pack/name`, exactly three segments), filled by identity at prepare; a map value fails the parse. See [Tools](07-tools.md).
 - `models:` declares the run's model roles, keyed by a prompt-local label, each with a keyword set, an optional `min_context` token floor, and a description. See [Models](06-models.md).
 - `args:` declares the run's typed input fields, each with a `type` (`string`, `boolean`, `integer`, or `number`), an `optional` flag, an optional `default`, and a description. A prompt with no `args:` key gets the default declaration: one optional string field named `prose`. See [Lua Globals and the Store](04-lua-globals-and-store.md).
 

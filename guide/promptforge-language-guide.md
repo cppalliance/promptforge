@@ -39,7 +39,7 @@ The parser is strict here. A leading UTF-8 byte-order mark is dropped. Malformed
 Four optional frontmatter keys declare what the prompt needs from its host. Together they form the prompt's contract, and the host satisfies it before anything runs (see [The Run](02-the-run.md)):
 
 - `capabilities:` lists the capabilities the prompt activates, by global id. A capability id has exactly two segments, `namespace/pack`. A bare id declares a required capability; the map form, `{ ref: namespace/pack, optional: true }`, declares one the run skips when absent, and may carry prompt-side `config` data. See [Tools](07-tools.md).
-- `tools:` declares the run's tool slots, keyed by a prompt-local alias. A bare string is an exact global tool path (`namespace/pack/name`, exactly three segments); the map form, `{ want: "prose description" }`, is a fuzzy slot filled at prepare. See [Tools](07-tools.md).
+- `tools:` declares the run's tool slots, keyed by a prompt-local alias. Each value is a string holding an exact global tool path (`namespace/pack/name`, exactly three segments), filled by identity at prepare; a map value fails the parse. See [Tools](07-tools.md).
 - `models:` declares the run's model roles, keyed by a prompt-local label, each with a keyword set, an optional `min_context` token floor, and a description. See [Models](06-models.md).
 - `args:` declares the run's typed input fields, each with a `type` (`string`, `boolean`, `integer`, or `number`), an `optional` flag, an optional `default`, and a description. A prompt with no `args:` key gets the default declaration: one optional string field named `prose`. See [Lua Globals and the Store](04-lua-globals-and-store.md).
 
@@ -73,7 +73,7 @@ You can now write a well-formed prompt file, so the next question is what happen
 
 ## Prepare: satisfaction before the walk
 
-A prompt never binds its own models and tools; it declares them, and the host satisfies the declaration before the run begins. When you run a prompt, the host first prepares the run against its environment: it activates each declared capability, assembles the catalog of tools those capabilities contribute, and fills every declared slot - each model role bound to a concrete model, each tool slot bound to a concrete tool. Every fill is journaled, so the host can show you exactly what a fuzzy `want` resolved to.
+A prompt never binds its own models and tools; it declares them, and the host satisfies the declaration before the run begins. When you run a prompt, the host first prepares the run against its environment: it activates each declared capability, assembles the catalog of tools those capabilities contribute, and fills every declared slot - each model role bound to a concrete model, each tool slot bound to the tool at its declared path. Every fill is journaled, so the host can show you exactly what each role and slot resolved to.
 
 Prepare then checks the declaration against what the environment could satisfy and reports what still needs human attention: model requirements the filled model does not meet (a `min_context` above the model's context window, or a hard keyword its descriptor contradicts), required capabilities that are missing or failed to activate, and declared capability pairs that cannot activate together. When the report is clean the run begins. When it is not, the run fails before the walk with a notice naming each gap, required versus actual.
 
@@ -456,12 +456,11 @@ The `tools` key declares the run's tool slots, keyed by a prompt-local alias:
 
 ````yaml
 tools:
-  search:
-    want: search the web
+  search: promptforge/web/search
   fetch: promptforge/web/fetch
 ````
 
-A bare string is an exact global path, filled by identity against the assembled catalog. Since the path's first two segments name its capability, a slot whose capability is not active cannot fill, and the preflight report says so. The map form is a fuzzy slot: the `want` prose is matched against the catalog at prepare by the picker, a local sentence-embedding model that maps English descriptions to tools, and every fill is journaled so you can see what the fuzz resolved to. A fuzzy slot with `optional: true` skips with a log line when nothing fills it.
+Each value is an exact global path, a string of exactly three segments, filled by identity against the assembled catalog. Since the path's first two segments name its capability, a slot whose capability is not active cannot fill, and the preflight report says so. A map value is not a slot shape: writing one fails the parse with a message naming the expected form, an exact tool path string.
 
 ## Binding versus advertising
 
@@ -527,8 +526,6 @@ Output from a tool that marks its result untrusted is wrapped in a preface and n
 
 ## Validation and edge cases
 
-Two semantic near-duplicate tools in one model-visible scope fail validation, with an error naming both aliases, both identities, and the similarity score. If you genuinely need both, isolate them in separate sections with per-section `tools.add`.
-
 An empty final reply from the model fails the loop unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. A bound tool's own failure does not abort the loop: the error message arrives as the call's tool result, wrapped as untrusted input, so the model reads the failure and the run continues. Cancellation and every other dispatch failure still abort the loop, and a local tool's handler error still fails the run.
 
 ## Migrating from tools.bind
@@ -546,15 +543,14 @@ After:
 capabilities:
   - promptforge/web
 tools:
-  search:
-    want: search the web
+  search: promptforge/web/search
 ````
 
 ````lua
 tools.always('search')
 ````
 
-The `tools.bind` call is removed. What was its prose description is now the fuzzy slot's `want`, filled by the picker at prepare with the fill journaled; an exact path fills by identity. The advertising calls, `tools.always` and `tools.add`, are unchanged.
+The `tools.bind` call is removed. What was a prose description resolved at run time is now an exact global path, filled by identity at prepare with the fill journaled. The advertising calls, `tools.always` and `tools.add`, are unchanged.
 
 ## Designed, not yet built
 

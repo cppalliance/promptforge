@@ -23,12 +23,11 @@ The `tools` key declares the run's tool slots, keyed by a prompt-local alias:
 
 ````yaml
 tools:
-  search:
-    want: search the web
+  search: promptforge/web/search
   fetch: promptforge/web/fetch
 ````
 
-A bare string is an exact global path, filled by identity against the assembled catalog. Since the path's first two segments name its capability, a slot whose capability is not active cannot fill, and the preflight report says so. The map form is a fuzzy slot: the `want` prose is matched against the catalog at prepare by the picker, a local sentence-embedding model that maps English descriptions to tools, and every fill is journaled so you can see what the fuzz resolved to. A fuzzy slot with `optional: true` skips with a log line when nothing fills it.
+Each value is an exact global path, a string of exactly three segments, filled by identity against the assembled catalog. Since the path's first two segments name its capability, a slot whose capability is not active cannot fill, and the preflight report says so. A map value is not a slot shape: writing one fails the parse with a message naming the expected form, an exact tool path string.
 
 ## Binding versus advertising
 
@@ -94,8 +93,6 @@ Output from a tool that marks its result untrusted is wrapped in a preface and n
 
 ## Validation and edge cases
 
-Two semantic near-duplicate tools in one model-visible scope fail validation, with an error naming both aliases, both identities, and the similarity score. If you genuinely need both, isolate them in separate sections with per-section `tools.add`.
-
 An empty final reply from the model fails the loop unless a tool call preceded it and the finish reason is `stop`. A `length` finish reason returns the partial text and reports truncation. A bound tool's own failure does not abort the loop: the error message arrives as the call's tool result, wrapped as untrusted input, so the model reads the failure and the run continues. Cancellation and every other dispatch failure still abort the loop, and a local tool's handler error still fails the run.
 
 ## Migrating from tools.bind
@@ -113,15 +110,14 @@ After:
 capabilities:
   - promptforge/web
 tools:
-  search:
-    want: search the web
+  search: promptforge/web/search
 ````
 
 ````lua
 tools.always('search')
 ````
 
-The `tools.bind` call is removed. What was its prose description is now the fuzzy slot's `want`, filled by the picker at prepare with the fill journaled; an exact path fills by identity. The advertising calls, `tools.always` and `tools.add`, are unchanged.
+The `tools.bind` call is removed. What was a prose description resolved at run time is now an exact global path, filled by identity at prepare with the fill journaled. The advertising calls, `tools.always` and `tools.add`, are unchanged.
 
 ## Designed, not yet built
 

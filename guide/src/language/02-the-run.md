@@ -4,7 +4,7 @@ You can now write a well-formed prompt file, so the next question is what happen
 
 ## Prepare: satisfaction before the walk
 
-A prompt never binds its own models and tools; it declares them, and the host satisfies the declaration before the run begins. When you run a prompt, the host first prepares the run against its environment: it activates each declared capability, assembles the catalog of tools those capabilities contribute, and fills every declared slot - each model role bound to a concrete model, each tool slot bound to a concrete tool. Every fill is journaled, so the host can show you exactly what a fuzzy `want` resolved to.
+A prompt never binds its own models and tools; it declares them, and the host satisfies the declaration before the run begins. When you run a prompt, the host first prepares the run against its environment: it activates each declared capability, assembles the catalog of tools those capabilities contribute, and fills every declared slot - each model role bound to a concrete model, each tool slot bound to the tool at its declared path. Every fill is journaled, so the host can show you exactly what each role and slot resolved to.
 
 Prepare then checks the declaration against what the environment could satisfy and reports what still needs human attention: model requirements the filled model does not meet (a `min_context` above the model's context window, or a hard keyword its descriptor contradicts), required capabilities that are missing or failed to activate, and declared capability pairs that cannot activate together. When the report is clean the run begins. When it is not, the run fails before the walk with a notice naming each gap, required versus actual.
 

@@ -141,17 +141,8 @@ export function renderContractRows(
   }
 
   for (const tool of contract.tools) {
-    const toolRow = row(
-      tool.alias,
-      readOnly(tool.kind === "exact" ? `exact: ${tool.path}` : `fuzzy: ${tool.want}`),
-    );
+    const toolRow = row(tool.alias, readOnly(`exact: ${tool.path}`));
     toolRow.classList.add("ws-run-panel__row--tool");
-    if (tool.kind === "fuzzy" && tool.optional) {
-      const marker = document.createElement("span");
-      marker.className = "ws-run-panel__optional";
-      marker.textContent = "optional";
-      toolRow.appendChild(marker);
-    }
     rows.appendChild(toolRow);
   }
 

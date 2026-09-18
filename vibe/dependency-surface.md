@@ -2,15 +2,15 @@
 
 Report type: specification / measured record. It defines how the PromptForge dependency graph is measured, records what the measurements say at a named commit, lists what was removed or replaced and why, names what is deliberately kept, and states the invariants a future change must preserve. It answers "can we drop or reimplement X?" from measurement rather than intuition, and it is the dependency counterpart to the version and feature choices already commented inline in the root `Cargo.toml`.
 
-- Measured at: the commit landing the `toml 1` pin (parent `26b29a7c`, which landed the `reqwest 0.13` pin), 2026-09-18; first measured at `92620c7e` the same day
+- Measured at: `c08201f0`, the commit deleting `promptforge-tool-picker` and its embedding stack, 2026-09-18; previously measured the same day at the commit landing the `toml 1` pin (parent `26b29a7c`, which landed the `reqwest 0.13` pin) and first at `92620c7e`
 - Toolchain: cargo 1.98.0
-- Scope: the whole workspace (47 members), then the three shipped shapes: the gateway binary, the Workshop desktop binary, and the one-door library pair
+- Scope: the whole workspace (46 members), then the three shipped shapes: the gateway binary, the Workshop desktop binary, and the one-door library pair
 
 ## Abstract
 
-PromptForge ships three binaries from one lockfile: `promptforge-gateway` (the credential boundary and the only process with an edge to an LLM backend), `workshop` (the Tauri desktop app, which embeds the executor), and the library pair `promptforge-api-runtime` and `promptforge-api-types` that a downstream host depends on. The lockfile holds 919 packages, but no single binary ships that many, and the number that matters for any one target is the normal-edge closure of that target on that platform. This document records those closures, ranks every direct third-party dependency by what it costs exclusively, and writes down the four measurement traps that produced wrong answers while it was being written so they are not repeated.
+PromptForge ships three binaries from one lockfile: `promptforge-gateway` (the credential boundary and the only process with an edge to an LLM backend), `workshop` (the Tauri desktop app, which embeds the executor), and the library pair `promptforge-api-runtime` and `promptforge-api-types` that a downstream host depends on. The lockfile holds 817 packages, but no single binary ships that many, and the number that matters for any one target is the normal-edge closure of that target on that platform. This document records those closures, ranks every direct third-party dependency by what it costs exclusively, and writes down the four measurement traps that produced wrong answers while it was being written so they are not repeated.
 
-Three findings came out of the first measurement. The first, that the gateway binary linked both rustls crypto backends, is resolved and recorded under "What was replaced, and why". Two remain open at the end: `workspace-hack` places a 372-package floor under every member build including the types crate, and `turso` is the single largest exclusive cost in the tree at 59 crates for three plain tables.
+Three findings came out of the first measurement. The first, that the gateway binary linked both rustls crypto backends, is resolved and recorded under "What was replaced, and why". Two remain open at the end: `workspace-hack` places a 318-package floor under every member build including the types crate, and `turso` is the single largest exclusive cost in the tree at 59 crates for three plain tables. The second-largest, the picker's candle and tokenizers stack, left the tree at `c08201f0` and is recorded under "What was replaced, and why".
 
 ## Method
 
@@ -28,7 +28,7 @@ Four wrong answers were produced and caught while writing this. Each is easy to 
 
 3. **`workspace-hack` is a normal edge on every member.** cargo-hakari unifies third-party feature sets by making every member depend on one crate that names every unified dependency, so every member's normal closure includes every other member's third-party dependencies. At `92620c7e`, `reqwest 0.13.4` reached the gateway binary through exactly one path, `workspace-hack`, with zero gateway call sites on it; it was there because Tauri and `hf-hub` wanted it elsewhere, and a Workshop-only plugin's feature choice (`rustls/ring`) reached the gateway the same way. Any "who pulls X" question must be read through `workspace-hack`, and any per-binary count must be understood as sitting on the hakari floor described below.
 
-4. **Dev and build edges are not shipped.** `hf-hub`, `safetensors`, `sha2`, and `half` look like part of the picker's runtime graph but are build-dependencies of `promptforge-tool-picker` (they fetch and verify the embedding model at build time). `minijinja` and `minijinja-contrib` are dev-only, the Jinja2 oracle for the bundled chat templates. Restrict to `-e normal` before claiming a runtime dependency exists.
+4. **Dev and build edges are not shipped.** `minijinja` and `minijinja-contrib` are dev-only, the Jinja2 oracle for the bundled chat templates; `criterion` and its `ciborium` and `half` tail are dev-only under `promptforge-lua`'s benches, which is why `half` is still in `Cargo.lock` after the picker left while `cargo tree --workspace -e normal,build --target all -i half` prints nothing. The first instance of this trap was the picker's `hf-hub`, `safetensors`, and `sha2`, which looked like runtime graph and were build-dependencies fetching the embedding model. Restrict to `-e normal` before claiming a runtime dependency exists.
 
 Wall-clock build deltas are not recorded here. Claiming one requires a measured before and after under the same profile, features, and platform.
 
@@ -36,11 +36,11 @@ Wall-clock build deltas are not recorded here. Claiming one requires a measured 
 
 ### The lockfile
 
-- 919 packages in `Cargo.lock`, of which 47 are workspace members.
-- Windows (`x86_64-pc-windows-msvc`): 635 third-party packages, 582 distinct names, 48 names resolving at two or more versions.
-- Linux (`x86_64-unknown-linux-gnu`): 693 third-party packages, 641 distinct names, 42 names at two or more versions. The Linux figures did not move when the `toml 0.8` line left, because `system-deps` (a build-dependency of the GTK stack) still resolves `toml 0.8.2` there, `gtk3-macros` still resolves `toml_edit 0.19` through `proc-macro-crate 1`, and `glib-macros` still resolves `toml_edit 0.20` through `proc-macro-crate 2`, so `winnow 0.5` keeps two pullers on Linux; the line was ours to drop on Windows and only shared on Linux.
-- 146 direct third-party normal dependencies across all members; 30 direct third-party dependencies that are dev-only or build-only.
-- 102 third-party packages on Windows and 103 on Linux are reachable only through dev or build edges and never ship.
+- 817 packages in `Cargo.lock`, of which 46 are workspace members. The picker removal took 102 packages out of the lock (919 before) and one member.
+- Windows (`x86_64-pc-windows-msvc`): 541 third-party packages, 493 distinct names, 44 names resolving at two or more versions (635, 582, and 48 before the picker left).
+- Linux (`x86_64-unknown-linux-gnu`): 599 third-party packages, 552 distinct names, 38 names at two or more versions (693, 641, and 42 before). The Linux figures did not move when the `toml 0.8` line left, because `system-deps` (a build-dependency of the GTK stack) still resolves `toml 0.8.2` there, `gtk3-macros` still resolves `toml_edit 0.19` through `proc-macro-crate 1`, and `glib-macros` still resolves `toml_edit 0.20` through `proc-macro-crate 2`, so `winnow 0.5` keeps two pullers on Linux; the line was ours to drop on Windows and only shared on Linux.
+- 123 distinct third-party packages are named as a normal dependency by at least one member on Windows (125 on Linux); 8 more are named only as dev or build dependencies (139, 141, and 12 before the picker left, remeasured on this basis at `bf8cb465`; the earlier revision's 146 and 30 counted on a different basis and are superseded).
+- 65 third-party packages on Windows and 66 on Linux are reachable only through dev or build edges and never ship (102 and 103 before; the picker's build-time fetch stack was most of the difference).
 
 ### What each shipped shape carries
 
@@ -48,24 +48,26 @@ Normal-edge closure, host platform Windows, including the package itself and wor
 
 | Target | Packages | Notes |
 |---|---|---|
-| `gateway` (default features: `local`, `web-search`, `config-ui`, `stt`) | 456 | The credential boundary process |
-| `gateway --no-default-features` | 427 | Headless: no local inference, no SPA, no STT, no Brave |
-| `workshop` (Tauri shell) | 717 | Embeds `workshop-server` and the executor |
-| `promptforge-api-runtime` | 509 | The one-door library a host depends on |
-| `promptforge-api-types` | 375 | The vocabulary crate; see the hakari floor below |
-| `workspace-hack` | 372 | The hakari floor under every member that inherits it |
+| `gateway` (default features: `local`, `web-search`, `config-ui`, `stt`) | 429 | The credential boundary process |
+| `gateway --no-default-features` | 396 | Headless: no local inference, no SPA, no STT, no Brave |
+| `workshop` (Tauri shell) | 615 | Embeds `workshop-server` and the executor |
+| `promptforge-api-runtime` | 388 | The one-door library a host depends on |
+| `promptforge-lua` | 340 | The Lua VM boundary, a private member behind the one door |
+| `promptforge-parser` | 349 | The prompt parser, a private member behind the one door |
+| `promptforge-model-client` | 331 | The model client, a private member behind the one door |
+| `promptforge-api-types` | 328 | The vocabulary crate; see the hakari floor below |
+| `workspace-hack` | 318 | The hakari floor under every member that inherits it |
 | `shared-vfs` | 1 | Std only, excluded from hakari, enforced by its manifest test |
 
-Every row but `shared-vfs` dropped by eight or nine packages when the `reqwest 0.12` line and `ring` left the tree. The two gateway rows then dropped by seven and the Workshop row by six when the `toml 0.8` line and its `toml_edit 0.19` and `winnow 0.5` tail left; the library rows did not move because neither library used it. The `promptforge-api-types` row is the one to read twice. A types crate with no I/O ships 375 packages because 372 of them are `workspace-hack`; its own contribution is three. That is the hakari trade stated as a number: `-p` builds share compiled artifacts across the workspace, and in exchange no member build is ever smaller than the unified set. The 29 packages between headless and default gateway are what the four default features actually add.
+Every row but `shared-vfs` dropped by eight or nine packages when the `reqwest 0.12` line and `ring` left the tree. The two gateway rows then dropped by seven and the Workshop row by six when the `toml 0.8` line and its `toml_edit 0.19` and `winnow 0.5` tail left; the library rows did not move because neither library used it. The picker removal at `c08201f0` moved every row: `promptforge-api-runtime` from 509 to 388, `workshop` from 717 to 615, `promptforge-api-types` from 375 to 328, `workspace-hack` from 372 to 318, and the two gateway rows from 456 to 429 and from 427 to 396. The projection before the change was about 51 packages out of the runtime and Workshop closures and low single digits out of the gateway; the measured drop is larger on every row because the candle and tokenizers stack sat in the hakari unified set, so measurement trap 3 applied and the floor itself fell by 54. The three private-member rows are recorded for the first time at this commit and have no earlier figure. The `promptforge-api-types` row is the one to read twice. A types crate with no I/O ships 328 packages because 318 of them are `workspace-hack`. That is the hakari trade stated as a number: `-p` builds share compiled artifacts across the workspace, and in exchange no member build is ever smaller than the unified set. The 33 packages between headless and default gateway are what the four default features actually add.
 
 ### Exclusive transitive cost, ranked
 
-Cohesive stacks are measured as one set. Windows figure first, Linux second where they differ.
+Cohesive stacks are measured as one set. Windows figure first, Linux second where they differ. The rows below carry the figures from the `toml 1` commit; the candle and tokenizers row that stood second at 50 exclusive crates left the tree at `c08201f0` and the remaining rows were not re-ranked at that commit, so a row whose crates shared a subtree with the picker may now cost slightly more.
 
 | Stack | Exclusive crates | What it does | Where |
 |---|---|---|---|
 | `turso` | 59 | Workspace files: three plain tables in an embedded SQLite-compatible database | `workshop-workspace` |
-| `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers` | 50 | Runs the local sentence-embedding model that fills fuzzy tool slots | `promptforge-tool-picker` |
 | `tauri` and five plugins | 31 / 42 | The desktop shell | `workshop` |
 | `readabilityrs`, `htmd` | 17 | Article extraction and HTML-to-Markdown for web fetch | `promptforge-webfetch` |
 | `axum`, `tower`, `tokio-tungstenite` | 10 | HTTP and WebSocket serving | gateway, workshop-server |
@@ -93,6 +95,7 @@ Each of these traded a dependency, a build-time requirement, or a whole crate fo
 | `sysinfo` as a prewarm gate | No gate; product design assumes the machine holds the transcription model | `vibe/2026-08/2026-08-29-4-progress-architecture-rollout.md`. `sysinfo` later entered the tree for a different purpose, `GET /admin/system`, with `default-features = false` and only the `system` and `disk` probes. The two decisions are both correct and should not be confused: the first refused a dependency to gate product behavior, the second accepted one to report telemetry |
 | `reqwest 0.12` with `rustls-tls` (the `ring` backend and the bundled `webpki-roots` list), beside the `reqwest 0.13` Tauri and `hf-hub` required | `reqwest 0.13` with `rustls` (the `aws-lc-rs` backend, OS trust store through `rustls-platform-verifier`) as the single workspace pin; `tauri-plugin-updater` with `default-features = false` so its `rustls-tls` default stops pinning `rustls/ring` | Before, host Windows: `cargo tree -p gateway -e normal -i rustls@0.23.45 -f '{p} [{f}]' --depth 0` printed `rustls v0.23.45 [aws-lc-rs,aws_lc_rs,ring,std,tls12]`. After: `rustls v0.23.45 [aws-lc-rs,aws_lc_rs,std,tls12]`, and `cargo tree -p gateway -e normal -i ring` prints nothing, likewise for `workshop` and `promptforge-api-runtime` and for `--workspace --target all`. `ring`, `webpki-roots`, and the second `reqwest` left every shipped closure; `ring` remains in `Cargo.lock` only as an unselected optional dependency of `rustls-webpki` and `quinn-proto`. Plan: `vibe/2026-09-18-1-single-rustls-backend.md` |
 | `toml 0.8` as the workspace pin, beside the `toml 1.1` that `tauri-utils` resolves | `toml 1` as the workspace pin; no code change, the API in use (`Value`, `Table`, `Spanned`, `from_str`, `to_string_pretty`) is unchanged and every `gateway-config` round-trip and fixture test passed as written | `cargo tree --workspace -e normal --target all -i toml@0.8` prints nothing, so the 0.8 line is off every shipping platform (it survives only as a Linux build edge under `system-deps`, which `-e normal` excludes). With `--target x86_64-pc-windows-msvc` or `--target aarch64-apple-darwin`, `-i toml_edit@0.19` and `-i winnow@0.5` also print nothing; the gateway closure on Windows dropped from 463 to 456. With `--target all` both still resolve, entirely inside Tauri's Linux GTK stack: `toml_edit 0.19.15` via `proc-macro-crate 1.3.1` <- `gtk3-macros 0.18.2` <- `gtk 0.18.2`, and `winnow 0.5.40` via that same `toml_edit 0.19.15` and a second puller, `toml_edit 0.20.2` <- `proc-macro-crate 2.0.2` <- `glib-macros 0.18.5` <- `glib 0.18.5`. Neither `proc-macro-crate` pin is ours; both leave when Tauri's GTK crates move to `proc-macro-crate 3`. Same plan, second commit |
+| `promptforge-tool-picker` with its `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`, `safetensors`, and `half` pins, the fp16 `BAAI/bge-small-en-v1.5` weights it embedded with `include_bytes!`, and the `build.rs` that fetched them from Hugging Face on first build | None. Fuzzy tool slots, near-duplicate tool conflicts, and the capability description lint were removed as features; `tools:` values are exact global paths filled by identity. The crate source is frozen as a non-compiling artifact in the design repository under `study-tool-picker/crate/` | The picker was switched off in every shipped build (the Workshop built its `Environment` without one), so the 50-crate stack, the embedded weights, and eleven CI model-cache steps were paid for one advisory lint. After: `cargo tree --workspace -e normal,build --target all -i candle-core` reports that `candle-core` matches no package in the lock, likewise `tokenizers`, `hf-hub`, `safetensors`, `candle-nn`, `candle-transformers`, `base64@0.13`, and `spm_precompiled`; `-i half` prints nothing (it survives in the lock as a dev-only edge under `criterion`). The lock lost 102 packages, the hakari floor 54, the runtime closure 121, and the Workshop closure 102 (table above). The weight bytes left the Workshop binary, but no before-and-after binary size was measured under one profile, so no size figure is claimed. Plan: `vibe/2026-09-18-2-remove-tool-picker.md` |
 
 Four of these deserve their reasoning kept.
 
@@ -124,22 +127,21 @@ Whatever their exclusive cost, these are kept because owning them would mean own
 - `rustls`, `rustls-webpki`, `rustls-platform-verifier`, `aws-lc-rs`: TLS for every outbound call from the gateway, with root trust from the OS store.
 - `sha2`, `hmac`, `subtle`: the gateway bearer key and its constant-time comparison.
 - `turso`: it backs user-visible workspace files, so it is a product surface, not a utility. Exact-pinned at `=0.7.2` because it is pre-1.0 and upgrades must be reviewed changes rather than resolver drift.
-- `candle-*` and `tokenizers`: numerical parity with the embedding model the picker was calibrated against. A reimplementation that differed in the last bit would silently change which tool a fuzzy slot fills.
 - `tauri`: the desktop shell. Pinned to the minor because `with_webview` exposes platform webview types that shift in minors.
 - `reqwest`: the HTTP client on both sides of the gateway wall.
 
 ### Version and feature choices already recorded in the manifest
 
-The root `Cargo.toml` comments carry the per-dependency reasoning and this document does not restate it. The ones that exist because of measurement are: `tokio-tungstenite` at 0.29 to unify with the copy axum's `ws` feature pulls; `tokenizers` at 0.22 with `default-features = false` to unify with candle and drop the progress bar and C++ trainer; `tar` and `zip` with defaults off; `sysinfo` reduced to two probes; `ksni` without its tokio feature to avoid the documented runtime-coupling panic class; the `objc2` framework crates feature-gated per class; `turso` with `mimalloc` off so a library cannot install a process-global allocator from a serve path.
+The root `Cargo.toml` comments carry the per-dependency reasoning and this document does not restate it. The ones that exist because of measurement are: `tokio-tungstenite` at 0.29 to unify with the copy axum's `ws` feature pulls; `tar` and `zip` with defaults off; `sysinfo` reduced to two probes; `ksni` without its tokio feature to avoid the documented runtime-coupling panic class; the `objc2` framework crates feature-gated per class; `turso` with `mimalloc` off so a library cannot install a process-global allocator from a serve path.
 
 ### Duplicate versions, and which are ours
 
-Forty-eight names resolve at two or more versions on Windows. Nearly all are transitive and not ours to fix:
+Forty-four names resolve at two or more versions on Windows. Nearly all are transitive and not ours to fix:
 
 - `zip 4` and `8`: `tauri-plugin-updater` pins 4; the workspace uses 8 for release archives.
-- `base64 0.13`: `spm_precompiled` under `tokenizers`. `base64 0.21`: `swift-rs` under `tauri-build`, macOS only.
-- `rand 0.8`, `0.9`, `0.10`: 0.9 is ours; 0.8 and 0.10 arrive through candle and Tauri.
-- `windows-sys` at four versions: 0.61 is ours; `jni` pins 0.45, the rest are Tauri's. The 0.52 line left with `ring`.
+- `base64`: one version on Windows and Linux. The `0.13` line under `spm_precompiled` left with `tokenizers`; `0.21` under `swift-rs` in `tauri-build` is macOS only.
+- `rand 0.9` and `0.10`: 0.9 is ours; 0.10 arrives through Tauri. The `0.8` line that candle pulled is off both shipping platforms; with `--target all` it still resolves once, through `antithesis_sdk` under `turso_core` for a target that does not ship.
+- `windows-sys` at three versions: 0.61 is ours; 0.59 and 0.60 are Tauri's. The 0.52 line left with `ring`; the 0.45 line stopped resolving on Windows when the picker left (`jni`, which pins it, is still in the lock for Tauri's Android target and `cargo tree -e normal -i windows-sys@0.45` now prints nothing on Windows).
 - `syn 1`: only `glib-macros` on Linux, under Tauri's GTK stack.
 - `toml 0.9` and `1.1`: 1.1 is the workspace pin, shared with `tauri-utils`; 0.9 is `cargo_toml` under `tauri-build`, a build edge that never ships. The 0.8 line that was ours left with the pin move.
 - `thiserror 1` and `2`, `hashbrown` at three versions, `indexmap 1`: transitive, chase by upgrading upstreams.
@@ -150,9 +152,9 @@ Chase transitive duplicates only by upgrading the upstream that pins them. Do no
 
 These are the results of the first measurement that call for a decision. None is applied by this document. Finding 1, the two rustls crypto backends, is resolved and recorded under "What was replaced, and why"; the numbering below is kept stable because other documents cite it.
 
-### Finding 2: `workspace-hack` sets a 372-package floor under every member
+### Finding 2: `workspace-hack` sets a 318-package floor under every member
 
-`promptforge-api-types` ships 375 packages of which three are its own. Every member that inherits `workspace-hack` builds the unified set, which is the intended trade for shared build artifacts across `-p` invocations. It is recorded here because it changes how every other number in this document reads, and because it was the mechanism behind finding 1: a Workshop-only plugin's feature choice reached the gateway through it. The candidate adjustment is hakari `[traversal-excludes]` for dependencies only one product needs (the Tauri family, `hf-hub`), which would shrink the gateway's floor at the cost of some artifact sharing. Measuring the trade requires editing `.config/hakari.toml` and rebuilding, so it is not measured here. Confidence: medium; the direction is clear, the magnitude is not.
+`promptforge-api-types` ships 328 packages of which 318 are the floor. Every member that inherits `workspace-hack` builds the unified set, which is the intended trade for shared build artifacts across `-p` invocations. It is recorded here because it changes how every other number in this document reads, and because it was the mechanism behind finding 1: a Workshop-only plugin's feature choice reached the gateway through it, and the picker removal moved the gateway closure by 27 packages for the same reason. The floor was 372 before the picker left. The candidate adjustment is hakari `[traversal-excludes]` for dependencies only one product needs (the Tauri family), which would shrink the gateway's floor at the cost of some artifact sharing. Measuring the trade requires editing `.config/hakari.toml` and rebuilding, so it is not measured here. Confidence: medium; the direction is clear, the magnitude is not.
 
 ### Finding 3: `turso` is 59 crates for three tables
 
@@ -180,6 +182,10 @@ cargo tree -p gateway -e normal --prefix none | sort -u | wc -l
 cargo tree -p gateway -e normal --no-default-features --prefix none | sort -u | wc -l
 cargo tree -p workshop -e normal --prefix none | sort -u | wc -l
 cargo tree -p promptforge-api-runtime -e normal --prefix none | sort -u | wc -l
+cargo tree -p promptforge-lua -e normal --prefix none | sort -u | wc -l
+cargo tree -p promptforge-parser -e normal --prefix none | sort -u | wc -l
+cargo tree -p promptforge-model-client -e normal --prefix none | sort -u | wc -l
+cargo tree -p promptforge-api-types -e normal --prefix none | sort -u | wc -l
 cargo tree -p workspace-hack -e normal --prefix none | sort -u | wc -l
 cargo tree -p gateway -e normal -i rustls@0.23.45 -f '{p} [{f}]' --depth 0
 cargo tree -p gateway -e normal -i reqwest
@@ -191,4 +197,4 @@ The lockfile-shape numbers (third-party packages, distinct names, names at two o
 
 The exclusive-cost ranking is an eighty-line walk over the `cargo metadata` resolve graph: normal-edge closure of the target set minus the normal-edge closure of every other direct third-party dependency, minus workspace members. It is deliberately not checked into the repository. Repository policy binds structural enforcement to explicit approval, and a ranking is an input to a decision, not a gate. If it is ever wanted as a `build-xtask` subcommand, that is the approval to seek.
 
-*2026-09-18 12:55 - claude-fable-5.1*
+*2026-09-18 15:05 - claude-fable-5.1*

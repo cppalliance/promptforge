@@ -103,12 +103,6 @@
   color: var(--danger-text);
 }
 
-.ws-run-panel__optional {
-  flex: none;
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-}
-
 .ws-run-panel__error {
   margin: var(--space-md);
   font-size: var(--font-size-sm);

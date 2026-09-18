@@ -23,23 +23,12 @@ export interface RunContractCapability {
   readonly optional: boolean;
 }
 
-/** An exact tool slot: the canonical namespace/pack/name path. */
-export interface RunContractToolExact {
+/** One tool slot: its alias and the canonical namespace/pack/name path. */
+export interface RunContractTool {
   readonly kind: "exact";
   readonly alias: string;
   readonly path: string;
 }
-
-/** A fuzzy tool slot: the prose the picker matches at prepare. */
-export interface RunContractToolFuzzy {
-  readonly kind: "fuzzy";
-  readonly alias: string;
-  readonly want: string;
-  readonly optional: boolean;
-}
-
-/** One tool slot, tagged by filling posture. */
-export type RunContractTool = RunContractToolExact | RunContractToolFuzzy;
 
 /** The declared arg types the wire format carries. */
 export type RunContractArgType = "string" | "boolean" | "integer" | "number";
@@ -112,22 +101,11 @@ function parseTool(value: unknown): RunContractTool | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { kind, alias } = value;
-  if (typeof alias !== "string") {
+  const { kind, alias, path } = value;
+  if (kind !== "exact" || typeof alias !== "string" || typeof path !== "string") {
     return null;
   }
-  if (kind === "exact") {
-    const { path } = value;
-    return typeof path === "string" ? { kind, alias, path } : null;
-  }
-  if (kind === "fuzzy") {
-    const { want, optional } = value;
-    if (typeof want !== "string" || typeof optional !== "boolean") {
-      return null;
-    }
-    return { kind, alias, want, optional };
-  }
-  return null;
+  return { kind, alias, path };
 }
 
 const ARG_TYPES: readonly string[] = ["string", "boolean", "integer", "number"];
