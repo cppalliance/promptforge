@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/tool-picker", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/sessions", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace"]
+members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/promptforge/web", "crates/promptforge/webfetch", "crates/promptforge/web-search", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/sessions", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace"]
 # crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
 # package both esbuild-built UIs consume, so the crates/* glob skips it.
 # crates/promptforge, crates/gateway, and crates/workshop are manifestless
@@ -48,7 +48,6 @@ promptforge-store = { path = "crates/promptforge/store", version = "0.3.0" }
 promptforge-vfs = { path = "crates/promptforge/vfs", version = "0.3.0" }
 promptforge-webfetch = { path = "crates/promptforge/webfetch", version = "0.3.0" }
 promptforge-web = { path = "crates/promptforge/web", version = "0.3.0" }
-promptforge-tool-picker = { path = "crates/promptforge/tool-picker", version = "0.3.0" }
 gateway-stt-engine = { path = "crates/gateway/stt/engine", version = "0.3.0" }
 gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper", version = "0.3.0" }
 promptforge-web-search = { path = "crates/promptforge/web-search", version = "0.3.0" }
@@ -72,7 +71,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
 serde_json = "1"
 # 0.13 rather than 0.12 so the tree links exactly one rustls crypto backend:
-# aws-lc-rs, the one Tauri and hf-hub already select. 0.13 has no `ring`
+# aws-lc-rs, the one Tauri already selects. 0.13 has no `ring`
 # option, so a bump cannot re-enable it; CI checks that `ring` stays out of
 # the gateway's normal closure. Root certificates come from the OS trust
 # store through the platform verifier (the `rustls` feature's default), not
@@ -128,21 +127,10 @@ tempfile = "3"
 # three plain tables.
 turso = { version = "=0.7.2", default-features = false }
 time = { version = "0.3", features = ["formatting"] }
-hf-hub = { version = "1", features = ["blocking"] }
-safetensors = "0.8"
 sha2 = "0.11"
 hmac = "0.13"
 subtle = "2.6"
-half = "2"
-candle-core = "0.11"
-candle-nn = "0.11"
-candle-transformers = "0.11"
 dotenvy = "0.15"
-# 0.22 rather than the newer 0.23 so the resolver unifies with the copy
-# candle-core already pulls in, instead of compiling two. default-features off
-# drops the progress bar and the C++ trainer; `onig` is the regex engine the
-# runtime pre-tokenizers need, and is what candle-core selects too.
-tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 # Loads the packaged whisper.cpp runtime without linking it into Cargo builds.

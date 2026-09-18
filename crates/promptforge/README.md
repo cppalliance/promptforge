@@ -20,11 +20,7 @@ The promptforge VFS policy: the `/_promptforge` mount layout, the stock empty ha
 
 ## promptforge-model-client
 
-The gateway model client: OpenAI-shaped chat-completions transport, wire types, and the model catalog and binding vocabulary. The runtime and the Lua host call models through it. Depends on promptforge-api-types and promptforge-tool-picker; reqwest carries the transport.
-
-## promptforge-tool-picker
-
-The tool picker: resolves a plain-English capability need to a tool from an abstract catalog, a deterministic embedding-based engine. The runtime and the model client resolve tools through it. Depends on promptforge-api-types and shared-progress; candle and tokenizers are the load-bearing third-party crates.
+The gateway model client: OpenAI-shaped chat-completions transport, wire types, and the model catalog and binding vocabulary. The runtime and the Lua host call models through it. Depends on promptforge-api-types; reqwest carries the transport.
 
 ## promptforge-web
 

@@ -45,7 +45,7 @@ The tool picker is a local sentence-embedding engine that maps prose capability 
   - Renaming the Workshop UI's "model picker" widgets or the gateway's "quant picker" wording; those are unrelated uses of the word.
 - Success criteria:
   - `cargo tree --workspace -e normal,build --target all -i candle-core` prints nothing, and likewise for `tokenizers`, `hf-hub`, and `safetensors`.
-  - A search of `crates/`, `.github/`, `.config/`, `guide/src/`, `Cargo.toml`, and `AGENTS.md` for `tool-picker`, `tool_picker`, `ToolPicker`, `FuzzySlot`, `NearDuplicate`, `hf-model-cache`, and `HF_TOKEN` returns nothing. History under `vibe/` is exempt.
+  - A search of `crates/`, `.github/`, `.config/`, `guide/src/`, `Cargo.toml`, and `AGENTS.md` for `tool-picker`, `tool_picker`, `ToolPicker`, `FuzzySlot`, `NearDuplicate`, `hf-model-cache`, and `HF_TOKEN` returns nothing. History under `vibe/` is exempt, and so are the gateway's own `HF_TOKEN` reads under `crates/gateway/` (its Hugging Face download token for local model artifacts, unrelated to the picker).
   - `../promptforge-design/study-tool-picker/crate/` holds the 20 files of the crate as they were at the removal commit, and `../promptforge-design/study-tool-picker/README.md` names it.
   - Every verification gate in the Testing Plan passes; `cargo hakari verify` is clean; `cargo test -p build-xtask` passes.
 - Constraints:
@@ -65,7 +65,7 @@ No shipped behavior changes for the Workshop's chat sessions, which never had a 
   - Prompt author: `tools:` in frontmatter maps an alias to a bare string global tool path (`namespace/pack/name`). The map form `{ want: "...", optional: true }` is no longer a slot shape and fails at parse. `tools.always` and `tools.add` in Lua are unchanged.
   - Host developer embedding `promptforge-api-runtime`: `Environment` has no `picker()` builder; `CapabilityRegistry::register` performs id uniqueness and normalization-collision checks only, with no description lint. `ToolBinding` (from `promptforge-lua`, re-exported through the runtime) has no `conflicts` field or accessor.
   - Workshop user: the run panel's tool rows render exact slots only.
-  - Developer building the workspace: no first-build network fetch, no `HF_TOKEN`, no model cache step in CI.
+  - Developer building the workspace: no first-build network fetch, no `HF_TOKEN` in CI, no model cache step in CI. The gateway's runtime `HF_TOKEN` read for local model downloads is unchanged.
 - Inputs and outputs: prompt frontmatter `tools:` values are strings; the runtime's prepare journal records exact fills only. Workshop's prompt-contract JSON (`crates/workshop/workspace/src/handlers-prompts.rs`) emits tool entries of kind `exact` only.
 - States and validation: `ToolSlotVisitor` accepts `visit_str` only; a map value is a deserialization error whose message names the expected shape ("an exact tool path string").
 - Errors and recovery: `Error::NearDuplicateTools` and the five `ModelBind`, `ModelBindQuery`, `ModelAbsent`, `ModelDuplicate`, `ModelAmbiguous` variants are removed from `crates/promptforge/model-client/src/error.rs`, `crates/promptforge/lua/src/error.rs`, and `crates/promptforge-api-runtime/src/error.rs` and their kind and mapping tables. No runtime path produced them.
@@ -124,7 +124,7 @@ Verification is the workspace's existing gate list plus dependency-graph invaria
 - Regression, security, and performance:
   - `cargo tree --workspace -e normal,build --target all -i candle-core` prints nothing; likewise for `tokenizers`, `hf-hub`, `safetensors`.
   - `cargo hakari verify` clean.
-  - Reference sweep: `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache|HF_TOKEN" crates .github .config guide/src Cargo.toml AGENTS.md` returns nothing.
+  - Reference sweep: `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache|HF_TOKEN" crates .github .config guide/src Cargo.toml AGENTS.md --glob '!crates/gateway/**'` returns nothing, and `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache" crates/gateway` returns nothing (the gateway's own `HF_TOKEN` reads stay).
   - `cargo deny check` clean.
 - Exit criteria: the workspace's verification commands as recorded in `AGENTS.md` (Verification section) all pass:
   - `cargo fmt --all --check`
@@ -223,7 +223,7 @@ The objective is one removal: the tool picker leaves PromptForge, its source is 
 
 <step-2>
 
-### Step 2: Delete the crate and prune the workspace, nextest, CI, and crate READMEs
+### Step 2: Delete the crate and prune the workspace, nextest, CI, and crate READMEs [completed]
 
 - Component: `workspace`
 - Crate: `git rm -r crates/promptforge/tool-picker` (the 20 files already archived in `../promptforge-design` at `c973a42`). This removes the only `build.rs` in the runtime and Workshop closure that reaches the network, and the `include_bytes!` of the fp16 `BAAI/bge-small-en-v1.5` weights.
@@ -232,7 +232,7 @@ The objective is one removal: the tool picker leaves PromptForge, its source is 
 - Nextest: `.config/nextest.toml` loses `package(promptforge-tool-picker)` from both `heavy` group filters (lines 23 and 28); the `heavy` group itself stays for `gateway-stt-backend-whisper` and `gateway-stt`.
 - CI: delete `.github/actions/hf-model-cache/action.yml` and its directory; remove every `uses: ./.github/actions/hf-model-cache` step with its `name: Cache the embedding model` line (`ci.yml` five, `nightly.yml` three, `release-workshop.yml` one, `workshop-installer-smoke.yml` one); remove the `HF_TOKEN: ${{ secrets.HF_TOKEN }}` env entries in `ci.yml`, `nightly.yml`, and `workshop-installer-smoke.yml`; remove or rewrite the explanatory comments at `ci.yml` 12-18, `nightly.yml` 20-22, and `release-workshop.yml` 125-126 so none mentions the picker or the model cache.
 - Crate READMEs: `crates/README.md` (the `promptforge-api-runtime` paragraph no longer lists `tool-picker`); `crates/promptforge/README.md` (the `promptforge-tool-picker` section is removed and the `promptforge-model-client` paragraph no longer names it); `AGENTS.md` if it names the crate or the model cache.
-- Tests: `cargo tree --workspace -e normal,build --target all -i candle-core` prints nothing, and likewise for `tokenizers`, `hf-hub`, and `safetensors`; `cargo hakari verify` clean; `cargo test -p build-xtask` passes with the shrunken member list; `cargo check -p gateway --no-default-features`; `cargo deny check` clean; `cargo nextest run --locked -p promptforge-api-runtime` (proves the `--locked` lock is coherent); `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache|HF_TOKEN" crates .github .config Cargo.toml AGENTS.md` returns nothing (`guide/src` is Step 3).
+- Tests: `cargo tree --workspace -e normal,build --target all -i candle-core` prints nothing, and likewise for `tokenizers`, `hf-hub`, and `safetensors`; `cargo hakari verify` clean; `cargo test -p build-xtask` passes with the shrunken member list; `cargo check -p gateway --no-default-features`; `cargo deny check` clean; `cargo nextest run --locked -p promptforge-api-runtime` (proves the `--locked` lock is coherent); `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache|HF_TOKEN" crates .github .config Cargo.toml AGENTS.md --glob '!crates/gateway/**'` returns nothing and `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache" crates/gateway` returns nothing (`guide/src` is Step 3; the gateway's own `HF_TOKEN` reads stay).
 - Commit: one commit in PromptForge containing the deletion, both manifests, `Cargo.lock`, `crates/workspace-hack/Cargo.toml`, `.config/nextest.toml`, the four workflows, the deleted action, and the READMEs.
 
 </step-2>
@@ -246,7 +246,7 @@ The objective is one removal: the tool picker leaves PromptForge, its source is 
 - Guide: edit the sources `guide/src/language/01-frontmatter-and-structure.md` (line 38), `guide/src/language/02-the-run.md` (line 7), and `guide/src/language/07-tools.md` (lines 31, 97, 124) so `tools:` is documented as alias-to-exact-path strings only, then regenerate `guide/promptforge-language-guide.md` with the `build-user-guide` crate (never edit the export by hand). The `guide/src/workshop/*` "picker" hits are the UI model picker and stay.
 - Other READMEs: `crates/workshop/server/README.md` only if its one "picker" mention is the tool picker rather than the model picker.
 - `vibe/dependency-surface.md`: remove the candle row from the ranked table and the picker note in measurement trap 4; remove the `base64 0.13` (via `spm_precompiled`) and `rand 0.8` (via candle) entries from the duplicate-versions list when `cargo tree -i` shows they left; add a row to "What was replaced, and why" (removed: `promptforge-tool-picker` and its candle, tokenizers, hf-hub, safetensors stack; replacement: none, exact slots only; evidence: the empty `cargo tree --workspace -e normal,build --target all -i candle-core` output); rerun the shipped-shape closure counts for `promptforge-api-runtime`, `workshop`, `promptforge-lua`, `promptforge-parser`, `promptforge-model-client`, and `gateway` per the file's "Reproducing the measurements" section, replacing the projected figures (about 51 packages and about 67 MB of embedded weights) with measured ones; update the header commit hash and date.
-- Tests: `npm run typecheck && npm test` in `crates/workshop/server/ui`; the reference sweep `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache|HF_TOKEN" crates .github .config guide/src Cargo.toml AGENTS.md` returns nothing (history under `vibe/` exempt); `../promptforge-design/study-tool-picker/crate/` still holds 20 files and `../promptforge-design/study-tool-picker/README.md` names it.
+- Tests: `npm run typecheck && npm test` in `crates/workshop/server/ui`; the reference sweep `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache|HF_TOKEN" crates .github .config guide/src Cargo.toml AGENTS.md --glob '!crates/gateway/**'` returns nothing and `rg -n "tool-picker|tool_picker|ToolPicker|FuzzySlot|NearDuplicate|hf-model-cache" crates/gateway` returns nothing (history under `vibe/` exempt; the gateway's own `HF_TOKEN` reads stay); `../promptforge-design/study-tool-picker/crate/` still holds 20 files and `../promptforge-design/study-tool-picker/README.md` names it.
 - Verification (`FULL`, the only standalone Verify dispatch in this plan), all of which must pass:
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`

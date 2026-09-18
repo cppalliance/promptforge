@@ -122,14 +122,10 @@ jobs:
         run: npm ci
 
       # The gateway sidecar build needs the config UI's esbuild pipeline
-      # (default `config-ui` feature) and the embedding model that
-      # promptforge-tool-picker's build script compiles in.
+      # (default `config-ui` feature).
       - name: Install config UI dependencies
         working-directory: crates/gateway/config-ui/ui
         run: npm ci
-
-      - name: Cache the embedding model
-        uses: ./.github/actions/hf-model-cache
 
       - name: Install Tauri system packages
         if: startsWith(matrix.name, 'linux')
