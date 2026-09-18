@@ -214,7 +214,7 @@ impl ModelDto {
     fn new(label: &str, role: &ModelRole) -> Self {
         Self {
             label: label.to_owned(),
-            keywords: role.keywords().iter().map(keyword_wire).collect(),
+            keywords: role.keywords().iter().copied().map(keyword_wire).collect(),
             min_context: role.min_context().map(std::num::NonZeroU32::get),
             description: role.description().map(str::to_owned),
         }
@@ -222,7 +222,7 @@ impl ModelDto {
 }
 
 /// The kebab-case wire form of a model keyword.
-fn keyword_wire(keyword: &ModelKeyword) -> &'static str {
+fn keyword_wire(keyword: ModelKeyword) -> &'static str {
     match keyword {
         ModelKeyword::Thinking => "thinking",
         ModelKeyword::NoThinking => "no-thinking",
@@ -248,7 +248,11 @@ impl From<&Frontmatter> for ContractResponse {
                 .map(std::num::NonZeroU32::get),
             input: frontmatter.input().map(FileDto::from),
             output: frontmatter.output().map(FileDto::from),
-            capabilities: frontmatter.capabilities().iter().map(CapabilityDto::from).collect(),
+            capabilities: frontmatter
+                .capabilities()
+                .iter()
+                .map(CapabilityDto::from)
+                .collect(),
             tools: frontmatter
                 .tools()
                 .iter()
@@ -268,7 +272,10 @@ impl From<&Frontmatter> for ContractResponse {
 /// `422` envelope when the text is not a valid prompt.
 pub(crate) async fn contract(Json(body): Json<ContractRequest>) -> Response {
     match Prompt::parse(&body.text, &body.name, &NullObserver::default()) {
-        Ok(prompt) => (StatusCode::OK, Json(ContractResponse::from(prompt.frontmatter())))
+        Ok(prompt) => (
+            StatusCode::OK,
+            Json(ContractResponse::from(prompt.frontmatter())),
+        )
             .into_response(),
         Err(error) => parse_failure(&error),
     }
@@ -293,8 +300,8 @@ fn parse_failure(error: &ParseError) -> Response {
     };
     let envelope = ErrorEnvelope::new(message, code);
     // Serializing the envelope cannot fail: two strings only.
-    let body = serde_json::to_string(&envelope)
-        .unwrap_or_else(|_| "prompt parse failed".to_owned());
+    let body =
+        serde_json::to_string(&envelope).unwrap_or_else(|_| "prompt parse failed".to_owned());
     (
         StatusCode::UNPROCESSABLE_ENTITY,
         [(header::CONTENT_TYPE, "application/json")],

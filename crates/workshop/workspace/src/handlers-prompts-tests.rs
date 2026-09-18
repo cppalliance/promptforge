@@ -118,7 +118,7 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
     assert_eq!(
         json["models"],
         serde_json::json!([
-            { "label": "writer", "keywords": ["frontier", "thinking"], "min_context": 128000, "description": "writes prose" },
+            { "label": "writer", "keywords": ["frontier", "thinking"], "min_context": 128_000, "description": "writes prose" },
         ])
     );
 }
@@ -156,7 +156,8 @@ async fn a_prompt_without_args_yields_the_implicit_prose_field() {
 
 #[tokio::test]
 async fn a_lua_error_answers_parse_lua() {
-    let text = "---\nname: badlua\ndescription: bad lua\n---\n\n# Bad\n\n## S\n\n```lua\nreturn (\n```\n";
+    let text =
+        "---\nname: badlua\ndescription: bad lua\n---\n\n# Bad\n\n## S\n\n```lua\nreturn (\n```\n";
     let body = serde_json::json!({ "name": "badlua", "text": text });
     let (status, json) = post_contract(body).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
