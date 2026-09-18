@@ -21,7 +21,7 @@ anyhow.workspace = true
 workshop-server-api.workspace = true
 # Window geometry lives in the workspace file (src/window_state.rs): the
 # shell reads and writes it over the server's loopback HTTP API with the
-# workspace's reqwest feature set (json, rustls-tls), the same set the
+# workspace's reqwest feature set (json, rustls), the same set the
 # gateway builds with, so cargo deny and the static-CRT Windows build see
 # nothing new.
 reqwest.workspace = true

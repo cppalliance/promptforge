@@ -260,8 +260,8 @@ fn open_transfer(
 }
 
 /// Streams a blocking response body through a channel so the download loop
-/// receives each chunk under an idle deadline. The pinned blocking reqwest
-/// client (0.12) exposes no per-read timeout, so the reader thread owns the
+/// receives each chunk under an idle deadline. The blocking reqwest client
+/// exposes no per-read timeout, so the reader thread owns the
 /// response and forwards every read; a peer that goes silent past the
 /// deadline surfaces as [`std::io::ErrorKind::TimedOut`] at the chunk
 /// boundary where the cancellation token is already checked, and the staged

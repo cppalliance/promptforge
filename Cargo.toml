@@ -71,7 +71,13 @@ pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+# 0.13 rather than 0.12 so the tree links exactly one rustls crypto backend:
+# aws-lc-rs, the one Tauri and hf-hub already select. 0.13 has no `ring`
+# option, so a bump cannot re-enable it; CI checks that `ring` stays out of
+# the gateway's normal closure. Root certificates come from the OS trust
+# store through the platform verifier (the `rustls` feature's default), not
+# from a bundled Mozilla list. `query` became opt-in in 0.13.
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream"] }
 fastrand = "2"
 rand = "0.9"
 readabilityrs = "0.1"
@@ -216,7 +222,15 @@ tauri-build = "2.6.3"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-process = "2.3.1"
-tauri-plugin-updater = "2.11.0"
+# default-features off drops the plugin's `rustls-tls` default, which is the
+# one dependency in the tree that pins rustls to the `ring` backend (and
+# installs it as the process-global CryptoProvider). Through workspace-hack
+# that feature would put `ring` back into every member, the gateway included.
+# The plugin's reqwest calls still get TLS: cargo unifies reqwest's features
+# per binary and the workspace pin above enables `rustls` (aws-lc-rs), so the
+# Workshop links one crypto backend. `system-proxy` and `zip` are the
+# plugin's other defaults, kept as they were.
+tauri-plugin-updater = { version = "2.11.0", default-features = false, features = ["system-proxy", "zip"] }
 tauri-plugin-single-instance = "2.4.4"
 # Test-only Jinja2 compatibility oracle for bundled chat templates. Members
 # inherit these only from their dev-dependency tables.

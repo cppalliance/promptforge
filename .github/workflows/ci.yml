@@ -375,6 +375,26 @@ jobs:
       - name: cargo audit
         run: cargo audit
 
+      # The gateway holds vendor credentials, so it links exactly one rustls
+      # crypto backend, aws-lc-rs. This fails when `ring` re-enters its
+      # normal-edge closure (through a reqwest bump, a plugin default, or a
+      # hakari regeneration) and when `cargo tree` itself cannot run; only a
+      # successful, ring-free result passes.
+      - name: One rustls crypto backend in the gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! out="$(cargo tree --locked -p gateway -e normal -i ring --depth 0 2>&1)"; then
+            echo "cargo tree failed:"
+            printf '%s\n' "$out"
+            exit 1
+          fi
+          if printf '%s\n' "$out" | grep -v '^warning: nothing to print' | grep -q '^ring v'; then
+            echo "ring is linked into the gateway; aws-lc-rs is the only permitted rustls backend"
+            printf '%s\n' "$out"
+            exit 1
+          fi
+
   # Single required status check for branch protection: it fails when any
   # job fails or is cancelled, so a cancelled job cannot read as green.
   # needs: is a static list, so every newly added job must be added to it

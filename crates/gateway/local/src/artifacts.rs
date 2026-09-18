@@ -64,8 +64,8 @@ const INSTALL_MARKER: &str = ".promptforge-install";
 const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Whole-request timeout for an artifact download (ART-003).
 ///
-/// The pinned blocking reqwest client (0.12) exposes no per-read timeout,
-/// so the read loop enforces the idle bound itself (see `download.rs`); this
+/// The blocking reqwest client exposes no per-read timeout, so the read
+/// loop enforces the idle bound itself (see `download.rs`); this
 /// generous ceiling stays as the final backstop: large enough for
 /// multi-gigabyte GGUF weights on a slow link, but finite so a peer that
 /// accepts the connection and then sends nothing can never pin the
