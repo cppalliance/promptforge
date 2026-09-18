@@ -3,9 +3,10 @@ name: real_tool_call
 description: Exercise one aliased real-model tool call and continuation
 promptforge: 0
 max_tool_iterations: 2
+capabilities:
+  - tests/tools
 tools:
-  ask_fixture:
-    want: Return one deterministic fixture value for one supplied string.
+  ask_fixture: tests/tools/ask_fixture
 models:
   writer:
     description: A careful analysis model suited to structured reasoning and long-context review
