@@ -43,9 +43,11 @@ use crate::drops::dispatch_file_drop;
 const DROP_MESSAGE: &str = "workspace-drop";
 
 /// Subscribes the window's webview to drop messages and permission
-/// requests. The message handler evals the `promptforge:file-drop`
-/// dispatch into the page; the permission handler grants the microphone
-/// and leaves every other kind to WebView2's default handling.
+/// requests. The message handler reads the dropped paths off the event
+/// and queues the `promptforge:file-drop` dispatch ([`crate::drops`]) for
+/// the next event-loop turn - never inside the callback, where the OLE
+/// drop may still be on the stack; the permission handler grants the
+/// microphone and leaves every other kind to WebView2's default handling.
 ///
 /// # Errors
 /// Returns an error when the webview dispatch or a COM subscription fails;
@@ -94,7 +96,12 @@ fn disable_browser_accelerator_keys(core: &ICoreWebView2) -> windows_core::Resul
 }
 
 /// The drop half: forward the real OS paths of a `workspace-drop`
-/// message's attached `File` objects into the page's grant flow.
+/// message's attached `File` objects into the page's grant flow. The
+/// dispatch is queued onto the next event-loop turn, never run inside
+/// the callback: on a real Explorer drop the message can arrive with
+/// the OLE drop still on the UI thread's stack, and eval'ing into the
+/// page from inside the callback is the reentrancy that hangs the app
+/// (WebView2Feedback #2498/#3559).
 fn attach_drop_bridge(
     core: &ICoreWebView2,
     window: tauri::WebviewWindow,
@@ -103,12 +110,16 @@ fn attach_drop_bridge(
         let Some(args) = args else {
             return Ok(());
         };
-        if message_string(&args).as_deref() == Some(DROP_MESSAGE) {
-            let paths = dropped_paths(&args);
-            if !paths.is_empty() {
-                dispatch_file_drop(&window, &paths);
+        let window = window.clone();
+        handle_web_message(&args, move |paths| {
+            let queued = window.run_on_main_thread({
+                let window = window.clone();
+                move || dispatch_file_drop(&window, &paths)
+            });
+            if let Err(error) = queued {
+                eprintln!("could not queue the file-drop dispatch: {error}");
             }
-        }
+        });
         Ok(())
     }));
     let mut token = 0_i64;
@@ -116,6 +127,23 @@ fn attach_drop_bridge(
     // subscription (the webview holds it), and `token` is a valid out-pointer
     // to a stack local.
     unsafe { core.add_WebMessageReceived(&handler, &raw mut token) }
+}
+
+/// Handles one web message: when it is the drop message carrying file
+/// attachments, hands their real OS paths to `defer`. The event args die
+/// with the callback, so the paths are read here; everything after -
+/// above all the eval that dispatches the drop into the page - runs
+/// outside the callback, which `defer` must arrange.
+fn handle_web_message(
+    args: &ICoreWebView2WebMessageReceivedEventArgs,
+    defer: impl FnOnce(Vec<PathBuf>),
+) {
+    if message_string(args).as_deref() == Some(DROP_MESSAGE) {
+        let paths = dropped_paths(args);
+        if !paths.is_empty() {
+            defer(paths);
+        }
+    }
 }
 
 /// The permission half: grant the microphone automatically. Every other
@@ -217,7 +245,7 @@ mod tests {
     use webview2_com::pwstr_from_str;
     use windows_core::{IUnknown, Interface as _, PWSTR, implement};
 
-    use super::{DROP_MESSAGE, dropped_paths, message_string};
+    use super::{DROP_MESSAGE, dropped_paths, handle_web_message, message_string};
 
     /// A fake dropped file carrying one path.
     #[implement(ICoreWebView2File)]
@@ -370,5 +398,37 @@ mod tests {
     fn a_message_with_no_attachments_yields_no_paths() {
         let args = args_with(Some(DROP_MESSAGE), Vec::new());
         assert!(dropped_paths(&args).is_empty());
+    }
+
+    #[test]
+    fn a_drop_message_defers_its_paths() {
+        let args = args_with(
+            Some(DROP_MESSAGE),
+            vec![file_object(r"C:\Users\Vinnie\Documents\project")],
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        handle_web_message(&args, move |paths| {
+            tx.send(paths).expect("the test channel is open");
+        });
+        assert_eq!(
+            rx.recv().expect("the drop's paths were deferred"),
+            vec![PathBuf::from(r"C:\Users\Vinnie\Documents\project")]
+        );
+    }
+
+    #[test]
+    fn a_non_drop_message_defers_nothing() {
+        let args = args_with(Some("other-message"), vec![file_object(r"D:\src\notes.md")]);
+        let called = std::cell::Cell::new(false);
+        handle_web_message(&args, |_| called.set(true));
+        assert!(!called.get());
+    }
+
+    #[test]
+    fn a_drop_message_with_no_files_defers_nothing() {
+        let args = args_with(Some(DROP_MESSAGE), Vec::new());
+        let called = std::cell::Cell::new(false);
+        handle_web_message(&args, |_| called.set(true));
+        assert!(!called.get());
     }
 }
