@@ -1406,6 +1406,7 @@ mod args_surface;
 mod chat_arm;
 mod chat_scope;
 mod debug_and_counts;
+mod effects;
 mod exec_flow;
 mod exit_rules;
 mod fanout_acceptance;

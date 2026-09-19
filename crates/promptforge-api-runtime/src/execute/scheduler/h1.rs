@@ -33,9 +33,6 @@ impl Scheduler<'_> {
             u32::try_from(self.chains.len())
                 .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
         );
-        // The pass owns its client slot, seeded from the run's configured
-        // client, exactly as the legacy pass seeds its own.
-        let client = self.client.ready().cloned();
         // The live H1 pass runs under the prompt's title, from its first
         // compiled H1 chunk.
         let origin = prompt_origin(
@@ -69,7 +66,6 @@ impl Scheduler<'_> {
             pending_prose: None,
             var: serde_json::json!({}),
             call_depth: 0,
-            client,
             parent: None,
             advertised: None,
             h1: Some(self.ctx.prompt().h1_blocks()),

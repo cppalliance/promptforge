@@ -1,5 +1,8 @@
 //! The request arms: one dispatch per validated protocol request from a
-//! suspended chain. Every store operation is a leaf yield, answered on the
+//! suspended chain. Every leaf arm builds its [`Effect`] and issues it
+//! through the scheduler's one `issue` path; the arm spawns nothing and
+//! emits nothing for the answer, which `apply_answer` handles when it
+//! lands. Every store operation is a leaf yield, performed on the
 //! blocking pool uniformly for all backends - no inline fast path - so
 //! interleaving behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
@@ -8,18 +11,19 @@
 
 use std::sync::Arc;
 
+use crate::client::Message;
 use crate::execute::protocol::{Answer, Request, StoreOp};
+use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
-use crate::execute::tools::infer_round;
-use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
-use crate::lua::{ToolSet, UserInputOutcome, resolve_model_binding, run_store_op};
+use crate::input::INPUT_UNAVAILABLE_FALLBACK;
+use crate::lua::{ToolSet, UserInputOutcome, resolve_model_binding};
 use crate::model::ModelBinding;
 use crate::observe::{Observation, detail};
-use crate::store::{Store, StoreError};
+use crate::store::StoreError;
 use crate::{Error, Result};
 
-use super::{Arrival, ChainIndex, Counters, RequestId, Scheduler};
+use super::{ChainIndex, Continuation, Counters, Scheduler};
 
 /// The error for an alias that names no binding in the run's tool catalog:
 /// the name and every bound alias, so the message reads required versus
@@ -90,7 +94,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
 /// store's own message, exactly as the legacy closure's external error
 /// surfaced at the call site (and classified `Lua` if it aborts the chunk
 /// uncaught, exactly as then).
-fn classify_store_failure(error: &StoreError) -> Error {
+pub(super) fn classify_store_failure(error: &StoreError) -> Error {
     if let Some(detail) = error.conflict_detail() {
         return Error::Determinism(detail.to_owned());
     }
@@ -108,7 +112,7 @@ impl Scheduler<'_> {
         self.chains[id.index()].blocked = blocked_on(&request);
         match request {
             Request::Infer { prompt, binding } => {
-                self.dispatch_infer(id, prompt, binding);
+                self.dispatch_infer(id, &prompt, binding);
                 Ok(())
             }
             Request::Call { target, input, var } => {
@@ -193,34 +197,28 @@ impl Scheduler<'_> {
         }
     }
 
-    /// Dispatches an `infer` request: resolves the binding and the chain's
-    /// client, spawns the single gateway round onto the answer channel, and
-    /// parks the chain in the pending table. A resolution failure is the
-    /// call's answer, resumed into the caller so an author `pcall` can catch
-    /// it exactly as on the legacy callback path.
-    fn dispatch_infer(&mut self, id: ChainIndex, prompt: String, binding: Option<ModelBinding>) {
-        match self.prepare_infer(id, prompt, binding) {
-            Ok((request_id, task)) => {
-                self.io_tasks.insert(request_id, task);
-                self.pending.insert(request_id, id);
-            }
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Infer(Err(error)));
-                self.ready.push_back(id);
-            }
+    /// Dispatches an `infer` request: resolves the binding, issues the
+    /// single tool-free gateway round as a `Chat` effect over one user
+    /// message, and parks the chain in the pending table. A resolution
+    /// failure is the call's answer, resumed into the caller so an author
+    /// `pcall` can catch it exactly as on the legacy callback path.
+    fn dispatch_infer(&mut self, id: ChainIndex, prompt: &str, binding: Option<ModelBinding>) {
+        if let Err(error) = self.issue_infer(id, prompt, binding) {
+            self.chains[id.index()].incoming = Some(Answer::Infer(Err(error)));
+            self.ready.push_back(id);
         }
     }
 
     /// The fallible half of infer dispatch: the binding resolution (the
-    /// handle's frozen binding, else the section's current model), the lazy
-    /// client resolution, and the spawned round.
-    fn prepare_infer(
+    /// handle's frozen binding, else the section's current model) and the
+    /// issued effect.
+    fn issue_infer(
         &mut self,
         id: ChainIndex,
-        prompt: String,
+        prompt: &str,
         binding: Option<ModelBinding>,
-    ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
-        let chain = &mut self.chains[id.index()];
+    ) -> Result<()> {
+        let chain = &self.chains[id.index()];
         let binding = if let Some(binding) = binding {
             binding
         } else {
@@ -234,134 +232,71 @@ impl Scheduler<'_> {
                 },
             )?
         };
-        if chain.client.is_none() {
-            chain.client = Some(self.client.resolve()?);
-        }
-        let client = chain
-            .client
-            .as_ref()
-            .ok_or(Error::internal("the client slot was just resolved"))?
-            .clone();
-        let emitter = Arc::clone(chain.ctx.emitter());
-        let section = chain.section_name().to_owned();
-        let turns = Arc::clone(chain.ctx.turns());
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        let task = tokio::spawn(async move {
-            let result = infer_round(
-                &client,
-                &binding,
-                &prompt,
-                emitter.as_ref(),
-                &section,
-                &turns,
-            )
-            .await;
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Arrival::Answer(Answer::Infer(result))));
-        });
-        Ok((request_id, task))
+        // A nested infer round consumes only the accumulated completion;
+        // live deltas have no consumer here.
+        let effect = Effect::Chat {
+            options: binding.completion_options(),
+            binding,
+            messages: vec![Message::user(prompt)],
+            tools: Vec::new(),
+            stream: false,
+        };
+        self.issue(id, effect, Continuation::Infer)?;
+        Ok(())
     }
 
-    /// Dispatches a `user_input` request: the run's input broker answers on
-    /// a spawned task exactly as a leaf I/O round does, so a blocking wait
-    /// parks its chain - the section's VM and message history intact -
-    /// without blocking the driver, and cancellation aborts it through the
-    /// shared in-flight abort path. With no broker configured the
-    /// unavailable-fallback policy answers immediately: the fixed fallback
-    /// sentence with `available` false. The wait and a delivered response
-    /// are reported through the chain's emitter; an unavailable answer
-    /// opens no wait and records no input.
+    /// Dispatches a `user_input` request: the run's input broker answers
+    /// the issued `UserInput` effect exactly as a leaf I/O round does, so
+    /// a blocking wait parks its chain - the section's VM and message
+    /// history intact - without blocking the driver, and cancellation
+    /// aborts it through the shared in-flight abort path. With no broker
+    /// configured the unavailable-fallback policy answers immediately: the
+    /// fixed fallback sentence with `available` false. The wait is
+    /// reported here; a delivered response is reported when its answer is
+    /// applied; an unavailable answer opens no wait and records no input.
     fn dispatch_user_input(&mut self, id: ChainIndex) {
         let chain = &self.chains[id.index()];
-        let Some(broker) = chain.ctx.input_broker().cloned() else {
+        if chain.ctx.input_broker().is_none() {
             self.chains[id.index()].incoming = Some(Answer::UserInput(Ok(UserInputOutcome {
                 text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
                 available: false,
             })));
             self.ready.push_back(id);
             return;
-        };
-        let emitter = Arc::clone(chain.ctx.emitter());
+        }
         let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();
-        emitter.report(&section, detail::USER_INPUT_WAIT_STARTED);
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        let task = tokio::spawn(async move {
-            let answer = match broker.user_input(&execution, &section).await {
-                Ok(InputOutcome::Text(text)) => {
-                    emitter.user_input(&section, &text);
-                    Answer::UserInput(Ok(UserInputOutcome {
-                        text,
-                        available: true,
-                    }))
-                }
-                Ok(InputOutcome::Unavailable) => Answer::UserInput(Ok(UserInputOutcome {
-                    text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
-                    available: false,
-                })),
-                Err(error) => Answer::UserInput(Err(Error::from(error))),
-            };
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Arrival::Answer(answer)));
-        });
-        self.io_tasks.insert(request_id, task);
-        self.pending.insert(request_id, id);
+        chain
+            .ctx
+            .emitter()
+            .report(&section, detail::USER_INPUT_WAIT_STARTED);
+        let effect = Effect::UserInput { execution, section };
+        if let Err(error) = self.issue(id, effect, Continuation::UserInput) {
+            self.chains[id.index()].incoming = Some(Answer::UserInput(Err(error)));
+            self.ready.push_back(id);
+        }
     }
 
-    /// Dispatches a `store` request: the chain's access capability runs the
-    /// operation on the blocking pool and posts the answer to the channel,
-    /// parking the chain in the pending table exactly as a leaf I/O round
-    /// does. Every store operation takes this yield path uniformly -
-    /// memory- and host-backed alike, with no inline fast path - so
-    /// interleaving behavior never depends on which backend serves the
-    /// mount. The operation's event is pushed before the answer posts, so
-    /// the event stream keeps the legacy closure path's ordering (the op's
-    /// outcome precedes the chunk's closing boundary).
+    /// Dispatches a `store` request: issues the operation under the
+    /// chain's access capability as a `Store` effect, performed on the
+    /// blocking pool, parking the chain in the pending table exactly as a
+    /// leaf I/O round does. Every store operation takes this yield path
+    /// uniformly (memory- and host-backed alike, with no inline fast path)
+    /// so interleaving behavior never depends on which backend serves
+    /// the mount. The operation's event is pushed when the answer is
+    /// applied, before the chain resumes.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the live chain's access capability
     /// is gone, which only the chain-end paths take.
     fn dispatch_store(&mut self, id: ChainIndex, op: StoreOp) -> Result<()> {
-        let chain = &self.chains[id.index()];
-        let access = Arc::clone(chain.access()?);
-        let emitter = Arc::clone(chain.ctx.emitter());
-        let section = chain.section_name().to_owned();
+        let access = Arc::clone(self.chains[id.index()].access()?);
         let observations = store_observations(&op);
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        // spawn_blocking, not a plain task: the Vfs is sync by design, and
-        // the blocking pool keeps a slow host-backend op from stalling the
-        // driver. Aborting the handle detaches rather than interrupts, so a
-        // cancelled run's in-flight op completes without delivering.
-        let task = tokio::task::spawn_blocking(move || {
-            let result = run_store_op(&Store::new(&access), op);
-            if let Some((succeeded, failed)) = observations {
-                emitter.report(&section, if result.is_ok() { succeeded } else { failed });
-            }
-            // Claims-release ordering constraint: the access clone must
-            // drop after the op and its observation and before the answer
-            // posts, so the claims it holds release before a resumed chain
-            // can acquire overlapping claims; the fix changes when claims
-            // release, never whether an operation succeeds.
-            drop(access);
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((
-                request_id,
-                Arrival::Answer(Answer::Store(
-                    result.map_err(|e| classify_store_failure(&e)),
-                )),
-            ));
-        });
-        self.io_tasks.insert(request_id, task);
-        self.pending.insert(request_id, id);
+        let effect = Effect::Store { access, op };
+        if let Err(error) = self.issue(id, effect, Continuation::Store(observations)) {
+            self.chains[id.index()].incoming = Some(Answer::Store(Err(error)));
+            self.ready.push_back(id);
+        }
         Ok(())
     }
 
@@ -416,7 +351,6 @@ impl Scheduler<'_> {
             Some(input) => chain.ctx.with_args(input),
             None => chain.ctx.clone(),
         };
-        let client = chain.client.clone();
         // A call chain is a blocking child: it borrows the caller's access
         // capability (the same serial thread of execution), so the caller's
         // standing claims never false-conflict with the child's ops.
@@ -438,9 +372,6 @@ impl Scheduler<'_> {
             var,
             depth,
         )?;
-        // The child inherits the caller's client slot: an already-resolved
-        // client is shared, an unresolved one stays lazy.
-        self.chains[child.index()].client = client;
         self.chains[child.index()].access = access;
         Ok(child)
     }

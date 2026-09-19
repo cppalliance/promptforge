@@ -12,7 +12,9 @@ use crate::execute::support::GENERIC_COMPLETION;
 use crate::parser::Section;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, Counters, RequestId, Scheduler};
+use crate::execute::run::EffectId;
+
+use super::{Chain, ChainIndex, Counters, Scheduler};
 
 impl<'a> Scheduler<'a> {
     /// Allocates the next child id under `owner`'s chain: the owner's id
@@ -93,7 +95,6 @@ impl<'a> Scheduler<'a> {
             pending_prose: None,
             var: var.clone(),
             call_depth,
-            client: None,
             parent,
             advertised: None,
             h1: None,
@@ -212,15 +213,15 @@ impl<'a> Scheduler<'a> {
         // one to reach, so the leaked-author list is moot here.
         self.abandon_owned_tasks(id, AbandonReason::OwnerAborted);
         self.ready.retain(|ready| *ready != id);
-        // The chain's own parked leaf request. A timer the chain owned is
+        // The chain's own parked leaf effect. A timer the chain owned is
         // keyed under it too, but `abandon_owned_tasks` above already
         // aborted every live one, so this is the only entry left.
-        let request = self
+        let effect = self
             .pending
             .iter()
-            .find_map(|(request, chain)| (*chain == id).then_some(*request));
-        if let Some(request) = request {
-            self.abort_request(request);
+            .find_map(|(effect, pending)| (pending.chain == id).then_some(*effect));
+        if let Some(effect) = effect {
+            self.abort_effect(effect);
         }
         // A chain on the call stack is the top here: only its own
         // descendants sit above it, and the recursion already removed them.
@@ -240,23 +241,31 @@ impl<'a> Scheduler<'a> {
         chain.access = None;
     }
 
-    /// Drops one in-flight leaf request whose chain is going away: the
+    /// Drops one in-flight leaf effect whose chain is going away: the
     /// pending entry leaves, the id is recorded as aborted, and the leaf
     /// task is aborted.
-    pub(super) fn abort_request(&mut self, request: RequestId) {
-        self.pending.remove(&request);
-        // Record the aborted request so its task's late answer (a send
+    pub(super) fn abort_effect(&mut self, effect: EffectId) {
+        self.pending.remove(&effect);
+        self.discard_performer(effect);
+    }
+
+    /// Discards one effect's in-flight performer, whether its chain is
+    /// going away or the host dropped the effect: the id is recorded as
+    /// aborted and the leaf task is aborted. The caller has already taken
+    /// or kept the pending entry as its path requires.
+    pub(super) fn discard_performer(&mut self, effect: EffectId) {
+        // Record the aborted effect so its task's late answer (a send
         // that landed before the abort) is the one unknown-id answer
         // the driver discards; anything else stays a loud invariant
         // failure.
-        self.aborted_requests.insert(request);
+        self.aborted_effects.insert(effect);
         // The handle stays in `io_tasks`: aborting a blocking-pool op
         // detaches rather than interrupts, so the op's access clone -
         // and the claims it holds - releases only when the op finishes.
         // The run-end drain awaits the handle, keeping claim release
         // bounded to the run's lifetime on this path too; if the op's
         // late answer arrives first, the answer loop takes the handle.
-        if let Some(task) = self.io_tasks.get(&request) {
+        if let Some(task) = self.io_tasks.get(&effect) {
             task.abort();
         }
     }

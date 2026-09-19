@@ -66,13 +66,10 @@ impl<'a> Scheduler<'a> {
         Ok(())
     }
 
-    /// Seeds a fresh root walk chain's slots: its own access capability -
+    /// Seeds a fresh root walk chain's slot: its own access capability -
     /// the walk is its own serial thread of execution, and a fresh acquire
     /// (the H1 pass's identity ended with its chain) means nothing the pass
-    /// touched can false-conflict with the walk - and its client slot from
-    /// the run's configured client, as the legacy walk's slot is seeded
-    /// from run()'s client: a prose block before any infer must use it
-    /// rather than fall back to building an environment client.
+    /// touched can false-conflict with the walk.
     ///
     /// # Errors
     /// Returns [`Error::Store`] when the backend refuses acquisition.
@@ -87,7 +84,6 @@ impl<'a> Scheduler<'a> {
         let origin = prompt_origin(prompt, prompt.title(), blocks);
         let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
         self.chains[root.index()].access = Some(Arc::new(access));
-        self.chains[root.index()].client = self.client.ready().cloned();
         Ok(())
     }
 
@@ -108,7 +104,7 @@ impl<'a> Scheduler<'a> {
 
     /// Enters the chain's next section and reports whether one was entered:
     /// constructs the frame with the chain's next entry id and its task id,
-    /// seeded from the chain's `var` and client slots (and, on a spawned
+    /// seeded from the chain's `var` slot (and, on a spawned
     /// chain's first entry, its `item` and `sys.index` seeds). The pending
     /// Markdown buffer
     /// resets: a previous section's unconsumed prose never crosses the

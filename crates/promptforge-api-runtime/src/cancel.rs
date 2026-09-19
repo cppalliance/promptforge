@@ -5,5 +5,5 @@
 //! keep working.
 
 pub(crate) use promptforge_api_types::cancel::{
-    CancelHandle, current, is_cancelled, maybe_scope, wait_cancelled,
+    CancelHandle, is_cancelled, maybe_scope, wait_cancelled,
 };

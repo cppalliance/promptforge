@@ -1,14 +1,14 @@
 //! The `chat` arm: one stateless tool-capable model round yielded by a
 //! section VM.
 //!
-//! Dispatch resolves the round's binding, client, and tool scope (the
-//! bound and local halves, plus the model's task built-ins once the
-//! section has run `tools.allow_tasks`), records the scope on the chain as
-//! `advertised`, prechecks the projected
-//! conversation against the model's context window, and spawns the single
-//! gateway round onto the answer channel as a raw completion - the leaf
-//! work runs through the same spawned path as `infer`. The driver
-//! classifies that completion into the round's answer when it arrives
+//! Dispatch resolves the round's binding and tool scope (the bound and
+//! local halves, plus the model's task built-ins once the section has run
+//! `tools.allow_tasks`), records the scope on the chain as `advertised`,
+//! prechecks the projected conversation against the model's context
+//! window, and issues the single gateway round as a `Chat` effect - the
+//! same effect a nested `infer` issues, over the author's conversation
+//! and the advertised schemas. The driver classifies the answered
+//! completion into the round's answer when it arrives
 //! ([`Scheduler::accept_chat`]), emitting the round's events - the turn
 //! advance, the debug capture pair, turn completed or failed or truncated,
 //! thinking, and the reply or the tool-call batch - through the chain's
@@ -25,6 +25,7 @@ use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 use crate::client::{Completion, CompletionResult, ToolCall};
 use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ChatResult};
+use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::advance_turn;
 use crate::lua::{
@@ -36,7 +37,7 @@ use crate::observe::detail;
 use crate::{Error, Result};
 
 use super::builtins::{advertise_task_builtins, scope_halves, task_allowlist};
-use super::{Arrival, ChainIndex, RequestId, Scheduler};
+use super::{ChainIndex, Continuation, Scheduler};
 
 /// The answer for a round refused as too large by `reason`'s gate, before
 /// or by the provider: no round ran, so every other field is absent.
@@ -69,19 +70,20 @@ fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
     measured.then_some(metrics)
 }
 
-/// How one `chat` dispatch resolved: a spawned round parked on the pending
-/// table, or an answer settled without leaving (the precheck overflow).
+/// How one `chat` dispatch resolved: a round issued as an effect and
+/// parked on the pending table, or an answer settled without leaving (the
+/// precheck overflow).
 enum ChatDispatch {
-    Spawned(RequestId, tokio::task::JoinHandle<()>),
+    Issued,
     Answered(Answer<Error>),
 }
 
 impl Scheduler<'_> {
     /// Dispatches a `chat` request: one tool-capable model round over the
-    /// author's message list. A spawned round parks the chain in the
+    /// author's message list. An issued round parks the chain in the
     /// pending table; a precheck overflow answers the round on the spot
     /// with the overflow flag; every preparation failure - the binding,
-    /// the client, the scope, the projection - is the call's answer,
+    /// the scope, the projection, the client - is the call's answer,
     /// resumed into the caller so an author `pcall` catches it exactly as
     /// on the other dispatch paths.
     pub(super) fn dispatch_chat(
@@ -93,10 +95,7 @@ impl Scheduler<'_> {
         tools: Option<&[String]>,
     ) {
         match self.prepare_chat(id, messages, binding, model, tools) {
-            Ok(ChatDispatch::Spawned(request_id, task)) => {
-                self.io_tasks.insert(request_id, task);
-                self.pending.insert(request_id, id);
-            }
+            Ok(ChatDispatch::Issued) => {}
             Ok(ChatDispatch::Answered(answer)) => {
                 self.chains[id.index()].incoming = Some(answer);
                 self.ready.push_back(id);
@@ -108,12 +107,12 @@ impl Scheduler<'_> {
         }
     }
 
-    /// The fallible half of chat dispatch: the lazy client resolution, the
-    /// binding (the loop shim's leading handle when it named one, else
-    /// `model: None` is the section's current model and an alias is its
-    /// frozen binding), the call-time tool scope recorded on the chain as
-    /// `advertised`, the per-dispatch projection, the context precheck, and
-    /// the spawned round.
+    /// The fallible half of chat dispatch: the binding (the loop shim's
+    /// leading handle when it named one, else `model: None` is the
+    /// section's current model and an alias is its frozen binding), the
+    /// call-time tool scope recorded on the chain as `advertised`, the
+    /// per-dispatch projection, the context precheck, and the issued
+    /// effect.
     fn prepare_chat(
         &mut self,
         id: ChainIndex,
@@ -122,15 +121,7 @@ impl Scheduler<'_> {
         model: Option<&str>,
         tools: Option<&[String]>,
     ) -> Result<ChatDispatch> {
-        let chain = &mut self.chains[id.index()];
-        if chain.client.is_none() {
-            chain.client = Some(self.client.resolve()?);
-        }
         let chain = &self.chains[id.index()];
-        let client = chain
-            .client
-            .clone()
-            .ok_or(Error::internal("the client slot was just resolved"))?;
         let section = chain.section_name().to_owned();
         let frame = chain
             .frame
@@ -171,9 +162,7 @@ impl Scheduler<'_> {
                 return Err(Error::from(error));
             }
         };
-        let completion_options = binding.completion_options();
         let context = binding.context();
-        let on_delta = chain.ctx.on_delta().cloned();
         self.chains[id.index()].advertised = Some(dispatch);
         // The pre-dispatch precheck: an over-window request never leaves.
         // The refusal is the round's answer - the overflow flag - and is
@@ -184,34 +173,15 @@ impl Scheduler<'_> {
                 overflow_result(reason),
             )))));
         }
-        let tool_arg = (!schemas.is_empty()).then_some(schemas);
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        // The host's delta callback is the live consumer; without one the
-        // chunks drop at the leaf and the completed reply is the repair.
-        // Cancellation is the driver aborting this task mid-round, so no
-        // event fires here for an aborted round.
-        let task = tokio::spawn(async move {
-            let result = client
-                .complete(
-                    &conversation,
-                    tool_arg.as_deref(),
-                    &completion_options,
-                    |delta| {
-                        if let Some(hook) = &on_delta {
-                            hook(delta);
-                        }
-                    },
-                )
-                .await
-                .map(Box::new)
-                .map_err(Error::from);
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Arrival::Chat(result)));
-        });
-        Ok(ChatDispatch::Spawned(request_id, task))
+        let effect = Effect::Chat {
+            options: binding.completion_options(),
+            binding,
+            messages: conversation,
+            tools: schemas,
+            stream: true,
+        };
+        self.issue(id, effect, Continuation::Chat)?;
+        Ok(ChatDispatch::Issued)
     }
 
     /// Classifies one arrived chat round into the chain's answer, emitting

@@ -4733,6 +4733,7 @@ dependencies = [
  "promptforge-model-client",
  "promptforge-store",
  "promptforge-vfs",
+ "serde",
  "serde_json",
  "shared-vfs",
  "thiserror 2.0.19",

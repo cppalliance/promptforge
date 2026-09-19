@@ -297,8 +297,8 @@ impl Scheduler<'_> {
         // task's own terminal event, which is the last word on it.
         let backing_chain = match backing {
             TaskBacking::Chain(backing_chain) => backing_chain,
-            TaskBacking::Effect(request) => {
-                self.abort_request(request);
+            TaskBacking::Effect(effect) => {
+                self.abort_effect(effect);
                 return Ok(None);
             }
         };

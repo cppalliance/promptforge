@@ -4,14 +4,16 @@
 //! per-VM call counts, the succeeded/failed observation, the untrusted nonce
 //! wrap, and the `ToolResult` report. It is synchronous and takes the tool's
 //! outcome as a value, so a host that performed the call elsewhere applies
-//! the same rules when the answer arrives. [`dispatch_tool`] is the async
-//! wrapper that still performs the call here: it counts the attempt, races
-//! the tool against cancellation, and hands the outcome to
-//! `prepare_dispatch`. Core's model
-//! tool loop and its scheduler's `tools.call` arm both call it; the agent
-//! driver adopts it unchanged. Keeping the body here - the crate every
-//! executor already depends on - is what stops dispatch semantics from
-//! forking.
+//! the same rules when the answer arrives; [`prepare_model_dispatch`] is
+//! the same body under the model-issued rule (a tool's own failure resumes
+//! as untrusted failure text, and the `ToolResult` fires under the model's
+//! call id). The executor's scheduler performs the call as an effect and
+//! applies one of the two when the answer lands. [`dispatch_tool`] and
+//! [`dispatch_model_tool`] are the async wrappers that still perform the
+//! call here: they count the attempt, race the tool against cancellation,
+//! and hand the outcome to the matching sync body. Keeping every body here -
+//! the crate every executor already depends on - is what stops dispatch
+//! semantics from forking.
 
 use promptforge_api_types::cancel;
 use promptforge_api_types::observe::{Observer, detail};
@@ -161,15 +163,103 @@ pub fn prepare_dispatch(
     Ok(ToolDispatch { content, trusted })
 }
 
+/// Applies the model-issued dispatch rules to one bound tool call's answer:
+/// [`prepare_dispatch`] under the model-loop failure rule, then the
+/// [`Observer::on_tool_result`] report under the model's call id.
+///
+/// A model-issued call always resumes with content: the tool's own failure
+/// ([`Error::Tool`]) becomes the call's result - the error message
+/// nonce-wrapped as untrusted - so the model reads the failure and the
+/// round continues; `prepare_dispatch` has already fired the failed
+/// observation. The counts increment and every other dispatch failure
+/// still propagate. Nothing here awaits, so a host that performed the
+/// call on its own executor applies exactly these rules when the answer
+/// arrives.
+///
+/// # Errors
+/// Returns the counts' own error when `binding`'s alias was never seeded.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the model-issued body names the same run coordinates as the script body it wraps"
+)]
+pub fn prepare_model_dispatch(
+    binding: &ToolBinding,
+    call_result: std::result::Result<ToolOutput, ToolError>,
+    counts: Option<&ToolCallCounts>,
+    nonce: &GuardNonce,
+    observer: &dyn Observer,
+    execution: &str,
+    section: &str,
+    report: &ModelReport,
+) -> Result<ToolDispatch> {
+    let outcome = match prepare_dispatch(
+        binding,
+        call_result,
+        counts,
+        nonce,
+        observer,
+        execution,
+        section,
+        None,
+    ) {
+        Ok(outcome) => outcome,
+        Err(Error::Tool { message, .. }) => ToolDispatch {
+            content: nonce.wrap(&message),
+            trusted: false,
+        },
+        Err(error) => return Err(error),
+    };
+    observer.on_tool_result(
+        execution,
+        section,
+        report.script.chain_id,
+        report.script.depth,
+        report.script.turn,
+        &report.call_id,
+        binding.alias(),
+        &outcome.content,
+        outcome.trusted,
+    );
+    Ok(outcome)
+}
+
+/// Performs one bound tool call here: the counts increment first (a
+/// dispatch attempted, as the wrappers have always counted it), so an
+/// unseeded alias fails before the tool runs and a cancelled dispatch
+/// still counts. The call is then raced against cancellation so a slow or
+/// stuck tool cannot hold the run past a Ctrl-C; on cancel the tool
+/// future is dropped, the failed observation fires, and the run ends
+/// promptly.
+///
+/// # Errors
+/// Returns the counts' own error when `binding`'s alias was never seeded,
+/// or [`Error::Interrupted`] when the run is cancelled mid-call.
+async fn perform_call(
+    binding: &ToolBinding,
+    args: serde_json::Value,
+    counts: Option<&ToolCallCounts>,
+    observer: &dyn Observer,
+    execution: &str,
+    section: &str,
+) -> Result<std::result::Result<ToolOutput, ToolError>> {
+    if let Some(counts) = counts {
+        counts.increment(binding.alias())?;
+    }
+    tokio::select! {
+        biased;
+        () = cancel::wait_cancelled() => {
+            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+            Err(Error::Interrupted)
+        }
+        result = binding.tool().call(args) => Ok(result),
+    }
+}
+
 /// Dispatches one bound tool call: performs the call here, then applies
 /// [`prepare_dispatch`] to its answer.
 ///
-/// The counts increment first (a dispatch attempted, as this wrapper has
-/// always counted it), so an unseeded alias fails before the tool runs and
-/// a cancelled dispatch still counts. The call is then raced against
-/// cancellation so a slow or stuck tool cannot hold the run past a Ctrl-C;
-/// on cancel the tool future is dropped, the failed observation fires, and
-/// the run ends promptly. Everything else - observation, trust, the
+/// The attempt is counted and raced against cancellation as
+/// `perform_call` does. Everything else - observation, trust, the
 /// `ToolResult` report - is `prepare_dispatch`'s, which is handed `None`
 /// for the counts so the answer is not counted twice.
 ///
@@ -191,17 +281,7 @@ pub async fn dispatch_tool(
     section: &str,
     script: Option<ScriptReport>,
 ) -> Result<ToolDispatch> {
-    if let Some(counts) = counts {
-        counts.increment(binding.alias())?;
-    }
-    let call_result = tokio::select! {
-        biased;
-        () = cancel::wait_cancelled() => {
-            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-            return Err(Error::Interrupted);
-        }
-        result = binding.tool().call(args) => result,
-    };
+    let call_result = perform_call(binding, args, counts, observer, execution, section).await?;
     prepare_dispatch(
         binding,
         call_result,
@@ -214,23 +294,15 @@ pub async fn dispatch_tool(
     )
 }
 
-/// Dispatches one model-issued bound tool call: the shared
-/// [`dispatch_tool`] body under the model-loop failure rule, then the
-/// [`Observer::on_tool_result`] report under the model's call id.
-///
-/// A model-issued call always resumes with content: the tool's own failure
-/// ([`Error::Tool`]) becomes the call's result - the error message
-/// nonce-wrapped as untrusted - so the model reads the failure and the
-/// round continues; `prepare_dispatch` has already fired the failed
-/// observation. Cancellation, the counts increment, and every other
-/// dispatch failure still propagate.
+/// Dispatches one model-issued bound tool call: performs the call here,
+/// then applies [`prepare_model_dispatch`] to its answer.
 ///
 /// # Errors
 /// Returns [`Error::Interrupted`] when the run is cancelled mid-call, or
 /// the counts' own error when `binding`'s alias was never seeded.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the model-issued body names the same run coordinates as the script body it wraps"
+    reason = "the model-issued wrapper names the same run coordinates as the body it hands the answer to"
 )]
 pub async fn dispatch_model_tool(
     binding: &ToolBinding,
@@ -242,30 +314,17 @@ pub async fn dispatch_model_tool(
     section: &str,
     report: &ModelReport,
 ) -> Result<ToolDispatch> {
-    let outcome = match dispatch_tool(
-        binding, args, counts, nonce, observer, execution, section, None,
-    )
-    .await
-    {
-        Ok(outcome) => outcome,
-        Err(Error::Tool { message, .. }) => ToolDispatch {
-            content: nonce.wrap(&message),
-            trusted: false,
-        },
-        Err(error) => return Err(error),
-    };
-    observer.on_tool_result(
+    let call_result = perform_call(binding, args, counts, observer, execution, section).await?;
+    prepare_model_dispatch(
+        binding,
+        call_result,
+        None,
+        nonce,
+        observer,
         execution,
         section,
-        report.script.chain_id,
-        report.script.depth,
-        report.script.turn,
-        &report.call_id,
-        binding.alias(),
-        &outcome.content,
-        outcome.trusted,
-    );
-    Ok(outcome)
+        report,
+    )
 }
 
 #[cfg(test)]

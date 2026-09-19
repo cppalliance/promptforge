@@ -12,12 +12,15 @@
 //!
 //! The loop is `resume -> match request -> dispatch -> resume with answer`.
 //! A chain whose coroutine yields a leaf request (`infer`) is parked in the
-//! pending table while a spawned task runs the single gateway round and
-//! posts the answer to the channel; a chain that yields a structural
-//! request (`call`) blocks while its child chain runs, and the child's
-//! finish delivers its final text as the parent's answer. When no chain is
-//! ready the driver awaits the answer channel or cancellation, whichever
-//! comes first.
+//! pending table while its [`Effect`] is performed: the arm builds the
+//! effect as a value and hands it to the internal performer table, which
+//! spawns the leaf work and posts the [`EffectAnswer`] to the channel
+//! under the effect's id; the driver applies the answer on its own thread
+//! through one `apply_answer`, emitting the round's events there. A chain
+//! that yields a structural request (`call`) blocks while its child chain
+//! runs, and the child's finish delivers its final text as the parent's
+//! answer. When no chain is ready the driver awaits the answer channel or
+//! cancellation, whichever comes first.
 //!
 //! [`RunState`] stays the ambient shared read-mostly context, borrowed by
 //! chain steps; the scheduler is the exclusively owned mutable counterpart.
@@ -26,8 +29,11 @@
 //! layer.
 //!
 //! This file carries the scheduler core: the chain record and arena, the
-//! ready queue, the pending table, the call stack, and the task arena. The
-//! submodules carry the rest: `drive` the driver loop, `chain` the chain
+//! ready queue, the pending table, the call stack, the task arena, and
+//! the one `issue` path every leaf arm hands its effect through. The
+//! submodules carry the rest: `drive` the driver loop, `performers` the
+//! internal performer table (today's spawned leaf work behind the effect
+//! boundary), `apply` the answer application, `chain` the chain
 //! lifecycle (arena insertion and the two chain-end paths), `step` one
 //! chain's step to its next suspension point, `walk` the section walk
 //! rules, `h1` the live H1 pass and its hand-off to the walk, `dispatch`
@@ -42,11 +48,14 @@
 //! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm, and
 //! the chain-end rules for tasks, `waits` the `when_any` wait and the
 //! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
-//! and `timer` the wait shims' internal timeout as an effect-backed slot.
+//! `timer` the wait shims' internal timeout as an effect-backed slot, and
+//! `test_hooks` (test builds only) the seams the suites drive the
+//! driver's edge paths through.
 //! A fanout is Lua over those arms (the `fanout` shim spawns one task per
 //! member and waits on the live set), so the scheduler keeps no fanout
 //! state of its own.
 
+mod apply;
 mod await_tasks;
 mod builtins;
 mod chain;
@@ -55,8 +64,11 @@ mod dispatch;
 mod drive;
 mod h1;
 mod notices;
+mod performers;
 mod step;
 mod tasks;
+#[cfg(test)]
+mod test_hooks;
 mod timer;
 mod tool_call;
 mod waits;
@@ -71,40 +83,73 @@ use shared_vfs::Origin;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::client::{Completion, GatewayClient};
+use crate::client::GatewayClient;
+use crate::lua::{ScriptReport, ToolBinding};
+use crate::observe::Observation;
 use crate::parser::{Block, Prompt, Section};
 use crate::store::Access;
 use crate::{Error, Result};
 
 use super::context::RunState;
-use super::gateway::GatewaySource;
 use super::protocol::Answer;
+use super::run::{Effect, EffectAnswer, EffectId};
 use super::scope::DispatchTarget;
 use super::section_context::{SectionContext, TaskSeed};
 use await_tasks::AwaitTasks;
+use performers::Performers;
 use tasks::TaskSlot;
 #[cfg(test)]
 pub(crate) use tasks::TaskState;
 
-/// Run-global monotonic id of an in-flight leaf request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct RequestId(u64);
-
-/// What a spawned leaf task posts back for its request.
-///
-/// Most leaf work posts its finished [`Answer`]. A `chat` round posts the
-/// raw completion instead: the round's events and the advertised-scope
-/// check need the parked chain, so the driver classifies the completion
-/// into the answer on its own thread when it applies it.
-enum Arrival {
-    /// A finished answer, resumed into the chain as delivered.
-    Answer(Answer<Error>),
-    /// One `chat` round's completion or failure, classified by the driver.
-    /// Boxed so the body-carrying completion does not size every arrival.
-    Chat(std::result::Result<Box<Completion>, Error>),
-    /// A timer's firing: no answer resumes a chain, the slot backed by the
-    /// request completes and its waiting owner is woken.
+/// The driver-side half of one issued leaf effect: what the parked chain
+/// asked for, in the terms `apply_answer` needs to turn the performer's
+/// raw [`EffectAnswer`] into the chain's protocol [`Answer`] and emit the
+/// round's events. The effect itself carries none of this: it describes
+/// the work, this describes what the work means to the chain.
+enum Continuation {
+    /// A nested `models.infer`: the completion becomes the round's text
+    /// under the single-prose-round reporting rules.
+    Infer,
+    /// A `chat` round: the completion is classified against the scope the
+    /// chain advertised and reported as one model turn.
+    Chat,
+    /// A bound tool call: the tool's own output goes through the shared
+    /// dispatch body (counts already taken at dispatch, then the
+    /// succeeded/failed event, the trust rule, and the `ToolResult`).
+    ToolCall(ToolCallContinuation),
+    /// A `user_input` wait: the broker's text is reported and resumes with
+    /// its availability flag.
+    UserInput,
+    /// A store operation: the succeeded/failed observation pair its
+    /// outcome reports, `None` for `exists`, which reports nothing.
+    Store(Option<(Observation, Observation)>),
+    /// The internal timer behind a timed wait: the firing completes the
+    /// slot backed by the effect and wakes its waiting owner; no chain
+    /// resumes.
     Timer,
+}
+
+/// What a bound `tool_call`'s answer is applied with: the binding the call
+/// resolved to (its alias, output kind, and trust rules), the coordinates
+/// the `ToolResult` reports under, and the model's call id when the model
+/// issued the call.
+struct ToolCallContinuation {
+    /// The binding the alias resolved to at dispatch.
+    binding: ToolBinding,
+    /// The chain, depth, and turn the call fired in.
+    report: ScriptReport,
+    /// The model-issued call id, or `None` for a script call.
+    call_id: Option<String>,
+}
+
+/// One in-flight leaf effect's pending entry: the chain parked on it and
+/// how its answer resumes that chain.
+struct Pending {
+    /// The parked chain (for a timer, the owner whose wait the timer
+    /// serves).
+    chain: ChainIndex,
+    /// How the answer is applied.
+    resume: Continuation,
 }
 
 /// The most precise prompt-source line known for `blocks`: the first
@@ -272,10 +317,6 @@ struct Chain<'a> {
     /// not the stack, so only the field carries the accounting across a
     /// spawn boundary.
     call_depth: usize,
-    /// The chain's client slot: seeded from the parent, resolved lazily on
-    /// first inference through the scheduler's gateway source, so a
-    /// construction error surfaces at first use rather than being swallowed.
-    client: Option<GatewayClient>,
     /// The call parent blocked on this chain, if any.
     parent: Option<ChainIndex>,
     /// The tool scope the chain's last `chat` round advertised, keyed by
@@ -341,8 +382,9 @@ pub(crate) struct Scheduler<'a> {
     /// Chains eligible to resume (FIFO); the driver drains it before
     /// awaiting anything.
     ready: VecDeque<ChainIndex>,
-    /// One entry per in-flight leaf request, mapping it to the parked chain.
-    pending: HashMap<RequestId, ChainIndex>,
+    /// One entry per in-flight leaf effect, keyed by the effect's id:
+    /// the parked chain and how the answer resumes it.
+    pending: HashMap<EffectId, Pending>,
     /// The task arena: one slot per task the run has started, keyed by the
     /// task's id (its backing chain's id). A slot outlives its chain: it
     /// holds the terminal state and the undelivered outcome at least until
@@ -350,13 +392,13 @@ pub(crate) struct Scheduler<'a> {
     /// arena is append-only like the chain arena, so `status` can report a
     /// terminal state at any later time.
     tasks: HashMap<TaskId, TaskSlot>,
-    /// The send half every spawned leaf task posts its answer to. The
-    /// channel is unbounded: each task sends exactly once, and the in-flight
-    /// count is already bounded by the chains that produced them.
-    answer_tx: mpsc::UnboundedSender<(RequestId, Arrival)>,
+    /// The internal performer table: today's spawned leaf work behind the
+    /// effect boundary. It holds the send half of the answer channel and
+    /// posts every answer under its effect's id.
+    performers: Performers<'a>,
     /// The receive half the driver awaits when no chain is ready.
-    answers: mpsc::UnboundedReceiver<(RequestId, Arrival)>,
-    /// Join handles of the in-flight leaf I/O tasks, keyed by request so
+    answers: mpsc::UnboundedReceiver<(EffectId, EffectAnswer)>,
+    /// Join handles of the in-flight leaf I/O tasks, keyed by effect so
     /// a cancelled task chain's own in-flight round can be aborted with
     /// it; every handle is aborted on cancellation or on the driver future's
     /// drop, and aborting a completed task is a no-op. The handles are
@@ -364,33 +406,32 @@ pub(crate) struct Scheduler<'a> {
     /// can drain them: a store op runs on the blocking pool, where abort
     /// detaches rather than interrupts, and only the op's completion
     /// drops its access clone.
-    io_tasks: HashMap<RequestId, JoinHandle<()>>,
-    /// The request ids whose in-flight tasks an abort discarded: a task
-    /// that posted its answer before the abort landed delivers it late,
-    /// and the driver discards exactly those answers. An unknown id that
-    /// was never aborted means the driver dropped a pending entry early -
-    /// answer loss that fails loudly rather than passing silently. An id
-    /// leaves the set when its late answer arrives, so the set stays
-    /// bounded by the aborts whose answers have not landed.
-    aborted_requests: HashSet<RequestId>,
+    io_tasks: HashMap<EffectId, JoinHandle<()>>,
+    /// The effect ids whose in-flight tasks an abort discarded (a chain
+    /// end or a `Dropped` answer): a task that posted its answer before
+    /// the abort landed delivers it late, and the driver discards exactly
+    /// those answers. An unknown id that was never aborted means the
+    /// driver dropped a pending entry early - answer loss that fails
+    /// loudly rather than passing silently. An id leaves the set when its
+    /// late answer arrives, so the set stays bounded by the aborts whose
+    /// answers have not landed.
+    aborted_effects: HashSet<EffectId>,
     /// The most chains one run may start: the arena indexes chains by
     /// `u32`, so the count is bounded by the index space. A field rather
     /// than a constant so a test can shrink the bound and drive the
     /// overflow path without allocating the real one.
     max_chains: usize,
-    /// The next leaf-request id.
-    next_request: u64,
-    /// The run's gateway source: chains resolve their client slot through
-    /// it on first inference.
-    client: GatewaySource,
+    /// The next effect id: a run-wide counter, so every effect the run
+    /// issues has a distinct in-flight handle.
+    next_effect: u64,
 }
 
 impl<'a> Scheduler<'a> {
     /// Builds the scheduler for one run over `ctx`'s prompt. `client` is the
-    /// run's gateway client, if the caller supplied one; otherwise each
-    /// chain builds one from the environment on first inference.
+    /// run's gateway client, if the caller supplied one; otherwise the run
+    /// builds one from the environment on first inference.
     pub(crate) fn new(ctx: &'a RunState, client: Option<GatewayClient>) -> Self {
-        let (answer_tx, answers) = mpsc::unbounded_channel();
+        let (performers, answers) = Performers::new(ctx, client);
         Self {
             ctx,
             chains: Vec::new(),
@@ -398,43 +439,36 @@ impl<'a> Scheduler<'a> {
             ready: VecDeque::new(),
             pending: HashMap::new(),
             tasks: HashMap::new(),
-            answer_tx,
+            performers,
             answers,
             io_tasks: HashMap::new(),
-            aborted_requests: HashSet::new(),
+            aborted_effects: HashSet::new(),
             max_chains: u32::MAX as usize,
-            next_request: 0,
-            client: GatewaySource::from_optional(client, ctx.limits()),
+            next_effect: 0,
         }
     }
 
-    /// Shrinks the chain-count bound so a test can drive the
-    /// [`start_chain`](Self::start_chain) overflow path.
-    #[cfg(test)]
-    pub(crate) fn set_max_chains_for_test(&mut self, limit: usize) {
-        self.max_chains = limit;
-    }
-
-    /// The number of leaf requests the run has issued so far, so a test
-    /// can prove a dispatch was answered inline with no spawned leaf work.
-    #[cfg(test)]
-    pub(crate) fn leaf_requests_issued(&self) -> u64 {
-        self.next_request
-    }
-
-    /// The state of one task's slot, or `None` when no task with that id
-    /// was ever started, so a test can prove a chain's end moved its slot.
-    #[cfg(test)]
-    pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {
-        self.tasks.get(task).map(|slot| slot.state)
-    }
-
-    /// Posts an answer for an arbitrary request id, so a test can drive
-    /// the driver's unknown-answer paths directly.
-    #[cfg(test)]
-    pub(crate) fn post_answer_for_test(&self, request: u64, answer: Answer<Error>) {
-        self.answer_tx
-            .send((RequestId(request), Arrival::Answer(answer)))
-            .expect("the scheduler holds its own receiver");
+    /// Issues one leaf effect for `chain`: allocates its id, hands it to
+    /// the performer table (which spawns the leaf work and will post the
+    /// answer under the id), and parks the chain in the pending table with
+    /// `resume`, the rule its answer is applied by. The one path every
+    /// leaf arm takes, so no arm spawns or parks on its own.
+    ///
+    /// # Errors
+    /// Returns the performer's error when the effect cannot be performed
+    /// (the gateway client cannot be built, or the tool the effect names
+    /// is not in the run's catalog). The id is consumed either way.
+    fn issue(
+        &mut self,
+        chain: ChainIndex,
+        effect: Effect,
+        resume: Continuation,
+    ) -> Result<EffectId> {
+        let id = EffectId(self.next_effect);
+        self.next_effect += 1;
+        let task = self.performers.perform(id, effect)?;
+        self.io_tasks.insert(id, task);
+        self.pending.insert(id, Pending { chain, resume });
+        Ok(id)
     }
 }

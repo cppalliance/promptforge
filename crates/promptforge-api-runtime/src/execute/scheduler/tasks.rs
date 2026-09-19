@@ -40,16 +40,17 @@ use crate::observe::Observation;
 use crate::{Error, Result};
 
 use super::notices::TaskEnd;
-use super::{ChainIndex, Counters, RequestId, Scheduler, prompt_origin};
+use super::{ChainIndex, Counters, Scheduler, prompt_origin};
+use crate::execute::run::EffectId;
 
 /// Where a task's work runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TaskBacking {
     /// A chain in the arena: every author- or model-started task.
     Chain(ChainIndex),
-    /// An in-flight leaf request: the internal timer behind a wait's
+    /// An in-flight leaf effect: the internal timer behind a wait's
     /// timeout, never author-visible.
-    Effect(RequestId),
+    Effect(EffectId),
 }
 
 /// One task's lifecycle state.
@@ -187,7 +188,6 @@ impl Scheduler<'_> {
             Some(input) => chain.ctx.with_args(input),
             None => chain.ctx.clone(),
         };
-        let client = chain.client.clone();
         let spawner_access = Arc::clone(chain.access()?);
         let spawner_emitter = Arc::clone(chain.ctx.emitter());
         let spawner_section = chain.section_name().to_owned();
@@ -233,7 +233,6 @@ impl Scheduler<'_> {
         )?;
         let spawned = &mut self.chains[child.index()];
         spawned.access = Some(Arc::new(access));
-        spawned.client = client;
         spawned.task = task.clone();
         spawned.owner = Some(id);
         spawned.seed = Some(seed.clone());
@@ -373,8 +372,8 @@ impl Scheduler<'_> {
             // the task's own terminal event, which is the last word on it.
             let backing_chain = match backing {
                 TaskBacking::Chain(backing_chain) => backing_chain,
-                TaskBacking::Effect(request) => {
-                    self.abort_request(request);
+                TaskBacking::Effect(effect) => {
+                    self.abort_effect(effect);
                     continue;
                 }
             };
@@ -411,12 +410,12 @@ impl Scheduler<'_> {
                 slot.owner = to;
             }
         }
-        // An effect-backed slot's request is keyed under its owner in the
-        // pending table; the pass has no parked request of its own at the
+        // An effect-backed slot's effect is keyed under its owner in the
+        // pending table; the pass has no parked effect of its own at the
         // hand-off, so every entry under it is such a slot's.
-        for owner in self.pending.values_mut() {
-            if *owner == from {
-                *owner = to;
+        for pending in self.pending.values_mut() {
+            if pending.chain == from {
+                pending.chain = to;
             }
         }
         for chain in &mut self.chains {

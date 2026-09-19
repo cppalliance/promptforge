@@ -726,7 +726,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-29>
 
-### Step 29: Effects as values behind an internal performer table
+### Step 29: Effects as values behind an internal performer table [completed]
 
 - Component: Run API and engine purity
 - Piece: inversion

@@ -5,14 +5,15 @@
 //! handle's frozen binding; `models.infer(prompt)` resolves the section's
 //! current model and runs the same path. Neither form advertises tools, sets
 //! `reply`, or touches `sys`. A Lua block that needs tools uses `call`
-//! on a section. The scheduler's leaf dispatch spawns the round and resumes
-//! the yielding chain with its outcome.
+//! on a section. The scheduler's leaf dispatch issues the round as a
+//! `Chat` effect over one user message and no tools; when the answer
+//! arrives, [`accept_infer`] reports the round and renders its text, and
+//! the yielding chain resumes with the outcome.
 
 use std::sync::atomic::AtomicU32;
 
 use crate::Error;
-use crate::client::{Completion, CompletionResult, GatewayClient, Message};
-use crate::model::ModelBinding;
+use crate::client::{Completion, CompletionError, CompletionResult};
 use crate::observe::detail;
 
 use super::event_buffer::Emitter;
@@ -62,35 +63,29 @@ fn accept_infer_completion(
     }
 }
 
-/// The one infer shape as an async round: a single direct, tool-free
-/// gateway call on a fresh conversation with `binding`, reported exactly
-/// like one prose round.
+/// Applies one infer round's answer - the completion the performer
+/// obtained, or its failure - reporting it exactly like one prose round
+/// through the chain's `emitter` under `section`, and renders its text.
 ///
-/// The scheduler's leaf dispatch drives this on a spawned task, so
-/// cancellation is the driver aborting the task mid-round - no
-/// `MODEL_TURN_FAILED` fires for an aborted round. The round reports
-/// through the chain's `emitter` under `section`.
-pub(crate) async fn infer_round(
-    client: &GatewayClient,
-    binding: &ModelBinding,
-    prompt: &str,
+/// A failed completion is a failed turn and the call's error. The
+/// performer's task is aborted on cancellation before any answer lands,
+/// so no `MODEL_TURN_FAILED` fires for an aborted round.
+///
+/// # Errors
+/// Returns the completion's failure, or [`Error::Lua`] when the round
+/// produced tool calls (none were advertised) or an unrecognized outcome.
+pub(crate) fn accept_infer(
+    result: std::result::Result<Box<Completion>, CompletionError>,
     emitter: &Emitter,
     section: &str,
     turns: &AtomicU32,
 ) -> Result<String, Error> {
-    let completion_options = binding.completion_options();
-    let conversation = [Message::user(prompt)];
-    // A nested infer round consumes only the accumulated completion; live
-    // deltas have no consumer here, so the callback is a no-op.
-    let completion = match client
-        .complete(&conversation, None, &completion_options, |_| {})
-        .await
-    {
+    let completion = match result {
         Ok(completion) => completion,
         Err(error) => {
             emitter.report(section, detail::MODEL_TURN_FAILED);
             return Err(Error::from(error));
         }
     };
-    accept_infer_completion(completion, emitter, section, turns)
+    accept_infer_completion(*completion, emitter, section, turns)
 }

@@ -6,11 +6,10 @@
 //! withheld until every in-flight leaf task has been aborted and joined,
 //! so no store op's access clone outlives the run.
 
-use crate::execute::protocol::Answer;
 use crate::execute::support::GENERIC_COMPLETION;
 use crate::{Error, Result, cancel};
 
-use super::{Arrival, Scheduler};
+use super::Scheduler;
 
 /// Aborts every in-flight leaf task when the driver future is dropped
 /// mid-suspension - a host tearing the run down without polling it to a
@@ -136,57 +135,18 @@ impl Scheduler<'_> {
                     return Err(Error::Interrupted);
                 }
                 arrival = self.answers.recv() => {
-                    let Some((request_id, arrival)) = arrival else {
+                    let Some((effect, answer)) = arrival else {
                         return Err(Error::internal(
                             "the answer channel cannot close while the scheduler holds its sender",
                         ));
                     };
-                    self.io_tasks.remove(&request_id);
-                    let Some(parked) = self.pending.remove(&request_id) else {
-                        // A late answer from an I/O task whose chain was
-                        // already aborted (a cancelled task chain's abort
-                        // races a task that sent before the abort landed):
-                        // the abort recorded the request id, so the answer
-                        // is moot. Any other unknown id means the driver
-                        // dropped a pending entry early - answer loss that
-                        // must fail loudly, not pass silently.
-                        if self.aborted_requests.remove(&request_id) {
-                            continue;
-                        }
-                        return Err(Error::internal(
-                            "an answer arrived for a request with no pending entry and no recorded abort",
-                        ));
-                    };
-                    // A chat round's completion becomes its answer here, on
-                    // the driver thread: the round's events fire against the
-                    // chain's own reporting handles and the tool calls are
-                    // checked against the scope the chain advertised.
-                    let answer = match arrival {
-                        Arrival::Answer(answer) => answer,
-                        Arrival::Chat(result) => self.accept_chat(parked, result)?,
-                        // A timer resumes no chain: its pending entry names
-                        // the owner only so the stall check and the abort
-                        // paths see the sleep as in flight. The firing
-                        // completes the timer's slot and wakes a waiting
-                        // owner through the task arena.
-                        Arrival::Timer => {
-                            self.fire_timer(request_id)?;
-                            continue;
-                        }
-                    };
-                    match answer {
-                        // A claims-model conflict is fatal: the run ends on
-                        // the spot with the determinism violation rather
-                        // than resuming it into Lua, where an author
-                        // `pcall` could catch it. The suspended chains drop
-                        // unarmed with the scheduler, exactly as on the
-                        // cancellation path.
-                        Answer::Store(Err(error @ Error::Determinism(_))) => return Err(error),
-                        answer => {
-                            self.chains[parked.index()].incoming = Some(answer);
-                            self.ready.push_back(parked);
-                        }
-                    }
+                    // Every answer is applied here, on the driver thread:
+                    // the round's events fire against the parked chain's
+                    // own reporting handles, a chat round's tool calls
+                    // are checked against the scope the chain advertised,
+                    // a timer's firing wakes its waiter, and a fatal store
+                    // conflict ends the run.
+                    self.apply_answer(effect, answer)?;
                 }
             }
         }

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use super::models_loop::{echo_tools, loop_context_observed};
 use super::*;
-use crate::execute::protocol::Answer;
+use crate::execute::run::EffectAnswer;
 use crate::execute::scheduler::Scheduler;
 use crate::model::{ModelBinding, ModelId};
 use promptforge_model_client::model::ModelInvocation;
@@ -3559,7 +3559,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // Posted before the drive, so the channel delivers it first: the
     // driver reaches the select with the phantom answer ahead of the real
     // infer's.
-    scheduler.post_answer_for_test(u64::MAX, Answer::Infer(Ok("phantom".to_owned())));
+    scheduler.post_answer_for_test(u64::MAX, EffectAnswer::Timer);
     let error = scheduler
         .drive()
         .await

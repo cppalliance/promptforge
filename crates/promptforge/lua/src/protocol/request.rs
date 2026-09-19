@@ -216,7 +216,10 @@ impl Request {
 /// had them: a negative bound converts to 0 at execution, which the
 /// facade's range validation rejects with the same error a zero bound
 /// earns.
-#[derive(Debug)]
+///
+/// Plain data, so the executor's effect record can carry an operation
+/// through serde exactly as the shim yielded it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StoreOp {
     /// `store.write(path, contents)`.
     Write {

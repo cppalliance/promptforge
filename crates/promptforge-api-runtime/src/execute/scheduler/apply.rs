@@ -1,0 +1,277 @@
+//! Answer application: the one path every performed effect's answer takes
+//! back into the scheduler.
+//!
+//! A performer posts a raw [`EffectAnswer`] - a completion, a tool's own
+//! output, a broker outcome, a store outcome, a timer's firing - and knows
+//! nothing of what the parked chain asked for. `apply_answer` pairs the
+//! answer with the effect's [`Continuation`] and turns it into the chain's
+//! protocol [`Answer`] on the driver thread, emitting the round's events
+//! there: the model turn's boundaries and content, the tool call's
+//! succeeded/failed event and `ToolResult` under the trust rule, the
+//! operator's input, the store operation's outcome. A timer's firing
+//! completes its slot and wakes the waiter instead of resuming a chain. A
+//! `Dropped` answer resumes the chain with the cancelled error, whatever
+//! it was parked on.
+
+use std::sync::Arc;
+
+use promptforge_api_types::tools::{ToolError, ToolOutput};
+
+use crate::client::{Completion, CompletionError};
+use crate::execute::protocol::{Answer, StoreOutcome, ToolCallOutcome};
+use crate::execute::tools::accept_infer;
+use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
+use crate::lua::{ModelReport, UserInputOutcome, prepare_dispatch, prepare_model_dispatch};
+use crate::observe::Observation;
+use crate::store::StoreError;
+use crate::{Error, Result};
+
+use super::dispatch::classify_store_failure;
+use super::tasks::{TaskBacking, TaskState};
+use super::{
+    ChainIndex, Continuation, EffectAnswer, EffectId, Pending, Scheduler, ToolCallContinuation,
+};
+
+/// The cancelled answer for a chain parked on `resume`'s kind of effect:
+/// the protocol variant the chain's shim expects, carrying the run's
+/// cancellation error. A timer resumes no chain; its drop is applied to
+/// its slot instead, before this is reached.
+fn dropped_answer(resume: &Continuation) -> Answer<Error> {
+    match resume {
+        Continuation::Infer => Answer::Infer(Err(Error::Interrupted)),
+        Continuation::Chat => Answer::Chat(Err(Error::Interrupted)),
+        Continuation::ToolCall(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
+        Continuation::UserInput => Answer::UserInput(Err(Error::Interrupted)),
+        // A timer's drop never reaches here; the cancelled store answer
+        // is the harmless stand-in should it ever do so.
+        Continuation::Store(_) | Continuation::Timer => Answer::Store(Err(Error::Interrupted)),
+    }
+}
+
+impl Scheduler<'_> {
+    /// Applies one performed effect's answer: removes the effect's
+    /// in-flight bookkeeping, turns the raw answer into the parked chain's
+    /// protocol answer under the effect's continuation (emitting the
+    /// round's events), and re-queues the chain. A timer's firing
+    /// completes its slot and wakes its waiter instead.
+    ///
+    /// A `Dropped` answer is the host giving the effect up while its
+    /// performer may still be running, so it takes the abort path the
+    /// chain-end rules take: the performer is aborted, its handle stays
+    /// for the run-end drain (a blocking-pool store op detaches rather
+    /// than interrupts, and only its completion releases the access
+    /// clone), and the id is recorded so the performer's late answer, if
+    /// it posted first, is discarded rather than failing the run.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when no pending entry and no recorded
+    /// abort explains the id (the driver dropped a pending entry early -
+    /// answer loss that fails loudly), or when the answer's kind does not
+    /// match the effect's. Returns [`Error::Determinism`] when a store
+    /// answer reports a claims-model conflict: the run ends on the spot
+    /// rather than resuming the conflict into Lua, where an author `pcall`
+    /// could catch it.
+    pub(super) fn apply_answer(&mut self, id: EffectId, answer: EffectAnswer) -> Result<()> {
+        let Some(Pending { chain, resume }) = self.pending.remove(&id) else {
+            // The performer has posted, so its handle has nothing left
+            // for the drain to await.
+            self.io_tasks.remove(&id);
+            // A late answer from a leaf task whose effect was already
+            // aborted or dropped (a cancelled task chain's abort races a
+            // task that sent before the abort landed): the abort recorded
+            // the id, so the answer is moot. Any other unknown id must
+            // fail loudly.
+            if self.aborted_effects.remove(&id) {
+                return Ok(());
+            }
+            return Err(Error::internal(
+                "an answer arrived for an effect with no pending entry and no recorded abort",
+            ));
+        };
+        if matches!(answer, EffectAnswer::Dropped) {
+            self.discard_performer(id);
+        } else {
+            self.io_tasks.remove(&id);
+        }
+        let answer = match (resume, answer) {
+            (Continuation::Timer, EffectAnswer::Dropped) => {
+                self.drop_timer(id);
+                return Ok(());
+            }
+            (resume, EffectAnswer::Dropped) => dropped_answer(&resume),
+            (Continuation::Infer, EffectAnswer::Chat(result)) => {
+                Answer::Infer(self.accept_infer(chain, result))
+            }
+            (Continuation::Chat, EffectAnswer::Chat(result)) => {
+                self.accept_chat(chain, result.map_err(Error::from))?
+            }
+            (Continuation::ToolCall(call), EffectAnswer::ToolCall(result)) => {
+                Answer::ToolCallResult(self.accept_tool_call(chain, &call, result))
+            }
+            (Continuation::UserInput, EffectAnswer::UserInput(result)) => {
+                Answer::UserInput(self.accept_user_input(chain, result))
+            }
+            (Continuation::Store(observations), EffectAnswer::Store(result)) => {
+                match self.accept_store(chain, observations, result) {
+                    // A claims-model conflict is fatal: the suspended
+                    // chains drop unarmed with the scheduler, exactly as
+                    // on the cancellation path.
+                    Err(error @ Error::Determinism(_)) => return Err(error),
+                    result => Answer::Store(result),
+                }
+            }
+            (Continuation::Timer, EffectAnswer::Timer) => return self.fire_timer(id),
+            _ => {
+                return Err(Error::internal(
+                    "an effect's answer must be of the effect's own kind",
+                ));
+            }
+        };
+        self.chains[chain.index()].incoming = Some(answer);
+        self.ready.push_back(chain);
+        Ok(())
+    }
+
+    /// Applies a nested infer round's completion: the single-prose-round
+    /// reporting through the chain's own emitter, then the round's text.
+    fn accept_infer(
+        &self,
+        chain: ChainIndex,
+        result: std::result::Result<Box<Completion>, CompletionError>,
+    ) -> Result<String> {
+        let chain = &self.chains[chain.index()];
+        accept_infer(
+            result,
+            chain.ctx.emitter(),
+            chain.section_name(),
+            chain.ctx.turns(),
+        )
+    }
+
+    /// Applies a bound tool call's own answer through the shared dispatch
+    /// body: the succeeded/failed event, the trust rule, and the
+    /// `ToolResult` report - under the model's call id when the model
+    /// issued the call (a tool's own failure then resumes as untrusted
+    /// failure text), else as a script call classified by the binding's
+    /// declared output kind. The counts were taken at dispatch, so the
+    /// body is handed `None` for them.
+    fn accept_tool_call(
+        &self,
+        chain: ChainIndex,
+        call: &ToolCallContinuation,
+        result: std::result::Result<ToolOutput, ToolError>,
+    ) -> Result<ToolCallOutcome> {
+        let chain = &self.chains[chain.index()];
+        // The shared dispatch body still names `&dyn Observer`; the emitter
+        // is that observer, so its reports land in the buffer under this
+        // chain's task.
+        let emitter = Arc::clone(chain.ctx.emitter());
+        let observer = emitter.as_ref();
+        let execution = chain.ctx.execution();
+        let section = chain.section_name();
+        let nonce = chain.ctx.nonce();
+        match &call.call_id {
+            // Model-issued: the content always resumes, plain - it is the
+            // tool record's text for the next round, never classified by
+            // output kind.
+            Some(call_id) => {
+                let report = ModelReport {
+                    script: call.report,
+                    call_id: call_id.clone(),
+                };
+                prepare_model_dispatch(
+                    &call.binding,
+                    result,
+                    None,
+                    nonce,
+                    observer,
+                    execution,
+                    section,
+                    &report,
+                )
+                .map(|outcome| ToolCallOutcome::Plain(outcome.into_content()))
+                .map_err(Error::from)
+            }
+            None => match prepare_dispatch(
+                &call.binding,
+                result,
+                None,
+                nonce,
+                observer,
+                execution,
+                section,
+                Some(call.report),
+            ) {
+                Ok(outcome) => ToolCallOutcome::from_dispatch(
+                    call.binding.output_kind,
+                    call.binding.alias(),
+                    outcome.into_content(),
+                )
+                .map_err(Error::from),
+                Err(error) => Err(Error::from(error)),
+            },
+        }
+    }
+
+    /// Applies a broker's answer: delivered text is reported byte-exact
+    /// and resumes with `available` true; an unavailable answer is the
+    /// fixed fallback sentence with `available` false and records no
+    /// input; a broker failure is the call's typed input error.
+    fn accept_user_input(
+        &self,
+        chain: ChainIndex,
+        result: std::result::Result<InputOutcome, InputError>,
+    ) -> Result<UserInputOutcome> {
+        let chain = &self.chains[chain.index()];
+        match result {
+            Ok(InputOutcome::Text(text)) => {
+                chain.ctx.emitter().user_input(chain.section_name(), &text);
+                Ok(UserInputOutcome {
+                    text,
+                    available: true,
+                })
+            }
+            Ok(InputOutcome::Unavailable) => Ok(UserInputOutcome {
+                text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
+                available: false,
+            }),
+            Err(error) => Err(Error::from(error)),
+        }
+    }
+
+    /// Applies a store operation's answer: the operation's succeeded or
+    /// failed observation (pushed before the chain resumes, so the event
+    /// stream keeps the legacy closure path's ordering - the op's outcome
+    /// precedes the chunk's closing boundary), then the outcome, with a
+    /// failure classified for the answer channel.
+    fn accept_store(
+        &self,
+        chain: ChainIndex,
+        observations: Option<(Observation, Observation)>,
+        result: std::result::Result<StoreOutcome, StoreError>,
+    ) -> Result<StoreOutcome> {
+        let chain = &self.chains[chain.index()];
+        if let Some((succeeded, failed)) = observations {
+            chain.ctx.emitter().report(
+                chain.section_name(),
+                if result.is_ok() { succeeded } else { failed },
+            );
+        }
+        result.map_err(|error| classify_store_failure(&error))
+    }
+
+    /// Applies a dropped timer: the slot backed by the effect moves to
+    /// `Cancelled` without waking its owner. The host drops effects only
+    /// when it is cancelling the run, and that cancel aborts the waiter
+    /// with every other chain.
+    fn drop_timer(&mut self, effect: EffectId) {
+        if let Some(slot) = self
+            .tasks
+            .values_mut()
+            .find(|slot| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
+        {
+            slot.state = TaskState::Cancelled;
+            slot.ok = Some(false);
+        }
+    }
+}

@@ -72,15 +72,17 @@
 //! (the adapter replaying drained events onto the host's observer and
 //! capture), `gateway` (client acquisition and the live H1 resolution
 //! inputs),
-//! `tools` (the nested-inference round),
+//! `tools` (the nested-inference round's answer),
 //! `section_vm` (the section VM setup half shared by the walk and
 //! the fanout arm), `section_context` (the per-section `SectionContext`
 //! frame the scheduler's chains construct, run, and tear down),
 //! `engine` (the walk-target
 //! resolution helpers), `protocol` (the coroutine request/answer types
-//! for the yield/resume boundary), `scheduler` (the chain-stack scheduler
-//! driving the coroutine protocol: the live H1 pass, the walk, call
-//! chains, fanout, and the `chat` and `tool_call` rounds the
+//! for the yield/resume boundary), `run` (the effect vocabulary: the
+//! `Effect` a leaf arm issues, its serializable `EffectRecord`, and the
+//! `EffectAnswer` a performer returns), `scheduler` (the chain-stack
+//! scheduler driving the coroutine protocol: the live H1 pass, the walk,
+//! call chains, fanout, and the `chat` and `tool_call` rounds the
 //! section-visible `models.loop` shim yields), `scope` (tool-scope
 //! validation and schema/dispatch preparation), and `support` (shared
 //! helpers).
@@ -97,6 +99,7 @@ mod fill;
 mod gateway;
 pub(crate) mod protocol;
 mod requirements;
+mod run;
 mod scheduler;
 mod scope;
 mod section_context;

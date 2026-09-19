@@ -15,7 +15,8 @@
 //! completion error types through [`crate::client`].
 
 pub(crate) use promptforge_model_client::model::{
-    ModelBinding, ModelDescriptor, ModelId, ModelInvocation, ModelSet, ModelView, ThinkingMode,
+    CompletionOptions, ModelBinding, ModelDescriptor, ModelId, ModelInvocation, ModelSet,
+    ModelView, Temperature, ThinkingMode,
 };
 
 #[cfg(test)]

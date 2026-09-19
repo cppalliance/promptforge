@@ -11,28 +11,27 @@
 //! script call, or a name whose arm has not landed) answers as unbound; a
 //! local Lua tool is
 //! answered inline on the parked chain's VM, since its handler is Lua on
-//! that VM and no leaf work exists to spawn; a bound tool resolves against the
-//! run's full bound catalog and its dispatch spawns onto the answer
-//! channel. `call_id: Some` always resumes with content - a tool's own
-//! failure becomes untrusted failure text - and `ToolResult` fires under
-//! the id; `call_id: None` keeps the raise-at-call-site behavior, and its
-//! `ToolResult` fires under no id.
+//! that VM and no leaf work exists to issue; a bound tool resolves against
+//! the run's full bound catalog, its attempt is counted, and the call is
+//! issued as a `ToolCall` effect whose answer the driver applies through
+//! the shared dispatch body. `call_id: Some` always resumes with content -
+//! a tool's own failure becomes untrusted failure text - and `ToolResult`
+//! fires under the id; `call_id: None` keeps the raise-at-call-site
+//! behavior, and its `ToolResult` fires under no id.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ToolCallOutcome};
-use crate::lua::{
-    ModelReport, ScriptReport, SectionVm, ToolCallCounts, current_tool_bindings,
-    dispatch_model_tool, dispatch_tool,
-};
+use crate::execute::run::Effect;
+use crate::lua::{ScriptReport, SectionVm, ToolCallCounts, current_tool_bindings};
 use crate::observe::detail;
-use crate::{Error, Result, cancel};
+use crate::{Error, Result};
 
 use super::builtins::is_task_builtin;
 use super::dispatch::unbound_tool_call;
-use super::{Arrival, ChainIndex, RequestId, Scheduler};
+use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
@@ -47,14 +46,14 @@ const RESERVED_TOOL_NAMES: [&str; 5] = [
     "await_tasks",
 ];
 
-/// How one `tool_call` dispatch resolved: a spawned bound dispatch parked
-/// on the pending table, an answer settled on the driver thread (a local
-/// Lua tool, run on the parked chain's VM; a task built-in), such an
-/// answer plus the task chain a `task` built-in started, enqueued behind
-/// the caller, or the chain parked in the model's `await_tasks` on its
-/// live tasks, answered when one ends or its timer fires.
+/// How one `tool_call` dispatch resolved: a bound call issued as an effect
+/// and parked on the pending table, an answer settled on the driver thread
+/// (a local Lua tool, run on the parked chain's VM; a task built-in), such
+/// an answer plus the task chain a `task` built-in started, enqueued
+/// behind the caller, or the chain parked in the model's `await_tasks` on
+/// its live tasks, answered when one ends or its timer fires.
 pub(super) enum ToolCallDispatch {
-    Spawned(RequestId, tokio::task::JoinHandle<()>),
+    Issued,
     Answered(Answer<Error>),
     Started(Answer<Error>, ChainIndex),
     Parked,
@@ -113,7 +112,7 @@ fn answer_local_tool(
 }
 
 impl Scheduler<'_> {
-    /// Dispatches a `tool_call` request. A spawned bound dispatch parks the
+    /// Dispatches a `tool_call` request. An issued bound call parks the
     /// chain in the pending table; a local Lua tool's answer resumes the
     /// chain on the spot; every preparation failure - a reserved name, an
     /// unbound alias, the counts install, a local handler's failure - is
@@ -127,10 +126,10 @@ impl Scheduler<'_> {
         call_id: Option<String>,
     ) {
         match self.prepare_tool_call(id, alias, args, call_id) {
-            Ok(ToolCallDispatch::Spawned(request_id, task)) => {
-                self.io_tasks.insert(request_id, task);
-                self.pending.insert(request_id, id);
-            }
+            // An issued call is parked on the pending table; a parked
+            // wait was recorded on the chain, and a member's end or the
+            // timer's firing answers it.
+            Ok(ToolCallDispatch::Issued | ToolCallDispatch::Parked) => {}
             Ok(ToolCallDispatch::Answered(answer)) => {
                 self.chains[id.index()].incoming = Some(answer);
                 self.ready.push_back(id);
@@ -142,9 +141,6 @@ impl Scheduler<'_> {
                 self.ready.push_back(id);
                 self.ready.push_back(child);
             }
-            // The arm recorded the wait on the chain; a member's end or
-            // the timer's firing answers it.
-            Ok(ToolCallDispatch::Parked) => {}
             Err(error) => {
                 self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
                 self.ready.push_back(id);
@@ -159,9 +155,11 @@ impl Scheduler<'_> {
     /// alias resolved against the run's full bound tool catalog (the
     /// section's effective scope shapes what the model is offered, and the
     /// author's own script is not the model, so the scope does not gate it;
-    /// the model-advertised set stays section-scoped) and the spawned
-    /// dispatch: the model-issued body under a `call_id`, else the script
-    /// body classified by the binding's declared output kind at completion.
+    /// the model-advertised set stays section-scoped), the attempt
+    /// counted, and the issued effect. The answer's rules - the
+    /// model-issued body under a `call_id`, else the script body
+    /// classified by the binding's declared output kind - are the
+    /// continuation's, applied when the answer lands.
     fn prepare_tool_call(
         &mut self,
         id: ChainIndex,
@@ -184,9 +182,7 @@ impl Scheduler<'_> {
         let chain = &mut self.chains[id.index()];
         let ctx = chain.ctx.clone();
         let emitter = Arc::clone(chain.ctx.emitter());
-        let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();
-        let nonce = chain.ctx.nonce().clone();
         let report = ScriptReport {
             chain_id: id.0,
             // The call depth is capped at MAX_CALL_DEPTH, far inside
@@ -220,75 +216,23 @@ impl Scheduler<'_> {
             return Err(unbound_tool_call(&tool_set, alias));
         };
         // The counts seed from the section's effective scope; a bound alias
-        // outside it must still be seeded here, because the shared dispatch
-        // body's increment errors on an unseeded alias.
+        // outside it must still be seeded here, because the increment
+        // errors on an unseeded alias. The attempt counts at dispatch -
+        // before the tool runs, so a cancelled dispatch still counts,
+        // exactly as the shared body has always counted it.
         counts.ensure(binding.alias())?;
-        let output_kind = binding.output_kind;
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        // A spawned task does not inherit the cancel task-local; the
-        // current handle rides into the task explicitly so the shared
-        // dispatch body's cancel race stays armed there. The driver also
-        // aborts the task handle on cancellation, so both paths end a slow
-        // tool promptly.
-        let cancel = cancel::current();
-        let task = tokio::spawn(async move {
-            // The shared dispatch body still names `&dyn Observer`; the
-            // emitter is that observer, so its reports land in the buffer
-            // under this chain's task.
-            let observer = emitter.as_ref();
-            let result = cancel::maybe_scope(cancel, async {
-                match call_id {
-                    // Model-issued: the content always resumes, plain -
-                    // it is the tool record's text for the next round,
-                    // never classified by output kind.
-                    Some(call_id) => {
-                        let report = ModelReport {
-                            script: report,
-                            call_id,
-                        };
-                        dispatch_model_tool(
-                            &binding,
-                            args,
-                            Some(&counts),
-                            &nonce,
-                            observer,
-                            &execution,
-                            &section,
-                            &report,
-                        )
-                        .await
-                        .map(|outcome| ToolCallOutcome::Plain(outcome.into_content()))
-                        .map_err(Error::from)
-                    }
-                    None => match dispatch_tool(
-                        &binding,
-                        args,
-                        Some(&counts),
-                        &nonce,
-                        observer,
-                        &execution,
-                        &section,
-                        Some(report),
-                    )
-                    .await
-                    {
-                        Ok(outcome) => ToolCallOutcome::from_dispatch(
-                            output_kind,
-                            binding.alias(),
-                            outcome.into_content(),
-                        )
-                        .map_err(Error::from),
-                        Err(error) => Err(Error::from(error)),
-                    },
-                }
-            })
-            .await;
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Arrival::Answer(Answer::ToolCallResult(result))));
+        counts.increment(binding.alias())?;
+        let effect = Effect::ToolCall {
+            tool: binding.id().clone(),
+            alias: binding.alias().to_owned(),
+            args,
+        };
+        let resume = Continuation::ToolCall(ToolCallContinuation {
+            binding,
+            report,
+            call_id,
         });
-        Ok(ToolCallDispatch::Spawned(request_id, task))
+        self.issue(id, effect, resume)?;
+        Ok(ToolCallDispatch::Issued)
     }
 }

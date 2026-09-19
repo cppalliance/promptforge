@@ -42,13 +42,4 @@ impl GatewaySource {
             GatewaySource::Env(limits) => env_client_with_limits(*limits),
         }
     }
-
-    /// The caller-supplied client when the source wraps one, so a driver can
-    /// seed a chain's client slot without forcing the environment build.
-    pub(crate) fn ready(&self) -> Option<&GatewayClient> {
-        match self {
-            GatewaySource::Ready(client) => Some(client),
-            GatewaySource::Env(_) => None,
-        }
-    }
 }
