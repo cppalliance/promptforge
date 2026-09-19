@@ -1,7 +1,7 @@
 //! Tests for the scheduler's `Chat` dispatch arm from a section VM: one
 //! stateless tool-capable round whose events the scheduler emits when it
 //! applies the answer. The section fixtures reach the arm through the
-//! test-only `models.chat` install (`expose_chat_shim_for_test`); in
+//! test-only `models.chat` install (`expose_raw_shims_for_test`); in
 //! production only the loop shim yields `chat`. The round's tool-scope
 //! resolution (absent, explicit, empty, and unbound lists) is covered in
 //! `chat_scope`.
@@ -129,7 +129,7 @@ pub(super) fn chat_context(
     *ctx.tool_set()
         .lock()
         .expect("the tool set mutex is not poisoned") = tools;
-    ctx.expose_chat_shim_for_test();
+    ctx.expose_raw_shims_for_test();
     ctx
 }
 

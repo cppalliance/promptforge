@@ -2,23 +2,20 @@
 //! suspended chain. Every store operation is a leaf yield, answered on the
 //! blocking pool uniformly for all backends - no inline fast path - so
 //! interleaving behavior never depends on which backend serves the mount.
-//! A received `mcp` request is the protocol's typed reserved error.
+//! A received `mcp` request is the protocol's typed reserved error. The
+//! `tool_call` and `chat` arms live in their own modules.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
-use crate::execute::protocol::{Answer, Request, StoreOp, ToolCallOutcome};
+use crate::execute::protocol::{Answer, Request, StoreOp};
 use crate::execute::support::MAX_CALL_DEPTH;
 use crate::execute::tools::infer_round;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
-use crate::lua::{
-    ScriptReport, ToolSet, UserInputOutcome, current_tool_bindings, dispatch_tool,
-    resolve_model_binding, run_store_op,
-};
+use crate::lua::{ToolSet, UserInputOutcome, resolve_model_binding, run_store_op};
 use crate::model::ModelBinding;
 use crate::observe::{Observation, detail};
 use crate::store::{Store, StoreError};
-use crate::{Error, Result, cancel};
+use crate::{Error, Result};
 
 use super::{Arrival, ChainId, RequestId, Scheduler};
 
@@ -96,14 +93,12 @@ impl Scheduler<'_> {
                 self.dispatch_fanout(id, &worker, &items, &var);
                 Ok(())
             }
-            // `call_id` is carried but not yet honored: the model-issued
-            // resume-with-content path lands with the tool_call arm.
             Request::ToolCall {
                 alias,
                 args,
-                call_id: _,
+                call_id,
             } => {
-                self.dispatch_tool_call(id, &alias, args);
+                self.dispatch_tool_call(id, &alias, args, call_id);
                 Ok(())
             }
             Request::Loop {
@@ -204,108 +199,6 @@ impl Scheduler<'_> {
             // A send fails only when the driver is gone (a cancelled run);
             // the answer is then moot.
             let _ = tx.send((request_id, Arrival::Answer(Answer::Infer(result))));
-        });
-        Ok((request_id, task))
-    }
-
-    /// Dispatches a `tool_call` request: resolves the alias against the
-    /// run's full bound tool catalog, spawns the shared dispatch body onto
-    /// the answer channel, and parks the chain in the pending table. Every
-    /// dispatch failure - an unbound alias, the counts install - is the
-    /// call's answer, resumed into the caller so an author `pcall` can
-    /// catch it exactly as a tool failure.
-    fn dispatch_tool_call(&mut self, id: ChainId, alias: &str, args: serde_json::Value) {
-        match self.prepare_tool_call(id, alias, args) {
-            Ok((request_id, task)) => {
-                self.io_tasks.insert(request_id, task);
-                self.pending.insert(request_id, id);
-            }
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
-                self.ready.push_back(id);
-            }
-        }
-    }
-
-    /// The fallible half of tool-call dispatch: the alias resolved against
-    /// the run's full bound tool catalog (the section's effective scope
-    /// shapes what the model is offered, and the author's own script is not
-    /// the model, so the scope does not gate it - the model-advertised set
-    /// stays section-scoped), the one-time counts install, and the spawned
-    /// dispatch through the shared `dispatch_tool` body, classified by the
-    /// binding's declared output kind at completion.
-    fn prepare_tool_call(
-        &mut self,
-        id: ChainId,
-        alias: &str,
-        args: serde_json::Value,
-    ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
-        let chain = &mut self.chains[id.index()];
-        let tool_set = chain.ctx.tool_set_snapshot()?;
-        let Some(binding) = tool_set.binding(alias).cloned() else {
-            return Err(unbound_tool_call(&tool_set, alias));
-        };
-        let ctx = chain.ctx.clone();
-        let counts = {
-            let frame = chain
-                .frame
-                .as_mut()
-                .ok_or(Error::internal("a live chain holds its frame"))?;
-            let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
-            frame.script_call_counts(&ctx, &effective)?
-        };
-        // The counts seed from the section's effective scope; a bound alias
-        // outside it must still be seeded here, because the shared dispatch
-        // body's increment errors on an unseeded alias.
-        counts.ensure(binding.alias())?;
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
-        let section = chain.section_name().to_owned();
-        let nonce = chain.ctx.nonce().clone();
-        let report = ScriptReport {
-            chain_id: id.0,
-            // The call depth is capped at MAX_CALL_DEPTH, far inside
-            // u32; the saturation is a defensive no-op.
-            depth: u32::try_from(chain.call_depth).unwrap_or(u32::MAX),
-            turn: chain.ctx.turns().load(Ordering::Relaxed),
-        };
-        let output_kind = binding.output_kind;
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        // A spawned task does not inherit the cancel task-local; the
-        // current handle rides into the task explicitly so the shared
-        // dispatch body's cancel race stays armed there. The driver also
-        // aborts the task handle on cancellation, so both paths end a slow
-        // tool promptly.
-        let cancel = cancel::current();
-        let task = tokio::spawn(async move {
-            let result = cancel::maybe_scope(cancel, async {
-                match dispatch_tool(
-                    &binding,
-                    args,
-                    Some(&counts),
-                    &nonce,
-                    observer.as_ref(),
-                    &execution,
-                    &section,
-                    Some(report),
-                )
-                .await
-                {
-                    Ok(outcome) => ToolCallOutcome::from_dispatch(
-                        output_kind,
-                        binding.alias(),
-                        outcome.into_content(),
-                    )
-                    .map_err(Error::from),
-                    Err(error) => Err(Error::from(error)),
-                }
-            })
-            .await;
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Arrival::Answer(Answer::ToolCallResult(result))));
         });
         Ok((request_id, task))
     }

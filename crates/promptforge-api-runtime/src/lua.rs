@@ -13,11 +13,12 @@
 
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, MessageContent, MessageRecord,
-    MessageRole, OverflowReason, ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts,
-    ToolCallRecord, ToolOutputKind, ToolSet, ToolView, UserInputOutcome, append_message_record,
-    current_tool_bindings, dispatch_tool, enrich_sys_model, install_section_loop_shim,
-    install_section_user_input_shim, install_store_shims, install_ui, invoke_selected,
-    is_context_overflow, precheck, project_messages, resolve_model_binding, run_store_op,
+    MessageRole, ModelReport, OverflowReason, ProseState, ScriptReport, SectionVm, ToolBinding,
+    ToolCallCounts, ToolCallRecord, ToolOutputKind, ToolSet, ToolView, UserInputOutcome,
+    append_message_record, current_tool_bindings, dispatch_model_tool, dispatch_tool,
+    enrich_sys_model, install_section_loop_shim, install_section_user_input_shim,
+    install_store_shims, install_ui, invoke_selected, is_context_overflow, precheck,
+    project_messages, resolve_model_binding, run_store_op,
 };
 
 #[cfg(test)]

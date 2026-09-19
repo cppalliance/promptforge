@@ -1889,6 +1889,7 @@ mod model_and_reply;
 mod models_loop;
 mod observations;
 mod scheduler;
+mod tool_call_arm;
 mod tool_loop;
 mod tool_scoping;
 mod unified_pipeline;

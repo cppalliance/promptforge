@@ -38,6 +38,14 @@ const CHAT_REGISTRY: &str = "promptforge.impl_coro.chat";
 /// ever reads this stash there.
 const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 
+/// The registry key for the shim's model-issued `tool_call` form, stashed
+/// by the prelude install so a test host can install it as
+/// `tools.call_as_model` and drive the driver's `call_id` path from a
+/// fixture section. The registry is host-side only: in production the
+/// loop shim reaches the function directly inside the prelude chunk, and
+/// no VM ever installs it as a global.
+const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
+
 /// The registry key for the shim's `user_input`, stashed by the prelude
 /// install so a section VM's host can install it as the `user_input`
 /// global. The registry is host-side only: an agent VM's `user_input`
@@ -155,6 +163,9 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models_loop: Function = shims.raw_get("loop").map_err(Error::lua)?;
     lua.set_named_registry_value(LOOP_REGISTRY, models_loop)
+        .map_err(Error::lua)?;
+    let model_tool_call: Function = shims.raw_get("model_tool_call").map_err(Error::lua)?;
+    lua.set_named_registry_value(MODEL_TOOL_CALL_REGISTRY, model_tool_call)
         .map_err(Error::lua)?;
     let user_input: Function = shims.raw_get("user_input").map_err(Error::lua)?;
     lua.set_named_registry_value(USER_INPUT_REGISTRY, user_input)
@@ -307,6 +318,27 @@ pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
     models.raw_set("chat", chat).map_err(Error::lua)
+}
+
+/// Installs the model-issued `tool_call` form as `tools.call_as_model` on a
+/// VM whose shim prelude already ran, so a fixture section can yield a
+/// `tool_call` carrying a `call_id` straight at the driver's dispatch arm.
+///
+/// Test hosts are the only callers: in production the loop shim reaches
+/// the function directly inside the prelude chunk, and `tools.call_as_model`
+/// never exists in any VM - not stubbed, simply absent.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude was never installed on this
+/// VM, the `tools` table is absent, or the install fails.
+pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
+    let model_tool_call: Function = lua
+        .named_registry_value(MODEL_TOOL_CALL_REGISTRY)
+        .map_err(Error::lua)?;
+    let tools: Table = lua.globals().raw_get("tools").map_err(Error::lua)?;
+    tools
+        .raw_set("call_as_model", model_tool_call)
+        .map_err(Error::lua)
 }
 
 /// Installs the store yield shims onto a VM's `store` table, replacing the
