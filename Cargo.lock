@@ -2593,6 +2593,11 @@ dependencies = [
 name = "harness-log"
 version = "0.3.0"
 dependencies = [
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "turso",
  "workspace-hack",
 ]
 
