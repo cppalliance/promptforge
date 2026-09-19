@@ -12,15 +12,30 @@ use crate::execute::support::MAX_CALL_DEPTH;
 use crate::execute::tools::infer_round;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
 use crate::lua::{
-    ScriptReport, UserInputOutcome, current_tool_bindings, dispatch_tool, resolve_model_binding,
-    run_store_op,
+    ScriptReport, ToolSet, UserInputOutcome, current_tool_bindings, dispatch_tool,
+    resolve_model_binding, run_store_op,
 };
 use crate::model::ModelBinding;
 use crate::observe::{Observation, detail};
 use crate::store::{Store, StoreError};
 use crate::{Error, Result, cancel};
 
-use super::{ChainId, RequestId, Scheduler};
+use super::{Arrival, ChainId, RequestId, Scheduler};
+
+/// The error for an alias that names no binding in the run's tool catalog:
+/// the name and every bound alias, so the message reads required versus
+/// actual. Shared by the script `tool_call` arm and the `chat` arm's
+/// explicit tool list.
+pub(super) fn unbound_tool_call(tool_set: &ToolSet, name: &str) -> Error {
+    Error::UnboundToolCall {
+        name: name.to_owned(),
+        bound: tool_set
+            .bindings()
+            .iter()
+            .map(|binding| binding.alias().to_owned())
+            .collect(),
+    }
+}
 
 /// The succeeded/failed observation pair one store operation reports,
 /// matching the legacy direct closures event for event; `exists` reported
@@ -105,13 +120,14 @@ impl Scheduler<'_> {
                 Ok(())
             }
             Request::Store { op } => self.dispatch_store(id, op),
-            // Unreachable: no section VM installs the models.chat shim, and
-            // stripped coroutines make a hand-rolled yield fail validation
-            // before dispatch - the mirror of the agent driver's guards for
-            // the section-only requests.
-            Request::Chat { .. } => Err(Error::internal(
-                "a section VM cannot yield a chat request: the models.chat shim is never installed",
-            )),
+            Request::Chat {
+                messages,
+                model,
+                tools,
+            } => {
+                self.dispatch_chat(id, &messages, model.as_deref(), tools.as_deref());
+                Ok(())
+            }
             Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
         }
     }
@@ -187,7 +203,7 @@ impl Scheduler<'_> {
             .await;
             // A send fails only when the driver is gone (a cancelled run);
             // the answer is then moot.
-            let _ = tx.send((request_id, Answer::Infer(result)));
+            let _ = tx.send((request_id, Arrival::Answer(Answer::Infer(result))));
         });
         Ok((request_id, task))
     }
@@ -227,14 +243,7 @@ impl Scheduler<'_> {
         let chain = &mut self.chains[id.index()];
         let tool_set = chain.ctx.tool_set_snapshot()?;
         let Some(binding) = tool_set.binding(alias).cloned() else {
-            return Err(Error::UnboundToolCall {
-                name: alias.to_owned(),
-                bound: tool_set
-                    .bindings()
-                    .iter()
-                    .map(|binding| binding.alias().to_owned())
-                    .collect(),
-            });
+            return Err(unbound_tool_call(&tool_set, alias));
         };
         let ctx = chain.ctx.clone();
         let counts = {
@@ -296,7 +305,7 @@ impl Scheduler<'_> {
             .await;
             // A send fails only when the driver is gone (a cancelled run);
             // the answer is then moot.
-            let _ = tx.send((request_id, Answer::ToolCallResult(result)));
+            let _ = tx.send((request_id, Arrival::Answer(Answer::ToolCallResult(result))));
         });
         Ok((request_id, task))
     }
@@ -344,7 +353,7 @@ impl Scheduler<'_> {
             };
             // A send fails only when the driver is gone (a cancelled run);
             // the answer is then moot.
-            let _ = tx.send((request_id, answer));
+            let _ = tx.send((request_id, Arrival::Answer(answer)));
         });
         self.io_tasks.insert(request_id, task);
         self.pending.insert(request_id, id);
@@ -396,7 +405,9 @@ impl Scheduler<'_> {
             // the answer is then moot.
             let _ = tx.send((
                 request_id,
-                Answer::Store(result.map_err(|e| classify_store_failure(&e))),
+                Arrival::Answer(Answer::Store(
+                    result.map_err(|e| classify_store_failure(&e)),
+                )),
             ));
         });
         self.io_tasks.insert(request_id, task);

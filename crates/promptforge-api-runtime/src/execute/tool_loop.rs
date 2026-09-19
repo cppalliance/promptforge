@@ -94,7 +94,7 @@ fn tool_result_record(id: &str, content: String) -> MessageRecord {
 
 /// Assembles one round's [`CallMetrics`] from everything the completion
 /// measured, or `None` when nothing was measured.
-fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
+pub(crate) fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
     let metrics = CallMetrics {
         usage: completion.usage().cloned(),
         llama: completion.llama_timings().cloned(),

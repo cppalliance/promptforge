@@ -201,6 +201,11 @@ pub(crate) struct RunState {
     /// The host's live streaming-delta callback, forwarded by every model
     /// round; `None` drops deltas at the leaf.
     on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
+    /// Test-only: install the `chat` yield shim as `models.chat` in every
+    /// section VM, so a fixture section can yield one raw `chat` round at
+    /// the scheduler's dispatch arm without going through a loop shim.
+    #[cfg(test)]
+    chat_shim: bool,
 }
 
 impl RunState {
@@ -242,7 +247,17 @@ impl RunState {
             input: ctx.input.clone(),
             ui: ctx.ui.clone(),
             on_delta: ctx.on_delta.clone(),
+            #[cfg(test)]
+            chat_shim: false,
         }
+    }
+
+    /// Exposes the `chat` yield shim as `models.chat` in every section VM
+    /// this run starts, so a test fixture can drive the scheduler's `Chat`
+    /// arm with one raw round.
+    #[cfg(test)]
+    pub(crate) fn expose_chat_shim_for_test(&mut self) {
+        self.chat_shim = true;
     }
 
     /// The prompt this run executes.
@@ -437,6 +452,8 @@ impl RunState {
             section_name,
             shared: &self.shared,
             ui: self.ui.as_ref(),
+            #[cfg(test)]
+            chat_shim: self.chat_shim,
         }
     }
 
@@ -462,7 +479,10 @@ impl RunState {
 
 impl fmt::Debug for RunState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunState")
+        let mut state = f.debug_struct("RunState");
+        #[cfg(test)]
+        state.field("chat_shim", &self.chat_shim);
+        state
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)
             .field("vfs", &"<VfsRef>")

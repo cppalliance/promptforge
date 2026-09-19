@@ -507,7 +507,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-11>
 
-### Step 11: `Chat` dispatch arm for the section VM
+### Step 11: `Chat` dispatch arm for the section VM [completed]
 
 - Component: Lua loop
 - Piece: runtime arms

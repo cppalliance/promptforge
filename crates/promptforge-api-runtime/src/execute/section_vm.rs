@@ -77,6 +77,10 @@ pub(crate) struct SectionVmSetup<'a> {
     /// one: its presence is the Agent-window context, so the section VM
     /// gains the `ui()` global and the raw-id `models.get` fallback.
     pub(crate) ui: Option<&'a Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
+    /// Test-only: install the `chat` yield shim as `models.chat`, so a
+    /// fixture section can yield one raw `chat` round.
+    #[cfg(test)]
+    pub(crate) chat_shim: bool,
 }
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
@@ -129,6 +133,10 @@ where
     vm.install_coro_shims()?;
     crate::lua::install_section_loop_shim(vm.lua())?;
     crate::lua::install_section_user_input_shim(vm.lua())?;
+    #[cfg(test)]
+    if setup.chat_shim {
+        promptforge_lua::install_agent_chat_shim(vm.lua())?;
+    }
     vm.replay_shared(
         setup.shared,
         setup.observer_arc.as_ref(),
