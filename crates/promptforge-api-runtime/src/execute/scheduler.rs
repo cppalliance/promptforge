@@ -30,17 +30,19 @@
 //! The submodules carry the rest: `chain` the chain lifecycle (arena
 //! insertion and the two chain-end paths), `step` one chain's step to its
 //! next suspension point, `walk` the section walk rules, `dispatch` the
-//! request arms, `models_loop` the Rust-backed `models.loop` dispatch, and
+//! request arms, `chat` the one-round `chat` arm and its answer
+//! application, `models_loop` the Rust-backed `models.loop` dispatch, and
 //! `tasks` the fanout join tables and arm bookkeeping.
 
 mod chain;
+mod chat;
 mod dispatch;
 mod models_loop;
 mod step;
 mod tasks;
 mod walk;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use mlua::Thread;
@@ -48,7 +50,7 @@ use shared_vfs::Origin;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::client::GatewayClient;
+use crate::client::{Completion, GatewayClient};
 use crate::parser::{Block, Prompt, Section};
 use crate::store::Access;
 use crate::{Error, Result, cancel};
@@ -56,6 +58,7 @@ use crate::{Error, Result, cancel};
 use super::context::RunState;
 use super::gateway::GatewaySource;
 use super::protocol::Answer;
+use super::scope::DispatchTarget;
 use super::section_context::SectionContext;
 use super::support::GENERIC_COMPLETION;
 use tasks::{ArmState, FanoutId, JoinState};
@@ -63,6 +66,20 @@ use tasks::{ArmState, FanoutId, JoinState};
 /// Run-global monotonic id of an in-flight leaf request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RequestId(u64);
+
+/// What a spawned leaf task posts back for its request.
+///
+/// Most leaf work posts its finished [`Answer`]. A `chat` round posts the
+/// raw completion instead: the round's events and the advertised-scope
+/// check need the parked chain, so the driver classifies the completion
+/// into the answer on its own thread when it applies it.
+enum Arrival {
+    /// A finished answer, resumed into the chain as delivered.
+    Answer(Answer<Error>),
+    /// One `chat` round's completion or failure, classified by the driver.
+    /// Boxed so the body-carrying completion does not size every arrival.
+    Chat(std::result::Result<Box<Completion>, Error>),
+}
 
 /// The most precise prompt-source line known for `blocks`: the first
 /// compiled chunk's absolute source line, else the prompt's opening line.
@@ -167,6 +184,11 @@ struct Chain<'a> {
     client: Option<GatewayClient>,
     /// The call parent blocked on this chain, if any.
     parent: Option<ChainId>,
+    /// The tool scope the chain's last `chat` round advertised, keyed by
+    /// alias: the round's answer is checked against it, so a tool name the
+    /// model invents or reaches for outside the scope fails as out of
+    /// scope. `None` before the chain's first round.
+    advertised: Option<BTreeMap<String, DispatchTarget>>,
     /// The fanout-arm state when this chain is a fanout arm: the arm runs
     /// the same walk machinery as any chain, and its finish writes its
     /// join's result slot instead of a call answer.
@@ -236,9 +258,9 @@ pub(crate) struct Scheduler<'a> {
     /// The send half every spawned leaf task posts its answer to. The
     /// channel is unbounded: each task sends exactly once, and the in-flight
     /// count is already bounded by the chains that produced them.
-    answer_tx: mpsc::UnboundedSender<(RequestId, Answer<Error>)>,
+    answer_tx: mpsc::UnboundedSender<(RequestId, Arrival)>,
     /// The receive half the driver awaits when no chain is ready.
-    answers: mpsc::UnboundedReceiver<(RequestId, Answer<Error>)>,
+    answers: mpsc::UnboundedReceiver<(RequestId, Arrival)>,
     /// Join handles of the in-flight leaf I/O tasks, keyed by request so
     /// a fatal fanout arm can abort a sibling arm's own in-flight round;
     /// every handle is aborted on cancellation or on the driver future's
@@ -322,7 +344,7 @@ impl<'a> Scheduler<'a> {
     #[cfg(test)]
     pub(crate) fn post_answer_for_test(&self, request: u64, answer: Answer<Error>) {
         self.answer_tx
-            .send((RequestId(request), answer))
+            .send((RequestId(request), Arrival::Answer(answer)))
             .expect("the scheduler holds its own receiver");
     }
 
@@ -427,8 +449,8 @@ impl<'a> Scheduler<'a> {
                     }
                     return Err(Error::Interrupted);
                 }
-                answer = self.answers.recv() => {
-                    let Some((request_id, answer)) = answer else {
+                arrival = self.answers.recv() => {
+                    let Some((request_id, arrival)) = arrival else {
                         return Err(Error::internal(
                             "the answer channel cannot close while the scheduler holds its sender",
                         ));
@@ -448,6 +470,14 @@ impl<'a> Scheduler<'a> {
                         return Err(Error::internal(
                             "an answer arrived for a request with no pending entry and no recorded abort",
                         ));
+                    };
+                    // A chat round's completion becomes its answer here, on
+                    // the driver thread: the round's events fire against the
+                    // chain's own reporting handles and the tool calls are
+                    // checked against the scope the chain advertised.
+                    let answer = match arrival {
+                        Arrival::Answer(answer) => answer,
+                        Arrival::Chat(result) => self.accept_chat(chain_id, result)?,
                     };
                     match answer {
                         // A claims-model conflict is fatal: the run ends on

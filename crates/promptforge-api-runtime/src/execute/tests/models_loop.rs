@@ -15,7 +15,7 @@ use promptforge_model_client::model::ModelInvocation;
 /// The model set a loop test's run carries: `writer` (the prompt-wide
 /// default, model `test-model`) and `other` (model `other-model`), so an
 /// explicit handle provably runs on its own frozen binding.
-fn loop_models() -> ModelSet {
+pub(super) fn loop_models() -> ModelSet {
     let binding = |alias: &str, description: &str, model: &str| {
         ModelBinding::new(
             alias,
@@ -59,7 +59,7 @@ fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
 }
 
 /// The tool set with the `echo` fixture bound and always in scope.
-fn echo_tools() -> ToolSet {
+pub(super) fn echo_tools() -> ToolSet {
     ToolSet::for_test(
         vec![crate::lua::ToolBinding::for_test(
             "echo",
@@ -71,7 +71,7 @@ fn echo_tools() -> ToolSet {
 }
 
 /// The one-section prompt shell every loop test drives.
-fn loop_prompt(lua: &str) -> String {
+pub(super) fn loop_prompt(lua: &str) -> String {
     format!(
         "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
     )

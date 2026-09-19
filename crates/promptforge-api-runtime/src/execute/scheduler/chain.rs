@@ -57,6 +57,7 @@ impl<'a> Scheduler<'a> {
             call_depth,
             client: None,
             parent,
+            advertised: None,
             arm,
             h1: None,
         });

@@ -172,6 +172,7 @@ impl<'a> Scheduler<'a> {
             call_depth: 0,
             client,
             parent: None,
+            advertised: None,
             arm: None,
             h1: Some(self.ctx.prompt().h1_blocks()),
         });
