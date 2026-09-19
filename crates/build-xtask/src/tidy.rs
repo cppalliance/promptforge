@@ -119,19 +119,9 @@ pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
 /// build, and target-specific) declared in a manifest.
 fn workshop_dependencies(manifest: &toml::Value) -> Vec<String> {
     let mut names = Vec::new();
-    for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        if let Some(table) = manifest.get(kind).and_then(toml::Value::as_table) {
-            collect_workshop_deps(table, &mut names);
-        }
-    }
-    if let Some(targets) = manifest.get("target").and_then(toml::Value::as_table) {
-        for target in targets.values() {
-            for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                if let Some(table) = target.get(kind).and_then(toml::Value::as_table) {
-                    collect_workshop_deps(table, &mut names);
-                }
-            }
-        }
+    let kinds = ["dependencies", "dev-dependencies", "build-dependencies"];
+    for (_, table) in crate::manifest::dependency_tables(manifest, &kinds) {
+        collect_workshop_deps(table, &mut names);
     }
     names
 }

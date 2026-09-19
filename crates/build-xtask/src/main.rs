@@ -7,6 +7,11 @@
 //!   `cargo xtask tidy` prints the same report on demand.
 //! - Every file in this crate stays under 500 lines; split first, then edit.
 
+// Fixture-tested now; Step 39 of the sans-I/O engine plan wires the guard
+// into `tidy`, at which point the allowance goes.
+#[cfg_attr(not(test), allow(dead_code))]
+mod engine_deps;
+mod manifest;
 mod new_crate;
 mod product;
 mod tidy;

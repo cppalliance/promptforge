@@ -398,7 +398,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-2>
 
-### Step 2: Engine manifest guard as a fixture-tested function
+### Step 2: Engine manifest guard as a fixture-tested function [completed]
 
 - Component: Structural guards
 - Piece: engine guards

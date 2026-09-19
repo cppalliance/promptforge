@@ -338,19 +338,8 @@ fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: 
 /// dev, build, and target-specific tables, resolving `package` renames.
 fn manifest_dependencies(manifest: &toml::Value) -> Vec<String> {
     let mut names = Vec::new();
-    for kind in DEP_KINDS {
-        if let Some(table) = manifest.get(kind).and_then(toml::Value::as_table) {
-            collect_deps(table, &mut names);
-        }
-    }
-    if let Some(targets) = manifest.get("target").and_then(toml::Value::as_table) {
-        for target in targets.values() {
-            for kind in DEP_KINDS {
-                if let Some(table) = target.get(kind).and_then(toml::Value::as_table) {
-                    collect_deps(table, &mut names);
-                }
-            }
-        }
+    for (_, table) in crate::manifest::dependency_tables(manifest, &DEP_KINDS) {
+        collect_deps(table, &mut names);
     }
     names
 }
