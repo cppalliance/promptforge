@@ -270,6 +270,153 @@ fn a_workshop_crate_depending_on_the_public_gateway_pair_passes() {
 }
 
 #[test]
+fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness/runner",
+        "harness-runner",
+        "[dependencies]\npromptforge-api-runtime = { path = \"../../promptforge-api-runtime\" }\n\
+         promptforge-api-types = { path = \"../../promptforge-api-types\" }\n\
+         gateway-api = { path = \"../../gateway-api\" }\n\
+         gateway-api-discovery = { path = \"../../gateway-api-discovery\" }\n\
+         shared-vfs = { path = \"../../shared-vfs\" }\n",
+    );
+    for name in [
+        "promptforge-api-runtime",
+        "promptforge-api-types",
+        "gateway-api",
+        "gateway-api-discovery",
+        "shared-vfs",
+    ] {
+        write_crate(root.path(), name, name, "");
+    }
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "the promptforge door, the gateway public pair, and shared-* are legal for harness crates: {violations:?}"
+    );
+}
+
+#[test]
+fn a_harness_crate_depending_on_a_workshop_crate_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness/sessions",
+        "harness-sessions",
+        "[dependencies]\nworkshop-registry = { path = \"../../workshop-registry\" }\n",
+    );
+    write_crate(root.path(), "workshop-registry", "workshop-registry", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("harness-sessions depends on workshop-registry:")
+            && violations[0].contains("harness crates must not depend on workshop crates"),
+        "the violation names the harness crate and the workshop dep: {violations:?}"
+    );
+}
+
+#[test]
+fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness/models",
+        "harness-models",
+        "[dependencies]\ngateway-routing = { path = \"../../gateway-routing\" }\n",
+    );
+    write_crate(root.path(), "gateway-routing", "gateway-routing", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("harness-models depends on gateway-routing:")
+            && violations[0].contains("gateway-api")
+            && violations[0].contains("gateway-api-discovery"),
+        "the violation names the harness crate and the public pair: {violations:?}"
+    );
+}
+
+#[test]
+fn a_harness_crate_reaching_past_the_promptforge_door_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness/runner",
+        "harness-runner",
+        "[dependencies]\npromptforge-lua = { path = \"../../promptforge-lua\" }\n",
+    );
+    write_crate(root.path(), "promptforge-lua", "promptforge-lua", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("harness-runner depends on promptforge-lua:"),
+        "the one-door rule binds harness crates: {violations:?}"
+    );
+}
+
+#[test]
+fn a_workshop_crate_depending_on_harness_api_passes() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop/server",
+        "workshop-server",
+        "[dependencies]\nharness-api = { path = \"../../harness-api\" }\n",
+    );
+    write_crate(root.path(), "harness-api", "harness-api", "");
+    let violations = product_boundary_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "harness-api is the harness door for workshop crates: {violations:?}"
+    );
+}
+
+#[test]
+fn a_workshop_crate_depending_on_a_harness_crate_other_than_harness_api_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop/server",
+        "workshop-server",
+        "[dependencies]\nharness-runner = { path = \"../../harness-runner\" }\n",
+    );
+    write_crate(root.path(), "harness-runner", "harness-runner", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("workshop-server depends on harness-runner:")
+            && violations[0].contains("harness-api"),
+        "the violation names the workshop crate and the harness door: {violations:?}"
+    );
+}
+
+#[test]
+fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let dep = "[dependencies]\nharness-api = { path = \"../harness-api\" }\n";
+    write_crate(root.path(), "harness-api", "harness-api", "");
+    write_crate(
+        root.path(),
+        "promptforge-api-runtime",
+        "promptforge-api-runtime",
+        dep,
+    );
+    write_crate(root.path(), "gateway-routing", "gateway-routing", dep);
+    write_crate(root.path(), "shared-vfs", "shared-vfs", dep);
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 3, "{violations:?}");
+    for package in ["promptforge-api-runtime", "gateway-routing", "shared-vfs"] {
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.starts_with(&format!("{package} depends on harness-api:"))),
+            "{package} depending on the harness door is reported: {violations:?}"
+        );
+    }
+}
+
+#[test]
 fn family_classification_follows_the_naming_rules() {
     assert_eq!(family("promptforge-api-runtime"), Family::Promptforge);
     assert_eq!(family("gateway"), Family::Gateway);
@@ -279,4 +426,11 @@ fn family_classification_follows_the_naming_rules() {
     assert_eq!(family("shared-vfs"), Family::Shared);
     assert_eq!(family("build-xtask"), Family::Build);
     assert_eq!(family("serde"), Family::Unaffiliated);
+}
+
+#[test]
+fn harness_family_classification_follows_the_name_prefix() {
+    assert_eq!(family("harness-api"), Family::Harness);
+    assert_eq!(family("harness-runner"), Family::Harness);
+    assert_eq!(family("harness"), Family::Unaffiliated);
 }
