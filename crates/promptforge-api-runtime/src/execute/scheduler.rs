@@ -33,14 +33,18 @@
 //! rules, `h1` the live H1 pass and its hand-off to the walk, `dispatch`
 //! the request arms, `chat` the one-round `chat` arm and its answer
 //! application, `tool_call` the script and model-issued `tool_call` arm
-//! (the two arms the section-visible `models.loop` shim drives), `tasks`
-//! the task arena, the `spawn` arm, and the chain-end rules for tasks,
-//! `waits` the `when_any` wait and the `ready`, `status`, `pending`,
-//! `note`, and `cancel` arms over the arena, and `timer` the wait shims'
-//! internal timeout as an effect-backed slot. A fanout is Lua over those
-//! arms (the `fanout` shim spawns one task per member and waits on the
-//! live set), so the scheduler keeps no fanout state of its own.
+//! (the two arms the section-visible `models.loop` shim drives),
+//! `builtins` the model's task built-ins (`task`, `task_cancel`,
+//! `task_status`) answered over the arena and advertised once a section
+//! runs `tools.allow_tasks`, `tasks` the task arena, the `spawn` arm, and
+//! the chain-end rules for tasks, `waits` the `when_any` wait and the
+//! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
+//! and `timer` the wait shims' internal timeout as an effect-backed slot.
+//! A fanout is Lua over those arms (the `fanout` shim spawns one task per
+//! member and waits on the live set), so the scheduler keeps no fanout
+//! state of its own.
 
+mod builtins;
 mod chain;
 mod chat;
 mod dispatch;

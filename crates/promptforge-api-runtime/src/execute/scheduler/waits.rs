@@ -13,7 +13,9 @@
 //! Ownership is the rule for every arm: only the chain that spawned a
 //! task may wait on, check, list, or cancel it, and an id naming no task
 //! is refused the same way so a caller learns nothing about tasks it never
-//! started. `status` and `note` add the self exception: a chain may read
+//! started. The model's `task_cancel` and `task_status` built-ins reuse
+//! the cancel and status readers here, narrowed further to the caller's
+//! model-origin tasks. `status` and `note` add the self exception: a chain may read
 //! and annotate the task it runs inside (`sys.taskid`), which is how a
 //! task reports progress. The main walk is task `0` with no slot, so its
 //! own status is not reportable; `note` from the main walk records on the
@@ -189,7 +191,7 @@ impl Scheduler<'_> {
     /// position while it is live (its section and what it is parked on)
     /// and the chain's counters and note, which the append-only arena
     /// keeps after the chain ends.
-    fn task_status(&self, id: ChainIndex, task: &TaskId) -> Result<TaskStatus> {
+    pub(super) fn task_status(&self, id: ChainIndex, task: &TaskId) -> Result<TaskStatus> {
         let slot = self.visible_slot(id, task)?;
         let mut status = TaskStatus {
             target: slot.target.clone(),
@@ -253,7 +255,7 @@ impl Scheduler<'_> {
     /// internal timer, whose cancel is the wait shim's own bookkeeping and
     /// reports nothing. A task already in a terminal state is left as it
     /// is.
-    fn cancel_task(&mut self, caller: ChainIndex, task: &TaskId) -> Result<()> {
+    pub(super) fn cancel_task(&mut self, caller: ChainIndex, task: &TaskId) -> Result<()> {
         let slot = self.owned_slot(caller, task)?;
         if !slot.state.is_live() {
             return Ok(());

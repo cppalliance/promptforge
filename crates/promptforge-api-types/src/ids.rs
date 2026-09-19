@@ -224,7 +224,27 @@ pub enum AbandonReason {
     OwnerReturned,
     /// The owner failed.
     OwnerFailed,
+    /// The owner's model-tool loop ran past its round cap: a failure kept
+    /// apart from [`OwnerFailed`](Self::OwnerFailed) because the model
+    /// notice must say so - the model's own task outlived the loop that
+    /// started it.
+    ToolLoopExhausted,
     /// The owner was aborted from outside: a fatal sibling's fail-fast,
     /// or its own owner ending first.
     OwnerAborted,
+}
+
+impl AbandonReason {
+    /// The phrase the `TaskAbandoned` trace line renders for the reason:
+    /// `the section ended`, `the owner failed`, `the tool loop was
+    /// exhausted`, or `the owner was aborted`.
+    #[must_use]
+    pub fn why(self) -> &'static str {
+        match self {
+            AbandonReason::OwnerReturned => "the section ended",
+            AbandonReason::OwnerFailed => "the owner failed",
+            AbandonReason::ToolLoopExhausted => "the tool loop was exhausted",
+            AbandonReason::OwnerAborted => "the owner was aborted",
+        }
+    }
 }

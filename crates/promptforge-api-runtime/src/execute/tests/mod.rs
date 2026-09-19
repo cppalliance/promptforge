@@ -1414,6 +1414,8 @@ mod lazy_prose;
 mod live_infer;
 mod local_tools;
 mod model_and_reply;
+mod model_task_answers;
+mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
 mod observations;

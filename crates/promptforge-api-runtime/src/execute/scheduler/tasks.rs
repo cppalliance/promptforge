@@ -144,21 +144,23 @@ impl Scheduler<'_> {
         }
     }
 
-    /// The fallible half of spawn dispatch: `call`'s depth cap against the
-    /// spawner's call-depth field (the refusal named after the author-facing
-    /// call that tripped it, `fanout` for an arm and `call` otherwise, so
-    /// the text is the one each path always had), `call`'s target
-    /// resolution over the spawner's visible set, the worker-template check
-    /// (a list section is not a target), then the task chain one level
-    /// deeper under the spawn's `args` and `var` snapshot, with its own
-    /// access capability (a concurrent thread of execution under the claims
-    /// model, spawned from the spawner's so the spawn is the happens-before
-    /// edge) and a fresh turn counter.
+    /// The fallible half of spawn dispatch, shared with the model's `task`
+    /// built-in: `call`'s depth cap against the spawner's call-depth field
+    /// (the refusal named after the author-facing call that tripped it,
+    /// `fanout` for an arm and `call` otherwise, so the text is the one
+    /// each path always had), `call`'s target resolution over the
+    /// spawner's visible set, the worker-template check (a list section is
+    /// not a target), then the task chain one level deeper under the
+    /// spawn's `args` and `var` snapshot, with its own access capability
+    /// (a concurrent thread of execution under the claims model, spawned
+    /// from the spawner's so the spawn is the happens-before edge) and a
+    /// fresh turn counter. The caller enqueues the returned child behind
+    /// the spawner.
     #[expect(
         clippy::too_many_arguments,
         reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
     )]
-    fn prepare_spawn(
+    pub(super) fn prepare_spawn(
         &mut self,
         id: ChainIndex,
         target: &str,
@@ -300,19 +302,20 @@ impl Scheduler<'_> {
 
     /// Applies the chain-end rules for tasks to `owner`'s `outcome`: every
     /// live task the chain owns is abandoned (the reason names how the
-    /// owner ended), and an `Ok` outcome that leaked author-origin tasks
-    /// becomes [`Error::TasksLive`] naming them in spawn order. A failing
-    /// chain keeps its own error - the leak is the lesser fault - but its
-    /// tasks end all the same.
+    /// owner ended: the section ended, the tool loop was exhausted, or the
+    /// owner failed some other way), and an `Ok` outcome that leaked
+    /// author-origin tasks becomes [`Error::TasksLive`] naming them in
+    /// spawn order. A failing chain keeps its own error - the leak is the
+    /// lesser fault - but its tasks end all the same.
     pub(super) fn settle_owned_tasks(
         &mut self,
         owner: ChainIndex,
         outcome: Result<String>,
     ) -> Result<String> {
-        let reason = if outcome.is_ok() {
-            AbandonReason::OwnerReturned
-        } else {
-            AbandonReason::OwnerFailed
+        let reason = match &outcome {
+            Ok(_) => AbandonReason::OwnerReturned,
+            Err(Error::ToolLoopExhausted) => AbandonReason::ToolLoopExhausted,
+            Err(_) => AbandonReason::OwnerFailed,
         };
         let leaked = self.abandon_owned_tasks(owner, reason);
         match outcome {

@@ -1,8 +1,10 @@
 //! The `chat` arm: one stateless tool-capable model round yielded by a
 //! section VM.
 //!
-//! Dispatch resolves the round's binding, client, and tool scope, records
-//! the scope on the chain as `advertised`, prechecks the projected
+//! Dispatch resolves the round's binding, client, and tool scope (the
+//! bound and local halves, plus the model's task built-ins once the
+//! section has run `tools.allow_tasks`), records the scope on the chain as
+//! `advertised`, prechecks the projected
 //! conversation against the model's context window, and spawns the single
 //! gateway round onto the answer channel as a raw completion - the leaf
 //! work runs through the same spawned path as `infer`. The driver
@@ -18,21 +20,21 @@ use std::collections::BTreeMap;
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 
-use crate::client::{Completion, CompletionResult, ToolCall, ToolSchema};
+use crate::client::{Completion, CompletionResult, ToolCall};
 use crate::debug::DebugEvent;
 use crate::execute::protocol::{Answer, ChatResult};
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::section_context::ReportingHandles;
 use crate::execute::support::advance_turn;
 use crate::lua::{
-    MessageRecord, OverflowReason, ToolBinding, ToolSet, current_tool_bindings,
-    is_context_overflow, precheck, project_messages, resolve_model_binding,
+    MessageRecord, OverflowReason, current_tool_bindings, is_context_overflow, precheck,
+    project_messages, resolve_model_binding,
 };
 use crate::model::ModelBinding;
 use crate::observe::detail;
 use crate::{Error, Result};
 
-use super::dispatch::unbound_tool_call;
+use super::builtins::{advertise_task_builtins, scope_halves, task_allowlist};
 use super::{Arrival, ChainIndex, RequestId, Scheduler};
 
 /// The answer for a round refused as too large by `reason`'s gate, before
@@ -71,44 +73,6 @@ fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
 enum ChatDispatch {
     Spawned(RequestId, tokio::task::JoinHandle<()>),
     Answered(Answer<Error>),
-}
-
-/// The bound and local halves of one round's tool scope, resolved from the
-/// request's `tools` against the section: an absent list is the section's
-/// current effective scope plus every local Lua tool; an explicit list
-/// names its members, each a local tool, an effective binding (which
-/// carries the section's description override), or a bound catalog slot.
-///
-/// # Errors
-/// Returns [`Error::UnboundToolCall`] when an explicit alias names no
-/// local tool and no bound slot.
-fn scope_halves(
-    tools: Option<&[String]>,
-    effective: Vec<ToolBinding>,
-    local_schemas: Vec<ToolSchema>,
-    tool_set: &ToolSet,
-) -> Result<(Vec<ToolBinding>, Vec<ToolSchema>)> {
-    let Some(aliases) = tools else {
-        return Ok((effective, local_schemas));
-    };
-    let mut bound = Vec::with_capacity(aliases.len());
-    let mut locals = Vec::new();
-    for alias in aliases {
-        if let Some(schema) = local_schemas.iter().find(|schema| &schema.name == alias) {
-            locals.push(schema.clone());
-            continue;
-        }
-        let binding = effective
-            .iter()
-            .find(|binding| binding.alias() == alias)
-            .or_else(|| tool_set.binding(alias))
-            .cloned();
-        match binding {
-            Some(binding) => bound.push(binding),
-            None => return Err(unbound_tool_call(tool_set, alias)),
-        }
-    }
-    Ok((bound, locals))
 }
 
 impl Scheduler<'_> {
@@ -192,8 +156,13 @@ impl Scheduler<'_> {
         let handles = frame.reporting_handles();
         let observer = handles.observer;
         let (bound, locals) = scope_halves(tools, effective, local_schemas, &tool_set)?;
-        let (schemas, dispatch) =
+        let (mut schemas, mut dispatch) =
             prepare_effective_scope(&bound, &locals, &execution, observer.as_ref(), &section)?;
+        // `tools.allow_tasks` is the section's opt-in: while its allowlist
+        // is set, every round offers the model its task built-ins.
+        if let Some(allowlist) = task_allowlist(vm)? {
+            advertise_task_builtins(&mut schemas, &mut dispatch, &allowlist)?;
+        }
         // The projection failure reports a failed turn before its call-site
         // error resumes into Lua, the loop's precedent.
         let conversation = match project_messages(messages) {

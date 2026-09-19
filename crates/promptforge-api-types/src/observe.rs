@@ -233,7 +233,8 @@ pub enum Observation {
     /// Terminal: the task's owner chain ended while the task was live, so
     /// the engine ended the task. Distinct from a cancellation - the task
     /// lost its owner rather than being stopped on purpose. Reported under
-    /// the task's target section.
+    /// the task's target section. Its trace line appends the reason's
+    /// phrase ([`AbandonReason::why`]): `Task abandoned: the section ended`.
     TaskAbandoned {
         /// The task's id.
         task: TaskId,
@@ -253,8 +254,10 @@ pub enum Observation {
 impl Observation {
     /// Returns the fixed trace label for a fixed variant, or `None` for the
     /// message-carrying [`Observation::Lua`] / [`Observation::Other`].
-    /// [`Display`](fmt::Display) is the human trace line for any variant;
-    /// `label` is the stable machine key for fixed variants only.
+    /// [`Display`](fmt::Display) is the human trace line for any variant
+    /// (for [`TaskAbandoned`](Observation::TaskAbandoned) it appends the
+    /// reason's phrase); `label` is the stable machine key for fixed
+    /// variants only.
     #[must_use]
     pub fn label(&self) -> Option<&'static str> {
         let label = match self {
@@ -322,6 +325,11 @@ impl fmt::Display for Observation {
         match self {
             Observation::Lua(message) => write!(f, "Lua: {message}"),
             Observation::Other(message) => f.write_str(message),
+            // The trace line says how the owner ended; the label stays the
+            // machine key.
+            Observation::TaskAbandoned { reason, .. } => {
+                write!(f, "Task abandoned: {}", reason.why())
+            }
             fixed => f.write_str(fixed.label().unwrap_or_default()),
         }
     }
@@ -625,6 +633,12 @@ mod tests {
         assert_eq!(Observation::Other("x".to_owned()).to_string(), "x");
         assert_eq!(Observation::RunStarted.label(), Some("Run started"));
         assert_eq!(Observation::Lua("hi".to_owned()).label(), None);
+        let abandoned = Observation::TaskAbandoned {
+            task: "0.0".parse().expect("a task id parses"),
+            reason: AbandonReason::OwnerReturned,
+        };
+        assert_eq!(abandoned.to_string(), "Task abandoned: the section ended");
+        assert_eq!(abandoned.label(), Some("Task abandoned"));
     }
 
     #[test]

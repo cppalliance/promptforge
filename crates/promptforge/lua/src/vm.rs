@@ -261,6 +261,7 @@ impl SectionVm {
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
+                allowed_tasks: None,
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             jump_slot: Arc::new(Mutex::new(None)),
