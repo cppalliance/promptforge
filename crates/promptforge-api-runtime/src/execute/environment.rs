@@ -156,7 +156,7 @@ impl Environment {
                 shared_vfs::MemoryBackend::new(),
             )
             .build();
-        let services = RunServices::new(ctx.vfs.clone(), ctx.cancel.clone().unwrap_or_default());
+        let services = RunServices::new(ctx.vfs.clone(), ctx.cancel.clone());
         let mut requirements = Requirements::default();
         // Resolve the declarations against the registry, preserving
         // declaration order.

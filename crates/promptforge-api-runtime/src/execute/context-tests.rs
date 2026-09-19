@@ -12,7 +12,7 @@ fn test_prompt() -> Prompt {
 
 fn test_context(prompt: &Prompt) -> RunState {
     RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &promptforge_vfs::empty(),
         LuaProgram::empty().expect("the empty chunk compiles"),

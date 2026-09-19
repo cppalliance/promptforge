@@ -1,3 +1,7 @@
+use std::sync::OnceLock;
+
+use promptforge_api_types::cancel::sync::CancelHandle;
+
 use super::{
     Arc, AtomicU64, Error, HOOK_BUDGET, HOOK_INTERVAL, HookTriggers, Lua, MultiValue, Ordering,
     Result, Thread, Value, VmState,
@@ -74,7 +78,10 @@ end
 ///
 /// The hook exists for cooperative cancellation: its trip budget
 /// ([`HOOK_BUDGET`]) is effectively unlimited, so a long-running or infinite
-/// loop is legal and only the run's cancel flag aborts it.
+/// loop is legal and only the run's cancel flag aborts it. The flag is the
+/// run's synchronous [`CancelHandle`], installed once by the executor
+/// through [`set_cancel`](Self::set_cancel); a VM no executor claimed
+/// (a test fixture, the legacy chunk path) is never cancelled.
 ///
 /// Instruction hooks are per-coroutine in PUC Lua: the hook installed on the
 /// main state at construction never fires inside a resumed coroutine, so
@@ -84,6 +91,8 @@ end
 #[derive(Debug, Default, Clone)]
 pub(crate) struct InstructionBudget {
     fired: Arc<AtomicU64>,
+    /// The run's cancel flag, set once; the hook polls it on every firing.
+    cancel: Arc<OnceLock<CancelHandle>>,
 }
 
 impl InstructionBudget {
@@ -95,10 +104,29 @@ impl InstructionBudget {
         thread
             .set_hook(
                 HookTriggers::new().every_nth_instruction(HOOK_INTERVAL),
-                budget_hook(Arc::clone(&self.fired)),
+                budget_hook(Arc::clone(&self.fired), Arc::clone(&self.cancel)),
             )
             .map_err(Error::lua)
     }
+
+    /// Installs the run's cancel flag. The first install wins: a VM serves
+    /// one run, so a second handle is a caller error and is ignored rather
+    /// than swapping the flag under a running hook.
+    pub(crate) fn set_cancel(&self, cancel: CancelHandle) {
+        let _ = self.cancel.set(cancel);
+    }
+
+    /// Whether the installed cancel flag is set. `false` when no executor
+    /// installed one.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancel.get().is_some_and(CancelHandle::is_cancelled)
+    }
+}
+
+/// Whether `cancel` holds a set flag: the hook's poll, one `OnceLock` read
+/// and a handful of atomic loads.
+fn cancelled(cancel: &OnceLock<CancelHandle>) -> bool {
+    cancel.get().is_some_and(CancelHandle::is_cancelled)
 }
 
 /// The every-Nth-instruction hook body shared by the main state and every
@@ -106,12 +134,13 @@ impl InstructionBudget {
 /// effectively unlimited ([`HOOK_BUDGET`]) and never fires in practice.
 fn budget_hook(
     fired: Arc<AtomicU64>,
+    cancel: Arc<OnceLock<CancelHandle>>,
 ) -> impl Fn(&Lua, &mlua::debug::Debug) -> mlua::Result<VmState> {
     move |_lua, _debug| {
         // Cooperative cancellation: abort a long-running Lua block promptly
         // when the run's CancelHandle is signaled (mapped to
-        // Error::Interrupted at the runtime-error boundary).
-        if promptforge_api_types::cancel::is_cancelled() {
+        // Error::Interrupted at the VM's failure boundary).
+        if cancelled(&cancel) {
             return Err(mlua::Error::RuntimeError(
                 "lua execution cancelled".to_string(),
             ));
@@ -136,7 +165,7 @@ pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<InstructionBudget>
     let budget = InstructionBudget::default();
     lua.set_hook(
         HookTriggers::new().every_nth_instruction(HOOK_INTERVAL),
-        budget_hook(Arc::clone(&budget.fired)),
+        budget_hook(Arc::clone(&budget.fired), Arc::clone(&budget.cancel)),
     )
     .map_err(Error::lua)?;
     Ok(budget)

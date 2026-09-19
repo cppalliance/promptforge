@@ -1,154 +1,182 @@
-//! The driver loop: `resume -> match request -> dispatch -> resume with
-//! answer`, run to the chain arena's terminal state. The loop drains the
-//! ready queue, then awaits the answer channel or cancellation, whichever
-//! comes first; an empty ready queue with an empty pending table is a
-//! stall, which fails loudly rather than hangs. The run's result is
-//! withheld until every in-flight leaf task has been aborted and joined,
-//! so no store op's access clone outlives the run.
+//! The run-level step: `resume -> match request -> dispatch -> resume with
+//! answer`, run until no chain can proceed without a host answer. The step
+//! starts the run's first chain on its first call, drains the ready queue,
+//! and returns the effects the drain issued with the events it reported.
+//! An empty ready queue with an empty pending table is a stall, which
+//! fails loudly rather than hangs. The run's `Done` is withheld until
+//! every issued effect has its answer, so no store op's access clone
+//! outlives the run and every effect the host was handed has exactly one
+//! answer.
 
+use crate::execute::RunResult;
+use crate::execute::error::RunError;
+use crate::execute::run::{EffectAnswer, EffectId, Step};
 use crate::execute::support::GENERIC_COMPLETION;
-use crate::{Error, Result, cancel};
+use crate::observe::detail;
+use crate::{Error, Result};
 
-use super::Scheduler;
+use super::{Phase, Scheduler};
 
-/// Aborts every in-flight leaf task when the driver future is dropped
-/// mid-suspension - a host tearing the run down without polling it to a
-/// terminal state. Dropping a bare `JoinHandle` detaches the task, which
-/// would strand a broker wait or gateway round forever (a session close
-/// would leak its pending input wait and never emit `input_cancelled`),
-/// so the drop path applies the same abort the cancellation path does.
-/// The claims-release join in [`Scheduler::drain_io_tasks`] is unnecessary
-/// here: a dropped run delivers no result.
-impl Drop for Scheduler<'_> {
-    fn drop(&mut self) {
-        for handle in self.io_tasks.values() {
-            handle.abort();
-        }
-    }
-}
-
-impl Scheduler<'_> {
-    /// Drives the run until it ends and returns the run's result: the H1
-    /// pass first when the prompt has H1 blocks, then the root chain over
-    /// the prompt's sections.
-    ///
-    /// Leaf dispatch spawns plain tasks (not `spawn_local`): an infer task
-    /// touches no scheduler state and no Lua value - it awaits one gateway
-    /// round and posts the answer to the channel - so the driver future
-    /// stays `Send` and a caller may spawn the run onto a multi-thread
-    /// runtime. On a current-thread runtime the spawned tasks run on that
-    /// one thread anyway.
-    ///
-    /// # Errors
-    /// Returns the [`Error`] of whichever step failed: frame construction,
-    /// a Lua block, or a dispatched request's answer.
-    /// Returns [`Error::Interrupted`] when the run's cancellation handle is
-    /// signaled while chains are running or suspended.
-    pub(crate) async fn drive(&mut self) -> Result<String> {
-        let result = self.drive_inner().await;
-        self.drain_io_tasks().await;
-        // The last drain: whatever the final round and the joined leaf
-        // tasks reported reaches the host before the result does.
-        self.ctx.flush_events();
-        result
-    }
-
-    /// Claims-release ordering constraint: the run's result - success,
-    /// determinism failure, or cancellation alike - must not be delivered
-    /// while an in-flight leaf op still holds its access clone. A store
-    /// op runs on the blocking pool, where aborting the task detaches
-    /// rather than interrupts, so an abandoned op would release its
-    /// identity's claims only when the closure finishes - past the run's
-    /// end, where a fresh access could meet the lingering claim. Abort
-    /// every task still recorded (prompt for an async task, a no-op for
-    /// a blocking op already running, which runs to completion), then
-    /// await each handle: the join resolves only once the op's access
-    /// clone - and with it the identity's claims - is gone. This changes
-    /// when claims release, never what an operation does.
-    async fn drain_io_tasks(&mut self) {
-        let tasks = std::mem::take(&mut self.io_tasks);
-        for task in tasks.values() {
-            task.abort();
-        }
-        for (_, task) in tasks {
-            let _ = task.await;
-        }
-    }
-
-    async fn drive_inner(&mut self) -> Result<String> {
-        // The H1 pass runs when the prompt has H1 blocks; an H1-less prompt
-        // goes straight to the walk, so its shared library never pays for a
-        // throwaway section-0 replay.
-        if self.ctx.prompt().h1_blocks().is_empty() {
-            let sections = self.ctx.prompt().sections();
-            if sections.is_empty() {
-                return Ok(GENERIC_COMPLETION.to_owned());
+impl Scheduler {
+    /// Drains the ready queue and returns the step's outcome: the effects
+    /// issued and the events reported while chains ran, or the run's
+    /// result once it is over and every issued effect is answered. The
+    /// first call starts the H1 pass when the prompt has H1 blocks, else
+    /// the root chain over the prompt's sections.
+    pub(crate) fn step(&mut self) -> Step {
+        if matches!(self.phase, Phase::Fresh) {
+            self.phase = Phase::Running;
+            if let Err(error) = self.start() {
+                self.end(Err(error));
             }
-            self.start_root_walk(sections)?;
+        }
+        if matches!(self.phase, Phase::Running) {
+            self.drain();
+        }
+        // Every unfinished chain is ready, pending on an effect, blocked on
+        // a child, or waiting on a task, and a blocked or waiting chain
+        // transitively bottoms out in a ready or pending chain, so an
+        // empty ready queue with an empty pending table can only be a
+        // scheduler bug (nothing ready, nothing pending, and whatever is
+        // waiting can never be woken) - fail loudly rather than hang.
+        if matches!(self.phase, Phase::Running) && self.ready.is_empty() && self.pending.is_empty()
+        {
+            self.end(Err(Error::internal(
+                "the scheduler stalled with no ready chain and no in-flight request",
+            )));
+        }
+        let effects = std::mem::take(&mut self.issued);
+        let events = self.ctx.take_events();
+        match &self.phase {
+            Phase::Ending(_) if self.pending.is_empty() && self.orphaned.is_empty() => {
+                let Phase::Ending(result) = std::mem::replace(&mut self.phase, Phase::Done) else {
+                    unreachable!("the phase was matched as ending");
+                };
+                Step::Done {
+                    result: match result {
+                        Ok(text) => RunResult::Ok(text),
+                        Err(Error::Interrupted) => RunResult::Cancelled,
+                        Err(error) => RunResult::Failure(RunError::from(error)),
+                    },
+                    events,
+                }
+            }
+            Phase::Done => Step::Done {
+                result: RunResult::Failure(RunError::from(Error::internal(
+                    "a finished run cannot be stepped again",
+                ))),
+                events,
+            },
+            Phase::Fresh | Phase::Running | Phase::Ending(_) => Step::Pending { effects, events },
+        }
+    }
+
+    /// Applies one effect's answer. An answer for an orphaned effect (its
+    /// chain stopped waiting) is discarded; an answer for an id the run
+    /// never issued, or a second answer for one effect, ends the run with
+    /// an internal error, as does a fatal outcome of the answer itself (a
+    /// claims-model conflict). A run that has returned `Done` ignores
+    /// every answer.
+    pub(crate) fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
+        if matches!(self.phase, Phase::Done) {
+            return;
+        }
+        if self.orphaned.remove(&id) {
+            return;
+        }
+        // Every answer is applied here, on the caller's thread: the
+        // round's events fire against the parked chain's own reporting
+        // handles, a chat round's tool calls are checked against the scope
+        // the chain advertised, a timer's firing wakes its waiter, and a
+        // fatal store conflict ends the run.
+        if let Err(error) = self.apply_answer(id, answer) {
+            self.end(Err(error));
+        }
+    }
+
+    /// Starts the run's first chain: the H1 pass when the prompt has H1
+    /// blocks; an H1-less prompt goes straight to the walk, so its shared
+    /// library never pays for a throwaway section-0 replay. A prompt with
+    /// neither ends at once with the generic completion.
+    fn start(&mut self) -> Result<()> {
+        let prompt = self.prompt();
+        if prompt.h1_blocks().is_empty() {
+            if prompt.sections().is_empty() {
+                self.end(Ok(GENERIC_COMPLETION.to_owned()));
+                return Ok(());
+            }
+            self.start_root_walk()?;
         } else {
             let h1 = self.start_live_h1()?;
             self.ready.push_back(h1);
         }
+        Ok(())
+    }
+
+    /// Runs every ready chain to its next suspension point. Cancellation
+    /// is polled before each chain step: the instruction hook covers
+    /// running Lua, and a host that cancels while every chain is
+    /// suspended is observed on its next `step`.
+    fn drain(&mut self) {
         let mut root_result = None;
         loop {
-            while let Some(id) = self.ready.pop_front() {
-                // Cancellation between steps: the instruction hook covers
-                // running Lua and the select below covers suspension, but a
-                // run whose chains never suspend on I/O would otherwise
-                // finish without ever observing the handle.
-                if cancel::is_cancelled() {
-                    return Err(Error::Interrupted);
-                }
-                if let Err(error) = self.step(id, &mut root_result) {
-                    self.finish(id, Err(error), &mut root_result);
-                }
-                if let Some(result) = root_result.take() {
-                    return result;
-                }
+            if self.ctx.cancel().is_cancelled() {
+                self.end(Err(Error::Interrupted));
+                return;
             }
-            // One dispatch round is done: every event the round's steps
-            // reported is forwarded before the driver waits on anything.
-            self.ctx.flush_events();
-            // Every unfinished chain is ready, pending on I/O, blocked on a
-            // child, or waiting on a task, and a blocked or waiting chain
-            // transitively bottoms out in a ready or pending chain, so an
-            // empty ready queue with an empty pending table can only be a
-            // driver bug (nothing ready, nothing pending, and whatever is
-            // waiting can never be woken) - fail loudly rather than hang.
-            if self.pending.is_empty() {
-                return Err(Error::internal(
-                    "the scheduler stalled with no ready chain and no in-flight request",
-                ));
+            let Some(id) = self.ready.pop_front() else {
+                return;
+            };
+            if let Err(error) = self.step_chain(id, &mut root_result) {
+                self.finish(id, Err(error), &mut root_result);
             }
-            tokio::select! {
-                biased;
-                // Cancellation while suspended: abort the in-flight leaf
-                // tasks and fail the run. The suspended chains' frames drop
-                // unarmed with the scheduler - the same outcome as the
-                // hook-driven path while running - and a task chain
-                // stranded this way reports no terminal of its own: the
-                // run's interruption is the record.
-                () = cancel::wait_cancelled() => {
-                    for handle in self.io_tasks.values() {
-                        handle.abort();
-                    }
-                    return Err(Error::Interrupted);
-                }
-                arrival = self.answers.recv() => {
-                    let Some((effect, answer)) = arrival else {
-                        return Err(Error::internal(
-                            "the answer channel cannot close while the scheduler holds its sender",
-                        ));
-                    };
-                    // Every answer is applied here, on the driver thread:
-                    // the round's events fire against the parked chain's
-                    // own reporting handles, a chat round's tool calls
-                    // are checked against the scope the chain advertised,
-                    // a timer's firing wakes its waiter, and a fatal store
-                    // conflict ends the run.
-                    self.apply_answer(effect, answer)?;
-                }
+            if let Some(result) = root_result.take() {
+                self.end(result);
+                return;
             }
         }
+    }
+
+    /// Decides the run: tears every chain down (the suspended chains'
+    /// frames drop unarmed - no `SECTION_FINISHED` - and every effect
+    /// still out with the host becomes an orphan the host still answers),
+    /// reports the run's end boundary, and holds `result` until the
+    /// orphans are answered. A second decision keeps the first: the
+    /// outcome that ended the run is the record.
+    pub(super) fn end(&mut self, result: Result<String>) {
+        if matches!(self.phase, Phase::Ending(_) | Phase::Done) {
+            return;
+        }
+        self.teardown();
+        self.ctx.emitter().report(
+            self.ctx.prompt().title(),
+            if result.is_ok() {
+                detail::RUN_SUCCEEDED
+            } else {
+                detail::RUN_FAILED
+            },
+        );
+        self.phase = Phase::Ending(result);
+    }
+
+    /// Drops every chain's live state in the teardown order (the suspended
+    /// coroutine, then the frame unarmed, then the access capability) and
+    /// orphans every pending effect. The task slots keep their terminal
+    /// or last live state for inspection; no task event fires - the run's
+    /// own end is the record.
+    fn teardown(&mut self) {
+        self.ready.clear();
+        self.stack.clear();
+        for chain in &mut self.chains {
+            chain.coroutine = None;
+            chain.incoming = None;
+            chain.waiting_on.clear();
+            chain.awaiting = None;
+            chain.blocked = None;
+            chain.frame = None;
+            chain.access = None;
+        }
+        let pending: Vec<EffectId> = self.pending.drain().map(|(id, _)| id).collect();
+        self.orphaned.extend(pending);
     }
 }

@@ -9,7 +9,7 @@ use super::models_loop::{
 };
 use super::run;
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
 
 #[tokio::test]
@@ -178,7 +178,7 @@ async fn drive_loop(
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let recorder = Arc::new(Recorder::default());
     let ctx = loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await;
     (
@@ -337,7 +337,7 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");

@@ -19,7 +19,7 @@ use super::models_loop::{echo_tools, loop_context_observed};
 use super::scheduler::{request_prompts, scheduler_context_from, scheduler_context_on};
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 
 /// The gateway delay that keeps one arm parked while its siblings finish.
 /// The arms it orders against complete in milliseconds on the loopback
@@ -120,7 +120,7 @@ async fn the_window_refills_on_any_arms_completion_not_the_first_arms() {
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the windowed fanout completes");
@@ -171,7 +171,7 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
     let ctx = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        Scheduler::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -228,7 +228,7 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the nested fanout completes");
@@ -281,7 +281,7 @@ async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<Ta
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the identity prompt completes");
@@ -385,7 +385,7 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("three looping arms complete");

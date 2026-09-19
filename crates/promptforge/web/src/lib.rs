@@ -108,7 +108,7 @@ impl Capability for Web {
 
 #[cfg(test)]
 mod tests {
-    use promptforge_api_types::cancel::CancelHandle;
+    use promptforge_api_types::cancel::sync::CancelHandle;
     use promptforge_api_types::capabilities::{
         Capability, CapabilityErrorKind, CapabilityId, RunServices,
     };

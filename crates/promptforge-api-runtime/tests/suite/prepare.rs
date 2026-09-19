@@ -16,7 +16,7 @@ use promptforge_api_runtime::execute::{
     Environment, RequirementCheck, RunContext, RunErrorKind, RunResult,
 };
 use promptforge_api_runtime::parser::Prompt;
-use promptforge_api_types::cancel::CancelHandle;
+use promptforge_api_types::cancel::sync::CancelHandle;
 use promptforge_api_types::capabilities::{
     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
 };

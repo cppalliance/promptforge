@@ -1,7 +1,28 @@
-use std::sync::mpsc;
+use std::future::Future;
+use std::pin::pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
+use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
 use super::CancelHandle;
+
+/// A waker that counts its wakes, so a test can tell a cancel woke the
+/// waiter from the waiter merely re-polling.
+#[derive(Default)]
+struct Counter(AtomicUsize);
+
+impl Wake for Counter {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl Counter {
+    fn wakes(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+}
 
 /// Compile-time proof that a handle can cross thread boundaries and live for
 /// the whole program: the harness moves one into every performer task, and
@@ -121,6 +142,52 @@ fn a_cancel_on_one_thread_is_observed_on_another() {
         .recv_timeout(std::time::Duration::from_secs(5))
         .expect("the polling thread observes the cancel");
     poller.join().expect("poller exits cleanly");
+}
+
+#[test]
+fn a_parents_cancel_wakes_a_waiter_on_its_child() {
+    let parent = CancelHandle::new();
+    let child = parent.child();
+    let counter = Arc::new(Counter::default());
+    let waker = Waker::from(Arc::clone(&counter));
+    let mut cx = Context::from_waker(&waker);
+    let mut waiting = pin!(child.cancelled());
+    assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
+    // Re-polling registers the same waker once more, not twice.
+    assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
+    assert_eq!(counter.wakes(), 0, "nothing woke the waiter yet");
+    parent.cancel();
+    assert_eq!(
+        counter.wakes(),
+        1,
+        "the cancel woke the waiter exactly once"
+    );
+    assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Ready(()));
+}
+
+#[test]
+fn a_childs_cancel_does_not_wake_a_waiter_on_its_parent() {
+    let parent = CancelHandle::new();
+    let child = parent.child();
+    let counter = Arc::new(Counter::default());
+    let waker = Waker::from(Arc::clone(&counter));
+    let mut cx = Context::from_waker(&waker);
+    let mut waiting = pin!(parent.cancelled());
+    assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
+    child.cancel();
+    assert_eq!(counter.wakes(), 0, "a child's cancel never reaches up");
+    assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
+    parent.cancel();
+    assert_eq!(counter.wakes(), 1);
+    assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Ready(()));
+}
+
+#[test]
+fn a_waiter_on_a_cancelled_handle_is_ready_at_its_first_poll() {
+    let handle = CancelHandle::new();
+    handle.cancel();
+    let mut cx = Context::from_waker(Waker::noop());
+    assert_eq!(pin!(handle.cancelled()).poll(&mut cx), Poll::Ready(()));
 }
 
 #[test]

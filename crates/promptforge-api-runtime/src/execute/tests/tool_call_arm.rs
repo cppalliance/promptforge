@@ -10,7 +10,7 @@
 
 use super::models_loop::loop_models;
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::{ToolBinding, ToolSet};
 
 /// Records every observation and every `on_tool_result` report as one
@@ -64,7 +64,7 @@ impl Observer for ToolRecorder {
 fn tool_context(prompt: &Prompt, tools: ToolSet, observer: Arc<dyn Observer>) -> RunState {
     let base = RunContext::new(EXECUTION).observer(observer);
     let mut ctx = RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -118,7 +118,7 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a model-issued call never raises for the tool's own failure");
@@ -159,7 +159,7 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -192,7 +192,7 @@ async fn a_local_lua_tool_call_issues_no_leaf_work() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await
@@ -234,7 +234,7 @@ async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await
@@ -275,7 +275,7 @@ async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("each refusal is pcall-able");

@@ -233,7 +233,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     // failure is the call's error result, so the loop continues to the
     // terminal reply.
     use super::models_loop::{always_tool, loop_context, loop_prompt};
-    use crate::execute::scheduler::Scheduler;
+    use crate::execute::tokio_driver::TokioDriver;
 
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
@@ -248,7 +248,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool's own failure becomes the call's result, not the loop's");

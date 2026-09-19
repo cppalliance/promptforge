@@ -52,7 +52,7 @@ fn state_tag(state: TaskState) -> &'static str {
     }
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Resumes `id` at once with `answer`: the inline-answer path every
     /// non-waiting task arm takes.
     fn answer_inline(&mut self, id: ChainIndex, answer: Answer<Error>) {

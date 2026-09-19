@@ -6,7 +6,7 @@ use super::{
     Capability, CapabilityError, CapabilityErrorKind, CapabilityId, CapabilityIdErrorKind,
     Contribution, RunServices,
 };
-use crate::cancel::CancelHandle;
+use crate::cancel::sync::CancelHandle;
 use crate::tools::ToolId;
 
 /// A minimal in-process capability: a static id, no contributed tools, and

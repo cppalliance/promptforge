@@ -200,7 +200,11 @@ pub struct RunContext {
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) debug: Option<Arc<dyn DebugCapture>>,
     pub(crate) client: Option<GatewayClient>,
-    pub(crate) cancel: Option<CancelHandle>,
+    /// The run's cancel flag: minted once at construction, replaced by
+    /// [`cancel`](RunContext::cancel), and shared from here by the
+    /// activated capabilities, every section VM's instruction hook, and
+    /// the run's own `cancel`, so one flag reaches them all.
+    pub(crate) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
     pub(crate) input: Option<Arc<dyn InputBroker>>,
     pub(crate) ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
@@ -231,8 +235,8 @@ pub struct RunContext {
 
 impl RunContext {
     /// Builds a context for the run `name` with default observer, no client,
-    /// no capture, no cancellation, no input broker, no `ui` provider, no
-    /// delta callback, default [`RunLimits`], and the stock store handle
+    /// no capture, a fresh cancel flag, no input broker, no `ui` provider,
+    /// no delta callback, default [`RunLimits`], and the stock store handle
     /// (`promptforge_vfs::empty()`).
     #[must_use]
     pub fn new(name: impl Into<String>) -> RunContext {
@@ -243,7 +247,7 @@ impl RunContext {
             observer: Arc::new(NullObserver::default()),
             debug: None,
             client: None,
-            cancel: None,
+            cancel: CancelHandle::new(),
             limits: RunLimits::new(),
             input: None,
             ui: None,
@@ -279,10 +283,18 @@ impl RunContext {
         self
     }
 
-    /// Sets the explicit cancellation handle threaded through the run.
+    /// Sets the run's cancellation flag: the synchronous
+    /// [`CancelHandle`](promptforge_api_types::cancel::sync::CancelHandle)
+    /// the engine polls between chain steps and from the Lua instruction
+    /// hook, and the one the activated capabilities are handed. A host
+    /// that cancels through an awaitable token bridges it to this flag
+    /// (set the flag when the token fires). Replaces the flag minted at
+    /// construction, so it must be set before
+    /// [`Environment::prepare`](super::Environment::prepare) hands the
+    /// flag to the capabilities.
     #[must_use]
     pub fn cancel(mut self, handle: CancelHandle) -> RunContext {
-        self.cancel = Some(handle);
+        self.cancel = handle;
         self
     }
 
@@ -434,7 +446,7 @@ impl fmt::Debug for RunContext {
             .field("observer", &"<dyn Observer>")
             .field("client", &self.client)
             .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
-            .field("cancel", &self.cancel.is_some())
+            .field("cancel", &self.cancel)
             .field("limits", &self.limits)
             .field("input", &self.input.is_some())
             .field("ui", &self.ui.is_some())

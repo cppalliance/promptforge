@@ -4,7 +4,6 @@
 //! `@`-named chunk errors rendering verbatim, and scalar returns and VM
 //! state rolling forward across block coroutines.
 
-use promptforge_api_types::cancel::scope;
 use promptforge_lua::Error;
 
 use crate::cancel::CancelHandle;
@@ -14,8 +13,8 @@ use crate::model::ModelSet;
 
 use super::{compile_block, scheduler_vm};
 
-#[tokio::test]
-async fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
+#[test]
+fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
     // Spike (a): instruction hooks are per-coroutine in PUC Lua, so the
     // main-state hook installed at construction cannot bite here. The
     // block coroutine carries the VM's hook via `Thread::set_hook`; no
@@ -23,13 +22,10 @@ async fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
     // pre-cancelled loop would hang the test instead of aborting.
     let handle = CancelHandle::new();
     handle.cancel();
-    let outcome = scope(handle, async {
-        let vm = scheduler_vm(&ModelSet::default(), None);
-        let program = compile_block("while true do end");
-        vm.start_block_coro(&program)
-    })
-    .await;
-    match outcome {
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    vm.set_cancel(handle);
+    let program = compile_block("while true do end");
+    match vm.start_block_coro(&program) {
         Err(error) => assert!(
             matches!(error, Error::Interrupted),
             "the per-coroutine hook must observe cancellation: {error:?}"
@@ -38,8 +34,8 @@ async fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
     }
 }
 
-#[tokio::test]
-async fn every_block_coroutine_carries_the_cancellation_hook() {
+#[test]
+fn every_block_coroutine_carries_the_cancellation_hook() {
     // One VM installs the hook on every block coroutine it starts, not
     // only the first: under a cancelled run, each block's first hook
     // firing aborts it. A thread that missed the install would let the
@@ -47,23 +43,21 @@ async fn every_block_coroutine_carries_the_cancellation_hook() {
     // block escaping cancellation fails this test.
     let handle = CancelHandle::new();
     handle.cancel();
-    scope(handle, async {
-        let vm = scheduler_vm(&ModelSet::default(), None);
-        for source in [
-            "while true do end",
-            "for i = 1, 100000 do end\nreturn \"done\"",
-        ] {
-            let program = compile_block(source);
-            match vm.start_block_coro(&program) {
-                Err(error) => assert!(
-                    matches!(error, Error::Interrupted),
-                    "block {source:?} must abort on the cancelled run: {error:?}"
-                ),
-                other => panic!("a cancelled block can only fail, got {other:?}"),
-            }
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    vm.set_cancel(handle);
+    for source in [
+        "while true do end",
+        "for i = 1, 100000 do end\nreturn \"done\"",
+    ] {
+        let program = compile_block(source);
+        match vm.start_block_coro(&program) {
+            Err(error) => assert!(
+                matches!(error, Error::Interrupted),
+                "block {source:?} must abort on the cancelled run: {error:?}"
+            ),
+            other => panic!("a cancelled block can only fail, got {other:?}"),
         }
-    })
-    .await;
+    }
 }
 
 #[test]

@@ -13,11 +13,11 @@ use std::sync::{Arc, Mutex};
 #[path = "context-bound.rs"]
 mod bound;
 
-#[cfg(test)]
 use promptforge_api_types::event::Event;
 use promptforge_api_types::ids::{ChainId, TaskId};
 
 use crate::Result;
+use crate::cancel::CancelHandle;
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
 use crate::lua::{LuaProgram, ToolSet, ToolView};
@@ -29,15 +29,15 @@ use crate::untrusted::GuardNonce;
 
 use super::config::{RunContext, RunLimits};
 use super::event_buffer::{Emitter, EventSink};
-use super::events_to_observer::forward;
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{now_rfc3339_checked, sys_json};
 use bound::{bound_model_set, bound_tool_set, derive_argv};
 
-/// The host's report seams the drained events are forwarded to: the
-/// observer every run carries and the opt-in raw capture. Held once per
-/// run and never handed to a chain: the engine reports into its buffer,
-/// and only the driver's drain reaches these.
+/// The host's report seams: the observer every run carries and the
+/// opt-in raw capture. Held once per run and never read by the engine,
+/// which reports into its buffer as values; the in-crate tokio driver
+/// forwards each drained batch to these on the host's behalf until the
+/// seams leave the run context.
 struct HostSinks {
     /// The host's progress observer.
     observer: Arc<dyn Observer>,
@@ -86,8 +86,12 @@ pub(crate) struct RunState {
     /// through [`observer`](Self::observer), so their reports land in the
     /// buffer in order with the scheduler's own.
     emitter: Arc<Emitter>,
-    /// The host's seams the drained events are forwarded to.
+    /// The host's report seams, read only by the in-crate tokio driver.
     host: Arc<HostSinks>,
+    /// The run's cancel flag: polled between chain steps and installed on
+    /// every section VM's instruction hook. The context's one handle, the
+    /// same flag the activated capabilities and the run's `cancel` share.
+    cancel: CancelHandle,
     /// Test-only: a copy of every drained event, so a test can assert on
     /// the values themselves - their provenance included - rather than on
     /// what the host observer was handed.
@@ -146,14 +150,14 @@ impl RunState {
     /// H1-to-walk handoff.
     #[must_use]
     pub(crate) fn new(
-        prompt: &Prompt,
+        prompt: Arc<Prompt>,
         args: &str,
         vfs: &VfsRef,
         shared: LuaProgram,
         ctx: &RunContext,
     ) -> Self {
-        let tool_set = Arc::new(Mutex::new(bound_tool_set(prompt, ctx)));
-        let model_set = Arc::new(Mutex::new(bound_model_set(prompt, ctx)));
+        let tool_set = Arc::new(Mutex::new(bound_tool_set(&prompt, ctx)));
+        let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
         let events = EventSink::default();
         // The root chain - the main walk - is task `0`.
@@ -163,13 +167,14 @@ impl RunState {
             Arc::clone(&execution),
             ctx.debug.is_some(),
         ));
+        let derived_argv = derive_argv(&prompt, args).map(Arc::from);
         Self {
-            prompt: Arc::new(prompt.clone()),
+            prompt,
             nonce: GuardNonce::fresh(),
             vfs: vfs.clone(),
             execution,
             args: Arc::from(args),
-            argv: derive_argv(prompt, args).map(Arc::from),
+            argv: derived_argv,
             limits: ctx.limits,
             events,
             emitter,
@@ -177,6 +182,7 @@ impl RunState {
                 observer: Arc::clone(&ctx.observer),
                 debug: ctx.debug.clone(),
             }),
+            cancel: ctx.cancel.clone(),
             #[cfg(test)]
             tap: None,
             turns: Arc::new(AtomicU32::new(0)),
@@ -217,6 +223,17 @@ impl RunState {
     /// The prompt this run executes.
     pub(crate) fn prompt(&self) -> &Prompt {
         &self.prompt
+    }
+
+    /// The prompt's shared handle, for a caller that must hold the tree
+    /// independently of this context's borrow.
+    pub(crate) fn prompt_arc(&self) -> &Arc<Prompt> {
+        &self.prompt
+    }
+
+    /// The run's cancel flag.
+    pub(crate) fn cancel(&self) -> &CancelHandle {
+        &self.cancel
     }
 
     /// The run's untrusted-envelope nonce.
@@ -264,25 +281,29 @@ impl RunState {
         self.emitter.as_ref()
     }
 
-    /// Drains the run's event buffer and forwards the batch, in order, to
-    /// the host's observer and capture. The driver calls this after every
-    /// dispatch round and once more when the run ends.
-    pub(crate) fn flush_events(&self) {
+    /// Drains the run's event buffer: every event pushed since the last
+    /// drain, in push order. The run's `step` calls this once per step and
+    /// hands the batch to the host.
+    pub(crate) fn take_events(&self) -> Vec<Event> {
         let events = self.events.take();
-        if events.is_empty() {
-            return;
-        }
         #[cfg(test)]
         if let Some(tap) = &self.tap {
             tap.lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend(events.iter().cloned());
         }
-        forward(
-            events,
-            self.host.observer.as_ref(),
-            self.host.debug.as_deref(),
-        );
+        events
+    }
+
+    /// The host's progress observer, for the driver that forwards the
+    /// drained events on the host's behalf.
+    pub(crate) fn host_observer(&self) -> &Arc<dyn Observer> {
+        &self.host.observer
+    }
+
+    /// The host's opt-in raw capture, for the same driver.
+    pub(crate) fn host_debug(&self) -> Option<&Arc<dyn DebugCapture>> {
+        self.host.debug.as_ref()
     }
 
     /// The model-turn counter this context advances.
@@ -459,6 +480,7 @@ impl fmt::Debug for RunState {
             .field("events", &self.events)
             .field("emitter", &self.emitter)
             .field("host", &"<HostSinks>")
+            .field("cancel", &self.cancel)
             .field("turns", &self.turns)
             .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")

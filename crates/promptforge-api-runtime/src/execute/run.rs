@@ -1,236 +1,281 @@
-//! Effects as values: what the engine asks a host to perform, and what the
-//! host answers with.
+//! The run: the engine's host boundary, four methods exchanging effects and
+//! events as values.
 //!
-//! A leaf request a section VM yields - a model round, a bound tool call,
-//! a wait for operator input, a store operation, a timer - is no longer
-//! performed where it is dispatched. The arm builds an [`Effect`], a plain
-//! description of the work, and the scheduler hands it to a performer; the
-//! performer's [`EffectAnswer`] comes back keyed by the effect's
-//! [`EffectId`], and the scheduler applies it on its own thread, emitting
-//! the round's events there. The engine thus decides *what* to do and
-//! *what it means*; performing is somebody else's job.
+//! A [`Run`] is a deterministic state machine over one prompt. The host
+//! calls [`step`](Run::step), which drains every chain that can make
+//! progress and returns the leaf [`Effect`]s those chains issued (each
+//! stamped with the [`Provenance`] of the task that built it) beside the
+//! [`Event`]s the step reported; the host performs the effects however it
+//! likes and hands each answer back through [`resume`](Run::resume), one
+//! per arriving answer, then steps again. The run performs no I/O, reads
+//! no clock, and holds no host trait objects: given the same context and
+//! the same answers it issues the same effects, events, and ids.
 //!
-//! An [`Effect`] may hold a live handle (the store access capability) and
-//! so does not serialize itself. [`Effect::record`] projects it onto an
-//! [`EffectRecord`], the effect minus its handles, which round-trips
-//! through serde: a run log stores records, and a later replay compares a
-//! re-executed run's records against them.
+//! [`Step::Done`] is withheld while any issued effect is unanswered, so a
+//! host that has answered every effect it was handed - a drop counts - can
+//! rely on the run's end being the end of every effect too. An effect a
+//! chain stopped waiting for (its task was cancelled or abandoned) still
+//! wants its one answer; the run discards it on arrival.
+//!
+//! [`cancel`](Run::cancel) sets the run's synchronous flag. The Lua
+//! instruction hook polls it, so a running chunk aborts promptly; the next
+//! `step` tears every chain down and reports the run as cancelled once the
+//! outstanding effects are answered - a host cancelling a run answers each
+//! effect it abandons with [`EffectAnswer::Dropped`].
+//!
+//! The effect vocabulary itself - [`Effect`], its serializable
+//! [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - lives in the
+//! `effect` child module and is re-exported here.
 
 use std::sync::Arc;
 
-use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use promptforge_api_types::event::Event;
+use promptforge_api_types::ids::Provenance;
 
-use crate::client::{Completion, CompletionError, Message, ToolSchema};
-use crate::input::{InputError, InputOutcome};
-use crate::model::{CompletionOptions, ModelBinding, Temperature};
-use crate::store::{Access, StoreError};
+#[path = "run-effect.rs"]
+mod effect;
 
-use super::protocol::{StoreOp, StoreOutcome};
+#[cfg(test)]
+pub(crate) use effect::EffectRecord;
+pub(crate) use effect::{Effect, EffectAnswer, EffectId};
 
-/// Run-wide handle of one in-flight effect: an opaque correlation key
-/// between an issued [`Effect`] and its [`EffectAnswer`]. Allocated from a
-/// run-wide counter; it need not reproduce across runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct EffectId(pub(crate) u64);
+use crate::cancel::CancelHandle;
+use crate::parser::{ParseErrorKind, Prompt};
+use crate::store::VfsRef;
+use crate::{Error, Result};
 
-/// One piece of work the engine asks its host to perform.
+use super::RunResult;
+use super::config::RunContext;
+use super::context::RunState;
+use super::error::RunError;
+use super::scheduler::Scheduler;
+
+/// What one [`Run::step`] produced.
 #[derive(Debug)]
-pub(crate) enum Effect {
-    /// One model round over `messages` with `tools` advertised, under
-    /// `binding`'s frozen `options`. A nested `models.infer` is a round
-    /// over one user message with no tools and no live deltas.
-    Chat {
-        /// The binding the round runs under.
-        binding: ModelBinding,
-        /// The projected conversation, in wire order.
-        messages: Vec<Message>,
-        /// The tool schemas advertised for the round; empty advertises
-        /// none.
-        tools: Vec<ToolSchema>,
-        /// The per-request fields, built from `binding`.
-        options: CompletionOptions,
-        /// Whether the performer forwards the round's live deltas to the
-        /// host's delta hook: `true` for a section's `chat` round (the
-        /// `models.loop` rounds the hook is documented for), `false` for
-        /// a nested `models.infer`, whose deltas have no consumer - only
-        /// the completed reply is. Not part of the record: a delta is not
-        /// an event, and the hint changes no request body.
-        stream: bool,
+pub(crate) enum Step {
+    /// The run is not over. `effects` are the leaf effects this step
+    /// issued, in issue order, each with the provenance of the task that
+    /// built it; an empty list means every chain waits on an effect
+    /// already issued. `events` are the reports the step made, in order.
+    Pending {
+        /// The effects the host performs and answers through
+        /// [`Run::resume`].
+        effects: Vec<(EffectId, Provenance, Effect)>,
+        /// The events the step reported.
+        events: Vec<Event>,
     },
-    /// One bound tool call: `tool` is the stable identity the performer
-    /// resolves to an implementation (a host against its activated
-    /// capabilities, the engine's internal table against the run's
-    /// catalog), `alias` the prompt-local name it was called by, carried
-    /// for the record.
-    ToolCall {
-        /// The tool's stable live identity.
-        tool: ToolId,
-        /// The prompt-local alias the call named.
-        alias: String,
-        /// The call's arguments.
-        args: Value,
-    },
-    /// One wait for operator input, for `section` of `execution`.
-    UserInput {
-        /// The run's execution identifier.
-        execution: String,
-        /// The section asking.
-        section: String,
-    },
-    /// One store operation under the chain's access capability. The
-    /// handle is minted by the engine from the chain's claims; a host
-    /// performing the effect uses it as given and never derives, widens,
-    /// or retains store scope from it.
-    Store {
-        /// The chain's access capability, released when the operation
-        /// completes.
-        access: Arc<Access>,
-        /// The validated operation.
-        op: StoreOp,
-    },
-    /// One sleep of `seconds`: the internal timeout behind a timed wait.
-    Timer {
-        /// The duration in seconds, non-negative and finite.
-        seconds: f64,
+    /// The run is over: its result and the last events, the run's own end
+    /// boundary among them. Returned only once every issued effect has
+    /// been answered.
+    Done {
+        /// The run's outcome.
+        result: RunResult,
+        /// The events reported since the previous step.
+        events: Vec<Event>,
     },
 }
 
-/// One value's serde wire form. Every type recorded here serializes
-/// infallibly (strings, numbers, and JSON values), so the `Null` fallback
-/// is unreachable in practice and stands only so the projection stays
-/// total.
-fn wire_value<T: Serialize>(value: &T) -> Value {
-    serde_json::to_value(value).unwrap_or(Value::Null)
+/// One run of one prompt, driven by a host through
+/// [`step`](Self::step) and [`resume`](Self::resume).
+///
+/// `Run` is `Send`: one caller drives it at a time, and the thread may
+/// change between calls. It owns its prompt through an `Arc`, so the host
+/// keeps parsing once and running many times.
+pub(crate) struct Run {
+    /// The scheduler, present unless construction failed.
+    scheduler: Option<Scheduler>,
+    /// A construction failure, delivered as the first step's `Done`.
+    stillborn: Option<Error>,
+    /// The run's cancel flag, shared with every chain's VM hook.
+    cancel: CancelHandle,
 }
 
-impl Effect {
-    /// The effect's record: the same request minus its live handles, in a
-    /// form a log stores and a replay compares.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the engine issues effects and never reads them back; the run log is the record's first production reader"
-        )
-    )]
-    pub(crate) fn record(&self) -> EffectRecord {
-        match self {
-            Effect::Chat {
-                binding,
-                messages,
-                tools,
-                ..
-            } => {
-                let invocation = binding.invocation();
-                EffectRecord::Chat {
-                    model: binding.id().name().to_owned(),
-                    alias: binding.alias().to_owned(),
-                    messages: messages.iter().map(wire_value).collect(),
-                    tools: tools.iter().map(|schema| schema.name.clone()).collect(),
-                    temperature: invocation.temperature.map(Temperature::get),
-                    max_tokens: invocation.max_tokens.map(std::num::NonZeroU32::get),
-                    thinking: invocation.thinking,
-                }
-            }
-            Effect::ToolCall { tool, alias, args } => EffectRecord::ToolCall {
-                tool: tool.clone(),
-                alias: alias.clone(),
-                args: args.clone(),
-            },
-            Effect::UserInput { execution, section } => EffectRecord::UserInput {
-                execution: execution.clone(),
-                section: section.clone(),
-            },
-            Effect::Store { op, .. } => EffectRecord::Store { op: op.clone() },
-            Effect::Timer { seconds } => EffectRecord::Timer { seconds: *seconds },
-        }
+impl std::fmt::Debug for Run {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Run")
+            .field("live", &self.scheduler.is_some())
+            .field("stillborn", &self.stillborn)
+            .field("cancel", &self.cancel)
+            .finish()
     }
 }
 
-/// An [`Effect`] minus its live handles: what a run log stores for the
-/// effect and what a replay compares a re-issued effect against.
-///
-/// The `Chat` record flattens the binding to what identifies the round -
-/// the model, the alias, and the frozen invocation - and carries the
-/// messages in their wire form, so the record reads the same as the
-/// request body the host would build from it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) enum EffectRecord {
-    /// One model round.
-    Chat {
-        /// The bound model's name.
-        model: String,
-        /// The prompt-local alias the round ran under.
-        alias: String,
-        /// The conversation, one wire-form message per entry.
-        messages: Vec<Value>,
-        /// The advertised tool names, in schema order.
-        tools: Vec<String>,
-        /// The frozen sampling temperature, when the bind declared one.
-        temperature: Option<f64>,
-        /// The frozen generation cap, when the bind declared one.
-        max_tokens: Option<u32>,
-        /// The frozen thinking switch, when the bind declared one.
-        thinking: Option<bool>,
-    },
-    /// One bound tool call.
-    ToolCall {
-        /// The tool's stable live identity.
-        tool: ToolId,
-        /// The prompt-local alias the call named.
-        alias: String,
-        /// The call's arguments.
-        args: Value,
-    },
-    /// One wait for operator input.
-    UserInput {
-        /// The run's execution identifier.
-        execution: String,
-        /// The section asking.
-        section: String,
-    },
-    /// One store operation.
-    Store {
-        /// The validated operation.
-        op: StoreOp,
-    },
-    /// One sleep.
-    Timer {
-        /// The duration in seconds.
-        seconds: f64,
-    },
-}
+impl Run {
+    /// Builds the run of `prompt` with `args` under `ctx`. A context that
+    /// never passed through
+    /// [`Environment::prepare`](super::Environment::prepare) runs
+    /// capability-free (empty tool and model sets). A prompt without a
+    /// supported `promptforge:` version, or a store handle whose mounted
+    /// backend fails, yields a run whose first `step` is `Done` with the
+    /// failure.
+    #[must_use]
+    pub(crate) fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
+        // The context's one flag, held here so a stillborn run still has
+        // the handle `cancel` and `cancel_handle` name.
+        let cancel = ctx.cancel.clone();
+        match prepare_state(prompt, args, ctx) {
+            Ok(state) => Self::from_state(state),
+            Err(error) => Run {
+                scheduler: None,
+                stillborn: Some(error),
+                cancel,
+            },
+        }
+    }
 
-/// What a performer answers one [`Effect`] with: one variant per effect
-/// kind, plus [`Dropped`](EffectAnswer::Dropped) for an effect the host
-/// gave up on. Every effect receives exactly one answer.
-#[derive(Debug)]
-pub(crate) enum EffectAnswer {
-    /// The model round's completion or its failure. Boxed: a completion
-    /// carries both request and response bodies, and the box keeps every
-    /// other answer's size from being set by this one.
-    Chat(std::result::Result<Box<Completion>, CompletionError>),
-    /// The tool's own output or its own failure, before the engine's
-    /// trust and count rules apply.
-    ToolCall(std::result::Result<ToolOutput, ToolError>),
-    /// The broker's outcome or its failure.
-    UserInput(std::result::Result<InputOutcome, InputError>),
-    /// The store operation's outcome or the store's own failure.
-    Store(std::result::Result<StoreOutcome, StoreError>),
-    /// The timer fired.
-    Timer,
-    /// The host dropped the effect without performing it (a cancelled
-    /// run): the chain resumes with a cancelled error.
+    /// Builds the run over an assembled context: the constructor the
+    /// in-crate drivers and the suites use when they shape the context
+    /// themselves.
+    #[must_use]
+    pub(crate) fn from_state(state: RunState) -> Run {
+        let cancel = state.cancel().clone();
+        Run {
+            scheduler: Some(Scheduler::new(state)),
+            stillborn: None,
+            cancel,
+        }
+    }
+
+    /// Drains the ready queue and returns what the run issued and
+    /// reported: [`Step::Pending`] while any chain waits on an answer,
+    /// [`Step::Done`] once the run is over and every issued effect is
+    /// answered. A step after `Done` is a host error and reports an
+    /// internal failure.
+    pub(crate) fn step(&mut self) -> Step {
+        if let Some(error) = self.stillborn.take() {
+            return Step::Done {
+                result: RunResult::Failure(RunError::from(error)),
+                events: Vec::new(),
+            };
+        }
+        match self.scheduler.as_mut() {
+            Some(scheduler) => scheduler.step(),
+            None => Step::Done {
+                result: RunResult::Failure(RunError::from(Error::internal(
+                    "a run that failed to start cannot be stepped again",
+                ))),
+                events: Vec::new(),
+            },
+        }
+    }
+
+    /// Applies one effect's answer: the parked chain resumes with it (or
+    /// with a cancelled error for [`EffectAnswer::Dropped`]) and is
+    /// re-queued for the next `step`; the round's events are buffered for
+    /// that step. An answer for an effect whose chain stopped waiting is
+    /// discarded. An answer for an id the run never issued, or a second
+    /// answer for one effect, is an internal error that ends the run.
+    pub(crate) fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
+        if let Some(scheduler) = self.scheduler.as_mut() {
+            scheduler.resume(id, answer);
+        }
+    }
+
+    /// Sets the run's cancel flag. Running Lua observes it from its
+    /// instruction hook; the next `step` tears every chain down and, once
+    /// the outstanding effects are answered, reports the run as cancelled.
     #[cfg_attr(
         not(test),
         expect(
             dead_code,
-            reason = "issued by the host's cancel path once `Run::resume` lands; the engine already applies it"
+            reason = "the in-crate tokio host cancels through the context's handle; the harness is the first host to cancel through the run"
         )
     )]
-    Dropped,
+    pub(crate) fn cancel(&mut self) {
+        self.cancel.cancel();
+    }
+
+    /// The run's cancel flag, for a host that cancels from another thread.
+    #[must_use]
+    pub(crate) fn cancel_handle(&self) -> CancelHandle {
+        self.cancel.clone()
+    }
+
+    /// Whether the run's outcome is decided: its end boundary has been
+    /// reported (or it never started) and every effect still out is an
+    /// orphan whose answer only `Done` waits on. A host reads this after
+    /// a `Pending` step to learn it may drop what it holds, so control
+    /// never rides on the events, which are a report and not a decision.
+    #[must_use]
+    pub(crate) fn decided(&self) -> bool {
+        self.scheduler.as_ref().is_none_or(Scheduler::decided)
+    }
+
+    /// The run's context, for an in-crate host that draws its resources
+    /// (tools, broker, observer) from it. `None` for a run that failed to
+    /// start.
+    pub(crate) fn state(&self) -> Option<&RunState> {
+        self.scheduler.as_ref().map(Scheduler::state)
+    }
+
+    /// The scheduler behind the run, for the suites that inspect its
+    /// arena.
+    #[cfg(test)]
+    pub(crate) fn scheduler_for_test(&mut self) -> &mut Scheduler {
+        self.scheduler
+            .as_mut()
+            .expect("a run built from a state holds its scheduler")
+    }
+}
+
+/// Assembles the run state from the host's context: the version gate, the
+/// shared library, and the store mount, in the order the run has always
+/// checked them.
+///
+/// # Errors
+/// Returns [`Error::UnsupportedVersion`] or a structural parse error for a
+/// prompt that is not a supported promptforge prompt, the Lua error when
+/// the empty shared chunk cannot compile, or [`Error::Store`] when the
+/// mounted store backend fails the mount probe.
+fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result<RunState> {
+    match prompt.frontmatter().promptforge() {
+        Some(0) => {}
+        Some(other) => return Err(Error::UnsupportedVersion(other)),
+        None => {
+            return Err(Error::parse(
+                ParseErrorKind::Structure,
+                "not a promptforge prompt: no promptforge version",
+            )
+            .with_prompt_name(prompt.frontmatter().name()));
+        }
+    }
+    // Section startup replays the shared library unconditionally; a prompt
+    // without one replays an empty compiled chunk instead, so the startup
+    // sequence carries no `Option` branch.
+    let shared = match prompt.replay() {
+        Some(program) => program.clone(),
+        None => crate::lua::LuaProgram::empty()?,
+    };
+    // The stock handle carries the store mount; a hand-built router lacking
+    // it gets a fresh memory store overlaid as a defensive fallback, so a
+    // run never fails for want of the mount. A mounted-but-failing backend
+    // is never shadowed by the throwaway overlay: its error fails the run.
+    if !store_mount_present(&ctx.vfs).map_err(Error::Store)? {
+        ctx.vfs = ctx.vfs.overlay(
+            promptforge_vfs::STORE_MOUNT,
+            shared_vfs::MemoryBackend::new(),
+        );
+    }
+    Ok(RunState::new(prompt, args, &ctx.vfs, shared, &ctx))
+}
+
+/// Whether the handle already serves the store mount. The probe stats the
+/// mount root through a throwaway capability: a mounted backend answers
+/// (the memory backend's root always exists), an unmounted path is
+/// `NotFound`. Only `NotFound` means "mount absent": any other error is the
+/// mounted backend's own failure and propagates, so a loud backend failure
+/// is never converted into the run silently reading and writing a
+/// throwaway overlay. The probe's identity and claim release with the
+/// access.
+fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, shared_vfs::VfsError> {
+    match vfs
+        .acquire(shared_vfs::Origin::new("store mount probe"))?
+        .stat(promptforge_vfs::STORE_MOUNT)
+    {
+        Ok(_) => Ok(true),
+        Err(shared_vfs::VfsError::NotFound(_)) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

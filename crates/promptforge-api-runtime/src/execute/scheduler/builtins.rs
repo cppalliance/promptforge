@@ -277,7 +277,7 @@ fn render_status(task: &TaskId, status: &TaskStatus) -> String {
     text
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Answers a model-issued call to one of the task built-ins on the
     /// driver thread: the arm's answer, its succeeded/failed observation,
     /// and the trusted `ToolResult` report under the model's call id - or

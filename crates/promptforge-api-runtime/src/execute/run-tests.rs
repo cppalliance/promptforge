@@ -1,16 +1,22 @@
 //! The effect record: every effect kind projects onto a record that
 //! round-trips through serde, and the projection drops exactly the live
-//! handles.
+//! handles. Then the run's host boundary: `Done` waits on outstanding
+//! effects, a drop is an answer, and the run is `Send`.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use promptforge_api_types::event::Event;
 use promptforge_api_types::tools::ToolId;
 use promptforge_model_client::model::{ModelInvocation, Temperature};
 use serde_json::json;
 
 use super::*;
-use crate::model::ModelId;
+use crate::client::{Message, ToolSchema};
+use crate::execute::protocol::StoreOp;
+use crate::input::{InputBroker, InputError, InputOutcome};
+use crate::model::{ModelBinding, ModelId};
+use crate::observe::NullObserver;
 
 /// Serializes the record and reads it back: the round trip a run log and
 /// a replay depend on.
@@ -139,4 +145,271 @@ fn a_timer_effect_records_its_seconds() {
     let record = effect.record();
     assert_eq!(record, EffectRecord::Timer { seconds: 0.25 });
     assert_eq!(round_trip(&record), record);
+}
+
+/// A run over one section whose only Lua block is `body`, capability-free.
+fn run_of(body: &str, ctx: RunContext) -> Run {
+    let source = format!(
+        "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\n{body}\n```\n"
+    );
+    let prompt = Prompt::parse(&source, "run-test", &NullObserver::default())
+        .expect("the run test prompt parses");
+    Run::new(Arc::new(prompt), "", ctx)
+}
+
+/// A broker that never answers, so only a dropped effect ends the wait.
+struct PendingBroker;
+
+#[async_trait::async_trait]
+impl InputBroker for PendingBroker {
+    async fn user_input(
+        &self,
+        _execution: &str,
+        _section: &str,
+    ) -> std::result::Result<InputOutcome, InputError> {
+        std::future::pending().await
+    }
+}
+
+/// The one effect a pending step issued.
+fn only_effect(step: Step) -> (EffectId, Effect) {
+    let Step::Pending { mut effects, .. } = step else {
+        panic!("the step is pending, got {step:?}");
+    };
+    assert_eq!(
+        effects.len(),
+        1,
+        "exactly one effect is issued: {effects:?}"
+    );
+    let (id, _, effect) = effects.remove(0);
+    (id, effect)
+}
+
+/// Whether `events` carry the run's end boundary.
+fn ended(events: &[Event]) -> bool {
+    events
+        .iter()
+        .any(|event| matches!(event, Event::RunSucceeded { .. } | Event::RunFailed { .. }))
+}
+
+const fn assert_send<T: Send>() {}
+
+#[test]
+fn a_run_is_send() {
+    // The host boundary: one caller at a time, and the thread may change
+    // between calls, so the run (its Lua VMs included) must cross threads.
+    assert_send::<Run>();
+}
+
+#[test]
+fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_dropped() {
+    let mut run = run_of(
+        "store.write('notes.md', 'kept')\nreturn 'unreachable'",
+        RunContext::new("run-test"),
+    );
+    let (id, effect) = only_effect(run.step());
+    assert!(
+        matches!(effect, Effect::Store { .. }),
+        "the store call is one store effect: {effect:?}"
+    );
+    // The host cancels while the store operation is out. The next step
+    // tears the run down and reports its end, but the effect still owes
+    // its answer, so `Done` waits.
+    run.cancel();
+    let step = run.step();
+    let Step::Pending { effects, events } = step else {
+        panic!("Done is withheld while the store effect is unanswered, got {step:?}");
+    };
+    assert!(effects.is_empty(), "a torn-down run issues nothing");
+    assert!(
+        ended(&events),
+        "the run's end boundary is reported: {events:?}"
+    );
+    run.resume(id, EffectAnswer::Dropped);
+    let step = run.step();
+    let Step::Done { result, .. } = step else {
+        panic!("Done follows the last answer, got {step:?}");
+    };
+    assert!(
+        matches!(result, RunResult::Cancelled),
+        "the cancelled run reports as cancelled: {result:?}"
+    );
+}
+
+#[test]
+fn a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error() {
+    let mut run = run_of(
+        "return user_input()",
+        RunContext::new("run-test").input_broker(Arc::new(PendingBroker)),
+    );
+    let (id, effect) = only_effect(run.step());
+    assert!(matches!(effect, Effect::UserInput { .. }));
+    run.resume(id, EffectAnswer::Dropped);
+    let step = run.step();
+    let Step::Done { result, .. } = step else {
+        panic!("the dropped wait ends the run, got {step:?}");
+    };
+    assert!(
+        matches!(result, RunResult::Cancelled),
+        "the chain resumed with the cancelled error and the run reports it: {result:?}"
+    );
+}
+
+#[test]
+fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer() {
+    let mut run = run_of(
+        "store.write('notes.md', 'kept')\nreturn 'unreachable'",
+        RunContext::new("run-test"),
+    );
+    let (id, _) = only_effect(run.step());
+    run.cancel();
+    assert!(matches!(run.step(), Step::Pending { .. }));
+    // The host performed the operation before it learned of the cancel:
+    // its answer is the effect's one answer, discarded rather than applied.
+    run.resume(
+        id,
+        EffectAnswer::Store(Ok(crate::execute::protocol::StoreOutcome::Unit)),
+    );
+    assert!(
+        matches!(
+            run.step(),
+            Step::Done {
+                result: RunResult::Cancelled,
+                ..
+            }
+        ),
+        "Done follows the orphan's answer"
+    );
+}
+
+#[test]
+fn an_answer_for_an_unissued_effect_is_an_internal_error() {
+    let mut run = run_of(
+        "return user_input()",
+        RunContext::new("run-test").input_broker(Arc::new(PendingBroker)),
+    );
+    let (id, _) = only_effect(run.step());
+    run.resume(EffectId(id.0 + 99), EffectAnswer::Timer);
+    // The unknown id ended the run; the real effect is now an orphan whose
+    // answer the host still owes.
+    let Step::Pending { events, .. } = run.step() else {
+        panic!("the run waits for the orphan's answer");
+    };
+    assert!(ended(&events));
+    run.resume(id, EffectAnswer::Dropped);
+    let Step::Done { result, .. } = run.step() else {
+        panic!("Done follows the orphan's answer");
+    };
+    let RunResult::Failure(error) = result else {
+        panic!("an unknown id fails the run, got {result:?}");
+    };
+    assert_eq!(error.kind(), crate::execute::RunErrorKind::Internal);
+    assert!(
+        error.to_string().contains("did not issue"),
+        "the failure names the unknown id: {error}"
+    );
+}
+
+#[test]
+fn an_answer_of_the_wrong_kind_for_a_pending_effect_fails_loudly() {
+    let mut run = run_of(
+        "return user_input()",
+        RunContext::new("run-test").input_broker(Arc::new(PendingBroker)),
+    );
+    let (id, _) = only_effect(run.step());
+    run.resume(id, EffectAnswer::Timer);
+    let Step::Done { result, .. } = run.step() else {
+        panic!("the mismatch ends the run with nothing outstanding");
+    };
+    let RunResult::Failure(error) = result else {
+        panic!("a wrong-kind answer fails the run, got {result:?}");
+    };
+    assert!(
+        error.to_string().contains("effect's own kind"),
+        "the mismatch is a loud invariant failure: {error}"
+    );
+}
+
+#[test]
+fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
+    let parent = CancelHandle::new();
+    let child = parent.child();
+    let mut run = run_of(
+        "local n = 0\nwhile true do n = n + 1 end",
+        RunContext::new("run-test").cancel(child),
+    );
+    // The loop never yields, so only the hook can end it: the parent's
+    // cancel reaches the child the run holds, from another thread.
+    let canceller = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        parent.cancel();
+    });
+    let step = run.step();
+    canceller.join().expect("the canceller thread finishes");
+    let Step::Done { result, events } = step else {
+        panic!("the hook aborts the loop and nothing is outstanding, got {step:?}");
+    };
+    assert!(matches!(result, RunResult::Cancelled), "got {result:?}");
+    assert!(ended(&events), "the end boundary rides the final step");
+}
+
+#[test]
+fn a_context_without_a_host_handle_shares_its_one_flag_with_prepare_and_the_run() {
+    let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\nreturn 'x'\n```\n";
+    let prompt = Prompt::parse(source, "run-test", &NullObserver::default())
+        .expect("the run test prompt parses");
+    // The flag `prepare` hands the capabilities is the context's own.
+    let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, RunContext::new("run-test"));
+    let capabilities_flag = ctx.cancel.clone();
+    let mut run = Run::new(Arc::new(prompt), "", ctx);
+    assert!(!capabilities_flag.is_cancelled());
+    assert!(!run.cancel_handle().is_cancelled());
+    run.cancel();
+    assert!(
+        capabilities_flag.is_cancelled(),
+        "the run's cancel sets the flag the capabilities hold"
+    );
+    assert!(
+        run.cancel_handle().is_cancelled(),
+        "the run's own handle is the same flag"
+    );
+}
+
+#[test]
+fn a_run_is_decided_once_its_end_is_reported_while_done_is_withheld() {
+    let mut run = run_of(
+        "store.write('notes.md', 'kept')\nreturn 'unreachable'",
+        RunContext::new("run-test"),
+    );
+    assert!(!run.decided(), "a fresh run is undecided");
+    let (id, _) = only_effect(run.step());
+    assert!(!run.decided(), "a run waiting on an answer is undecided");
+    run.cancel();
+    assert!(
+        matches!(run.step(), Step::Pending { .. }),
+        "Done waits on the store effect"
+    );
+    assert!(
+        run.decided(),
+        "the run is decided before Done, so the host can drop what it holds"
+    );
+    run.resume(id, EffectAnswer::Dropped);
+    assert!(matches!(run.step(), Step::Done { .. }));
+    assert!(run.decided(), "a finished run stays decided");
+}
+
+#[test]
+fn a_stillborn_run_reports_its_failure_on_the_first_step() {
+    let source = "---\nname: t\ndescription: d\npromptforge: 7\n---\n\n# Run\n\n## Only\n\ndone\n";
+    let prompt = Prompt::parse(source, "run-test", &NullObserver::default())
+        .expect("the prompt parses whatever version it declares");
+    let mut run = Run::new(Arc::new(prompt), "", RunContext::new("run-test"));
+    let Step::Done { result, events } = run.step() else {
+        panic!("a run that cannot start is done at once");
+    };
+    assert!(events.is_empty(), "nothing ran, nothing reported");
+    let RunResult::Failure(error) = result else {
+        panic!("an unsupported version fails, got {result:?}");
+    };
+    assert_eq!(error.kind(), crate::execute::RunErrorKind::Version);
 }

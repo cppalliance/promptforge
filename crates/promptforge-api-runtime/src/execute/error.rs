@@ -132,6 +132,12 @@ impl RunError {
         matches!(self.inner, Error::Interrupted)
     }
 
+    /// Dissolves the boundary error into the engine's own, for the
+    /// in-crate drivers that report in that vocabulary.
+    pub(crate) fn into_inner(self) -> Error {
+        self.inner
+    }
+
     /// Returns `true` when retrying the run may succeed (transient transport or
     /// backend failures).
     #[must_use]

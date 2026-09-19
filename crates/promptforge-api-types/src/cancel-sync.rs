@@ -7,12 +7,19 @@
 //! flag, arranged as a tree so a run-level cancel reaches every task while
 //! one task can be cancelled without touching its siblings or its owner.
 //!
-//! This is the handle `RunContext` will carry once the scheduler stops
-//! awaiting the tokio token in [`super`]; until then both live side by side.
+//! This is the handle the engine's `RunContext` carries and the one
+//! `RunServices` hands a capability; the awaitable token in [`super`] stays
+//! for hosts that select over cancellation and bridge it to this flag. A
+//! host that drives the engine and must wait on the flag itself awaits
+//! [`CancelHandle::cancelled`], a std-only future woken by the cancel, so
+//! no host has to poll the flag on a timer.
 
 use std::fmt;
-use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll, Waker};
 
 #[cfg(test)]
 #[path = "cancel-sync-tests.rs"]
@@ -33,6 +40,10 @@ mod tests;
 ///   returns to `false`.
 /// - **No registry.** A child holds its parent, never the reverse, so there
 ///   are no reference cycles and nothing to unregister when a handle drops.
+/// - **Awaitable.** [`cancelled`](Self::cancelled) is a future the cancel
+///   wakes, for a host that waits on the flag beside its other sources.
+///   Polling stays a flag read; waiting costs one waker per node per
+///   waiter, dropped when the cancel fires them.
 ///
 /// Reading walks the ancestor chain, one atomic load per level. The chain is
 /// as deep as the run's task nesting, which the engine caps, so a poll from
@@ -64,6 +75,12 @@ pub struct CancelHandle {
 struct Node {
     cancelled: AtomicBool,
     parent: Option<Arc<Node>>,
+    /// The wakers of the [`Cancelled`] futures waiting on this node or on
+    /// a descendant: a waiter registers on every node up its chain, since
+    /// a cancel anywhere on the chain completes it, and a node holds
+    /// wakers (never handles), so the tree still has no reference cycles.
+    /// Drained by the cancel that fires them.
+    wakers: Mutex<Vec<Waker>>,
 }
 
 impl Node {
@@ -77,6 +94,49 @@ impl Node {
                 Some(parent) => node = parent,
                 None => return false,
             }
+        }
+    }
+
+    /// Registers `waker` on this node unless an equivalent waker already
+    /// waits here, so a future polled many times leaves one entry.
+    fn register(&self, waker: &Waker) {
+        let mut wakers = self.wakers.lock().unwrap_or_else(PoisonError::into_inner);
+        if !wakers.iter().any(|known| known.will_wake(waker)) {
+            wakers.push(waker.clone());
+        }
+    }
+}
+
+/// Completes when the handle it was drawn from reports cancelled.
+///
+/// Returned by [`CancelHandle::cancelled`]. The future is `Unpin` and owns
+/// its handle, so a host can hold it across awaits or select over it
+/// beside its other sources. It never times out or spins: the cancel that
+/// sets the flag wakes it.
+#[derive(Debug)]
+#[must_use = "futures do nothing unless polled"]
+pub struct Cancelled {
+    handle: CancelHandle,
+}
+
+impl Future for Cancelled {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        // Register before reading the flag, so a cancel landing between
+        // the two is observed by the read rather than lost.
+        let mut node = &*self.handle.inner;
+        loop {
+            node.register(cx.waker());
+            match &node.parent {
+                Some(parent) => node = parent,
+                None => break,
+            }
+        }
+        if self.handle.is_cancelled() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
         }
     }
 }
@@ -103,15 +163,55 @@ impl CancelHandle {
             inner: Arc::new(Node {
                 cancelled: AtomicBool::new(false),
                 parent: Some(Arc::clone(&self.inner)),
+                wakers: Mutex::new(Vec::new()),
             }),
         }
     }
 
-    /// Marks this handle (and every clone and descendant) cancelled.
+    /// Marks this handle (and every clone and descendant) cancelled and
+    /// wakes every [`cancelled`](Self::cancelled) future waiting on it or
+    /// on a descendant.
     ///
     /// Idempotent and irreversible.
     pub fn cancel(&self) {
         self.inner.cancelled.store(true, Ordering::Release);
+        let wakers = std::mem::take(
+            &mut *self
+                .inner
+                .wakers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        for waker in wakers {
+            waker.wake();
+        }
+    }
+
+    /// A future that completes when this handle reports cancelled: at once
+    /// if it already does, otherwise when a cancel lands on it or on an
+    /// ancestor. This is how a host that must wait on the flag waits
+    /// without polling it on a timer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::future::Future;
+    /// use std::pin::pin;
+    /// use std::task::{Context, Poll, Waker};
+    ///
+    /// use promptforge_api_types::cancel::sync::CancelHandle;
+    ///
+    /// let run = CancelHandle::new();
+    /// let mut waiting = pin!(run.child().cancelled());
+    /// let mut cx = Context::from_waker(Waker::noop());
+    /// assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
+    /// run.cancel();
+    /// assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Ready(()));
+    /// ```
+    pub fn cancelled(&self) -> Cancelled {
+        Cancelled {
+            handle: self.clone(),
+        }
     }
 
     /// Returns whether [`cancel`](Self::cancel) has been called on this

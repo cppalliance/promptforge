@@ -44,7 +44,7 @@ pub(super) enum TaskEnd<'a> {
     Abandoned(AbandonReason),
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Queues one notice on `owner` for its model task `task` (started at
     /// `target`) that ended as `end`, and reports it as a `TaskNotice`
     /// under the owner's section. The completed text is nonce-wrapped

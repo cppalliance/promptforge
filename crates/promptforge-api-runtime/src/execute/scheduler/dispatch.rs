@@ -1,10 +1,10 @@
 //! The request arms: one dispatch per validated protocol request from a
 //! suspended chain. Every leaf arm builds its [`Effect`] and issues it
-//! through the scheduler's one `issue` path; the arm spawns nothing and
+//! through the scheduler's one `issue` path; the arm performs nothing and
 //! emits nothing for the answer, which `apply_answer` handles when it
-//! lands. Every store operation is a leaf yield, performed on the
-//! blocking pool uniformly for all backends - no inline fast path - so
-//! interleaving behavior never depends on which backend serves the mount.
+//! lands. Every store operation is a leaf yield, handed to the host
+//! uniformly for all backends - no inline fast path - so interleaving
+//! behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
 //! `tool_call`, `chat`, `spawn`, `timer`, `drain_task_notices`, and task
 //! wait, inspection, note, and cancel arms live in their own modules.
@@ -101,7 +101,7 @@ pub(super) fn classify_store_failure(error: &StoreError) -> Error {
     Error::Lua(error.to_string())
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Dispatches one validated request from a suspended chain.
     ///
     /// # Errors
@@ -241,19 +241,19 @@ impl Scheduler<'_> {
             tools: Vec::new(),
             stream: false,
         };
-        self.issue(id, effect, Continuation::Infer)?;
+        self.issue(id, effect, Continuation::Infer);
         Ok(())
     }
 
-    /// Dispatches a `user_input` request: the run's input broker answers
-    /// the issued `UserInput` effect exactly as a leaf I/O round does, so
-    /// a blocking wait parks its chain - the section's VM and message
-    /// history intact - without blocking the driver, and cancellation
-    /// aborts it through the shared in-flight abort path. With no broker
-    /// configured the unavailable-fallback policy answers immediately: the
-    /// fixed fallback sentence with `available` false. The wait is
-    /// reported here; a delivered response is reported when its answer is
-    /// applied; an unavailable answer opens no wait and records no input.
+    /// Dispatches a `user_input` request: the host answers the issued
+    /// `UserInput` effect exactly as a leaf I/O round does, so a blocking
+    /// wait parks its chain - the section's VM and message history intact -
+    /// without blocking the run, and a cancel drops it with every other
+    /// outstanding effect. With no broker configured the
+    /// unavailable-fallback policy answers immediately: the fixed fallback
+    /// sentence with `available` false. The wait is reported here; a
+    /// delivered response is reported when its answer is applied; an
+    /// unavailable answer opens no wait and records no input.
     fn dispatch_user_input(&mut self, id: ChainIndex) {
         let chain = &self.chains[id.index()];
         if chain.ctx.input_broker().is_none() {
@@ -271,16 +271,13 @@ impl Scheduler<'_> {
             .emitter()
             .report(&section, detail::USER_INPUT_WAIT_STARTED);
         let effect = Effect::UserInput { execution, section };
-        if let Err(error) = self.issue(id, effect, Continuation::UserInput) {
-            self.chains[id.index()].incoming = Some(Answer::UserInput(Err(error)));
-            self.ready.push_back(id);
-        }
+        self.issue(id, effect, Continuation::UserInput);
     }
 
     /// Dispatches a `store` request: issues the operation under the
-    /// chain's access capability as a `Store` effect, performed on the
-    /// blocking pool, parking the chain in the pending table exactly as a
-    /// leaf I/O round does. Every store operation takes this yield path
+    /// chain's access capability as a `Store` effect for the host to
+    /// perform, parking the chain in the pending table exactly as a leaf
+    /// I/O round does. Every store operation takes this yield path
     /// uniformly (memory- and host-backed alike, with no inline fast path)
     /// so interleaving behavior never depends on which backend serves
     /// the mount. The operation's event is pushed when the answer is
@@ -293,10 +290,7 @@ impl Scheduler<'_> {
         let access = Arc::clone(self.chains[id.index()].access()?);
         let observations = store_observations(&op);
         let effect = Effect::Store { access, op };
-        if let Err(error) = self.issue(id, effect, Continuation::Store(observations)) {
-            self.chains[id.index()].incoming = Some(Answer::Store(Err(error)));
-            self.ready.push_back(id);
-        }
+        self.issue(id, effect, Continuation::Store(observations));
         Ok(())
     }
 
@@ -355,8 +349,8 @@ impl Scheduler<'_> {
         // capability (the same serial thread of execution), so the caller's
         // standing claims never false-conflict with the child's ops.
         let access = chain.access.clone();
-        // `chain`'s arena borrow ends here; the resolution borrows the
-        // prompt tree, so the target's slice outlives it.
+        // `chain`'s arena borrow ends here; the resolution names the
+        // target's slice by path, so nothing borrows the arena across it.
         let target_section = self.resolve_chain_target(id, target)?;
         // The child's id is the caller's next child index: `call` children
         // and spawned tasks share the caller's counter, so the id depends

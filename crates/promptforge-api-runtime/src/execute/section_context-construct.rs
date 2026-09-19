@@ -78,6 +78,8 @@ impl SectionContext {
             ctx.observer(),
             section.name(),
         )?;
+        // The run's cancel flag reaches every block coroutine's hook.
+        vm.set_cancel(ctx.cancel().clone());
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
         vm.apply_lua_limits(
@@ -166,6 +168,7 @@ impl SectionContext {
             ctx.observer(),
             title,
         )?;
+        vm.set_cancel(ctx.cancel().clone());
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
         vm.apply_lua_limits(

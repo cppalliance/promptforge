@@ -79,7 +79,7 @@ fn render_wake(mut lines: Vec<String>, timed_out: Option<f64>, still_running: &[
     lines.join("\n")
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// The `await_tasks` built-in: answers at once with the pending
     /// notices when any are queued (a task that ended during the round
     /// that issued the call is a result that has already arrived, so no

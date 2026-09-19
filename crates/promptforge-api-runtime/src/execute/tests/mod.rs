@@ -13,6 +13,7 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use serde_json::{Value, json};
 
+use super::context::RunState;
 use super::gateway::{GatewaySource, env_client_with_limits};
 use super::scope::prepare_scoped_tools;
 use super::support::{advance_turn, now_rfc3339_checked};
@@ -24,6 +25,7 @@ use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::observe::{NullObserver, Observation, Observer, detail};
+use crate::parser::ParseErrorKind;
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;

@@ -29,10 +29,11 @@
 //! event buffer, stamped with the
 //! [`Provenance`](promptforge_api_types::ids::Provenance) of the chain that
 //! reported it (its nearest enclosing task and that task's next sequence
-//! number). The driver drains the buffer after every dispatch round and
-//! forwards the batch to the [`RunContext`] observer and debug capture
-//! through the `events_to_observer` adapter. Reporting is a side channel
-//! and never a decision, so passing
+//! number). Every `step` of the run drains the buffer and returns the
+//! batch to the host; the in-crate tokio driver behind [`run`] forwards
+//! it to the [`RunContext`] observer and debug capture through the
+//! `events_to_observer` adapter. Reporting is a side channel and never a
+//! decision, so passing
 //! [`NullObserver`](promptforge_api_types::observe::NullObserver) changes
 //! nothing but the silence.
 //!
@@ -52,13 +53,15 @@
 //!
 //! # Runtime
 //!
-//! One driver task runs a whole prompt: section Lua yields request messages
-//! to the chain-stack scheduler, which awaits I/O without blocking a worker
-//! thread and resumes the chain with the answer, so a run needs no
-//! particular Tokio runtime flavor - a current-thread runtime runs any
+//! The engine is a state machine (`run::Run`): it performs no I/O and
+//! awaits nothing. Section Lua yields request messages to the chain-stack
+//! scheduler, which turns each leaf request into an effect value the
+//! host performs and answers, so a run needs no particular Tokio runtime
+//! flavor - the in-crate driver behind [`run`] performs on whatever
+//! runtime the caller is on, and a current-thread runtime runs any
 //! prompt, host calls included. Concurrency (a fanout's arms) comes from
-//! interleaving chains at I/O points on the driver's thread, not from
-//! worker threads.
+//! interleaving chains at their effect boundaries, not from worker
+//! threads.
 //!
 //! # Module layout
 //!
@@ -78,14 +81,17 @@
 //! frame the scheduler's chains construct, run, and tear down),
 //! `engine` (the walk-target
 //! resolution helpers), `protocol` (the coroutine request/answer types
-//! for the yield/resume boundary), `run` (the effect vocabulary: the
-//! `Effect` a leaf arm issues, its serializable `EffectRecord`, and the
-//! `EffectAnswer` a performer returns), `scheduler` (the chain-stack
-//! scheduler driving the coroutine protocol: the live H1 pass, the walk,
-//! call chains, fanout, and the `chat` and `tool_call` rounds the
-//! section-visible `models.loop` shim yields), `scope` (tool-scope
-//! validation and schema/dispatch preparation), and `support` (shared
-//! helpers).
+//! for the yield/resume boundary), `run` (the host boundary: the `Run`
+//! state machine with its `step`, `resume`, and `cancel`, the `Step` it
+//! returns, and the effect vocabulary - the `Effect` a leaf arm issues,
+//! its serializable `EffectRecord`, and the `EffectAnswer` a host
+//! returns), `scheduler` (the chain-stack scheduler driving the coroutine
+//! protocol: the live H1 pass, the walk, call chains, fanout, and the
+//! `chat` and `tool_call` rounds the section-visible `models.loop` shim
+//! yields), `tokio_driver` (the in-crate tokio host that performs a
+//! run's effects with the configured client, tools, and broker), `scope`
+//! (tool-scope validation and schema/dispatch preparation), and
+//! `support` (shared helpers).
 
 mod bindings;
 mod config;
@@ -99,12 +105,13 @@ mod fill;
 mod gateway;
 pub(crate) mod protocol;
 mod requirements;
-mod run;
+pub(crate) mod run;
 mod scheduler;
 mod scope;
 mod section_context;
 pub(crate) mod section_vm;
 mod support;
+pub(crate) mod tokio_driver;
 mod tools;
 
 // Public API surface.
@@ -114,14 +121,13 @@ pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
 
-use context::RunState;
-use scheduler::Scheduler;
+use std::sync::Arc;
+
+use run::Run;
+use tokio_driver::TokioDriver;
 
 use crate::Error;
-use crate::cancel;
-use crate::observe::detail;
-use crate::parser::{ParseErrorKind, Prompt};
-use crate::store::VfsRef;
+use crate::parser::Prompt;
 
 /// What the run produced. Domain outcomes (including "the prompt
 /// declined") are values, not thrown errors: the variant is for code, the
@@ -213,115 +219,36 @@ pub enum RunResult {
 /// ```
 ///
 /// # Runtime
-/// A run needs no particular Tokio runtime flavor. Every chain step - all
-/// Lua, the walk, call chains, and fanout joins - executes inside the
-/// one driver task, and suspending Lua host calls (`models.infer`,
-/// `call`, `fanout`) are coroutine yields the scheduler answers, so no
-/// host call parks a worker thread. Concurrency (a fanout's arms) comes
-/// from interleaving chains at I/O points, not from threads; on a
-/// multi-thread runtime only the leaf I/O waits, which never touch Lua or
-/// scheduler state, may run on other workers.
+/// A run needs no particular Tokio runtime flavor. The engine itself
+/// awaits nothing: every chain step - all Lua, the walk, call chains, and
+/// fanout joins - runs inside one `Run::step`, and suspending Lua host
+/// calls (`models.infer`, `call`, `fanout`) are coroutine yields the
+/// scheduler turns into effects, so no host call parks a worker thread.
+/// The tokio loop behind this function performs those effects with the
+/// context's client, tools, and broker and feeds the answers back.
+/// Concurrency (a fanout's arms) comes from interleaving chains at their
+/// effect boundaries, not from threads; on a multi-thread runtime only
+/// the performers, which never touch Lua or scheduler state, may run on
+/// other workers.
 pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
-    match prompt.frontmatter().promptforge() {
-        Some(0) => {}
-        Some(other) => {
-            return RunResult::Failure(RunError::from(Error::UnsupportedVersion(other)));
-        }
-        None => {
-            return RunResult::Failure(RunError::from(
-                Error::parse(
-                    ParseErrorKind::Structure,
-                    "not a promptforge prompt: no promptforge version",
-                )
-                .with_prompt_name(prompt.frontmatter().name()),
-            ));
-        }
-    }
-
-    // Section startup replays the shared library unconditionally; a prompt
-    // without one replays an empty compiled chunk instead, so the startup
-    // sequence carries no `Option` branch.
-    let shared = match prompt.replay() {
-        Some(program) => program.clone(),
-        None => match crate::lua::LuaProgram::empty() {
-            Ok(program) => program,
-            Err(error) => return RunResult::Failure(RunError::from(Error::from(error))),
-        },
-    };
-    // The stock handle carries the store mount; a hand-built router lacking
-    // it gets a fresh memory store overlaid as a defensive fallback, so a
-    // run never fails for want of the mount. A mounted-but-failing backend
-    // is never shadowed by the throwaway overlay: its error fails the run.
+    // The caller-supplied client honors the run's HTTP limits, as a
+    // lazily built environment client does.
+    let limits = ctx.limits;
     let mut ctx = ctx;
-    match store_mount_present(&ctx.vfs) {
-        Ok(true) => {}
-        Ok(false) => {
-            ctx.vfs = ctx.vfs.overlay(
-                promptforge_vfs::STORE_MOUNT,
-                shared_vfs::MemoryBackend::new(),
-            );
-        }
-        Err(error) => return RunResult::Failure(RunError::from(Error::Store(error))),
-    }
-    let state = RunState::new(prompt, args, &ctx.vfs, shared, &ctx);
-
-    let RunContext {
-        client,
-        cancel,
-        limits,
-        ..
-    } = ctx;
-    let client =
-        client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
-    // The run's boundaries are events like every other report: pushed into
-    // the buffer under the root task, so the host sees them in order with
-    // the sections between them.
-    state.emitter().report(prompt.title(), detail::RUN_STARTED);
-
-    // Boxed: the driver future carries the whole scheduler step machinery,
-    // and `run`'s own future must stay small for its callers (the
-    // workspace's large-futures lint gates every one of them).
-    let run_body = Box::pin(async { Scheduler::new(&state, client).drive().await });
-
-    // Explicit cancellation: when the caller supplies a handle it is installed
-    // for the run so cooperative cancel checks observe it; without one the run
-    // simply is not cancellable from this path.
-    let result = cancel::maybe_scope(cancel, run_body).await;
-
-    state.emitter().report(
-        prompt.title(),
-        if result.is_ok() {
-            detail::RUN_SUCCEEDED
-        } else {
-            detail::RUN_FAILED
-        },
-    );
-    // The final drain: the run's end and whatever the scheduler's drop
-    // reported (an interrupted run's teardown boundaries) reach the host.
-    state.flush_events();
+    let client = ctx
+        .client
+        .take()
+        .map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
+    let run = Run::new(Arc::new(prompt.clone()), args, ctx);
+    // Boxed: the driver future carries the whole step machinery, and
+    // `run`'s own future must stay small for its callers (the workspace's
+    // large-futures lint gates every one of them).
+    let mut driver = TokioDriver::over(run, client);
+    let result = Box::pin(driver.drive()).await;
     match result {
         Ok(text) => RunResult::Ok(text),
         Err(Error::Interrupted) => RunResult::Cancelled,
         Err(error) => RunResult::Failure(RunError::from(error)),
-    }
-}
-
-/// Whether the handle already serves the store mount. The probe stats the
-/// mount root through a throwaway capability: a mounted backend answers
-/// (the memory backend's root always exists), an unmounted path is
-/// `NotFound`. Only `NotFound` means "mount absent": any other error is the
-/// mounted backend's own failure and propagates, so a loud backend failure
-/// is never converted into the run silently reading and writing a
-/// throwaway overlay. The probe's identity and claim release with the
-/// access.
-fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, shared_vfs::VfsError> {
-    match vfs
-        .acquire(shared_vfs::Origin::new("store mount probe"))?
-        .stat(promptforge_vfs::STORE_MOUNT)
-    {
-        Ok(_) => Ok(true),
-        Err(shared_vfs::VfsError::NotFound(_)) => Ok(false),
-        Err(error) => Err(error),
     }
 }
 

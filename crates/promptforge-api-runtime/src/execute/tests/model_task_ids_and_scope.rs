@@ -18,7 +18,7 @@ use super::model_task_acceptance::{
 use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
 use super::model_tasks::{NeverBroker, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 
 /// Drives the two-task prompt with `A` released after `delays[0]` and `B`
 /// after `delays[1]`, and returns the run's output (the owner's `sys.id`
@@ -49,7 +49,7 @@ async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, V
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&delays),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both tasks end inside the two waits");
@@ -127,7 +127,7 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");

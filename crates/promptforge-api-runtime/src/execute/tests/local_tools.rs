@@ -7,7 +7,7 @@ use super::super::*;
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
 
 /// The `grab` local tool registration the loop tests open with, followed
@@ -34,7 +34,7 @@ async fn local_tool_handler_result_returns_to_the_model() {
     .await;
     let prompt = parse(&grab_loop("return 'got ' .. args.value"));
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the local handler answers the model's call");
@@ -80,7 +80,7 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both calls in the one response run");
@@ -116,7 +116,7 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a handler Lua error must fail the tool call");

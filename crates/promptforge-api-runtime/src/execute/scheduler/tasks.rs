@@ -111,7 +111,7 @@ impl TaskSlot {
     }
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Dispatches a `spawn` request: constructs the task's chain, registers
     /// its slot, and resumes the spawner with the task's id; the child is
     /// enqueued behind the spawner, so `spawn` returns before the child
@@ -191,10 +191,11 @@ impl Scheduler<'_> {
         let spawner_access = Arc::clone(chain.access()?);
         let spawner_emitter = Arc::clone(chain.ctx.emitter());
         let spawner_section = chain.section_name().to_owned();
-        // `chain`'s arena borrow ends here; the resolution borrows the
-        // prompt tree, so the target's slice outlives it.
+        // `chain`'s arena borrow ends here; the resolution names the
+        // target's slice by path, resolved against the shared tree.
+        let prompt = self.prompt();
         let target_section = self.resolve_chain_target(id, target)?;
-        let worker = &target_section.slice[target_section.index];
+        let worker = &target_section.slice.resolve(&prompt)[target_section.index];
         if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items().is_empty() {
             return Err(Error::Lua(format!(
                 "section `{}` is a list section, not a worker template",
@@ -206,11 +207,7 @@ impl Scheduler<'_> {
         // runs ahead of the id allocation and the arena push rather than
         // orphaning a started chain that is neither enqueued nor slotted.
         let access = spawner_access
-            .spawn(prompt_origin(
-                self.ctx.prompt(),
-                worker.name(),
-                worker.blocks(),
-            ))
+            .spawn(prompt_origin(&prompt, worker.name(), worker.blocks()))
             .map_err(Error::Store)?;
         // The task's id is the spawner's next child index, shared with
         // `call` children, so it depends only on the spawner's own

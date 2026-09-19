@@ -313,6 +313,14 @@ impl SectionVm {
         Ok(vm)
     }
 
+    /// Installs the run's cancel flag on this VM's instruction hook: every
+    /// block coroutine the VM starts polls it, and a set flag aborts the
+    /// running chunk as [`Error::Interrupted`]. A VM without one is never
+    /// cancelled. The first install wins.
+    pub fn set_cancel(&self, cancel: promptforge_api_types::cancel::sync::CancelHandle) {
+        self.instruction_budget.set_cancel(cancel);
+    }
+
     /// Opts the VM into the Agent-window model-picker hack: `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id.
     ///
@@ -1055,7 +1063,7 @@ impl SectionVm {
         if let Some(heading) = self.take_jump()? {
             return Ok(LuaBlockResult::Jump(heading));
         }
-        let returned = result.map_err(|error| program.map_runtime_error(&error))?;
+        let returned = result.map_err(|error| self.map_chunk_failure(program, &error))?;
         Ok(LuaBlockResult::Returned(scalar_return(returned)?))
     }
 
@@ -1213,7 +1221,7 @@ impl SectionVm {
     /// taken on every failure so it never goes stale.
     fn block_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Result<Error> {
         let stashed = take_failure(&self.lua)?;
-        let mapped = program.map_runtime_error(&stashed.restore_traceback(error));
+        let mapped = self.map_chunk_failure(program, &stashed.restore_traceback(error));
         if matches!(mapped, Error::Interrupted | Error::LuaQuota { .. }) {
             return Ok(mapped);
         }
@@ -1221,6 +1229,17 @@ impl SectionVm {
             Some(raised) if raised.kind != crate::ErrorKind::Lua => Error::Raised(raised),
             _ => mapped,
         })
+    }
+
+    /// Maps one chunk's Lua failure to its typed outcome: a chunk the
+    /// instruction hook aborted under the run's cancel flag is
+    /// [`Error::Interrupted`], whatever the raw error says; everything
+    /// else maps through [`LuaProgram::map_runtime_error`].
+    fn map_chunk_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Error {
+        if self.instruction_budget.is_cancelled() {
+            return Error::Interrupted;
+        }
+        program.map_runtime_error(error)
     }
 }
 

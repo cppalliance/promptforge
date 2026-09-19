@@ -8,7 +8,7 @@
 use super::chat_arm::chat_context;
 use super::models_loop::{echo_tools, loop_prompt};
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::{ToolBinding, ToolSet};
 
 /// The function names one request advertised, in wire order.
@@ -53,7 +53,7 @@ async fn an_absent_tool_list_advertises_the_section_scope_with_local_tools() {
     );
     let prompt = parse(&md);
     let ctx = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the section scope includes local tools");
@@ -93,7 +93,7 @@ async fn an_explicit_tool_list_advertises_exactly_its_members() {
         echo_and_spare_tools(),
         Arc::new(NullObserver::default()),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an explicit list resolves each member");
@@ -120,7 +120,7 @@ async fn an_explicit_tool_list_advertises_exactly_its_members() {
         echo_and_spare_tools(),
         Arc::new(NullObserver::default()),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the scope refusal is pcall-able");
@@ -142,7 +142,7 @@ async fn an_empty_tool_list_advertises_nothing() {
     );
     let prompt = parse(&md);
     let ctx = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an empty list runs a tool-free round");
@@ -169,7 +169,7 @@ async fn an_unbound_alias_in_the_tool_list_fails_the_call_as_unbound_tool() {
     );
     let prompt = parse(&md);
     let ctx = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -187,7 +187,7 @@ async fn an_unbound_alias_in_the_tool_list_fails_the_call_as_unbound_tool() {
     );
     let prompt = parse(&md);
     let ctx = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("an uncaught unbound alias fails the section");

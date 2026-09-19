@@ -7,7 +7,7 @@
 
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::{OverflowReason, ToolSet};
 
 #[tokio::test(flavor = "current_thread")]
@@ -21,7 +21,7 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("an over-window request must exhaust the context");
@@ -54,7 +54,7 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -79,7 +79,7 @@ async fn an_explicit_compactors_fail_invocation_carries_the_provider_reason() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a provider context rejection must exhaust the context");
@@ -116,7 +116,7 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_hosts_type_names() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -159,7 +159,7 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -193,7 +193,7 @@ async fn a_compactors_own_string_raise_reaches_the_host_with_the_reason_tag() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("the compactor's own raise fails the section");

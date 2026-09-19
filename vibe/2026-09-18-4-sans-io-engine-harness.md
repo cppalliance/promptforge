@@ -738,7 +738,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-30>
 
-### Step 30: `Run::step` and `Run::resume`; the tokio internals deleted
+### Step 30: `Run::step` and `Run::resume`; the tokio internals deleted [completed]
 
 - Component: Run API and engine purity
 - Piece: inversion

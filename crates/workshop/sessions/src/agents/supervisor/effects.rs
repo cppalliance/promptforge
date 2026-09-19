@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use promptforge_api_runtime::client::GatewayClient as ModelClient;
 use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api_types::cancel::sync::CancelHandle as CancelFlag;
 use promptforge_api_types::observe::Observer;
 use promptforge_api_types::wire::StreamDelta;
 
@@ -166,17 +167,21 @@ async fn run_markdown_agent(
             });
         }
     };
+    let (cancel, bridge) = bridge_cancel(session.arm_cancel(run));
     let mut ctx = RunContext::new(session.id.clone())
         .observer(observer)
         .client(client)
-        .cancel(session.arm_cancel(run))
+        .cancel(cancel)
         .input_broker(broker)
         .ui(ui)
         .on_delta(on_delta);
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    match environment.run(&prompt, "", ctx).await {
+    let outcome = environment.run(&prompt, "", ctx).await;
+    // The run is over, so nothing reads the flag: the bridge ends with it.
+    bridge.abort();
+    match outcome {
         RunResult::Ok(_output) => Ok(()),
         RunResult::Cancelled => Err(AgentRunError::Interrupted),
         RunResult::Failure(error) => Err(AgentRunError::Failed {
@@ -184,6 +189,23 @@ async fn run_markdown_agent(
             source: Some(Box::new(error)),
         }),
     }
+}
+
+/// Bridges the session's awaitable cancel token to the synchronous flag
+/// the engine polls: the flag is set the moment the token fires. The
+/// caller aborts the returned bridge task once the run is over, so a run
+/// that finishes uncancelled leaves no task waiting on a token nobody
+/// will fire.
+fn bridge_cancel(
+    token: promptforge_api_types::cancel::CancelHandle,
+) -> (CancelFlag, tokio::task::JoinHandle<()>) {
+    let flag = CancelFlag::new();
+    let bridged = flag.clone();
+    let bridge = tokio::spawn(async move {
+        token.cancelled().await;
+        bridged.cancel();
+    });
+    (flag, bridge)
 }
 
 /// Mutable runtime bindings and the currently executing run.

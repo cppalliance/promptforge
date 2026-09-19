@@ -8,15 +8,13 @@ use promptforge_api_types::ids::{AbandonReason, ChainId, TaskId};
 
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
+use crate::execute::run::EffectId;
 use crate::execute::support::GENERIC_COMPLETION;
-use crate::parser::Section;
 use crate::{Error, Result};
 
-use crate::execute::run::EffectId;
+use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath};
 
-use super::{Chain, ChainIndex, Counters, Scheduler};
-
-impl<'a> Scheduler<'a> {
+impl Scheduler {
     /// Allocates the next child id under `owner`'s chain: the owner's id
     /// extended by its local child counter, which `call` children and
     /// spawned tasks share, so the ids a chain hands out depend only on
@@ -55,7 +53,7 @@ impl<'a> Scheduler<'a> {
         lineage: ChainId,
         counters: Counters,
         ctx: RunState,
-        slice: &'a [Section],
+        slice: SlicePath,
         index: usize,
         parent: Option<ChainIndex>,
         var: &serde_json::Value,
@@ -97,7 +95,7 @@ impl<'a> Scheduler<'a> {
             call_depth,
             parent,
             advertised: None,
-            h1: None,
+            h1: false,
         });
         Ok(id)
     }
@@ -134,7 +132,7 @@ impl<'a> Scheduler<'a> {
         // paths (fall-through, scalar return) handle the frame themselves;
         // this guard keeps an H1 frame that reaches here - an error path -
         // unarmed.
-        let is_h1 = chain.h1.is_some();
+        let is_h1 = chain.h1;
         let outcome = outcome.and_then(|returned| {
             // A chain ending mid-section (a scalar return) reads its final
             // var back before teardown, exactly as a completed section does
@@ -191,7 +189,7 @@ impl<'a> Scheduler<'a> {
     /// its call children and the tasks it spawned (a fanout's arms among
     /// them; each abandoned as `owner_aborted`, its own subtree aborted in
     /// turn): the chain leaves the ready queue and the pending table, its
-    /// in-flight leaf I/O task is aborted, and its state drops in the
+    /// in-flight leaf effect is orphaned, and its state drops in the
     /// teardown order (the suspended coroutine, then the frame unarmed - no
     /// `SECTION_FINISHED`). The chain's own task slot, if it is a task, is
     /// the caller's to settle: the owner's chain end abandons it, a cancel
@@ -241,32 +239,15 @@ impl<'a> Scheduler<'a> {
         chain.access = None;
     }
 
-    /// Drops one in-flight leaf effect whose chain is going away: the
-    /// pending entry leaves, the id is recorded as aborted, and the leaf
-    /// task is aborted.
+    /// Orphans one in-flight leaf effect whose chain is going away: the
+    /// pending entry leaves, and the id is recorded so the host's answer,
+    /// when it arrives, is discarded rather than failing the run. The host
+    /// still owes the answer: a store effect's access clone - and the
+    /// claims it holds - releases only when the host's performer finishes
+    /// and answers, and `Done` waits for it, so claim release stays
+    /// bounded to the run's lifetime on this path too.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
         self.pending.remove(&effect);
-        self.discard_performer(effect);
-    }
-
-    /// Discards one effect's in-flight performer, whether its chain is
-    /// going away or the host dropped the effect: the id is recorded as
-    /// aborted and the leaf task is aborted. The caller has already taken
-    /// or kept the pending entry as its path requires.
-    pub(super) fn discard_performer(&mut self, effect: EffectId) {
-        // Record the aborted effect so its task's late answer (a send
-        // that landed before the abort) is the one unknown-id answer
-        // the driver discards; anything else stays a loud invariant
-        // failure.
-        self.aborted_effects.insert(effect);
-        // The handle stays in `io_tasks`: aborting a blocking-pool op
-        // detaches rather than interrupts, so the op's access clone -
-        // and the claims it holds - releases only when the op finishes.
-        // The run-end drain awaits the handle, keeping claim release
-        // bounded to the run's lifetime on this path too; if the op's
-        // late answer arrives first, the answer loop takes the handle.
-        if let Some(task) = self.io_tasks.get(&effect) {
-            task.abort();
-        }
+        self.orphaned.insert(effect);
     }
 }

@@ -13,7 +13,7 @@ use promptforge_api_types::ids::TaskId;
 
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::execute::scheduler::{Scheduler, TaskState};
+use crate::execute::scheduler::TaskState;
 
 /// A recorder that keeps the typed observation, so a payload-carrying
 /// variant can be matched whole. Shared with the timeout suite, which
@@ -99,7 +99,7 @@ async fn drive(md: &str) -> (Result<String>, Arc<WaitRecorder>) {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, None).drive().await;
+    let out = TokioDriver::new(&ctx, None).drive().await;
     (out, recorder)
 }
 
@@ -220,7 +220,7 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the run completes");
@@ -331,7 +331,7 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await

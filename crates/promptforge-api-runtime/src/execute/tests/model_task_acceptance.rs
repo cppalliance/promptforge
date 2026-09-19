@@ -21,7 +21,7 @@ use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
 use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::scheduler::{Scheduler, TaskState};
+use crate::execute::scheduler::TaskState;
 
 /// A broker delay that orders one child's end against another's. The
 /// scripted rounds between them complete in milliseconds on the loopback
@@ -162,7 +162,7 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -244,7 +244,7 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[SOON]),
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -314,7 +314,7 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[SOON, LATER]),
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -402,7 +402,7 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await

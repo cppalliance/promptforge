@@ -1,20 +1,17 @@
 //! Effects as values: every leaf request kind a section yields - `infer`
 //! and `chat`, `tool_call`, `user_input`, `store`, `timer` - issues
-//! exactly one `Effect` through the scheduler's performer table, and each
-//! effect's record round-trips through serde. A `Dropped` answer resumes
-//! the parked chain with the cancelled error and aborts the performer,
-//! whose late answer is discarded; an answer of the wrong kind fails the
-//! run; only a `chat` round streams its deltas to the host.
-
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+//! exactly one `Effect` out of the run's `step`, and each effect's record
+//! round-trips through serde; only a `chat` round streams its deltas to
+//! the host. The run's answer rules (a drop, an orphan, a wrong kind) are
+//! pinned beside `Run` itself.
 
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::client::StreamDelta;
 use crate::execute::protocol::StoreOp;
-use crate::execute::run::{EffectAnswer, EffectId, EffectRecord};
-use crate::execute::scheduler::Scheduler;
+use crate::execute::run::EffectRecord;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::input::{InputBroker, InputError, InputOutcome};
 use crate::lua::ToolSet;
 
@@ -38,7 +35,7 @@ fn assert_round_trips(records: &[EffectRecord]) {
 /// the given run configuration.
 fn effect_context(prompt: &Prompt, tools: ToolSet, config: &RunContext) -> RunState {
     let ctx = RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -67,71 +64,6 @@ impl InputBroker for TextBroker {
     }
 }
 
-/// A broker that never answers, so only a dropped effect ends the wait.
-struct PendingBroker;
-
-#[async_trait::async_trait]
-impl InputBroker for PendingBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
-        std::future::pending().await
-    }
-}
-
-/// Sets its flag when dropped, so a test can prove an aborted performer's
-/// future was torn down rather than detached.
-struct SetOnDrop(Arc<AtomicBool>);
-
-impl Drop for SetOnDrop {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
-    }
-}
-
-/// A broker that stages the race a cancel loses: its first wait posts the
-/// host's `Dropped` for effect 0 and then its own answer for the same id
-/// (the performer posted before the abort landed), then parks forever,
-/// flagging when its future is dropped; every later wait answers at once.
-struct LateBroker {
-    calls: AtomicUsize,
-    /// The scheduler's answer sender, installed once the scheduler exists
-    /// (the broker is configured before the scheduler that owns the
-    /// channel is built).
-    answers: Mutex<Option<tokio::sync::mpsc::UnboundedSender<(EffectId, EffectAnswer)>>>,
-    first_dropped: Arc<AtomicBool>,
-}
-
-#[async_trait::async_trait]
-impl InputBroker for LateBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            let _guard = SetOnDrop(Arc::clone(&self.first_dropped));
-            let answers = self
-                .answers
-                .lock()
-                .expect("the sender mutex is not poisoned")
-                .clone()
-                .expect("the test installs the sender before the drive");
-            let late = EffectAnswer::UserInput(Ok(InputOutcome::Text("late".to_owned())));
-            for answer in [EffectAnswer::Dropped, late] {
-                answers
-                    .send((EffectId(0), answer))
-                    .expect("the scheduler holds its receiver");
-            }
-            std::future::pending().await
-        } else {
-            Ok(InputOutcome::Text("second".to_owned()))
-        }
-    }
-}
-
 /// Records every streamed delta the run forwards to the host.
 fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunContext) {
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -149,7 +81,7 @@ async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
     let ctx = effect_context(&prompt, ToolSet::default(), &RunContext::new(EXECUTION));
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");
@@ -185,7 +117,7 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
          return msgs[#msgs].content",
     ));
     let ctx = effect_context(&prompt, echo_tools(), &RunContext::new(EXECUTION));
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "done");
@@ -219,7 +151,7 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
 async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
     let prompt = parse(&loop_prompt("return tools.call('echo', { value = 'hi' })"));
     let ctx = effect_context(&prompt, echo_tools(), &RunContext::new(EXECUTION));
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the call completes");
     assert_eq!(out, "echoed: hi");
@@ -244,7 +176,7 @@ async fn user_input_issues_exactly_one_user_input_effect() {
     ));
     let config = RunContext::new(EXECUTION).input_broker(Arc::new(TextBroker("typed")));
     let ctx = effect_context(&prompt, ToolSet::default(), &config);
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the wait completes");
     assert_eq!(out, "typed|true");
@@ -267,7 +199,7 @@ async fn a_store_operation_issues_exactly_one_store_effect() {
          return store.read('notes.md')",
     ));
     let ctx = effect_context(&prompt, ToolSet::default(), &RunContext::new(EXECUTION));
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the store ops complete");
     assert_eq!(out, "kept");
@@ -313,7 +245,7 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the wait completes");
     assert_eq!(out, "quick");
@@ -325,91 +257,6 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
         "the wait's timeout is one timer effect; the child issued none"
     );
     assert_round_trips(&records);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_dropped_answer_resumes_the_parked_chain_with_the_cancelled_error() {
-    // The chain parks on a wait no broker ever answers; the host drops
-    // the effect instead. The first effect the run issues is id 0, and
-    // the answer is posted before the drive so the channel delivers it
-    // the moment the driver awaits it.
-    let prompt = parse(&loop_prompt("return user_input()"));
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(PendingBroker));
-    let ctx = effect_context(&prompt, ToolSet::default(), &config);
-    let scheduler = Scheduler::new(&ctx, None);
-    scheduler.post_answer_for_test(0, EffectAnswer::Dropped);
-    let mut scheduler = scheduler;
-    let result = scheduler.drive().await;
-    assert!(
-        matches!(result, Err(Error::Interrupted)),
-        "a dropped wait resumes as the cancelled error, got {result:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_dropped_effects_performer_is_aborted_and_its_late_answer_discarded() {
-    // The host drops effect 0 while its performer runs, and the
-    // performer's own answer lands right behind the drop - the race a
-    // cancel loses when the performer posted first. The broker stages
-    // both from inside the running performer, so the channel delivers
-    // them in that order: the drop resumes the caught wait, the chain
-    // issues effect 1, and the late answer for 0 arrives with no pending
-    // entry. It must be discarded, not fail the run; effect 1's answer
-    // then completes it.
-    let first_dropped = Arc::new(AtomicBool::new(false));
-    let prompt = parse(&loop_prompt(
-        "local ok = pcall(user_input)\n\
-         local text = user_input()\n\
-         return tostring(ok) .. '|' .. text",
-    ));
-    let broker = Arc::new(LateBroker {
-        calls: AtomicUsize::new(0),
-        answers: Mutex::new(None),
-        first_dropped: Arc::clone(&first_dropped),
-    });
-    let config =
-        RunContext::new(EXECUTION).input_broker(Arc::clone(&broker) as Arc<dyn InputBroker>);
-    let ctx = effect_context(&prompt, ToolSet::default(), &config);
-    let mut scheduler = Scheduler::new(&ctx, None);
-    *broker
-        .answers
-        .lock()
-        .expect("the sender mutex is not poisoned") = Some(scheduler.answer_sender_for_test());
-    let out = scheduler
-        .drive()
-        .await
-        .expect("the late answer for a dropped effect is discarded");
-    assert_eq!(
-        out, "false|second",
-        "the dropped wait failed under pcall and the second wait was answered"
-    );
-    // The drop aborted the first performer and the run-end drain joined
-    // it: its future is gone, not detached on the runtime.
-    assert!(
-        first_dropped.load(Ordering::SeqCst),
-        "the dropped effect's performer was aborted and joined"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn an_answer_of_the_wrong_kind_for_a_pending_effect_fails_loudly() {
-    // Effect 0 is a user_input wait; a timer's firing posted under its id
-    // has a pending entry but the wrong kind, so the run fails with the
-    // kind-mismatch internal error rather than resuming the chain.
-    let prompt = parse(&loop_prompt("return user_input()"));
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(PendingBroker));
-    let ctx = effect_context(&prompt, ToolSet::default(), &config);
-    let scheduler = Scheduler::new(&ctx, None);
-    scheduler.post_answer_for_test(0, EffectAnswer::Timer);
-    let mut scheduler = scheduler;
-    let error = scheduler
-        .drive()
-        .await
-        .expect_err("a wrong-kind answer must fail the run");
-    assert!(
-        matches!(&error, Error::Internal { message, .. } if message.contains("effect's own kind")),
-        "the mismatch is a loud invariant failure: {error}"
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -425,7 +272,7 @@ async fn a_chat_round_streams_its_deltas_to_the_host() {
     ));
     let (seen, config) = delta_hook();
     let ctx = effect_context(&prompt, ToolSet::default(), &config);
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "answer");
     assert_eq!(
@@ -447,7 +294,7 @@ async fn a_nested_infer_round_streams_no_deltas_to_the_host() {
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
     let (seen, config) = delta_hook();
     let ctx = effect_context(&prompt, ToolSet::default(), &config);
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");
     assert!(

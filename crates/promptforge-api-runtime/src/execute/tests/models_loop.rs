@@ -11,7 +11,7 @@
 //! trust in `tool_loop`.
 
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelId};
 use promptforge_model_client::model::ModelInvocation;
@@ -52,7 +52,7 @@ pub(super) fn loop_context_observed(
     observer: Arc<dyn Observer>,
 ) -> RunState {
     let ctx = RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -129,7 +129,7 @@ async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool-free loop runs to its terminal turn");
@@ -171,7 +171,7 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, echo_tools());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the loop repeats until terminal text");
@@ -219,7 +219,7 @@ async fn models_loop_dispatches_local_and_bound_tools() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, echo_tools());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the loop routes local and bound tools");
@@ -262,7 +262,7 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
         Vec::new(),
     );
     let ctx = loop_context(&prompt, tools);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("each call reads the current scope");
@@ -298,7 +298,7 @@ async fn models_loop_with_a_leading_handle_runs_on_its_frozen_binding() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an explicit handle runs at any point in the section");
@@ -353,7 +353,7 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
     );
     let prompt = parse(&md);
     let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a two-call batch appends atomically");

@@ -18,17 +18,14 @@ use crate::{Error, Result};
 
 use super::{ChainIndex, Scheduler};
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Runs one ready chain to its next suspension point: resume a
     /// suspended coroutine with its delivered answer, or advance the walk -
     /// entering the next section, starting the next Lua block's coroutine,
     /// stashing one prose block as the pending Markdown buffer, or falling
     /// through at a section's end. The step never awaits: every dispatch
-    /// either spawns its leaf work or answers on the spot, and every chain
-    /// runs under the driver's own cancel scope (a dispatch arm that
-    /// captures the current handle, as the `tool_call` arm does for its
-    /// spawned task, sees the run's).
-    pub(super) fn step(
+    /// either issues its leaf effect or answers on the spot.
+    pub(super) fn step_chain(
         &mut self,
         id: ChainIndex,
         root_result: &mut Option<Result<String>>,
@@ -49,6 +46,7 @@ impl Scheduler<'_> {
             /// The section's blocks are exhausted: fall through.
             SectionEnd,
         }
+        let prompt = self.prompt();
         let advance = {
             let chain = &mut self.chains[id.index()];
             if let Some(answer) = chain.incoming.take() {
@@ -66,10 +64,10 @@ impl Scheduler<'_> {
                 ));
             } else if chain.frame.is_none() {
                 Advance::EnterSection
-            } else if chain.block >= chain.blocks().len() {
+            } else if chain.block >= chain.blocks(&prompt).len() {
                 Advance::SectionEnd
             } else {
-                match &chain.blocks()[chain.block] {
+                match &chain.blocks(&prompt)[chain.block] {
                     Block::Lua(_) => Advance::StartLua,
                     Block::Prose { .. } => Advance::StashProse,
                     // `Block` is `#[non_exhaustive]` across the crate seam; a
@@ -86,7 +84,7 @@ impl Scheduler<'_> {
             Advance::StartLua => self.start_lua(id, root_result),
             Advance::StashProse => {
                 let chain = &mut self.chains[id.index()];
-                let text = match &chain.blocks()[chain.block] {
+                let text = match &chain.blocks(&prompt)[chain.block] {
                     Block::Prose { text, .. } => text.clone(),
                     _ => {
                         return Err(Error::internal("the advance matched the block kind"));
@@ -103,7 +101,7 @@ impl Scheduler<'_> {
                 Ok(())
             }
             Advance::SectionEnd => {
-                if self.chains[id.index()].h1.is_some() {
+                if self.chains[id.index()].h1 {
                     self.end_live_h1(id, root_result, 0)?;
                 } else {
                     self.end_section(id)?;
@@ -122,8 +120,9 @@ impl Scheduler<'_> {
         answer: Answer<Error>,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
+        let prompt = self.prompt();
         let chain = &self.chains[id.index()];
-        let Block::Lua(program) = &chain.blocks()[chain.block] else {
+        let Block::Lua(program) = &chain.blocks(&prompt)[chain.block] else {
             return Err(Error::internal("a suspended coroutine's block is Lua"));
         };
         let frame = chain
@@ -147,6 +146,7 @@ impl Scheduler<'_> {
         id: ChainIndex,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
+        let prompt = self.prompt();
         let pending = self.chains[id.index()].pending_prose.take();
         let chain = &self.chains[id.index()];
         let emitter = Arc::clone(chain.ctx.emitter());
@@ -160,7 +160,7 @@ impl Scheduler<'_> {
             emitter.report(&name, detail::LUA_CHUNK_FAILED);
             return Err(error);
         }
-        let Block::Lua(program) = &chain.blocks()[chain.block] else {
+        let Block::Lua(program) = &chain.blocks(&prompt)[chain.block] else {
             return Err(Error::internal("the advance matched the block kind"));
         };
         let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
@@ -197,7 +197,7 @@ impl Scheduler<'_> {
                 // `Error::Lua`, not an unsatisfiable environment. Fatal
                 // run conditions (cancellation, the claims violation)
                 // keep their own classification either way.
-                let error = if self.chains[id.index()].h1.is_some() {
+                let error = if self.chains[id.index()].h1 {
                     match error {
                         Error::Lua(_) | Error::LuaRuntime { .. } => Error::RequirementsUnmet {
                             notice: error.to_string(),
@@ -244,7 +244,7 @@ impl Scheduler<'_> {
                 // resolved target. A jump out of H1 ends the pass and
                 // starts the walk at the target.
                 emitter.report(&name, detail::LUA_CHUNK_SUCCEEDED);
-                if self.chains[id.index()].h1.is_some() {
+                if self.chains[id.index()].h1 {
                     return self.end_live_h1_at_jump(id, &heading, root_result);
                 }
                 self.apply_jump(id, &heading)?;
@@ -253,7 +253,7 @@ impl Scheduler<'_> {
             }
             CoroStep::Done(LuaBlockResult::Returned(value)) => {
                 emitter.report(&name, detail::LUA_CHUNK_SUCCEEDED);
-                if self.chains[id.index()].h1.is_some() {
+                if self.chains[id.index()].h1 {
                     let chain = &mut self.chains[id.index()];
                     if let Some(value) = value {
                         // A scalar return from the H1 pass

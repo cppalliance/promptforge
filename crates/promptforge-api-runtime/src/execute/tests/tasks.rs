@@ -13,7 +13,7 @@ use promptforge_api_types::ids::{AbandonReason, TaskId, TaskOrigin};
 
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::execute::scheduler::{Scheduler, TaskState};
+use crate::execute::scheduler::TaskState;
 
 /// A recorder that keeps the typed observation, so a payload-carrying
 /// variant (`TaskStarted`) can be matched whole.
@@ -82,7 +82,7 @@ async fn spawn_returns_to_its_caller_before_the_child_runs() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the spawner's return ends the run");
@@ -118,7 +118,7 @@ async fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     scheduler.drive().await.expect("the run completes");
 
     assert_eq!(
@@ -165,7 +165,7 @@ async fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await
@@ -205,7 +205,7 @@ async fn task_started_carries_the_spawn_seeds_and_the_child_sees_them() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    Scheduler::new(&ctx, None)
+    TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the run completes");
@@ -248,7 +248,7 @@ async fn spawn_shares_calls_target_resolution_and_raises_at_the_call_site() {
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the caught errors end the run normally");
@@ -292,7 +292,7 @@ async fn spawn_shares_calls_depth_cap() {
     // blocking pool's answer order: the run ends `done` or `tasks_live`.
     // Either way the whole spawn cascade and the one refusal ran before
     // any answer arrived, which is what this test measures.
-    let outcome = Scheduler::new(&ctx, None).drive().await;
+    let outcome = TokioDriver::new(&ctx, None).drive().await;
     assert!(
         matches!(outcome, Ok(_) | Err(Error::TasksLive { .. })),
         "unexpected outcome: {outcome:?}"
@@ -332,7 +332,7 @@ async fn spawn_rejects_a_list_section_target_with_the_worker_message() {
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the caught error ends the run normally");
@@ -366,7 +366,7 @@ async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_id
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let error = scheduler
         .drive()
         .await
@@ -429,7 +429,7 @@ async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_t
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let error = scheduler
         .drive()
         .await
@@ -497,7 +497,7 @@ async fn assert_task_outlives_movement(md: &str) {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let error = scheduler
         .drive()
         .await
@@ -566,7 +566,7 @@ async fn a_call_chain_ending_with_a_live_task_answers_tasks_live_to_its_caller()
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await
@@ -614,7 +614,7 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let error = scheduler
         .drive()
         .await
@@ -678,7 +678,7 @@ async fn aborting_a_chain_abandons_the_tasks_it_owns() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await

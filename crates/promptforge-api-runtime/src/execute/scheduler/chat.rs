@@ -78,7 +78,7 @@ enum ChatDispatch {
     Answered(Answer<Error>),
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Dispatches a `chat` request: one tool-capable model round over the
     /// author's message list. An issued round parks the chain in the
     /// pending table; a precheck overflow answers the round on the spot
@@ -180,7 +180,7 @@ impl Scheduler<'_> {
             tools: schemas,
             stream: true,
         };
-        self.issue(id, effect, Continuation::Chat)?;
+        self.issue(id, effect, Continuation::Chat);
         Ok(ChatDispatch::Issued)
     }
 

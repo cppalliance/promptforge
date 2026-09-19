@@ -230,18 +230,15 @@ impl LuaProgram {
 
     /// Maps a Lua runtime failure to its ordered core outcome.
     ///
-    /// Cancellation is checked first and returns [`Error::Interrupted`].
-    /// Otherwise a recognized host quota returns [`Error::LuaQuota`]. All
-    /// remaining failures return [`Error::LuaRuntime`] with this program's
+    /// A recognized host quota returns [`Error::LuaQuota`]. All remaining
+    /// failures return [`Error::LuaRuntime`] with this program's
     /// chunk-relative line rewritten to an absolute prompt-source line. Nested
     /// errors from other chunks (for example a fanout arm) are left unchanged.
+    /// Cancellation is the VM's to classify: a chunk the instruction hook
+    /// aborted under the run's cancel flag is [`Error::Interrupted`] before
+    /// the raw error reaches here.
     #[must_use]
     pub fn map_runtime_error(&self, error: &mlua::Error) -> Error {
-        // A block aborted by the cancellation hook surfaces as an interruption,
-        // not a Lua authoring error.
-        if promptforge_api_types::cancel::is_cancelled() {
-            return Error::Interrupted;
-        }
         let raw = error.to_string();
         // A host-quota refusal is a stable typed error, not an authoring error.
         if let Some(resource) = quota_resource(&raw) {

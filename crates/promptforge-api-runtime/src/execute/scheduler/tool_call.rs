@@ -111,7 +111,7 @@ fn answer_local_tool(
     Ok(ToolCallOutcome::Plain(text))
 }
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Dispatches a `tool_call` request. An issued bound call parks the
     /// chain in the pending table; a local Lua tool's answer resumes the
     /// chain on the spot; every preparation failure - a reserved name, an
@@ -232,7 +232,7 @@ impl Scheduler<'_> {
             report,
             call_id,
         });
-        self.issue(id, effect, resume)?;
+        self.issue(id, effect, resume);
         Ok(ToolCallDispatch::Issued)
     }
 }

@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use super::models_loop::{echo_tools, loop_context_observed};
 use super::*;
-use crate::execute::run::EffectAnswer;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::run::{EffectAnswer, EffectId};
+use crate::execute::tokio_driver::TokioDriver;
 use crate::model::{ModelBinding, ModelId};
 use promptforge_model_client::model::ModelInvocation;
 use shared_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath};
@@ -76,7 +76,7 @@ pub(super) fn scheduler_context_from(
     run_context: &RunContext,
 ) -> RunState {
     let ctx = RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -108,7 +108,7 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the gate scenario runs end to end on one thread");
@@ -134,9 +134,6 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
-    use crate::cancel::CancelHandle;
-    use promptforge_api_types::cancel::scope;
-
     let gateway = ScriptedGateway::start(vec![resp_delayed_text(
         "too late",
         std::time::Duration::from_secs(30),
@@ -148,8 +145,8 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         ```lua\nreturn models.infer('hang')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let cancel = CancelHandle::new();
-    let canceller = cancel.clone();
+    let mut driver = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -161,12 +158,7 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         canceller.cancel();
     });
 
-    let result = scope(cancel, async {
-        Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-            .drive()
-            .await
-    })
-    .await;
+    let result = driver.drive().await;
 
     assert!(
         matches!(result, Err(Error::Interrupted)),
@@ -193,7 +185,7 @@ async fn call_depth_cap_reads_the_chain_field() {
         ```lua\nreturn call('## Alpha')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("the depth cap must fail the run");
@@ -218,7 +210,7 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an explicit infer of the prose runs through the scheduler");
@@ -251,7 +243,7 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the dispatch failure is catchable");
@@ -284,7 +276,7 @@ async fn sections_run_in_fall_through_order() {
         ```lua\nstore.append('order.txt', 'Second\\n')\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the walk falls through in document order");
@@ -303,7 +295,7 @@ async fn generic_result_when_nothing_produced() {
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the empty walk completes");
@@ -324,7 +316,7 @@ async fn sys_id_increments_per_section() {
         ```lua\nreturn tostring(sys.id)\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("each section entry takes the next id");
@@ -361,7 +353,7 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the chain must run the addressed off-walk target and fall through");
@@ -388,7 +380,7 @@ async fn var_persists_across_sections_in_fall_through() {
         ```lua\nreturn var.from_a .. var.from_b\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("var must persist across the walk");
@@ -418,7 +410,7 @@ async fn call_clones_var_in_and_discards_child_writes() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("call must clone var in and discard child writes");
@@ -456,7 +448,7 @@ async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a call chain must take ids nested under its own chain");
@@ -481,7 +473,7 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         ```lua\nreturn tostring(sys.id)\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("re-entering a section must take a fresh id");
@@ -504,7 +496,7 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
         ```lua\nreturn 'two-ran'\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the walk completes both sections");
@@ -555,7 +547,7 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("jump must transfer control");
@@ -575,7 +567,7 @@ async fn section_cannot_jump_to_itself() {
         ```lua\njump('## Self')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("self-jump must fail");
@@ -602,7 +594,7 @@ async fn jump_to_off_walk_section_runs_it() {
         ```lua\nreturn 'c-ran'\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump to an off-walk section must run it");
@@ -638,7 +630,7 @@ async fn var_persists_across_a_jump() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("var must persist across the jump");
@@ -661,7 +653,7 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the jump completes both sections");
@@ -697,7 +689,7 @@ async fn an_erroring_section_reports_started_but_not_finished() {
         ```lua\nerror('expected failure')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = Scheduler::new(&ctx, None).drive().await;
+    let result = TokioDriver::new(&ctx, None).drive().await;
 
     assert!(result.is_err());
     let observed = recorder.events();
@@ -738,7 +730,7 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump to a child must start the child-level walk");
@@ -778,7 +770,7 @@ async fn child_walk_recurses_to_h4() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the child-level rule must recurse to H4");
@@ -807,7 +799,7 @@ async fn jump_to_an_off_walk_child_runs_it() {
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump to an off-walk child must run it");
@@ -839,7 +831,7 @@ async fn running_child_addresses_its_own_siblings_and_children() {
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a running child must address its own siblings and children");
@@ -862,7 +854,7 @@ async fn running_child_cannot_address_a_top_level_section() {
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a child jumping to a top-level section must fail");
@@ -888,7 +880,7 @@ async fn jump_to_a_niece_errors() {
         ```lua\nreturn 'niece-ran'\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a jump to a niece must fail");
@@ -925,7 +917,7 @@ async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("sys.id must count the sections the one chain enters");
@@ -963,7 +955,7 @@ async fn a_call_child_takes_ids_nested_under_its_own_chain_distinct_from_the_par
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the call child and its fanout complete");
@@ -1007,7 +999,7 @@ async fn two_runs_of_the_same_prompt_produce_identical_ids() {
     let mut outputs = Vec::new();
     for _ in 0..2 {
         let ctx = scheduler_context(&prompt);
-        let out = Scheduler::new(&ctx, None)
+        let out = TokioDriver::new(&ctx, None)
             .drive()
             .await
             .expect("the identity prompt completes");
@@ -1037,7 +1029,7 @@ async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
         ```lua\nerror('the return must end the chain before the parent resumes')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a return in the child walk ends the whole chain");
@@ -1066,7 +1058,7 @@ async fn jump_inside_call_is_contained_in_the_chain() {
         ```lua\nreturn 'peer-ran'\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump inside call must be followed within the chain");
@@ -1099,7 +1091,7 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump inside the chain must move within the chain");
@@ -1145,7 +1137,7 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the call chain must jump, fall through, and return its final text");
@@ -1180,7 +1172,7 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the outer walk must resume at the section after the caller");
@@ -1213,7 +1205,7 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
         ```lua\nerror('a return must end the chain before fall-through')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a return must end the chain, not the run");
@@ -1244,7 +1236,7 @@ async fn call_to_a_child_starts_a_contained_chain() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("call to a child must start a contained chain");
@@ -1279,7 +1271,7 @@ async fn a_jump_descent_does_not_consume_call_depth() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("the depth cap must fail the run");
@@ -1315,7 +1307,7 @@ async fn walk_never_descends_into_children() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the walk must never descend into children");
@@ -1336,7 +1328,7 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
         ```lua\njump('## Missing')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = Scheduler::new(&ctx, None).drive().await;
+    let result = TokioDriver::new(&ctx, None).drive().await;
 
     let error = result.expect_err("an unresolvable jump target must fail the run");
     assert!(
@@ -1377,7 +1369,7 @@ fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>
         );
     }
     RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -1401,7 +1393,7 @@ async fn live_h1_infer_runs_once() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 pass must run on the scheduler");
@@ -1428,7 +1420,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("H1 models.infer must run on the scheduler");
@@ -1470,7 +1462,7 @@ async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the H1 chunk takes root entry 0 and the first walked section root entry 1");
@@ -1494,7 +1486,7 @@ async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
     let prompt = parse(md);
     let store = TestStore::new();
     let ctx = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a failed H1 assertion must fail the run");
@@ -1526,7 +1518,7 @@ async fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("the failed gate must fail the run");
@@ -1556,7 +1548,7 @@ async fn an_h1_scalar_return_still_reads_var_back() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a reassigned `var` global must fail the run");
@@ -1593,13 +1585,13 @@ async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
         .cloned()
         .expect("the prompt's shared chunk compiles at parse");
     let ctx = RunState::new(
-        &prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         shared,
         &RunContext::new(EXECUTION),
     );
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a failing shared replay must fail the run");
@@ -1627,7 +1619,7 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
         ```lua\nreturn 'called from h1'\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("call from H1 runs the target section");
@@ -1655,7 +1647,7 @@ async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutiv
         ```lua\nreturn sys.id\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a call from H1 and a call from the walk both complete");
@@ -1676,7 +1668,7 @@ async fn call_from_h1_to_an_unknown_section_is_a_catchable_error() {
         ```lua\nlocal ok, err = pcall(call, '## Nope'); return tostring(ok) .. ':' .. tostring(err)\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the caught call failure is the run's result");
@@ -1700,7 +1692,7 @@ async fn jump_from_h1_starts_the_walk_at_the_target() {
         ```lua\nreturn 'jumped'\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("jump from H1 starts the walk at the target");
@@ -1715,7 +1707,7 @@ async fn jump_from_h1_to_an_unknown_section_fails_the_run() {
         ```lua\njump('## Nope')\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("jump from H1 to an unknown section must fail");
@@ -1742,7 +1734,7 @@ async fn fanout_from_h1_runs_the_worker_over_the_collection() {
         ```lua\nreturn 'item:' .. item\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("fanout from H1 joins the arms");
@@ -1778,7 +1770,7 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
         ```lua\nreturn var.verdict\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 decision-tool idiom runs");
@@ -1808,7 +1800,7 @@ async fn list_from_section_works_on_the_h1() {
         - two\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("list_from_section from H1 reads the target's items");
@@ -1825,7 +1817,7 @@ async fn h1_only_lua_return() {
         ```lua\nreturn \"hello\"\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the H1-only return runs");
@@ -1842,7 +1834,7 @@ async fn h1_only_lua_no_return() {
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the H1-only fall-through runs");
@@ -1862,7 +1854,7 @@ async fn h1_scalar_return_short_circuits_the_walk() {
         ```lua\nerror('the walk must not start after an H1 return')\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the H1 return short-circuits the run");
@@ -1887,7 +1879,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 infer of its prose ends the run");
@@ -1919,7 +1911,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("H1 prose and H2 prose each infer explicitly");
@@ -1963,7 +1955,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ```lua\nreturn 'ok'\n```\n";
     let prompt = parse(unread);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("unread H1 prose must not require a model");
@@ -1975,7 +1967,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(reading);
     let ctx = h1_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("an explicit infer of H1 prose with no binding must fail");
@@ -2009,7 +2001,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         ```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("live H1 prose infers explicitly");
@@ -2031,7 +2023,7 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
         ```lua\nreturn 'done-now'\n```\n";
     let prompt = parse(md);
     let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the pass and the walk complete");
@@ -2118,7 +2110,7 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -2160,7 +2152,7 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -2208,7 +2200,7 @@ async fn fanout_concurrency_window_limits_active_arms() {
         &prompt,
         RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the windowed fanout completes on the scheduler");
@@ -2251,7 +2243,7 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -2295,7 +2287,7 @@ async fn fanout_over_a_large_collection_refills_the_window() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a collection over the window width completes");
@@ -2308,9 +2300,6 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     // Mirror of the legacy `pre_cancelled_fanout_returns_interrupted`: a
     // fanout entered under an already-cancelled handle fails the run with
     // Error::Interrupted instead of running the arms.
-    use crate::cancel::CancelHandle;
-    use promptforge_api_types::cancel::scope;
-
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -2322,9 +2311,9 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         ```lua\nreturn item\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let cancel = CancelHandle::new();
-    cancel.cancel();
-    let result = scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
+    let mut driver = TokioDriver::new(&ctx, None);
+    driver.cancel_handle().cancel();
+    let result = driver.drive().await;
     assert!(
         matches!(result, Err(Error::Interrupted)),
         "a pre-cancelled fanout must interrupt the run, got {result:?}"
@@ -2350,13 +2339,13 @@ async fn model_required_when_arm_infer_has_no_binding() {
     let prompt = parse(md);
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = RunState::new(
-        &prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         shared,
         &RunContext::new(EXECUTION),
     );
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("an arm infer without a model binding must fail");
@@ -2400,13 +2389,13 @@ async fn the_shared_replay_sees_the_arm_item() {
         .cloned()
         .expect("the prompt's shared chunk compiles at parse");
     let ctx = RunState::new(
-        &prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         shared,
         &RunContext::new(EXECUTION),
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the arm must succeed");
@@ -2452,7 +2441,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
     let store = TestStore::new();
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump inside an arm drives a child walk");
@@ -2499,7 +2488,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
     let store = TestStore::new();
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a jump to a worker child walks the child slice");
@@ -2533,7 +2522,7 @@ async fn fanout_hash_collection_iterates_in_sorted_key_order() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a hash-shaped collection fans out");
@@ -2573,7 +2562,7 @@ async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the sealed results read and render");
@@ -2620,7 +2609,7 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
         ```lua\nstore.write('ran.txt', 'yes')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, recorder.clone());
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("an empty collection must error");
@@ -2654,7 +2643,7 @@ async fn fanout_worker_that_is_a_list_section_errors() {
         - b\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a list section is not a worker template");
@@ -2695,7 +2684,7 @@ async fn fanout_depth_cap_reads_the_chain_field() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("the fanout depth cap must fail the run");
@@ -2759,7 +2748,7 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an exhausted arm must not fail the fanout");
@@ -2840,7 +2829,7 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, GateObserver::new(&gate, recorder.clone()));
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("two live arms writing one path must terminate the run");
@@ -2908,7 +2897,7 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
         &store,
         GateObserver::new(&gate, Arc::new(NullObserver::default())),
     );
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("two live arms appending one path must terminate the run");
@@ -3128,7 +3117,7 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         &store,
         GateObserver::new(&gate, Arc::new(NullObserver::default())),
     );
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("concurrent appends to one path must boom");
@@ -3169,7 +3158,7 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("an arm rewriting its own path must succeed");
@@ -3199,7 +3188,7 @@ async fn sequential_fanouts_may_write_one_path() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a sequential fanout may write the same path");
@@ -3238,7 +3227,7 @@ async fn fatal_arm_aborts_queued_siblings() {
             )
             .observer(recorder.clone()),
     );
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("a fatal arm must fail the whole fanout");
@@ -3299,7 +3288,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        Scheduler::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -3378,7 +3367,7 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the caught fanout failure lets the caller continue");
@@ -3400,9 +3389,6 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // fires for them - the run's own interruption is the record. The
     // 30-second answers and the timeout guard prove the aborted I/O is
     // never awaited.
-    use crate::cancel::CancelHandle;
-    use promptforge_api_types::cancel::scope;
-
     let gateway = ScriptedGateway::start(vec![resp_delayed_text(
         "too late",
         std::time::Duration::from_secs(30),
@@ -3420,8 +3406,8 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let cancel = CancelHandle::new();
-    let canceller = cancel.clone();
+    let mut driver = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -3433,16 +3419,9 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         canceller.cancel();
     });
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        scope(cancel, async {
-            Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-                .drive()
-                .await
-        }),
-    )
-    .await
-    .expect("cancellation must not wait on the aborted in-flight I/O");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), driver.drive())
+        .await
+        .expect("cancellation must not wait on the aborted in-flight I/O");
 
     assert!(
         matches!(result, Err(Error::Interrupted)),
@@ -3497,7 +3476,7 @@ async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
         ```lua\nreturn 'worked:' .. item\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.
     scheduler.set_max_chains_for_test(2);
@@ -3542,10 +3521,10 @@ async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_answer_for_an_unknown_request_id_fails_loudly() {
-    // An answer arriving with no pending entry and no recorded abort means
-    // the driver dropped a pending entry early: the run must fail with
-    // Error::Internal rather than silently discard the answer. Only an
-    // abort-recorded id (a fatal sibling's late I/O answer, covered by
+    // An answer arriving for an id the run never issued (and that is not an
+    // orphan) means the host lost track of its effects: the run must fail
+    // with Error::Internal rather than silently discard the answer. Only an
+    // orphaned id (a fatal sibling's late I/O answer, covered by
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be
     // discarded.
     let gateway = ScriptedGateway::start(vec![resp_text("real-answer")]).await;
@@ -3555,18 +3534,19 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         ```lua\nreturn models.infer('ask')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
-    // Posted before the drive, so the channel delivers it first: the
-    // driver reaches the select with the phantom answer ahead of the real
-    // infer's.
-    scheduler.post_answer_for_test(u64::MAX, EffectAnswer::Timer);
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    // Handed to the run before the drive: the phantom answer lands ahead
+    // of the real infer's, on a run that has issued nothing.
+    scheduler
+        .run_for_test()
+        .resume(EffectId(u64::MAX), EffectAnswer::Timer);
     let error = scheduler
         .drive()
         .await
-        .expect_err("an answer no pending entry explains must fail the run");
+        .expect_err("an answer for an unissued effect must fail the run");
 
     assert!(
-        matches!(error, Error::Internal { message, .. } if message.contains("no pending entry")),
+        matches!(error, Error::Internal { message, .. } if message.contains("did not issue")),
         "the unknown answer is a loud invariant failure: {error}"
     );
 }
@@ -3621,7 +3601,7 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
             Arc::new(EchoTool),
         )],
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the script dispatch succeeds");
@@ -3650,7 +3630,7 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
             Arc::new(EchoTool),
         )],
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the handle-form dispatch succeeds");
@@ -3676,7 +3656,7 @@ async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
             Arc::new(EchoTool),
         )],
     );
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("an unbound alias fails the block");
@@ -3714,7 +3694,7 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
         )],
         Vec::new(),
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a bound but unscoped alias dispatches for a script");
@@ -3765,9 +3745,6 @@ impl Tool for SignallingSlowTool {
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn cancellation_interrupts_a_slow_script_tools_call() {
-    use crate::cancel::CancelHandle;
-    use promptforge_api_types::cancel::scope;
-
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
@@ -3785,8 +3762,8 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
             }),
         )],
     );
-    let cancel = CancelHandle::new();
-    let canceller = cancel.clone();
+    let mut driver = TokioDriver::new(&ctx, None);
+    let canceller = driver.cancel_handle();
     let observed = Arc::clone(&started);
     tokio::spawn(async move {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -3799,7 +3776,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
     });
 
     let start = std::time::Instant::now();
-    let result = scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
+    let result = driver.drive().await;
 
     assert!(
         matches!(result, Err(Error::Interrupted)),
@@ -3833,7 +3810,7 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
             Arc::new(UntrustedEchoTool),
         )],
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the untrusted dispatch succeeds");
@@ -3868,7 +3845,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
     );
     binding.output_kind = crate::lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the structured dispatch succeeds");
@@ -3893,7 +3870,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
     );
     binding.output_kind = crate::lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("invalid structured output fails the call");
@@ -3930,7 +3907,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
     );
     binding.output_kind = crate::lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("untrusted structured output fails the call");
@@ -3967,7 +3944,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
             Arc::new(EchoTool),
         )],
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("infer after a script dispatch still resolves the model");
@@ -3992,7 +3969,7 @@ async fn a_document_prompt_without_tools_call_is_unaffected() {
             Arc::new(EchoTool),
         )],
     );
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("a prompt that never calls tools.call is unchanged");
@@ -4011,7 +3988,7 @@ async fn models_chat_is_nil_in_a_section_vm() {
         ```lua\nreturn models.chat({})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let error = Scheduler::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect_err("calling the absent models.chat must fail the section");

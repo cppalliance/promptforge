@@ -338,7 +338,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
 #[tokio::test(flavor = "current_thread")]
 async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     use super::models_loop::{echo_tools, loop_context_observed, loop_events, loop_prompt};
-    use crate::execute::scheduler::Scheduler;
+    use crate::execute::tokio_driver::TokioDriver;
 
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let md = loop_prompt(
@@ -354,7 +354,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the loop converges");

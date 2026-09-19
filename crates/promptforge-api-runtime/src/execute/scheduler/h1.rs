@@ -18,9 +18,9 @@ use crate::execute::support::{GENERIC_COMPLETION, now_rfc3339_checked};
 use crate::fanout;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, Counters, Scheduler, prompt_origin};
+use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Starts the H1 pass as the driver loop's first chain: the prompt's
     /// H1 blocks under its title - section 0 - driven through the same
     /// coroutine machinery as any section.
@@ -57,7 +57,7 @@ impl Scheduler<'_> {
             ctx: self.ctx.clone(),
             access: Some(Arc::new(access)),
             frame: None,
-            slice: &[],
+            slice: SlicePath::root(),
             index: 0,
             positions: Vec::new(),
             block: 0,
@@ -68,7 +68,7 @@ impl Scheduler<'_> {
             call_depth: 0,
             parent: None,
             advertised: None,
-            h1: Some(self.ctx.prompt().h1_blocks()),
+            h1: true,
         });
         Ok(id)
     }
@@ -109,8 +109,7 @@ impl Scheduler<'_> {
         // pass's counters: the pass took entry 0, the first walked section
         // takes entry 1, and a child the pass started keeps its index.
         let counters = chain.counters;
-        let sections = self.ctx.prompt().sections();
-        if sections.is_empty() {
+        if self.ctx.prompt().sections().is_empty() {
             // No walk follows, so the pass's end is the run's end: a task
             // the pass spawned and left live ends here under the same
             // rules as a finishing chain.
@@ -126,7 +125,7 @@ impl Scheduler<'_> {
             ChainId::root(),
             counters,
             walk_ctx,
-            sections,
+            SlicePath::root(),
             start,
             None,
             &var,
@@ -156,7 +155,8 @@ impl Scheduler<'_> {
         heading: &str,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
-        let sections = self.ctx.prompt().sections();
+        let prompt = self.prompt();
+        let sections = prompt.sections();
         let target = fanout::resolve_sibling(heading, sections)?;
         let start = section_position(sections, target).ok_or(Error::internal(
             "a resolved H1 jump target is absent from the top-level slice",

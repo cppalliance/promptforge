@@ -1,11 +1,11 @@
 //! Answer application: the one path every performed effect's answer takes
 //! back into the scheduler.
 //!
-//! A performer posts a raw [`EffectAnswer`] - a completion, a tool's own
+//! The host hands back a raw [`EffectAnswer`] - a completion, a tool's own
 //! output, a broker outcome, a store outcome, a timer's firing - and knows
 //! nothing of what the parked chain asked for. `apply_answer` pairs the
 //! answer with the effect's [`Continuation`] and turns it into the chain's
-//! protocol [`Answer`] on the driver thread, emitting the round's events
+//! protocol [`Answer`] on the caller's thread, emitting the round's events
 //! there: the model turn's boundaries and content, the tool call's
 //! succeeded/failed event and `ToolResult` under the trust rule, the
 //! operator's input, the store operation's outcome. A timer's firing
@@ -48,51 +48,29 @@ fn dropped_answer(resume: &Continuation) -> Answer<Error> {
     }
 }
 
-impl Scheduler<'_> {
-    /// Applies one performed effect's answer: removes the effect's
-    /// in-flight bookkeeping, turns the raw answer into the parked chain's
-    /// protocol answer under the effect's continuation (emitting the
-    /// round's events), and re-queues the chain. A timer's firing
-    /// completes its slot and wakes its waiter instead.
-    ///
-    /// A `Dropped` answer is the host giving the effect up while its
-    /// performer may still be running, so it takes the abort path the
-    /// chain-end rules take: the performer is aborted, its handle stays
-    /// for the run-end drain (a blocking-pool store op detaches rather
-    /// than interrupts, and only its completion releases the access
-    /// clone), and the id is recorded so the performer's late answer, if
-    /// it posted first, is discarded rather than failing the run.
+impl Scheduler {
+    /// Applies one performed effect's answer: removes the effect's pending
+    /// entry, turns the raw answer into the parked chain's protocol answer
+    /// under the effect's continuation (emitting the round's events), and
+    /// re-queues the chain. A timer's firing completes its slot and wakes
+    /// its waiter instead. A `Dropped` answer is the host giving the
+    /// effect up: the chain resumes with the cancelled error.
     ///
     /// # Errors
-    /// Returns [`Error::Internal`] when no pending entry and no recorded
-    /// abort explains the id (the driver dropped a pending entry early -
-    /// answer loss that fails loudly), or when the answer's kind does not
-    /// match the effect's. Returns [`Error::Determinism`] when a store
-    /// answer reports a claims-model conflict: the run ends on the spot
-    /// rather than resuming the conflict into Lua, where an author `pcall`
-    /// could catch it.
+    /// Returns [`Error::Internal`] when no pending entry explains the id
+    /// (the caller has already ruled out an orphan, so the host answered
+    /// an effect the run never issued or answered one twice - which fails
+    /// loudly), or when the answer's kind does not match the effect's.
+    /// Returns [`Error::Determinism`] when a store answer reports a
+    /// claims-model conflict: the run ends on the spot rather than
+    /// resuming the conflict into Lua, where an author `pcall` could catch
+    /// it.
     pub(super) fn apply_answer(&mut self, id: EffectId, answer: EffectAnswer) -> Result<()> {
         let Some(Pending { chain, resume }) = self.pending.remove(&id) else {
-            // The performer has posted, so its handle has nothing left
-            // for the drain to await.
-            self.io_tasks.remove(&id);
-            // A late answer from a leaf task whose effect was already
-            // aborted or dropped (a cancelled task chain's abort races a
-            // task that sent before the abort landed): the abort recorded
-            // the id, so the answer is moot. Any other unknown id must
-            // fail loudly.
-            if self.aborted_effects.remove(&id) {
-                return Ok(());
-            }
             return Err(Error::internal(
-                "an answer arrived for an effect with no pending entry and no recorded abort",
+                "an answer arrived for an effect the run did not issue or already answered",
             ));
         };
-        if matches!(answer, EffectAnswer::Dropped) {
-            self.discard_performer(id);
-        } else {
-            self.io_tasks.remove(&id);
-        }
         let answer = match (resume, answer) {
             (Continuation::Timer, EffectAnswer::Dropped) => {
                 self.drop_timer(id);
@@ -114,8 +92,8 @@ impl Scheduler<'_> {
             (Continuation::Store(observations), EffectAnswer::Store(result)) => {
                 match self.accept_store(chain, observations, result) {
                     // A claims-model conflict is fatal: the suspended
-                    // chains drop unarmed with the scheduler, exactly as
-                    // on the cancellation path.
+                    // chains drop unarmed in the run's teardown, exactly
+                    // as on the cancellation path.
                     Err(error @ Error::Determinism(_)) => return Err(error),
                     result => Answer::Store(result),
                 }
@@ -261,9 +239,9 @@ impl Scheduler<'_> {
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to
-    /// `Cancelled` without waking its owner. The host drops effects only
-    /// when it is cancelling the run, and that cancel aborts the waiter
-    /// with every other chain.
+    /// `Cancelled` without waking its owner. A host drops a live timer
+    /// only when it is cancelling the run, and that cancel tears the
+    /// waiter down with every other chain.
     fn drop_timer(&mut self, effect: EffectId) {
         if let Some(slot) = self
             .tasks

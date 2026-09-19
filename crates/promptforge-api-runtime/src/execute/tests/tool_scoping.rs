@@ -1,6 +1,6 @@
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 
 /// The one-section loop every scoping test drives: one user message, then
 /// the terminal record's text.
@@ -69,7 +69,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
 
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let ctx = loop_context(&prompt, tool_set);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the always-scoped alias dispatches");
@@ -156,7 +156,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         Vec::new(),
     );
     let ctx = loop_context(&prompt, bindings);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the section-scoped alias dispatches");

@@ -85,6 +85,17 @@ impl EventSink {
         buffer.events.push(build(provenance));
     }
 
+    /// Allocates `task`'s next provenance without pushing an event: the
+    /// stamp an issued effect carries, drawn from the same counter as the
+    /// task's events so effects and events from one task share one dense
+    /// sequence.
+    fn allocate(&self, task: &TaskId) -> Provenance {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .next_provenance(task)
+    }
+
     /// Takes every event pushed since the last drain, in push order.
     pub(crate) fn take(&self) -> Vec<Event> {
         let mut buffer = self
@@ -144,6 +155,12 @@ impl Emitter {
     /// Whether the run captures raw model-turn bodies.
     pub(crate) fn captures_debug(&self) -> bool {
         self.debug
+    }
+
+    /// Stamps one issued effect: this task's next provenance, drawn from
+    /// the counter its events advance, so the effect orders among them.
+    pub(crate) fn stamp_effect(&self) -> Provenance {
+        self.sink.allocate(&self.task)
     }
 
     /// Pushes one event built from this task's next coordinates.

@@ -8,7 +8,7 @@
 
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 
@@ -117,7 +117,7 @@ pub(super) fn chat_context(
 ) -> RunState {
     let base = RunContext::new(EXECUTION).observer(observer);
     let mut ctx = RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -169,7 +169,7 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
         echo_tools(),
         Arc::clone(&loop_recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&loop_ctx, Some(gateway_client(loop_gateway.addr())))
+    let out = TokioDriver::new(&loop_ctx, Some(gateway_client(loop_gateway.addr())))
         .drive()
         .await
         .expect("the reference loop runs one text round");
@@ -195,7 +195,7 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
         echo_tools(),
         Arc::clone(&chat_recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&chat_ctx, Some(gateway_client(chat_gateway.addr())))
+    let out = TokioDriver::new(&chat_ctx, Some(gateway_client(chat_gateway.addr())))
         .drive()
         .await
         .expect("one chat round resumes the reply");
@@ -243,7 +243,7 @@ async fn a_chat_round_resumes_the_requested_tool_calls_unexecuted() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool round resumes its calls");
@@ -281,7 +281,7 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -307,7 +307,7 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     );
     let prompt = parse(&md);
     let ctx = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("an uncaught out-of-scope call fails the section");
@@ -345,7 +345,7 @@ async fn an_empty_reply_resumes_as_a_completed_round_with_the_reply_absent() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an empty reply is a completed round");
@@ -377,7 +377,7 @@ async fn a_context_overflow_resumes_as_an_overflow_round_without_raising() {
         ToolSet::default(),
         Arc::new(NullObserver::default()),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the overflow is the round's answer, not a raise");
@@ -408,7 +408,7 @@ async fn a_context_overflow_resumes_as_an_overflow_round_without_raising() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the provider overflow is the round's answer");

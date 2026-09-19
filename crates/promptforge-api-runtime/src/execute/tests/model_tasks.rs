@@ -12,7 +12,7 @@ use promptforge_api_types::ids::{AbandonReason, TaskId, TaskOrigin};
 use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::execute::scheduler::{Scheduler, TaskState};
+use crate::execute::scheduler::TaskState;
 use crate::input::{InputBroker, InputError, InputOutcome};
 use crate::lua::ToolSet;
 
@@ -62,7 +62,7 @@ pub(super) fn model_task_context_with(
         .observer(observer)
         .input_broker(broker);
     let ctx = RunState::new(
-        prompt,
+        Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
@@ -125,7 +125,7 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the model starts and inspects its task");
@@ -174,7 +174,7 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the refusal is the call's content, not a raise");
@@ -214,7 +214,7 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -264,7 +264,7 @@ async fn an_exhausted_tool_loop_abandons_the_model_task_for_that_reason() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -315,7 +315,7 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -362,7 +362,7 @@ async fn the_model_sees_only_its_own_tasks() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the author's cancel ends its task before the chain ends");
@@ -386,7 +386,7 @@ async fn without_allow_tasks_the_built_ins_are_not_advertised() {
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
     let ctx = model_task_context(&prompt, &recorder);
-    Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool-free round completes");

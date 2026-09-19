@@ -18,7 +18,7 @@ use promptforge_api_types::ids::TaskId;
 
 use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 use crate::input::{InputBroker, InputError, InputOutcome};
 
 /// A broker that answers each `user_input` in call order after the next
@@ -149,7 +149,7 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the notice is a message, not a raise");
@@ -205,7 +205,7 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[Duration::from_millis(300)]),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the wait resumes with content");
@@ -249,7 +249,7 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the timeout resumes with content and the owner's end abandons both");
@@ -277,7 +277,7 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("every answer is content");
@@ -323,7 +323,7 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both tasks end and the owner collects them");
@@ -362,7 +362,7 @@ async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the owner ends clean");
@@ -424,7 +424,7 @@ async fn a_model_issued_cancel_queues_no_notice() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the cancel leaves nothing live");

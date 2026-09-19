@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
 use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::scheduler::{Scheduler, TaskState};
+use crate::execute::scheduler::TaskState;
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
@@ -47,7 +47,7 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("a pending notice answers the call without a wait")
@@ -102,7 +102,7 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[Duration::from_millis(300)]),
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")

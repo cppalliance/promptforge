@@ -20,8 +20,8 @@
 //!
 //! The sleep is a `Timer` effect issued under the owner: keyed in the
 //! pending table under the owner so the stall check and the abort paths
-//! see it as the in-flight effect it is, and served today by the internal
-//! performer table's `tokio::time::sleep`.
+//! see it as the in-flight effect it is, and performed by the host (a
+//! tokio host sleeps on its timer wheel).
 
 use std::time::Duration;
 
@@ -34,7 +34,7 @@ use crate::{Error, Result};
 use super::tasks::{TaskBacking, TaskSlot, TaskState};
 use super::{ChainIndex, Continuation, Scheduler};
 
-impl Scheduler<'_> {
+impl Scheduler {
     /// Dispatches a `timer` request: allocates the timer's id under the
     /// caller, registers its effect-backed slot, issues the sleep as an
     /// effect, and resumes the caller at once with the id. A dispatch
@@ -57,7 +57,7 @@ impl Scheduler<'_> {
             ))
         })?;
         let task = TaskId::from(self.allocate_child_id(id)?);
-        let effect = self.issue(id, Effect::Timer { seconds }, Continuation::Timer)?;
+        let effect = self.issue(id, Effect::Timer { seconds }, Continuation::Timer);
         self.tasks.insert(
             task.clone(),
             TaskSlot {

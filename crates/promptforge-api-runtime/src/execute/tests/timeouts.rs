@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::scheduler::scheduler_context_on;
 use super::waits::{WaitRecorder, task, tasks_prompt};
 use super::*;
-use crate::execute::scheduler::{Scheduler, TaskState};
+use crate::execute::scheduler::TaskState;
 
 /// The gateway reply a slow child parks on: long enough that a short
 /// timeout wins, short enough that the test then waits it out.
@@ -42,7 +42,7 @@ async fn when_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -90,7 +90,7 @@ async fn when_any_cancels_the_timer_when_a_member_wins() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")
@@ -138,7 +138,7 @@ async fn when_all_returns_timed_out_with_the_unfinished_members_absent() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a timed-out when_all leaks nothing");
@@ -173,7 +173,7 @@ async fn when_all_cancels_the_timer_when_every_member_finishes() {
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")
@@ -218,7 +218,7 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the run completes");
@@ -253,7 +253,7 @@ async fn the_timeout_option_is_validated_at_the_call_site() {
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = Scheduler::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler
         .drive()
         .await

@@ -12,7 +12,7 @@ use promptforge_api_types::ids::TaskId;
 
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::execute::scheduler::Scheduler;
+use crate::execute::tokio_driver::TokioDriver;
 
 fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
@@ -31,15 +31,21 @@ fn seqs_by_task(events: &[Event]) -> BTreeMap<TaskId, Vec<u32>> {
     grouped
 }
 
-/// Asserts `seqs` starts at zero and grows by exactly one per event: the
-/// property that lets a log order one task's records without a clock.
-fn assert_dense_from_zero(task: &TaskId, seqs: &[u32]) {
+/// Asserts `seqs` starts at zero and strictly increases: the property that
+/// lets a log order one task's records without a clock. The events alone
+/// are not dense - the task's effects draw from the same counter, so each
+/// issued effect leaves a gap in the event-only view - but they never
+/// repeat or go backwards.
+fn assert_strictly_increasing_from_zero(task: &TaskId, seqs: &[u32]) {
     assert!(!seqs.is_empty(), "task {task} reported nothing");
-    for (position, seq) in seqs.iter().enumerate() {
-        assert_eq!(
-            *seq,
-            u32::try_from(position).expect("a test emits fewer than u32::MAX events"),
-            "task {task}'s sequence must be dense from zero: {seqs:?}"
+    assert_eq!(
+        seqs[0], 0,
+        "task {task}'s first report opens its sequence: {seqs:?}"
+    );
+    for pair in seqs.windows(2) {
+        assert!(
+            pair[0] < pair[1],
+            "task {task}'s sequence must strictly increase: {seqs:?}"
         );
     }
 }
@@ -71,7 +77,7 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         Arc::new(NullObserver::default()),
     );
     let events = ctx.record_events_for_test();
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the fanout completes");
@@ -85,7 +91,7 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         "the walk and each arm is its own task: {grouped:?}"
     );
     for (task, seqs) in &grouped {
-        assert_dense_from_zero(task, seqs);
+        assert_strictly_increasing_from_zero(task, seqs);
     }
     // The arms' events - their section boundaries, store writes, and
     // model turns - are stamped with the arm's task, not the spawner's.
@@ -146,7 +152,7 @@ async fn a_call_child_reports_under_its_callers_task() {
         Arc::new(NullObserver::default()),
     );
     let events = ctx.record_events_for_test();
-    let out = Scheduler::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, None)
         .drive()
         .await
         .expect("the call completes");
@@ -159,7 +165,14 @@ async fn a_call_child_reports_under_its_callers_task() {
         vec![task("0")],
         "a call child is not a task of its own: {grouped:?}"
     );
-    assert_dense_from_zero(&task("0"), &grouped[&task("0")]);
+    // This run issues no effect, so the one task's events are dense.
+    assert_strictly_increasing_from_zero(&task("0"), &grouped[&task("0")]);
+    assert_eq!(
+        grouped[&task("0")],
+        (0..u32::try_from(events.len()).expect("a test emits fewer than u32::MAX events"))
+            .collect::<Vec<_>>(),
+        "with no effect issued, every stamp is an event's"
+    );
     let inner_log = events.iter().find(|event| {
         matches!(event, Event::Lua { section, message, .. } if section == "Inner" && message == "inner ran")
     });

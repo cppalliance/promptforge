@@ -31,7 +31,7 @@ use promptforge_api_runtime::client::{
     GatewayClient as ModelClient, GatewayEndpoint, SecretString,
 };
 use promptforge_api_runtime::{Prompt, RunContext, RunResult};
-use promptforge_api_types::cancel::CancelHandle;
+use promptforge_api_types::cancel::sync::CancelHandle;
 use promptforge_api_types::events::{EventLog as _, RuntimeEventKind};
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::Observer;
@@ -329,7 +329,8 @@ struct RestoredChat {
     frames: broadcast::Receiver<InputFrame>,
     /// The registry the response delivery completes waits through.
     waits: Arc<WaitRegistry>,
-    /// Ends the relaunched run at teardown.
+    /// Ends the relaunched run at teardown: the synchronous flag the
+    /// engine polls, set directly since nothing here awaits a token.
     cancel: CancelHandle,
     /// The run task, joined at teardown.
     run: tokio::task::JoinHandle<Result<(), AgentError>>,

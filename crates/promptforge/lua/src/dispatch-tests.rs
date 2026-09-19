@@ -1,6 +1,5 @@
 //! Tests for the shared tool-dispatch body: the fixture tools and recorder
 //! every dispatch test uses, and the synchronous `prepare_dispatch` tests.
-//! The async wrappers are tested in `dispatch-tests-race.rs`.
 
 use std::sync::{Arc, Mutex};
 
@@ -9,9 +8,6 @@ use promptforge_api_types::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolO
 use serde_json::json;
 
 use super::*;
-
-#[path = "dispatch-tests-race.rs"]
-mod race;
 
 const EXECUTION: &str = "dispatch-test";
 const SECTION: &str = "Test";
@@ -229,5 +225,96 @@ fn prepare_dispatch_turns_a_canned_tool_error_into_the_typed_error() {
             .expect("the recorder mutex must not be poisoned"),
         vec![Observation::ToolCallFailed],
         "a canned Err output reports the failed observation"
+    );
+}
+
+fn model_report(call_id: &str) -> ModelReport {
+    ModelReport {
+        script: ScriptReport {
+            chain_id: 4,
+            depth: 0,
+            turn: 1,
+        },
+        call_id: call_id.to_owned(),
+    }
+}
+
+#[test]
+fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id() {
+    let recorder = Recorder::default();
+    let failing = binding("failing", Arc::new(FailingTool));
+    let nonce = GuardNonce::fresh();
+    let outcome = prepare_model_dispatch(
+        &failing,
+        Err(ToolError::message("the tool's own backend failed").with_kind(ToolErrorKind::Backend)),
+        None,
+        &nonce,
+        &recorder,
+        EXECUTION,
+        SECTION,
+        &model_report("call_1"),
+    )
+    .expect("a model-issued call never fails for the tool's own failure");
+    assert!(!outcome.trusted(), "the failure text is untrusted");
+    assert_eq!(
+        outcome.content(),
+        nonce.wrap("the tool's own backend failed"),
+        "the failure text is the tool's message, nonce-wrapped"
+    );
+    assert_eq!(
+        *recorder
+            .tool_results
+            .lock()
+            .expect("the recorder mutex must not be poisoned"),
+        vec![(
+            4,
+            0,
+            1,
+            "call_1".to_owned(),
+            "failing".to_owned(),
+            nonce.wrap("the tool's own backend failed"),
+            false,
+        )],
+        "ToolResult fires once, under the model's call id"
+    );
+    assert_eq!(
+        *recorder
+            .observations
+            .lock()
+            .expect("the recorder mutex must not be poisoned"),
+        vec![Observation::ToolCallFailed],
+    );
+}
+
+#[test]
+fn a_model_issued_dispatch_reports_its_result_under_the_call_id() {
+    let recorder = Recorder::default();
+    let echo = binding("echo", Arc::new(EchoTool { trusted: true }));
+    let outcome = prepare_model_dispatch(
+        &echo,
+        Ok(ToolOutput::trusted("echoed: hi")),
+        None,
+        &GuardNonce::fresh(),
+        &recorder,
+        EXECUTION,
+        SECTION,
+        &model_report("call_2"),
+    )
+    .expect("the dispatch succeeds");
+    assert_eq!(outcome.content(), "echoed: hi");
+    assert_eq!(
+        *recorder
+            .tool_results
+            .lock()
+            .expect("the recorder mutex must not be poisoned"),
+        vec![(
+            4,
+            0,
+            1,
+            "call_2".to_owned(),
+            "echo".to_owned(),
+            "echoed: hi".to_owned(),
+            true,
+        )],
     );
 }

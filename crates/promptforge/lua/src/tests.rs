@@ -1910,15 +1910,16 @@ stack traceback:
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn long_running_lua_block_cancels_cooperatively() {
-    use promptforge_api_types::cancel::{self, CancelHandle};
+#[test]
+fn long_running_lua_block_cancels_cooperatively() {
+    use promptforge_api_types::cancel::sync::CancelHandle;
     use std::time::{Duration, Instant};
 
     // An unbounded loop that, without cooperative cancellation, would run
     // forever: no instruction ceiling ends it. With the cancel flag set, the
-    // very first instruction-hook firing aborts it and maps to
-    // `Error::Interrupted`.
+    // very first instruction-hook firing aborts it; the hook's error is the
+    // raw cancellation message, which the VM classifies as
+    // `Error::Interrupted` once the flag is observed set.
     let program = LuaProgram::compile(
         "local n = 0\nwhile true do n = n + 1 end",
         "cancel loop",
@@ -1933,16 +1934,11 @@ async fn long_running_lua_block_cancels_cooperatively() {
     handle.cancel();
 
     let start = Instant::now();
-    let outcome = cancel::scope(handle, async {
-        tokio::task::block_in_place(|| {
-            let lua = Lua::new();
-            install_instruction_budget(&lua).expect("hook installs on a fresh VM");
-            let func = program.load(&lua).expect("bytecode loads");
-            func.call::<()>(())
-                .map_err(|e| program.map_runtime_error(&e))
-        })
-    })
-    .await;
+    let lua = Lua::new();
+    let budget = install_instruction_budget(&lua).expect("hook installs on a fresh VM");
+    budget.set_cancel(handle);
+    let func = program.load(&lua).expect("bytecode loads");
+    let outcome = func.call::<()>(());
 
     assert!(
         start.elapsed() < Duration::from_secs(5),
@@ -1950,8 +1946,15 @@ async fn long_running_lua_block_cancels_cooperatively() {
         start.elapsed()
     );
     assert!(
-        matches!(outcome, Err(crate::Error::Interrupted)),
-        "expected Interrupted, got {outcome:?}"
+        budget.is_cancelled(),
+        "the budget reports the installed flag as set"
+    );
+    let raw = outcome
+        .expect_err("a cancelled loop cannot finish")
+        .to_string();
+    assert!(
+        raw.contains("lua execution cancelled"),
+        "the hook aborts the chunk under the cancel flag, got {raw}"
     );
 }
 
@@ -2262,9 +2265,9 @@ fn dangerous_globals_absent() {
     assert_eq!(out.returned.as_deref(), Some("nil,nil,nil,nil"));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
-    use promptforge_api_types::cancel::{self, CancelHandle};
+#[test]
+fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
+    use promptforge_api_types::cancel::sync::CancelHandle;
     use std::time::{Duration, Instant};
 
     // No instruction ceiling aborts a runaway block anymore; the cancel flag,
@@ -2275,24 +2278,21 @@ async fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
     handle.cancel();
 
     let start = Instant::now();
-    let outcome = cancel::scope(handle, async {
-        tokio::task::block_in_place(|| {
-            let mut vm =
-                SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Loop")?;
-            vm.inject_host("", &json!({}), &fresh_access())?;
-            let observer = null_observer();
-            vm.install_host_apis(&observer, "Loop")?;
-            let result = run_scalar(
-                &vm,
-                &program("while true do end"),
-                &NullObserver::default(),
-                "Loop",
-            );
-            vm.teardown(&NullObserver::default(), "Loop");
-            result
-        })
-    })
-    .await;
+    let outcome = (|| {
+        let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Loop")?;
+        vm.set_cancel(handle);
+        vm.inject_host("", &json!({}), &fresh_access())?;
+        let observer = null_observer();
+        vm.install_host_apis(&observer, "Loop")?;
+        let result = run_scalar(
+            &vm,
+            &program("while true do end"),
+            &NullObserver::default(),
+            "Loop",
+        );
+        vm.teardown(&NullObserver::default(), "Loop");
+        result
+    })();
 
     assert!(
         start.elapsed() < Duration::from_secs(5),

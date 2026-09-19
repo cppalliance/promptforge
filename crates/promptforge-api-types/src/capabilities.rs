@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use shared_vfs::VfsRef;
 
-use crate::cancel::CancelHandle;
+use crate::cancel::sync::CancelHandle;
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::{Tool, ToolId};
 
@@ -325,7 +325,8 @@ pub trait Capability: Send + Sync {
 pub struct RunServices {
     /// The run's filesystem.
     pub vfs: VfsRef,
-    /// The run's cancellation handle.
+    /// The run's cancellation flag: the same synchronous handle the engine
+    /// polls, so a capability observes the host's cancel by polling too.
     pub cancel: CancelHandle,
 }
 
@@ -335,7 +336,7 @@ impl RunServices {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_api_types::cancel::CancelHandle;
+    /// use promptforge_api_types::cancel::sync::CancelHandle;
     /// use promptforge_api_types::capabilities::RunServices;
     ///
     /// let services = RunServices::new(shared_vfs::VfsRef::builder().build(), CancelHandle::new());
