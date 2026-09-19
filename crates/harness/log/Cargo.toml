@@ -1,0 +1,19 @@
+[package]
+name = "harness-log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge harness run log: the append-only Turso record of every run's effects, answers, and events"
+readme = "README.md"
+keywords = ["promptforge", "llm", "agent", "harness", "log"]
+categories = ["development-tools", "database"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

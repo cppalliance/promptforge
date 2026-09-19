@@ -1,0 +1,21 @@
+[package]
+name = "harness-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge harness runner: the effect loop that drives an engine Run on tokio, the performer traits, cancellation, supervision, and the one instrumented spawn wrapper"
+readme = "README.md"
+keywords = ["promptforge", "llm", "agent", "harness", "tokio"]
+categories = ["development-tools", "asynchronous"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

@@ -145,6 +145,35 @@ fn an_unparseable_clippy_toml_is_reported() {
 }
 
 #[test]
+fn the_ban_check_covers_the_five_container_crates_and_the_door() {
+    let root = crate::product::test_support::workspace_root();
+    let covered = harness_crates(
+        &root.join("crates").join("harness"),
+        &root.join("crates").join("harness-api"),
+    );
+    let expected = [
+        root.join("crates").join("harness").join("runner"),
+        root.join("crates").join("harness").join("models"),
+        root.join("crates").join("harness").join("capabilities"),
+        root.join("crates").join("harness").join("log"),
+        root.join("crates").join("harness").join("sessions"),
+        root.join("crates").join("harness-api"),
+    ];
+    assert_eq!(
+        covered.len(),
+        expected.len(),
+        "the ban check covers exactly the six harness crates; covered: {covered:?}"
+    );
+    for dir in &expected {
+        assert!(
+            covered.contains(dir),
+            "{} is a harness crate the ban check covers; covered: {covered:?}",
+            dir.display()
+        );
+    }
+}
+
+#[test]
 fn harness_crates_ban_raw_tokio_spawns() {
     let root = crate::product::test_support::workspace_root();
     let violations = harness_clippy_bans(
