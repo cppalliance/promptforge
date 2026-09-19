@@ -1422,3 +1422,4 @@ mod tool_call_arm;
 mod tool_loop;
 mod tool_scoping;
 mod unified_pipeline;
+mod waits;

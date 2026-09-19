@@ -11,5 +11,5 @@
 //! `crate::execute::protocol::*` paths keep working.
 
 pub(crate) use promptforge_lua::{
-    Answer, ChatResult, Request, StoreOp, ToolCallOutcome, YieldParse,
+    Answer, ChatResult, Request, StoreOp, TaskDelivery, TaskStatus, ToolCallOutcome, YieldParse,
 };

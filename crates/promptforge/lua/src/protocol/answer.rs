@@ -2,7 +2,7 @@
 //! types its variants carry.
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
-use promptforge_api_types::ids::TaskId;
+use promptforge_api_types::ids::{TaskId, TaskOrigin};
 
 use crate::compactors::OverflowReason;
 use crate::{Error, LuaFanoutResult, Result, ToolOutputKind};
@@ -123,6 +123,53 @@ pub struct UserInputOutcome {
     pub available: bool,
 }
 
+/// One task's delivery to a `when_any` waiter: which member ended and how.
+///
+/// `outcome` is the task's final text, or its failure as the error value
+/// the shim hands back (`ok = false`): the task chain's own error, or the
+/// `cancelled` value for a task that was cancelled or abandoned. The
+/// delivery itself succeeded; a wait that fails outright (a task the
+/// caller does not own, a result already delivered) is the outer
+/// [`Answer::WhenAny`] error instead.
+#[derive(Debug)]
+pub struct TaskDelivery<E> {
+    /// The member that ended.
+    pub task: TaskId,
+    /// The member's final text or failure.
+    pub outcome: std::result::Result<String, E>,
+}
+
+/// One task's status, as `tasks.status` reports it: the slot's facts plus
+/// a live backing chain's position. Every optional field resumes as nil
+/// when absent, so an author tests presence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskStatus {
+    /// The name of the section the task's chain started at.
+    pub target: String,
+    /// The principal that started the task.
+    pub origin: TaskOrigin,
+    /// The lifecycle state tag: `running`, `done`, `cancelled`, or
+    /// `abandoned` (a delivered task reports `done`).
+    pub state: &'static str,
+    /// Whether the task ended well: `None` while it runs, `Some(false)`
+    /// for a failed, cancelled, or abandoned task.
+    pub ok: Option<bool>,
+    /// The section the backing chain is currently in, while it is live and
+    /// inside one.
+    pub section: Option<String>,
+    /// What the backing chain is parked on (`chat`, `tool_call`,
+    /// `user_input`, `store`, `timer`, `tasks`, `call`), while it is.
+    pub blocked: Option<&'static str>,
+    /// The task's model-turn count so far.
+    pub turns: u32,
+    /// The live tasks the task's chain owns, in spawn order.
+    pub tasks: Vec<TaskId>,
+    /// The task chain's call depth.
+    pub depth: u32,
+    /// The latest note the task published through `tasks.note`.
+    pub note: Option<String>,
+}
+
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
 /// at resume time.
 ///
@@ -149,6 +196,20 @@ pub enum Answer<E> {
     /// The started task's id for a `spawn` request, resumed as its path
     /// text; the shim wraps it in the methodless `Task` table.
     Spawn(std::result::Result<TaskId, E>),
+    /// The member delivered for a `when_any` request.
+    WhenAny(std::result::Result<TaskDelivery<E>, E>),
+    /// Whether the task has ended, for a `ready` request.
+    Ready(std::result::Result<bool, E>),
+    /// The task's status table for a `status` request. Boxed so the
+    /// field-heavy [`TaskStatus`] does not size every answer.
+    Status(std::result::Result<Box<TaskStatus>, E>),
+    /// The caller's live tasks in spawn order, for a `pending` request;
+    /// the shim wraps each id in a `Task` handle.
+    Pending(std::result::Result<Vec<TaskId>, E>),
+    /// The unit outcome of a `note` request.
+    Note(std::result::Result<(), E>),
+    /// The unit outcome of a `cancel` request.
+    Cancel(std::result::Result<(), E>),
     /// The ordered arm results for a `fanout` request, in collection order.
     Fanout(std::result::Result<Vec<LuaFanoutResult>, E>),
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
@@ -170,6 +231,18 @@ impl<E> Answer<E> {
             Answer::Infer(result) => Answer::Infer(result.map_err(map)),
             Answer::Call(result) => Answer::Call(result.map_err(map)),
             Answer::Spawn(result) => Answer::Spawn(result.map_err(map)),
+            Answer::WhenAny(result) => Answer::WhenAny(match result {
+                Ok(TaskDelivery { task, outcome }) => Ok(TaskDelivery {
+                    task,
+                    outcome: outcome.map_err(map),
+                }),
+                Err(error) => Err(map(error)),
+            }),
+            Answer::Ready(result) => Answer::Ready(result.map_err(map)),
+            Answer::Status(result) => Answer::Status(result.map_err(map)),
+            Answer::Pending(result) => Answer::Pending(result.map_err(map)),
+            Answer::Note(result) => Answer::Note(result.map_err(map)),
+            Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),

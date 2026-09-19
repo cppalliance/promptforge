@@ -2,7 +2,7 @@
 //! yield, the store operations they carry, and the message-record types
 //! the chat request is built from.
 
-use promptforge_api_types::ids::TaskOrigin;
+use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use promptforge_model_client::model::ModelBinding;
 
 use crate::Error;
@@ -58,6 +58,45 @@ pub enum Request {
         /// The principal starting the task. Shim-produced, never
         /// author-supplied: the author shim always says `author`.
         origin: TaskOrigin,
+    },
+    /// `tasks.when_any(set)`: park the chain until the first task in `set`
+    /// ends, or resume at once when one already has. The one scheduler
+    /// wait primitive: `tasks.when_all` is Lua over it.
+    WhenAny {
+        /// The tasks to wait on, in the author's order: the first terminal
+        /// member in this order is the one delivered when several are.
+        /// Non-empty by the shim's check.
+        tasks: Vec<TaskId>,
+    },
+    /// `tasks.ready(task)`: the non-blocking check whether `task` has
+    /// ended (in any terminal state, delivered or not).
+    Ready {
+        /// The task to inspect.
+        task: TaskId,
+    },
+    /// `tasks.status(task)`: the task's status table. Owner-or-self: the
+    /// caller may inspect a task it owns or the task it runs inside.
+    Status {
+        /// The task to inspect.
+        task: TaskId,
+    },
+    /// `tasks.pending(filter?)`: the caller's live tasks in spawn order,
+    /// optionally narrowed to one origin.
+    Pending {
+        /// `filter.origin`, when given.
+        origin: Option<TaskOrigin>,
+    },
+    /// `tasks.note(text)`: publish the caller's own task's latest progress
+    /// note, read back by `tasks.status`.
+    Note {
+        /// The author-supplied note text.
+        text: String,
+    },
+    /// `tasks.cancel(task)`: end a task the caller owns. Idempotent: a
+    /// task already in a terminal state is left as it is.
+    Cancel {
+        /// The task to cancel.
+        task: TaskId,
     },
     /// `fanout(worker, collection)`: the collection already converted
     /// member-wise through the existing rules.

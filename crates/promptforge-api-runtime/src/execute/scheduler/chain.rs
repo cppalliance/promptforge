@@ -80,6 +80,7 @@ impl<'a> Scheduler<'a> {
             owner: None,
             seed: None,
             waiting_on: Vec::new(),
+            blocked: None,
             task_notices: Vec::new(),
             note: None,
             ctx,
@@ -253,6 +254,10 @@ impl<'a> Scheduler<'a> {
         let chain = &mut self.chains[id.index()];
         chain.coroutine = None;
         chain.incoming = None;
+        // A chain aborted mid-wait leaves its set: no member's end may wake
+        // a dead chain.
+        chain.waiting_on.clear();
+        chain.blocked = None;
         chain.frame = None;
         chain.access = None;
         chain.arm = None;

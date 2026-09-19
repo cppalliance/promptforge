@@ -74,6 +74,8 @@ impl Scheduler<'_> {
                         "a delivered answer implies a suspended coroutine",
                     ));
                 };
+                // The answer ends whatever the chain was parked on.
+                chain.blocked = None;
                 Advance::Resume(thread, answer)
             } else if chain.coroutine.is_some() {
                 return Err(Error::internal(

@@ -59,10 +59,8 @@ pub(crate) enum TaskState {
     /// The backing chain ended; its outcome waits in the slot.
     Done,
     /// The owner took the outcome through a wait.
-    #[expect(dead_code, reason = "reached by the wait arms of the next step")]
     Delivered,
-    /// Someone cancelled the task.
-    #[expect(dead_code, reason = "reached by the cancel arm of the next step")]
+    /// The owner cancelled the task.
     Cancelled,
     /// The owner ended while the task was live, so the engine ended it.
     Abandoned,
@@ -71,7 +69,7 @@ pub(crate) enum TaskState {
 impl TaskState {
     /// True while the task's backing chain or request is still running:
     /// the one state a chain end must act on.
-    fn is_live(self) -> bool {
+    pub(super) fn is_live(self) -> bool {
         matches!(self, TaskState::Running)
     }
 }
@@ -91,6 +89,11 @@ pub(super) struct TaskSlot {
     pub(super) target: String,
     /// The task's lifecycle state.
     pub(super) state: TaskState,
+    /// Whether the task ended well, once it has ended: `Some(true)` for a
+    /// chain that returned, `Some(false)` for one that failed, was
+    /// cancelled, or was abandoned. Kept beside `outcome` so `status`
+    /// still reports it after a wait took the outcome.
+    pub(super) ok: Option<bool>,
     /// The chain's final text or failure, held from the chain's end until
     /// the owner takes it.
     pub(super) outcome: Option<Result<String>>,
@@ -217,6 +220,7 @@ impl Scheduler<'_> {
                 origin,
                 target: worker.name().to_owned(),
                 state: TaskState::Running,
+                ok: None,
                 outcome: None,
             },
         );
@@ -239,9 +243,10 @@ impl Scheduler<'_> {
     }
 
     /// Applies a task chain's end to its slot: the outcome lands in the
-    /// slot, the slot moves to `Done`, and the task's terminal observation
-    /// fires under its target section. Delivery to a waiting owner is the
-    /// wait arms' job; the slot holds the outcome until then.
+    /// slot, the slot moves to `Done`, the task's terminal observation
+    /// fires under its target section, and an owner parked on a set
+    /// containing the task is woken with it delivered. Otherwise the slot
+    /// holds the outcome until a wait takes it.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the chain has no slot, which only a
@@ -256,13 +261,16 @@ impl Scheduler<'_> {
             return Err(Error::internal("a task chain's end implies its slot"));
         };
         let event = if outcome.is_ok() {
-            Observation::TaskSucceeded { task }
+            Observation::TaskSucceeded { task: task.clone() }
         } else {
-            Observation::TaskFailed { task }
+            Observation::TaskFailed { task: task.clone() }
         };
         slot.state = TaskState::Done;
+        slot.ok = Some(outcome.is_ok());
         slot.outcome = Some(outcome);
+        let owner = slot.owner;
         observer.observe(&execution, &slot.target, event);
+        self.wake_waiter(owner, &task);
         Ok(())
     }
 
@@ -292,7 +300,9 @@ impl Scheduler<'_> {
     /// Ends every live task `owner` owns because `owner` is ending: each
     /// slot moves to `Abandoned`, its backing chain aborts with everything
     /// it owns in turn (or its in-flight request is dropped), and its
-    /// terminal observation fires under its target with `reason`. Returns
+    /// terminal observation fires under its target with `reason` - the
+    /// observation is the reason's only record, since no wait can reach
+    /// an abandoned slot once its owner is gone. Returns
     /// the abandoned author-origin ids in spawn order, for the owner's
     /// `tasks_live` outcome; the caller discards them for an owner that
     /// is itself being aborted, whose outcome no one receives.
@@ -317,6 +327,7 @@ impl Scheduler<'_> {
         for (task, origin, backing, target) in live {
             if let Some(slot) = self.tasks.get_mut(&task) {
                 slot.state = TaskState::Abandoned;
+                slot.ok = Some(false);
             }
             // The backing ends first, so anything it owned reports before
             // the task's own terminal event, which is the last word on it.
