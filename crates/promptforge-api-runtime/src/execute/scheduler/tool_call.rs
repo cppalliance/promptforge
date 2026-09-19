@@ -21,12 +21,13 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ToolCallOutcome};
 use crate::lua::{
     ModelReport, ScriptReport, SectionVm, ToolCallCounts, current_tool_bindings,
     dispatch_model_tool, dispatch_tool,
 };
-use crate::observe::{Observer, detail};
+use crate::observe::detail;
 use crate::{Error, Result, cancel};
 
 use super::builtins::is_task_builtin;
@@ -61,7 +62,7 @@ pub(super) enum ToolCallDispatch {
 
 /// Answers a call to a local Lua tool on the parked chain's VM: the counts
 /// seed and increment (dispatch attempted, even if the handler then
-/// fails), the handler run, the succeeded/failed observation, and the
+/// fails), the handler run, the succeeded/failed event, and the
 /// `ToolResult` report - trusted, since the prompt author wrote the
 /// handler and its output passes verbatim - under the model-issued call
 /// id, or no id for a script call. No leaf work is issued. A handler
@@ -73,7 +74,7 @@ pub(super) enum ToolCallDispatch {
 /// Returns the counts' own error, or the handler's failure.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the inline answer names the same run coordinates the spawned dispatch bodies do"
+    reason = "the inline answer names the same call coordinates the spawned dispatch bodies do"
 )]
 fn answer_local_tool(
     vm: &SectionVm,
@@ -82,8 +83,7 @@ fn answer_local_tool(
     args: &serde_json::Value,
     call_id: Option<&str>,
     report: ScriptReport,
-    observer: &dyn Observer,
-    execution: &str,
+    emitter: &Emitter,
     section: &str,
 ) -> Result<ToolCallOutcome> {
     counts.ensure(alias)?;
@@ -92,8 +92,7 @@ fn answer_local_tool(
     // to race against cancellation; the VM's instruction hook polls the
     // cancel flag, so a stuck handler still aborts on cancellation.
     let result = vm.call_local_tool(alias, args).map_err(Error::from);
-    observer.observe(
-        execution,
+    emitter.report(
         section,
         if result.is_ok() {
             detail::TOOL_CALL_SUCCEEDED
@@ -102,11 +101,8 @@ fn answer_local_tool(
         },
     );
     let text = result?;
-    observer.on_tool_result(
-        execution,
+    emitter.tool_result(
         section,
-        report.chain_id,
-        report.depth,
         report.turn,
         call_id.unwrap_or(""),
         alias,
@@ -187,7 +183,7 @@ impl Scheduler<'_> {
         }
         let chain = &mut self.chains[id.index()];
         let ctx = chain.ctx.clone();
-        let observer = Arc::clone(chain.ctx.observer());
+        let emitter = Arc::clone(chain.ctx.emitter());
         let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();
         let nonce = chain.ctx.nonce().clone();
@@ -215,8 +211,7 @@ impl Scheduler<'_> {
                 &args,
                 call_id.as_deref(),
                 report,
-                observer.as_ref(),
-                &execution,
+                emitter.as_ref(),
                 &section,
             );
             return Ok(ToolCallDispatch::Answered(Answer::ToolCallResult(outcome)));
@@ -239,6 +234,10 @@ impl Scheduler<'_> {
         // tool promptly.
         let cancel = cancel::current();
         let task = tokio::spawn(async move {
+            // The shared dispatch body still names `&dyn Observer`; the
+            // emitter is that observer, so its reports land in the buffer
+            // under this chain's task.
+            let observer = emitter.as_ref();
             let result = cancel::maybe_scope(cancel, async {
                 match call_id {
                     // Model-issued: the content always resumes, plain -
@@ -254,7 +253,7 @@ impl Scheduler<'_> {
                             args,
                             Some(&counts),
                             &nonce,
-                            observer.as_ref(),
+                            observer,
                             &execution,
                             &section,
                             &report,
@@ -268,7 +267,7 @@ impl Scheduler<'_> {
                         args,
                         Some(&counts),
                         &nonce,
-                        observer.as_ref(),
+                        observer,
                         &execution,
                         &section,
                         Some(report),

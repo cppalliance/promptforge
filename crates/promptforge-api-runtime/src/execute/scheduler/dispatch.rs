@@ -242,9 +242,7 @@ impl Scheduler<'_> {
             .as_ref()
             .ok_or(Error::internal("the client slot was just resolved"))?
             .clone();
-        let observer = Arc::clone(chain.ctx.observer());
-        let debug = chain.ctx.debug().cloned();
-        let execution = chain.ctx.execution().to_owned();
+        let emitter = Arc::clone(chain.ctx.emitter());
         let section = chain.section_name().to_owned();
         let turns = Arc::clone(chain.ctx.turns());
         let request_id = RequestId(self.next_request);
@@ -255,9 +253,7 @@ impl Scheduler<'_> {
                 &client,
                 &binding,
                 &prompt,
-                observer.as_ref(),
-                debug.as_deref(),
-                &execution,
+                emitter.as_ref(),
                 &section,
                 &turns,
             )
@@ -276,8 +272,8 @@ impl Scheduler<'_> {
     /// shared in-flight abort path. With no broker configured the
     /// unavailable-fallback policy answers immediately: the fixed fallback
     /// sentence with `available` false. The wait and a delivered response
-    /// are recorded through the run's observer; an unavailable answer opens
-    /// no wait and records no input.
+    /// are reported through the chain's emitter; an unavailable answer
+    /// opens no wait and records no input.
     fn dispatch_user_input(&mut self, id: ChainIndex) {
         let chain = &self.chains[id.index()];
         let Some(broker) = chain.ctx.input_broker().cloned() else {
@@ -288,17 +284,17 @@ impl Scheduler<'_> {
             self.ready.push_back(id);
             return;
         };
-        let observer = Arc::clone(chain.ctx.observer());
+        let emitter = Arc::clone(chain.ctx.emitter());
         let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();
-        observer.observe(&execution, &section, detail::USER_INPUT_WAIT_STARTED);
+        emitter.report(&section, detail::USER_INPUT_WAIT_STARTED);
         let request_id = RequestId(self.next_request);
         self.next_request += 1;
         let tx = self.answer_tx.clone();
         let task = tokio::spawn(async move {
             let answer = match broker.user_input(&execution, &section).await {
                 Ok(InputOutcome::Text(text)) => {
-                    observer.on_user_input(&execution, &section, &text);
+                    emitter.user_input(&section, &text);
                     Answer::UserInput(Ok(UserInputOutcome {
                         text,
                         available: true,
@@ -324,7 +320,7 @@ impl Scheduler<'_> {
     /// does. Every store operation takes this yield path uniformly -
     /// memory- and host-backed alike, with no inline fast path - so
     /// interleaving behavior never depends on which backend serves the
-    /// mount. The operation's observation fires before the answer posts, so
+    /// mount. The operation's event is pushed before the answer posts, so
     /// the event stream keeps the legacy closure path's ordering (the op's
     /// outcome precedes the chunk's closing boundary).
     ///
@@ -334,8 +330,7 @@ impl Scheduler<'_> {
     fn dispatch_store(&mut self, id: ChainIndex, op: StoreOp) -> Result<()> {
         let chain = &self.chains[id.index()];
         let access = Arc::clone(chain.access()?);
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
+        let emitter = Arc::clone(chain.ctx.emitter());
         let section = chain.section_name().to_owned();
         let observations = store_observations(&op);
         let request_id = RequestId(self.next_request);
@@ -348,11 +343,7 @@ impl Scheduler<'_> {
         let task = tokio::task::spawn_blocking(move || {
             let result = run_store_op(&Store::new(&access), op);
             if let Some((succeeded, failed)) = observations {
-                observer.observe(
-                    &execution,
-                    &section,
-                    if result.is_ok() { succeeded } else { failed },
-                );
+                emitter.report(&section, if result.is_ok() { succeeded } else { failed });
             }
             // Claims-release ordering constraint: the access clone must
             // drop after the op and its observation and before the answer

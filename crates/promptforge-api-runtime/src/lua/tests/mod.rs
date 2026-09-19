@@ -132,7 +132,7 @@ fn scheduler_vm_with_tools(
         sys: &sys,
         access: &access,
         seed: VmSeed { var, item: None },
-        observer_arc: &observer,
+        observer_arc: observer,
         section_name: "Test",
         shared: &shared,
         max_tool_iterations: 24,

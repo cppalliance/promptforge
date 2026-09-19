@@ -11,20 +11,21 @@
 //! classifies that completion into the round's answer when it arrives
 //! ([`Scheduler::accept_chat`]), emitting the round's events - the turn
 //! advance, the debug capture pair, turn completed or failed or truncated,
-//! thinking, and the reply or the tool-call batch - against the chain's
-//! own reporting handles, and rejecting a tool name outside the scope the
-//! chain advertised for that round. The shim that yielded the round emits
-//! nothing; the scheduler owns every event.
+//! thinking, and the reply or the tool-call batch - through the chain's
+//! own task-scoped emitter, and rejecting a tool name outside the scope
+//! the chain advertised for that round. The shim that yielded the round
+//! emits nothing; the scheduler owns every event.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 
 use crate::client::{Completion, CompletionResult, ToolCall};
-use crate::debug::DebugEvent;
+use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ChatResult};
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
-use crate::execute::section_context::ReportingHandles;
 use crate::execute::support::advance_turn;
 use crate::lua::{
     MessageRecord, OverflowReason, current_tool_bindings, is_context_overflow, precheck,
@@ -130,7 +131,6 @@ impl Scheduler<'_> {
             .client
             .clone()
             .ok_or(Error::internal("the client slot was just resolved"))?;
-        let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();
         let frame = chain
             .frame
@@ -153,11 +153,10 @@ impl Scheduler<'_> {
         // advertised set.
         let effective = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
         let local_schemas = vm.local_tool_schemas()?;
-        let handles = frame.reporting_handles();
-        let observer = handles.observer;
+        let emitter = frame.reporting_handles().emitter;
         let (bound, locals) = scope_halves(tools, effective, local_schemas, &tool_set)?;
         let (mut schemas, mut dispatch) =
-            prepare_effective_scope(&bound, &locals, &execution, observer.as_ref(), &section)?;
+            prepare_effective_scope(&bound, &locals, emitter.as_ref(), &section)?;
         // `tools.allow_tasks` is the section's opt-in: while its allowlist
         // is set, every round offers the model its task built-ins.
         if let Some(allowlist) = task_allowlist(vm)? {
@@ -168,7 +167,7 @@ impl Scheduler<'_> {
         let conversation = match project_messages(messages) {
             Ok(conversation) => conversation,
             Err(error) => {
-                observer.observe(&execution, &section, detail::MODEL_TURN_FAILED);
+                emitter.report(&section, detail::MODEL_TURN_FAILED);
                 return Err(Error::from(error));
             }
         };
@@ -180,7 +179,7 @@ impl Scheduler<'_> {
         // The refusal is the round's answer - the overflow flag - and is
         // observed as a failed turn, exactly as the loop reported it.
         if let Err(reason) = precheck(&conversation, context) {
-            observer.observe(&execution, &section, detail::MODEL_TURN_FAILED);
+            emitter.report(&section, detail::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
                 overflow_result(reason),
             )))));
@@ -216,7 +215,7 @@ impl Scheduler<'_> {
     }
 
     /// Classifies one arrived chat round into the chain's answer, emitting
-    /// the round's events against the chain's reporting handles.
+    /// the round's events through the chain's task-scoped emitter.
     ///
     /// A provider context rejection is the overflow answer under a failed
     /// turn. An empty reply is a completed round with the reply absent -
@@ -243,10 +242,11 @@ impl Scheduler<'_> {
             .frame
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
+        let handles = frame.reporting_handles();
         let round = Round {
-            execution: chain.ctx.execution().to_owned(),
             section: chain.section_name().to_owned(),
-            handles: frame.reporting_handles(),
+            emitter: handles.emitter,
+            turns: handles.turns,
         };
         let completion = match result {
             Ok(completion) => completion,
@@ -254,7 +254,7 @@ impl Scheduler<'_> {
         };
         // A round trip that produced a reply is a turn, whether the reply
         // is text or a batch of tool calls.
-        let turn = advance_turn(&round.handles.turns);
+        let turn = advance_turn(&round.turns);
         let (outcome, served) = round.served(*completion, turn);
         let result = match outcome {
             CompletionResult::Text(text) => Ok(round.text_reply(&served, turn, text)),
@@ -280,12 +280,13 @@ impl Scheduler<'_> {
     }
 }
 
-/// One arrived round's reporting context: the chain's labels and its
-/// effective reporting handles (a fanout arm's proxies included).
+/// One arrived round's reporting context: the chain's section label, its
+/// task-scoped emitter, and the turn counter it advances (a task chain's
+/// own, so its turns count against its own cap).
 struct Round {
-    execution: String,
     section: String,
-    handles: ReportingHandles,
+    emitter: Arc<Emitter>,
+    turns: Arc<AtomicU32>,
 }
 
 /// What a served completion reports once the turn has advanced and the
@@ -307,10 +308,10 @@ impl Round {
     /// request/response bodies to record. Every other failure is a failed
     /// turn and the call's error.
     fn failed(&self, error: Error) -> std::result::Result<Box<ChatResult>, Error> {
-        let observer = self.handles.observer.as_ref();
         match error {
             Error::Backend { status, body } if is_context_overflow(status, &body) => {
-                observer.observe(&self.execution, &self.section, detail::MODEL_TURN_FAILED);
+                self.emitter
+                    .report(&self.section, detail::MODEL_TURN_FAILED);
                 Ok(Box::new(overflow_result(OverflowReason::Provider)))
             }
             Error::EmptyModelReply {
@@ -318,8 +319,9 @@ impl Round {
                 finish_reason,
                 ..
             } => {
-                advance_turn(&self.handles.turns);
-                observer.observe(&self.execution, &self.section, detail::MODEL_TURN_COMPLETED);
+                advance_turn(&self.turns);
+                self.emitter
+                    .report(&self.section, detail::MODEL_TURN_COMPLETED);
                 Ok(Box::new(ChatResult {
                     overflow: false,
                     overflow_reason: None,
@@ -332,18 +334,18 @@ impl Round {
                 }))
             }
             error => {
-                observer.observe(&self.execution, &self.section, detail::MODEL_TURN_FAILED);
+                self.emitter
+                    .report(&self.section, detail::MODEL_TURN_FAILED);
                 Err(error)
             }
         }
     }
 
     /// Reports a served completion's round-level events - the debug
-    /// capture pair, the completion observation, and the thinking side
-    /// channel - and dissolves the completion into its outcome and what
-    /// the answer arms report beside it.
+    /// capture pair, the completion event, and the thinking side channel -
+    /// and dissolves the completion into its outcome and what the answer
+    /// arms report beside it.
     fn served(&self, completion: Completion, turn: u32) -> (CompletionResult, Served) {
-        let observer = self.handles.observer.as_ref();
         // Extracted before the debug capture, which moves the request body
         // out of the completion.
         let metrics = call_metrics(&completion);
@@ -353,32 +355,24 @@ impl Round {
             .filter(|text| !text.is_empty())
             .map(str::to_owned);
         let finish_reason = completion.finish_reason().map(str::to_owned);
-        if let Some(capture) = &self.handles.debug {
-            capture.on_event(
-                &self.execution,
+        if self.emitter.captures_debug() {
+            self.emitter
+                .request(&self.section, turn, completion.request_body);
+            self.emitter.response(
                 &self.section,
                 turn,
-                DebugEvent::Request {
-                    body: completion.request_body,
-                },
-            );
-            capture.on_event(
-                &self.execution,
-                &self.section,
-                turn,
-                DebugEvent::Response {
-                    body: completion.response_body.clone(),
-                    finish_reason: completion.finish_reason.clone(),
-                    reasoning_content: completion.reasoning_content.clone(),
-                },
+                completion.response_body.clone(),
+                completion.finish_reason.clone(),
+                completion.reasoning_content.clone(),
             );
         }
-        observer.observe(&self.execution, &self.section, detail::MODEL_TURN_COMPLETED);
+        self.emitter
+            .report(&self.section, detail::MODEL_TURN_COMPLETED);
         // The content reports every host transcript is built from: the
         // thinking side channel first, then the reply or the tool-call
         // batch, each with model and metrics.
         if let Some(thinking) = &thinking {
-            observer.on_thinking(&self.execution, &self.section, 0, 0, turn, &model, thinking);
+            self.emitter.thinking(&self.section, turn, &model, thinking);
         }
         (
             completion.result,
@@ -393,15 +387,12 @@ impl Round {
     /// Reports a text reply (with the truncation observation on a `length`
     /// finish) and builds its answer.
     fn text_reply(&self, served: &Served, turn: u32, text: String) -> ChatResult {
-        let observer = self.handles.observer.as_ref();
         if served.finish_reason.as_deref() == Some("length") {
-            observer.observe(&self.execution, &self.section, detail::MODEL_TURN_TRUNCATED);
+            self.emitter
+                .report(&self.section, detail::MODEL_TURN_TRUNCATED);
         }
-        observer.on_assistant_reply(
-            &self.execution,
+        self.emitter.assistant_reply(
             &self.section,
-            0,
-            0,
             turn,
             &text,
             served.finish_reason.as_deref(),
@@ -437,7 +428,6 @@ impl Round {
         advertised: &BTreeMap<String, DispatchTarget>,
         global_exists: impl Fn(&str) -> Result<bool>,
     ) -> Result<std::result::Result<ChatResult, Error>> {
-        let observer = self.handles.observer.as_ref();
         let events: Vec<ToolCallEvent> = calls
             .iter()
             .map(|call| ToolCallEvent {
@@ -446,20 +436,13 @@ impl Round {
                 arguments: call.arguments.clone(),
             })
             .collect();
-        observer.on_assistant_tool_calls(
-            &self.execution,
-            &self.section,
-            0,
-            0,
-            turn,
-            &served.model,
-            &events,
-        );
+        self.emitter
+            .assistant_tool_calls(&self.section, turn, &served.model, &events);
         if let Some(rogue) = calls
             .iter()
             .find(|call| !advertised.contains_key(&call.name))
         {
-            observer.observe(&self.execution, &self.section, detail::TOOL_CALL_FAILED);
+            self.emitter.report(&self.section, detail::TOOL_CALL_FAILED);
             return Ok(Err(Error::OutOfScopeToolCall {
                 name: rogue.name.clone(),
                 global_exists: global_exists(&rogue.name)?,

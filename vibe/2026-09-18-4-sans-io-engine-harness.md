@@ -714,7 +714,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-28>
 
-### Step 28: Events as values with `Provenance`
+### Step 28: Events as values with `Provenance` [completed]
 
 - Component: Run API and engine purity
 - Piece: inversion

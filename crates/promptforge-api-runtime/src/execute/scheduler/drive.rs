@@ -48,6 +48,9 @@ impl Scheduler<'_> {
     pub(crate) async fn drive(&mut self) -> Result<String> {
         let result = self.drive_inner().await;
         self.drain_io_tasks().await;
+        // The last drain: whatever the final round and the joined leaf
+        // tasks reported reaches the host before the result does.
+        self.ctx.flush_events();
         result
     }
 
@@ -104,6 +107,9 @@ impl Scheduler<'_> {
                     return result;
                 }
             }
+            // One dispatch round is done: every event the round's steps
+            // reported is forwarded before the driver waits on anything.
+            self.ctx.flush_events();
             // Every unfinished chain is ready, pending on I/O, blocked on a
             // child, or waiting on a task, and a blocked or waiting chain
             // transitively bottoms out in a ready or pending chain, so an

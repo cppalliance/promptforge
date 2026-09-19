@@ -12,51 +12,39 @@ use std::sync::atomic::AtomicU32;
 
 use crate::Error;
 use crate::client::{Completion, CompletionResult, GatewayClient, Message};
-use crate::debug::{DebugCapture, DebugEvent};
 use crate::model::ModelBinding;
-use crate::observe::{Observer, detail};
+use crate::observe::detail;
 
+use super::event_buffer::Emitter;
 use super::support::advance_turn;
 
 /// Reports one completed infer round exactly like a single prose round and
 /// renders its text: the turn advance, the debug capture pair, the
-/// completion and truncation observations, and the no-tools-advertised
+/// completion and truncation events, and the no-tools-advertised
 /// violation check.
 fn accept_infer_completion(
     completion: Completion,
-    observer: &dyn Observer,
-    debug: Option<&dyn DebugCapture>,
-    execution: &str,
+    emitter: &Emitter,
     section: &str,
     turns: &AtomicU32,
 ) -> Result<String, Error> {
     let turn = advance_turn(turns);
-    if let Some(capture) = debug {
-        capture.on_event(
-            execution,
+    if emitter.captures_debug() {
+        emitter.request(section, turn, completion.request_body);
+        emitter.response(
             section,
             turn,
-            DebugEvent::Request {
-                body: completion.request_body,
-            },
-        );
-        capture.on_event(
-            execution,
-            section,
-            turn,
-            DebugEvent::Response {
-                body: completion.response_body.clone(),
-                finish_reason: completion.finish_reason.clone(),
-                reasoning_content: completion.reasoning_content.clone(),
-            },
+            completion.response_body.clone(),
+            completion.finish_reason.clone(),
+            completion.reasoning_content.clone(),
         );
     }
-    observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
+    emitter.report(section, detail::MODEL_TURN_COMPLETED);
 
     match completion.result {
         CompletionResult::Text(text) => {
             if completion.finish_reason.as_deref() == Some("length") {
-                observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
+                emitter.report(section, detail::MODEL_TURN_TRUNCATED);
             }
             Ok(text)
         }
@@ -80,18 +68,13 @@ fn accept_infer_completion(
 ///
 /// The scheduler's leaf dispatch drives this on a spawned task, so
 /// cancellation is the driver aborting the task mid-round - no
-/// `MODEL_TURN_FAILED` fires for an aborted round.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the one infer round keeps the client, binding, prompt, and the frame's reporting handles explicit and linear"
-)]
+/// `MODEL_TURN_FAILED` fires for an aborted round. The round reports
+/// through the chain's `emitter` under `section`.
 pub(crate) async fn infer_round(
     client: &GatewayClient,
     binding: &ModelBinding,
     prompt: &str,
-    observer: &dyn Observer,
-    debug: Option<&dyn DebugCapture>,
-    execution: &str,
+    emitter: &Emitter,
     section: &str,
     turns: &AtomicU32,
 ) -> Result<String, Error> {
@@ -105,9 +88,9 @@ pub(crate) async fn infer_round(
     {
         Ok(completion) => completion,
         Err(error) => {
-            observer.observe(execution, section, detail::MODEL_TURN_FAILED);
+            emitter.report(section, detail::MODEL_TURN_FAILED);
             return Err(Error::from(error));
         }
     };
-    accept_infer_completion(completion, observer, debug, execution, section, turns)
+    accept_infer_completion(completion, emitter, section, turns)
 }

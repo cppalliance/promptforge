@@ -22,12 +22,19 @@
 //! bulk state persists across the context-clearing transitions even though a
 //! section's Lua state never does.
 //!
-//! A run reports itself as it goes: the [`RunContext`] observer receives a
-//! `(execution, section, event)` record when the run starts and ends, at each
-//! section boundary, model turn, tool call, and harness-mediated store
-//! operation. Reporting is a side channel and never
-//! a decision, so passing [`NullObserver`](promptforge_api_types::observe::NullObserver) changes nothing but
-//! the silence.
+//! A run reports itself as it goes, as values: every boundary - the run's
+//! start and end, each section, model turn, tool call, and
+//! harness-mediated store operation - is an
+//! [`Event`](promptforge_api_types::event::Event) pushed into the run's
+//! event buffer, stamped with the
+//! [`Provenance`](promptforge_api_types::ids::Provenance) of the chain that
+//! reported it (its nearest enclosing task and that task's next sequence
+//! number). The driver drains the buffer after every dispatch round and
+//! forwards the batch to the [`RunContext`] observer and debug capture
+//! through the `events_to_observer` adapter. Reporting is a side channel
+//! and never a decision, so passing
+//! [`NullObserver`](promptforge_api_types::observe::NullObserver) changes
+//! nothing but the silence.
 //!
 //! Rust installs the run's filled tool and model slots - bound at prepare
 //! from the frontmatter - into each section VM. Prompt-wide aliases and
@@ -60,7 +67,10 @@
 //! ([`RunContext`]/[`RunLimits`]), `environment` (the public
 //! [`Environment`]), `requirements` (the preflight
 //! [`Requirements`] report), `context` (the ambient `RunState` run
-//! state), `gateway` (client acquisition and the live H1 resolution
+//! state), `event_buffer` (the run-level event buffer and the
+//! task-scoped emitter every report goes through), `events_to_observer`
+//! (the adapter replaying drained events onto the host's observer and
+//! capture), `gateway` (client acquisition and the live H1 resolution
 //! inputs),
 //! `tools` (the nested-inference round),
 //! `section_vm` (the section VM setup half shared by the walk and
@@ -81,6 +91,8 @@ mod context;
 mod engine;
 mod environment;
 mod error;
+mod event_buffer;
+mod events_to_observer;
 mod fill;
 mod gateway;
 pub(crate) mod protocol;
@@ -251,8 +263,6 @@ pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
     let state = RunState::new(prompt, args, &ctx.vfs, shared, &ctx);
 
     let RunContext {
-        name,
-        observer,
         client,
         cancel,
         limits,
@@ -260,7 +270,10 @@ pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
     } = ctx;
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
-    observer.observe(&name, prompt.title(), detail::RUN_STARTED);
+    // The run's boundaries are events like every other report: pushed into
+    // the buffer under the root task, so the host sees them in order with
+    // the sections between them.
+    state.emitter().report(prompt.title(), detail::RUN_STARTED);
 
     // Boxed: the driver future carries the whole scheduler step machinery,
     // and `run`'s own future must stay small for its callers (the
@@ -272,8 +285,7 @@ pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
     // simply is not cancellable from this path.
     let result = cancel::maybe_scope(cancel, run_body).await;
 
-    observer.observe(
-        &name,
+    state.emitter().report(
         prompt.title(),
         if result.is_ok() {
             detail::RUN_SUCCEEDED
@@ -281,6 +293,9 @@ pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
             detail::RUN_FAILED
         },
     );
+    // The final drain: the run's end and whatever the scheduler's drop
+    // reported (an interrupted run's teardown boundaries) reach the host.
+    state.flush_events();
     match result {
         Ok(text) => RunResult::Ok(text),
         Err(Error::Interrupted) => RunResult::Cancelled,

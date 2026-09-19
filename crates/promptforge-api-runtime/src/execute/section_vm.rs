@@ -67,8 +67,10 @@ pub(crate) struct SectionVmSetup<'a> {
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
     /// The observer `Arc`: the persistent host APIs (`log`, `store`) capture
-    /// it, and the shared-library replay reports through it.
-    pub(crate) observer_arc: &'a Arc<dyn Observer>,
+    /// it, and the shared-library replay reports through it. Owned, not
+    /// borrowed, because the run context holds its emitter as a concrete
+    /// `Arc<Emitter>` and coerces a clone to the trait object here.
+    pub(crate) observer_arc: Arc<dyn Observer>,
     /// The section name used in observations and error messages.
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
@@ -129,7 +131,7 @@ where
         crate::lua::Argv::Frozen(setup.argv)
     };
     vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
-    vm.install_host_apis(setup.observer_arc, setup.section_name)?;
+    vm.install_host_apis(&setup.observer_arc, setup.section_name)?;
     if let Some(provider) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(provider))?;
     }

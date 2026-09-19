@@ -68,14 +68,14 @@ impl SectionContext {
         if let Some(index) = seed.index {
             sys["index"] = serde_json::Value::from(index);
         }
-        ctx.observer()
-            .observe(ctx.execution(), section.name(), detail::SECTION_STARTED);
+        ctx.emitter()
+            .report(section.name(), detail::SECTION_STARTED);
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
             &ctx.tool_set(),
             &ctx.model_set(),
             ctx.execution(),
-            ctx.observer().as_ref(),
+            ctx.observer(),
             section.name(),
         )?;
         // A limits failure propagates bare: no teardown runs here, so no
@@ -105,20 +105,18 @@ impl SectionContext {
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer().as_ref(), section.name());
+            vm.teardown(ctx.observer(), section.name());
             return Err(error);
         }
         Ok(Self {
             vm: Some(vm),
             name: section.name().to_owned(),
-            execution: ctx.execution().to_owned(),
             completed: false,
             sys,
             var: var.clone(),
             item: seed.item,
             counts: None,
-            observer: Arc::clone(ctx.observer()),
-            debug: ctx.debug().cloned(),
+            emitter: Arc::clone(ctx.emitter()),
             turns: Arc::clone(ctx.turns()),
         })
     }
@@ -165,7 +163,7 @@ impl SectionContext {
             &ctx.tool_set(),
             &ctx.model_set(),
             ctx.execution(),
-            ctx.observer().as_ref(),
+            ctx.observer(),
             title,
         )?;
         // A limits failure propagates bare: no teardown runs here, so no
@@ -186,20 +184,18 @@ impl SectionContext {
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer().as_ref(), title);
+            vm.teardown(ctx.observer(), title);
             return Err(error);
         }
         Ok(Self {
             vm: Some(vm),
             name: title.to_owned(),
-            execution: ctx.execution().to_owned(),
             completed: false,
             sys,
             var: serde_json::json!({}),
             item: None,
             counts: None,
-            observer: Arc::clone(ctx.observer()),
-            debug: ctx.debug().cloned(),
+            emitter: Arc::clone(ctx.emitter()),
             turns: Arc::clone(ctx.turns()),
         })
     }

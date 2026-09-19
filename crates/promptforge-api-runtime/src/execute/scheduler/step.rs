@@ -149,16 +149,15 @@ impl Scheduler<'_> {
     ) -> Result<()> {
         let pending = self.chains[id.index()].pending_prose.take();
         let chain = &self.chains[id.index()];
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
+        let emitter = Arc::clone(chain.ctx.emitter());
         let name = chain.section_name().to_owned();
-        observer.observe(&execution, &name, detail::LUA_CHUNK_STARTED);
+        emitter.report(&name, detail::LUA_CHUNK_STARTED);
         let frame = chain
             .frame
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
         if let Err(error) = frame.install_lazy_prose(&chain.ctx, pending.as_deref().unwrap_or("")) {
-            observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
+            emitter.report(&name, detail::LUA_CHUNK_FAILED);
             return Err(error);
         }
         let Block::Lua(program) = &chain.blocks()[chain.block] else {
@@ -177,18 +176,17 @@ impl Scheduler<'_> {
         result: Result<CoroStep>,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
-        let (observer, execution, name) = {
+        let (emitter, name) = {
             let chain = &self.chains[id.index()];
             (
-                Arc::clone(chain.ctx.observer()),
-                chain.ctx.execution().to_owned(),
+                Arc::clone(chain.ctx.emitter()),
                 chain.section_name().to_owned(),
             )
         };
         let step = match result {
             Ok(step) => step,
             Err(error) => {
-                observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
+                emitter.report(&name, detail::LUA_CHUNK_FAILED);
                 // A failed H1 assertion ends the run before the walk:
                 // H1's remaining job is the prompt's hard gates, so the
                 // prompt chunk's own Lua failure IS the failed assertion
@@ -235,7 +233,7 @@ impl Scheduler<'_> {
                         Ok(())
                     }
                     YieldParse::Malformed(error) => {
-                        observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
+                        emitter.report(&name, detail::LUA_CHUNK_FAILED);
                         Err(Error::from(error))
                     }
                 }
@@ -245,7 +243,7 @@ impl Scheduler<'_> {
                 // boundary reports success and the walk moves to the
                 // resolved target. A jump out of H1 ends the pass and
                 // starts the walk at the target.
-                observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
+                emitter.report(&name, detail::LUA_CHUNK_SUCCEEDED);
                 if self.chains[id.index()].h1.is_some() {
                     return self.end_live_h1_at_jump(id, &heading, root_result);
                 }
@@ -254,7 +252,7 @@ impl Scheduler<'_> {
                 Ok(())
             }
             CoroStep::Done(LuaBlockResult::Returned(value)) => {
-                observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
+                emitter.report(&name, detail::LUA_CHUNK_SUCCEEDED);
                 if self.chains[id.index()].h1.is_some() {
                     let chain = &mut self.chains[id.index()];
                     if let Some(value) = value {

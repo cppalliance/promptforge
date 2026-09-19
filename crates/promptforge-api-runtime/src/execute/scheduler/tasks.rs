@@ -187,15 +187,9 @@ impl Scheduler<'_> {
             Some(input) => chain.ctx.with_args(input),
             None => chain.ctx.clone(),
         };
-        let child_ctx = child_ctx.with_effective_handles(
-            Arc::clone(child_ctx.observer()),
-            child_ctx.debug().cloned(),
-            Arc::new(AtomicU32::new(0)),
-        );
         let client = chain.client.clone();
         let spawner_access = Arc::clone(chain.access()?);
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
+        let spawner_emitter = Arc::clone(chain.ctx.emitter());
         let spawner_section = chain.section_name().to_owned();
         // `chain`'s arena borrow ends here; the resolution borrows the
         // prompt tree, so the target's slice outlives it.
@@ -223,6 +217,10 @@ impl Scheduler<'_> {
         // dispatch order; the task is its chain, named from the other side.
         let chain_id = self.allocate_child_id(id)?;
         let task = TaskId::from(chain_id.clone());
+        // The task's context reports under its own task id with its own
+        // turn counter, so its events carry its provenance and its turns
+        // count against its own cap.
+        let child_ctx = child_ctx.with_task(task.clone(), Arc::new(AtomicU32::new(0)));
         let child = self.start_chain(
             chain_id,
             Counters::default(),
@@ -252,9 +250,9 @@ impl Scheduler<'_> {
             },
         );
         // The start carries the spawn seeds: everything a host needs to
-        // start the same chain again under the same id.
-        observer.observe(
-            &execution,
+        // start the same chain again under the same id. The spawn is the
+        // spawner's act, so it rides the spawner's task sequence.
+        spawner_emitter.report(
             &spawner_section,
             Observation::TaskStarted {
                 task: task.clone(),
@@ -284,8 +282,8 @@ impl Scheduler<'_> {
     pub(super) fn complete_task(&mut self, id: ChainIndex, outcome: Result<String>) -> Result<()> {
         let chain = &self.chains[id.index()];
         let task = chain.task.clone();
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
+        // The terminal is the task's own last word, stamped with its task.
+        let emitter = Arc::clone(chain.ctx.emitter());
         let Some(slot) = self.tasks.get_mut(&task) else {
             return Err(Error::internal("a task chain's end implies its slot"));
         };
@@ -299,7 +297,7 @@ impl Scheduler<'_> {
         let owner = slot.owner;
         let origin = slot.origin;
         let target = slot.target.clone();
-        observer.observe(&execution, &target, event);
+        emitter.report(&target, event);
         if origin == TaskOrigin::Model {
             let end = match &outcome {
                 Ok(text) => TaskEnd::Completed(text),
@@ -365,9 +363,6 @@ impl Scheduler<'_> {
             .map(|(task, slot)| (task.clone(), slot.origin, slot.backing, slot.target.clone()))
             .collect();
         live.sort_by(|left, right| left.0.cmp(&right.0));
-        let chain = &self.chains[owner.index()];
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
         let mut leaked = Vec::new();
         for (task, origin, backing, target) in live {
             if let Some(slot) = self.tasks.get_mut(&task) {
@@ -383,9 +378,12 @@ impl Scheduler<'_> {
                     continue;
                 }
             };
+            // The terminal is stamped with the abandoned task's own
+            // provenance: its backing chain's emitter, taken before the
+            // abort clears the chain's state.
+            let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
             self.abort_subtree(backing_chain);
-            observer.observe(
-                &execution,
+            emitter.report(
                 &target,
                 Observation::TaskAbandoned {
                     task: task.clone(),

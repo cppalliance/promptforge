@@ -4,8 +4,10 @@ use std::collections::BTreeMap;
 
 use crate::client::ToolSchema;
 use crate::lua::ToolBinding;
-use crate::observe::{Observer, detail};
+use crate::observe::detail;
 use crate::{Error, Result};
+
+use super::event_buffer::Emitter;
 
 /// What kind of tool stands behind one alias a round advertised.
 ///
@@ -27,17 +29,20 @@ pub(crate) enum DispatchTarget {
     Builtin,
 }
 
+/// Builds the round's advertised scope under the validation boundary
+/// pair, reported through the chain's `emitter` under `section`.
+///
+/// # Errors
+/// Returns the schema-construction error of [`prepare_scoped_tools`].
 pub(crate) fn prepare_effective_scope(
     bindings: &[ToolBinding],
     local_schemas: &[ToolSchema],
-    execution: &str,
-    observer: &dyn Observer,
+    emitter: &Emitter,
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {
-    observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
+    emitter.report(section, detail::TOOL_SCOPE_VALIDATION_STARTED);
     let result = prepare_scoped_tools(bindings, local_schemas);
-    observer.observe(
-        execution,
+    emitter.report(
         section,
         if result.is_ok() {
             detail::TOOL_SCOPE_VALIDATION_SUCCEEDED

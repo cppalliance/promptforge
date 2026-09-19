@@ -4,10 +4,10 @@
 //! It owns the section VM plus the state the block walk reads and writes -
 //! the `sys` JSON, the seeded `var`, a spawned chain's `item`, and the
 //! tool-call counts - and it
-//! carries the frame's effective reporting handles (observer, debug sink,
-//! turn counter) seeded out of the run context; a task chain's context is
-//! the spawn's fork, so the handles reach the frame and the task's nested
-//! chains through the one value. Each driver is one
+//! carries the frame's effective reporting handles (the task-scoped event
+//! emitter and the turn counter) seeded out of the run context; a task
+//! chain's context is the spawn's fork, so the handles reach the frame and
+//! the task's nested chains through the one value. Each driver is one
 //! construct-run-teardown cycle: the constructor absorbs the VM
 //! construction and setup preamble ([`SectionContext::new`] for a walked
 //! section, [`SectionContext::new_live_h1`] for the live H1 pass; the two
@@ -24,12 +24,12 @@ mod construct;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use crate::debug::DebugCapture;
 use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts};
-use crate::observe::{Observer, detail};
+use crate::observe::detail;
 use crate::{Error, Result, subst};
 
 use super::context::RunState;
+use super::event_buffer::Emitter;
 
 /// The seeds a spawned task chain's first section entry carries beyond the
 /// shared host contract: `tasks.spawn`'s `opts.item` (installed as the
@@ -60,9 +60,6 @@ pub(crate) struct SectionContext {
     /// The section's own name, retained so `Drop` reports the teardown
     /// boundary and the completion observation without a parameter.
     name: String,
-    /// The run's execution id, retained for the completion observation
-    /// `Drop` fires on the armed path.
-    execution: String,
     /// Armed by [`SectionContext::mark_completed`] on the success path
     /// only, so `Drop` fires `SECTION_FINISHED` on completion (a jump or
     /// return included) and never on an error.
@@ -79,21 +76,20 @@ pub(crate) struct SectionContext {
     /// The per-section tool-call counts, installed at the first
     /// script-initiated `tools.call`.
     counts: Option<ToolCallCounts>,
-    /// The frame's effective observer handle: the run's own.
-    observer: Arc<dyn Observer>,
-    /// Opt-in raw request/response capture for each model turn.
-    debug: Option<Arc<dyn DebugCapture>>,
+    /// The frame's task-scoped event emitter: the chain's own, so every
+    /// report the frame makes - the teardown boundary, the completion -
+    /// is stamped with the chain's task.
+    emitter: Arc<Emitter>,
     /// The model-turn counter this frame advances.
     turns: Arc<AtomicU32>,
 }
 
 /// The frame's effective reporting handles for a model round: the
-/// observer, the opt-in debug capture sink, and the model-turn counter.
+/// task-scoped event emitter (which also knows whether the run captures
+/// raw model-turn bodies) and the model-turn counter.
 pub(crate) struct ReportingHandles {
-    /// The frame's effective observer handle.
-    pub(crate) observer: Arc<dyn Observer>,
-    /// The frame's opt-in raw request/response capture sink.
-    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
+    /// The frame's task-scoped event emitter.
+    pub(crate) emitter: Arc<Emitter>,
     /// The model-turn counter the frame advances.
     pub(crate) turns: Arc<AtomicU32>,
 }
@@ -184,8 +180,7 @@ impl SectionContext {
     /// construction.
     pub(crate) fn reporting_handles(&self) -> ReportingHandles {
         ReportingHandles {
-            observer: Arc::clone(&self.observer),
-            debug: self.debug.clone(),
+            emitter: Arc::clone(&self.emitter),
             turns: Arc::clone(&self.turns),
         }
     }
@@ -267,10 +262,11 @@ impl Drop for SectionContext {
         let Some(vm) = self.vm.take() else {
             return;
         };
-        vm.teardown(self.observer.as_ref(), &self.name);
+        // The VM's teardown pair reports through the emitter's observer
+        // seam, so it lands in the buffer ahead of the completion below.
+        vm.teardown(self.emitter.as_ref(), &self.name);
         if self.completed {
-            self.observer
-                .observe(&self.execution, &self.name, detail::SECTION_FINISHED);
+            self.emitter.report(&self.name, detail::SECTION_FINISHED);
         }
     }
 }
