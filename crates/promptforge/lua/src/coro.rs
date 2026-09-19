@@ -92,12 +92,15 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// `yield` capture (legacy VMs keep exactly `STRING | TABLE | MATH`); the
 /// `coroutine` global is stripped again before returning, so author code
 /// cannot yield directly and a hand-rolled yield fails the driver's strict
-/// validation. The `models` and `tools` tables are passed to the shim chunk
-/// as arguments, so the chunk never reads a global; the chunk shims
-/// `models.infer` and installs `tools.call`, and the `call`/`fanout` shims
-/// come back for the host to install. The `models.loop` shim is stashed in
-/// the registry for [`install_section_loop_shim`], so agent VMs - which run
-/// this prelude too - never receive it.
+/// validation. The `models`, `tools`, and `compactors` tables are passed
+/// to the shim chunk as arguments, so the chunk never reads a global; the
+/// chunk shims `models.infer` and installs `tools.call`, and the
+/// `call`/`fanout` shims come back for the host to install. The
+/// `models.loop` shim is stashed in the registry for
+/// [`install_section_loop_shim`], so agent VMs - which run this prelude
+/// too - never receive it. `max_tool_iterations` is the loop's round cap,
+/// the run's resolved value, captured by the chunk so the shim needs no
+/// host call to read it.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
@@ -112,7 +115,7 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
 /// install step fails.
-pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
+pub(crate) fn install_shim_prelude(lua: &Lua, max_tool_iterations: usize) -> Result<()> {
     lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
     let globals = lua.globals();
     let coroutine: Table = globals.raw_get("coroutine").map_err(Error::lua)?;
@@ -122,6 +125,7 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = globals.raw_get("models").map_err(Error::lua)?;
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
+    let compactors: Table = globals.raw_get("compactors").map_err(Error::lua)?;
     let error_value = install_error_value(lua).map_err(Error::lua)?;
     let stash_failure = lua
         .create_function(|lua, failure: Value| {
@@ -142,6 +146,8 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
             var_snapshot,
             models,
             tools,
+            compactors,
+            max_tool_iterations,
             error_value,
             stash_failure,
             normalize_failure,

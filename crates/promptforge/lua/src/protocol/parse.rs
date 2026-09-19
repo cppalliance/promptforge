@@ -1,16 +1,16 @@
 //! The yield-to-request validation: every field of a yielded table is
 //! checked before use, a malformed yield fails the block with the fixed
 //! direct-yield message, and an author-argument failure becomes the call's
-//! answer so the shim raises it at the call site. The chat and loop
-//! request parsers, which share the message-record validation, sit in the
-//! `chat` sibling.
+//! answer so the shim raises it at the call site. The chat request parser,
+//! which owns the message-record validation, sits in the `chat` sibling.
 
 #[path = "parse-chat.rs"]
 mod chat;
 
 use mlua::{Lua, LuaSerdeExt, Value};
+use promptforge_model_client::model::ModelBinding;
 
-use chat::{parse_chat, parse_loop};
+use chat::parse_chat;
 
 use crate::tools::tool_alias;
 use crate::{Error, LuaModelHandle, Result, resolve_section_target};
@@ -180,7 +180,6 @@ impl Request {
                 Answer::ToolCallResult(Err(error))
             }),
             "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
-            "loop" => classify(parse_loop(lua, table), |error| Answer::Loop(Err(error))),
             // No author arguments exist to fail validation: a well-formed
             // `user_input` yield is always the unit request.
             "user_input" => YieldParse::Request(Request::UserInput),
@@ -216,25 +215,34 @@ fn classify(
 /// not a malformed yield.
 fn parse_infer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let prompt = call_string(table, "prompt")?;
-    let binding = match table.raw_get::<Value>("handle") {
-        Ok(Value::Nil) => None,
-        Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
-            Ok(handle) => Some(handle.binding().clone()),
-            Err(_) => {
-                return Err(FieldFailure::Call(Error::Lua(
-                    "models.infer handle must be a model handle".to_owned(),
-                )));
-            }
-        },
-        Ok(other) => {
-            return Err(FieldFailure::Call(Error::Lua(format!(
-                "models.infer handle must be a model handle, got {}",
-                other.type_name()
-            ))));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
+    let binding = call_handle(table, "models.infer")?;
     Ok(Request::Infer { prompt, binding })
+}
+
+/// Reads the optional leading model handle of `call` (`models.infer` or
+/// `models.loop`) off the request's `handle` field: absent or nil is
+/// `None`, a model handle's userdata is its frozen [`ModelBinding`] cloned
+/// out of its borrow while the VM handle is live, and any other value is
+/// the call's error naming the call, since the handle is author-supplied
+/// under namespace-only invocation.
+fn call_handle(
+    table: &mlua::Table,
+    call: &str,
+) -> std::result::Result<Option<ModelBinding>, FieldFailure> {
+    match table.raw_get::<Value>("handle") {
+        Ok(Value::Nil) => Ok(None),
+        Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
+            Ok(handle) => Ok(Some(handle.binding().clone())),
+            Err(_) => Err(FieldFailure::Call(Error::Lua(format!(
+                "{call} handle must be a model handle"
+            )))),
+        },
+        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+            "{call} handle must be a model handle, got {}",
+            other.type_name()
+        )))),
+        Err(_) => Err(FieldFailure::Malformed),
+    }
 }
 
 /// Parses a `call` request: the author-supplied `target` (validated

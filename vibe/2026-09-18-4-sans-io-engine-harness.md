@@ -531,7 +531,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-13>
 
-### Step 13: `models.loop` in Lua and the Rust loop deleted
+### Step 13: `models.loop` in Lua and the Rust loop deleted [completed]
 
 - Component: Lua loop
 - Piece: shim and deletion

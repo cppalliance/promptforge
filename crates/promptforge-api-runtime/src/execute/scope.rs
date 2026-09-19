@@ -7,17 +7,19 @@ use crate::lua::ToolBinding;
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 
-/// How the tool loop reaches the tool behind one in-scope alias.
+/// What kind of tool stands behind one alias a round advertised.
 ///
-/// Produced by [`prepare_scoped_tools`]: bound tools carry their binding
-/// (whose attached implementation is the dispatch target); local tools are
-/// prompt-author Lua functions with no live implementation, marked here so
-/// the loop routes them back into the section VM instead.
+/// Produced by [`prepare_scoped_tools`] and recorded on the chain as the
+/// round's advertised scope: the `chat` arm gates the model's requested
+/// names against the map's keys, and the `tool_call` arm the loop shim
+/// then yields resolves each name itself - a bound alias against the run's
+/// tool catalog, a local alias against the section VM's handlers - so the
+/// map carries no implementation.
 #[derive(Debug, Clone)]
 pub(crate) enum DispatchTarget {
-    /// A bound live tool, called through the binding's attached implementation.
-    Bound(ToolBinding),
-    /// A Lua-local tool, dispatched through the section's local dispatcher.
+    /// A bound live tool, resolved against the run's tool catalog.
+    Bound,
+    /// A Lua-local tool, answered by the section VM's handler.
     Local,
 }
 
@@ -72,15 +74,11 @@ pub(crate) fn prepare_scoped_tools(
             source: Box::new(error),
         })?;
         schemas.push(schema);
-        dispatch.insert(
-            binding.alias().to_owned(),
-            DispatchTarget::Bound(binding.clone()),
-        );
+        dispatch.insert(binding.alias().to_owned(), DispatchTarget::Bound);
     }
     // Local tools are prompt-author Lua functions with no live implementation;
-    // the loop recognizes the `Local` marker and routes their calls back into
-    // the section VM. The alias was validated at `tools.add_local`
-    // registration.
+    // the `tool_call` arm answers their calls on the section VM. The alias
+    // was validated at `tools.add_local` registration.
     for schema in local_schemas {
         dispatch.insert(schema.name.clone(), DispatchTarget::Local);
         schemas.push(schema.clone());

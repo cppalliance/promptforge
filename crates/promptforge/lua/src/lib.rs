@@ -123,7 +123,7 @@ mod runtime_events;
 #[doc(hidden)]
 pub use crate::argv::Argv;
 #[doc(hidden)]
-pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_overflow, precheck};
+pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
 #[doc(hidden)]
 pub use coro::{
     install_agent_chat_shim, install_model_tool_call_shim, install_section_loop_shim,
@@ -147,7 +147,6 @@ pub use prose::ProseState;
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
     StoreOutcome, ToolCallOutcome, ToolCallRecord, UserInputOutcome, YieldParse,
-    append_message_record,
 };
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};

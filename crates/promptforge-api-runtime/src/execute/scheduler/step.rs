@@ -33,13 +33,11 @@ impl Scheduler<'_> {
             .arm
             .as_ref()
             .and_then(|arm| arm.cancel.clone());
-        // The step body awaits only inside a `models.loop` dispatch, so the
-        // scoped future carries the call, not a suspended step frame.
-        cancel::maybe_scope(
-            cancel,
-            async move { self.step_inner(id, root_result).await },
-        )
-        .await
+        // The step body never awaits: every dispatch either spawns its leaf
+        // work or answers on the spot. The scope exists so a dispatch arm
+        // that captures the current cancel handle (the `tool_call` arm
+        // hands it to its spawned task) sees the arm's handle.
+        cancel::maybe_scope(cancel, async move { self.step_inner(id, root_result) }).await
     }
 
     /// Runs one ready chain to its next suspension point: resume a
@@ -47,11 +45,7 @@ impl Scheduler<'_> {
     /// entering the next section, starting the next Lua block's coroutine,
     /// stashing one prose block as the pending Markdown buffer, or falling
     /// through at a section's end.
-    async fn step_inner(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
+    fn step_inner(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
@@ -99,10 +93,8 @@ impl Scheduler<'_> {
         };
         match advance {
             Advance::EnterSection => self.advance_entry(id, root_result),
-            Advance::Resume(thread, answer) => {
-                self.resume_block(id, &thread, answer, root_result).await
-            }
-            Advance::StartLua => self.start_lua(id, root_result).await,
+            Advance::Resume(thread, answer) => self.resume_block(id, &thread, answer, root_result),
+            Advance::StartLua => self.start_lua(id, root_result),
             Advance::StashProse => {
                 let chain = &mut self.chains[id.index()];
                 let text = match &chain.blocks()[chain.block] {
@@ -134,7 +126,7 @@ impl Scheduler<'_> {
     }
 
     /// Resumes a chain's suspended coroutine with its delivered answer.
-    async fn resume_block(
+    fn resume_block(
         &mut self,
         id: ChainId,
         thread: &Thread,
@@ -152,7 +144,7 @@ impl Scheduler<'_> {
         let result = frame
             .vm()?
             .resume_block_coro_answer(program, thread, answer);
-        self.handle_coro_result(id, result, root_result).await
+        self.handle_coro_result(id, result, root_result)
     }
 
     /// Starts the chain's current Lua block as a fresh coroutine: the
@@ -161,11 +153,7 @@ impl Scheduler<'_> {
     /// driver owns the chunk observation
     /// boundaries: STARTED at the block's start, SUCCEEDED or FAILED when
     /// its coroutine finally returns or fails - a suspension is neither.
-    async fn start_lua(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
+    fn start_lua(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
         let pending = self.chains[id.index()].pending_prose.take();
         let chain = &self.chains[id.index()];
         let observer = Arc::clone(chain.ctx.observer());
@@ -184,13 +172,13 @@ impl Scheduler<'_> {
             return Err(Error::internal("the advance matched the block kind"));
         };
         let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
-        self.handle_coro_result(id, result, root_result).await
+        self.handle_coro_result(id, result, root_result)
     }
 
     /// Applies one Lua block coroutine's outcome: parks a yielded chain on
     /// its request's dispatch, advances or finishes a completed block, and
     /// reports the chunk's closing observation boundary.
-    async fn handle_coro_result(
+    fn handle_coro_result(
         &mut self,
         id: ChainId,
         result: Result<CoroStep>,
@@ -241,7 +229,7 @@ impl Scheduler<'_> {
                 match frame.vm()?.request_from_yield(&values) {
                     YieldParse::Request(request) => {
                         chain.coroutine = Some(thread);
-                        self.dispatch(id, request).await
+                        self.dispatch(id, request)
                     }
                     YieldParse::Call(answer) => {
                         // An argument-validation failure is the call's

@@ -1,15 +1,15 @@
-//! The chat and loop request parsers: the author-supplied `messages` list
-//! validated once into message records, the `opts` table, and the loop's
-//! stashed author table and compactor.
+//! The chat request parser: the loop shim's optional leading handle, the
+//! author-supplied `messages` list validated once into message records,
+//! and the `opts` table.
 
 use mlua::{Lua, LuaSerdeExt, Value};
 
-use crate::{Error, LuaModelHandle};
+use crate::Error;
 
 use super::super::request::{
     ContentPart, MessageContent, MessageRecord, MessageRole, Request, ToolCallRecord,
 };
-use super::FieldFailure;
+use super::{FieldFailure, call_handle};
 
 /// The message roles the chat protocol accepts.
 const CHAT_ROLES: [&str; 4] = ["system", "user", "assistant", "tool"];
@@ -23,17 +23,21 @@ fn chat_error(message: impl Into<String>) -> FieldFailure {
     FieldFailure::Call(Error::Lua(message.into()))
 }
 
-/// Parses a `chat` request: the author-supplied `messages` list and the
-/// optional `opts` table carrying `model` and `tools`.
+/// Parses a `chat` request: the loop shim's optional leading `handle`, the
+/// author-supplied `messages` list, and the optional `opts` table carrying
+/// `model` and `tools`.
 ///
 /// The whole messages/opts validation lives here, once - the driver
 /// converts the validated records without re-checking. Every
-/// author-argument failure is the call's error, raised at the `models.chat`
-/// call site so a program `pcall` catches it.
+/// author-argument failure is the call's error, raised at the
+/// `models.chat` or `models.loop` call site so a program `pcall` catches
+/// it. The handle is checked first, as the loop's leading argument: only
+/// the loop shim sets it, so its error names `models.loop`.
 pub(super) fn parse_chat(
     lua: &Lua,
     table: &mlua::Table,
 ) -> std::result::Result<Request, FieldFailure> {
+    let binding = call_handle(table, "models.loop")?;
     let messages = match table.raw_get::<Value>("messages") {
         Ok(value @ Value::Table(_)) => lua
             .from_value::<serde_json::Value>(value)
@@ -50,6 +54,7 @@ pub(super) fn parse_chat(
     let (model, tools) = parse_chat_opts(table)?;
     Ok(Request::Chat {
         messages,
+        binding,
         model,
         tools,
     })
@@ -342,82 +347,4 @@ fn parse_chat_opts(
         Err(_) => return Err(FieldFailure::Malformed),
     };
     Ok((model, tools))
-}
-
-/// Frames one loop author-argument failure as the call's error.
-fn loop_error(message: impl Into<String>) -> FieldFailure {
-    FieldFailure::Call(Error::Lua(message.into()))
-}
-
-/// Parses a `loop` request: the optional leading handle's userdata (whose
-/// frozen [`ModelBinding`] is cloned out of its borrow while the VM handle
-/// is live), the author-supplied `messages` list (validated once here
-/// through the same [`parse_messages`] the chat parse runs, and stashed in
-/// the registry so the driver appends the loop's records to the author's
-/// own table), and the optional `compactor` callback (stashed for the
-/// driver's overflow invocations).
-///
-/// Every author-argument failure is the call's error, raised at the
-/// `models.loop` call site so an author `pcall` catches it.
-pub(super) fn parse_loop(
-    lua: &Lua,
-    table: &mlua::Table,
-) -> std::result::Result<Request, FieldFailure> {
-    let binding = match table.raw_get::<Value>("handle") {
-        Ok(Value::Nil) => None,
-        Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
-            Ok(handle) => Some(handle.binding().clone()),
-            Err(_) => {
-                return Err(loop_error("models.loop handle must be a model handle"));
-            }
-        },
-        Ok(other) => {
-            return Err(loop_error(format!(
-                "models.loop handle must be a model handle, got {}",
-                other.type_name()
-            )));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let messages_table = match table.raw_get::<Value>("messages") {
-        Ok(value @ Value::Table(_)) => value,
-        Ok(other) => {
-            return Err(loop_error(format!(
-                "messages must be a table of message tables, got {}",
-                other.type_name()
-            )));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let messages = match lua.from_value::<serde_json::Value>(messages_table.clone()) {
-        Ok(messages) => parse_messages(&messages)?,
-        Err(_) => {
-            return Err(loop_error("messages must be a JSON-representable table"));
-        }
-    };
-    // Stash the author's table only after validation succeeds, so a
-    // rejected call leaves nothing in the registry.
-    let messages_key = lua
-        .create_registry_value(messages_table)
-        .map_err(|_| FieldFailure::Malformed)?;
-    let compactor = match table.raw_get::<Value>("compactor") {
-        Ok(Value::Nil) => None,
-        Ok(Value::Function(function)) => Some(
-            lua.create_registry_value(function)
-                .map_err(|_| FieldFailure::Malformed)?,
-        ),
-        Ok(other) => {
-            return Err(loop_error(format!(
-                "compactor must be a function, got {}",
-                other.type_name()
-            )));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    Ok(Request::Loop {
-        messages,
-        messages_key,
-        binding,
-        compactor,
-    })
 }

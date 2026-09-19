@@ -24,28 +24,46 @@ use crate::execute::protocol::{Answer, ChatResult};
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::section_context::ReportingHandles;
 use crate::execute::support::advance_turn;
-use crate::execute::tool_loop::call_metrics;
 use crate::lua::{
-    MessageRecord, ToolBinding, ToolSet, current_tool_bindings, is_context_overflow, precheck,
-    project_messages, resolve_model_binding,
+    MessageRecord, OverflowReason, ToolBinding, ToolSet, current_tool_bindings,
+    is_context_overflow, precheck, project_messages, resolve_model_binding,
 };
+use crate::model::ModelBinding;
 use crate::observe::detail;
 use crate::{Error, Result};
 
 use super::dispatch::unbound_tool_call;
 use super::{Arrival, ChainId, RequestId, Scheduler};
 
-/// The answer for a round refused as too large, before or by the provider:
-/// no round ran, so every other field is absent.
-fn overflow_result() -> ChatResult {
+/// The answer for a round refused as too large by `reason`'s gate, before
+/// or by the provider: no round ran, so every other field is absent.
+fn overflow_result(reason: OverflowReason) -> ChatResult {
     ChatResult {
         overflow: true,
+        overflow_reason: Some(reason),
         reply: None,
+        empty_detail: None,
         tool_calls: None,
         finish_reason: None,
         model: String::new(),
         metrics: None,
     }
+}
+
+/// Assembles one round's [`CallMetrics`] from everything the completion
+/// measured, or `None` when nothing was measured.
+fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
+    let metrics = CallMetrics {
+        usage: completion.usage().cloned(),
+        llama: completion.llama_timings().cloned(),
+        vllm: completion.vllm_metrics().cloned(),
+        client: completion.client_timing().cloned(),
+    };
+    let measured = metrics.usage.is_some()
+        || metrics.llama.is_some()
+        || metrics.vllm.is_some()
+        || metrics.client.is_some();
+    measured.then_some(metrics)
 }
 
 /// How one `chat` dispatch resolved: a spawned round parked on the pending
@@ -105,10 +123,11 @@ impl Scheduler<'_> {
         &mut self,
         id: ChainId,
         messages: &[MessageRecord],
+        binding: Option<ModelBinding>,
         model: Option<&str>,
         tools: Option<&[String]>,
     ) {
-        match self.prepare_chat(id, messages, model, tools) {
+        match self.prepare_chat(id, messages, binding, model, tools) {
             Ok(ChatDispatch::Spawned(request_id, task)) => {
                 self.io_tasks.insert(request_id, task);
                 self.pending.insert(request_id, id);
@@ -125,14 +144,16 @@ impl Scheduler<'_> {
     }
 
     /// The fallible half of chat dispatch: the lazy client resolution, the
-    /// binding (`model: None` is the section's current model, an alias is
-    /// its frozen binding), the call-time tool scope recorded on the chain
-    /// as `advertised`, the per-dispatch projection, the context precheck,
-    /// and the spawned round.
+    /// binding (the loop shim's leading handle when it named one, else
+    /// `model: None` is the section's current model and an alias is its
+    /// frozen binding), the call-time tool scope recorded on the chain as
+    /// `advertised`, the per-dispatch projection, the context precheck, and
+    /// the spawned round.
     fn prepare_chat(
         &mut self,
         id: ChainId,
         messages: &[MessageRecord],
+        binding: Option<ModelBinding>,
         model: Option<&str>,
         tools: Option<&[String]>,
     ) -> Result<ChatDispatch> {
@@ -152,17 +173,16 @@ impl Scheduler<'_> {
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
         let vm = frame.vm()?;
-        let binding =
-            match model {
-                None => resolve_model_binding(chain.ctx.models(), &vm.model_runtime)?.ok_or_else(
-                    || Error::ModelRequired {
-                        section: section.clone(),
-                    },
-                )?,
-                Some(alias) => chain.ctx.models().binding(alias)?.ok_or_else(|| {
-                    Error::Lua(format!("model alias {alias:?} has no frozen binding"))
+        let binding = match (binding, model) {
+            (Some(binding), _) => binding,
+            (None, None) => resolve_model_binding(chain.ctx.models(), &vm.model_runtime)?
+                .ok_or_else(|| Error::ModelRequired {
+                    section: section.clone(),
                 })?,
-            };
+            (None, Some(alias)) => chain.ctx.models().binding(alias)?.ok_or_else(|| {
+                Error::Lua(format!("model alias {alias:?} has no frozen binding"))
+            })?,
+        };
         let tool_set = chain.ctx.tool_set_snapshot()?;
         // The scope is read at call time: `tools.add` and `tools.add_local`
         // calls since the last model operation shape this round's
@@ -190,10 +210,10 @@ impl Scheduler<'_> {
         // The pre-dispatch precheck: an over-window request never leaves.
         // The refusal is the round's answer - the overflow flag - and is
         // observed as a failed turn, exactly as the loop reported it.
-        if precheck(&conversation, context).is_err() {
+        if let Err(reason) = precheck(&conversation, context) {
             observer.observe(&execution, &section, detail::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
-                overflow_result(),
+                overflow_result(reason),
             )))));
         }
         let tool_arg = (!schemas.is_empty()).then_some(schemas);
@@ -322,14 +342,20 @@ impl Round {
         match error {
             Error::Backend { status, body } if is_context_overflow(status, &body) => {
                 observer.observe(&self.execution, &self.section, detail::MODEL_TURN_FAILED);
-                Ok(Box::new(overflow_result()))
+                Ok(Box::new(overflow_result(OverflowReason::Provider)))
             }
-            Error::EmptyModelReply { finish_reason, .. } => {
+            Error::EmptyModelReply {
+                detail: phrase,
+                finish_reason,
+                ..
+            } => {
                 advance_turn(&self.handles.turns);
                 observer.observe(&self.execution, &self.section, detail::MODEL_TURN_COMPLETED);
                 Ok(Box::new(ChatResult {
                     overflow: false,
+                    overflow_reason: None,
                     reply: None,
+                    empty_detail: Some(phrase.into_owned()),
                     tool_calls: None,
                     finish_reason,
                     model: String::new(),
@@ -415,7 +441,9 @@ impl Round {
         );
         ChatResult {
             overflow: false,
+            overflow_reason: None,
             reply: Some(text),
+            empty_detail: None,
             tool_calls: None,
             finish_reason: served.finish_reason.clone(),
             model: served.model.clone(),
@@ -471,7 +499,9 @@ impl Round {
         }
         Ok(Ok(ChatResult {
             overflow: false,
+            overflow_reason: None,
             reply: None,
+            empty_detail: None,
             tool_calls: Some(events),
             finish_reason: served.finish_reason.clone(),
             model: served.model.clone(),

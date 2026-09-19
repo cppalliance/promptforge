@@ -1,4 +1,13 @@
+use super::models_loop::{loop_context, loop_prompt};
 use super::*;
+use crate::execute::scheduler::Scheduler;
+
+/// The one-section loop every scoping test drives: one user message, then
+/// the terminal record's text.
+const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
+     msgs:user('Use the tool.')\n\
+     models.loop(msgs)\n\
+     return msgs[#msgs].content";
 
 /// A bound tool stays out of the model-visible scope until `tools.always`
 /// or `tools.add` names it: the scope snapshot over an untouched runtime is
@@ -30,10 +39,9 @@ fn declared_tools_are_not_injected_without_always_or_add() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_id() {
     let gateway = ScriptedGateway::start(aliased_tool_script("local_alias")).await;
-    let client = gateway_client(gateway.addr());
     let tool = Arc::new(ScopedFixtureTool::new(
         "concrete",
         "canonical_wire",
@@ -52,31 +60,17 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         description_overrides: BTreeMap::new(),
     });
     let effective = current_tool_bindings(&tool_set, &runtime).expect("the always scope snapshots");
-    let (schemas, dispatch) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
+    let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].name, "local_alias");
     assert_eq!(schemas[0].description, "Concrete description.");
 
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
+    let ctx = loop_context(&prompt, tool_set);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the always-scoped alias dispatches");
 
     assert_eq!(out, "aliased final");
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
@@ -95,10 +89,9 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     assert_ne!(function["name"], "canonical_wire");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let gateway = ScriptedGateway::start(aliased_tool_script("section_tool")).await;
-    let client = gateway_client(gateway.addr());
     let tool = Arc::new(ScopedFixtureTool::new(
         "concrete",
         "canonical_wire",
@@ -142,31 +135,29 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
-    let (schemas, dispatch) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].name, "section_tool");
     vm.teardown(&NullObserver::default(), "Only");
 
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    // The same `tools.add` inside a section scopes the alias for the
+    // loop's rounds: the round advertises it and dispatches the concrete
+    // tool behind it.
+    let md = loop_prompt(&format!("tools.add('section_tool')\n{LOOP_TO_TEXT}"));
+    let prompt = parse(&md);
+    let bindings = crate::lua::ToolSet::for_test(
+        vec![crate::lua::ToolBinding::for_test(
+            "section_tool",
+            "capability",
+            Arc::clone(&tool) as Arc<dyn Tool>,
+        )],
+        Vec::new(),
+    );
+    let ctx = loop_context(&prompt, bindings);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the section-scoped alias dispatches");
 
     assert_eq!(out, "aliased final");
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);

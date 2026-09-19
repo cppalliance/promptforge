@@ -47,9 +47,11 @@ fn chat_parses_messages_model_and_tools() {
     match request {
         Request::Chat {
             messages,
+            binding,
             model,
             tools,
         } => {
+            assert!(binding.is_none(), "the agent's chat names no handle");
             assert_eq!(model.as_deref(), Some("fast"));
             assert_eq!(
                 tools,
@@ -372,5 +374,52 @@ fn chat_opts_validation_is_the_calls_error() {
     expect_chat_call_error(
         Request::from_yield(&lua, &Value::Table(bad_alias)),
         "opts.tools[2] must be a string tool alias, got integer",
+    );
+}
+
+#[test]
+fn chat_with_the_loops_leading_handle_carries_its_frozen_binding() {
+    // The loop shim yields its leading handle beside the messages; the
+    // binding is cloned out of the userdata at the parse, so the round runs
+    // on the handle's model rather than the section default.
+    let lua = Lua::new();
+    let table = chat_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
+    table
+        .raw_set("handle", handle_userdata(&lua))
+        .expect("raw_set");
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::Chat {
+            binding: Some(binding),
+            model: None,
+            ..
+        } => assert_eq!(binding.alias(), "fast"),
+        other => panic!("expected a chat request on the handle's binding, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_handle_validation_names_the_loop_and_is_the_calls_error() {
+    // Only the loop shim sets `handle`, and it sets it only for a userdata
+    // first argument, so a userdata that is not a model handle is the
+    // loop's own argument error; the parse still refuses any other shape.
+    let lua = Lua::new();
+    let valid = r#"{ { role = "user", content = "hi" } }"#;
+    let wrong_userdata = chat_request(&lua, valid, None);
+    wrong_userdata
+        .raw_set(
+            "handle",
+            lua.create_userdata(LuaFanoutResult::success(json!(1), "x"))
+                .expect("userdata creation cannot fail"),
+        )
+        .expect("raw_set");
+    expect_chat_call_error(
+        Request::from_yield(&lua, &Value::Table(wrong_userdata)),
+        "models.loop handle must be a model handle",
+    );
+    let wrong_type = chat_request(&lua, valid, None);
+    wrong_type.raw_set("handle", "fast").expect("raw_set");
+    expect_chat_call_error(
+        Request::from_yield(&lua, &Value::Table(wrong_type)),
+        "models.loop handle must be a model handle, got string",
     );
 }

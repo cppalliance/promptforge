@@ -77,9 +77,9 @@ impl Scheduler<'_> {
     ///
     /// # Errors
     /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces yet, or a `models.loop` cancellation, which
-    /// fails the run rather than resuming into the caller.
-    pub(super) async fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
+    /// no call surface produces yet, or the store arm's error when the
+    /// chain's access capability is gone.
+    pub(super) fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
         match request {
             Request::Infer { prompt, binding } => {
                 self.dispatch_infer(id, prompt, binding);
@@ -101,15 +101,6 @@ impl Scheduler<'_> {
                 self.dispatch_tool_call(id, &alias, args, call_id);
                 Ok(())
             }
-            Request::Loop {
-                messages,
-                messages_key,
-                binding,
-                compactor,
-            } => {
-                self.dispatch_loop(id, binding, messages, messages_key, compactor)
-                    .await
-            }
             Request::UserInput => {
                 self.dispatch_user_input(id);
                 Ok(())
@@ -117,10 +108,11 @@ impl Scheduler<'_> {
             Request::Store { op } => self.dispatch_store(id, op),
             Request::Chat {
                 messages,
+                binding,
                 model,
                 tools,
             } => {
-                self.dispatch_chat(id, &messages, model.as_deref(), tools.as_deref());
+                self.dispatch_chat(id, &messages, binding, model.as_deref(), tools.as_deref());
                 Ok(())
             }
             Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),

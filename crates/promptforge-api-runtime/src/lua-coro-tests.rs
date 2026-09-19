@@ -131,6 +131,7 @@ fn scheduler_vm_with_tools(
         observer_arc: &observer,
         section_name: "Test",
         shared: &shared,
+        max_tool_iterations: 24,
         ui: None,
         raw_shims: false,
     };

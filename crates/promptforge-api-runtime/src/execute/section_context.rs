@@ -79,7 +79,7 @@ pub(crate) struct SectionContext {
     turns: Arc<AtomicU32>,
 }
 
-/// The frame's effective reporting handles for the model tool loop: the
+/// The frame's effective reporting handles for a model round: the
 /// observer, the opt-in debug capture sink, and the model-turn counter.
 pub(crate) struct ReportingHandles {
     /// The frame's effective observer handle.
@@ -431,9 +431,10 @@ impl SectionContext {
         Ok(())
     }
 
-    /// The frame's effective reporting handles for the model tool loop a
-    /// `models.loop` dispatch runs, each seeded out of the run context (a
-    /// fanout arm's fork) at construction.
+    /// The frame's effective reporting handles for the `chat` rounds the
+    /// scheduler applies on this chain (the `models.loop` shim's among
+    /// them), each seeded out of the run context (a fanout arm's fork) at
+    /// construction.
     pub(crate) fn reporting_handles(&self) -> ReportingHandles {
         ReportingHandles {
             observer: Arc::clone(&self.observer),
