@@ -16,6 +16,7 @@ test-fixtures = []
 async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
+harness-api.workspace = true
 promptforge-api-runtime.workspace = true
 promptforge-api-types.workspace = true
 rand.workspace = true

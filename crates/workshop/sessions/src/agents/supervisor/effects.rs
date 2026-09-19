@@ -3,10 +3,8 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use promptforge_api_runtime::client::GatewayClient as ModelClient;
-use promptforge_api_runtime::{
-    CapabilityRegistry, Environment, Prompt, RunContext, RunHost, RunResult,
-};
+use harness_api::bridge::{CapabilityRegistry, GatewayClient as ModelClient};
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
 use promptforge_api_types::cancel::sync::CancelHandle as CancelFlag;
 use promptforge_api_types::observe::Observer;
 use promptforge_api_types::timestamp::Timestamp;

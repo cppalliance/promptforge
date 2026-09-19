@@ -5,8 +5,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_runtime::client::fetch_model_catalog;
-use promptforge_api_runtime::{CapabilityRegistry, CompletionError, Web};
+use harness_api::bridge::{CapabilityRegistry, CompletionError, Web, fetch_model_catalog};
 use promptforge_api_types::models::{ModelDescriptor, ModelId};
 
 use super::SessionHost;

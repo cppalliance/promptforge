@@ -17,6 +17,7 @@
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 
+pub mod bridge;
 mod harness;
 mod session;
 

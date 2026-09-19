@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::{broadcast, mpsc};
 
-use promptforge_api_runtime::client::{GatewayClient, GatewayEndpoint, SecretString};
+use harness_api::bridge::{GatewayClient, GatewayEndpoint, SecretString};
 use workshop_gateway::{GatewayBinding, WorkshopObserver};
 use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{Push, Registry};

@@ -786,7 +786,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-34>
 
-### Step 34: `harness-api` as the bridge for `workshop-sessions`
+### Step 34: `harness-api` as the bridge for `workshop-sessions` [completed]
 
 - Component: Run API and engine purity
 - Piece: interim

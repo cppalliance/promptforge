@@ -2577,6 +2577,7 @@ dependencies = [
 name = "harness-api"
 version = "0.3.0"
 dependencies = [
+ "promptforge-api-runtime",
  "serde",
  "serde_json",
  "workspace-hack",
@@ -8549,6 +8550,7 @@ dependencies = [
  "async-trait",
  "axum",
  "futures-util",
+ "harness-api",
  "promptforge-api-runtime",
  "promptforge-api-types",
  "rand 0.9.5",
