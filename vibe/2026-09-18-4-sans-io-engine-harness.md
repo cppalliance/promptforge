@@ -422,7 +422,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-4>
 
-### Step 4: `harness-api` door with its type surface
+### Step 4: `harness-api` door with its type surface [completed]
 
 - Component: Harness scaffolding
 - Piece: public door
