@@ -127,14 +127,4 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   if (await startTake()) {
     failures.push("a click on the closed tab's detached mic started a take");
   }
-
-  // Closing the right zone's last panel resurrects the zone with the
-  // inert placeholder (zone stability); that placeholder is dock content
-  // the leak check would otherwise count. Removing it lets the zone die -
-  // a placeholder's own close never resurrects - and disposes its stores.
-  const dock = ctx.resolveService("workshop.dock");
-  const placeholder = dock.getPanel("placeholder:right");
-  if (placeholder) {
-    dock.removePanel(placeholder);
-  }
 });

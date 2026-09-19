@@ -1,14 +1,17 @@
 // Integration test for zone stability (src/ui/layout/zones.ts size memory
-// and resurrection, the placeholder panel type, and the restore guard in
-// layout-persistence.ts). Bundles the modules with esbuild, mounts real
-// Dockview docks in jsdom, and drives the public API. Covers: closing the
-// last editor leaves the side zones pixel-identical with the main group
-// alive holding its placeholder at the recorded size; opening an editor
-// reuses that group and drops the placeholder; closing the last agent
-// panel preserves the right zone; an explicit group close lets the zone
-// die; a mid-session restore spawns no placeholders; and a quit-and-
-// relaunch restores all three zones at their prior sizes with the
-// placeholders included.
+// and empty-group rebuild, and the restore guard in layout-persistence.ts).
+// Bundles the modules with esbuild, mounts real Dockview docks in jsdom,
+// and drives the public API. Covers: closing the last editor leaves the
+// main zone alive as an empty group at its recorded width with the side
+// zones pixel-identical; reopening an editor lands in that same group;
+// closing the last agent panel keeps the right zone; dragging a zone's
+// last panel out leaves the zone alive and empty; relocating a zone's
+// group keeps exactly one group for the zone; the layout envelope is v4
+// and carries no placeholder panel; a relaunch restores the empty zones
+// at their recorded widths with no panels; a mid-session restore and a
+// reset create no extra groups; an unrelated mutation never creates a
+// zone that was never opened; and nothing in the document reads
+// "Placeholder".
 // Run: node --test test/zone-stability.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -32,6 +35,8 @@ const bundle = await esbuild.build({
       } from "./src/ui/layout/zones.ts";
       export { createPanelComponent, createPanelTabComponent } from "./src/ui/layout/panel-types.ts";
       export { restoreLayout, buildLayoutEnvelope } from "./src/ui/layout/layout-persistence.ts";
+      export { getService } from "./src/services/service-registry.ts";
+      export { ZONE_STATE } from "./src/services/zone-state-service.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -174,6 +179,8 @@ const {
   createPanelTabComponent,
   restoreLayout,
   buildLayoutEnvelope,
+  getService,
+  ZONE_STATE,
 } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -201,7 +208,28 @@ function createDock(element) {
   });
 }
 
-// --- Closing the last editor: side zones hold, main resurrects --------------
+/** The zone's live group on `dock` per the zone map, or undefined. */
+function zoneGroup(dock, zone) {
+  const id = getService(ZONE_STATE).groupFor(zone);
+  return id === undefined ? undefined : dock.getGroup(id);
+}
+
+/** Every grid leaf (group record) in a serialized dockview layout. */
+function gridLeaves(node, out = []) {
+  if (node.type === "leaf") {
+    out.push(node.data);
+  } else if (node.type === "branch") {
+    for (const child of node.data ?? []) gridLeaves(child, out);
+  }
+  return out;
+}
+
+/** Every grid leaf's view ids in a serialized dockview layout. */
+function gridViewIds(node) {
+  return gridLeaves(node).flatMap((leaf) => leaf?.views ?? []);
+}
+
+// --- Closing the last editor: side zones hold, main stays as an empty group -
 
 const dock = createDock(window.document.getElementById("dock"));
 initZones(dock);
@@ -228,93 +256,94 @@ check(
 dock.removePanel(editorA);
 await flush();
 
-const mainPlaceholder = dock.getPanel(panelIdFor("placeholder", { zone: "main" }));
-check("closing the last editor keeps a main placeholder alive", !!mainPlaceholder);
-check("the placeholder lives in the main zone", !!mainPlaceholder && zoneOfPanel(mainPlaceholder) === "main");
+const mainGroup = zoneGroup(dock, "main");
+check("closing the last editor leaves the main zone with a live group", mainGroup !== undefined);
+check("the rebuilt main group holds no panels", mainGroup?.panels.length === 0);
 check("the dock keeps all three zone groups", dock.groups.length === 3);
-check(
-  "the resurrected main group takes the recorded size",
-  mainPlaceholder?.group.api.width === 600,
-);
+check("the rebuilt main group takes the recorded width", mainGroup?.api.width === 600);
 check(
   "the side zones are pixel-identical",
   leftGroup.api.width === 280 && rightGroup.api.width === 320,
 );
-check(
-  "the placeholder tab cannot be closed from the tab strip",
-  mainPlaceholder?.view.tab.element.querySelector(".dv-default-tab-action") === null,
-);
-await flush();
-check(
-  "the main placeholder renders its inert content",
-  mainPlaceholder?.view.content.element.textContent.includes("Open a file to begin") === true,
-);
+check("the dock holds only the tree and agent panels", dock.panels.length === 2);
 
-// --- Opening an editor reuses the group and drops the placeholder -----------
+// --- Reopening an editor lands in the same empty group ----------------------
 
-const placeholderGroup = mainPlaceholder.group;
 const editorB = openInZone("editor", { path: `${ROOT}\\b.txt` });
 await flush();
-check(
-  "opening an editor reuses the placeholder's group",
-  editorB.group.id === placeholderGroup.id,
-);
-check(
-  "the placeholder is dropped when a real panel arrives",
-  dock.getPanel(panelIdFor("placeholder", { zone: "main" })) === undefined,
-);
-check("the reused group keeps its size", editorB.group.api.width === 600);
+check("the reopened editor lands in the rebuilt main group", editorB.group.id === mainGroup?.id);
+check("the reopened editor's group keeps its width", editorB.group.api.width === 600);
+check("the reopened editor is the main zone's only panel", editorB.group.panels.length === 1);
+check("the reopened editor reports the main zone", zoneOfPanel(editorB) === "main");
 
-// --- Closing the last agent panel preserves the right zone -------------------
+// --- Closing the last agent panel keeps the right zone ----------------------
+
+dock.removePanel(agentPanel);
+await flush();
+const rightRebuilt = zoneGroup(dock, "right");
+check("closing the last agent panel leaves the right zone with a live group", rightRebuilt !== undefined);
+check("the rebuilt right group holds no panels", rightRebuilt?.panels.length === 0);
+check("the rebuilt right group takes the recorded width", rightRebuilt?.api.width === 320);
+check("the dock still has three groups after the agent close", dock.groups.length === 3);
+
+// --- Dragging a zone's last panel out leaves the zone alive and empty -------
+
+// A panel drag onto another group is moveGroupOrPanel; the source group
+// empties and dockview removes it inside the same mutation.
+const mainBefore = editorB.group.id;
+editorB.api.moveTo({ group: rightRebuilt });
+await flush();
+check("the dragged editor lands in the right zone's group", editorB.group.id === rightRebuilt?.id);
+check("the drag-out reports the right zone for the editor", zoneOfPanel(editorB) === "right");
+const mainAfterDrag = zoneGroup(dock, "main");
+check("dragging the last panel out leaves the main zone alive", mainAfterDrag !== undefined);
+check("the main zone after the drag-out is a fresh empty group", mainAfterDrag?.panels.length === 0 && mainAfterDrag?.id !== mainBefore);
+check("the drag-out keeps three groups", dock.groups.length === 3);
+// Drag it back so the main zone holds the editor again.
+editorB.api.moveTo({ group: mainAfterDrag });
+await flush();
+check("dragging the editor back fills the empty main group", editorB.group.id === mainAfterDrag?.id);
+check("the right zone is empty again after the drag back", rightRebuilt?.panels.length === 0);
+check("the drag back keeps three groups", dock.groups.length === 3);
+
+// --- Relocating a zone's group keeps exactly one group for the zone ---------
+
+const mainGroupNow = editorB.group;
+mainGroupNow.api.moveTo({ group: leftGroup, position: "left" });
+await flush();
+check("relocating the main group keeps its id in the zone map", zoneGroup(dock, "main")?.id === mainGroupNow.id);
+check("relocating the main group creates no extra group", dock.groups.length === 3);
+check("the relocated main group still holds the editor", mainGroupNow.panels.length === 1 && editorB.group.id === mainGroupNow.id);
+mainGroupNow.api.moveTo({ group: leftGroup, position: "right" });
+await flush();
+check("relocating the main group back keeps three groups", dock.groups.length === 3);
+
+// --- The envelope: v4, no placeholder panels or views -------------------------
 
 dock.removePanel(editorB);
 await flush();
-dock.removePanel(agentPanel);
-await flush();
-const rightPlaceholder = dock.getPanel(panelIdFor("placeholder", { zone: "right" }));
-check("closing the last agent panel keeps a right placeholder alive", !!rightPlaceholder);
-check(
-  "the right zone is preserved at its size",
-  !!rightPlaceholder && zoneOfPanel(rightPlaceholder) === "right" && rightPlaceholder.group.api.width === 320,
-);
-
-// --- Quit and relaunch: zones restore at prior sizes, placeholders included --
-
-// The quit snapshot: no editors open, the main and right zones holding
-// their placeholders at the recorded sizes.
+check("the main zone survives the editor's close as an empty group", zoneGroup(dock, "main")?.panels.length === 0);
 const envelope = JSON.parse(JSON.stringify(buildLayoutEnvelope(dock)));
-
-// --- Explicit group closes ---------------------------------------------------
-
-// Dockview's removeGroup closes each panel through the same per-panel
-// path a tab close takes, so explicitly closing a group that holds a
-// real panel resurrects the zone once - the plan's accepted fallback.
-const editorC = openInZone("editor", { path: `${ROOT}\\c.txt` });
-await flush();
-const explicitGroup = editorC.group;
-explicitGroup.api.close();
-await flush();
+check("the envelope reports schema version 4", envelope.version === 4);
 check(
-  "an explicit close of a real panel's group resurrects the zone once",
-  !!dock.getPanel(panelIdFor("placeholder", { zone: "main" })),
-);
-// Closing the placeholder-only group explicitly is the workbench's way
-// to retire a zone: no real panel closed, so the zone stays closed.
-const inertGroup = dock.getPanel(panelIdFor("placeholder", { zone: "main" }))?.group;
-inertGroup?.api.close();
-await flush();
-check(
-  "an explicit close of the placeholder-only group removes it",
-  inertGroup !== undefined && dock.getGroup(inertGroup.id) === undefined,
+  "the envelope's panels carry no placeholder",
+  !Object.keys(envelope.layout.panels).some((id) => id.startsWith("placeholder:")),
 );
 check(
-  "an explicit close of the placeholder-only group spawns no placeholder",
-  dock.getPanel(panelIdFor("placeholder", { zone: "main" })) === undefined &&
-    !dock.panels.some((panel) => panel.id.startsWith("placeholder:main")),
+  "the envelope's grid views carry no placeholder",
+  !gridViewIds(envelope.layout.grid.root).some((id) => id.startsWith("placeholder:")),
+);
+check("the envelope's only panel is the tree", Object.keys(envelope.layout.panels).join(",") === "tree");
+check(
+  "the envelope serializes three grid leaves, two of them empty",
+  gridLeaves(envelope.layout.grid.root).length === 3 &&
+    gridLeaves(envelope.layout.grid.root).filter((leaf) => leaf.views.length === 0).length === 2,
 );
 
-// The relaunch: a fresh dock restores the snapshot. (initZones rebinds
-// the module's dock, so the first dock is driven no further.)
+// --- Relaunch: both empty zones restore at recorded widths with no panels ----
+
+// initZones rebinds the module's dock, so the first dock is driven no
+// further.
 const dockRelaunched = createDock(window.document.createElement("div"));
 initZones(dockRelaunched);
 check("the saved layout restores on relaunch", restoreLayout(dockRelaunched, envelope) === true);
@@ -322,25 +351,27 @@ check("the saved layout restores on relaunch", restoreLayout(dockRelaunched, env
 // to the window, which is what applies the serialized view sizes.
 dockRelaunched.layout(1200, 800);
 await flush();
-check(
-  "the relaunch restores every zone's placeholder through its factory",
-  !!dockRelaunched.getPanel(panelIdFor("placeholder", { zone: "main" })) &&
-    !!dockRelaunched.getPanel(panelIdFor("placeholder", { zone: "right" })) &&
-    !!dockRelaunched.getPanel("tree"),
-);
 check("the relaunch restores all three zone groups", dockRelaunched.groups.length === 3);
+check("the relaunch restores only the tree panel", dockRelaunched.panels.length === 1 && !!dockRelaunched.getPanel("tree"));
+const relaunchedMain = zoneGroup(dockRelaunched, "main");
+const relaunchedRight = zoneGroup(dockRelaunched, "right");
+check("the relaunch restores the main zone as an empty group", relaunchedMain?.panels.length === 0);
+check("the relaunch restores the right zone as an empty group", relaunchedRight?.panels.length === 0);
 check(
-  "the relaunch restores the zones at their prior sizes",
+  "the relaunch restores the zones at their prior widths",
   dockRelaunched.getPanel("tree")?.group.api.width === 280 &&
-    dockRelaunched.getPanel(panelIdFor("placeholder", { zone: "main" }))?.group.api.width === 600 &&
-    dockRelaunched.getPanel(panelIdFor("placeholder", { zone: "right" }))?.group.api.width === 320,
+    relaunchedMain?.api.width === 600 &&
+    relaunchedRight?.api.width === 320,
 );
+const relaunchedEditor = openInZone("editor", { path: FILE_A });
+check("an editor opened after relaunch fills the restored empty main group", relaunchedEditor.group.id === relaunchedMain?.id);
+check("filling the restored main group adds no group", dockRelaunched.groups.length === 3);
 
-// --- A mid-session restore spawns no placeholders ------------------------------
+// --- A mid-session restore and a reset create no extra groups -----------------
 
 // The Open Workspace path applies the opened file's envelope onto a live
 // dock; fromJSON tears the live groups down first, and those removals
-// must never resurrect.
+// must never rebuild anything.
 const dockLive = createDock(window.document.createElement("div"));
 initZones(dockLive);
 resetZones();
@@ -349,16 +380,37 @@ openInZone("agent", {});
 openInZone("editor", { path: FILE_A });
 await flush();
 const opened = JSON.parse(JSON.stringify(buildLayoutEnvelope(dockLive)));
-check(
-  "the live layout carries no placeholders before the switch",
-  !Object.keys(opened.layout.panels).some((id) => id.startsWith("placeholder:")),
-);
 check("the mid-session restore succeeds", restoreLayout(dockLive, opened) === true);
 await flush();
+check("a mid-session restore creates no extra groups", dockLive.groups.length === 3);
+check("a mid-session restore keeps every panel in a zone group", dockLive.groups.every((group) => group.panels.length === 1));
+resetZones();
+await flush();
+check("a zone reset creates no groups", dockLive.groups.length === 3);
+
+// --- A never-opened zone is not created by an unrelated mutation -------------
+
+const dockTwo = createDock(window.document.createElement("div"));
+initZones(dockTwo);
+resetZones();
+openInZone("tree", {});
+openInZone("agent", {});
+await flush();
+const secondAgent = openInZone("agent", { instance: "second" });
+await flush();
+dockTwo.removePanel(secondAgent);
+await flush();
+check("an unrelated mutation leaves the never-opened main zone unmapped", zoneGroup(dockTwo, "main") === undefined);
+check("an unrelated mutation creates no group for the never-opened zone", dockTwo.groups.length === 2);
+check("the unrelated mutation keeps the right zone's group", zoneGroup(dockTwo, "right")?.panels.length === 1);
+
+// --- No placeholder ever renders -------------------------------------------------
+
 check(
-  "a layout restore spawns no placeholders",
-  !dockLive.panels.some((panel) => panel.id.startsWith("placeholder:")),
+  "no element in the document reads Placeholder",
+  ![...window.document.body.querySelectorAll("*")].some((element) => element.textContent === "Placeholder"),
 );
+check("the placeholder panel type is gone from panelIdFor", panelIdFor("placeholder", { zone: "main" }) === "placeholder");
 
 if (failures.length > 0) {
   console.error(`zone-stability: ${failures.length} failure(s)`);

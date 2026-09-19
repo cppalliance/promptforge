@@ -7,8 +7,8 @@
 // tab and the Workshop tree's tab has no close button; the tree requests
 // directory paths from /workspace/tree and never file contents;
 // openInZone places panels by affinity and honors per-panel overrides; a
-// zone group is rebuilt after its last panel closes; tree expansion
-// survives a panel reopen.
+// zone group is rebuilt empty after its last panel closes and the next
+// open fills it; tree expansion survives a panel reopen.
 // Run: node test/workshop-zones.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -401,7 +401,10 @@ check(
   zoneOfPanel(editorB3) === "main" && editorB3.group.id === editorA.group.id,
 );
 
-// --- A zone group resurrects with a placeholder after its last panel closes ---
+// --- A zone group is rebuilt empty after its last panel closes ---------------
+
+/** The dock's groups holding no panel. */
+const emptyGroups = () => dock.groups.filter((group) => group.panels.length === 0);
 
 const mainGroupId = editorA.group.id;
 dock.removePanel(editorA);
@@ -409,20 +412,19 @@ dock.removePanel(editorB3);
 await flush();
 check("closing every main panel retires the old group", dock.getGroup(mainGroupId) === undefined);
 check(
-  "the main zone resurrects with a placeholder instead of dying",
-  dock.groups.length === 3 && !!dock.getPanel("placeholder:main"),
+  "the main zone is rebuilt as an empty group instead of dying",
+  dock.groups.length === 3 && emptyGroups().length === 1,
 );
-const mainPlaceholder = dock.getPanel("placeholder:main");
+const emptyMain = emptyGroups()[0];
 check(
-  "the placeholder holds the main zone",
-  !!mainPlaceholder && zoneOfPanel(mainPlaceholder) === "main",
+  "the empty group is neither the agent nor the tree group",
+  !!emptyMain && emptyMain.id !== agentPanel.group.id && emptyMain.id !== treePanel.group.id,
 );
 const editorC = openInZone("editor", { path: `${ROOT}\\c.txt` });
 check("the next main-zone open keeps the group count", dock.groups.length === 3);
 check(
-  "the reopened editor reuses the placeholder's group and drops it",
-  editorC.group.id === mainPlaceholder?.group.id &&
-    dock.getPanel("placeholder:main") === undefined,
+  "the reopened editor fills the empty main group",
+  editorC.group.id === emptyMain?.id && zoneOfPanel(editorC) === "main" && emptyGroups().length === 0,
 );
 
 // --- Tree reopen: expansion state survives for the session ------------------
@@ -431,15 +433,16 @@ const callsBeforeReopen = treeCalls().length;
 dock.removePanel(treePanel);
 await flush();
 check(
-  "closing the tree resurrects the left zone with a placeholder",
-  dock.groups.length === 3 && !!dock.getPanel("placeholder:left"),
+  "closing the tree leaves the left zone as an empty group",
+  dock.groups.length === 3 && emptyGroups().length === 1,
 );
+const emptyLeft = emptyGroups()[0];
 const treePanel2 = openInZone("tree", {});
 await flush();
 check("the tree reopens in the left zone", zoneOfPanel(treePanel2) === "left");
 check(
-  "the reopened tree reuses the placeholder's group",
-  dock.groups.length === 3 && dock.getPanel("placeholder:left") === undefined,
+  "the reopened tree fills the empty left group",
+  dock.groups.length === 3 && treePanel2.group.id === emptyLeft?.id && emptyGroups().length === 0,
 );
 check(
   "a reopened tree renders from the session cache without refetching",

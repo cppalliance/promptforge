@@ -18,9 +18,11 @@ import type { DockviewApi, SerializedDockview } from "dockview";
 import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
 import { resetZones, restoreZoneState, serializeZoneState, withZoneRestore } from "./zones";
 
-// v3: panels serialize their tabComponent; a v2 snapshot would restore
-// the Workshop tree with a closable default tab.
-export const LAYOUT_SCHEMA_VERSION = 3;
+// v4: the placeholder panel type is gone - an emptied zone persists as a
+// dockview grid leaf with no views. A v3 snapshot could carry a
+// `placeholder:*` panel, which would now restore as an unknown-panel
+// stub, so v3 falls back to the default layout like v1 and v2 before it.
+export const LAYOUT_SCHEMA_VERSION = 4;
 
 const SAVE_DEBOUNCE_MS = 250;
 

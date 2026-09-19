@@ -166,7 +166,7 @@ The workbench is never locked. You can drag panels to rearrange the layout at an
 
 When you move a panel to another zone, the application remembers that choice and reopens the panel in your chosen zone next time. Moving a panel back to its default zone clears the remembered override, so the panel follows its type's normal placement again.
 
-Closing every panel in a zone collapses that zone. Opening a new panel into it rebuilds the zone on its own side of the dock. A rebuilt main zone regrows beside the left zone when possible, otherwise beside the right zone, so the layout keeps its familiar shape.
+Closing or dragging away a zone's last panel leaves the zone in place, empty, at its current size. The next panel opened into that zone fills it, so the layout keeps its familiar shape.
 
 ## Layout persistence
 

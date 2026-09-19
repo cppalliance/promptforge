@@ -211,7 +211,7 @@ All commands run in `crates/workshop/server/ui` unless a path says otherwise. Ea
 
 <step-2>
 
-### Step 2: Empty zone groups replace the placeholder panel
+### Step 2: Empty zone groups replace the placeholder panel [completed]
 
 - Component: `none`
 - Goal: a zone whose last panel closes or is dragged away stays as an empty dockview group at its recorded size; the placeholder panel type and every artifact of it are gone; the layout schema is v4; the guide describes the new behavior.

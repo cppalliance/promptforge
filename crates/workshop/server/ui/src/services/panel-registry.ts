@@ -26,7 +26,7 @@ export const AGENT_TAB = "agent-tab";
 export const RUN_TAB = "run-tab";
 
 /** The panel kinds the workbench knows. */
-export type PanelType = "tree" | "editor" | "config" | "agent" | "run" | "placeholder";
+export type PanelType = "tree" | "editor" | "config" | "agent" | "run";
 
 /**
  * The contract a lazy feature directory's barrel (index.ts) satisfies.
@@ -220,15 +220,4 @@ registerPanelType({
   title: "Run",
   tabComponent: RUN_TAB,
   load: () => import("../ui/run/index"),
-});
-// The placeholder holds a zone's resurrected group after its last real
-// panel closes. Its tab is permanent: closing it would just resurrect
-// the zone again. It rides the layout directory's chunk - it is the
-// layout layer's own panel, so it needs no chunk of its own.
-registerPanelType({
-  type: "placeholder",
-  defaultZone: "main",
-  title: "Placeholder",
-  tabComponent: PERMANENT_TAB,
-  load: () => import("../ui/layout/index"),
 });
