@@ -6,8 +6,10 @@
 //! five reserved model built-in names (`task`, `task_cancel`, `task_status`,
 //! `task_events`, `await_tasks`) are recognized before alias lookup - a
 //! model-issued call to the first three is answered by the `builtins`
-//! module over the task arena, every other form (a script call, or a name
-//! whose arm has not landed) answers as unbound; a local Lua tool is
+//! module over the task arena, `await_tasks` by its own module (answered
+//! at once or parked on the chain's model tasks), every other form (a
+//! script call, or a name whose arm has not landed) answers as unbound; a
+//! local Lua tool is
 //! answered inline on the parked chain's VM, since its handler is Lua on
 //! that VM and no leaf work exists to spawn; a bound tool resolves against the
 //! run's full bound catalog and its dispatch spawns onto the answer
@@ -33,9 +35,9 @@ use super::{Arrival, ChainIndex, RequestId, Scheduler};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
-/// them. A model-issued `task`, `task_cancel`, or `task_status` is answered
-/// by the `builtins` module; the rest answer as unbound until their arms
-/// land.
+/// them. A model-issued `task`, `task_cancel`, `task_status`, or
+/// `await_tasks` is answered over the task arena; `task_events` answers
+/// as unbound until its arm lands.
 const RESERVED_TOOL_NAMES: [&str; 5] = [
     "task",
     "task_cancel",
@@ -46,13 +48,15 @@ const RESERVED_TOOL_NAMES: [&str; 5] = [
 
 /// How one `tool_call` dispatch resolved: a spawned bound dispatch parked
 /// on the pending table, an answer settled on the driver thread (a local
-/// Lua tool, run on the parked chain's VM; a task built-in), or such an
+/// Lua tool, run on the parked chain's VM; a task built-in), such an
 /// answer plus the task chain a `task` built-in started, enqueued behind
-/// the caller.
-enum ToolCallDispatch {
+/// the caller, or the chain parked in the model's `await_tasks` on its
+/// live tasks, answered when one ends or its timer fires.
+pub(super) enum ToolCallDispatch {
     Spawned(RequestId, tokio::task::JoinHandle<()>),
     Answered(Answer<Error>),
     Started(Answer<Error>, ChainIndex),
+    Parked,
 }
 
 /// Answers a call to a local Lua tool on the parked chain's VM: the counts
@@ -142,6 +146,9 @@ impl Scheduler<'_> {
                 self.ready.push_back(id);
                 self.ready.push_back(child);
             }
+            // The arm recorded the wait on the chain; a member's end or
+            // the timer's firing answers it.
+            Ok(ToolCallDispatch::Parked) => {}
             Err(error) => {
                 self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
                 self.ready.push_back(id);
@@ -174,11 +181,7 @@ impl Scheduler<'_> {
         // unbound.
         if RESERVED_TOOL_NAMES.contains(&alias) {
             if let Some(call_id) = call_id.as_deref().filter(|_| is_task_builtin(alias)) {
-                let (answer, started) = self.answer_task_builtin(id, alias, &args, call_id)?;
-                return Ok(match started {
-                    Some(child) => ToolCallDispatch::Started(answer, child),
-                    None => ToolCallDispatch::Answered(answer),
-                });
+                return self.answer_task_builtin(id, alias, &args, call_id);
             }
             return Err(unbound_tool_call(&tool_set, alias));
         }

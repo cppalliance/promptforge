@@ -53,6 +53,7 @@ impl Scheduler<'_> {
             owner: None,
             seed: None,
             waiting_on: Vec::new(),
+            awaiting: None,
             blocked: None,
             task_notices: Vec::new(),
             note: None,

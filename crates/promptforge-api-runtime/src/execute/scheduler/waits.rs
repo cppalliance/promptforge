@@ -15,7 +15,9 @@
 //! is refused the same way so a caller learns nothing about tasks it never
 //! started. The model's `task_cancel` and `task_status` built-ins reuse
 //! the cancel and status readers here, narrowed further to the caller's
-//! model-origin tasks. `status` and `note` add the self exception: a chain may read
+//! model-origin tasks, and its `await_tasks` parks on the same
+//! `waiting_on` set, with the wake diverted to its own answer (see the
+//! `await_tasks` module). `status` and `note` add the self exception: a chain may read
 //! and annotate the task it runs inside (`sys.taskid`), which is how a
 //! task reports progress. The main walk is task `0` with no slot, so its
 //! own status is not reportable; `note` from the main walk records on the
@@ -35,6 +37,7 @@ use crate::execute::protocol::{Answer, TaskDelivery, TaskStatus};
 use crate::observe::Observation;
 use crate::{Error, Result};
 
+use super::notices::TaskEnd;
 use super::tasks::{TaskBacking, TaskSlot, TaskState};
 use super::{ChainIndex, Scheduler};
 
@@ -81,7 +84,11 @@ impl Scheduler<'_> {
     /// when given; an internal timer slot is never listed. The arena is a
     /// hash map; ids order as paths and one owner's tasks are its direct
     /// children, so sorting recovers spawn order.
-    fn live_tasks_of(&self, owner: ChainIndex, origin: Option<TaskOrigin>) -> Vec<TaskId> {
+    pub(super) fn live_tasks_of(
+        &self,
+        owner: ChainIndex,
+        origin: Option<TaskOrigin>,
+    ) -> Vec<TaskId> {
         let mut live: Vec<TaskId> = self
             .tasks
             .iter()
@@ -163,13 +170,20 @@ impl Scheduler<'_> {
 
     /// Wakes `task`'s owner if it is parked on a set containing `task`:
     /// the member is delivered as the wait's answer and the owner leaves
-    /// its wait.
+    /// its wait. An owner parked in the model's `await_tasks` is answered
+    /// through that arm instead - the member is not delivered, its notice
+    /// already sits in the owner's queue - so the slot stays `Done` for a
+    /// later author wait.
     pub(super) fn wake_waiter(&mut self, owner: ChainIndex, task: &TaskId) {
         if !self.chains[owner.index()].waiting_on.contains(task) {
             return;
         }
-        let delivery = self.deliver(task);
         self.chains[owner.index()].waiting_on.clear();
+        if let Some(awaiting) = self.chains[owner.index()].awaiting.take() {
+            self.finish_await_tasks(owner, &awaiting, task);
+            return;
+        }
+        let delivery = self.deliver(task);
         self.answer_inline(owner, Answer::WhenAny(Ok(delivery)));
     }
 
@@ -243,10 +257,16 @@ impl Scheduler<'_> {
         self.answer_inline(id, Answer::Note(Ok(())));
     }
 
-    /// Dispatches a `cancel` request over a task the chain owns.
+    /// Dispatches a `cancel` request over a task the chain owns. This is
+    /// the author's cancel: ending a live model task here queues the
+    /// model's `was canceled` notice (the model's own `task_cancel` does
+    /// not, having answered the model directly).
     pub(super) fn dispatch_cancel(&mut self, id: ChainIndex, task: &TaskId) {
         let answer = self.cancel_task(id, task);
-        self.answer_inline(id, Answer::Cancel(answer));
+        if let Ok(Some(target)) = &answer {
+            self.queue_task_notice(id, task, target, TaskEnd::CancelledByAuthor);
+        }
+        self.answer_inline(id, Answer::Cancel(answer.map(|_| ())));
     }
 
     /// Cancels a live task `caller` owns: the slot moves to `Cancelled`, the
@@ -254,14 +274,21 @@ impl Scheduler<'_> {
     /// and `TaskCancelled` fires once under the target - except for an
     /// internal timer, whose cancel is the wait shim's own bookkeeping and
     /// reports nothing. A task already in a terminal state is left as it
-    /// is.
-    pub(super) fn cancel_task(&mut self, caller: ChainIndex, task: &TaskId) -> Result<()> {
+    /// is. Returns the target of a live model task this call ended, so
+    /// the author's arm can queue its notice; `None` for every other
+    /// outcome.
+    pub(super) fn cancel_task(
+        &mut self,
+        caller: ChainIndex,
+        task: &TaskId,
+    ) -> Result<Option<String>> {
         let slot = self.owned_slot(caller, task)?;
         if !slot.state.is_live() {
-            return Ok(());
+            return Ok(None);
         }
         let backing = slot.backing;
         let target = slot.target.clone();
+        let origin = slot.origin;
         if let Some(slot) = self.tasks.get_mut(task) {
             slot.state = TaskState::Cancelled;
             slot.ok = Some(false);
@@ -272,7 +299,7 @@ impl Scheduler<'_> {
             TaskBacking::Chain(backing_chain) => backing_chain,
             TaskBacking::Effect(request) => {
                 self.abort_request(request);
-                return Ok(());
+                return Ok(None);
             }
         };
         self.abort_subtree(backing_chain);
@@ -283,6 +310,6 @@ impl Scheduler<'_> {
             &target,
             Observation::TaskCancelled { task: task.clone() },
         );
-        Ok(())
+        Ok((origin == TaskOrigin::Model).then_some(target))
     }
 }

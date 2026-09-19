@@ -3,8 +3,8 @@
 //! blocking pool uniformly for all backends - no inline fast path - so
 //! interleaving behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
-//! `tool_call`, `chat`, `spawn`, `timer`, and task wait, inspection, note,
-//! and cancel arms live in their own modules.
+//! `tool_call`, `chat`, `spawn`, `timer`, `drain_task_notices`, and task
+//! wait, inspection, note, and cancel arms live in their own modules.
 
 use std::sync::Arc;
 
@@ -77,6 +77,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
         | Request::Pending { .. }
         | Request::Note { .. }
         | Request::Cancel { .. }
+        | Request::DrainTaskNotices
         | Request::Mcp { .. } => None,
     }
 }
@@ -160,6 +161,10 @@ impl Scheduler<'_> {
             }
             Request::Cancel { task } => {
                 self.dispatch_cancel(id, &task);
+                Ok(())
+            }
+            Request::DrainTaskNotices => {
+                self.dispatch_drain_task_notices(id);
                 Ok(())
             }
             Request::ToolCall {

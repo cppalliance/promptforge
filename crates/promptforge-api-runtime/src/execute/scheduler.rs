@@ -36,7 +36,10 @@
 //! (the two arms the section-visible `models.loop` shim drives),
 //! `builtins` the model's task built-ins (`task`, `task_cancel`,
 //! `task_status`) answered over the arena and advertised once a section
-//! runs `tools.allow_tasks`, `tasks` the task arena, the `spawn` arm, and
+//! runs `tools.allow_tasks`, `await_tasks` the fourth built-in, the
+//! model's wait over its live tasks, `notices` the model-task notices
+//! (queued at a model task's end, drained into the owner's next round or
+//! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm, and
 //! the chain-end rules for tasks, `waits` the `when_any` wait and the
 //! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
 //! and `timer` the wait shims' internal timeout as an effect-backed slot.
@@ -44,12 +47,14 @@
 //! member and waits on the live set), so the scheduler keeps no fanout
 //! state of its own.
 
+mod await_tasks;
 mod builtins;
 mod chain;
 mod chat;
 mod dispatch;
 mod drive;
 mod h1;
+mod notices;
 mod step;
 mod tasks;
 mod timer;
@@ -76,6 +81,7 @@ use super::gateway::GatewaySource;
 use super::protocol::Answer;
 use super::scope::DispatchTarget;
 use super::section_context::{SectionContext, TaskSeed};
+use await_tasks::AwaitTasks;
 use tasks::TaskSlot;
 #[cfg(test)]
 pub(crate) use tasks::TaskState;
@@ -186,18 +192,26 @@ struct Chain<'a> {
     /// A spawned chain's `item` and `sys.index` seeds, consumed by its
     /// first section entry; `None` afterward and on every other chain.
     seed: Option<TaskSeed>,
-    /// The tasks the chain is parked on in a `when_any` wait; empty while
-    /// the chain is not waiting. A member's chain end delivers it and
-    /// clears the set.
+    /// The tasks the chain is parked on in a `when_any` wait (or the
+    /// model's `await_tasks`); empty while the chain is not waiting. A
+    /// member's chain end delivers it and clears the set.
     waiting_on: Vec<TaskId>,
+    /// The model's `await_tasks` call the chain is parked in, when
+    /// `waiting_on` is that call's set rather than an author `when_any`:
+    /// the member's end answers the model's tool call with the drained
+    /// notices instead of delivering the member to the shim. `None`
+    /// otherwise.
+    awaiting: Option<AwaitTasks>,
     /// What the chain's suspended request is parked on, as `tasks.status`
     /// reports it (`chat`, `tool_call`, `user_input`, `store`, `timer`,
     /// `tasks`, `call`): set at dispatch, cleared when the answer resumes
     /// the chain. `None` while the chain runs or between blocks.
     blocked: Option<&'static str>,
     /// Model-task notices not yet delivered into the chain's next model
-    /// round, in arrival order. The H1 hand-off moves them to the walk
-    /// with the pass's tasks; a later step fills and drains them.
+    /// round, in arrival order: queued when a model task the chain owns
+    /// ends, drained by the loop shim's per-round request or by the
+    /// model's `await_tasks` answer. The H1 hand-off moves them to the
+    /// walk with the pass's tasks.
     task_notices: Vec<String>,
     /// The latest progress note published through `tasks.note` for the
     /// task this chain backs, reported by `tasks.status`.

@@ -162,6 +162,11 @@ impl<E: ErrorValue> Answer<E> {
             Answer::Status(Ok(status)) => vec![Value::Table(task_status_table(lua, *status)?)],
             Answer::Pending(Ok(tasks)) => vec![Value::Table(task_id_sequence(lua, &tasks)?)],
             Answer::Note(Ok(())) | Answer::Cancel(Ok(())) => vec![Value::Nil],
+            // Always a sequence, empty included, so the shim's `#` and
+            // `ipairs` need no nil check.
+            Answer::DrainTaskNotices(Ok(notices)) => {
+                vec![Value::Table(lua.create_sequence_from(notices)?)]
+            }
             // The one serde-boundary conversion: the parsed JSON output
             // becomes the resumed Lua value, so the shim hands the script a
             // table with no codec in author reach.
@@ -187,6 +192,7 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Pending(Err(error))
             | Answer::Note(Err(error))
             | Answer::Cancel(Err(error))
+            | Answer::DrainTaskNotices(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
             | Answer::Store(Err(error))

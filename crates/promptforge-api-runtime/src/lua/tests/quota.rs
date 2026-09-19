@@ -121,12 +121,19 @@ fn a_models_loop_round_costs_a_few_hundred_lua_instructions() {
         })
         .expect("the counting hook installs on the loop thread");
 
+    // Every round opens with the notice drain, answered empty here, then
+    // the chat.
     let yielded = thread
         .resume::<MultiValue>(())
-        .expect("the block yields its first chat");
+        .expect("the block yields its first drain");
+    assert!(
+        matches!(parse_request(&vm, yielded), Request::DrainTaskNotices),
+        "the loop's first yield drains the task notices"
+    );
+    let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
     assert!(
         matches!(parse_request(&vm, yielded), Request::Chat { .. }),
-        "the loop's first yield is a chat request"
+        "after the drain the loop yields its first chat"
     );
 
     // One mark per chat yield: the difference between consecutive marks
@@ -147,8 +154,13 @@ fn a_models_loop_round_costs_a_few_hundred_lua_instructions() {
             Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed".to_owned()))),
         );
         assert!(
+            matches!(parse_request(&vm, yielded), Request::DrainTaskNotices),
+            "after the tool result the loop drains notices ahead of the next chat"
+        );
+        let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
+        assert!(
             matches!(parse_request(&vm, yielded), Request::Chat { .. }),
-            "after the tool result the loop yields the next chat"
+            "after the drain the loop yields the next chat"
         );
         marks.push(executed.load(Ordering::Relaxed));
     }
