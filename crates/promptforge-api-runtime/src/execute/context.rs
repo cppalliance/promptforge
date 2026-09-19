@@ -201,11 +201,12 @@ pub(crate) struct RunState {
     /// The host's live streaming-delta callback, forwarded by every model
     /// round; `None` drops deltas at the leaf.
     on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
-    /// Test-only: install the `chat` yield shim as `models.chat` in every
-    /// section VM, so a fixture section can yield one raw `chat` round at
-    /// the scheduler's dispatch arm without going through a loop shim.
+    /// Test-only: install the raw protocol shims (`models.chat`,
+    /// `tools.call_as_model`) in every section VM, so a fixture section
+    /// can yield one raw `chat` round or one model-issued `tool_call` at
+    /// the scheduler's dispatch arms without going through a loop shim.
     #[cfg(test)]
-    chat_shim: bool,
+    raw_shims: bool,
 }
 
 impl RunState {
@@ -248,16 +249,17 @@ impl RunState {
             ui: ctx.ui.clone(),
             on_delta: ctx.on_delta.clone(),
             #[cfg(test)]
-            chat_shim: false,
+            raw_shims: false,
         }
     }
 
-    /// Exposes the `chat` yield shim as `models.chat` in every section VM
-    /// this run starts, so a test fixture can drive the scheduler's `Chat`
-    /// arm with one raw round.
+    /// Exposes the raw protocol shims (`models.chat`, `tools.call_as_model`)
+    /// in every section VM this run starts, so a test fixture can drive the
+    /// scheduler's `Chat` arm with one raw round or its `tool_call` arm
+    /// with one model-issued call.
     #[cfg(test)]
-    pub(crate) fn expose_chat_shim_for_test(&mut self) {
-        self.chat_shim = true;
+    pub(crate) fn expose_raw_shims_for_test(&mut self) {
+        self.raw_shims = true;
     }
 
     /// The prompt this run executes.
@@ -453,7 +455,7 @@ impl RunState {
             shared: &self.shared,
             ui: self.ui.as_ref(),
             #[cfg(test)]
-            chat_shim: self.chat_shim,
+            raw_shims: self.raw_shims,
         }
     }
 
@@ -481,7 +483,7 @@ impl fmt::Debug for RunState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut state = f.debug_struct("RunState");
         #[cfg(test)]
-        state.field("chat_shim", &self.chat_shim);
+        state.field("raw_shims", &self.raw_shims);
         state
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)

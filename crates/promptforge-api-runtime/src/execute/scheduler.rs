@@ -31,8 +31,9 @@
 //! insertion and the two chain-end paths), `step` one chain's step to its
 //! next suspension point, `walk` the section walk rules, `dispatch` the
 //! request arms, `chat` the one-round `chat` arm and its answer
-//! application, `models_loop` the Rust-backed `models.loop` dispatch, and
-//! `tasks` the fanout join tables and arm bookkeeping.
+//! application, `tool_call` the script and model-issued `tool_call` arm,
+//! `models_loop` the Rust-backed `models.loop` dispatch, and `tasks` the
+//! fanout join tables and arm bookkeeping.
 
 mod chain;
 mod chat;
@@ -40,6 +41,7 @@ mod dispatch;
 mod models_loop;
 mod step;
 mod tasks;
+mod tool_call;
 mod walk;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -337,6 +339,13 @@ impl<'a> Scheduler<'a> {
     #[cfg(test)]
     pub(crate) fn set_max_chains_for_test(&mut self, limit: usize) {
         self.max_chains = limit;
+    }
+
+    /// The number of leaf requests the run has issued so far, so a test
+    /// can prove a dispatch was answered inline with no spawned leaf work.
+    #[cfg(test)]
+    pub(crate) fn leaf_requests_issued(&self) -> u64 {
+        self.next_request
     }
 
     /// Posts an answer for an arbitrary request id, so a test can drive

@@ -126,11 +126,11 @@ pub use crate::argv::Argv;
 pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_overflow, precheck};
 #[doc(hidden)]
 pub use coro::{
-    install_agent_chat_shim, install_section_loop_shim, install_section_user_input_shim,
-    install_store_shims,
+    install_agent_chat_shim, install_model_tool_call_shim, install_section_loop_shim,
+    install_section_user_input_shim, install_store_shims,
 };
 #[doc(hidden)]
-pub use dispatch::{ScriptReport, ToolDispatch, dispatch_tool};
+pub use dispatch::{ModelReport, ScriptReport, ToolDispatch, dispatch_model_tool, dispatch_tool};
 #[doc(hidden)]
 pub use handles::{
     LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolSet, ToolView,

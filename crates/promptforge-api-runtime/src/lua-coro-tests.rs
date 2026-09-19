@@ -132,7 +132,7 @@ fn scheduler_vm_with_tools(
         section_name: "Test",
         shared: &shared,
         ui: None,
-        chat_shim: false,
+        raw_shims: false,
     };
     let list_callback =
         |_: String| -> std::result::Result<Vec<String>, crate::Error> { Ok(Vec::new()) };

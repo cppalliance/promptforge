@@ -519,7 +519,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-12>
 
-### Step 12: `tool_call` arm with `call_id` and inline local tools
+### Step 12: `tool_call` arm with `call_id` and inline local tools [completed]
 
 - Component: Lua loop
 - Piece: runtime arms

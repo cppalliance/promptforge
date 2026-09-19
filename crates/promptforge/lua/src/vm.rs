@@ -968,8 +968,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
-    #[expect(dead_code, reason = "wired up by the local-tools dispatch step")]
-    pub(crate) fn has_local_tool(&self, alias: &str) -> Result<bool> {
+    pub fn has_local_tool(&self, alias: &str) -> Result<bool> {
         self.local_tools.contains(alias)
     }
 

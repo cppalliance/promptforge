@@ -117,6 +117,23 @@ local function tools_call(alias_or_tool, args)
   return result
 end
 
+-- The model-issued form of the same dispatch: `call_id` is the id the model
+-- attached to its tool call. The driver always resumes it with content (a
+-- tool's own failure becomes untrusted failure text) and fires ToolResult
+-- under the id. Shim-internal: the loop shim calls it per requested tool
+-- call; authors never see it, and a hand-built yield carrying `call_id` is
+-- refused as a malformed request when its shape is wrong.
+local function tools_call_as_model(call_id, alias_or_tool, args)
+  local ok, result = yield({
+    op = "tool_call",
+    alias = alias_or_tool,
+    args = args,
+    call_id = call_id,
+  })
+  if not ok then fail(result) end
+  return result
+end
+
 -- One stateless tool-capable model round. The host installs this as
 -- models.chat in agent VMs only; a section VM never sees it. Both
 -- arguments pass through unvalidated: the protocol parse owns the whole
@@ -266,6 +283,7 @@ return {
   chat = chat,
   infer = infer,
   loop = models_loop,
+  model_tool_call = tools_call_as_model,
   user_input = user_input,
   guard = guard,
   pcall = protected_call,
