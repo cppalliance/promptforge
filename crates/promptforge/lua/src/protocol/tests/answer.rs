@@ -175,6 +175,7 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
 
     let lua = Lua::new();
     let result = ChatResult {
+        overflow: false,
         reply: Some("hello there".to_owned()),
         tool_calls: None,
         finish_reason: Some("stop".to_owned()),
@@ -202,7 +203,7 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
     assert!(retained.is_none());
     // Presence-branching is the agent contract: absent fields must read
     // back as true Lua nil, never a serde null sentinel.
-    let (ok, reply, tools_nil, finish, model, total, llama_nil, e2e): (
+    let (ok, reply, tools_nil, finish, model, total, llama_nil, e2e, overflow): (
         bool,
         String,
         bool,
@@ -211,15 +212,18 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
         i64,
         bool,
         f64,
+        bool,
     ) = lua
         .load(
             "local ok, r = ...; \
              return ok, r.reply, r.tool_calls == nil, r.finish_reason, r.model, \
-             r.metrics.usage.total_tokens, r.metrics.llama == nil, r.metrics.client.e2e_ms",
+             r.metrics.usage.total_tokens, r.metrics.llama == nil, r.metrics.client.e2e_ms, \
+             r.overflow",
         )
         .call(envelope)
         .expect("the result table reads back through Lua");
     assert!(ok);
+    assert!(!overflow, "a completed round renders overflow as false");
     assert_eq!(reply, "hello there");
     assert!(
         tools_nil,
@@ -236,6 +240,7 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
 fn an_ok_chat_tool_calls_answer_resumes_with_presence_and_arguments() {
     let lua = Lua::new();
     let result = ChatResult {
+        overflow: false,
         reply: None,
         tool_calls: Some(vec![
             ToolCallEvent {
@@ -283,6 +288,127 @@ fn an_ok_chat_tool_calls_answer_resumes_with_presence_and_arguments() {
     assert_eq!(value, "hi");
     assert_eq!(second, "rust");
     assert!(metrics_nil);
+}
+
+#[test]
+fn an_overflow_chat_answer_resumes_with_overflow_true_and_nothing_else() {
+    // The request was refused as too large before or by the provider: no
+    // round ran, so the shim branches on `overflow` and calls the compactor
+    // without ever reading a reply or tool calls.
+    let lua = Lua::new();
+    let result = ChatResult {
+        overflow: true,
+        reply: None,
+        tool_calls: None,
+        finish_reason: None,
+        model: String::new(),
+        metrics: None,
+    };
+    let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, overflow, reply_nil, calls_nil, finish_nil, model): (
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+        String,
+    ) = lua
+        .load(
+            "local ok, r = ...; \
+             return ok, r.overflow, r.reply == nil, r.tool_calls == nil, \
+             r.finish_reason == nil, r.model",
+        )
+        .call(envelope)
+        .expect("the result table reads back through Lua");
+    assert!(
+        ok,
+        "an overflow is a successful answer, not a failure envelope"
+    );
+    assert!(overflow, "the overflow flag must read back as true");
+    assert!(reply_nil, "an overflow carries no reply");
+    assert!(calls_nil, "an overflow carries no tool calls");
+    assert!(finish_nil, "an overflow carries no finish reason");
+    assert_eq!(model, "");
+}
+
+#[test]
+fn an_empty_reply_chat_answer_resumes_with_nil_reply_and_its_finish_reason() {
+    // An empty reply is a completed round with `reply` absent: the shim
+    // reads nil (never an empty string) and applies the exit rules against
+    // `finish_reason`.
+    let lua = Lua::new();
+    let result = ChatResult {
+        overflow: false,
+        reply: None,
+        tool_calls: None,
+        finish_reason: Some("stop".to_owned()),
+        model: "fixture-model".to_owned(),
+        metrics: None,
+    };
+    let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, overflow, reply_nil, calls_nil, finish, model): (
+        bool,
+        bool,
+        bool,
+        bool,
+        String,
+        String,
+    ) = lua
+        .load(
+            "local ok, r = ...; \
+             return ok, r.overflow, r.reply == nil, r.tool_calls == nil, \
+             r.finish_reason, r.model",
+        )
+        .call(envelope)
+        .expect("the result table reads back through Lua");
+    assert!(ok);
+    assert!(
+        !overflow,
+        "an empty reply is a completed round, not an overflow"
+    );
+    assert!(
+        reply_nil,
+        "the absent reply must be nil, not an empty string"
+    );
+    assert!(calls_nil);
+    assert_eq!(finish, "stop");
+    assert_eq!(model, "fixture-model");
+}
+
+#[test]
+fn an_empty_reply_string_chat_answer_also_resumes_with_nil_reply() {
+    // The render drops an empty `reply` string, so a producer that hands
+    // over `Some("")` instead of the documented absent field still resumes
+    // the shim with nil: presence-branching never sees an empty string.
+    let lua = Lua::new();
+    let result = ChatResult {
+        overflow: false,
+        reply: Some(String::new()),
+        tool_calls: None,
+        finish_reason: Some("stop".to_owned()),
+        model: "fixture-model".to_owned(),
+        metrics: None,
+    };
+    let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, reply_nil, finish): (bool, bool, String) = lua
+        .load("local ok, r = ...; return ok, r.reply == nil, r.finish_reason")
+        .call(envelope)
+        .expect("the result table reads back through Lua");
+    assert!(ok);
+    assert!(
+        reply_nil,
+        "an empty reply string must resume as nil, not as an empty string"
+    );
+    assert_eq!(finish, "stop");
 }
 
 #[test]

@@ -272,12 +272,15 @@ fn parse_tool_call_record(
 }
 
 /// Parses the optional `opts` table: `model` (an optional catalog model
-/// name) and `tools` (the aliases to advertise this round; default none).
+/// name) and `tools` (the aliases to advertise this round). An absent
+/// `tools` is `None` - the section VM's shape, resolved by the driver to
+/// the section's current scope - and a present list, empty included, is
+/// the explicit set.
 fn parse_chat_opts(
     table: &mlua::Table,
-) -> std::result::Result<(Option<String>, Vec<String>), FieldFailure> {
+) -> std::result::Result<(Option<String>, Option<Vec<String>>), FieldFailure> {
     let opts = match table.raw_get::<Value>("opts") {
-        Ok(Value::Nil) => return Ok((None, Vec::new())),
+        Ok(Value::Nil) => return Ok((None, None)),
         Ok(Value::Table(opts)) => opts,
         Ok(other) => {
             return Err(chat_error(format!(
@@ -303,7 +306,7 @@ fn parse_chat_opts(
         Err(_) => return Err(FieldFailure::Malformed),
     };
     let tools = match opts.raw_get::<Value>("tools") {
-        Ok(Value::Nil) => Vec::new(),
+        Ok(Value::Nil) => None,
         Ok(Value::Table(aliases)) => {
             let mut tools = Vec::new();
             for (position, alias) in aliases.sequence_values::<Value>().enumerate() {
@@ -328,7 +331,7 @@ fn parse_chat_opts(
                     Err(_) => return Err(FieldFailure::Malformed),
                 }
             }
-            tools
+            Some(tools)
         }
         Ok(other) => {
             return Err(chat_error(format!(

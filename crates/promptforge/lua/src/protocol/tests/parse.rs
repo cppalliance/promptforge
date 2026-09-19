@@ -106,12 +106,47 @@ fn tool_call_parses_alias_and_args() {
     table.raw_set("args", args).expect("raw_set");
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
-        Request::ToolCall { alias, args } => {
+        Request::ToolCall {
+            alias,
+            args,
+            call_id,
+        } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
+            assert_eq!(call_id, None, "a script call carries no call id");
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }
+}
+
+#[test]
+fn tool_call_with_a_call_id_parses_it_as_a_model_issued_call() {
+    // The loop shim sets `call_id` from the model's tool call; the request
+    // carries it so the driver resumes with content and fires ToolResult
+    // under that id.
+    let lua = Lua::new();
+    let table = request_table(&lua, "tool_call");
+    table.raw_set("alias", "echo").expect("raw_set");
+    table.raw_set("call_id", "call_7").expect("raw_set");
+    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+    match request {
+        Request::ToolCall { alias, call_id, .. } => {
+            assert_eq!(alias, "echo");
+            assert_eq!(call_id.as_deref(), Some("call_7"));
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_non_string_call_id_is_a_malformed_yield() {
+    // `call_id` is shim-produced, never author-supplied: a wrong shape is
+    // a corrupted yield, not a catchable call error.
+    let lua = Lua::new();
+    let table = request_table(&lua, "tool_call");
+    table.raw_set("alias", "echo").expect("raw_set");
+    table.raw_set("call_id", 7).expect("raw_set");
+    assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]

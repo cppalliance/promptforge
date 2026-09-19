@@ -60,18 +60,27 @@ impl ToolCallOutcome {
     }
 }
 
-/// One completed `models.chat` round, resumed into the agent program as a
-/// plain result table.
+/// One `chat` round's outcome, resumed into the program as a plain result
+/// table.
 ///
-/// Exactly one of `reply` and `tool_calls` is present: the round produced
-/// text or requested tools, never both. Agents branch on the presence of
-/// `tool_calls`, never on `finish_reason` - backends routinely finish
+/// When `overflow` is set the request was refused as too large before or
+/// by the provider: no round ran, and every other field is absent or
+/// empty. Otherwise the round completed and at most one of `reply` and
+/// `tool_calls` is present: the round produced text or requested tools,
+/// never both. An empty reply is a completed round with `reply` absent
+/// (never an empty string), so the loop shim applies its exit rules
+/// against `finish_reason`. Callers branch on the presence of `tool_calls`
+/// and `reply`, never on `finish_reason` alone - backends routinely finish
 /// tool-call rounds with `stop`. Absent optional fields are simply never
-/// set on the resumed table, so they read back as nil.
+/// set on the resumed table, so they read back as nil; `overflow` is
+/// always set, as a boolean.
 // No `Eq`: `metrics` carries `f64` timings transitively.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
-    /// The completed reply text, when the round produced text.
+    /// Whether the request was refused as too large before or by the
+    /// provider. No round ran; the loop shim invokes the compactor.
+    pub overflow: bool,
+    /// The completed reply text, when the round produced non-empty text.
     pub reply: Option<String>,
     /// The tool calls the model requested, unexecuted, when it requested
     /// any.

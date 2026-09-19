@@ -55,11 +55,18 @@ pub enum Request {
         /// The author-supplied JSON arguments; an absent or nil `args`
         /// parses as the empty object.
         args: serde_json::Value,
+        /// `Some`: a model-issued call, set by the loop shim from the
+        /// model's tool call. It always resumes with content (a tool's own
+        /// failure becomes untrusted failure text) and `ToolResult` fires
+        /// under this id. `None`: a script call, which keeps the
+        /// raise-at-call-site behavior. Shim-produced, never
+        /// author-supplied: a wrong shape is a malformed yield.
+        call_id: Option<String>,
     },
     /// `models.chat(messages, opts)`: one stateless tool-capable model
-    /// round over an agent-built message list. Agent VMs alone install the
-    /// shim; core's scheduler carries an unreachable internal-invariant
-    /// guard for the arm its exhaustive match forces.
+    /// round over an author-built message list. The agent VM installs the
+    /// `models.chat` shim; the section VM's `models.loop` shim yields the
+    /// same request per round, so one dispatch arm serves both.
     Chat {
         /// The validated message records. Each carries a known role
         /// ([`MessageRole`]), visible text or a non-empty content-parts
@@ -72,8 +79,13 @@ pub enum Request {
         /// `None` for the program's current `models.use` selection.
         model: Option<String>,
         /// `opts.tools`: the tool aliases to advertise for exactly this
-        /// round. Defaults to none; the driver never adds to it.
-        tools: Vec<String>,
+        /// round. `Some`: the agent VM's explicit list, which the driver
+        /// never adds to (an empty list advertises nothing). `None`: no
+        /// list was given - a section VM's shape - and the driver resolves
+        /// the section's current tool scope, local Lua tools included. The
+        /// aliases resolve to schemas in the dispatch arm, where the tool
+        /// scope lives; the parse has no catalog.
+        tools: Option<Vec<String>>,
     },
     /// `models.loop(handle?, messages, compactor?)`: the Rust-backed
     /// model-tool loop over an author-owned message list. Section VMs alone
