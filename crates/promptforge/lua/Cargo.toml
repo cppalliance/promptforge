@@ -22,6 +22,11 @@ thiserror.workspace = true
 tokio.workspace = true
 workspace-hack.workspace = true
 
+[features]
+# Test-only installs for companion crates' suites (`tools.call_as_model`);
+# never enabled by a production dependent.
+test-support = []
+
 [dev-dependencies]
 async-trait.workspace = true
 criterion.workspace = true

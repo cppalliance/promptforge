@@ -330,13 +330,15 @@ pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
 /// VM whose shim prelude already ran, so a fixture section can yield a
 /// `tool_call` carrying a `call_id` straight at the driver's dispatch arm.
 ///
-/// Test hosts are the only callers: in production the loop shim reaches
-/// the function directly inside the prelude chunk, and `tools.call_as_model`
+/// Test hosts are the only callers, so the install exists only under the
+/// `test-support` feature: in production the loop shim reaches the
+/// function directly inside the prelude chunk, and `tools.call_as_model`
 /// never exists in any VM - not stubbed, simply absent.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the shim prelude was never installed on this
 /// VM, the `tools` table is absent, or the install fails.
+#[cfg(feature = "test-support")]
 pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
     let model_tool_call: Function = lua
         .named_registry_value(MODEL_TOOL_CALL_REGISTRY)

@@ -1414,6 +1414,7 @@ mod live_infer;
 mod local_tools;
 mod model_and_reply;
 mod models_loop;
+mod models_loop_compactors;
 mod observations;
 mod scheduler;
 mod tool_call_arm;
