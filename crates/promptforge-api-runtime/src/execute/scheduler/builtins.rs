@@ -24,7 +24,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
@@ -333,11 +332,9 @@ impl Scheduler<'_> {
         answer: BuiltinAnswer,
     ) -> Answer<Error> {
         let chain = &self.chains[id.index()];
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution();
+        let emitter = chain.ctx.emitter();
         let section = chain.section_name();
-        observer.observe(
-            execution,
+        emitter.report(
             section,
             if answer.ok {
                 detail::TOOL_CALL_SUCCEEDED
@@ -345,13 +342,8 @@ impl Scheduler<'_> {
                 detail::TOOL_CALL_FAILED
             },
         );
-        observer.on_tool_result(
-            execution,
+        emitter.tool_result(
             section,
-            id.0,
-            // The call depth is capped far inside u32; the saturation is a
-            // defensive no-op.
-            u32::try_from(chain.call_depth).unwrap_or(u32::MAX),
             chain.ctx.turns().load(Ordering::Relaxed),
             call_id,
             name,

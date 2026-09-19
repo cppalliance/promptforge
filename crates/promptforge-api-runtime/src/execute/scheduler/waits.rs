@@ -302,14 +302,12 @@ impl Scheduler<'_> {
                 return Ok(None);
             }
         };
+        // The terminal is stamped with the cancelled task's own
+        // provenance: its backing chain's emitter, taken before the abort
+        // clears the chain's state.
+        let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
         self.abort_subtree(backing_chain);
-        let chain = &self.chains[caller.index()];
-        let observer = Arc::clone(chain.ctx.observer());
-        observer.observe(
-            chain.ctx.execution(),
-            &target,
-            Observation::TaskCancelled { task: task.clone() },
-        );
+        emitter.report(&target, Observation::TaskCancelled { task: task.clone() });
         Ok((origin == TaskOrigin::Model).then_some(target))
     }
 }

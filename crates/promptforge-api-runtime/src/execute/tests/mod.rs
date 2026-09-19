@@ -1423,6 +1423,7 @@ mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
 mod observations;
+mod provenance;
 mod scheduler;
 mod tasks;
 mod timeouts;

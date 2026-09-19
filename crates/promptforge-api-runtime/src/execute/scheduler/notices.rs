@@ -22,7 +22,6 @@
 //! untrusted under the owner's run nonce; the rest of every sentence is
 //! the engine's own and stays bare.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use promptforge_api_types::ids::{AbandonReason, TaskId};
@@ -69,14 +68,8 @@ impl Scheduler<'_> {
             }
             TaskEnd::Abandoned(reason) => format!("{head} was abandoned: {}", reason.why()),
         };
-        let observer = Arc::clone(chain.ctx.observer());
-        observer.on_task_notice(
-            chain.ctx.execution(),
+        chain.ctx.emitter().task_notice(
             chain.section_name(),
-            owner.0,
-            // The call depth is capped far inside u32; the saturation is a
-            // defensive no-op.
-            u32::try_from(chain.call_depth).unwrap_or(u32::MAX),
             chain.ctx.turns().load(Ordering::Relaxed),
             task,
             &text,
