@@ -606,7 +606,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-19>
 
-### Step 19: Timeouts through effect-backed timer slots
+### Step 19: Timeouts through effect-backed timer slots [completed]
 
 - Component: Tasks and fanout
 - Piece: waits

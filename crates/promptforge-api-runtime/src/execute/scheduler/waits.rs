@@ -76,14 +76,14 @@ impl Scheduler<'_> {
     }
 
     /// The live tasks `owner` owns in spawn order, narrowed to `origin`
-    /// when given. The arena is a hash map; ids order as paths and one
-    /// owner's tasks are its direct children, so sorting recovers spawn
-    /// order.
+    /// when given; an internal timer slot is never listed. The arena is a
+    /// hash map; ids order as paths and one owner's tasks are its direct
+    /// children, so sorting recovers spawn order.
     fn live_tasks_of(&self, owner: ChainIndex, origin: Option<TaskOrigin>) -> Vec<TaskId> {
         let mut live: Vec<TaskId> = self
             .tasks
             .iter()
-            .filter(|(_, slot)| slot.owner == owner && slot.state.is_live())
+            .filter(|(_, slot)| slot.owner == owner && slot.state.is_live() && !slot.is_internal())
             .filter(|(_, slot)| origin.is_none_or(|origin| slot.origin == origin))
             .map(|(task, _)| task.clone())
             .collect();
@@ -249,8 +249,10 @@ impl Scheduler<'_> {
 
     /// Cancels a live task `caller` owns: the slot moves to `Cancelled`, the
     /// backing ends (a chain with everything it owns, a request dropped),
-    /// and `TaskCancelled` fires once under the target. A task already in
-    /// a terminal state is left as it is.
+    /// and `TaskCancelled` fires once under the target - except for an
+    /// internal timer, whose cancel is the wait shim's own bookkeeping and
+    /// reports nothing. A task already in a terminal state is left as it
+    /// is.
     fn cancel_task(&mut self, caller: ChainIndex, task: &TaskId) -> Result<()> {
         let slot = self.owned_slot(caller, task)?;
         if !slot.state.is_live() {
@@ -264,10 +266,14 @@ impl Scheduler<'_> {
         }
         // The backing ends first, so anything it owned reports before the
         // task's own terminal event, which is the last word on it.
-        match backing {
-            TaskBacking::Chain(chain) => self.abort_subtree(chain),
-            TaskBacking::Effect(request) => self.abort_request(request),
-        }
+        let backing_chain = match backing {
+            TaskBacking::Chain(backing_chain) => backing_chain,
+            TaskBacking::Effect(request) => {
+                self.abort_request(request);
+                return Ok(());
+            }
+        };
+        self.abort_subtree(backing_chain);
         let chain = &self.chains[caller.index()];
         let observer = Arc::clone(chain.ctx.observer());
         observer.observe(

@@ -14,7 +14,9 @@ use promptforge_api_types::ids::TaskOrigin;
 use promptforge_model_client::model::ModelBinding;
 
 use chat::parse_chat;
-use tasks::{parse_cancel, parse_note, parse_pending, parse_ready, parse_status, parse_when_any};
+use tasks::{
+    parse_cancel, parse_note, parse_pending, parse_ready, parse_status, parse_timer, parse_when_any,
+};
 
 use crate::tools::tool_alias;
 use crate::{Error, LuaModelHandle, Result, resolve_section_target};
@@ -180,6 +182,7 @@ impl Request {
             "infer" => classify(parse_infer(table), |error| Answer::Infer(Err(error))),
             "call" => classify(parse_call(lua, table), |error| Answer::Call(Err(error))),
             "spawn" => classify(parse_spawn(lua, table), |error| Answer::Spawn(Err(error))),
+            "timer" => classify(parse_timer(table), |error| Answer::Timer(Err(error))),
             "when_any" => classify(parse_when_any(table), |error| Answer::WhenAny(Err(error))),
             "ready" => classify(parse_ready(table), |error| Answer::Ready(Err(error))),
             "status" => classify(parse_status(table), |error| Answer::Status(Err(error))),

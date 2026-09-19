@@ -16,9 +16,10 @@ use super::*;
 use crate::execute::scheduler::{Scheduler, TaskState};
 
 /// A recorder that keeps the typed observation, so a payload-carrying
-/// variant can be matched whole.
+/// variant can be matched whole. Shared with the timeout suite, which
+/// exercises the same wait shims under `opts.timeout`.
 #[derive(Default)]
-struct WaitRecorder(Mutex<Vec<(String, Observation)>>);
+pub(super) struct WaitRecorder(Mutex<Vec<(String, Observation)>>);
 
 impl Observer for WaitRecorder {
     fn observe(&self, _execution: &str, section: &str, event: Observation) {
@@ -30,7 +31,7 @@ impl Observer for WaitRecorder {
 }
 
 impl WaitRecorder {
-    fn records(&self) -> Vec<(String, Observation)> {
+    pub(super) fn records(&self) -> Vec<(String, Observation)> {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")
@@ -38,7 +39,7 @@ impl WaitRecorder {
     }
 
     /// The `log` messages recorded under `section`, in order.
-    fn logs(&self, section: &str) -> Vec<String> {
+    pub(super) fn logs(&self, section: &str) -> Vec<String> {
         self.records()
             .into_iter()
             .filter(|(seen, _)| seen == section)
@@ -48,15 +49,31 @@ impl WaitRecorder {
             })
             .collect()
     }
+
+    /// Every task observation naming `task`, in order.
+    pub(super) fn task_events(&self, task: &TaskId) -> Vec<Observation> {
+        self.records()
+            .into_iter()
+            .map(|(_, event)| event)
+            .filter(|event| match event {
+                Observation::TaskStarted { task: seen, .. }
+                | Observation::TaskSucceeded { task: seen }
+                | Observation::TaskFailed { task: seen }
+                | Observation::TaskCancelled { task: seen }
+                | Observation::TaskAbandoned { task: seen, .. } => seen == task,
+                _ => false,
+            })
+            .collect()
+    }
 }
 
-fn task(id: &str) -> TaskId {
+pub(super) fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
 /// A prompt whose first section drives the tasks it spawns over the
 /// remaining sections.
-fn tasks_prompt(main: &str, sections: &[(&str, &str)]) -> String {
+pub(super) fn tasks_prompt(main: &str, sections: &[(&str, &str)]) -> String {
     let mut md = format!(
         "---\nname: waits\ndescription: d\npromptforge: 0\n---\n\n\
          # Waits\n\n\

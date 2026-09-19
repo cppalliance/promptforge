@@ -239,6 +239,9 @@ impl<'a> Scheduler<'a> {
         // one to reach, so the leaked-author list is moot here.
         self.abandon_owned_tasks(id, AbandonReason::OwnerAborted);
         self.ready.retain(|ready| *ready != id);
+        // The chain's own parked leaf request. A timer the chain owned is
+        // keyed under it too, but `abandon_owned_tasks` above already
+        // aborted every live one, so this is the only entry left.
         let request = self
             .pending
             .iter()

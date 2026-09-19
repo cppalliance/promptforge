@@ -1418,6 +1418,7 @@ mod models_loop_compactors;
 mod observations;
 mod scheduler;
 mod tasks;
+mod timeouts;
 mod tool_call_arm;
 mod tool_loop;
 mod tool_scoping;

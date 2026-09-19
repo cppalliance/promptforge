@@ -161,6 +161,15 @@ impl Scheduler<'_> {
                     let answer = match arrival {
                         Arrival::Answer(answer) => answer,
                         Arrival::Chat(result) => self.accept_chat(parked, result)?,
+                        // A timer resumes no chain: its pending entry names
+                        // the owner only so the stall check and the abort
+                        // paths see the sleep as in flight. The firing
+                        // completes the timer's slot and wakes a waiting
+                        // owner through the task arena.
+                        Arrival::Timer => {
+                            self.fire_timer(request_id)?;
+                            continue;
+                        }
                     };
                     match answer {
                         // A claims-model conflict is fatal: the run ends on

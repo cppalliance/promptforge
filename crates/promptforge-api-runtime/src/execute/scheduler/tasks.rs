@@ -47,7 +47,6 @@ pub(super) enum TaskBacking {
     Chain(ChainIndex),
     /// An in-flight leaf request: the internal timer behind a wait's
     /// timeout, never author-visible.
-    #[expect(dead_code, reason = "constructed by the timer arm of a later step")]
     Effect(RequestId),
 }
 
@@ -97,6 +96,16 @@ pub(super) struct TaskSlot {
     /// The chain's final text or failure, held from the chain's end until
     /// the owner takes it.
     pub(super) outcome: Option<Result<String>>,
+}
+
+impl TaskSlot {
+    /// True for a slot the author never sees: the effect-backed timer
+    /// behind a timed wait. Internal slots are omitted from `pending` and
+    /// a status table's `tasks`, report no task observations, and never
+    /// count as leaked.
+    pub(super) fn is_internal(&self) -> bool {
+        matches!(self.backing, TaskBacking::Effect(_))
+    }
 }
 
 impl Scheduler<'_> {
@@ -302,7 +311,9 @@ impl Scheduler<'_> {
     /// it owns in turn (or its in-flight request is dropped), and its
     /// terminal observation fires under its target with `reason` - the
     /// observation is the reason's only record, since no wait can reach
-    /// an abandoned slot once its owner is gone. Returns
+    /// an abandoned slot once its owner is gone. An internal timer slot
+    /// ends the same way but reports nothing and never counts as leaked:
+    /// it is the wait's detail, not a task the author started. Returns
     /// the abandoned author-origin ids in spawn order, for the owner's
     /// `tasks_live` outcome; the caller discards them for an owner that
     /// is itself being aborted, whose outcome no one receives.
@@ -331,10 +342,14 @@ impl Scheduler<'_> {
             }
             // The backing ends first, so anything it owned reports before
             // the task's own terminal event, which is the last word on it.
-            match backing {
-                TaskBacking::Chain(chain) => self.abort_subtree(chain),
-                TaskBacking::Effect(request) => self.abort_request(request),
-            }
+            let backing_chain = match backing {
+                TaskBacking::Chain(backing_chain) => backing_chain,
+                TaskBacking::Effect(request) => {
+                    self.abort_request(request);
+                    continue;
+                }
+            };
+            self.abort_subtree(backing_chain);
             observer.observe(
                 &execution,
                 &target,
@@ -359,6 +374,14 @@ impl Scheduler<'_> {
         for slot in self.tasks.values_mut() {
             if slot.owner == from {
                 slot.owner = to;
+            }
+        }
+        // An effect-backed slot's request is keyed under its owner in the
+        // pending table; the pass has no parked request of its own at the
+        // hand-off, so every entry under it is such a slot's.
+        for owner in self.pending.values_mut() {
+            if *owner == from {
+                *owner = to;
             }
         }
         for chain in &mut self.chains {

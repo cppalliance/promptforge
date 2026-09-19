@@ -157,7 +157,9 @@ impl<E: ErrorValue> Answer<E> {
             }
             // The task id resumes as its path text; the shim builds the
             // `{ task = id }` table around it, so no host handle crosses.
-            Answer::Spawn(Ok(task)) => vec![Value::String(lua.create_string(task.to_string())?)],
+            Answer::Spawn(Ok(task)) | Answer::Timer(Ok(task)) => {
+                vec![Value::String(lua.create_string(task.to_string())?)]
+            }
             Answer::WhenAny(Ok(delivery)) => delivery_values(lua, delivery)?,
             Answer::Ready(Ok(ready)) => vec![Value::Boolean(ready)],
             Answer::Status(Ok(status)) => vec![Value::Table(task_status_table(lua, *status)?)],
@@ -182,6 +184,7 @@ impl<E: ErrorValue> Answer<E> {
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
             | Answer::Spawn(Err(error))
+            | Answer::Timer(Err(error))
             | Answer::WhenAny(Err(error))
             | Answer::Ready(Err(error))
             | Answer::Status(Err(error))

@@ -36,7 +36,8 @@
 //! (the two arms the section-visible `models.loop` shim drives), `tasks`
 //! the task arena, the `spawn` arm, and the chain-end rules for tasks,
 //! `waits` the `when_any` wait and the `ready`, `status`, `pending`,
-//! `note`, and `cancel` arms over the arena, and `joins` the fanout join
+//! `note`, and `cancel` arms over the arena, `timer` the wait shims'
+//! internal timeout as an effect-backed slot, and `joins` the fanout join
 //! tables and arm bookkeeping.
 
 mod chain;
@@ -47,6 +48,7 @@ mod h1;
 mod joins;
 mod step;
 mod tasks;
+mod timer;
 mod tool_call;
 mod waits;
 mod walk;
@@ -91,6 +93,9 @@ enum Arrival {
     /// One `chat` round's completion or failure, classified by the driver.
     /// Boxed so the body-carrying completion does not size every arrival.
     Chat(std::result::Result<Box<Completion>, Error>),
+    /// A timer's firing: no answer resumes a chain, the slot backed by the
+    /// request completes and its waiting owner is woken.
+    Timer,
 }
 
 /// The most precise prompt-source line known for `blocks`: the first
