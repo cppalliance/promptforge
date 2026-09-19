@@ -124,10 +124,13 @@ mod runtime_events;
 pub use crate::argv::Argv;
 #[doc(hidden)]
 pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use coro::install_model_tool_call_shim;
 #[doc(hidden)]
 pub use coro::{
-    install_agent_chat_shim, install_model_tool_call_shim, install_section_loop_shim,
-    install_section_user_input_shim, install_store_shims,
+    install_agent_chat_shim, install_section_loop_shim, install_section_user_input_shim,
+    install_store_shims,
 };
 #[doc(hidden)]
 pub use dispatch::{ModelReport, ScriptReport, ToolDispatch, dispatch_model_tool, dispatch_tool};

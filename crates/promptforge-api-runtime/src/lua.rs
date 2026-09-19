@@ -21,5 +21,4 @@ pub(crate) use promptforge_lua::{
 };
 
 #[cfg(test)]
-#[path = "lua-coro-tests.rs"]
-mod coro_tests;
+mod tests;

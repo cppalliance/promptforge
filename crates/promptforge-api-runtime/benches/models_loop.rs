@@ -1,6 +1,9 @@
-//! Benchmarks for the active executor paths: the Rust-backed `models.loop`
-//! over one scripted terminal turn, and the `compactors.fail` invocation on
-//! a precheck overflow.
+//! Benchmarks for the active executor paths: the Lua-shim `models.loop`
+//! (the loop runs inside `__impl_coro.lua`, yielding one `chat` request
+//! per round to the scheduler) over one scripted terminal turn, which is
+//! the round-overhead gate the plan's checkpoints compare against, and the
+//! `compactors.fail` invocation on a precheck overflow, which runs zero
+//! rounds and measures the overflow failure path.
 //!
 //! Run with `cargo bench -p promptforge-api-runtime`.
 
