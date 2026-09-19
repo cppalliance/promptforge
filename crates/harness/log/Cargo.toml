@@ -13,7 +13,14 @@ categories = ["development-tools", "database"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+turso.workspace = true
 workspace-hack.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

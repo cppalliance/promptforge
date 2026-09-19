@@ -446,7 +446,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-6>
 
-### Step 6: Turso run log schema and append path
+### Step 6: Turso run log schema and append path [completed]
 
 - Component: Harness log
 - Piece: write path
