@@ -1,0 +1,19 @@
+[package]
+name = "harness-sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge harness sessions: agent discovery, session state, input waits, and the supervisor state machine behind the harness door"
+readme = "README.md"
+keywords = ["promptforge", "llm", "agent", "harness", "sessions"]
+categories = ["development-tools", "api-bindings"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

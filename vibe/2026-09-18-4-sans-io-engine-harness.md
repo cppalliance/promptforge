@@ -434,7 +434,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-5>
 
-### Step 5: Skeleton crates under `crates/harness/` with the spawn wrapper
+### Step 5: Skeleton crates under `crates/harness/` with the spawn wrapper [completed]
 
 - Component: Harness scaffolding
 - Piece: container

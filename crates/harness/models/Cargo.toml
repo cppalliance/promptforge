@@ -1,0 +1,19 @@
+[package]
+name = "harness-models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge harness model client: the HTTP transport that performs the engine's Chat effects against the bound gateway"
+readme = "README.md"
+keywords = ["promptforge", "llm", "agent", "harness", "openai"]
+categories = ["development-tools", "web-programming::http-client"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

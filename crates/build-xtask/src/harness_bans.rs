@@ -21,12 +21,22 @@ const BANNED: [&str; 2] = ["tokio::spawn", "tokio::task::spawn_blocking"];
 /// crate directory for a complete clippy ban list.
 #[must_use]
 pub(crate) fn harness_clippy_bans(container: &Path, door: &Path) -> Vec<String> {
+    harness_crates(container, door)
+        .iter()
+        .filter_map(|dir| check_crate(dir))
+        .collect()
+}
+
+/// The crate directories the ban check covers: every crate under
+/// `container` plus the `door` crate when its directory exists.
+#[must_use]
+pub(crate) fn harness_crates(container: &Path, door: &Path) -> Vec<PathBuf> {
     let mut crates = Vec::new();
     collect_crates(container, &mut crates);
     if door.is_dir() {
         crates.push(door.to_path_buf());
     }
-    crates.iter().filter_map(|dir| check_crate(dir)).collect()
+    crates
 }
 
 /// Every crate directory under `dir`: a directory holding a `Cargo.toml`
