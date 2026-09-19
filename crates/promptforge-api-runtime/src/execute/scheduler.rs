@@ -31,14 +31,13 @@
 //! insertion and the two chain-end paths), `step` one chain's step to its
 //! next suspension point, `walk` the section walk rules, `dispatch` the
 //! request arms, `chat` the one-round `chat` arm and its answer
-//! application, `tool_call` the script and model-issued `tool_call` arm,
-//! `models_loop` the Rust-backed `models.loop` dispatch, and `tasks` the
-//! fanout join tables and arm bookkeeping.
+//! application, `tool_call` the script and model-issued `tool_call` arm
+//! (the two arms the section-visible `models.loop` shim drives), and
+//! `tasks` the fanout join tables and arm bookkeeping.
 
 mod chain;
 mod chat;
 mod dispatch;
-mod models_loop;
 mod step;
 mod tasks;
 mod tool_call;

@@ -1,121 +1,39 @@
 //! The rendering half of the protocol: an answer becomes the `(ok, result)`
-//! resume envelope, a chat result becomes its plain result table, and a
-//! message record appends to an author's message list.
+//! resume envelope and a chat result becomes its plain result table.
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
 use crate::error_value::{ErrorValue, error_table};
-use crate::{Error, Result, pack_sequence};
+use crate::pack_sequence;
 
 use super::answer::{Answer, ChatResult, StoreOutcome, ToolCallOutcome};
-use super::request::{ContentPart, MessageContent, MessageRecord};
-
-/// Appends one record to an author's message list - the table behind
-/// `key`, stashed by the loop request's parse - rendered as the plain
-/// record shape the protocol parse consumes: `role`, `content` (a string
-/// or a content-parts array), `tool_calls` when the record carries calls,
-/// and `tool_call_id` when it answers one. The append is raw, so a
-/// `messages.new()` list's builder metatable never intercepts it.
-///
-/// The driver calls this as the loop's append sink: every assistant
-/// message and correlated tool result lands in the author's own table, in
-/// order, as its round completes.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the registry read, a table creation, or a raw
-/// set fails.
-pub fn append_message_record(
-    lua: &Lua,
-    key: &mlua::RegistryKey,
-    record: &MessageRecord,
-) -> Result<()> {
-    let list: mlua::Table = lua.registry_value(key).map_err(Error::lua)?;
-    let entry = lua.create_table().map_err(Error::lua)?;
-    entry
-        .raw_set("role", record.role.as_str())
-        .map_err(Error::lua)?;
-    match &record.content {
-        MessageContent::Text(text) => entry
-            .raw_set("content", text.as_str())
-            .map_err(Error::lua)?,
-        MessageContent::Parts(parts) => {
-            let sequence = lua
-                .create_table_with_capacity(parts.len(), 0)
-                .map_err(Error::lua)?;
-            for (position, part) in parts.iter().enumerate() {
-                let rendered = lua.create_table().map_err(Error::lua)?;
-                match part {
-                    ContentPart::Text(text) => {
-                        rendered.raw_set("type", "text").map_err(Error::lua)?;
-                        rendered
-                            .raw_set("text", text.as_str())
-                            .map_err(Error::lua)?;
-                    }
-                    ContentPart::ImageUrl(url) => {
-                        rendered.raw_set("type", "image_url").map_err(Error::lua)?;
-                        let image = lua.create_table().map_err(Error::lua)?;
-                        image.raw_set("url", url.as_str()).map_err(Error::lua)?;
-                        rendered.raw_set("image_url", image).map_err(Error::lua)?;
-                    }
-                }
-                sequence
-                    .raw_set(position + 1, rendered)
-                    .map_err(Error::lua)?;
-            }
-            entry.raw_set("content", sequence).map_err(Error::lua)?;
-        }
-    }
-    if !record.tool_calls.is_empty() {
-        let sequence = lua
-            .create_table_with_capacity(record.tool_calls.len(), 0)
-            .map_err(Error::lua)?;
-        for (position, call) in record.tool_calls.iter().enumerate() {
-            let rendered = lua.create_table().map_err(Error::lua)?;
-            rendered
-                .raw_set("id", call.id.as_str())
-                .map_err(Error::lua)?;
-            rendered
-                .raw_set("name", call.name.as_str())
-                .map_err(Error::lua)?;
-            rendered
-                .raw_set(
-                    "arguments",
-                    lua.to_value(&call.arguments).map_err(Error::lua)?,
-                )
-                .map_err(Error::lua)?;
-            sequence
-                .raw_set(position + 1, rendered)
-                .map_err(Error::lua)?;
-        }
-        entry.raw_set("tool_calls", sequence).map_err(Error::lua)?;
-    }
-    if let Some(id) = &record.tool_call_id {
-        entry
-            .raw_set("tool_call_id", id.as_str())
-            .map_err(Error::lua)?;
-    }
-    let length = list.raw_len();
-    list.raw_set(length + 1, entry).map_err(Error::lua)
-}
 
 /// Renders one [`ChatResult`] as the plain Lua result table.
 ///
 /// `overflow` is always set as a boolean, so the loop shim branches on it
-/// with a plain truth test. Absent optional fields are never set, so they
-/// resume as nil and `result.tool_calls` and `result.reply`
-/// presence-branching works; mapping them through the serde boundary would
-/// resume mlua's non-nil null sentinel instead. An empty `reply` string is
-/// dropped here as well, so an empty reply resumes as nil whether the
-/// producer left the field absent (its documented shape) or handed over
-/// `Some("")`: the shim's exit rules read presence, never length. Each
+/// with a plain truth test; `overflow_reason` rides beside it as the
+/// compactor's tag when the request was refused. Absent optional fields
+/// are never set, so they resume as nil and `result.tool_calls` and
+/// `result.reply` presence-branching works; mapping them through the
+/// serde boundary would resume mlua's non-nil null sentinel instead. An
+/// empty `reply` string is dropped here as well, so an empty reply resumes
+/// as nil whether the producer left the field absent (its documented
+/// shape) or handed over `Some("")`: the shim's exit rules read presence,
+/// never length, and `empty_detail` supplies the message they raise. Each
 /// call's `arguments` and the `metrics` sections cross the serde boundary
 /// as tables (the metrics types skip absent sections in serialization, so
 /// no null enters them).
 fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table> {
     let table = lua.create_table()?;
     table.raw_set("overflow", result.overflow)?;
+    if let Some(reason) = result.overflow_reason {
+        table.raw_set("overflow_reason", reason.tag())?;
+    }
     if let Some(reply) = result.reply.filter(|reply| !reply.is_empty()) {
         table.raw_set("reply", reply)?;
+    }
+    if let Some(detail) = result.empty_detail {
+        table.raw_set("empty_detail", detail)?;
     }
     if let Some(calls) = result.tool_calls {
         let sequence = lua.create_table_with_capacity(calls.len(), 0)?;
@@ -192,12 +110,6 @@ impl<E: ErrorValue> Answer<E> {
                     None,
                 ))
             }
-            // The loop appended the history itself; success resumes as
-            // `(true, nil)` so the shim returns nil.
-            Answer::Loop(Ok(())) => Ok((
-                MultiValue::from_vec(vec![Value::Boolean(true), Value::Nil]),
-                None,
-            )),
             // The availability flag rides beside the text as a third resume
             // value, so the shim returns both and the broker's fixed
             // fallback sentence stays unspoofable by identical human text.
@@ -232,7 +144,6 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
-            | Answer::Loop(Err(error))
             | Answer::Store(Err(error))
             | Answer::UserInput(Err(error)) => {
                 let table = error_table(lua, &error)?;

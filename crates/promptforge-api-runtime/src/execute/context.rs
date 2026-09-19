@@ -319,17 +319,6 @@ impl RunState {
         &self.ids
     }
 
-    /// The run's tool set, read-only.
-    ///
-    /// Unused until the `models.loop` step reads the call-time tool scope.
-    #[expect(
-        dead_code,
-        reason = "unused until the models.loop step reads the call-time tool scope"
-    )]
-    pub(crate) fn tools(&self) -> &dyn ToolView {
-        &*self.tools
-    }
-
     /// The concrete handle behind the tools view, shared with every
     /// section VM the run constructs.
     pub(crate) fn tool_set(&self) -> Arc<Mutex<ToolSet>> {
@@ -453,6 +442,7 @@ impl RunState {
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,
+            max_tool_iterations: self.max_tool_iterations(),
             ui: self.ui.as_ref(),
             #[cfg(test)]
             raw_shims: self.raw_shims,

@@ -335,55 +335,45 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
+    use super::models_loop::{echo_tools, loop_context_observed, loop_events, loop_prompt};
+    use crate::execute::scheduler::Scheduler;
+
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let tools: Vec<Arc<dyn Tool>> = vec![echo];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user('ask the model')\n\
+         models.loop(msgs)\n\
+         return msgs[#msgs].content",
+    );
+    let prompt = parse(&md);
     let recorder = Arc::new(Recorder::default());
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask the model".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        recorder.as_ref(),
-        "Gather",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let ctx = loop_context_observed(
+        &prompt,
+        echo_tools(),
+        Arc::clone(&recorder) as Arc<dyn Observer>,
+    );
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the loop converges");
     assert_eq!(out, "final answer");
 
     assert_eq!(
-        recorder.events(),
+        loop_events(&recorder),
         vec![
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-            (
-                "Gather".to_string(),
-                detail::TOOL_CALL_SUCCEEDED.to_string(),
-            ),
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
+            detail::MODEL_TURN_COMPLETED.to_string(),
+            detail::TOOL_CALL_SUCCEEDED.to_string(),
+            detail::MODEL_TURN_COMPLETED.to_string(),
         ]
+    );
+    assert!(
+        recorder
+            .events()
+            .iter()
+            .filter(|(_, event)| loop_events(&recorder).contains(event))
+            .all(|(section, _)| section == "Only"),
+        "every loop event is reported under the section that ran the loop"
     );
 }

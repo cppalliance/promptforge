@@ -176,7 +176,9 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
     let lua = Lua::new();
     let result = ChatResult {
         overflow: false,
+        overflow_reason: None,
         reply: Some("hello there".to_owned()),
+        empty_detail: None,
         tool_calls: None,
         finish_reason: Some("stop".to_owned()),
         model: "fixture-model".to_owned(),
@@ -241,7 +243,9 @@ fn an_ok_chat_tool_calls_answer_resumes_with_presence_and_arguments() {
     let lua = Lua::new();
     let result = ChatResult {
         overflow: false,
+        overflow_reason: None,
         reply: None,
+        empty_detail: None,
         tool_calls: Some(vec![
             ToolCallEvent {
                 id: "call_1".to_owned(),
@@ -298,7 +302,9 @@ fn an_overflow_chat_answer_resumes_with_overflow_true_and_nothing_else() {
     let lua = Lua::new();
     let result = ChatResult {
         overflow: true,
+        overflow_reason: Some(crate::OverflowReason::Precheck),
         reply: None,
+        empty_detail: None,
         tool_calls: None,
         finish_reason: None,
         model: String::new(),
@@ -342,7 +348,9 @@ fn an_empty_reply_chat_answer_resumes_with_nil_reply_and_its_finish_reason() {
     let lua = Lua::new();
     let result = ChatResult {
         overflow: false,
+        overflow_reason: None,
         reply: None,
+        empty_detail: Some("empty model reply".to_owned()),
         tool_calls: None,
         finish_reason: Some("stop".to_owned()),
         model: "fixture-model".to_owned(),
@@ -389,7 +397,9 @@ fn an_empty_reply_string_chat_answer_also_resumes_with_nil_reply() {
     let lua = Lua::new();
     let result = ChatResult {
         overflow: false,
+        overflow_reason: None,
         reply: Some(String::new()),
+        empty_detail: None,
         tool_calls: None,
         finish_reason: Some("stop".to_owned()),
         model: "fixture-model".to_owned(),
@@ -429,47 +439,76 @@ fn an_err_chat_answer_round_trips_and_retains_the_typed_error() {
 }
 
 #[test]
-fn an_ok_loop_answer_resumes_nil() {
+fn an_overflow_chat_answer_resumes_the_flag_and_the_compactor_tag() {
+    // The loop shim hands `overflow_reason` to the compactor as its tag, so
+    // it must resume as the reason's exact tag string beside the flag.
     let lua = Lua::new();
-    let (envelope, retained) = Answer::<Error>::Loop(Ok(()))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, result): (bool, Value) = lua
-        .load("local ok, result = ...; return ok, result")
-        .call(envelope)
-        .expect("the envelope round-trips through Lua");
-    assert!(ok);
-    assert_eq!(result, Value::Nil, "a successful loop returns nil");
+    for (reason, tag) in [
+        (crate::OverflowReason::Precheck, "precheck"),
+        (crate::OverflowReason::Provider, "provider"),
+    ] {
+        let result = ChatResult {
+            overflow: true,
+            overflow_reason: Some(reason),
+            reply: None,
+            empty_detail: None,
+            tool_calls: None,
+            finish_reason: None,
+            model: String::new(),
+            metrics: None,
+        };
+        let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, overflow, resumed_tag, reply_nil): (bool, bool, String, bool) = lua
+            .load("local ok, r = ...; return ok, r.overflow, r.overflow_reason, r.reply == nil")
+            .call(envelope)
+            .expect("the result table reads back through Lua");
+        assert!(ok);
+        assert!(overflow, "the flag resumes set");
+        assert_eq!(
+            resumed_tag, tag,
+            "the reason resumes as the compactor's tag"
+        );
+        assert!(reply_nil, "no round ran");
+    }
 }
 
 #[test]
-fn an_err_loop_answer_round_trips_and_retains_the_typed_error() {
+fn an_empty_round_chat_answer_resumes_its_detail_beside_the_absent_reply() {
+    // The exit rules raise `empty_detail` as the empty_model_reply message,
+    // so the client's phrase must resume verbatim while `reply` stays nil.
     let lua = Lua::new();
-    let (envelope, retained) = Answer::Loop(Err(Error::ContextExhausted {
-        reason: crate::OverflowReason::Precheck,
-    }))
-    .into_envelope(&lua)
-    .expect("the envelope renders");
-    match retained {
-        Some(Error::ContextExhausted {
-            reason: crate::OverflowReason::Precheck,
-        }) => {}
-        other => panic!("expected the retained ContextExhausted error, got {other:?}"),
-    }
-    let (ok, result) = echo_through_lua(&lua, envelope);
-    assert!(!ok);
-    let reason: String = lua
-        .load("local err = ...; return err.reason")
-        .call(result.clone())
-        .expect("the exhaustion table carries its reason");
-    assert_eq!(reason, "precheck", "the kind's field rides beside it");
-    let (kind, message) = failure_parts(&lua, result);
-    assert_eq!(kind, "context_exhausted");
-    assert!(
-        message.starts_with("context exhausted: "),
-        "the envelope carries the typed exhaustion's message"
+    let result = ChatResult {
+        overflow: false,
+        overflow_reason: None,
+        reply: None,
+        empty_detail: Some(
+            "empty model reply: reasoning content was present but ignored".to_owned(),
+        ),
+        tool_calls: None,
+        finish_reason: Some("stop".to_owned()),
+        model: String::new(),
+        metrics: None,
+    };
+    let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, reply_nil, detail, overflow_reason_nil): (bool, bool, String, bool) = lua
+        .load(
+            "local ok, r = ...; return ok, r.reply == nil, r.empty_detail, r.overflow_reason == nil",
+        )
+        .call(envelope)
+        .expect("the result table reads back through Lua");
+    assert!(ok);
+    assert!(reply_nil, "an empty round carries no reply");
+    assert_eq!(
+        detail,
+        "empty model reply: reasoning content was present but ignored"
     );
+    assert!(overflow_reason_nil, "a served round names no overflow gate");
 }
 
 #[test]

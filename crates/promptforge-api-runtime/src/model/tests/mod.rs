@@ -7,7 +7,7 @@ use crate::observe::NullObserver;
 use crate::store::Access;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
-use promptforge_model_client::model::ModelInvocation;
+use promptforge_model_client::model::{CompletionOptions, ModelInvocation};
 use serde_json::json;
 
 const EXECUTION: &str = "model-bind-test";

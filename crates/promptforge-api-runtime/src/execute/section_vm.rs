@@ -73,6 +73,9 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
+    /// The run's resolved per-section tool-loop cap, captured by the
+    /// `models.loop` shim as its round cap.
+    pub(crate) max_tool_iterations: usize,
     /// The run's host-state snapshot provider, when the host configured
     /// one: its presence is the Agent-window context, so the section VM
     /// gains the `ui()` global and the raw-id `models.get` fallback.
@@ -131,7 +134,7 @@ where
         vm.set_global_json("item", item)?;
     }
     vm.install_scheduler_control_globals(list_callback)?;
-    vm.install_coro_shims()?;
+    vm.install_coro_shims(setup.max_tool_iterations)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
     crate::lua::install_section_user_input_shim(vm.lua())?;
     #[cfg(test)]

@@ -3,6 +3,7 @@
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 
+use crate::compactors::OverflowReason;
 use crate::{Error, LuaFanoutResult, Result, ToolOutputKind};
 
 /// The outcome of one dispatched store operation: the value the shim
@@ -64,24 +65,34 @@ impl ToolCallOutcome {
 /// table.
 ///
 /// When `overflow` is set the request was refused as too large before or
-/// by the provider: no round ran, and every other field is absent or
-/// empty. Otherwise the round completed and at most one of `reply` and
-/// `tool_calls` is present: the round produced text or requested tools,
-/// never both. An empty reply is a completed round with `reply` absent
-/// (never an empty string), so the loop shim applies its exit rules
-/// against `finish_reason`. Callers branch on the presence of `tool_calls`
-/// and `reply`, never on `finish_reason` alone - backends routinely finish
-/// tool-call rounds with `stop`. Absent optional fields are simply never
-/// set on the resumed table, so they read back as nil; `overflow` is
-/// always set, as a boolean.
+/// by the provider: no round ran, `overflow_reason` says which of the two
+/// refused it, and every other field is absent or empty. Otherwise the
+/// round completed and at most one of `reply` and `tool_calls` is present:
+/// the round produced text or requested tools, never both. An empty reply
+/// is a completed round with `reply` absent (never an empty string) and
+/// `empty_detail` naming the empty product, so the loop shim applies its
+/// exit rules against `finish_reason`. Callers branch on the presence of
+/// `tool_calls` and `reply`, never on `finish_reason` alone - backends
+/// routinely finish tool-call rounds with `stop`. Absent optional fields
+/// are simply never set on the resumed table, so they read back as nil;
+/// `overflow` is always set, as a boolean.
 // No `Eq`: `metrics` carries `f64` timings transitively.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
     /// Whether the request was refused as too large before or by the
     /// provider. No round ran; the loop shim invokes the compactor.
     pub overflow: bool,
+    /// Which gate refused the request when `overflow` is set: the
+    /// pre-dispatch precheck or the provider. The loop shim hands its tag
+    /// to the compactor.
+    pub overflow_reason: Option<OverflowReason>,
     /// The completed reply text, when the round produced non-empty text.
     pub reply: Option<String>,
+    /// The client's fixed phrase naming the empty product, when the round
+    /// completed with neither text nor tool calls. The loop shim raises it
+    /// as the `empty_model_reply` message when its exit rules reject the
+    /// round, so the author sees the text the client would have produced.
+    pub empty_detail: Option<String>,
     /// The tool calls the model requested, unexecuted, when it requested
     /// any.
     pub tool_calls: Option<Vec<ToolCallEvent>>,
@@ -139,9 +150,6 @@ pub enum Answer<E> {
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
     /// [`ChatResult`] does not size every answer the non-chat paths move.
     Chat(std::result::Result<Box<ChatResult>, E>),
-    /// The outcome of a `loop` request: the loop appends the history itself
-    /// and returns nil, so success carries no value.
-    Loop(std::result::Result<(), E>),
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
     /// The outcome of a `user_input` request: the resumed text and its
@@ -160,7 +168,6 @@ impl<E> Answer<E> {
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
-            Answer::Loop(result) => Answer::Loop(result.map_err(map)),
             Answer::UserInput(result) => Answer::UserInput(result.map_err(map)),
             Answer::Store(result) => Answer::Store(result.map_err(map)),
         }

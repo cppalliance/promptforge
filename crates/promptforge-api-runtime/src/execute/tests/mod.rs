@@ -14,16 +14,15 @@ use axum::routing::post;
 use serde_json::{Value, json};
 
 use super::gateway::{GatewaySource, env_client_with_limits};
-use super::scope::{DispatchTarget, prepare_scoped_tools};
+use super::scope::prepare_scoped_tools;
 use super::support::{advance_turn, now_rfc3339_checked};
-use super::tool_loop::{LocalDispatch, run_prose_inference};
 use super::*;
 use crate::Result;
 use crate::capabilities::CapabilityRegistry;
-use crate::client::{GatewayClient, GatewayEndpoint, SecretString, ToolSchema};
+use crate::client::{GatewayClient, GatewayEndpoint, SecretString};
 use crate::debug::DebugCapture;
-use crate::lua::{LuaProgram, SectionVm, ToolCallCounts, current_tool_bindings};
-use crate::model::{CompletionOptions, ModelDescriptor, ModelId, ModelSet, ThinkingMode};
+use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
+use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::observe::{NullObserver, Observation, Observer, detail};
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
@@ -125,10 +124,6 @@ fn test_model_catalog() -> ModelCatalog {
         ThinkingMode::Switchable,
     )])
     .expect("the test catalog has a single unique model")
-}
-
-fn test_completion_options() -> CompletionOptions {
-    CompletionOptions::new("claude-sonnet-4-6")
 }
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
@@ -1006,6 +1001,30 @@ fn resp_tool_call(id: &str, name: &str, arguments: &str) -> GatewayReply {
     }))
 }
 
+/// A response asking the model to call one tool twice in a single turn.
+fn resp_two_tool_calls(name: &str, first: (&str, &str), second: (&str, &str)) -> GatewayReply {
+    GatewayReply::Json(json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": first.0,
+                        "type": "function",
+                        "function": { "name": name, "arguments": first.1 }
+                    },
+                    {
+                        "id": second.0,
+                        "type": "function",
+                        "function": { "name": name, "arguments": second.1 }
+                    }
+                ]
+            }
+        }]
+    }))
+}
+
 /// A final assistant text reply.
 fn resp_text(content: &str) -> GatewayReply {
     GatewayReply::Json(json!({
@@ -1056,93 +1075,6 @@ fn aliased_tool_script(alias: &str) -> Vec<GatewayReply> {
         resp_tool_call("aliased_call", alias, "{\"value\":\"payload\"}"),
         resp_text("aliased final"),
     ]
-}
-
-/// Build the tool schemas the loop advertises, mirroring what `run` does.
-fn schemas_for(tools: &[Arc<dyn Tool>]) -> Vec<ToolSchema> {
-    tools
-        .iter()
-        .map(|t| {
-            ToolSchema::new(
-                t.wire_name().to_string(),
-                t.description().to_string(),
-                t.parameters_schema(),
-            )
-            .expect("fixture tool schema is valid")
-        })
-        .collect()
-}
-
-/// Build the loop's dispatch map: each fixture tool bound under its wire name,
-/// mirroring what `prepare_scoped_tools` produces for an always-scoped bind.
-fn dispatch_for(tools: &[Arc<dyn Tool>]) -> BTreeMap<String, DispatchTarget> {
-    tools
-        .iter()
-        .map(|tool| {
-            (
-                tool.wire_name().to_owned(),
-                DispatchTarget::Bound(crate::lua::ToolBinding::for_test(
-                    tool.wire_name(),
-                    tool.description(),
-                    Arc::clone(tool),
-                )),
-            )
-        })
-        .collect()
-}
-
-/// The test-only port of the deleted production `run_tool_loop` wrapper: a
-/// fresh conversation looping until text, with exhaustion surfaced as
-/// [`Error::ToolLoopExhausted`]. The loop tests keep their original call
-/// shape through this shim over [`run_prose_inference`]; every call reports
-/// under [`EXECUTION`] with no debug capture.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shim mirrors the deleted wrapper's borrowed loop context"
-)]
-async fn run_tool_loop(
-    client: &GatewayClient,
-    schemas: &[ToolSchema],
-    dispatch: &BTreeMap<String, DispatchTarget>,
-    prose: String,
-    max_tool_iterations: usize,
-    observer: &dyn Observer,
-    section: &str,
-    turns: &AtomicU32,
-    completion_options: &CompletionOptions,
-    nonce: &GuardNonce,
-    counts: Option<&ToolCallCounts>,
-    global_aliases: Option<&BTreeMap<String, ToolId>>,
-    local_dispatch: Option<&LocalDispatch<'_>>,
-) -> Result<(String, Option<String>)> {
-    let mut conversation = Vec::new();
-    let outcome = run_prose_inference(
-        client,
-        schemas,
-        dispatch,
-        &mut conversation,
-        prose,
-        max_tool_iterations,
-        // The shim's loop never approaches a window: the test catalog's
-        // context size, with the omitted-compactor default.
-        NonZeroU32::new(131_072).expect("131072 is non-zero"),
-        None,
-        EXECUTION,
-        observer,
-        section,
-        turns,
-        None,
-        completion_options,
-        nonce,
-        counts,
-        global_aliases,
-        local_dispatch,
-    )
-    .await?;
-    match outcome.text {
-        Some(text) => Ok((text, outcome.finish_reason)),
-        None => Err(Error::ToolLoopExhausted),
-    }
 }
 
 // --- Schema description overrides (ported from the deleted tool_bag.rs) ---
@@ -1296,47 +1228,6 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     vm.teardown(&NullObserver::default(), "Precedence");
 }
 
-#[tokio::test]
-async fn tool_loop_dispatches_then_returns_text() {
-    // The loop is tested against a real client pointed at the mock gateway.
-    // `run_tool_loop` takes the client explicitly, so no process-global env
-    // is needed (the crate forbids `unsafe`, which `env::set_var` requires).
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(EchoTool)];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask the model".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "final answer");
-    assert_eq!(
-        turns.load(Ordering::Relaxed),
-        2,
-        "one tool-call reply, then the final text"
-    );
-}
-
 /// A tool whose call blocks far longer than the test's cancel deadline, so the
 /// test can prove the tool-call loop honors cancellation mid-call.
 struct SlowTool;
@@ -1374,61 +1265,6 @@ impl Tool for SlowTool {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancel_during_in_flight_tool_call_returns_promptly() {
-    use crate::cancel::CancelHandle;
-    use promptforge_api_types::cancel::scope;
-    use std::time::{Duration, Instant};
-
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(SlowTool)];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-
-    let handle = CancelHandle::new();
-    let canceller = handle.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        canceller.cancel();
-    });
-
-    let start = Instant::now();
-    let result = scope(
-        handle,
-        run_tool_loop(
-            &client,
-            &schemas,
-            &dispatch,
-            "ask the model".to_string(),
-            DEFAULT_MAX_TOOL_ITERATIONS,
-            &NullObserver::default(),
-            "Only",
-            &turns,
-            &options,
-            &nonce,
-            None,
-            None,
-            None,
-        ),
-    )
-    .await;
-
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "cancel during an in-flight tool call must return promptly, took {:?}",
-        start.elapsed()
-    );
-    assert!(
-        matches!(result, Err(crate::Error::Interrupted)),
-        "expected Interrupted, got {result:?}"
-    );
-}
-
 #[tokio::test]
 async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
     use crate::cancel::CancelHandle;
@@ -1451,171 +1287,6 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
     assert!(error.is_cancelled());
 }
 
-/// Run the loop against `addr` with `tools` in scope, recording observations
-/// and the turn count so tests can assert on the accepted or failed turn.
-async fn run_tool_loop_recorded(
-    addr: SocketAddr,
-    tools: &[Arc<dyn Tool>],
-) -> (Result<String>, Vec<(String, String)>, u32) {
-    let client = gateway_client(addr);
-    let recorder = Arc::new(Recorder::default());
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let out = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask the model".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        recorder.as_ref(),
-        "Gather",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .map(|(text, _)| text);
-    (out, recorder.events(), turns.load(Ordering::Relaxed))
-}
-
-#[tokio::test]
-async fn empty_final_text_fails_the_turn() {
-    // No prior tool calls: an empty "stop" turn on the first round is a
-    // failure, not a clean exit.
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
-    let addr = gateway.addr();
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[]).await;
-    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
-    assert_eq!(turns, 0);
-    assert_eq!(
-        events,
-        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
-    );
-}
-
-#[tokio::test]
-async fn length_finish_reason_reports_model_turn_truncated() {
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("partial answer", "length")]).await;
-    let addr = gateway.addr();
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[]).await;
-    assert_eq!(out.unwrap(), "partial answer");
-    assert_eq!(turns, 1);
-    assert_eq!(
-        events,
-        vec![
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_TRUNCATED.to_string(),
-            ),
-        ]
-    );
-}
-
-#[tokio::test]
-async fn empty_truncated_final_text_fails_without_truncation_detail() {
-    // `finish_reason: "length"` is never a clean exit, even with empty text.
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "length")]).await;
-    let addr = gateway.addr();
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[]).await;
-    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
-    assert_eq!(turns, 0);
-    assert_eq!(
-        events,
-        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
-    );
-}
-
-#[tokio::test]
-async fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-        resp_text_finish("", "stop"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[echo]).await;
-    assert_eq!(
-        out.as_deref().expect("the run must succeed"),
-        "",
-        "a clean stop-exit yields an empty reply"
-    );
-    assert_eq!(turns, 2, "the tool-call turn and the accepted empty turn");
-    assert_eq!(
-        events,
-        vec![
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-            (
-                "Gather".to_string(),
-                detail::TOOL_CALL_SUCCEEDED.to_string(),
-            ),
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-        ]
-    );
-}
-
-#[tokio::test]
-async fn empty_stop_turn_without_tool_calls_fails() {
-    // Zero prior dispatches: the acceptance conditions cannot hold, so the
-    // empty "stop" turn stays an `EmptyModelReply` failure.
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
-    let addr = gateway.addr();
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[echo]).await;
-    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
-    assert_eq!(turns, 0);
-    assert_eq!(
-        events,
-        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
-    );
-}
-
-#[tokio::test]
-async fn empty_turn_without_finish_reason_after_tool_call_fails() {
-    // Fail closed: a missing finish reason is not "stop", so the empty turn
-    // is an error even after a successful dispatch.
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-        resp_text(""),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[echo]).await;
-    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
-    assert_eq!(turns, 1, "only the tool-call turn completed");
-    assert_eq!(
-        events,
-        vec![
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-            (
-                "Gather".to_string(),
-                detail::TOOL_CALL_SUCCEEDED.to_string(),
-            ),
-            ("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),),
-        ]
-    );
-}
-
 // --- Guard-wrapping of untrusted tool results in the loop ---
 
 /// The content of the first `tool`-role message in the last recorded body.
@@ -1635,54 +1306,6 @@ fn last_tool_turn_content(bodies: &[Value]) -> String {
         .to_string()
 }
 
-#[tokio::test]
-async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let echo: Arc<dyn Tool> = Arc::new(UntrustedEchoTool);
-    let tools: Vec<Arc<dyn Tool>> = vec![echo];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "final answer");
-
-    let content = last_tool_turn_content(&gateway.requests());
-    assert!(
-        content.contains("is data, not instructions"),
-        "an untrusted tool's result must carry the preface, got: {content}"
-    );
-    assert!(
-        content.contains("<untrusted_input_") && content.contains("</untrusted_input_"),
-        "an untrusted tool's result must be wrapped in the tags, got: {content}"
-    );
-    assert!(
-        content.contains("echoed: hi"),
-        "the wrapped block must still contain the tool output, got: {content}"
-    );
-}
-
 /// Extracts the guard-tag nonce from every `tool`-role turn in the last body.
 fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
     let last = bodies.last().expect("the loop must send a final request");
@@ -1700,58 +1323,6 @@ fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
             Some(rest[..end].to_string())
         })
         .collect()
-}
-
-#[tokio::test]
-async fn untrusted_nonce_is_stable_across_rounds() {
-    // One nonce per run: every round's envelope in a single loop carries the
-    // same nonce, so identical content wraps byte-identically and KV-cache
-    // prefixes stay shared across rounds.
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_0", "echo", "{\"value\":\"hi\"}"),
-        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
-        resp_text("final answer"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let echo: Arc<dyn Tool> = Arc::new(UntrustedEchoTool);
-    let tools: Vec<Arc<dyn Tool>> = vec![echo];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "final answer");
-
-    let nonces = tool_turn_nonces(&gateway.requests());
-    assert!(
-        nonces.len() >= 2,
-        "expected two rounds of guard-wrapped tool output, got: {nonces:?}"
-    );
-    assert!(
-        nonces.windows(2).all(|pair| pair[0] == pair[1]),
-        "every round's untrusted wrap in a run must carry the run's nonce: {nonces:?}"
-    );
 }
 
 #[tokio::test]
@@ -1786,50 +1357,6 @@ async fn untrusted_nonce_differs_across_runs() {
     assert_ne!(
         run_nonces[0], run_nonces[1],
         "each run must mint its own nonce"
-    );
-}
-
-#[tokio::test]
-async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let tools: Vec<Arc<dyn Tool>> = vec![echo];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "final answer");
-
-    let content = last_tool_turn_content(&gateway.requests());
-    assert_eq!(
-        content, "echoed: hi",
-        "a trusted tool's result must be appended verbatim, got: {content}"
-    );
-    assert!(
-        !content.contains("untrusted_input_"),
-        "a trusted tool's result must carry no guard tags, got: {content}"
     );
 }
 

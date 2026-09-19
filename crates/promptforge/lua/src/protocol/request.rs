@@ -1,6 +1,6 @@
 //! The request vocabulary: the validated suspending host calls a shim can
 //! yield, the store operations they carry, and the message-record types
-//! the chat and loop requests are built from.
+//! the chat request is built from.
 
 use promptforge_model_client::model::ModelBinding;
 
@@ -75,6 +75,11 @@ pub enum Request {
         /// answers. Validation lives here, in the protocol parse, once -
         /// the driver converts without re-checking.
         messages: Vec<MessageRecord>,
+        /// The loop shim's leading handle, as its frozen binding cloned
+        /// out of the userdata while the VM handle is live; `None` when
+        /// the round names no handle. Wins over `model` when both are
+        /// present (the shims never set both).
+        binding: Option<ModelBinding>,
         /// `opts.model`: the catalog model to use for this round, or
         /// `None` for the program's current `models.use` selection.
         model: Option<String>,
@@ -86,27 +91,6 @@ pub enum Request {
         /// aliases resolve to schemas in the dispatch arm, where the tool
         /// scope lives; the parse has no catalog.
         tools: Option<Vec<String>>,
-    },
-    /// `models.loop(handle?, messages, compactor?)`: the Rust-backed
-    /// model-tool loop over an author-owned message list. Section VMs alone
-    /// install the shim; the agent driver carries an unreachable
-    /// internal-invariant guard for the arm its exhaustive match forces.
-    Loop {
-        /// The validated message records, parsed once here exactly as for
-        /// [`Request::Chat`]. The driver projects them per dispatch and
-        /// appends every assistant message and correlated tool result to
-        /// the author's list behind `messages_key`.
-        messages: Vec<MessageRecord>,
-        /// The registry key for the author's message list, stashed while
-        /// the VM handle is live so the driver can append the loop's
-        /// records to the very table the author passed.
-        messages_key: mlua::RegistryKey,
-        /// The leading handle's frozen binding, else `None` (the driver
-        /// resolves the section's current model at call time).
-        binding: Option<ModelBinding>,
-        /// The registry key for the author-selected compactor callback,
-        /// else `None` (the omitted-compactor default, `compactors.fail`).
-        compactor: Option<mlua::RegistryKey>,
     },
     /// `user_input()`: a direct operator-input request to the run's input
     /// broker. Section VMs alone install the shim; the agent driver

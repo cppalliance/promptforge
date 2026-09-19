@@ -626,12 +626,14 @@ impl SectionVm {
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `call`,
-    /// `fanout`, `tools.call`).
+    /// `fanout`, `tools.call`). `max_tool_iterations` is the run's resolved
+    /// round cap for the `models.loop` shim a section install adds
+    /// afterward; a VM that never installs the loop shim passes any value.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
-    pub fn install_coro_shims(&mut self) -> Result<()> {
-        install_shim_prelude(&self.lua)
+    pub fn install_coro_shims(&mut self, max_tool_iterations: usize) -> Result<()> {
+        install_shim_prelude(&self.lua, max_tool_iterations)
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {

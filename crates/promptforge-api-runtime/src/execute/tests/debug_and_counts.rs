@@ -225,54 +225,35 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn tool_calls_count_increments_even_when_tool_errors() {
-    // TESTS-002: drive a real `FailingTool` through `run_tool_loop` and prove the
-    // counter records exactly one call even though the tool errors (the count is
-    // incremented before dispatch). The tool's own failure is now the call's
-    // error result, so the loop continues to the terminal reply.
+    // TESTS-002: drive a real `FailingTool` through a `models.loop` round
+    // and prove `tools.calls` records exactly one call even though the tool
+    // errors (the count is incremented before dispatch). The tool's own
+    // failure is the call's error result, so the loop continues to the
+    // terminal reply.
+    use super::models_loop::{always_tool, loop_context, loop_prompt};
+    use crate::execute::scheduler::Scheduler;
+
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
         resp_text("final answer"),
     ])
     .await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let failing: Arc<dyn Tool> = Arc::new(FailingTool);
-    let tools: Vec<Arc<dyn Tool>> = vec![failing];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
-    let recorder = Arc::new(Recorder::default());
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    // The gateway always calls the tool wired as "echo".
-    let counts = ToolCallCounts::new(["echo".to_string()]);
-
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask the model".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        recorder.as_ref(),
-        "Gather",
-        &turns,
-        &options,
-        &nonce,
-        Some(&counts),
-        None,
-        None,
-    )
-    .await
-    .expect("a tool's own failure becomes the call's result, not the loop's");
-    assert_eq!(out, "final answer");
-
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user('ask the model')\n\
+         models.loop(msgs)\n\
+         return msgs[#msgs].content .. '|' .. tostring(tools.calls.echo)",
+    );
+    let prompt = parse(&md);
+    let ctx = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("a tool's own failure becomes the call's result, not the loop's");
     assert_eq!(
-        counts.get("echo").expect("echo is a tracked alias"),
-        Some(1),
+        out, "final answer|1",
         "the counter must record exactly one call even though the tool errored"
     );
 }
@@ -342,172 +323,6 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
     assert!(
         msg.contains("search"),
         "error must list the seeded aliases: {msg}"
-    );
-}
-
-#[tokio::test]
-async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
-    // The loop's scope gate: a model call naming a declared-but-unscoped
-    // alias fails with OutOfScopeToolCall carrying the
-    // declared-but-unscoped hint. Driven at the loop directly; the
-    // prompt-level wiring returns with the `models.loop` step.
-    let gateway = ScriptedGateway::start(vec![resp_tool_call(
-        "call_1",
-        "global_tool",
-        "{\"value\":\"x\"}",
-    )])
-    .await;
-    let client = gateway_client(gateway.addr());
-    let scoped: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
-        "scoped",
-        "canonical_scoped",
-        "A scoped tool.",
-    ));
-    let global: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
-        "global_tool",
-        "canonical_global",
-        "A global tool.",
-    ));
-    let schemas = vec![
-        ToolSchema::new(
-            "scoped".to_string(),
-            "A scoped tool.".to_string(),
-            scoped.parameters_schema(),
-        )
-        .expect("the scoped schema is valid"),
-    ];
-    let mut dispatch = BTreeMap::new();
-    dispatch.insert(
-        "scoped".to_string(),
-        DispatchTarget::Bound(crate::lua::ToolBinding::for_test(
-            "scoped",
-            "A scoped tool.",
-            Arc::clone(&scoped),
-        )),
-    );
-    let mut global_aliases = BTreeMap::new();
-    global_aliases.insert("scoped".to_string(), scoped.id());
-    global_aliases.insert("global_tool".to_string(), global.id());
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let error = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        Some(&global_aliases),
-        None,
-    )
-    .await
-    .expect_err("model calling a global-but-unscoped tool must fail");
-    match &error {
-        Error::OutOfScopeToolCall {
-            name,
-            global_exists,
-            in_scope,
-        } => {
-            assert_eq!(name, "global_tool");
-            assert!(*global_exists, "the alias is a bound tool slot");
-            assert!(
-                in_scope.contains(&"scoped".to_string()),
-                "in_scope must list the scoped alias: {in_scope:?}"
-            );
-            assert!(
-                !in_scope.contains(&"global_tool".to_string()),
-                "global_tool must not be in scope: {in_scope:?}"
-            );
-        }
-        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
-    }
-    let msg = error.to_string();
-    assert!(
-        msg.contains("bound tool slot but was not added"),
-        "error message must hint declared-but-unscoped: {msg}"
-    );
-}
-
-#[tokio::test]
-async fn model_calling_pure_unknown_tool_is_a_hard_error() {
-    let gateway = ScriptedGateway::start(vec![resp_tool_call(
-        "call_1",
-        "nonexistent",
-        "{\"value\":\"x\"}",
-    )])
-    .await;
-    let client = gateway_client(gateway.addr());
-    let echo: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
-        "echo",
-        "canonical_echo",
-        "Echo a test value.",
-    ));
-    let schemas = vec![
-        ToolSchema::new(
-            "echo".to_string(),
-            "Echo a test value.".to_string(),
-            echo.parameters_schema(),
-        )
-        .expect("the echo schema is valid"),
-    ];
-    let mut dispatch = BTreeMap::new();
-    dispatch.insert(
-        "echo".to_string(),
-        DispatchTarget::Bound(crate::lua::ToolBinding::for_test(
-            "echo",
-            "Echo a test value.",
-            Arc::clone(&echo),
-        )),
-    );
-    let mut global_aliases = BTreeMap::new();
-    global_aliases.insert("echo".to_string(), echo.id());
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let error = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        Some(&global_aliases),
-        None,
-    )
-    .await
-    .expect_err("model calling a pure unknown tool must fail");
-    match &error {
-        Error::OutOfScopeToolCall {
-            name,
-            global_exists,
-            in_scope,
-        } => {
-            assert_eq!(name, "nonexistent");
-            assert!(!*global_exists, "the alias was never a bound tool slot");
-            assert!(
-                in_scope.contains(&"echo".to_string()),
-                "in_scope must list the scoped alias: {in_scope:?}"
-            );
-        }
-        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
-    }
-    let msg = error.to_string();
-    assert!(
-        !msg.contains("bound tool slot but was not added"),
-        "pure unknown must not hint declared-but-unscoped: {msg}"
     );
 }
 

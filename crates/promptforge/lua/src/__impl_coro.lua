@@ -5,19 +5,35 @@
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
 -- the host helper returning the hidden `var` data table as a plain deep
--- copy, `models`/`tools` are the section's namespace tables, passed in so
--- the chunk never reads a global, `error_value` builds the structured error
--- table (`{ kind, message, ... }` under the host's shared metatable, whose
--- `__tostring` is `message`), `stash_failure` records a block's raised
--- value for the host before the guard re-raises it, and `normalize_failure`
--- turns a Rust callback's raised failure (mlua's opaque userdata) into the
--- error table, passing every other value through unchanged.
-local yield, var_snapshot, models, tools, error_value, stash_failure, normalize_failure = ...
+-- copy, `models`/`tools`/`compactors` are the section's namespace tables,
+-- passed in so the chunk never reads a global, `max_tool_iterations` is
+-- the run's resolved round cap for `models.loop`, `error_value` builds the
+-- structured error table (`{ kind, message, ... }` under the host's shared
+-- metatable, whose `__tostring` is `message`), `stash_failure` records a
+-- block's raised value for the host before the guard re-raises it, and
+-- `normalize_failure` turns a Rust callback's raised failure (mlua's
+-- opaque userdata) into the error table, passing every other value
+-- through unchanged.
+local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
+  error_value, stash_failure, normalize_failure = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
 -- failure value so the host's runtime-error mapping keeps its source.
 local raw_pcall, raw_xpcall = pcall, xpcall
+
+-- math.type, captured at install for the same reason: the shim's type
+-- names must not move when author code rebinds `math`.
+local math_type = math.type
+
+-- The host's name for a value's type, as the protocol parse reports it:
+-- Lua folds integers and floats into "number", while the host names an
+-- integer "integer" and a float "number", so a shim-raised argument error
+-- reads exactly as the parse-raised one for the same value.
+local function host_type(value)
+  if math_type(value) == "integer" then return "integer" end
+  return type(value)
+end
 
 -- Every failure that reaches author code is one error table: `tostring`
 -- gives exactly the message, and a caller that branches reads `kind` and
@@ -145,14 +161,59 @@ local function chat(messages, opts)
   return result
 end
 
--- models.loop(handle?, messages, compactor?): the Rust-backed model-tool
--- loop over an author-owned message list. The host installs this as
--- models.loop in section VMs only; an agent VM never sees it. The leading
--- handle is optional: a userdata first argument selects the handle's frozen
--- binding, anything else is the messages argument (a wrong handle type is
--- the protocol parse's call error, exactly as for models.infer). The loop
--- appends every assistant message and correlated tool result to the list
--- and returns nil.
+-- Drains pending model-task notices into the author's list ahead of a
+-- round. No task exists yet, so nothing drains; the hook is the seam the
+-- tasks namespace fills in.
+local function drain_task_notices(messages)
+end
+
+-- Appends one record to the author's list. The list is a plain array (a
+-- messages.new() list keeps its builders behind __index, never as
+-- fields), so the append is an ordinary sequence store.
+local function append_record(messages, record)
+  messages[#messages + 1] = record
+end
+
+-- The message the exit rules raise for an empty round when the round
+-- carried no phrase of its own.
+local EMPTY_MODEL_REPLY = "empty model reply"
+
+-- Invokes the selected compactor on an overflow round with the reason tag.
+-- The shipped policy raises typed context exhaustion from Rust; the raise
+-- is normalized into the structured error table before re-raising, so the
+-- kind reaches an author pcall and the host alike. A compactor that
+-- returns instead of raising is the deferred replacement shape, which the
+-- active surface refuses.
+local function compact(compactor, reason)
+  local ok, failure = raw_pcall(compactor, reason)
+  if ok then
+    raise("lua", {
+      message = "the selected compactor returned without raising: replacement compactors are "
+        .. "deferred; compactors.fail is the only shipped policy",
+    })
+  end
+  error(normalize_failure(failure), 0)
+end
+
+-- models.loop(handle?, messages, compactor?): the model-tool loop over an
+-- author-owned message list, driven here over `chat` and `tool_call`
+-- yields so every network wait inside it is an ordinary suspension. The
+-- host installs this as models.loop in section VMs only; an agent VM
+-- never sees it. The leading handle is optional: a userdata first argument
+-- selects the handle's frozen binding, anything else is the messages
+-- argument (a wrong handle type is the protocol parse's call error,
+-- exactly as for models.infer). The compactor defaults to compactors.fail.
+--
+-- Per round: drain pending task notices, yield one `chat` over the list;
+-- on an overflow round invoke the compactor; on tool calls yield one
+-- `tool_call` per call under its call id, buffer every result, then append
+-- the assistant tool-call record and one tool record per result, so the
+-- list never shows a half-answered batch; on a reply append it and return
+-- nil; on an empty reply with `finish_reason == "stop"` after at least one
+-- answered tool call append an empty assistant record and return nil (the
+-- model's clean exit); on any other empty reply raise empty_model_reply.
+-- Past the round cap raise tool_loop_exhausted. The shim emits no events:
+-- the scheduler reports each round as it applies the round's answer.
 local function models_loop(...)
   local handle, messages, compactor
   if type((...)) == 'userdata' then
@@ -166,14 +227,50 @@ local function models_loop(...)
     end
     messages, compactor = ...
   end
-  local ok, result = yield({
-    op = "loop",
-    handle = handle,
-    messages = messages,
-    compactor = compactor,
-  })
-  if not ok then fail(result) end
-  return result
+  if compactor == nil then
+    compactor = compactors.fail
+  elseif type(compactor) ~= "function" then
+    raise("lua", { message = "compactor must be a function, got " .. host_type(compactor) })
+  end
+  -- Answered dispatches: any call that received a result record, a tool's
+  -- own failure included, counts toward the clean-exit rule.
+  local answered = 0
+  for _ = 1, max_tool_iterations do
+    drain_task_notices(messages)
+    local ok, round = yield({ op = "chat", messages = messages, handle = handle })
+    if not ok then fail(round) end
+    if round.overflow then
+      compact(compactor, round.overflow_reason)
+    end
+    local calls = round.tool_calls
+    if calls then
+      local results = {}
+      for index, call in ipairs(calls) do
+        results[index] = tools_call_as_model(call.id, call.name, call.arguments)
+      end
+      local record_calls = {}
+      for index, call in ipairs(calls) do
+        record_calls[index] = { id = call.id, name = call.name, arguments = call.arguments }
+      end
+      append_record(messages, { role = "assistant", content = "", tool_calls = record_calls })
+      for index, call in ipairs(calls) do
+        append_record(messages, { role = "tool", content = results[index], tool_call_id = call.id })
+      end
+      answered = answered + #calls
+    elseif round.reply then
+      append_record(messages, { role = "assistant", content = round.reply })
+      return nil
+    elseif round.finish_reason == "stop" and answered > 0 then
+      append_record(messages, { role = "assistant", content = "" })
+      return nil
+    else
+      raise("empty_model_reply", {
+        message = round.empty_detail or EMPTY_MODEL_REPLY,
+        finish_reason = round.finish_reason,
+      })
+    end
+  end
+  raise("tool_loop_exhausted", { message = "tool-call loop did not converge" })
 end
 
 -- user_input(): direct operator input through the run's input broker. The

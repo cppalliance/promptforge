@@ -70,10 +70,10 @@
 //! resolution helpers), `protocol` (the coroutine request/answer types
 //! for the yield/resume boundary), `scheduler` (the chain-stack scheduler
 //! driving the coroutine protocol: the live H1 pass, the walk, call
-//! chains, and fanout), `scope` (tool-scope
-//! validation and schema/dispatch preparation), `tool_loop` (the
-//! Rust-backed model-tool loop behind the section-visible `models.loop`),
-//! and `support` (shared helpers).
+//! chains, fanout, and the `chat` and `tool_call` rounds the
+//! section-visible `models.loop` shim yields), `scope` (tool-scope
+//! validation and schema/dispatch preparation), and `support` (shared
+//! helpers).
 
 mod bindings;
 mod config;
@@ -90,7 +90,6 @@ mod scope;
 mod section_context;
 pub(crate) mod section_vm;
 mod support;
-mod tool_loop;
 mod tools;
 
 // Public API surface.
