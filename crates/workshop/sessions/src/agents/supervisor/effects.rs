@@ -1,13 +1,8 @@
 //! Execution of reducer-selected supervisor effects.
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_api::bridge::{CapabilityRegistry, GatewayClient as ModelClient};
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
-use promptforge_api_types::cancel::sync::CancelHandle as CancelFlag;
-use promptforge_api_types::observe::Observer;
-use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::wire::StreamDelta;
 
 use workshop_gateway::GatewaySnapshot;
@@ -15,8 +10,9 @@ use workshop_menu::ChatCatalog;
 use workshop_protocol::Activity;
 
 use crate::agents::environment::{current_model, session_registry};
+use crate::agents::run::{RunParts, now_timestamp, run_markdown_agent};
 use crate::agents::{
-    AgentSession, AgentSource, SessionHost, SessionObserver, agent_client, delta_stamp, ui_provider,
+    AgentSession, AgentSource, SessionHost, SessionSink, agent_client, delta_stamp, ui_provider,
 };
 use crate::input::SessionInputBroker;
 
@@ -32,7 +28,7 @@ use super::transition::{
 /// `AgentError`, which named Lua-specific failure shapes no session run
 /// can produce.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum AgentRunError {
+pub(in crate::agents) enum AgentRunError {
     /// The run was cancelled: a stop reason, never a failure.
     #[error("the agent run was interrupted")]
     Interrupted,
@@ -56,7 +52,6 @@ pub(super) enum EffectOutcome {
 /// Immutable resources reused by each reducer-selected relaunch.
 struct RunFactory {
     session: Arc<AgentSession>,
-    observer: Arc<dyn Observer>,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
     host: SessionHost,
@@ -65,20 +60,25 @@ struct RunFactory {
 impl RunFactory {
     /// Builds reusable run resources for one session.
     fn new(session: Arc<AgentSession>, host: &SessionHost) -> Self {
-        let observer: Arc<dyn Observer> = Arc::new(SessionObserver {
-            log: Arc::clone(&session.log),
-            rounds: Arc::clone(&session.rounds),
-            push: host.push(),
-            backoff: host.backoff().clone(),
-            errors: session.errors.clone(),
-            lifecycle: Arc::clone(&session.lifecycle),
-        });
         Self {
             on_delta: delta_stamp(&session, &host.push()),
             ui: ui_provider(host.menu(), host.registry()),
             session,
-            observer,
             host: host.clone(),
+        }
+    }
+
+    /// The session's event sink for one run: the memory log every
+    /// transcript event lands in and the side effects the session wires
+    /// to the run's reports.
+    fn sink(&self) -> SessionSink {
+        SessionSink {
+            log: Arc::clone(&self.session.log),
+            rounds: Arc::clone(&self.session.rounds),
+            push: self.host.push(),
+            backoff: self.host.backoff().clone(),
+            errors: self.session.errors.clone(),
+            lifecycle: Arc::clone(&self.session.lifecycle),
         }
     }
 
@@ -97,7 +97,10 @@ impl RunFactory {
     /// Builds one unified-runtime run of a Markdown prompt document. The
     /// run's host-drawn inputs are taken here, at launch: the `ui()`
     /// snapshot (so a menu or workspace change takes effect on the next
-    /// run), a fresh seed, and the start instant.
+    /// run), a fresh seed, and the start instant. The dropdown's current
+    /// model is resolved at launch too, so a selection change takes
+    /// effect on the next run; the session's wait registry stands behind
+    /// the generic input broker, and deltas go to the session's channel.
     fn launch_markdown(
         &self,
         run: RunId,
@@ -106,138 +109,39 @@ impl RunFactory {
         registry: Arc<CapabilityRegistry>,
         gateway: Arc<GatewaySnapshot>,
     ) -> RunFuture {
-        let parts = MarkdownRunParts {
-            session: Arc::clone(&self.session),
-            observer: Arc::clone(&self.observer),
-            ui: (self.ui)(),
-            seed: rand::random(),
-            started_at: now_timestamp(),
-            on_delta: Arc::clone(&self.on_delta),
-            host: self.host.clone(),
-        };
+        let session = Arc::clone(&self.session);
+        let host = self.host.clone();
+        let sink = self.sink();
+        let ui = (self.ui)();
+        let on_delta = Arc::clone(&self.on_delta);
         Box::pin(async move {
-            let result = run_markdown_agent(&source, parts, run, client, registry, &gateway).await;
+            let result = async {
+                let model = current_model(&host, gateway.base_url(), gateway.api_key())
+                    .await
+                    .map_err(|cause| AgentRunError::Failed {
+                        message: format!("the chat cannot launch: {cause}"),
+                        source: Some(Box::new(cause)),
+                    })?;
+                let parts = RunParts {
+                    sink,
+                    broker: Arc::new(SessionInputBroker::new(
+                        Arc::clone(&session.waits),
+                        session.input_frames.clone(),
+                    )),
+                    ui,
+                    seed: rand::random(),
+                    started_at: now_timestamp(),
+                    on_delta,
+                    model,
+                    execution: session.id.clone(),
+                    cancel: session.arm_cancel(run),
+                };
+                run_markdown_agent(&source, parts, client, registry).await
+            }
+            .await;
             (run, result)
         })
     }
-}
-
-/// The owned pieces one unified-runtime run needs beyond its source and
-/// client, cloned out of the factory per relaunch.
-struct MarkdownRunParts {
-    session: Arc<AgentSession>,
-    observer: Arc<dyn Observer>,
-    /// The `ui()` snapshot taken at launch.
-    ui: serde_json::Value,
-    /// The run's seed, drawn at launch from the OS CSPRNG.
-    seed: u64,
-    /// The launch instant, every section's `sys.when`.
-    started_at: Timestamp,
-    on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
-    host: SessionHost,
-}
-
-/// Runs one Markdown agent prompt on the unified runtime: the session's
-/// wait registry behind the generic input broker, the launch-time menu
-/// selection behind `ui().selected_model`, deltas forwarded to the
-/// session's channel. The host carries the session's shared registry, and
-/// the engine's loop activates the first-party capabilities the prompt's
-/// frontmatter declares against it - the catalog goes to the engine, the
-/// implementations stay on the host's side - while the context carries
-/// the dropdown's current model resolved at launch, so a selection change
-/// takes effect on the next run.
-async fn run_markdown_agent(
-    source: &str,
-    parts: MarkdownRunParts,
-    run: RunId,
-    client: ModelClient,
-    registry: Arc<CapabilityRegistry>,
-    gateway: &GatewaySnapshot,
-) -> Result<(), AgentRunError> {
-    let MarkdownRunParts {
-        session,
-        observer,
-        ui,
-        seed,
-        started_at,
-        on_delta,
-        host,
-    } = parts;
-    let prompt = Prompt::parse(source, &session.id, observer.as_ref()).map_err(|error| {
-        AgentRunError::Failed {
-            message: format!("the embedded Markdown agent failed to parse: {error}"),
-            source: Some(Box::new(error)),
-        }
-    })?;
-    let broker = Arc::new(SessionInputBroker::new(
-        Arc::clone(&session.waits),
-        session.input_frames.clone(),
-    ));
-    let model = match current_model(&host, gateway.base_url(), gateway.api_key()).await {
-        Ok(model) => model,
-        Err(cause) => {
-            return Err(AgentRunError::Failed {
-                message: format!("the chat cannot launch: {cause}"),
-                source: Some(Box::new(cause)),
-            });
-        }
-    };
-    let (cancel, bridge) = bridge_cancel(session.arm_cancel(run));
-    let mut ctx = RunContext::new(session.id.clone(), seed, started_at)
-        .cancel(cancel)
-        .ui(ui);
-    if let Some(model) = model {
-        ctx = ctx.model(model);
-    }
-    // The engine's context carries the run's inputs; everything the loop
-    // performs with - the client, the registry it activates, the broker,
-    // the delta hook, the observer - rides the host.
-    let host = RunHost::new()
-        .observer(observer)
-        .client(client)
-        .registry(registry)
-        .input_broker(broker)
-        .on_delta(on_delta);
-    let outcome = Environment::new().run(&prompt, "", ctx, host).await;
-    // The run is over, so nothing reads the flag: the bridge ends with it.
-    bridge.abort();
-    match outcome {
-        RunResult::Ok(_output) => Ok(()),
-        RunResult::Cancelled => Err(AgentRunError::Interrupted),
-        RunResult::Failure(error) => Err(AgentRunError::Failed {
-            message: error.to_string(),
-            source: Some(Box::new(error)),
-        }),
-    }
-}
-
-/// The system clock now as the engine's `Timestamp`: the host's stamp for
-/// a run's `started_at`, since the engine reads no clock of its own. A
-/// clock before the epoch or beyond `i64` milliseconds (neither reachable
-/// on a real host) saturates to the epoch rather than refusing the launch.
-fn now_timestamp() -> Timestamp {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
-        .map_or(Timestamp::UNIX_EPOCH, Timestamp::from_unix_millis)
-}
-
-/// Bridges the session's awaitable cancel token to the synchronous flag
-/// the engine polls: the flag is set the moment the token fires. The
-/// caller aborts the returned bridge task once the run is over, so a run
-/// that finishes uncancelled leaves no task waiting on a token nobody
-/// will fire.
-fn bridge_cancel(
-    token: promptforge_api_types::cancel::CancelHandle,
-) -> (CancelFlag, tokio::task::JoinHandle<()>) {
-    let flag = CancelFlag::new();
-    let bridged = flag.clone();
-    let bridge = tokio::spawn(async move {
-        token.cancelled().await;
-        bridged.cancel();
-    });
-    (flag, bridge)
 }
 
 /// Mutable runtime bindings and the currently executing run.

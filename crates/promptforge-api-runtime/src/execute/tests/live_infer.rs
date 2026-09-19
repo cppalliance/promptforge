@@ -1,4 +1,3 @@
-use super::super::*;
 use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -43,7 +42,9 @@ async fn the_hosts_client_serves_a_run_the_context_never_names() {
     let prompt = parse(source);
     let env = Environment::new();
     let host = RunHost::new().client(gateway_client(addr));
-    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent()), host).await else {
+    let RunResult::Ok(out) =
+        crate::test_support::run_with_host(&env, &prompt, "", to_context(silent()), host).await
+    else {
         panic!("the host's client must serve the run");
     };
 
@@ -129,7 +130,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     );
     let store = TestStore::from_vfs(ctx.vfs_handle().clone());
     let RunResult::Ok(out) =
-        crate::execute::run(&prompt, "load-time args", ctx, RunHost::new()).await
+        crate::test_support::run_host(&prompt, "load-time args", ctx, RunHost::new()).await
     else {
         panic!("top-level shared host calls must succeed");
     };

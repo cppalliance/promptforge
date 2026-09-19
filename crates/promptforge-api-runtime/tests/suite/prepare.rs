@@ -5,7 +5,7 @@
 //! identity against the host-supplied catalog, and model satisfaction -
 //! the trivial fill binding every declared role to the context's current
 //! model, the hard-keyword and context-minimum checks against its
-//! descriptor, and `Environment::run` refusing an unsatisfiable prompt
+//! descriptor, and the host's activate-prepare-run path refusing an unsatisfiable prompt
 //! with today's model-readable notice.
 
 use std::io;
@@ -14,10 +14,11 @@ use std::sync::{Arc, Mutex};
 
 use promptforge_api_runtime::capabilities::CapabilityRegistry;
 use promptforge_api_runtime::execute::{
-    Activation, Environment, RequirementCheck, Requirements, RunContext, RunErrorKind, RunHost,
-    RunResult, activate,
+    Activation, Environment, RequirementCheck, Requirements, RunContext, RunErrorKind, RunResult,
+    activate,
 };
 use promptforge_api_runtime::parser::Prompt;
+use promptforge_api_runtime::test_support::{RunHost, run_with_host};
 use promptforge_api_types::cancel::sync::CancelHandle;
 use promptforge_api_types::capabilities::{
     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
@@ -32,7 +33,7 @@ use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
 use super::support::context;
 
 /// The loop path's activate-then-prepare ceremony spelled out, so a test
-/// can inspect what `Environment::run` folds into one refusal: builds the
+/// can inspect what the host's activate-prepare-run path folds into one refusal: builds the
 /// run's VFS from `env`, activates the prompt's declared capabilities
 /// against `registry` with the run's own services, installs the resulting
 /// catalog, prepares the context over that VFS, and merges activation's
@@ -54,7 +55,7 @@ fn prepare_activated(
 }
 
 /// The host's zero-burden flow with capabilities: hands `registry` to the
-/// host and runs through `Environment::run`, which builds the run's VFS,
+/// host and runs through the host's activate-prepare-run path, which builds the run's VFS,
 /// activates, installs the catalog, prepares, merges the activation
 /// report, and refuses an unsatisfiable prompt.
 async fn run_activated(
@@ -62,9 +63,14 @@ async fn run_activated(
     prompt: &Prompt,
     ctx: RunContext,
 ) -> RunResult {
-    Environment::new()
-        .run(prompt, "", ctx, RunHost::new().registry(Arc::new(registry)))
-        .await
+    run_with_host(
+        &Environment::new(),
+        prompt,
+        "",
+        ctx,
+        RunHost::new().registry(Arc::new(registry)),
+    )
+    .await
 }
 
 /// A prompt declaring `promptforge/web` as a required capability.
@@ -587,14 +593,14 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
     let env = Environment::new();
-    let result = env
-        .run(
-            &prompt,
-            "",
-            context("refuse").model(current_model(32_000, ThinkingMode::Never)),
-            RunHost::new(),
-        )
-        .await;
+    let result = run_with_host(
+        &env,
+        &prompt,
+        "",
+        context("refuse").model(current_model(32_000, ThinkingMode::Never)),
+        RunHost::new(),
+    )
+    .await;
     let RunResult::Failure(error) = result else {
         panic!("an unsatisfiable prompt is refused: {result:?}");
     };
@@ -690,14 +696,14 @@ async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
     let env = Environment::new();
     // The zero-burden path: no explicit prepare call, and the declared
     // role's requirements are met by the current model.
-    let result = env
-        .run(
-            &prompt,
-            "",
-            context("implicit").model(current_model(200_000, ThinkingMode::Always)),
-            RunHost::new(),
-        )
-        .await;
+    let result = run_with_host(
+        &env,
+        &prompt,
+        "",
+        context("implicit").model(current_model(200_000, ThinkingMode::Always)),
+        RunHost::new(),
+    )
+    .await;
     let RunResult::Ok(text) = result else {
         panic!("a satisfiable prompt runs through implicit prepare: {result:?}");
     };
@@ -1217,9 +1223,14 @@ async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
     // An empty catalog: the slot's capability contributed nothing, which
     // prepare reports as the missing capability.
-    let result = Environment::new()
-        .run(&prompt, "", context("notice"), RunHost::new())
-        .await;
+    let result = run_with_host(
+        &Environment::new(),
+        &prompt,
+        "",
+        context("notice"),
+        RunHost::new(),
+    )
+    .await;
     let RunResult::Failure(error) = result else {
         panic!("an unfilled required slot is refused: {result:?}");
     };

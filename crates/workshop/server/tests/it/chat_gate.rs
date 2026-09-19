@@ -5,7 +5,9 @@
 //!
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -
-//! a Markdown prompt on the unified runtime.
+//! a Markdown prompt on the unified runtime. A session's transcript lives
+//! in memory until the harness's run log lands, so no gate here spans a
+//! server restart; reconnect within one process is the agents suite's.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant
@@ -25,41 +27,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures_util::StreamExt as _;
 use serde_json::json;
-use tokio::sync::broadcast;
 
-use promptforge_api_runtime::client::{
-    GatewayClient as ModelClient, GatewayEndpoint, SecretString,
-};
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
-use promptforge_api_types::cancel::sync::CancelHandle;
-use promptforge_api_types::events::{EventLog as _, RuntimeEventKind};
-use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge_api_types::observe::Observer;
 use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
 use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,
-    ServerConfig, SessionInputBroker, WaitRegistry, WorkshopObserver, router,
+    AgentsConfig, AppState, Config, GatewayConfig, InputResponse, ResolvedGateway, ServerConfig,
+    router,
 };
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
 use crate::common::{JsonSocket, spawn_gateway};
-
-/// The embedded built-in chat prompt, exactly what a `chat` launch runs.
-const CHAT_MD: &str = include_str!("../../../sessions/agents/chat.md");
-
-/// The relaunch harness's terminal outcome, mirroring the supervisor's
-/// `AgentRunError`: cancellation maps to `Interrupted`, and every other
-/// run failure carries its rendered message.
-#[derive(Debug)]
-enum AgentError {
-    /// The run's cancel handle fired.
-    Interrupted,
-    /// The prompt run failed.
-    Program {
-        /// The failure's rendered message.
-        message: String,
-    },
-}
 
 /// Every completion request body the gate mock received, in arrival
 /// order: the gate's proof of exactly what the model was shown.
@@ -142,14 +118,12 @@ async fn switch_to_model_b() -> Response {
 struct GateServer {
     /// The server's `ws://` base URL.
     ws_base: String,
-    /// The mock gateway's `http://` base URL, for the restart relaunch.
-    gateway_url: String,
     /// The shared state handle: menu, catalog, and session registry.
     state: AppState,
     /// The mock's captured request bodies.
     captured: CapturedRequests,
-    /// Keeps the state directory (and its session JSONLs) alive.
-    dir: tempfile::TempDir,
+    /// Keeps the state directory alive.
+    _dir: tempfile::TempDir,
 }
 
 /// The typed catalog a mock gateway serves from `/v1/models`: the launch
@@ -250,10 +224,9 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
     });
     GateServer {
         ws_base: format!("ws://{addr}"),
-        gateway_url,
         state,
         captured,
-        dir,
+        _dir: dir,
     }
 }
 
@@ -320,86 +293,6 @@ fn role_content_pairs(request: &serde_json::Value) -> Vec<(String, String)> {
 /// Builds one owned `(role, content)` pair for the assertions.
 fn pair(role: &str, content: &str) -> (String, String) {
     (role.to_owned(), content.to_owned())
-}
-
-/// The running relaunch of the restart gate: everything the test drives
-/// and tears down.
-struct RestoredChat {
-    /// Announces the relaunched agent's input waits.
-    frames: broadcast::Receiver<InputFrame>,
-    /// The registry the response delivery completes waits through.
-    waits: Arc<WaitRegistry>,
-    /// Ends the relaunched run at teardown: the synchronous flag the
-    /// engine polls, set directly since nothing here awaits a token.
-    cancel: CancelHandle,
-    /// The run task, joined at teardown.
-    run: tokio::task::JoinHandle<Result<(), AgentError>>,
-}
-
-/// The relaunch half of the restart gate: the supervisor's own pieces -
-/// the session's wait registry behind the generic input broker, the
-/// embedded chat prompt, the shared session registry of first-party
-/// capabilities on the host, and a client aimed at the mock gateway - run
-/// on the unified runtime over the restored log. The context carries the
-/// current model directly: the supervisor resolves the dropdown's
-/// selection at launch, and this harness drives the run beneath that
-/// seam.
-fn spawn_restored_chat(
-    restored: &Arc<WorkshopObserver>,
-    session: &str,
-    gateway_url: &str,
-) -> RestoredChat {
-    let waits = Arc::new(WaitRegistry::new());
-    let (frames_tx, frames) = broadcast::channel(8);
-    let broker = Arc::new(SessionInputBroker::new(Arc::clone(&waits), frames_tx));
-    let client = ModelClient::new(
-        GatewayEndpoint::new(&format!("{gateway_url}/v1")).expect("the mock endpoint parses"),
-        SecretString::new("test-key").expect("the test key is non-empty"),
-    );
-    let cancel = CancelHandle::new();
-    let observer: Arc<dyn Observer> = restored.clone();
-    let registry = workshop_sessions::session_registry(gateway_url, "test-key")
-        .expect("the mock gateway shape builds the session registry");
-    let model = ModelDescriptor::new(
-        ModelId::gateway("test-model").expect("the test model id is valid"),
-        "test model",
-        std::num::NonZeroU32::new(200_000).expect("200000 is non-zero"),
-        ThinkingMode::Never,
-    );
-    let ctx = RunContext::new(
-        session.to_owned(),
-        1,
-        promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
-    )
-    .cancel(cancel.clone())
-    .model(model);
-    let host = RunHost::new()
-        .observer(Arc::clone(&observer))
-        .client(client)
-        .registry(Arc::new(registry))
-        .input_broker(broker);
-    let execution = session.to_owned();
-    let run = tokio::spawn(async move {
-        let result = async {
-            let prompt = Prompt::parse(CHAT_MD, &execution, observer.as_ref())
-                .expect("the embedded chat prompt parses");
-            Environment::new().run(&prompt, "", ctx, host).await
-        }
-        .await;
-        match result {
-            RunResult::Ok(_output) => Ok(()),
-            RunResult::Cancelled => Err(AgentError::Interrupted),
-            RunResult::Failure(error) => Err(AgentError::Program {
-                message: error.to_string(),
-            }),
-        }
-    });
-    RestoredChat {
-        frames,
-        waits,
-        cancel,
-        run,
-    }
 }
 
 include!("chat_gate/protocol.rs");

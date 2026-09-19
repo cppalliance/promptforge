@@ -1,13 +1,16 @@
-//! The adapter from the engine's [`Event`] values to today's host seams.
+//! The adapter from the engine's [`Event`] values to the recording-observer
+//! seams the existing suites install.
 //!
-//! The scheduler reports as values into the run's event buffer; the driver
-//! drains that buffer after every dispatch round and hands the batch to
-//! [`forward`], which replays each event onto the host's [`Observer`] and,
-//! for the debug variants, its [`DebugCapture`]. Lifecycle variants become
-//! the matching [`Observation`]; content variants become the `on_*` hooks;
-//! `Request` and `Response` become the capture pair. The order of the
-//! batch is the order the host sees, so the existing observation suites
-//! hold unchanged through this path.
+//! The scheduler reports as values; a run's `step` returns them, and the
+//! test drivers hand each batch to [`forward`], which replays each event
+//! onto the suite's [`Observer`] and, for the debug variants, its
+//! [`DebugCapture`]. Lifecycle variants become the matching
+//! [`Observation`]; content variants become the `on_*` hooks; `Request`
+//! and `Response` become the capture pair. The order of the batch is the
+//! order the observer sees, so the observation suites hold unchanged
+//! through this path without rewriting their assertions. The adapter's
+//! only consumers are the drivers in this module; production hosts read
+//! the events themselves.
 //!
 //! The live streaming-delta callback (`on_delta`) is not an event: a delta
 //! is a fragment the model client hands over mid-round, before the round's
@@ -29,9 +32,8 @@
 use promptforge_api_types::event::Event;
 
 use crate::debug::{DebugCapture, DebugEvent};
+use crate::execute::event_buffer::{unit_lifecycle_variants, unit_observation};
 use crate::observe::{Observation, Observer};
-
-use super::event_buffer::{unit_lifecycle_variants, unit_observation};
 
 /// The payload-carrying lifecycle and task variants
 /// [`forward_lifecycle`] owns.
@@ -82,12 +84,10 @@ macro_rules! other_groups {
     };
 }
 
-/// Replays `events`, in order, onto `observer` and `debug`.
-pub(crate) fn forward(
-    events: Vec<Event>,
-    observer: &dyn Observer,
-    debug: Option<&dyn DebugCapture>,
-) {
+/// Replays `events`, in order, onto `observer` and `debug`: the adapter a
+/// suite applies to the events a driver returned, so its recording
+/// observer sees what the loop used to hand it.
+pub fn forward(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
     for event in events {
         forward_one(event, observer, debug);
     }
@@ -99,7 +99,7 @@ pub(crate) fn forward(
 /// The match is exhaustive over [`Event`] with no wildcard, and each
 /// group's own match names the other groups' variants as not its own, so
 /// a new variant fails to compile here until a group claims it.
-fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
+pub(crate) fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
     if let Some(observation) = unit_observation(&event) {
         observer.observe(event.execution(), event.section(), observation);
         return;

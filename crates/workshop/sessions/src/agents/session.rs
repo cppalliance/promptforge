@@ -1,5 +1,5 @@
 //! One running agent session: the state that outlives any socket, the
-//! per-session observer the agent run reports through, and the
+//! per-session event sink the agent run reports through, and the
 //! launch-time providers for deltas and the `ui()` snapshot.
 
 use std::fmt;
@@ -7,8 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::events::{CallMetrics, RuntimeEventKind, ToolCallEvent};
-use promptforge_api_types::observe::{Observation, Observer};
+use promptforge_api_types::event::Event;
 use promptforge_api_types::wire::StreamDelta;
 use tokio::sync::broadcast;
 
@@ -34,7 +33,7 @@ pub(crate) enum AgentSource {
 /// reply id of the durable event that will supersede it.
 #[derive(Debug, Clone)]
 pub(crate) struct AgentDelta {
-    /// The superseding reply id ([`SessionObserver`]'s round count when
+    /// The superseding reply id ([`SessionSink`]'s round count when
     /// the chunk streamed).
     pub(crate) reply: u64,
     /// Which side channel the chunk belongs to.
@@ -45,7 +44,7 @@ pub(crate) struct AgentDelta {
 
 /// One running agent session: the state that outlives any socket.
 pub(crate) struct AgentSession {
-    /// The session's unguessable id, also its event JSONL's file stem.
+    /// The session's unguessable id.
     pub(crate) id: String,
     /// The agent's name (its `.md` file stem), every observer call's
     /// `section` label.
@@ -53,8 +52,9 @@ pub(crate) struct AgentSession {
     /// The program source and its runtime, retained so turn-cancel can
     /// relaunch it.
     pub(super) source: AgentSource,
-    /// The persisting event log: `Observer` write side, `EventLog` read
-    /// side, broadcast fan-out for socket wakeups.
+    /// The session's memory event log: the transcript the sockets drain
+    /// by cursor, with broadcast fan-out for their wakeups. Memory-only
+    /// until the harness's run log lands.
     pub(crate) log: Arc<WorkshopObserver>,
     /// Cancellation provenance and the accepted-turn exclusion boundary.
     pub(super) lifecycle: Arc<RunLifecycle>,
@@ -171,14 +171,16 @@ impl AgentSession {
     }
 }
 
-/// The per-session [`Observer`] wrapper `run_agent` reports through: it
-/// forwards every report to the persisting log and owns the side effects
-/// the session wires to content events - the reply-id round count
-/// (advanced as a reply or tool-call batch lands, before the program
-/// resumes, so no later delta can carry a settled id), the backoff reset,
-/// and the idle status push on completed replies.
-pub(crate) struct SessionObserver {
-    /// The persisting log every report forwards to.
+/// The per-session event sink one run reports through: it appends every
+/// transcript event (the content kinds the `/agents/ws` socket frames) to
+/// the session's memory log and owns the side effects the session wires
+/// to the run's reports - the reply-id round count (advanced as a reply
+/// or tool-call batch lands, before the program resumes, so no later delta
+/// can carry a settled id), the backoff reset, the idle status push on
+/// completed replies, and the operator-facing error frame for a failed
+/// model turn or tool call.
+pub(crate) struct SessionSink {
+    /// The memory log every transcript event lands in.
     pub(super) log: Arc<WorkshopObserver>,
     /// Settled model rounds, shared with the delta stamp.
     pub(super) rounds: Arc<AtomicU64>,
@@ -192,122 +194,58 @@ pub(crate) struct SessionObserver {
     pub(super) lifecycle: Arc<RunLifecycle>,
 }
 
-impl Observer for SessionObserver {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        // A failed model round or tool dispatch is operator-visible: the
-        // program survives it (the built-in chat pcalls models.loop and
-        // returns to waiting), so the run never fails and only the session
-        // can tell the SPA. A tool dispatch failure aborts the loop just as
-        // a failed round does, so both are terminal for the turn. The
-        // observation carries no payload; the frame names the boundary
-        // that failed.
-        if matches!(
-            event,
-            Observation::ModelTurnFailed | Observation::ToolCallFailed
-        ) {
-            self.lifecycle.settle_current_turn();
-            let message = format!("{event} in agent `{section}`");
-            let _ = self.errors.send(message.clone());
-            // The failed turn never reaches on_assistant_reply, so this
-            // terminal status is the only frame that releases the
-            // turn-dispatch Thinking push; without it the status bar's
-            // sustained amber LED never returns to idle.
-            self.push
-                .push_failure(event.to_string(), message, Activity::General);
+impl SessionSink {
+    /// Applies one run event: the side effects first, then the append,
+    /// so a socket woken by the append reads a settled round count.
+    pub(crate) fn observe(&self, event: Event) {
+        match &event {
+            // A failed model round or tool dispatch is operator-visible:
+            // the program survives it (the built-in chat pcalls
+            // models.loop and returns to waiting), so the run never fails
+            // and only the session can tell the SPA. A tool dispatch
+            // failure aborts the loop just as a failed round does, so both
+            // are terminal for the turn. The event carries no payload; the
+            // frame names the boundary that failed.
+            Event::ModelTurnFailed { section, .. } | Event::ToolCallFailed { section, .. } => {
+                let boundary = match event {
+                    Event::ModelTurnFailed { .. } => "Model turn failed",
+                    _ => "Tool call failed",
+                };
+                self.lifecycle.settle_current_turn();
+                let message = format!("{boundary} in agent `{section}`");
+                let _ = self.errors.send(message.clone());
+                // The failed turn never reaches a reply, so this terminal
+                // status is the only frame that releases the
+                // turn-dispatch Thinking push; without it the status bar's
+                // sustained amber LED never returns to idle.
+                self.push.push_failure(boundary, message, Activity::General);
+                return;
+            }
+            Event::AssistantReply { .. } => {
+                self.lifecycle.settle_current_turn();
+                self.rounds.fetch_add(1, Ordering::SeqCst);
+                self.backoff.record_useful_work();
+                self.push.push_idle();
+            }
+            // A tool-call batch settles its round's deltas without ending
+            // the turn: the count advances, the status stays busy.
+            Event::AssistantToolCalls { .. } => {
+                self.rounds.fetch_add(1, Ordering::SeqCst);
+            }
+            Event::Thinking { .. } | Event::ToolResult { .. } | Event::UserInput { .. } => {}
+            // Lifecycle, task, and debug events are not transcript: the
+            // socket has no frame for them and the log records content
+            // alone.
+            _ => return,
         }
-        self.log.observe(execution, section, event);
+        self.log.append(event);
     }
 
-    fn on_assistant_reply(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        metrics: Option<&CallMetrics>,
-    ) {
-        self.log.on_assistant_reply(
-            execution,
-            section,
-            chain_id,
-            depth,
-            turn,
-            text,
-            finish_reason,
-            model,
-            metrics,
-        );
-        self.lifecycle.settle_current_turn();
-        self.rounds.fetch_add(1, Ordering::SeqCst);
-        self.backoff.record_useful_work();
-        self.push.push_idle();
-    }
-
-    fn on_assistant_tool_calls(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        model: &str,
-        calls: &[ToolCallEvent],
-    ) {
-        self.log
-            .on_assistant_tool_calls(execution, section, chain_id, depth, turn, model, calls);
-        // A tool-call batch settles its round's deltas without ending the
-        // turn: the count advances, the status stays busy.
-        self.rounds.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn on_tool_result(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        content: &str,
-        trusted: bool,
-    ) {
-        self.log.on_tool_result(
-            execution,
-            section,
-            chain_id,
-            depth,
-            turn,
-            tool_call_id,
-            alias,
-            content,
-            trusted,
-        );
-    }
-
-    fn on_thinking(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
-        self.log
-            .on_thinking(execution, section, chain_id, depth, turn, model, text);
-    }
-
-    fn on_user_input(&self, execution: &str, section: &str, text: &str) {
-        self.log.on_user_input(execution, section, text);
+    /// The sink as the closure the run driver takes.
+    pub(crate) fn into_fn(self) -> impl FnMut(Event) + Send {
+        move |event| self.observe(event)
     }
 }
-
 /// Builds the delta stamp: the `on_delta` closure feeding the session's
 /// dedicated broadcast, each chunk stamped with the current round count -
 /// the id of the durable event that will supersede it - plus the
@@ -364,12 +302,12 @@ pub(crate) fn ui_provider(
 /// The reply-id derivation the socket applies while draining the event
 /// log: the model-round content kinds carry the current round count as
 /// their stamp, and a reply or tool-call batch advances it - the same
-/// rule [`SessionObserver`] applies live, so delta stamps and event
+/// rule [`SessionSink`] applies live, so delta stamps and event
 /// stamps agree.
-pub(crate) fn reply_stamp(kind: RuntimeEventKind, rounds_seen: &mut u64) -> Option<u64> {
-    match kind {
-        RuntimeEventKind::Thinking => Some(*rounds_seen),
-        RuntimeEventKind::AssistantReply | RuntimeEventKind::AssistantToolCalls => {
+pub(crate) fn reply_stamp(event: &Event, rounds_seen: &mut u64) -> Option<u64> {
+    match event {
+        Event::Thinking { .. } => Some(*rounds_seen),
+        Event::AssistantReply { .. } | Event::AssistantToolCalls { .. } => {
             let round = *rounds_seen;
             *rounds_seen += 1;
             Some(round)

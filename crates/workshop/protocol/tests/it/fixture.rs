@@ -19,39 +19,41 @@ fn agent_fixture() -> serde_json::Value {
     }
 }
 
-/// The fixture's `agent_event_minimal` entry as the vocabulary type.
-fn minimal_fixture_event() -> promptforge_api_types::events::RuntimeEvent {
-    use promptforge_api_types::events::{RuntimeEvent, RuntimeEventKind};
-    RuntimeEvent {
-        kind: RuntimeEventKind::UserInput,
-        section: "chat".to_owned(),
-        chain_id: 0,
-        depth: 0,
-        turn: 0,
-        content: "hi".to_owned(),
-        model: None,
-        tool_call_id: None,
-        finish_reason: None,
-        metrics: None,
+/// The root task's zeroth sequence: the provenance every fixture event
+/// carries, since the wire does not expose it.
+fn provenance() -> promptforge_api_types::ids::Provenance {
+    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    Provenance {
+        task: TaskId::from(ChainId::root()),
+        seq: 0,
     }
 }
 
-/// The fixture's `agent_event_stamped` entry as the vocabulary type,
-/// every metrics section populated.
-fn stamped_fixture_event() -> promptforge_api_types::events::RuntimeEvent {
-    use promptforge_api_types::events::{
-        CallMetrics, ClientTiming, LlamaTimings, RuntimeEvent, RuntimeEventKind, Usage, VllmMetrics,
-    };
-    RuntimeEvent {
-        kind: RuntimeEventKind::AssistantReply,
+/// The fixture's `agent_event_minimal` entry as the engine event it
+/// projects from.
+fn minimal_fixture_event() -> promptforge_api_types::event::Event {
+    promptforge_api_types::event::Event::UserInput {
+        execution: "run".to_owned(),
         section: "chat".to_owned(),
-        chain_id: 1,
-        depth: 0,
+        provenance: provenance(),
+        text: "hi".to_owned(),
+    }
+}
+
+/// The fixture's `agent_event_stamped` entry as the engine event it
+/// projects from, every metrics section populated.
+fn stamped_fixture_event() -> promptforge_api_types::event::Event {
+    use promptforge_api_types::events::{
+        CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,
+    };
+    promptforge_api_types::event::Event::AssistantReply {
+        execution: "run".to_owned(),
+        section: "chat".to_owned(),
+        provenance: provenance(),
         turn: 2,
-        content: "hello".to_owned(),
-        model: Some("llama-3".to_owned()),
-        tool_call_id: None,
+        text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
+        model: "llama-3".to_owned(),
         metrics: Some(CallMetrics {
             usage: Some(Usage {
                 prompt_tokens: 7,
@@ -136,15 +138,15 @@ fn server_to_client_agent_frames_match_the_shared_fixture() {
         fixture["agent_session"]
     );
     assert_eq!(
-        serde_json::to_value(AgentEventFrame::new(3, None, minimal_fixture_event()))
+        serde_json::to_value(AgentEventFrame::new(3, None, &minimal_fixture_event()))
             .expect("the frame serializes"),
         fixture["agent_event_minimal"]
     );
     assert_eq!(
-        serde_json::to_value(AgentEventFrame::new(4, Some(1), stamped_fixture_event()))
+        serde_json::to_value(AgentEventFrame::new(4, Some(1), &stamped_fixture_event()))
             .expect("the frame serializes"),
         fixture["agent_event_stamped"],
-        "the event rides in its persisted vocabulary shape, metrics and all"
+        "the event rides in its wire shape, metrics and all"
     );
     assert_eq!(
         serde_json::to_value(AgentDeltaFrame::new(

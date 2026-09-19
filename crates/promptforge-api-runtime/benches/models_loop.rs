@@ -29,7 +29,8 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_api_runtime::client::{GatewayClient, GatewayEndpoint, SecretString};
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
+use promptforge_api_runtime::test_support::{RunHost, run_with_host};
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
 use promptforge_api_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::NullObserver;
 
@@ -162,19 +163,18 @@ fn models_loop(c: &mut Criterion) {
     let env = bench_env();
     c.bench_function("models_loop", |b| {
         b.iter(|| {
-            let result = runtime.block_on(
-                env.run(
-                    &prompt,
-                    "",
-                    RunContext::new(
-                        EXECUTION,
-                        1,
-                        promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
-                    )
-                    .model(bench_catalog(131_072).models()[0].clone()),
-                    RunHost::new().client(gateway.client()),
-                ),
-            );
+            let result = runtime.block_on(run_with_host(
+                &env,
+                &prompt,
+                "",
+                RunContext::new(
+                    EXECUTION,
+                    1,
+                    promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+                )
+                .model(bench_catalog(131_072).models()[0].clone()),
+                RunHost::new().client(gateway.client()),
+            ));
             assert!(
                 matches!(result, RunResult::Ok(_)),
                 "the loop bench run succeeds: {result:?}"
@@ -201,19 +201,18 @@ fn compactors_fail(c: &mut Criterion) {
     let env = bench_env();
     c.bench_function("compactors_fail", |b| {
         b.iter(|| {
-            let result = runtime.block_on(
-                env.run(
-                    &prompt,
-                    "",
-                    RunContext::new(
-                        EXECUTION,
-                        1,
-                        promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
-                    )
-                    .model(bench_catalog(1).models()[0].clone()),
-                    RunHost::new().client(gateway.client()),
-                ),
-            );
+            let result = runtime.block_on(run_with_host(
+                &env,
+                &prompt,
+                "",
+                RunContext::new(
+                    EXECUTION,
+                    1,
+                    promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+                )
+                .model(bench_catalog(1).models()[0].clone()),
+                RunHost::new().client(gateway.client()),
+            ));
             let RunResult::Failure(error) = result else {
                 panic!("a one-token window must exhaust at the precheck");
             };

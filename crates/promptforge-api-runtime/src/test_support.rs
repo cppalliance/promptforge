@@ -1,22 +1,50 @@
-//! The engine's test drivers: hosts for a [`Run`] that need no runtime and
-//! no HTTP, for this crate's own suites and, under the `test-support`
-//! feature, for companion crates'.
+//! The engine's test drivers: hosts for a [`Run`] for this crate's own
+//! suites and, under the `test-support` feature, for companion crates'.
 //!
 //! [`drive`] is the serial sans-IO driver: it steps a run on the calling
 //! thread and answers every effect the moment it is issued, through a
-//! closure the caller supplies. Nothing here awaits, spawns, or sleeps; a
+//! closure the caller supplies. Nothing there awaits, spawns, or sleeps; a
 //! timer effect is answered however the closure sees fit, so a test's
 //! timeouts take no wall time.
+//!
+//! [`drive_tokio`] is the tokio driver: it performs a run's `Chat`,
+//! `ToolCall`, and `UserInput` effects through the caller's [`Performers`]
+//! (a struct of boxed async closures, one per kind) on the current tokio
+//! runtime, runs store operations on the blocking pool, sleeps timers on
+//! the timer wheel, and hands every event to the caller's sink. It is the
+//! interim host of Workshop's agent sessions until the harness lands, and
+//! the host the engine's own suites drive.
+//!
+//! [`RunHost`] bundles the resources the suites used to hand the retired
+//! in-crate loop - an observer, a debug capture, a client, a registry, a
+//! tool table, a broker, a delta hook - and [`run_with_host`] is that
+//! loop's zero-burden path over the tokio driver: activate, prepare,
+//! refuse or run. [`forward`] is the adapter that replays returned events
+//! onto a recording observer, so the observation suites hold without
+//! rewriting their assertions.
 
 #[cfg(test)]
 pub(crate) use promptforge_parser::test_support::synthetic_section;
 
+use std::sync::Arc;
+
+use promptforge_api_types::capabilities::RunServices;
 use promptforge_api_types::event::Event;
 
 use crate::Error;
 use crate::execute::{
-    Effect, EffectAnswer, EffectId, Run, RunError, RunResult, Step, task_history,
+    Effect, EffectAnswer, EffectId, Environment, Run, RunContext, RunError, RunResult, Step,
+    task_history,
 };
+use crate::parser::Prompt;
+
+pub(crate) mod events_to_observer;
+pub mod host;
+pub mod tokio_driver;
+
+pub use events_to_observer::forward;
+pub use host::RunHost;
+pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 
 /// Drives `run` to its end on the calling thread, performing every effect
 /// through `perform` as it is issued, and returns the run's result with
@@ -97,4 +125,60 @@ pub fn drive(
             }
         }
     }
+}
+
+/// The retired loop's zero-burden path over the tokio driver: activates,
+/// prepares, and runs `prompt` with the resources `host` bundles.
+///
+/// When `host` carries a [registry](RunHost::registry), this is where the
+/// prompt's declared capabilities activate: the run's VFS is built first
+/// ([`Environment::run_vfs`], unless the context's handle was set by the
+/// caller) so the capabilities' services and the run share one store;
+/// each declaration activates with those services
+/// ([`activate`](crate::execute::activate)); the activated catalog is the
+/// run's catalog, its implementations go to the tool performer, and what
+/// activation could not satisfy is folded into prepare's report. Without
+/// a registry nothing activates and the environment's own catalog stands.
+///
+/// An unsatisfiable prompt - missing required capabilities, conflicts, or
+/// unmet model requirements - is refused with [`RunResult::Failure`]
+/// carrying [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet)
+/// and the model-readable notice naming each gap once.
+pub async fn run_with_host(
+    env: &Environment,
+    prompt: &Prompt,
+    args: &str,
+    ctx: RunContext,
+    host: RunHost,
+) -> RunResult {
+    let mut ctx = ctx;
+    let mut host = host;
+    let mut env = env.clone();
+    if let Some(registry) = host.registry.take() {
+        if !ctx.vfs_explicit {
+            ctx = ctx.vfs(env.run_vfs());
+        }
+        let services = RunServices::new(ctx.vfs.clone(), ctx.cancel_handle());
+        let mut activation = crate::execute::activate(Some(&registry), prompt, &services);
+        env = env.tools(std::mem::take(&mut activation.catalog));
+        host = host.activated(activation);
+    }
+    let (ctx, mut requirements) = env.prepare(prompt, ctx);
+    requirements.merge(host.requirements.clone());
+    if let Some(refusal) = requirements.refusal() {
+        return RunResult::Failure(refusal);
+    }
+    run_host(prompt, args, ctx, host).await
+}
+
+/// Runs an already-prepared `prompt` under `ctx` with the resources
+/// `host` bundles, on the tokio driver: the host's
+/// [`performers`](RunHost::performers) perform the effects under the
+/// context's limits, and every event is replayed onto its observer and
+/// capture.
+pub async fn run_host(prompt: &Prompt, args: &str, ctx: RunContext, host: RunHost) -> RunResult {
+    let limits = ctx.limits;
+    let run = Run::new(Arc::new(prompt.clone()), args, ctx);
+    let cancel = run.cancel_handle();
+    drive_tokio(run, host.performers(limits), host.sink(), cancel).await
 }

@@ -89,8 +89,6 @@ function event(index, content) {
     event: {
       kind: "user_message",
       section: "chat",
-      chain_id: 0,
-      depth: 0,
       turn: 0,
       content,
     },

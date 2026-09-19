@@ -49,12 +49,7 @@ fn wired_for(base_url: &str, origin_allowed: fn(&axum::http::HeaderMap) -> bool)
         GatewayHandles::new(gateway.clone(), GatewayHealth::new()),
     ));
     let host = SessionHost::new(registry.clone(), ReconnectBackoff::new(), menu, catalog);
-    let agents = AgentSessions::new(
-        dir.path().join("agents"),
-        dir.path().join("sessions"),
-        gateway,
-        host,
-    );
+    let agents = AgentSessions::new(dir.path().join("agents"), gateway, host);
     let state = SessionsState::new(registry.clone(), origin_allowed);
     Wired {
         registry,

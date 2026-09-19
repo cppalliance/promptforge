@@ -18,7 +18,7 @@ use super::model_task_acceptance::{
 use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
 use super::model_tasks::{NeverBroker, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// Drives the two-task prompt with `A` released after `delays[0]` and `B`
 /// after `delays[1]`, and returns the run's output (the owner's `sys.id`

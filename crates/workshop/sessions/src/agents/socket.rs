@@ -4,7 +4,7 @@
 //! On connect the server pushes the discovered agent list. The client
 //! then sends `{"type":"launch","agent":"..."}` to start a session or
 //! `{"type":"attach","session":"..."}` to reattach to a running one -
-//! sessions outlive sockets, so a reconnect replays the persisted event
+//! sessions outlive sockets, so a reconnect replays the session's event
 //! log from index zero and re-announces every unresolved input wait.
 //! While attached, the loop streams four families: durable
 //! `agent_event` frames drained from the session's event log by a
@@ -29,7 +29,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use promptforge_api_types::events::{EventLog as _, RuntimeEvent};
+use promptforge_api_types::event::Event;
 use tokio::sync::broadcast;
 
 use workshop_protocol::{
@@ -97,7 +97,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
     // The subscriptions ride beside the attachment (not inside it) so the
     // select! arms below can borrow them while the inbound arm borrows
     // `attached`; attach() and the arms keep them all in step.
-    let mut events_rx: Option<broadcast::Receiver<RuntimeEvent>> = None;
+    let mut events_rx: Option<broadcast::Receiver<Event>> = None;
     let mut deltas_rx: Option<broadcast::Receiver<AgentDelta>> = None;
     let mut input_rx: Option<broadcast::Receiver<InputFrame>> = None;
     let mut errors_rx: Option<broadcast::Receiver<String>> = None;
@@ -211,7 +211,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
 /// The four channel subscriptions an attachment holds, passed as one
 /// bundle so [`handle_frame`] can replace them atomically on attach.
 type Subscriptions<'a> = (
-    &'a mut Option<broadcast::Receiver<RuntimeEvent>>,
+    &'a mut Option<broadcast::Receiver<Event>>,
     &'a mut Option<broadcast::Receiver<AgentDelta>>,
     &'a mut Option<broadcast::Receiver<InputFrame>>,
     &'a mut Option<broadcast::Receiver<String>>,
@@ -347,7 +347,7 @@ async fn handle_open(
 
 /// Attaches the socket to `session`: subscribes the three channels
 /// (before the replay, so nothing lands between them unseen),
-/// acknowledges with the session frame, replays the persisted log from
+/// acknowledges with the session frame, replays the session's log from
 /// index zero, and re-announces unresolved waits. A `false` return means
 /// the client is gone.
 async fn attach(
@@ -388,9 +388,12 @@ async fn drain_events(attached: &mut Attached, socket: &mut WebSocket) -> bool {
             // a witnessed len() reads. Stop cleanly rather than spin.
             return true;
         };
-        let stamp = reply_stamp(event.kind, &mut attached.rounds_seen);
-        let frame = AgentEventFrame::new(attached.cursor, stamp, event);
-        if !send_frame(socket, &frame).await {
+        let stamp = reply_stamp(&event, &mut attached.rounds_seen);
+        // The log holds transcript events alone, so every entry frames;
+        // an entry with no wire shape would be skipped, cursor advanced.
+        if let Some(frame) = AgentEventFrame::new(attached.cursor, stamp, &event)
+            && !send_frame(socket, &frame).await
+        {
             return false;
         }
         attached.cursor += 1;

@@ -1,15 +1,17 @@
 //! Agent sessions: discovery of `.md` agent programs, the
 //! [`AgentSessions`] registry, and each session's run lifecycle.
 //!
-//! A session owns one running agent: its persisting event log
-//! ([`workshop_gateway::WorkshopObserver`], JSONL under
-//! `state_dir/sessions/<session-id>.jsonl`), its
-//! [`crate::input::WaitRegistry`] and `user_input` tool, its dedicated
-//! delta broadcast (deltas never enter the event log), and the retained
-//! cancel handle behind turn-cancel. The supervisor task relaunches
-//! the agent run over the retained event log after a turn-cancel -
-//! cancellation is a stop reason, never an error - and ends the session
-//! when the program returns or fails.
+//! A session owns one running agent: its memory event log
+//! ([`workshop_gateway::WorkshopObserver`], the transcript sockets replay
+//! by cursor; nothing persists across a restart until the harness's run
+//! log lands), its [`crate::input::WaitRegistry`] and `user_input` tool,
+//! its dedicated delta broadcast (deltas never enter the event log), and
+//! the retained cancel handle behind turn-cancel. The supervisor task
+//! relaunches the agent run over the retained event log after a
+//! turn-cancel - cancellation is a stop reason, never an error - and ends
+//! the session when the program returns or fails. Each run is driven on
+//! the engine's tokio test driver (`run`), the interim host until the
+//! harness replaces it.
 //!
 //! **Registry carve-out.** Sessions survive socket disconnect and sockets
 //! attach and detach (`socket`), so this module keeps the session
@@ -20,13 +22,14 @@
 //!
 //! Reply ids coalesce deltas: every live delta is stamped with the id of
 //! the durable event that will supersede it. The id is the count of
-//! settled model rounds - the session observer advances it as the reply
+//! settled model rounds - the session sink advances it as the reply
 //! or tool-call event lands, before the program
 //! resumes, and the socket derives the same count from the event sequence
 //! itself, so both sides agree without sharing more than the log.
 
 mod environment;
 mod lifecycle;
+mod run;
 mod session;
 pub(crate) mod socket;
 mod supervisor;
@@ -50,7 +53,7 @@ use crate::input::WaitRegistry;
 use self::lifecycle::RunLifecycle;
 
 pub use environment::session_registry;
-pub(crate) use session::{AgentDelta, AgentSession, AgentSource, SessionObserver};
+pub(crate) use session::{AgentDelta, AgentSession, AgentSource, SessionSink};
 pub(crate) use session::{delta_stamp, reply_stamp, ui_provider};
 
 /// Capacity of a session's delta broadcast. Deltas are ephemeral: a
@@ -159,8 +162,6 @@ pub struct AgentSessions {
 struct Inner {
     /// Directory whose `.md` files are the launchable agents.
     agents_dir: PathBuf,
-    /// Where session event JSONLs persist (`state_dir/sessions`).
-    sessions_dir: PathBuf,
     /// The atomically replaceable Gateway clients every run snapshots.
     gateway: GatewayBinding,
     /// The shared handles session lifecycles report through.
@@ -180,22 +181,15 @@ impl fmt::Debug for AgentSessions {
 }
 
 impl AgentSessions {
-    /// Builds the registry over the discovery directory, the sessions
-    /// state directory, the model client agents complete through, and
-    /// the shared handles. Nothing touches the filesystem here:
-    /// discovery reads the agents directory per request, and the
-    /// sessions directory is created at first launch.
+    /// Builds the registry over the discovery directory, the model client
+    /// agents complete through, and the shared handles. Nothing touches
+    /// the filesystem here: discovery reads the agents directory per
+    /// request, and a session's event log lives in memory.
     #[must_use]
-    pub fn new(
-        agents_dir: PathBuf,
-        sessions_dir: PathBuf,
-        gateway: GatewayBinding,
-        host: SessionHost,
-    ) -> Self {
+    pub fn new(agents_dir: PathBuf, gateway: GatewayBinding, host: SessionHost) -> Self {
         Self {
             inner: Arc::new(Inner {
                 agents_dir,
-                sessions_dir,
                 gateway,
                 host,
                 sessions: Mutex::new(HashMap::new()),
@@ -224,8 +218,8 @@ impl AgentSessions {
     /// discovered agent (which also refuses path-shaped names: discovery
     /// yields bare file stems), [`LaunchRefusal::GatewayUnusable`] when
     /// the workshop gateway settings could not make a model client, and
-    /// [`LaunchRefusal::SessionState`] when the sessions directory or the
-    /// session's event log cannot be created.
+    /// [`LaunchRefusal::SessionState`] when the agent's source cannot be
+    /// read.
     pub(crate) fn launch(&self, name: &str) -> Result<Arc<AgentSession>, LaunchRefusal> {
         // Resolving through the discovered list is the trust boundary: a
         // client-sent name never reaches the filesystem unless it is the
@@ -246,14 +240,8 @@ impl AgentSessions {
         }
         let source = agent_source(&self.inner.agents_dir, name)
             .map_err(|source| LaunchRefusal::SessionState { source })?;
-        std::fs::create_dir_all(&self.inner.sessions_dir)
-            .map_err(|source| LaunchRefusal::SessionState { source })?;
         let id = fresh_session_id();
-        let log_path = self.inner.sessions_dir.join(format!("{id}.jsonl"));
-        let observer = Arc::new(
-            WorkshopObserver::new(Some(&log_path))
-                .map_err(|source| LaunchRefusal::SessionState { source })?,
-        );
+        let observer = Arc::new(WorkshopObserver::new());
         let (supervisor_events, events) = mpsc::unbounded_channel();
         let (cancellations, cancellation_events) = mpsc::channel(lifecycle::CANCELLATION_CAPACITY);
         let lifecycle = Arc::new(RunLifecycle::new(supervisor_events, cancellations));
@@ -292,7 +280,7 @@ impl AgentSessions {
     /// Ends the session with this id: its run is cancelled for good (no
     /// relaunch), pending waits die as `input_cancelled`, and the session
     /// leaves the registry. Returns whether a session was ended. The
-    /// persisted event JSONL stays on disk.
+    /// memory event log goes with it.
     #[must_use]
     pub fn close(&self, id: &str) -> bool {
         let Some(session) = self.lock().remove(id) else {
@@ -356,7 +344,7 @@ pub(crate) enum LaunchRefusal {
          `gateway.api_key` in workshop.toml"
     )]
     GatewayUnusable,
-    /// The session's on-disk state could not be prepared.
+    /// The agent's program source could not be read.
     #[error("agent session state unavailable")]
     SessionState {
         /// The underlying filesystem failure.
@@ -434,8 +422,8 @@ fn agent_source(dir: &Path, name: &str) -> io::Result<AgentSource> {
 
 /// A fresh unguessable session id: 128 bits from the OS-seeded
 /// cryptographic RNG, hex-encoded - wide enough that ids never collide
-/// across server restarts, so an old session's JSONL is never truncated
-/// by a new session's log.
+/// across server restarts, so a client's retained id never names a
+/// stranger's session.
 fn fresh_session_id() -> String {
     use rand::Rng as _;
     let mut rng = rand::rng();

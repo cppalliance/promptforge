@@ -1522,12 +1522,10 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 /// `models.infer(handle, ...)` inside an arm handed no client surfaces the lazy-creation
 /// error through the infer hook.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arm_model_infer_without_a_client_surfaces_the_lazy_error() {
-    // The missing-variable error only fires on an unconfigured host; with a
-    // gateway exported, the lazy creation would succeed and make a real call.
-    if !gateway_env_is_unset() {
-        return;
-    }
+async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
+    // A host without a client performs every `Chat` against the disabled
+    // gateway: the round fails with that error and nothing reaches the
+    // network, however the process environment is configured.
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
@@ -1538,11 +1536,11 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
     .concat();
     let error = run(&bound_for_model(&md), "", &[], &TestStore::new(), silent())
         .await
-        .expect_err("handle infer in an arm with no client must surface the lazy error");
+        .expect_err("handle infer in an arm with no client must surface the disabled gateway");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
-        "the infer hook must surface the lazy client construction error: {rendered}"
+        rendered.contains("gateway access is disabled"),
+        "the infer hook must surface the disabled-gateway completion error: {rendered}"
     );
 }
 
@@ -2290,7 +2288,7 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     );
     let test = fixture(md);
     let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
-    let RunResult::Ok(out) = crate::execute::run(
+    let RunResult::Ok(out) = crate::test_support::run_host(
         &test.prompt,
         "",
         test_context(EXECUTION).vfs(vfs.clone()),
@@ -2327,9 +2325,14 @@ async fn default_environment_runs_a_capability_free_prompt() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Ok(out) = env
-        .run(&test.prompt, "", test_context(EXECUTION), RunHost::new())
-        .await
+    let RunResult::Ok(out) = crate::test_support::run_with_host(
+        &env,
+        &test.prompt,
+        "",
+        test_context(EXECUTION),
+        RunHost::new(),
+    )
+    .await
     else {
         panic!("a capability-free prompt runs under the default environment");
     };
@@ -2347,9 +2350,14 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Ok(out) = env
-        .run(&test.prompt, "", test_context(EXECUTION), RunHost::new())
-        .await
+    let RunResult::Ok(out) = crate::test_support::run_with_host(
+        &env,
+        &test.prompt,
+        "",
+        test_context(EXECUTION),
+        RunHost::new(),
+    )
+    .await
     else {
         panic!("the default store handle carries the stock mount");
     };
@@ -2369,14 +2377,14 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     );
     let test = fixture(md);
     let registry = Arc::new(tools_registry(&[Arc::new(EchoTool) as Arc<dyn Tool>]));
-    let RunResult::Failure(error) = Environment::new()
-        .run(
-            &test.prompt,
-            "",
-            test_context(EXECUTION),
-            RunHost::new().registry(registry),
-        )
-        .await
+    let RunResult::Failure(error) = crate::test_support::run_with_host(
+        &Environment::new(),
+        &test.prompt,
+        "",
+        test_context(EXECUTION),
+        RunHost::new().registry(registry),
+    )
+    .await
     else {
         panic!("advertising an unfilled alias must fail");
     };
@@ -2400,9 +2408,14 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Failure(error) = env
-        .run(&test.prompt, "", test_context(EXECUTION), RunHost::new())
-        .await
+    let RunResult::Failure(error) = crate::test_support::run_with_host(
+        &env,
+        &test.prompt,
+        "",
+        test_context(EXECUTION),
+        RunHost::new(),
+    )
+    .await
     else {
         panic!("a models.bind call must fail");
     };

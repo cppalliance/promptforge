@@ -56,8 +56,23 @@ impl Requirements {
         self.unmet_requirements.extend(other.unmet_requirements);
     }
 
-    /// The refusal notice [`Environment::run`](super::Environment::run)
-    /// fails with when the report is unsatisfied.
+    /// The refusal a host fails the run with when the report is
+    /// unsatisfied: a [`RunError`](super::RunError) of kind
+    /// [`RequirementsUnmet`](super::RunErrorKind::RequirementsUnmet)
+    /// carrying the [`notice`](Requirements::notice), or `None` when
+    /// nothing blocks the run. The host checks this after merging
+    /// activation's report into prepare's, before building the run.
+    #[must_use]
+    pub fn refusal(&self) -> Option<super::RunError> {
+        (!self.is_satisfied()).then(|| {
+            super::RunError::from(crate::Error::RequirementsUnmet {
+                notice: self.notice(),
+            })
+        })
+    }
+
+    /// The refusal notice a host fails the run with when the report is
+    /// unsatisfied.
     ///
     /// Written to be read by a model - concise, factual, self-contained -
     /// because it may arrive as tool output when the prompt runs as a

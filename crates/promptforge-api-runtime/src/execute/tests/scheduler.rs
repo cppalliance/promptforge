@@ -21,8 +21,8 @@ use std::time::Duration;
 use super::models_loop::{echo_tools, loop_context_observed};
 use super::*;
 use crate::execute::run::{EffectAnswer, EffectId};
-use crate::execute::tokio_driver::TokioDriver;
 use crate::model::{ModelBinding, ModelId};
+use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 use shared_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath};
 

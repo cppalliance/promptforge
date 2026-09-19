@@ -4,10 +4,10 @@
 //! advertises no `user_input` tool to the model.
 
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputBroker, InputError, InputOutcome};
 use crate::lua::ToolSet;
 use crate::model::{ModelBinding, ModelId};
+use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 
 /// The model set an input test's run carries: `writer` (the prompt-wide

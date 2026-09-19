@@ -9,7 +9,9 @@
 //! module is the crate-internal import surface for it; hosts name the
 //! observation vocabulary through `promptforge_api_types::observe`.
 
-pub(crate) use promptforge_api_types::observe::{NullObserver, Observation, Observer, detail};
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use promptforge_api_types::observe::NullObserver;
+pub(crate) use promptforge_api_types::observe::{Observation, Observer, detail};
 
 #[cfg(test)]
 mod tests {

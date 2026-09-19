@@ -28,15 +28,18 @@ shared-vfs.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 mlua.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"], optional = true }
 workspace-hack.workspace = true
 
 [features]
 # The engine's own test drivers, for companion crates' suites: the serial
 # sans-IO driver (`test_support::drive`) that performs a run's effects
-# through a caller's closure with no runtime and no HTTP. Never enabled by a
-# production dependent.
-test-support = []
+# through a caller's closure with no runtime and no HTTP, and the tokio
+# driver (`test_support::drive_tokio`) that performs them through a
+# caller's async performers - the only thing in this crate that needs
+# tokio. Workshop's agent sessions enable it as their interim host until
+# the harness lands; no other production dependent does.
+test-support = ["dep:tokio"]
 
 [dev-dependencies]
 axum.workspace = true
@@ -46,9 +49,16 @@ promptforge-parser = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber.workspace = true
 
+# The integration suite and the bench drive runs through the tokio test
+# driver, so both need the feature that carries it.
+[[test]]
+name = "suite"
+required-features = ["test-support"]
+
 [[bench]]
 name = "models_loop"
 harness = false
+required-features = ["test-support"]
 
 [lints]
 workspace = true

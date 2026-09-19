@@ -1,22 +1,22 @@
 //! PromptForge runtime core.
 //!
-//! This crate holds the pieces that turn a prompt markdown file into a model
-//! call: the [`parser`] that reads the file into a [`parser::Prompt`], the
-//! [`client`] that talks to an `OpenAI`-compatible chat completions endpoint, and
-//! [`execute`] that runs H1 once with live resolution before walking sections
-//! top to bottom (fall-through) and
-//! returns the run's result. The host-facing vocabulary a run is configured
-//! with - the progress observer, the model and tool catalogs, the tool
-//! contract - lives in the `promptforge-api-types` crate, re-exported here
-//! as [`types`] (`types::observe`, `types::models`, `types::tools`), so a
-//! host depends on this one crate alone. The store handle a host seeds or
-//! extracts comes from `shared-vfs` and `promptforge-vfs`.
-//! [`execute::run`] takes an [`execute::RunContext`] (the engine's inputs)
-//! and an [`execute::RunHost`] (the loop's resources: the client, the tool
-//! implementations, the broker, and the observer the correlated report
-//! records go to; `types::observe::NullObserver` is what a caller wanting
-//! silence passes). [`debug::DebugCapture`] is an opt-in raw
-//! request/response seam on the same host; production hosts leave it unset.
+//! This crate holds the pieces that turn a prompt markdown file into a run:
+//! the [`parser`] that reads the file into a [`parser::Prompt`], and
+//! [`execute`] whose [`Run`] state machine runs H1 once before walking
+//! sections top to bottom (fall-through), issuing every model round, tool
+//! call, input wait, store operation, and timer as an [`Effect`] value the
+//! host performs and answers, and reporting every boundary as an
+//! [`types::event::Event`] value the host logs. The engine performs no I/O
+//! and reads no clock; the harness is its production host. The
+//! host-facing vocabulary a run is configured with - the model and tool
+//! catalogs, the tool contract, the event enum - lives in the
+//! `promptforge-api-types` crate, re-exported here as [`types`]
+//! (`types::event`, `types::models`, `types::tools`), so a host depends on
+//! this one crate alone. The store handle a host seeds or extracts comes
+//! from `shared-vfs` and `promptforge-vfs`. The [`client`] module is the
+//! interim door to the gateway model client for Workshop's session
+//! machinery until the harness owns its own; the engine itself never uses
+//! it.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
@@ -42,37 +42,38 @@
 //! # Ok::<(), promptforge_api_runtime::ParseError>(())
 //! ```
 //!
-//! Executing a parsed prompt goes through [`run`] with a [`RunContext`]
+//! Executing a parsed prompt builds a [`Run`] over a [`RunContext`]
 //! prepared by an [`Environment`] (which holds the host roots and the
-//! catalog of tools the host activated) and a [`RunHost`] carrying the
-//! loop's resources; the store handle rides on the context, defaulting to
-//! the stock in-memory mount. That path can perform gateway I/O, so it is
-//! shown as `no_run`:
+//! catalog of tools the host activated); the store handle rides on the
+//! context, defaulting to the stock in-memory mount. The host then loops:
+//! [`Run::step`] returns the effects to perform and the events to log,
+//! and [`Run::resume`] hands each effect's answer back. A prompt that
+//! issues no effect is done in one step:
 //!
-//! ```no_run
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! ```
+//! use std::sync::Arc;
+//!
 //! use promptforge_api_runtime::types::observe::NullObserver;
 //! use promptforge_api_runtime::types::timestamp::Timestamp;
-//! use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
+//! use promptforge_api_runtime::{Environment, Prompt, Run, RunContext, RunResult, Step};
 //!
-//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
+//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\n```lua\nreturn 'hello'\n```\n";
 //! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
 //!
 //! // Capability-free agents use the default environment: an empty catalog.
 //! // The host draws the run's seed and stamps its start: the engine reads
-//! // neither the OS RNG nor the clock. The silent host builds its gateway
-//! // client from the process environment on the first model round.
+//! // neither the OS RNG nor the clock.
 //! let env = Environment::new();
 //! let seed: u64 = 0x5eed; // a CSPRNG draw in a real host
 //! let started_at = Timestamp::from_unix_millis(1_700_000_000_000);
-//! let ctx = RunContext::new("run-example", seed, started_at);
-//! let answer = env.run(&prompt, "", ctx, RunHost::new()).await;
-//! let RunResult::Ok(text) = answer else {
-//!     panic!("the greeter run succeeds: {answer:?}");
+//! let (ctx, requirements) = env.prepare(&prompt, RunContext::new("run-example", seed, started_at));
+//! assert!(requirements.is_satisfied());
+//! let mut run = Run::new(Arc::new(prompt), "", ctx);
+//! let Step::Done { result: RunResult::Ok(text), .. } = run.step() else {
+//!     panic!("the greeter run is done in one step");
 //! };
-//! println!("{text}");
-//! # Ok(())
-//! # }
+//! assert_eq!(text, "hello");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 pub(crate) mod cancel;
@@ -100,8 +101,8 @@ pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKi
 pub use crate::client::{CompletionError, CompletionErrorKind};
 pub use crate::execute::{
     Activation, Effect, EffectAnswer, EffectId, EffectRecord, Environment, RequirementCheck,
-    Requirements, Run, RunContext, RunError, RunErrorKind, RunHost, RunLimits, RunResult,
-    SourceLocation, Step, ToolTable, UnmetRequirement, activate, run,
+    Requirements, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation,
+    Step, ToolTable, UnmetRequirement, activate,
 };
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};
 pub use promptforge_api_types as types;

@@ -214,13 +214,6 @@ impl Run {
         self.scheduler.as_ref().is_none_or(Scheduler::decided)
     }
 
-    /// The run's context, for an in-crate host that draws its resources
-    /// (tools, broker, observer) from it. `None` for a run that failed to
-    /// start.
-    pub(crate) fn state(&self) -> Option<&RunState> {
-        self.scheduler.as_ref().map(Scheduler::state)
-    }
-
     /// The scheduler behind the run, for the suites that inspect its
     /// arena.
     #[cfg(test)]

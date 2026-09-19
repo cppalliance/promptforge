@@ -13,13 +13,15 @@
 
 #[cfg(test)]
 pub(crate) use promptforge_lua::ToolOutputKind;
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use promptforge_lua::run_store_op;
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, LuaBlockResult, LuaProgram, MessageRecord, ModelReport, OverflowReason,
     ProseState, ScriptReport, SectionVm, TaskAllowlist, ToolBinding, ToolCallCounts, ToolSet,
     ToolView, UserInputOutcome, current_tool_bindings, enrich_sys_model, install_section_loop_shim,
     install_section_user_input_shim, install_store_shims, install_ui, is_context_overflow,
     precheck, prepare_dispatch, prepare_model_dispatch, project_messages, render_item,
-    resolve_model_binding, run_store_op,
+    resolve_model_binding,
 };
 
 #[cfg(test)]

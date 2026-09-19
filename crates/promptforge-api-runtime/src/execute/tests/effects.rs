@@ -11,9 +11,9 @@ use super::*;
 use crate::client::StreamDelta;
 use crate::execute::protocol::StoreOp;
 use crate::execute::run::EffectRecord;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::input::{InputBroker, InputError, InputOutcome};
 use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// Serializes a record and reads it back: the round trip a run log and a
 /// replay depend on.

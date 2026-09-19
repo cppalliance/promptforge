@@ -450,11 +450,6 @@ impl Scheduler {
         Arc::clone(self.ctx.prompt_arc())
     }
 
-    /// The run's context.
-    pub(crate) fn state(&self) -> &RunState {
-        &self.ctx
-    }
-
     /// Whether the run's outcome is decided: the end boundary is reported
     /// and only the orphans' answers stand between the run and `Done`.
     pub(crate) fn decided(&self) -> bool {

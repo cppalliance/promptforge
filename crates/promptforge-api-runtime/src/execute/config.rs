@@ -26,9 +26,8 @@ use super::bindings::{ModelBindings, ToolBindings};
 ///
 /// The context is the engine's input and nothing else: it holds no
 /// observer, client, tool implementation, broker, or capture. Those are
-/// the host's, bundled for the in-crate loop as a
-/// [`RunHost`](super::RunHost); the engine reports events and issues
-/// effects as values and never reaches for a host seam.
+/// the host's; the engine reports events and issues effects as values and
+/// never reaches for a host seam.
 ///
 /// The engine reads no clock and draws no randomness of its own: the
 /// run's `seed` and `started_at` are inputs the host supplies to
@@ -109,10 +108,10 @@ pub struct RunContext {
     pub(crate) tool_bindings: ToolBindings,
     /// Test-only: the host seams the in-crate suites still set through the
     /// context's old builder methods, carried to the run state and read by
-    /// the test driver's constructor. Production hosts build a
-    /// [`RunHost`](super::RunHost) and hand it to the loop directly.
+    /// the test driver's constructor. Production hosts perform effects and
+    /// read events themselves.
     #[cfg(test)]
-    pub(crate) test_host: super::host::RunHost,
+    pub(crate) test_host: crate::test_support::RunHost,
 }
 
 impl RunContext {
@@ -145,7 +144,7 @@ impl RunContext {
             tools: ToolCatalog::default(),
             tool_bindings: ToolBindings::default(),
             #[cfg(test)]
-            test_host: super::host::RunHost::new(),
+            test_host: crate::test_support::RunHost::new(),
         }
     }
 
@@ -331,7 +330,7 @@ impl RunContext {
 
 /// The in-crate suites' seams: the host resources a test used to set on
 /// the context, routed into the test host the test driver's constructor
-/// reads. Production hosts build a [`RunHost`](super::RunHost) instead;
+/// reads. Production hosts perform effects and read events themselves;
 /// none of these exist outside `cfg(test)`.
 #[cfg(test)]
 impl RunContext {

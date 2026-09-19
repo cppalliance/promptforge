@@ -1,9 +1,7 @@
-use std::num::NonZeroU32;
 use std::sync::atomic::AtomicU64;
 
-use promptforge_api_types::events::RuntimeEventKind;
-use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge_api_types::observe::{Observation, Observer};
+use promptforge_api_types::event::Event;
+use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
 use workshop_protocol::Activity;
 
 use super::*;
@@ -14,7 +12,7 @@ fn wired_push(
     status: &workshop_status::StatusBus,
     catalog: &CatalogBus,
     menu: &MenuBus,
-) -> (Push, impl std::fmt::Debug + Send + Sync + 'static) {
+) -> (Push, impl std::fmt::Debug + Send + Sync + 'static + use<>) {
     let registry = Registry::new();
     let status_guards = workshop_status::register(&registry, status);
     let menu_guards = workshop_menu::register(&registry, catalog, menu);
@@ -98,31 +96,87 @@ fn an_unreadable_chat_md_surfaces_its_error_rather_than_the_built_in() {
     );
 }
 
+/// A content event of one shape under the fixed test coordinates: the
+/// stamp rule reads the variant alone.
+fn content_event(shape: &str) -> Event {
+    let execution = "run".to_owned();
+    let section = "chat".to_owned();
+    let provenance = Provenance {
+        task: TaskId::from(ChainId::root()),
+        seq: 0,
+    };
+    match shape {
+        "input" => Event::UserInput {
+            execution,
+            section,
+            provenance,
+            text: "hi".to_owned(),
+        },
+        "thinking" => Event::Thinking {
+            execution,
+            section,
+            provenance,
+            turn: 1,
+            model: "m".to_owned(),
+            text: "hmm".to_owned(),
+        },
+        "reply" => Event::AssistantReply {
+            execution,
+            section,
+            provenance,
+            turn: 1,
+            text: "hello".to_owned(),
+            finish_reason: None,
+            model: "m".to_owned(),
+            metrics: None,
+        },
+        "tool_calls" => Event::AssistantToolCalls {
+            execution,
+            section,
+            provenance,
+            turn: 1,
+            model: "m".to_owned(),
+            calls: Vec::new(),
+        },
+        "tool_result" => Event::ToolResult {
+            execution,
+            section,
+            provenance,
+            turn: 1,
+            tool_call_id: "call_1".to_owned(),
+            alias: "read".to_owned(),
+            content: "done".to_owned(),
+            trusted: false,
+        },
+        other => panic!("no fixture shape named {other}"),
+    }
+}
+
 #[test]
 fn reply_stamps_follow_the_settle_rule() {
     let mut rounds = 0;
     assert_eq!(
-        reply_stamp(RuntimeEventKind::UserInput, &mut rounds),
+        reply_stamp(&content_event("input"), &mut rounds),
         None,
         "input events settle nothing"
     );
     assert_eq!(
-        reply_stamp(RuntimeEventKind::Thinking, &mut rounds),
+        reply_stamp(&content_event("thinking"), &mut rounds),
         Some(0),
         "thinking carries the open round without settling it"
     );
+    assert_eq!(reply_stamp(&content_event("reply"), &mut rounds), Some(0));
     assert_eq!(
-        reply_stamp(RuntimeEventKind::AssistantReply, &mut rounds),
-        Some(0)
-    );
-    assert_eq!(
-        reply_stamp(RuntimeEventKind::AssistantToolCalls, &mut rounds),
+        reply_stamp(&content_event("tool_calls"), &mut rounds),
         Some(1),
         "a tool-call batch settles its round exactly as a reply does"
     );
-    assert_eq!(reply_stamp(RuntimeEventKind::ToolResult, &mut rounds), None);
     assert_eq!(
-        reply_stamp(RuntimeEventKind::Thinking, &mut rounds),
+        reply_stamp(&content_event("tool_result"), &mut rounds),
+        None
+    );
+    assert_eq!(
+        reply_stamp(&content_event("thinking"), &mut rounds),
         Some(2),
         "the next round opens where the last one settled"
     );
@@ -169,7 +223,6 @@ fn a_launch_without_a_usable_client_is_refused() {
     let registry = Registry::new();
     let sessions = AgentSessions::new(
         dir.path().to_path_buf(),
-        dir.path().join("sessions"),
         GatewayBinding::new("http://127.0.0.1:1", "")
             .expect("the unusable model binding still builds its HTTP client"),
         SessionHost::new(registry, ReconnectBackoff::new(), menu, catalog),
@@ -189,26 +242,66 @@ fn a_launch_without_a_usable_client_is_refused() {
     );
 }
 
-#[tokio::test]
-async fn a_failed_model_turn_pushes_a_terminal_failure_status() {
+/// A sink over fresh session plumbing, wired to the real status bus, with
+/// the receivers a test reads the side effects from.
+fn sink_fixture() -> (
+    SessionSink,
+    broadcast::Receiver<workshop_protocol::StatusBarUpdate>,
+    broadcast::Receiver<String>,
+    impl std::fmt::Debug + Send + Sync + 'static + use<>,
+) {
     let status = workshop_status::StatusBus::new();
-    let mut status_rx = status.subscribe();
+    let status_rx = status.subscribe();
     let catalog = CatalogBus::new();
     let menu = MenuBus::new(catalog.clone(), None);
-    let (push, _guards) = wired_push(&status, &catalog, &menu);
-    let (errors, mut errors_rx) = broadcast::channel(ERROR_CAPACITY);
+    let (push, guards) = wired_push(&status, &catalog, &menu);
+    let (errors, errors_rx) = broadcast::channel(ERROR_CAPACITY);
     let (supervisor_events, _events) = mpsc::unbounded_channel();
     let (cancellations, _cancellation_events) = mpsc::channel(lifecycle::CANCELLATION_CAPACITY);
-    let observer = SessionObserver {
-        log: Arc::new(WorkshopObserver::new(None).expect("a memory log")),
+    let sink = SessionSink {
+        log: Arc::new(WorkshopObserver::new()),
         rounds: Arc::new(AtomicU64::new(0)),
         push,
         backoff: ReconnectBackoff::new(),
         errors,
         lifecycle: Arc::new(RunLifecycle::new(supervisor_events, cancellations)),
     };
+    (sink, status_rx, errors_rx, guards)
+}
 
-    observer.observe("run", "chat", Observation::ModelTurnFailed);
+/// A lifecycle event of one shape under the fixed test coordinates.
+fn lifecycle_event(shape: &str) -> Event {
+    let execution = "run".to_owned();
+    let section = "chat".to_owned();
+    let provenance = Provenance {
+        task: TaskId::from(ChainId::root()),
+        seq: 0,
+    };
+    match shape {
+        "model_turn_failed" => Event::ModelTurnFailed {
+            execution,
+            section,
+            provenance,
+        },
+        "tool_call_failed" => Event::ToolCallFailed {
+            execution,
+            section,
+            provenance,
+        },
+        "section_started" => Event::SectionStarted {
+            execution,
+            section,
+            provenance,
+        },
+        other => panic!("no fixture shape named {other}"),
+    }
+}
+
+#[tokio::test]
+async fn a_failed_model_turn_pushes_a_terminal_failure_status() {
+    let (sink, mut status_rx, mut errors_rx, _guards) = sink_fixture();
+
+    sink.observe(lifecycle_event("model_turn_failed"));
 
     let update = status_rx
         .recv()
@@ -224,6 +317,10 @@ async fn a_failed_model_turn_pushes_a_terminal_failure_status() {
         errors_rx.recv().await.expect("the error frame is sent"),
         "Model turn failed in agent `chat`"
     );
+    assert!(
+        sink.log.is_empty(),
+        "a lifecycle event is a side effect, never a transcript entry"
+    );
 }
 
 #[tokio::test]
@@ -232,24 +329,9 @@ async fn a_failed_tool_call_pushes_a_terminal_failure_status() {
     // model round does, and the built-in chat's pcall swallows both; without
     // this frame the operator sees a tool call that never returns and a
     // status bar stuck busy.
-    let status = workshop_status::StatusBus::new();
-    let mut status_rx = status.subscribe();
-    let catalog = CatalogBus::new();
-    let menu = MenuBus::new(catalog.clone(), None);
-    let (push, _guards) = wired_push(&status, &catalog, &menu);
-    let (errors, mut errors_rx) = broadcast::channel(ERROR_CAPACITY);
-    let (supervisor_events, _events) = mpsc::unbounded_channel();
-    let (cancellations, _cancellation_events) = mpsc::channel(lifecycle::CANCELLATION_CAPACITY);
-    let observer = SessionObserver {
-        log: Arc::new(WorkshopObserver::new(None).expect("a memory log")),
-        rounds: Arc::new(AtomicU64::new(0)),
-        push,
-        backoff: ReconnectBackoff::new(),
-        errors,
-        lifecycle: Arc::new(RunLifecycle::new(supervisor_events, cancellations)),
-    };
+    let (sink, mut status_rx, mut errors_rx, _guards) = sink_fixture();
 
-    observer.observe("run", "chat", Observation::ToolCallFailed);
+    sink.observe(lifecycle_event("tool_call_failed"));
 
     let update = status_rx
         .recv()
@@ -267,6 +349,42 @@ async fn a_failed_tool_call_pushes_a_terminal_failure_status() {
     );
 }
 
+#[tokio::test]
+async fn the_sink_logs_transcript_events_and_settles_rounds_on_replies() {
+    let (sink, _status_rx, _errors_rx, _guards) = sink_fixture();
+    let mut entries = sink.log.subscribe();
+
+    sink.observe(lifecycle_event("section_started"));
+    sink.observe(content_event("input"));
+    sink.observe(content_event("thinking"));
+    assert_eq!(
+        sink.rounds.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "input and thinking leave the round open"
+    );
+    sink.observe(content_event("tool_calls"));
+    assert_eq!(
+        sink.rounds.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "a tool-call batch settles its round"
+    );
+    sink.observe(content_event("reply"));
+    assert_eq!(
+        sink.rounds.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "a reply settles its round"
+    );
+
+    assert_eq!(
+        sink.log.len(),
+        4,
+        "the four content events land in the log; the lifecycle event does not"
+    );
+    assert!(
+        matches!(entries.try_recv(), Ok(Event::UserInput { .. })),
+        "the log broadcasts in append order, content events only"
+    );
+}
 #[test]
 fn the_model_client_requires_a_usable_key_and_url() {
     assert!(
@@ -278,168 +396,4 @@ fn the_model_client_requires_a_usable_key_and_url() {
         "an empty key cannot authenticate: agents report it at launch"
     );
     assert!(agent_client("not a url", "k").is_none());
-}
-
-/// The descriptor the chat unit runs bind the declared `chat` role to; its
-/// window clears the role's declared minimum.
-fn test_model() -> ModelDescriptor {
-    ModelDescriptor::new(
-        ModelId::gateway("test-model").expect("the test model id is valid"),
-        "test model",
-        NonZeroU32::new(200_000).expect("200000 is non-zero"),
-        ThinkingMode::Never,
-    )
-}
-
-/// Runs the embedded chat prompt on the unified runtime with the given
-/// broker configuration, against a client no model call can survive. The
-/// host carries the first-party capabilities exactly as the session
-/// wiring builds them, and the context carries the current model, because
-/// the prompt now declares its contract in frontmatter.
-async fn run_builtin_chat(
-    broker: Option<Arc<dyn promptforge_api_runtime::input::InputBroker>>,
-) -> Result<String, promptforge_api_runtime::execute::RunError> {
-    use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
-    let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
-    let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
-        .expect("the embedded chat prompt parses");
-    let registry = session_registry("http://127.0.0.1:9", "k")
-        .expect("a well-shaped gateway root builds the session registry");
-    let ctx = RunContext::new(
-        "chat-unit",
-        1,
-        promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
-    )
-    .model(test_model());
-    let mut host = RunHost::new()
-        .observer(observer)
-        .registry(Arc::new(registry));
-    if let Some(broker) = broker {
-        host = host.input_broker(broker);
-    }
-    match Environment::new().run(&prompt, "", ctx, host).await {
-        RunResult::Ok(text) => Ok(text),
-        RunResult::Cancelled => panic!("the chat unit run is never cancelled"),
-        RunResult::Failure(error) => Err(error),
-    }
-}
-
-#[test]
-fn the_builtin_chat_declares_its_contract_in_frontmatter() {
-    let prompt = promptforge_api_runtime::Prompt::parse(
-        BUILTIN_CHAT_SOURCE,
-        "chat-unit",
-        &promptforge_api_types::observe::NullObserver::default(),
-    )
-    .expect("the embedded chat prompt parses");
-    let frontmatter = prompt.frontmatter();
-    let capabilities = frontmatter.capabilities();
-    assert_eq!(
-        capabilities.len(),
-        1,
-        "chat declares exactly one capability"
-    );
-    assert_eq!(capabilities[0].id().to_string(), "promptforge/web");
-    assert!(
-        !capabilities[0].is_optional(),
-        "the built-in host always installs its own web capability"
-    );
-    let tools = frontmatter.tools();
-    assert_eq!(tools.len(), 2, "both web tools get exact slots");
-    assert!(tools.get("fetch").is_some(), "the fetch slot is declared");
-    assert!(tools.get("search").is_some(), "the search slot is declared");
-    let chat = frontmatter
-        .models()
-        .get("chat")
-        .expect("the chat role is declared for the host's current model");
-    assert_eq!(
-        chat.min_context(),
-        NonZeroU32::new(32768),
-        "the role declares the window its web tools need, so an undersized \
-         binding is refused at prepare instead of failing mid-conversation"
-    );
-}
-
-#[tokio::test]
-async fn an_undersized_model_is_refused_before_the_first_turn() {
-    // The scenario this pins: a launch that bound a small descriptor (the
-    // catalog fetch's fallback window) used to run, then fail the first
-    // conversation that outgrew it. The declared minimum turns that into a
-    // refusal at prepare naming the role.
-    use promptforge_api_runtime::execute::RunErrorKind;
-    use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
-    let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
-    let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
-        .expect("the embedded chat prompt parses");
-    let registry = session_registry("http://127.0.0.1:9", "k")
-        .expect("a well-shaped gateway root builds the session registry");
-    let small = ModelDescriptor::new(
-        ModelId::gateway("small-model").expect("the test model id is valid"),
-        "small model",
-        NonZeroU32::new(8192).expect("8192 is non-zero"),
-        ThinkingMode::Never,
-    );
-    let ctx = RunContext::new(
-        "chat-unit",
-        1,
-        promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
-    )
-    .model(small);
-    let host = RunHost::new()
-        .observer(observer)
-        .registry(Arc::new(registry));
-
-    let RunResult::Failure(error) = Environment::new().run(&prompt, "", ctx, host).await else {
-        panic!("an 8192-token model cannot satisfy the chat role");
-    };
-    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
-    let notice = error.to_string();
-    assert!(
-        notice.contains("chat") && notice.contains("32768") && notice.contains("8192"),
-        "the notice names the role, the minimum, and the actual window: {notice}"
-    );
-}
-
-#[tokio::test]
-async fn the_builtin_chat_returns_without_a_broker_beneath_it() {
-    // No broker is the unavailable-fallback policy: user_input()
-    // resumes unavailable, the prompt returns, and no model call is
-    // ever attempted (the run carries no client at all).
-    let result = run_builtin_chat(None).await;
-    assert!(
-        result.is_ok(),
-        "the unavailable fallback ends the run cleanly: {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn a_failing_broker_fails_the_builtin_chat_as_typed_input() {
-    struct FailingBroker;
-
-    #[async_trait::async_trait]
-    impl promptforge_api_runtime::input::InputBroker for FailingBroker {
-        async fn user_input(
-            &self,
-            _execution: &str,
-            _section: &str,
-        ) -> Result<
-            promptforge_api_runtime::input::InputOutcome,
-            promptforge_api_runtime::input::InputError,
-        > {
-            Err(promptforge_api_runtime::input::InputError::message(
-                "the input device is gone",
-            ))
-        }
-    }
-
-    let error = run_builtin_chat(Some(Arc::new(FailingBroker)))
-        .await
-        .expect_err("the broker failure fails the run");
-    assert!(
-        matches!(
-            error.kind(),
-            promptforge_api_runtime::execute::RunErrorKind::Input
-        ),
-        "a broker failure is the typed input failure: {error}"
-    );
 }

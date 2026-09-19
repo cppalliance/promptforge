@@ -11,9 +11,9 @@
 //! trust in `tool_loop`.
 
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
 use crate::model::{ModelBinding, ModelId};
+use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 
 /// The model set a loop test's run carries: `writer` (the prompt-wide

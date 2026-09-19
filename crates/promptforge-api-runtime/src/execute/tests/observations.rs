@@ -1,4 +1,3 @@
-use super::super::*;
 use super::run;
 use super::*;
 
@@ -338,7 +337,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
 #[tokio::test(flavor = "current_thread")]
 async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     use super::models_loop::{echo_tools, loop_context_observed, loop_events, loop_prompt};
-    use crate::execute::tokio_driver::TokioDriver;
+    use crate::test_support::tokio_driver::TokioDriver;
 
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let md = loop_prompt(

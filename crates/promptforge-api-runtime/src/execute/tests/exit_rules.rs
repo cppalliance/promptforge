@@ -9,8 +9,8 @@ use super::models_loop::{
 };
 use super::run;
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test]
 async fn falls_through_to_next_section() {

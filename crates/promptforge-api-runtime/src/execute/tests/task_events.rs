@@ -125,7 +125,7 @@ fn a_malformed_opts_argument_is_the_calls_error() {
 async fn the_tokio_driver_answers_a_history_read_from_its_own_events() {
     let prompt = parse(OWNER_READS_CHILD);
     let RunResult::Ok(text) =
-        crate::execute::run(&prompt, "", test_context(EXECUTION), RunHost::new()).await
+        crate::test_support::run_host(&prompt, "", test_context(EXECUTION), RunHost::new()).await
     else {
         panic!("the run succeeds through the tokio driver");
     };

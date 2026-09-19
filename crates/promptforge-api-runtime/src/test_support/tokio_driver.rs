@@ -1,14 +1,17 @@
-//! The in-crate tokio host: a loop over [`Run`] that performs its effects
-//! with the resources a [`RunHost`] bundles - the gateway client, the tool
-//! implementation table, the input broker, the blocking pool for store
-//! operations, and the tokio timer wheel - and forwards its events to the
-//! host's observer and capture.
+//! The tokio test driver: a loop over [`Run`] that performs its effects on
+//! a tokio runtime through a caller's [`Performers`] and hands every event
+//! to a caller's sink.
 //!
 //! The loop is `step -> perform -> await an answer -> resume`. Every
-//! effect the step hands out is spawned as one performer that posts its
-//! answer on a channel under the effect's id; the loop resumes the run
-//! with each arriving answer and steps again. A `TaskEvents` read is
-//! answered at issue from the driver's own history of forwarded events.
+//! `Chat`, `ToolCall`, and `UserInput` effect the step hands out goes to
+//! the matching performer closure, whose future is spawned as one task
+//! that posts its answer on a channel under the effect's id; the loop
+//! resumes the run with each arriving answer and steps again. The
+//! driver performs the engine-internal kinds itself: a `Store` operation
+//! runs on the blocking pool (the VFS is synchronous by design), a `Timer`
+//! sleeps on tokio's timer wheel, and a `TaskEvents` read is answered at
+//! issue from the driver's own history of forwarded events.
+//!
 //! When the run reports itself decided ([`Run::decided`]) every performer
 //! still out is aborted and joined - a blocking-pool store operation runs
 //! to completion, so its access clone and the claims it holds release
@@ -17,13 +20,15 @@
 //! performed; so the run reaches `Done` with every effect answered exactly
 //! once.
 //!
-//! Cancellation is the run's synchronous flag: the host sets it (through
-//! the context's handle or [`Run::cancel`]), running Lua observes it from
-//! its instruction hook, and this loop awaits the flag beside the answer
-//! channel so a run whose chains are all suspended tears down promptly.
+//! Cancellation is a synchronous flag: the caller hands one to
+//! [`drive_tokio`], the loop awaits it beside the answer channel, and when
+//! it fires the loop cancels the run so a run whose chains are all
+//! suspended tears down promptly. Running Lua observes the run's own flag
+//! from its instruction hook.
 //!
-//! This is the engine's only in-process host until the harness replaces
-//! it; the suites drive it in place of the scheduler they used to drive.
+//! This is a test host: the engine's own suites drive it in place of the
+//! scheduler they used to drive, and a companion crate's suite enables
+//! the `test-support` feature for it. The harness is the production host.
 
 use std::collections::HashMap;
 #[cfg(test)]
@@ -31,46 +36,99 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use promptforge_api_types::event::Event;
-use promptforge_api_types::tools::ToolError;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::cancel::CancelHandle;
-use crate::client::{CompletionError, GatewayClient};
-use crate::input::InputOutcome;
+#[cfg(test)]
+use crate::client::GatewayClient;
 use crate::lua::run_store_op;
 use crate::store::Store;
 use crate::{Error, Result};
 
-use super::RunResult;
 #[cfg(test)]
-use super::context::RunState;
-use super::gateway::GatewaySource;
-use super::host::RunHost;
+use crate::execute::EffectRecord;
+use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step, task_history};
+
 #[cfg(test)]
-use super::run::EffectRecord;
-use super::run::{Effect, EffectAnswer, EffectId, Run, Step};
+use crate::execute::context::RunState;
 #[cfg(test)]
-use super::scheduler::Scheduler;
+use crate::execute::scheduler::Scheduler;
+
+#[path = "tokio_driver-performers.rs"]
+mod performers;
+
+pub(crate) use performers::refuse_tool_call;
+pub use performers::{BoxFuture, Performer, Performers};
+
+/// The sink every drained event is handed to, in step order.
+pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
+
+/// Drives `run` to its end on the current tokio runtime, performing its
+/// `Chat`, `ToolCall`, and `UserInput` effects through `performers`,
+/// handing every event to `sink` in order, and cancelling the run when
+/// `cancel` fires. Returns the run's result.
+///
+/// The future is boxed internally: the step machinery is large, and the
+/// caller's own future stays small.
+///
+/// # Examples
+/// A prompt whose only section returns a literal issues no effect, so
+/// the refusing performers are never called:
+/// ```
+/// use std::sync::Arc;
+///
+/// use promptforge_api_runtime::test_support::{Performers, drive_tokio};
+/// use promptforge_api_runtime::{Prompt, Run, RunContext, RunResult};
+/// use promptforge_api_types::cancel::sync::CancelHandle;
+/// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::timestamp::Timestamp;
+///
+/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
+/// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
+/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
+/// let run = Run::new(Arc::new(prompt), "", ctx);
+/// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+/// let mut events = Vec::new();
+/// let result = runtime.block_on(drive_tokio(
+///     run,
+///     Performers::refusing(),
+///     |event| events.push(event),
+///     CancelHandle::new(),
+/// ));
+/// let RunResult::Ok(text) = result else {
+///     panic!("the literal run succeeds: {result:?}");
+/// };
+/// assert_eq!(text, "hello");
+/// assert!(!events.is_empty());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub async fn drive_tokio(
+    run: Run,
+    performers: Performers,
+    sink: impl FnMut(Event) + Send,
+    cancel: CancelHandle,
+) -> RunResult {
+    let mut driver = TokioDriver::over(run, performers, Box::new(sink), cancel);
+    let result = Box::pin(driver.drive()).await;
+    match result {
+        Ok(text) => RunResult::Ok(text),
+        Err(Error::Interrupted) => RunResult::Cancelled,
+        Err(error) => RunResult::Failure(crate::execute::RunError::from(error)),
+    }
+}
 
 /// The send half every performer posts its answer to.
 type AnswerSender = mpsc::UnboundedSender<(EffectId, EffectAnswer)>;
 
 /// One run driven on tokio.
-pub(crate) struct TokioDriver {
+pub(crate) struct TokioDriver<'a> {
     /// The run being driven.
     run: Run,
-    /// The host resources the performers draw on (the tool table, the
-    /// input broker, the delta hook) and the observer and capture the
-    /// events are forwarded to.
-    host: RunHost,
-    /// The run's gateway source: the client the host supplied, or the
-    /// environment with the run's HTTP limits, resolved on the first
-    /// `Chat` effect so a construction error surfaces as that round's
-    /// failure rather than being swallowed.
-    gateway: GatewaySource,
-    /// The resolved client, cached for the run.
-    client: Option<GatewayClient>,
+    /// The host's performers for the kinds it performs.
+    performers: Performers,
+    /// Where every drained event goes.
+    sink: EventSink<'a>,
     /// The answer channel: unbounded, because each performer sends exactly
     /// once and the in-flight count is already bounded by the chains that
     /// produced the effects.
@@ -80,7 +138,8 @@ pub(crate) struct TokioDriver {
     /// here is a late answer for an effect already dropped and is
     /// discarded, so the run never sees two answers for one effect.
     outstanding: HashMap<EffectId, JoinHandle<()>>,
-    /// The run's cancel flag, awaited while the loop waits on answers.
+    /// The caller's cancel flag, awaited while the loop waits on answers;
+    /// when it fires the run is cancelled.
     cancel: CancelHandle,
     /// Every event the run has reported, in step order: the history a
     /// `TaskEvents` effect is answered from. A step's events are appended
@@ -92,43 +151,40 @@ pub(crate) struct TokioDriver {
     tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
 }
 
-impl TokioDriver {
+impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`: the suites' entry, which
-    /// shape the context themselves. The host is the one the suite set on
-    /// its context (observer, broker, tools, delta hook), with `client` as
-    /// the run's gateway client when the suite supplies one.
+    /// shape the context themselves. The performers and sink come from the
+    /// test host the suite set on its context (observer, broker, tools,
+    /// delta hook), with `client` as the run's gateway client when the
+    /// suite supplies one.
     #[cfg(test)]
-    pub(crate) fn new(state: &RunState, client: Option<GatewayClient>) -> Self {
+    pub(crate) fn new(state: &RunState, client: Option<GatewayClient>) -> TokioDriver<'static> {
         let mut host = state.test_host();
         if let Some(client) = client {
             host = host.client(client);
         }
-        Self::over(Run::from_state(state.clone()), host)
+        let run = Run::from_state(state.clone());
+        let cancel = run.cancel_handle();
+        let limits = state.limits();
+        TokioDriver::over(run, host.performers(limits), host.boxed_sink(), cancel)
     }
 
-    /// Builds the driver over an assembled run with the host's resources.
-    /// A client the host supplies is used as given; otherwise one is built
-    /// from the environment on the first `Chat`, honoring the run's HTTP
-    /// limits.
-    pub(crate) fn over(run: Run, host: RunHost) -> Self {
+    /// Builds the driver over an assembled run.
+    pub(crate) fn over(
+        run: Run,
+        performers: Performers,
+        sink: EventSink<'a>,
+        cancel: CancelHandle,
+    ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let limits = run
-            .state()
-            .map(super::context::RunState::limits)
-            .unwrap_or_default();
-        let client = host
-            .client
-            .clone()
-            .map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
         Self {
-            cancel: run.cancel_handle(),
             run,
-            host,
-            gateway: GatewaySource::from_optional(client, limits),
-            client: None,
+            performers,
+            sink,
             tx,
             rx,
             outstanding: HashMap::new(),
+            cancel,
             history: Vec::new(),
             #[cfg(test)]
             tap: None,
@@ -198,9 +254,9 @@ impl TokioDriver {
     }
 
     /// Waits for the next answer, applying every answer already queued
-    /// behind it, or returns as soon as the cancel flag is set so the
-    /// run's next step observes it. Both arms are event-driven: the
-    /// channel wakes on a posted answer and the flag's future wakes on
+    /// behind it, or returns as soon as the cancel flag is set - cancelling
+    /// the run so its next step observes it. Both arms are event-driven:
+    /// the channel wakes on a posted answer and the flag's future wakes on
     /// the cancel, so a fully suspended run costs no wakeups while it
     /// waits.
     async fn await_answer(&mut self) {
@@ -214,9 +270,12 @@ impl TokioDriver {
                     self.deliver(id, answer);
                 }
             }
-            // The flag itself is the run's to act on at its next step;
-            // the wake only makes that step happen promptly.
-            () = self.cancel.cancelled() => {}
+            // The run acts on its own flag at its next step; setting it
+            // here is what makes that step happen promptly when the
+            // caller's flag is a different handle.
+            () = self.cancel.cancelled() => {
+                self.run.cancel();
+            }
         }
     }
 
@@ -245,103 +304,33 @@ impl TokioDriver {
         while self.rx.try_recv().is_ok() {}
     }
 
-    /// Forwards one step's events to the host's observer and capture, and
-    /// appends them to the history `TaskEvents` reads answer from.
+    /// Hands one step's events to the sink and appends them to the history
+    /// `TaskEvents` reads answer from.
     fn forward(&mut self, events: Vec<Event>) {
-        if events.is_empty() {
-            return;
+        for event in events {
+            (self.sink)(event.clone());
+            self.history.push(event);
         }
-        super::events_to_observer::forward(
-            events.clone(),
-            self.host.observer.as_ref(),
-            self.host.debug.as_deref(),
-        );
-        self.history.extend(events);
-    }
-
-    /// The run's gateway client, resolved on first use and cached.
-    ///
-    /// # Errors
-    /// Returns the client's construction error when the environment
-    /// cannot build one.
-    fn client(&mut self) -> std::result::Result<GatewayClient, CompletionError> {
-        if let Some(client) = &self.client {
-            return Ok(client.clone());
-        }
-        let client = self.gateway.resolve()?;
-        self.client = Some(client.clone());
-        Ok(client)
     }
 
     /// Performs one effect: spawns the performer that will post the
     /// effect's answer under `id` and returns `true`, or answers at once
-    /// and returns `false` when the effect cannot be performed (no client
-    /// can be built for a `Chat`, the tool a `ToolCall` names is not in
-    /// the host's table, no broker serves a `UserInput`).
+    /// and returns `false` for a `TaskEvents` read, which is answered from
+    /// the history.
     fn perform(&mut self, id: EffectId, effect: Effect) -> bool {
         let tx = self.tx.clone();
         let handle = match effect {
-            Effect::Chat {
-                messages,
-                tools,
-                options,
-                stream,
-                ..
-            } => {
-                let client = match self.client() {
-                    Ok(client) => client,
-                    Err(error) => {
-                        self.run.resume(id, EffectAnswer::Chat(Err(error)));
-                        return false;
-                    }
-                };
-                // The host's delta callback is the live consumer of a
-                // streaming round; without one, or for a round the effect
-                // marks non-streaming (a nested infer), the chunks drop at
-                // the leaf and the completed reply is the repair.
-                let on_delta = stream.then(|| self.host.on_delta.clone()).flatten();
-                tokio::spawn(async move {
-                    let tool_arg = (!tools.is_empty()).then_some(tools.as_slice());
-                    let result = client
-                        .complete(&messages, tool_arg, &options, |delta| {
-                            if let Some(hook) = &on_delta {
-                                hook(delta);
-                            }
-                        })
-                        .await
-                        .map(Box::new);
-                    post(&tx, id, EffectAnswer::Chat(result));
-                })
+            Effect::Chat { .. } => {
+                let future = (self.performers.chat)(effect);
+                tokio::spawn(async move { post(&tx, id, future.await) })
             }
-            Effect::ToolCall { tool, args, .. } => {
-                // Resolved by the stable identity against the host's
-                // implementation table, as a harness resolves it against
-                // its activated capabilities; the alias is the record's,
-                // not the resolver's.
-                let Some(tool) = self.host.tools.get(&tool) else {
-                    self.run.resume(
-                        id,
-                        EffectAnswer::ToolCall(Err(ToolError::message(
-                            "the tool the call names has no implementation in the host's table",
-                        ))),
-                    );
-                    return false;
-                };
-                tokio::spawn(async move {
-                    let result = tool.call(args).await;
-                    post(&tx, id, EffectAnswer::ToolCall(result));
-                })
+            Effect::ToolCall { .. } => {
+                let future = (self.performers.tool_call)(effect);
+                tokio::spawn(async move { post(&tx, id, future.await) })
             }
-            Effect::UserInput { execution, section } => {
-                let Some(broker) = self.host.input.clone() else {
-                    self.run
-                        .resume(id, EffectAnswer::UserInput(Ok(InputOutcome::Unavailable)));
-                    return false;
-                };
-                tokio::spawn(async move {
-                    let result = broker.user_input(&execution, &section).await;
-                    post(&tx, id, EffectAnswer::UserInput(result));
-                })
+            Effect::UserInput { .. } => {
+                let future = (self.performers.user_input)(effect);
+                tokio::spawn(async move { post(&tx, id, future.await) })
             }
             Effect::Store { access, op } => {
                 // spawn_blocking, not a plain task: the Vfs is sync by
@@ -373,7 +362,7 @@ impl TokioDriver {
                 // Answered from the driver's own history, at issue: the
                 // step's events are already appended, so the read sees
                 // everything reported before it.
-                let events = super::task_history(&self.history, &task, last);
+                let events = task_history(&self.history, &task, last);
                 self.run.resume(id, EffectAnswer::TaskEvents(events));
                 return false;
             }
@@ -413,7 +402,7 @@ impl TokioDriver {
     pub(crate) fn task_state_for_test(
         &mut self,
         task: &promptforge_api_types::ids::TaskId,
-    ) -> Option<super::scheduler::TaskState> {
+    ) -> Option<crate::execute::scheduler::TaskState> {
         self.scheduler_for_test().task_state_for_test(task)
     }
 
@@ -435,14 +424,15 @@ impl TokioDriver {
         &mut self.run
     }
 
-    /// The run's cancel flag, for a test that cancels from another task.
+    /// The driver's cancel flag, for a test that cancels from another
+    /// task.
     #[cfg(test)]
     pub(crate) fn cancel_handle(&self) -> CancelHandle {
         self.cancel.clone()
     }
 }
 
-impl std::fmt::Debug for TokioDriver {
+impl std::fmt::Debug for TokioDriver<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TokioDriver")
             .field("run", &self.run)
@@ -456,7 +446,7 @@ impl std::fmt::Debug for TokioDriver {
 /// Dropping a bare `JoinHandle` detaches the task, which would strand a
 /// broker wait or gateway round forever, so the drop applies the same
 /// abort the run's end does.
-impl Drop for TokioDriver {
+impl Drop for TokioDriver<'_> {
     fn drop(&mut self) {
         for handle in self.outstanding.values() {
             handle.abort();

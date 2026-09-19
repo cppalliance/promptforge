@@ -3,7 +3,6 @@ use super::*;
 use std::sync::Arc;
 
 use promptforge_api_runtime::input::{InputBroker, InputOutcome};
-use promptforge_api_types::observe::Observation;
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.
@@ -128,74 +127,6 @@ async fn reconnect_resends_unresolved_waits_in_creation_order() {
         socket.recv().await.expect("the second resend arrives"),
         InputFrame::Required { token: second },
         "resend preserves creation order"
-    );
-}
-
-#[derive(Default)]
-struct RecordingObserver {
-    inputs: Mutex<Vec<(String, String, String)>>,
-}
-
-impl RecordingObserver {
-    fn inputs(&self) -> MutexGuard<'_, Vec<(String, String, String)>> {
-        self.inputs.lock().expect("the recorder mutex stays usable")
-    }
-}
-
-impl Observer for RecordingObserver {
-    fn observe(&self, _execution: &str, _section: &str, _event: Observation) {}
-
-    fn on_user_input(&self, execution: &str, section: &str, text: &str) {
-        self.inputs()
-            .push((execution.to_owned(), section.to_owned(), text.to_owned()));
-    }
-}
-
-#[test]
-fn on_user_input_fires_exactly_once_per_response_byte_exact_before_completion() {
-    let registry = WaitRegistry::new();
-    let observer = RecordingObserver::default();
-    let (token, mut receiver) = registry.create();
-    deliver_input_response(
-        &observer,
-        &registry,
-        "run-1",
-        "chat",
-        InputResponse {
-            token: token.clone(),
-            text: GNARLY.to_owned(),
-        },
-    )
-    .expect("a live wait completes");
-    assert_eq!(
-        receiver.try_recv().expect("the wait resumed"),
-        GNARLY,
-        "the completed value is the response text byte-exact"
-    );
-    assert_eq!(
-        observer.inputs().as_slice(),
-        &[("run-1".to_owned(), "chat".to_owned(), GNARLY.to_owned())],
-        "exactly one byte-exact event per response"
-    );
-    // A duplicate response still records the operator's text - one
-    // event per response - while the dead wait reports as the error.
-    assert_eq!(
-        deliver_input_response(
-            &observer,
-            &registry,
-            "run-1",
-            "chat",
-            InputResponse {
-                token,
-                text: "again".to_owned(),
-            },
-        ),
-        Err(WaitError::UnknownToken)
-    );
-    assert_eq!(
-        observer.inputs().len(),
-        2,
-        "the event fires exactly once per response, even a stale one"
     );
 }
 

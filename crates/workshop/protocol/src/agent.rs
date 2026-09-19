@@ -1,5 +1,7 @@
 //! Agent-session frames: the `/agents/ws` socket's frame family.
 
+use promptforge_api_types::event::Event;
+use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 use serde::Serialize;
 
 /// The agent list pushed when an `/agents/ws` socket connects:
@@ -55,6 +57,141 @@ impl AgentSessionFrame {
     }
 }
 
+/// The kind of one [`AgentEvent`] on the wire, labelled with the Agent
+/// Client Protocol `sessionUpdate` names so the SPA's transcript stays
+/// ACP-conversant:
+///
+/// | Variant | Label |
+/// |---|---|
+/// | [`AssistantReply`](Self::AssistantReply) | `agent_message` |
+/// | [`AssistantToolCalls`](Self::AssistantToolCalls) | `tool_call` |
+/// | [`ToolResult`](Self::ToolResult) | `tool_call_update` |
+/// | [`Thinking`](Self::Thinking) | `agent_thought` |
+/// | [`UserInput`](Self::UserInput) | `user_message` |
+///
+/// Exactly the engine's content [`Event`] variants a transcript renders;
+/// lifecycle, task, and debug events have no wire label and never frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum AgentEventKind {
+    /// A completed assistant reply.
+    #[serde(rename = "agent_message")]
+    AssistantReply,
+    /// A batch of tool calls the model requested.
+    #[serde(rename = "tool_call")]
+    AssistantToolCalls,
+    /// The result of one dispatched tool call.
+    #[serde(rename = "tool_call_update")]
+    ToolResult,
+    /// A completed block of model thinking.
+    #[serde(rename = "agent_thought")]
+    Thinking,
+    /// Text the user supplied.
+    #[serde(rename = "user_message")]
+    UserInput,
+}
+
+/// One content [`Event`] in the shape the `/agents/ws` wire carries: the
+/// ACP-labelled `kind`, the reporting `section`, the model-turn counter,
+/// the kind-specific `content` string (a tool-call batch renders as the
+/// JSON array of its calls), and the model, tool-call id, finish reason,
+/// and metrics where the kind carries them. `content` and every other
+/// free-text field is untrusted model-, tool-, or user-authored data. An
+/// [`Event`] locates itself by its provenance (the task and sequence),
+/// which the wire does not yet expose.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AgentEvent {
+    /// What kind of thing happened.
+    pub kind: AgentEventKind,
+    /// The reporting scope: the agent's name.
+    pub section: String,
+    /// The model-turn counter the event was reported under.
+    pub turn: u32,
+    /// The kind-specific untrusted payload.
+    pub content: String,
+    /// The model that produced the event, for model-attributed kinds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The provider-issued tool-call id the event answers to, for tool
+    /// results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// The provider's finish reason, when it sent one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+    /// Everything measured about the model call that produced the event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<CallMetrics>,
+}
+
+impl AgentEvent {
+    /// Projects one engine event onto the wire shape, or `None` for a
+    /// variant the transcript does not render (lifecycle, task, and debug
+    /// events).
+    #[must_use]
+    pub fn from_event(event: &Event) -> Option<Self> {
+        let base = |kind: AgentEventKind, turn: u32, content: String| AgentEvent {
+            kind,
+            section: event.section().to_owned(),
+            turn,
+            content,
+            model: None,
+            tool_call_id: None,
+            finish_reason: None,
+            metrics: None,
+        };
+        Some(match event {
+            Event::UserInput { text, .. } => base(AgentEventKind::UserInput, 0, text.clone()),
+            Event::Thinking {
+                turn, model, text, ..
+            } => AgentEvent {
+                model: Some(model.clone()),
+                ..base(AgentEventKind::Thinking, *turn, text.clone())
+            },
+            Event::AssistantReply {
+                turn,
+                text,
+                finish_reason,
+                model,
+                metrics,
+                ..
+            } => AgentEvent {
+                model: Some(model.clone()),
+                finish_reason: finish_reason.clone(),
+                metrics: metrics.clone(),
+                ..base(AgentEventKind::AssistantReply, *turn, text.clone())
+            },
+            Event::AssistantToolCalls {
+                turn, model, calls, ..
+            } => AgentEvent {
+                model: Some(model.clone()),
+                ..base(
+                    AgentEventKind::AssistantToolCalls,
+                    *turn,
+                    render_tool_calls(calls),
+                )
+            },
+            Event::ToolResult {
+                turn,
+                tool_call_id,
+                content,
+                ..
+            } => AgentEvent {
+                tool_call_id: Some(tool_call_id.clone()),
+                ..base(AgentEventKind::ToolResult, *turn, content.clone())
+            },
+            _ => return None,
+        })
+    }
+}
+
+/// Renders a tool-call batch as the JSON array of its calls, so a reader
+/// parses the ids, names, and arguments back out of one string field.
+/// The calls hold only strings and JSON values, so serialization cannot
+/// fail; the fallback keeps the projection total.
+fn render_tool_calls(calls: &[ToolCallEvent]) -> String {
+    serde_json::to_string(calls).unwrap_or_else(|_| "[]".to_owned())
+}
+
 /// One durable entry of an agent session's event log:
 /// `{"type":"agent_event","index":N,"event":{...}}` plus, on the
 /// model-round content kinds (`agent_thought`, `agent_message`,
@@ -74,24 +211,21 @@ pub struct AgentEventFrame {
     /// content kinds and omitted elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     reply: Option<u64>,
-    /// The logged entry, in its persisted vocabulary shape.
-    event: promptforge_api_types::events::RuntimeEvent,
+    /// The logged entry, in its wire shape.
+    event: AgentEvent,
 }
 
 impl AgentEventFrame {
-    /// Builds the frame for the entry at `index`.
+    /// Builds the frame for the entry at `index`, or `None` when `event`
+    /// is a variant the transcript does not render.
     #[must_use]
-    pub fn new(
-        index: u64,
-        reply: Option<u64>,
-        event: promptforge_api_types::events::RuntimeEvent,
-    ) -> Self {
-        Self {
+    pub fn new(index: u64, reply: Option<u64>, event: &Event) -> Option<Self> {
+        Some(Self {
             kind: "agent_event",
             index,
             reply,
-            event,
-        }
+            event: AgentEvent::from_event(event)?,
+        })
     }
 }
 

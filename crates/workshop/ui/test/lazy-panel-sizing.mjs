@@ -296,7 +296,7 @@ if (feed !== null) {
   push({
     type: "agent_event",
     index: 0,
-    event: { kind: "user_message", section: "chat", chain_id: 0, depth: 0, turn: 0, content: "hello" },
+    event: { kind: "user_message", section: "chat", turn: 0, content: "hello" },
   });
   await flush();
 

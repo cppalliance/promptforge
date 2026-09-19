@@ -159,21 +159,21 @@ fn an_agent_session_frame_serializes_its_id_and_agent() {
 
 #[test]
 fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
-    use promptforge_api_types::events::{RuntimeEvent, RuntimeEventKind};
-    let event = RuntimeEvent {
-        kind: RuntimeEventKind::UserInput,
+    use promptforge_api_types::event::Event;
+    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    let event = Event::UserInput {
+        execution: "run".to_owned(),
         section: "chat".to_owned(),
-        chain_id: 0,
-        depth: 0,
-        turn: 0,
-        content: "hi".to_owned(),
-        model: None,
-        tool_call_id: None,
-        finish_reason: None,
-        metrics: None,
+        provenance: Provenance {
+            task: TaskId::from(ChainId::root()),
+            seq: 0,
+        },
+        text: "hi".to_owned(),
     };
-    let plain = serde_json::to_value(AgentEventFrame::new(3, None, event.clone()))
-        .expect("the frame serializes");
+    let plain = serde_json::to_value(
+        AgentEventFrame::new(3, None, &event).expect("a user-input event frames"),
+    )
+    .expect("the frame serializes");
     assert_eq!(plain["type"], "agent_event");
     assert_eq!(plain["index"], 3, "the frame carries the entry's log index");
     assert!(
@@ -182,14 +182,115 @@ fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
     );
     assert_eq!(
         plain["event"],
-        serde_json::to_value(&event).expect("events serialize"),
-        "the entry rides in its persisted vocabulary shape"
+        serde_json::json!({
+            "kind": "user_message", "section": "chat", "turn": 0, "content": "hi",
+        }),
+        "the entry rides in its ACP-labelled wire shape"
     );
-    let stamped = serde_json::to_value(AgentEventFrame::new(4, Some(1), event))
-        .expect("the frame serializes");
+    let stamped = serde_json::to_value(
+        AgentEventFrame::new(4, Some(1), &event).expect("a user-input event frames"),
+    )
+    .expect("the frame serializes");
     assert_eq!(
         stamped["reply"], 1,
         "a superseding event is stamped with the reply id its deltas carried"
+    );
+}
+
+#[test]
+fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
+    use promptforge_api_types::event::Event;
+    use promptforge_api_types::events::ToolCallEvent;
+    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    let provenance = Provenance {
+        task: TaskId::from(ChainId::root()),
+        seq: 0,
+    };
+    let batch = Event::AssistantToolCalls {
+        execution: "run".to_owned(),
+        section: "chat".to_owned(),
+        provenance: provenance.clone(),
+        turn: 1,
+        model: "llama-3".to_owned(),
+        calls: vec![ToolCallEvent {
+            id: "call_1".to_owned(),
+            name: "read_file".to_owned(),
+            arguments: serde_json::json!({ "path": "notes.txt" }),
+        }],
+    };
+    let frame = serde_json::to_value(
+        AgentEventFrame::new(0, Some(0), &batch).expect("a tool-call batch frames"),
+    )
+    .expect("the frame serializes");
+    assert_eq!(frame["event"]["kind"], "tool_call");
+    assert_eq!(
+        frame["event"]["content"],
+        r#"[{"id":"call_1","name":"read_file","arguments":{"path":"notes.txt"}}]"#,
+        "a batch renders as the JSON array of its calls in one string field"
+    );
+    assert_eq!(frame["event"]["model"], "llama-3");
+
+    let lifecycle = Event::SectionStarted {
+        execution: "run".to_owned(),
+        section: "chat".to_owned(),
+        provenance,
+    };
+    assert!(
+        AgentEventFrame::new(1, None, &lifecycle).is_none(),
+        "a lifecycle event has no wire label and never frames"
+    );
+}
+
+#[test]
+fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_results() {
+    use promptforge_api_types::event::Event;
+    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    let provenance = Provenance {
+        task: TaskId::from(ChainId::root()),
+        seq: 0,
+    };
+    let thinking = Event::Thinking {
+        execution: "run".to_owned(),
+        section: "chat".to_owned(),
+        provenance: provenance.clone(),
+        turn: 2,
+        model: "llama-3".to_owned(),
+        text: "weighing the options".to_owned(),
+    };
+    let thought = serde_json::to_value(
+        AgentEventFrame::new(5, Some(2), &thinking).expect("a thinking event frames"),
+    )
+    .expect("the frame serializes");
+    assert_eq!(
+        thought["event"],
+        serde_json::json!({
+            "kind": "agent_thought", "section": "chat", "turn": 2,
+            "content": "weighing the options", "model": "llama-3",
+        }),
+        "a thinking block keeps its model and carries no tool-call id"
+    );
+
+    let result = Event::ToolResult {
+        execution: "run".to_owned(),
+        section: "chat".to_owned(),
+        provenance,
+        turn: 2,
+        tool_call_id: "call_7".to_owned(),
+        alias: "read_file".to_owned(),
+        content: "the file's text".to_owned(),
+        trusted: false,
+    };
+    let update = serde_json::to_value(
+        AgentEventFrame::new(6, None, &result).expect("a tool-result event frames"),
+    )
+    .expect("the frame serializes");
+    assert_eq!(
+        update["event"],
+        serde_json::json!({
+            "kind": "tool_call_update", "section": "chat", "turn": 2,
+            "content": "the file's text", "tool_call_id": "call_7",
+        }),
+        "a tool result keeps the id it answers and its content, and carries no model"
     );
 }
 

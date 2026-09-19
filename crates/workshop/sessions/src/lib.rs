@@ -9,9 +9,11 @@
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`, the service crates
 //!   (`workshop-gateway`, `workshop-menu`, `workshop-status`), the
-//!   promptforge door, and the harness door `harness-api` (the engine's
-//!   model client and capability registry are named through its
-//!   `bridge`). Read `AGENTS.md` before adding an import.
+//!   promptforge door (with its `test-support` feature: the tokio test
+//!   driver is the sessions' interim run host until the harness lands),
+//!   and the harness door `harness-api` (the engine's model client and
+//!   capability registry are named through its `bridge`). Read
+//!   `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - One task owns each socket: a single `select!` loop reads inbound
@@ -35,5 +37,5 @@ mod session;
 pub mod state;
 
 pub use agents::{AgentSessions, SessionHost, session_registry};
-pub use input::{SessionInputBroker, WaitError, WaitRegistry, deliver_input_response};
+pub use input::{SessionInputBroker, WaitError, WaitRegistry};
 pub use state::{SessionsState, register, routes};

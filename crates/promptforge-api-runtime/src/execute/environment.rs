@@ -2,16 +2,12 @@
 
 use std::fmt;
 
-use promptforge_api_types::capabilities::RunServices;
-
 use crate::parser::Prompt;
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
 
-use super::RunResult;
 use super::config::RunContext;
 use super::fill::{fill_model_bindings, fill_tool_bindings};
-use super::host::RunHost;
 use super::requirements::Requirements;
 
 /// What exists in this deployment and its standing policy: the host roots,
@@ -76,10 +72,9 @@ impl Environment {
     /// Sets the catalog of tools a run may bind: the descriptors the host
     /// assembled from its activated capabilities.
     /// [`prepare`](Environment::prepare) fills the prompt's exact slots
-    /// against it by identity. A host running through
-    /// [`run`](Environment::run) with a registry on its
-    /// [`RunHost`] never sets this: the activated catalog is installed
-    /// there.
+    /// against it by identity. A host that activates a registry
+    /// ([`activate`](super::activate)) installs the activated catalog
+    /// here before preparing.
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> Environment {
         self.tools = tools;
@@ -95,10 +90,9 @@ impl Environment {
     /// runs conflicting on one host file under the caller's identity.
     ///
     /// [`prepare`](Environment::prepare) builds one unless the host set
-    /// the context's handle itself; [`run`](Environment::run) builds it
-    /// here before activating, hands it to activation's services, and
-    /// sets it on the context so the capabilities and the run share one
-    /// store.
+    /// the context's handle itself; a host that activates capabilities
+    /// builds it here first, hands it to activation's services, and sets
+    /// it on the context so the capabilities and the run share one store.
     #[must_use]
     pub fn run_vfs(&self) -> VfsRef {
         VfsRef::builder()
@@ -127,9 +121,8 @@ impl Environment {
     /// run time). Every fill is journaled into the context's tool
     /// bindings. Capability resolution, co-activation conflicts, and
     /// activation itself happen before prepare
-    /// ([`activation::activate`](super::activation::activate)), on the
-    /// loop path in [`run`](Environment::run), which merges that report
-    /// into this one.
+    /// ([`activation::activate`](super::activation::activate)) in the
+    /// host, which merges that report into this one.
     ///
     /// Model satisfaction is a fill function over the declared roles, and
     /// v1's fill is deliberately trivial: every role binds to the
@@ -151,57 +144,6 @@ impl Environment {
         ctx.tool_bindings = fill_tool_bindings(prompt, &ctx.tools, &mut requirements);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
-    }
-
-    /// The zero-burden path: activates, [prepares](Environment::prepare),
-    /// and runs.
-    ///
-    /// When `host` carries a [registry](RunHost::registry), this is the
-    /// one place the prompt's declared capabilities activate: the run's
-    /// VFS is built first ([`run_vfs`](Environment::run_vfs), unless the
-    /// host set the context's handle itself) so the capabilities'
-    /// services and the run share one store; each declaration activates
-    /// with those services ([`activation::activate`](super::activation::activate));
-    /// the activated catalog is the run's catalog, its implementations
-    /// go to the loop's tool performer, and what activation could not
-    /// satisfy is folded into prepare's report. Without a registry
-    /// nothing activates and the environment's own catalog stands.
-    ///
-    /// An unsatisfiable prompt - missing required capabilities,
-    /// conflicts, or unmet model requirements - is refused with
-    /// [`RunResult::Failure`] carrying
-    /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and
-    /// a model-readable notice naming each gap once. The notice may
-    /// arrive as tool output when the prompt runs as a sub-run tool, so
-    /// it is written for a model to reason about.
-    #[must_use]
-    pub async fn run(
-        &self,
-        prompt: &Prompt,
-        args: &str,
-        ctx: RunContext,
-        host: RunHost,
-    ) -> RunResult {
-        let mut ctx = ctx;
-        let mut host = host;
-        let mut env = self.clone();
-        if let Some(registry) = host.registry.take() {
-            if !ctx.vfs_explicit {
-                ctx = ctx.vfs(self.run_vfs());
-            }
-            let services = RunServices::new(ctx.vfs.clone(), ctx.cancel_handle());
-            let mut activation = super::activation::activate(Some(&registry), prompt, &services);
-            env.tools = std::mem::take(&mut activation.catalog);
-            host = host.activated(activation);
-        }
-        let (ctx, mut requirements) = env.prepare(prompt, ctx);
-        requirements.merge(host.requirements.clone());
-        if !requirements.is_satisfied() {
-            return RunResult::Failure(crate::RunError::from(crate::Error::RequirementsUnmet {
-                notice: requirements.notice(),
-            }));
-        }
-        super::run(prompt, args, ctx, host).await
     }
 }
 

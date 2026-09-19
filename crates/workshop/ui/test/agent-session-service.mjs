@@ -84,7 +84,7 @@ function makeWire() {
         const frame = {
           type: "agent_event",
           index: 0,
-          event: { kind, section: "chat", chain_id: 0, depth: 0, turn: 0, content, ...eventFields },
+          event: { kind, section: "chat", turn: 0, content, ...eventFields },
         };
         if (reply !== undefined) frame.reply = reply;
         emitters.event.fire(frame);

@@ -8,8 +8,8 @@
 
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 
 /// Records every observation and every content report as one rendered

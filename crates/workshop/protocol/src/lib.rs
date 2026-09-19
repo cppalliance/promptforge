@@ -136,7 +136,10 @@ mod menu;
 mod status;
 mod workbench;
 
-pub use agent::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, AgentSessionFrame, AgentsFrame};
+pub use agent::{
+    AgentDeltaFrame, AgentDeltaKind, AgentEvent, AgentEventFrame, AgentEventKind,
+    AgentSessionFrame, AgentsFrame,
+};
 pub use catalog::{CatalogFrame, CatalogPush, is_chat_capable};
 pub use error::{ErrorEnvelope, ErrorFrame};
 pub use input::{InputFrame, InputResponse};

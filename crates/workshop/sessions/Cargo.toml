@@ -17,7 +17,9 @@ async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 harness-api.workspace = true
-promptforge-api-runtime.workspace = true
+# The tokio test driver is the sessions' interim run host until the harness
+# lands; the engine's feature gates it.
+promptforge-api-runtime = { workspace = true, features = ["test-support"] }
 promptforge-api-types.workspace = true
 rand.workspace = true
 serde.workspace = true

@@ -8,7 +8,7 @@
 use super::chat_arm::chat_context;
 use super::models_loop::{echo_tools, loop_prompt};
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// The function names one request advertised, in wire order.
 fn advertised_names(body: &serde_json::Value) -> Vec<&str> {

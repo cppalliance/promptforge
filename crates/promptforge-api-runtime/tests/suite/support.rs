@@ -5,8 +5,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunHost, RunResult};
+use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunResult};
 use promptforge_api_runtime::parser::Prompt;
+use promptforge_api_runtime::test_support::{RunHost, run_host};
 use promptforge_api_types::observe::{Observation, Observer};
 use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::tools::Tool;
@@ -79,14 +80,14 @@ pub(super) fn prepare_run(
     (ctx, opts.host(), vfs)
 }
 
-/// Drives a prepared context to its result through the free `run`.
+/// Drives a prepared context to its result through the tokio test driver.
 pub(super) async fn drive(
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
     host: RunHost,
 ) -> Result<String, RunError> {
-    match promptforge_api_runtime::execute::run(prompt, args, ctx, host).await {
+    match run_host(prompt, args, ctx, host).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),
         RunResult::Failure(error) => Err(error),

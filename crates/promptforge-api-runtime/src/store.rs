@@ -19,7 +19,9 @@
 //! crates. This module is the crate-internal import surface for them; hosts
 //! that seed or extract the store depend on `shared-vfs` directly.
 
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use promptforge_store::Store;
+pub(crate) use promptforge_store::StoreError;
 #[cfg(test)]
 pub(crate) use promptforge_store::StoreExt;
-pub(crate) use promptforge_store::{Store, StoreError};
 pub(crate) use shared_vfs::{Access, VfsRef};

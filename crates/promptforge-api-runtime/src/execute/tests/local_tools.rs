@@ -3,12 +3,11 @@
 //! so a model-issued call to a local tool is answered on the section VM
 //! and its trusted result rides back to the model verbatim.
 
-use super::super::*;
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// The `grab` local tool registration the loop tests open with, followed
 /// by one loop over a single user message; `handler` is the Lua body of

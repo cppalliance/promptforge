@@ -10,8 +10,8 @@
 
 use super::models_loop::loop_models;
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// Records every observation and every `on_tool_result` report as one
 /// rendered line, so a test reads the arm's whole reporting sequence.

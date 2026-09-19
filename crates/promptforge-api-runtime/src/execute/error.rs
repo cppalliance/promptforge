@@ -67,8 +67,9 @@ pub struct SourceLocation {
     pub span: Option<Range<usize>>,
 }
 
-/// The error returned by [`run`](super::run), the orchestration boundary of a
-/// prompt run.
+/// The error a prompt run fails with, carried by
+/// [`RunResult::Failure`](super::RunResult::Failure) out of
+/// [`Step::Done`](super::Step::Done).
 ///
 /// A `RunError` carries a stable [`kind`](RunError::kind) classifier plus the
 /// `is_cancelled`/`is_retryable` predicates, and preserves the underlying cause
@@ -132,8 +133,9 @@ impl RunError {
         matches!(self.inner, Error::Interrupted)
     }
 
-    /// Dissolves the boundary error into the engine's own, for the
-    /// in-crate drivers that report in that vocabulary.
+    /// Dissolves the boundary error into the engine's own, for the test
+    /// drivers that report in that vocabulary.
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn into_inner(self) -> Error {
         self.inner
     }

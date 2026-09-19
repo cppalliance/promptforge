@@ -6,8 +6,8 @@
 //! input broker - session-supplied code, never advertised to a model. The
 //! broker registers a wait, announces it with a durable
 //! `input_required` frame, and suspends on the wait's receiver until the
-//! session delivers the operator's answer ([`deliver_input_response`]) or
-//! the wait dies. A dying wait is an outcome, never silence: every path
+//! session completes the wait with the operator's answer or the wait
+//! dies. A dying wait is an outcome, never silence: every path
 //! out of an unresolved wait - the future dropped by a turn-cancel, the
 //! wait cancelled out of the registry - removes the entry and pushes a
 //! durable `input_cancelled` frame, so the SPA never pins its input box
@@ -20,7 +20,6 @@ mod tool;
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use promptforge_api_types::observe::Observer;
 use tokio::sync::{broadcast, oneshot};
 
 use workshop_protocol::{InputFrame, InputResponse};
@@ -231,62 +230,13 @@ pub enum WaitError {
     UnknownToken,
 }
 
-/// Fires `on_user_input` for an arrived `input_response`, byte-exact,
-/// then completes the wait its token names.
-///
-/// This is the producer the session calls when the SPA answers a prompt.
-/// The event fires exactly once per response, before completion and
-/// regardless of whether the token still names a live wait: the
-/// operator's text is history the relaunched agent rebuilds context
-/// from, so a response racing a turn-cancel records its text even though
-/// the wait it aimed at is gone.
-///
-/// # Errors
-/// Returns [`WaitError::UnknownToken`] when no unresolved wait holds the
-/// response's token; the `on_user_input` event has fired regardless.
-///
-/// # Examples
-/// ```
-/// use promptforge_api_types::observe::NullObserver;
-/// use workshop_protocol::InputResponse;
-/// use workshop_sessions::{WaitRegistry, deliver_input_response};
-///
-/// let registry = WaitRegistry::new();
-/// let (token, mut receiver) = registry.create();
-/// deliver_input_response(
-///     &NullObserver::default(),
-///     &registry,
-///     "run",
-///     "chat",
-///     InputResponse { token, text: "hello".to_owned() },
-/// )?;
-/// assert_eq!(receiver.try_recv(), Ok("hello".to_owned()));
-/// # Ok::<(), workshop_sessions::WaitError>(())
-/// ```
-pub fn deliver_input_response(
-    observer: &dyn Observer,
-    registry: &WaitRegistry,
-    execution: &str,
-    section: &str,
-    response: InputResponse,
-) -> Result<(), WaitError> {
-    deliver_input_response_before_completion(
-        observer,
-        registry,
-        execution,
-        section,
-        response,
-        || {},
-    )
-}
-
 /// Completes the wait `response` names without recording anything.
 ///
-/// The unified-runtime half of delivery: a session whose agent runs on
-/// the unified runtime records the operator's text consumer-side, when
-/// the suspended `user_input` call resumes, so the producer-side
-/// observation would double the event. The `before_completion` seam is
-/// the same one [`deliver_input_response_before_completion`] offers.
+/// The engine records the operator's text consumer-side, as a
+/// `UserInput` event when the suspended `user_input` call resumes, so
+/// a producer-side record here would double the event. The
+/// `before_completion` seam runs after the response is accepted and
+/// before the suspended call resumes.
 ///
 /// # Errors
 /// Returns [`WaitError::UnknownToken`] when no unresolved wait holds the
@@ -296,21 +246,6 @@ pub(crate) fn complete_input_response(
     response: InputResponse,
     before_completion: impl FnOnce(),
 ) -> Result<(), WaitError> {
-    before_completion();
-    registry.complete(&response.token, response.text)
-}
-
-/// Delivers one response with a synchronous seam after the durable input
-/// observation and before the suspended tool call resumes.
-pub(crate) fn deliver_input_response_before_completion(
-    observer: &dyn Observer,
-    registry: &WaitRegistry,
-    execution: &str,
-    section: &str,
-    response: InputResponse,
-    before_completion: impl FnOnce(),
-) -> Result<(), WaitError> {
-    observer.on_user_input(execution, section, &response.text);
     before_completion();
     registry.complete(&response.token, response.text)
 }

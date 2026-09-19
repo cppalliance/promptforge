@@ -19,7 +19,7 @@ use super::models_loop::{echo_tools, loop_context_observed};
 use super::scheduler::{request_prompts, scheduler_context_from, scheduler_context_on};
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// The gateway delay that keeps one arm parked while its siblings finish.
 /// The arms it orders against complete in milliseconds on the loopback

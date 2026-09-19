@@ -11,6 +11,7 @@ mod catalog;
 mod effects;
 mod events;
 pub(super) mod transition;
+pub(super) use effects::AgentRunError;
 use effects::{EffectExecutor, EffectOutcome};
 use events::{CollectedEvent, EventCollector};
 use transition::{SupervisorEvent, SupervisorState, transition};

@@ -403,7 +403,6 @@ fn compose(
     registrations.hold(state);
     let agents = AgentSessions::new(
         config.agents.path.clone(),
-        state_dir.join("sessions"),
         gateway_binding,
         SessionHost::new(registry.clone(), backoff.clone(), menu, catalog),
     );

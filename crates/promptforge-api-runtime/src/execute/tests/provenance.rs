@@ -12,7 +12,7 @@ use promptforge_api_types::ids::TaskId;
 
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
+use crate::test_support::tokio_driver::TokioDriver;
 
 fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")

@@ -37,6 +37,7 @@ use crate::observe::{Observation, Observer};
 mod lifecycle;
 
 use lifecycle::lifecycle_event;
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) use lifecycle::{unit_lifecycle_variants, unit_observation};
 
 /// The run's event buffer: the events not yet drained, plus one sequence

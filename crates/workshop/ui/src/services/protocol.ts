@@ -67,12 +67,11 @@ export interface WorkbenchFrame {
 // durable event.
 
 /**
- * The kind of one runtime event, following the Agent Client Protocol
- * `sessionUpdate` names. Mirrors `RuntimeEventKind` in
- * promptforge-api-types (src/events.rs), which is `#[non_exhaustive]`:
- * future kinds (`plan`, tool-status updates) may arrive as labels outside
- * this union, so renderers matching on kinds tolerate unknown labels
- * through a wildcard arm.
+ * The kind of one agent event, following the Agent Client Protocol
+ * `sessionUpdate` names. Mirrors `AgentEventKind` in workshop-protocol
+ * (src/agent.rs). Future kinds (`plan`, tool-status updates) may arrive
+ * as labels outside this union, so renderers matching on kinds tolerate
+ * unknown labels through a wildcard arm.
  */
 export type AgentEventKind =
   | "agent_message"
@@ -128,17 +127,15 @@ export interface CallMetrics {
 
 /**
  * One durable record of something that happened during an agent run,
- * mirroring `RuntimeEvent` in promptforge-api-types (src/events.rs).
- * `content` and every other free-text field is untrusted model-, tool-, or
- * user-authored data. Absent optional fields are omitted keys on the wire,
- * never `null`.
+ * mirroring `AgentEvent` in workshop-protocol (src/agent.rs): the engine's
+ * content event projected onto the wire. `content` and every other
+ * free-text field is untrusted model-, tool-, or user-authored data. Absent
+ * optional fields are omitted keys on the wire, never `null`.
  */
-export interface RuntimeEvent {
+export interface AgentEvent {
   kind: AgentEventKind;
   /** The reporting scope: for agent sessions, the agent's name. */
   section: string;
-  chain_id: number;
-  depth: number;
   turn: number;
   /** The kind-specific untrusted payload. */
   content: string;
@@ -186,7 +183,7 @@ export interface AgentEventFrame {
   type: "agent_event";
   index: number;
   reply?: number;
-  event: RuntimeEvent;
+  event: AgentEvent;
 }
 
 /** Which streaming side channel one agent delta belongs to. */

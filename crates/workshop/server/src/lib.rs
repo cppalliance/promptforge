@@ -77,9 +77,7 @@ pub use push::Push;
 pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
 pub use workshop_protocol::{Activity, InputFrame, InputResponse};
-pub use workshop_sessions::{
-    AgentSessions, SessionInputBroker, WaitError, WaitRegistry, deliver_input_response,
-};
+pub use workshop_sessions::{AgentSessions, SessionInputBroker, WaitError, WaitRegistry};
 pub use workshop_support::{
     AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig,
 };

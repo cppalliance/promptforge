@@ -1,7 +1,7 @@
 //! The session run's capabilities and current model: the shared registry of
-//! first-party capabilities every session run hands its `RunHost` (the
-//! engine's loop activates against it per run), and the launch-time
-//! resolution of the dropdown's current model into the per-run context.
+//! first-party capabilities every session run activates its prompt's
+//! declarations against, and the launch-time resolution of the dropdown's
+//! current model into the per-run context.
 
 use std::sync::Arc;
 

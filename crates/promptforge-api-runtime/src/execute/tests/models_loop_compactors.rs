@@ -7,8 +7,8 @@
 
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::{OverflowReason, ToolSet};
+use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() {

@@ -1,4 +1,3 @@
-use super::super::*;
 use super::run;
 use super::*;
 
@@ -29,7 +28,7 @@ Ask the model.\n\n\
         ),
     );
     let host = ctx.test_host.clone();
-    let out = match crate::execute::run(&prompt, "", ctx, host).await {
+    let out = match crate::test_support::run_host(&prompt, "", ctx, host).await {
         RunResult::Ok(out) => out,
         other => panic!("the run must succeed: {other:?}"),
     };
@@ -578,7 +577,7 @@ async fn run_with_bindings(
         );
     }
     let host = ctx.test_host.clone();
-    match crate::execute::run(&prompt, "", ctx, host).await {
+    match crate::test_support::run_host(&prompt, "", ctx, host).await {
         RunResult::Ok(out) => Ok(out),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
@@ -741,7 +740,7 @@ async fn models_infer_without_use_or_default_errors() {
             ThinkingMode::Switchable,
         ),
     );
-    let error = match crate::execute::run(&prompt, "", ctx, RunHost::new()).await {
+    let error = match crate::test_support::run_host(&prompt, "", ctx, RunHost::new()).await {
         RunResult::Failure(error) => error,
         other => panic!("models.infer with no current model must fail: {other:?}"),
     };

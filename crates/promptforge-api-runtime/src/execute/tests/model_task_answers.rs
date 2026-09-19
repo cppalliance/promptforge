@@ -10,7 +10,7 @@
 use super::model_tasks::{model_task_context, owner_prompt, task};
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
+use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
 async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note() {

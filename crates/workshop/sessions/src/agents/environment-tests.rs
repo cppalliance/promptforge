@@ -299,7 +299,6 @@ async fn a_chat_session_activates_the_web_capability_and_calls_search_end_to_end
     let dir = tempfile::TempDir::new().expect("tempdir");
     let sessions = AgentSessions::new(
         dir.path().join("missing-agents"),
-        dir.path().join("sessions"),
         GatewayBinding::new(&gateway.base_url, "test-key").expect("the binding builds"),
         SessionHost::new(Registry::new(), ReconnectBackoff::new(), menu, catalog),
     );
@@ -362,7 +361,6 @@ async fn a_failed_catalog_fetch_fails_the_chat_launch_naming_the_fetch_as_cause(
     let dir = tempfile::TempDir::new().expect("tempdir");
     let sessions = AgentSessions::new(
         dir.path().join("missing-agents"),
-        dir.path().join("sessions"),
         GatewayBinding::new("http://127.0.0.1:1", "test-key").expect("the binding builds"),
         host,
     );

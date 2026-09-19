@@ -10,13 +10,11 @@
 //! [`ToolCatalog`] of descriptors [`Environment::prepare`] fills slots
 //! against, and the [`ToolTable`] of implementations the host's tool
 //! performer resolves a `ToolCall` effect's id in. The engine sees only the
-//! first. The in-crate tokio loop ([`Environment::run`], given a registry
-//! on its [`RunHost`](super::RunHost)) is this module's one production
-//! caller today; the harness takes it over when the capability machinery
-//! moves there.
+//! first. Workshop's session launch is this module's production caller
+//! today; the harness takes it over when the capability machinery moves
+//! there.
 //!
 //! [`Environment::prepare`]: super::Environment::prepare
-//! [`Environment::run`]: super::Environment::run
 
 use std::collections::BTreeMap;
 use std::fmt;

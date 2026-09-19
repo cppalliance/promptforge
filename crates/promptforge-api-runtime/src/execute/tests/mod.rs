@@ -14,11 +14,9 @@ use axum::routing::post;
 use serde_json::{Value, json};
 
 use super::context::RunState;
-use super::gateway::{GatewaySource, env_client_with_limits};
 use super::scope::prepare_scoped_tools;
 use super::support::advance_turn;
 use super::*;
-use crate::Result;
 use crate::capabilities::CapabilityRegistry;
 use crate::client::{GatewayClient, GatewayEndpoint, SecretString};
 use crate::debug::DebugCapture;
@@ -26,9 +24,13 @@ use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::observe::{NullObserver, Observation, Observer, detail};
 use crate::parser::ParseErrorKind;
+use crate::parser::Prompt;
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
+use crate::test_support::RunHost;
+use crate::test_support::tokio_driver::TokioDriver;
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
+use crate::{Error, Result};
 use promptforge_api_types::capabilities::{
     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
 };
@@ -327,14 +329,6 @@ fn gatewayed_with_debug(addr: SocketAddr, capture: Arc<dyn DebugCapture>) -> Run
     }
 }
 
-/// True when the host exports no gateway configuration, so a test asserting
-/// the lazy-client construction error cannot be turned into a real gateway
-/// call by a developer's PROMPTFORGE_GATEWAY_* variables.
-fn gateway_env_is_unset() -> bool {
-    std::env::var_os("PROMPTFORGE_GATEWAY_URL").is_none()
-        && std::env::var_os("PROMPTFORGE_GATEWAY_API_KEY").is_none()
-}
-
 /// Parse `md` and run it offline with empty `args`, no tools, and a fresh
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.
@@ -376,7 +370,7 @@ async fn run(
         ctx = ctx.report_debug(true);
         host = host.debug(debug);
     }
-    match env.run(&test.prompt, args, ctx, host).await {
+    match crate::test_support::run_with_host(&env, &test.prompt, args, ctx, host).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
@@ -515,15 +509,17 @@ fn tools_registry(tools: &[Arc<dyn Tool>]) -> CapabilityRegistry {
     registry
 }
 
-/// [`Environment::run`] with the host the test set on its context through
-/// the context's test-only seams (observer, client, broker, capture).
+/// The test-support driver ([`crate::test_support::run_with_host`]) with the
+/// host the test set on its context through the context's test-only seams
+/// (observer, client, broker, capture).
 async fn env_run(env: &Environment, prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
     let host = ctx.test_host.clone();
-    env.run(prompt, args, ctx, host).await
+    crate::test_support::run_with_host(env, prompt, args, ctx, host).await
 }
 
-/// Runs a fixture offline through the real [`Environment::run`] entry point
-/// with a caller-customized [`RunContext`], returning the typed [`RunError`]
+/// Runs a fixture offline through the test-support driver
+/// ([`crate::test_support::run_with_host`]) with a caller-customized
+/// [`RunContext`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
 async fn run_with_context(
     test: &TestPrompt,
@@ -537,7 +533,7 @@ async fn run_with_context(
         ctx = ctx.model(model.clone());
     }
     let host = ctx.test_host.clone();
-    match env.run(&test.prompt, "", ctx, host).await {
+    match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
         RunResult::Failure(error) => Err(error),
@@ -1456,7 +1452,8 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }
-        let out = match env.run(&test.prompt, "", ctx, host).await {
+        let out = match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await
+        {
             RunResult::Ok(out) => out,
             other => panic!("the echo run succeeds: {other:?}"),
         };

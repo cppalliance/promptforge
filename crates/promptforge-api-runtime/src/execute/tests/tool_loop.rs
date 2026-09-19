@@ -10,8 +10,8 @@ use super::models_loop::{
     always_tool, echo_tools, loop_context, loop_context_observed, loop_events, loop_prompt,
 };
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
 use crate::lua::ToolSet;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// The one-section prompt shell with an explicit frontmatter round cap.
 fn capped_loop_prompt(cap: usize, lua: &str) -> String {

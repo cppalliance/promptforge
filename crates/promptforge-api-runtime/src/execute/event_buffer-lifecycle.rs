@@ -36,6 +36,10 @@ macro_rules! lifecycle_pairs {
 
         /// The payload-free [`Observation`] matching a payload-free
         /// [`Event`], or `None` for any other variant.
+        #[cfg_attr(
+            not(any(test, feature = "test-support")),
+            allow(dead_code, reason = "read by the test drivers' observer adapter alone")
+        )]
         pub(crate) fn unit_observation(event: &Event) -> Option<Observation> {
             Some(match event {
                 $(Event::$variant { .. } => Observation::$variant,)*
@@ -46,11 +50,19 @@ macro_rules! lifecycle_pairs {
         /// The payload-free lifecycle variants as one or-pattern, so an
         /// exhaustive `match` over [`Event`] elsewhere names the group
         /// from this list rather than repeating it.
+        #[cfg_attr(
+            not(any(test, feature = "test-support")),
+            allow(unused_macros, reason = "read by the test drivers' observer adapter alone")
+        )]
         macro_rules! unit_lifecycle_variants {
             () => {
                 $(promptforge_api_types::event::Event::$variant { .. })|*
             };
         }
+        #[cfg_attr(
+            not(any(test, feature = "test-support")),
+            allow(unused_imports, reason = "read by the test drivers' observer adapter alone")
+        )]
         pub(crate) use unit_lifecycle_variants;
     };
 }

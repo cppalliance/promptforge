@@ -7,8 +7,6 @@
     "event": {
       "kind": "user_message",
       "section": "chat",
-      "chain_id": 0,
-      "depth": 0,
       "turn": 0,
       "content": "hi"
     }
@@ -20,8 +18,6 @@
     "event": {
       "kind": "agent_message",
       "section": "chat",
-      "chain_id": 1,
-      "depth": 0,
       "turn": 2,
       "content": "hello",
       "model": "llama-3",

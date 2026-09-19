@@ -1,6 +1,6 @@
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
-use crate::execute::tokio_driver::TokioDriver;
+use crate::test_support::tokio_driver::TokioDriver;
 
 /// The one-section loop every scoping test drives: one user message, then
 /// the terminal record's text.

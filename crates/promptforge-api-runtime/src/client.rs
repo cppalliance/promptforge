@@ -14,8 +14,12 @@
 //! environment an executor run prepares against.
 //!
 //! The implementation lives in the `promptforge-model-client` crate and is
-//! re-exported here: hosts pass a [`GatewayClient`] to
-//! [`RunContext::client`](crate::RunContext) and classify its failures through
+//! re-exported here. The engine itself never performs a completion: a
+//! model round is a `Chat` effect the host performs. This module is the
+//! interim door through which Workshop's session machinery (via the
+//! harness door's bridge) and the engine's own test driver reach the
+//! client until the harness owns a model client of its own; it leaves with
+//! that move. Hosts classify a round's failure through
 //! [`CompletionError`].
 
 pub use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, SecretString};
@@ -23,6 +27,8 @@ pub use promptforge_model_client::model::{
     CompletionError, CompletionErrorKind, fetch_model_catalog,
 };
 
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use promptforge_model_client::client::StreamDelta;
 pub(crate) use promptforge_model_client::client::{
-    Completion, CompletionResult, Message, StreamDelta, ToolCall, ToolSchema,
+    Completion, CompletionResult, Message, ToolCall, ToolSchema,
 };

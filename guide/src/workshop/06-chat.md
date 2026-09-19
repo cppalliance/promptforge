@@ -54,13 +54,13 @@ The model picker in the toolbar is the pill button from the Models and Profiles 
 
 ## Sessions that survive
 
-A session is more durable than its connection. Agent sessions survive a dropped connection. The socket reconnects on its own and reattaches to the same session. The server replays the persisted event log from the beginning, and a per-client cursor drops duplicates, so you see each event exactly once and in order. Every unanswered prompt is re-announced in the order it was asked.
+A session is more durable than its connection. Agent sessions survive a dropped connection. The socket reconnects on its own and reattaches to the same session. The server replays the session's event log from the beginning, and a per-client cursor drops duplicates, so you see each event exactly once and in order. Every unanswered prompt is re-announced in the order it was asked.
 
 You can also attach to an already running session by its session id, resuming where that session stands. Sessions outlive sockets.
 
-Your run history is recorded as a durable event log that survives restarts. Each session's conversation persists to a JSONL transcript file named after the session id under the sessions state directory. The log format is versioned, so session logs saved on disk keep loading after every application update. A damaged, truncated, or incompatible history file is refused with a clear error instead of showing a wrong or partial history. You can return to a previous run and continue it: the saved history is restored with its original ordering, and new events append to the same record. If saving the log to disk fails, the run keeps working and nothing you see is lost; the failure is logged as a warning and saving retries on later events.
+Your run history is recorded as an event log the Workshop keeps in memory for the life of the session: every reconnect replays it from the beginning in its original ordering, and new events append to the same record. The log does not survive an application restart; a durable, resumable run history arrives with the harness's run log.
 
-The chat shows both sides of the conversation back to the model each turn, rebuilding the message list from the recorded user and agent messages. The conversation accumulates turn over turn, and what you typed reaches the model byte-exact, with newlines, quotes, and unicode preserved. Selecting another model takes effect on the next turn, and each reply is attributed to the model that produced it. A relaunch over retained or reloaded history resumes the conversation exactly where it stood.
+The chat shows both sides of the conversation back to the model each turn, rebuilding the message list from the recorded user and agent messages. The conversation accumulates turn over turn, and what you typed reaches the model byte-exact, with newlines, quotes, and unicode preserved. Selecting another model takes effect on the next turn, and each reply is attributed to the model that produced it. A relaunch over retained history resumes the conversation exactly where it stood.
 
 ## Cancelling and failing gracefully
 
