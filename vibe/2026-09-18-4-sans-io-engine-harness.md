@@ -642,7 +642,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-22>
 
-### Step 22: Model task origin and the start, cancel, status built-ins
+### Step 22: Model task origin and the start, cancel, status built-ins [completed]
 
 - Component: Model tasks
 - Piece: built-ins

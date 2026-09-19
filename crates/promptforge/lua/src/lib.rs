@@ -154,7 +154,7 @@ pub use protocol::{
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};
 #[doc(hidden)]
-pub use scope::{ToolCallCounts, ToolRuntime};
+pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 #[doc(hidden)]
 pub use sys::enrich_sys_model;
 #[doc(hidden)]

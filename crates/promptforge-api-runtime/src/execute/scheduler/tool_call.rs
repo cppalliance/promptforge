@@ -4,10 +4,12 @@
 //!
 //! Three things resolve on the driver thread before any leaf work: the
 //! five reserved model built-in names (`task`, `task_cancel`, `task_status`,
-//! `task_events`, `await_tasks`) are recognized before alias lookup and
-//! answer as unbound until their arms land; a local Lua tool is answered
-//! inline on the parked chain's VM, since its handler is Lua on that VM
-//! and no leaf work exists to spawn; a bound tool resolves against the
+//! `task_events`, `await_tasks`) are recognized before alias lookup - a
+//! model-issued call to the first three is answered by the `builtins`
+//! module over the task arena, every other form (a script call, or a name
+//! whose arm has not landed) answers as unbound; a local Lua tool is
+//! answered inline on the parked chain's VM, since its handler is Lua on
+//! that VM and no leaf work exists to spawn; a bound tool resolves against the
 //! run's full bound catalog and its dispatch spawns onto the answer
 //! channel. `call_id: Some` always resumes with content - a tool's own
 //! failure becomes untrusted failure text - and `ToolResult` fires under
@@ -25,12 +27,15 @@ use crate::lua::{
 use crate::observe::{Observer, detail};
 use crate::{Error, Result, cancel};
 
+use super::builtins::is_task_builtin;
 use super::dispatch::unbound_tool_call;
 use super::{Arrival, ChainIndex, RequestId, Scheduler};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
-/// them. Until their arms land they answer as unbound.
+/// them. A model-issued `task`, `task_cancel`, or `task_status` is answered
+/// by the `builtins` module; the rest answer as unbound until their arms
+/// land.
 const RESERVED_TOOL_NAMES: [&str; 5] = [
     "task",
     "task_cancel",
@@ -40,11 +45,14 @@ const RESERVED_TOOL_NAMES: [&str; 5] = [
 ];
 
 /// How one `tool_call` dispatch resolved: a spawned bound dispatch parked
-/// on the pending table, or an answer settled on the driver thread (a
-/// local Lua tool, run on the parked chain's VM).
+/// on the pending table, an answer settled on the driver thread (a local
+/// Lua tool, run on the parked chain's VM; a task built-in), or such an
+/// answer plus the task chain a `task` built-in started, enqueued behind
+/// the caller.
 enum ToolCallDispatch {
     Spawned(RequestId, tokio::task::JoinHandle<()>),
     Answered(Answer<Error>),
+    Started(Answer<Error>, ChainIndex),
 }
 
 /// Answers a call to a local Lua tool on the parked chain's VM: the counts
@@ -127,6 +135,13 @@ impl Scheduler<'_> {
                 self.chains[id.index()].incoming = Some(answer);
                 self.ready.push_back(id);
             }
+            // The caller runs first and the task when it suspends, the
+            // order `tasks.spawn` keeps.
+            Ok(ToolCallDispatch::Started(answer, child)) => {
+                self.chains[id.index()].incoming = Some(answer);
+                self.ready.push_back(id);
+                self.ready.push_back(child);
+            }
             Err(error) => {
                 self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
                 self.ready.push_back(id);
@@ -134,8 +149,10 @@ impl Scheduler<'_> {
         }
     }
 
-    /// The fallible half of tool-call dispatch: the reserved-name check,
-    /// the one-time counts install, the local-tool inline answer, then the
+    /// The fallible half of tool-call dispatch: the reserved-name check
+    /// (a model-issued task built-in answered over the arena, any other
+    /// reserved form unbound), the one-time counts install, the local-tool
+    /// inline answer, then the
     /// alias resolved against the run's full bound tool catalog (the
     /// section's effective scope shapes what the model is offered, and the
     /// author's own script is not the model, so the scope does not gate it;
@@ -149,13 +166,23 @@ impl Scheduler<'_> {
         args: serde_json::Value,
         call_id: Option<String>,
     ) -> Result<ToolCallDispatch> {
-        let chain = &mut self.chains[id.index()];
-        let tool_set = chain.ctx.tool_set_snapshot()?;
+        let tool_set = self.chains[id.index()].ctx.tool_set_snapshot()?;
         // The reservation wins over every lookup: a bound or local tool
-        // registered under one of these names is never reachable here.
+        // registered under one of these names is never reachable here. The
+        // built-ins serve the model; the author's own script reaches the
+        // arena through the `tasks` namespace, so a script call stays
+        // unbound.
         if RESERVED_TOOL_NAMES.contains(&alias) {
+            if let Some(call_id) = call_id.as_deref().filter(|_| is_task_builtin(alias)) {
+                let (answer, started) = self.answer_task_builtin(id, alias, &args, call_id)?;
+                return Ok(match started {
+                    Some(child) => ToolCallDispatch::Started(answer, child),
+                    None => ToolCallDispatch::Answered(answer),
+                });
+            }
             return Err(unbound_tool_call(&tool_set, alias));
         }
+        let chain = &mut self.chains[id.index()];
         let ctx = chain.ctx.clone();
         let observer = Arc::clone(chain.ctx.observer());
         let execution = chain.ctx.execution().to_owned();

@@ -31,6 +31,7 @@ fn declared_tools_are_not_injected_without_always_or_add() {
     let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: Vec::new(),
         description_overrides: BTreeMap::new(),
+        allowed_tasks: None,
     });
     let effective = current_tool_bindings(&tool_set, &runtime).expect("the scope must snapshot");
     assert!(
@@ -58,6 +59,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: Vec::new(),
         description_overrides: BTreeMap::new(),
+        allowed_tasks: None,
     });
     let effective = current_tool_bindings(&tool_set, &runtime).expect("the always scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
