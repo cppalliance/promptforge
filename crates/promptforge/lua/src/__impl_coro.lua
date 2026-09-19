@@ -109,6 +109,33 @@ local function call_section(target, input)
   return result
 end
 
+-- tasks.spawn(target, opts?): start a chain over `target` and return at
+-- once with a Task handle. `opts.input` overrides the chain's args,
+-- `opts.item` becomes its `item` global, `opts.index` its `sys.index`; the
+-- caller's `var` seeds the chain. The handle is a plain methodless table
+-- `{ task = id }` (A9): every `tasks.*` operation is a namespace function
+-- that accepts the table or the bare id, so a handle stored in `var`
+-- survives the serde boundary unchanged. The origin is the shim's own
+-- fact, never an argument: this surface is the author's.
+local function tasks_spawn(target, opts)
+  if opts == nil then
+    opts = {}
+  elseif type(opts) ~= "table" then
+    raise("lua", { message = "tasks.spawn opts must be a table, got " .. host_type(opts) })
+  end
+  local ok, result = yield({
+    op = "spawn",
+    target = target,
+    input = opts.input,
+    item = opts.item,
+    index = opts.index,
+    var = var_snapshot(),
+    origin = "author",
+  })
+  if not ok then fail(result) end
+  return { task = result }
+end
+
 -- The collection passes through unconverted; the driver runs the
 -- member-wise conversion at the protocol boundary.
 local function fanout_collection(worker, collection)
@@ -376,6 +403,9 @@ end
 
 return {
   call = call_section,
+  tasks = {
+    spawn = tasks_spawn,
+  },
   fanout = fanout_collection,
   chat = chat,
   infer = infer,

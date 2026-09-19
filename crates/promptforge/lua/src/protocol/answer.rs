@@ -2,6 +2,7 @@
 //! types its variants carry.
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
+use promptforge_api_types::ids::TaskId;
 
 use crate::compactors::OverflowReason;
 use crate::{Error, LuaFanoutResult, Result, ToolOutputKind};
@@ -145,6 +146,9 @@ pub enum Answer<E> {
     Infer(std::result::Result<String, E>),
     /// The contained chain's final text for a `call` request.
     Call(std::result::Result<String, E>),
+    /// The started task's id for a `spawn` request, resumed as its path
+    /// text; the shim wraps it in the methodless `Task` table.
+    Spawn(std::result::Result<TaskId, E>),
     /// The ordered arm results for a `fanout` request, in collection order.
     Fanout(std::result::Result<Vec<LuaFanoutResult>, E>),
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
@@ -165,6 +169,7 @@ impl<E> Answer<E> {
         match self {
             Answer::Infer(result) => Answer::Infer(result.map_err(map)),
             Answer::Call(result) => Answer::Call(result.map_err(map)),
+            Answer::Spawn(result) => Answer::Spawn(result.map_err(map)),
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),

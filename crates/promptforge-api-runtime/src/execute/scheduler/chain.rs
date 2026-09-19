@@ -1,9 +1,9 @@
 //! The chain lifecycle: arena insertion, and the two chain-end paths - a
 //! chain's finish (the frame's teardown boundary and the outcome's
-//! delivery to the root, a call parent, or a fanout join) and the abort of
-//! a chain with everything it transitively blocks on.
+//! delivery to the root, a call parent, a fanout join, or a task slot) and
+//! the abort of a chain with everything it transitively blocks on.
 
-use promptforge_api_types::ids::ChainId;
+use promptforge_api_types::ids::{ChainId, TaskId};
 
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
@@ -11,7 +11,7 @@ use crate::execute::support::GENERIC_COMPLETION;
 use crate::parser::Section;
 use crate::{Error, Result};
 
-use super::tasks::{ArmState, FanoutId};
+use super::joins::{ArmState, FanoutId};
 use super::{Chain, ChainIndex, Counters, Scheduler};
 
 impl<'a> Scheduler<'a> {
@@ -39,7 +39,9 @@ impl<'a> Scheduler<'a> {
     /// walk continues the counters of the H1 pass it follows. The chain's
     /// `var` slot seeds from `var` (a call chain's or arm's caller
     /// snapshot, discarded with the chain). `arm` carries the fanout-arm
-    /// state for an arm chain.
+    /// state for an arm chain. The chain's task is its call parent's when
+    /// it has one, else task `0`; a spawned chain's dispatch overwrites it
+    /// with the chain's own id, and an arm's with its caller's.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
@@ -66,9 +68,19 @@ impl<'a> Scheduler<'a> {
             u32::try_from(self.chains.len())
                 .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
         );
+        let task = parent.map_or_else(
+            || TaskId::from(ChainId::root()),
+            |parent| self.chains[parent.index()].task.clone(),
+        );
         self.chains.push(Chain {
             lineage,
             counters,
+            task,
+            owner: None,
+            seed: None,
+            waiting_on: Vec::new(),
+            task_notices: Vec::new(),
+            note: None,
             ctx,
             access: None,
             frame: None,
@@ -93,7 +105,8 @@ impl<'a> Scheduler<'a> {
     /// Finishes one chain: the frame's teardown boundary when the chain
     /// ends mid-section, then the outcome's delivery - the run's result for
     /// the root chain, the call answer for a child chain, the join
-    /// slot's result for a fanout arm.
+    /// slot's result for a fanout arm, the task slot's outcome for a
+    /// spawned chain.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
     /// walk that ran off its slice's last section, or the chain's failure.
@@ -105,6 +118,7 @@ impl<'a> Scheduler<'a> {
     ) {
         let chain = &mut self.chains[id.index()];
         let parent = chain.parent;
+        let is_task = chain.owner.is_some();
         let arm = chain.arm.take();
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
@@ -138,9 +152,11 @@ impl<'a> Scheduler<'a> {
                 Some(value) => value,
                 // A walk that ran off its slice produced no scalar result:
                 // the top-level chain falls back to the shared generic
-                // completion; a call chain or a fanout arm to the empty
-                // string.
-                None if parent.is_none() && arm.is_none() => GENERIC_COMPLETION.to_owned(),
+                // completion; a call chain, a fanout arm, or a task chain
+                // to the empty string.
+                None if parent.is_none() && arm.is_none() && !is_task => {
+                    GENERIC_COMPLETION.to_owned()
+                }
                 None => String::new(),
             };
             Ok(text)
@@ -150,6 +166,14 @@ impl<'a> Scheduler<'a> {
         drop(access);
         if let Some(arm) = arm {
             self.complete_arm(arm, outcome);
+            return;
+        }
+        if is_task {
+            // A missing slot is a scheduler bug: fail the run loudly rather
+            // than lose the task's outcome.
+            if let Err(error) = self.complete_task(id, outcome) {
+                *root_result = Some(Err(error));
+            }
             return;
         }
         match parent {

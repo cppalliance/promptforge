@@ -2,6 +2,7 @@
 //! yield, the store operations they carry, and the message-record types
 //! the chat request is built from.
 
+use promptforge_api_types::ids::TaskOrigin;
 use promptforge_model_client::model::ModelBinding;
 
 use crate::Error;
@@ -34,6 +35,29 @@ pub enum Request {
         /// The caller's `var` snapshot, seeded into the chain and discarded
         /// when it ends.
         var: serde_json::Value,
+    },
+    /// `tasks.spawn(target, opts?)`: start a task chain over the target's
+    /// slice and return at once. The chain shares `call`'s target
+    /// resolution and depth cap, and `fanout`'s worker validation.
+    Spawn {
+        /// The heading string, validated with the `resolve_section_target`
+        /// rule so a non-string target keeps its byte-identical error.
+        target: String,
+        /// `opts.input`: the chain's `args` override; `None` runs under the
+        /// caller's own args.
+        input: Option<String>,
+        /// `opts.item`: the chain's `item` global and `{{ item }}` seed;
+        /// `None` installs no `item`.
+        item: Option<serde_json::Value>,
+        /// `opts.index`: the chain's `sys.index`; `None` leaves the field
+        /// absent, as outside a fanout.
+        index: Option<u64>,
+        /// The caller's `var` snapshot, seeded into the chain and discarded
+        /// when it ends.
+        var: serde_json::Value,
+        /// The principal starting the task. Shim-produced, never
+        /// author-supplied: the author shim always says `author`.
+        origin: TaskOrigin,
     },
     /// `fanout(worker, collection)`: the collection already converted
     /// member-wise through the existing rules.

@@ -3,11 +3,13 @@
 //! blocking pool uniformly for all backends - no inline fast path - so
 //! interleaving behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
-//! `tool_call` and `chat` arms live in their own modules.
+//! `tool_call`, `chat`, `spawn`, and `fanout` arms live in their own
+//! modules.
 
 use std::sync::Arc;
 
 use crate::execute::protocol::{Answer, Request, StoreOp};
+use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
 use crate::execute::tools::infer_round;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
@@ -87,6 +89,24 @@ impl Scheduler<'_> {
             }
             Request::Call { target, input, var } => {
                 self.dispatch_call(id, &target, input.as_deref(), &var);
+                Ok(())
+            }
+            Request::Spawn {
+                target,
+                input,
+                item,
+                index,
+                var,
+                origin,
+            } => {
+                self.dispatch_spawn(
+                    id,
+                    &target,
+                    input.as_deref(),
+                    TaskSeed { item, index },
+                    &var,
+                    origin,
+                );
                 Ok(())
             }
             Request::Fanout { worker, items, var } => {

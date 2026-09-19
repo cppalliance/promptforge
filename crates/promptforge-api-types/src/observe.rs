@@ -25,6 +25,9 @@
 //! - `section` - the prompt's H2 heading text, authored in the prompt file;
 //! - [`Observation::Lua`] and [`Observation::Other`] messages - a validated Lua
 //!   `log(message)` checkpoint and the forward-compatible escape hatch;
+//! - [`Observation::TaskStarted`]'s spawn seeds (`target`, `input`, `item`,
+//!   `var`) - author-supplied data a task chain starts from, recorded so a
+//!   task can be re-executed from its start;
 //! - every `on_*` content payload - text, arguments, and results are model-,
 //!   tool-, or user-authored.
 //!
@@ -37,6 +40,7 @@
 use std::fmt;
 
 use crate::events::{CallMetrics, ToolCallEvent};
+use crate::ids::{TaskId, TaskOrigin};
 
 /// One typed operational observation emitted by the runtime.
 ///
@@ -207,6 +211,41 @@ pub enum Observation {
     /// A section began waiting on operator input through the run's input
     /// broker.
     UserInputWaitStarted,
+    /// A task chain was started by `tasks.spawn` (or, later, the model's
+    /// `task` tool). The payload is the task's spawn seeds: everything a
+    /// host needs to start the same chain again under the same id. The
+    /// seeds are author-supplied data and are untrusted metadata, as the
+    /// module docs say. Reported under the spawning section.
+    TaskStarted {
+        /// The task's id: its chain's hierarchical id.
+        task: TaskId,
+        /// The name of the section the task's chain starts at.
+        target: String,
+        /// The principal that started the task.
+        origin: TaskOrigin,
+        /// The `opts.input` override of the chain's `args`, when given.
+        input: Option<String>,
+        /// The `opts.item` seed installed as the chain's `item` global,
+        /// when given.
+        item: Option<serde_json::Value>,
+        /// The `opts.index` seed reported as the chain's `sys.index`, when
+        /// given.
+        index: Option<u64>,
+        /// The spawner's `var` snapshot the chain seeds from.
+        var: serde_json::Value,
+    },
+    /// Terminal: a task's chain ended with a result. Reported under the
+    /// task's target section.
+    TaskSucceeded {
+        /// The task's id.
+        task: TaskId,
+    },
+    /// Terminal: a task's chain ended with an error. Reported under the
+    /// task's target section.
+    TaskFailed {
+        /// The task's id.
+        task: TaskId,
+    },
     /// The one author-controlled checkpoint: a validated Lua `log(message)`.
     ///
     /// Prompt authors must never place arguments, replies, tool data,
@@ -279,6 +318,9 @@ impl Observation {
             Observation::FanoutArmFailed => "Fanout arm failed",
             Observation::FanoutArmCancelled => "Fanout arm cancelled",
             Observation::UserInputWaitStarted => "User input wait started",
+            Observation::TaskStarted { .. } => "Task started",
+            Observation::TaskSucceeded { .. } => "Task succeeded",
+            Observation::TaskFailed { .. } => "Task failed",
             Observation::Lua(_) | Observation::Other(_) => return None,
         };
         Some(label)

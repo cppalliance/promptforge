@@ -26,21 +26,23 @@
 //! layer.
 //!
 //! This file carries the scheduler core: the chain record and arena, the
-//! ready queue, the pending table, and the call stack. The submodules
-//! carry the rest: `drive` the driver loop, `chain` the chain lifecycle
-//! (arena insertion and the two chain-end paths), `step` one chain's step
-//! to its next suspension point, `walk` the section walk rules, `h1` the
-//! live H1 pass and its hand-off to the walk, `dispatch` the request arms,
-//! `chat` the one-round `chat` arm and its answer application, `tool_call`
-//! the script and model-issued `tool_call` arm (the two arms the
-//! section-visible `models.loop` shim drives), and `tasks` the fanout join
-//! tables and arm bookkeeping.
+//! ready queue, the pending table, the call stack, and the task arena. The
+//! submodules carry the rest: `drive` the driver loop, `chain` the chain
+//! lifecycle (arena insertion and the two chain-end paths), `step` one
+//! chain's step to its next suspension point, `walk` the section walk
+//! rules, `h1` the live H1 pass and its hand-off to the walk, `dispatch`
+//! the request arms, `chat` the one-round `chat` arm and its answer
+//! application, `tool_call` the script and model-issued `tool_call` arm
+//! (the two arms the section-visible `models.loop` shim drives), `tasks`
+//! the task arena and the `spawn` arm, and `joins` the fanout join tables
+//! and arm bookkeeping.
 
 mod chain;
 mod chat;
 mod dispatch;
 mod drive;
 mod h1;
+mod joins;
 mod step;
 mod tasks;
 mod tool_call;
@@ -50,7 +52,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use mlua::Thread;
-use promptforge_api_types::ids::ChainId;
+use promptforge_api_types::ids::{ChainId, TaskId};
 use shared_vfs::Origin;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -64,8 +66,11 @@ use super::context::RunState;
 use super::gateway::GatewaySource;
 use super::protocol::Answer;
 use super::scope::DispatchTarget;
-use super::section_context::SectionContext;
-use tasks::{ArmState, FanoutId, JoinState};
+use super::section_context::{SectionContext, TaskSeed};
+use joins::{ArmState, FanoutId, JoinState};
+use tasks::TaskSlot;
+#[cfg(test)]
+pub(crate) use tasks::TaskState;
 
 /// Run-global monotonic id of an in-flight leaf request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -157,6 +162,35 @@ struct Chain<'a> {
     /// or not the prompt has H1 blocks, so the first walked section is
     /// always `0.1`.
     counters: Counters,
+    /// The nearest enclosing task: the chain's own id when the chain is a
+    /// spawned task, its caller's task for a `call` child or a fanout arm
+    /// (a blocking child never interleaves with its caller, so the two
+    /// share one task), and task `0` for the root chain. Every section the
+    /// chain enters reads it as `sys.taskid`.
+    task: TaskId,
+    /// The chain that spawned this chain, when the chain is a task's
+    /// backing chain: the task's owner, the only chain allowed to wait on,
+    /// inspect, or cancel it. `None` for the root, a `call` child, and a
+    /// fanout arm.
+    owner: Option<ChainIndex>,
+    /// A spawned chain's `item` and `sys.index` seeds, consumed by its
+    /// first section entry; `None` afterward and on every other chain.
+    seed: Option<TaskSeed>,
+    /// The tasks the chain is parked on in a `when_any` wait; empty while
+    /// the chain is not waiting.
+    #[expect(
+        dead_code,
+        reason = "read and written by the wait arms of the next step"
+    )]
+    waiting_on: Vec<TaskId>,
+    /// Model-task notices not yet delivered into the chain's next model
+    /// round, in arrival order.
+    #[expect(dead_code, reason = "filled by the model-task notices of a later step")]
+    task_notices: Vec<String>,
+    /// The latest progress note the chain published through `tasks.note`,
+    /// reported by `tasks.status`.
+    #[expect(dead_code, reason = "written by the note arm of the next step")]
+    note: Option<String>,
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for a call chain's input override.
     ctx: RunState,
@@ -286,6 +320,11 @@ pub(crate) struct Scheduler<'a> {
     ready: VecDeque<ChainIndex>,
     /// One entry per in-flight leaf request, mapping it to the parked chain.
     pending: HashMap<RequestId, ChainIndex>,
+    /// The task arena: one slot per task the run has started, keyed by the
+    /// task's id (its backing chain's id). A slot outlives its chain: it
+    /// holds the terminal state and the undelivered outcome until the
+    /// owner takes the result or ends.
+    tasks: HashMap<TaskId, TaskSlot>,
     /// One join state per live fanout.
     joins: HashMap<FanoutId, JoinState<'a>>,
     /// The send half every spawned leaf task posts its answer to. The
@@ -337,6 +376,7 @@ impl<'a> Scheduler<'a> {
             stack: Vec::new(),
             ready: VecDeque::new(),
             pending: HashMap::new(),
+            tasks: HashMap::new(),
             joins: HashMap::new(),
             answer_tx,
             answers,
@@ -361,6 +401,13 @@ impl<'a> Scheduler<'a> {
     #[cfg(test)]
     pub(crate) fn leaf_requests_issued(&self) -> u64 {
         self.next_request
+    }
+
+    /// The state of one task's slot, or `None` when no task with that id
+    /// was ever started, so a test can prove a chain's end moved its slot.
+    #[cfg(test)]
+    pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {
+        self.tasks.get(task).map(|slot| slot.state)
     }
 
     /// Posts an answer for an arbitrary request id, so a test can drive

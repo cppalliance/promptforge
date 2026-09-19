@@ -4,6 +4,7 @@
 //! model handle, the captured alias globals, and the methodless handle
 //! contract.
 
+use promptforge_api_types::ids::TaskOrigin;
 use serde_json::json;
 
 use crate::execute::protocol::{Request, YieldParse};
@@ -53,6 +54,67 @@ fn fanout_yields_a_well_formed_request() {
         }
         other => panic!("expected a fanout request, got {other:?}"),
     }
+}
+
+#[test]
+fn tasks_spawn_yields_the_target_seeds_var_and_author_origin() {
+    let var = json!({ "k": 1 });
+    let vm = scheduler_vm(&ModelSet::default(), Some(&var));
+    let source =
+        r###"return tasks.spawn("## Child", { input = "in", item = { name = "a" }, index = 2 })"###;
+    match yielded_request(&vm, source) {
+        Request::Spawn {
+            target,
+            input,
+            item,
+            index,
+            var,
+            origin,
+        } => {
+            assert_eq!(target, "## Child");
+            assert_eq!(input.as_deref(), Some("in"));
+            assert_eq!(item, Some(json!({ "name": "a" })));
+            assert_eq!(index, Some(2));
+            assert_eq!(var, json!({ "k": 1 }));
+            assert_eq!(origin, TaskOrigin::Author);
+        }
+        other => panic!("expected a spawn request, got {other:?}"),
+    }
+}
+
+#[test]
+fn tasks_spawn_resumes_with_a_methodless_task_table() {
+    // The shim wraps the resumed id in `{ task = id }`: a plain table with
+    // no metatable and no methods, so a handle stored in `var` survives
+    // the serde boundary unchanged.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (thread, _yielded) = start(
+        &vm,
+        "local t = tasks.spawn('## Child')\n\
+         return t.task, getmetatable(t) == nil, next(t, 'task') == nil",
+    );
+    let (id, methodless, single_field): (String, bool, bool) = thread
+        .resume((true, "0.3"))
+        .expect("the shim returns the task table");
+    assert_eq!(id, "0.3");
+    assert!(methodless, "the task table carries no metatable");
+    assert!(single_field, "the task table carries exactly one field");
+}
+
+#[test]
+fn tasks_spawn_rejects_non_table_options_at_the_call_site() {
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (kind, message): (String, String) = vm
+        .lua()
+        .load(
+            "local ok, err = pcall(tasks.spawn, '## Child', 5)\n\
+             assert(not ok, 'a non-table opts argument must fail')\n\
+             return err.kind, tostring(err)",
+        )
+        .call(())
+        .expect("the rejection is a pcall-able error table");
+    assert_eq!(kind, "lua");
+    assert_eq!(message, "tasks.spawn opts must be a table, got integer");
 }
 
 #[test]

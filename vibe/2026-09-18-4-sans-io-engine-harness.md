@@ -569,7 +569,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-16>
 
-### Step 16: Task arena and `spawn`
+### Step 16: Task arena and `spawn` [completed]
 
 - Component: Tasks and fanout
 - Piece: arena

@@ -95,7 +95,8 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// validation. The `models`, `tools`, and `compactors` tables are passed
 /// to the shim chunk as arguments, so the chunk never reads a global; the
 /// chunk shims `models.infer` and installs `tools.call`, and the
-/// `call`/`fanout` shims come back for the host to install. The
+/// `call`/`fanout` shims and the `tasks` namespace table come back for the
+/// host to install as globals. The
 /// `models.loop` shim is stashed in the registry for
 /// [`install_section_loop_shim`], so agent VMs - which run this prelude
 /// too - never receive it. `max_tool_iterations` is the loop's round cap,
@@ -162,6 +163,8 @@ pub(crate) fn install_shim_prelude(lua: &Lua, max_tool_iterations: usize) -> Res
     }
     let call: Function = shims.raw_get("call").map_err(Error::lua)?;
     globals.raw_set("call", call).map_err(Error::lua)?;
+    let tasks: Table = shims.raw_get("tasks").map_err(Error::lua)?;
+    globals.raw_set("tasks", tasks).map_err(Error::lua)?;
     let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
     let chat: Function = shims.raw_get("chat").map_err(Error::lua)?;

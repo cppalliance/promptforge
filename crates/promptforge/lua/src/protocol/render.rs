@@ -82,6 +82,15 @@ impl<E: ErrorValue> Answer<E> {
                     None,
                 ))
             }
+            // The task id resumes as its path text; the shim builds the
+            // `{ task = id }` table around it, so no host handle crosses.
+            Answer::Spawn(Ok(task)) => {
+                let text = lua.create_string(task.to_string())?;
+                Ok((
+                    MultiValue::from_vec(vec![Value::Boolean(true), Value::String(text)]),
+                    None,
+                ))
+            }
             Answer::ToolCallResult(Ok(ToolCallOutcome::Structured(json))) => {
                 // The one serde-boundary conversion: the parsed JSON output
                 // becomes the resumed Lua value, so the shim hands the
@@ -141,6 +150,7 @@ impl<E: ErrorValue> Answer<E> {
             }
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
+            | Answer::Spawn(Err(error))
             | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
