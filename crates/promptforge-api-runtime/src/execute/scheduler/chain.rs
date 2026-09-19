@@ -3,6 +3,8 @@
 //! delivery to the root, a call parent, or a fanout join) and the abort of
 //! a chain with everything it transitively blocks on.
 
+use promptforge_api_types::ids::ChainId;
+
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
 use crate::execute::support::GENERIC_COMPLETION;
@@ -10,11 +12,31 @@ use crate::parser::Section;
 use crate::{Error, Result};
 
 use super::tasks::{ArmState, FanoutId};
-use super::{Chain, ChainId, Scheduler};
+use super::{Chain, ChainIndex, Counters, Scheduler};
 
 impl<'a> Scheduler<'a> {
-    /// Creates one chain over `slice` from `index` and returns its id. The
-    /// chain enters its first section on its first step. The chain's
+    /// Allocates the next child id under `owner`'s chain: the owner's id
+    /// extended by its local child counter, which `call` children and
+    /// spawned arms share, so the ids a chain hands out depend only on
+    /// the order of its own dispatches.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when one chain has started `u32::MAX`
+    /// children, which no reachable run does.
+    pub(super) fn allocate_child_id(&mut self, owner: ChainIndex) -> Result<ChainId> {
+        let chain = &mut self.chains[owner.index()];
+        let index = chain.counters.next_child;
+        chain.counters.next_child = index
+            .checked_add(1)
+            .ok_or(Error::internal("a chain's child count cannot exceed u32"))?;
+        Ok(chain.lineage.child(index))
+    }
+
+    /// Creates one chain over `slice` from `index` under the hierarchical
+    /// `lineage` with its id `counters` and returns its arena index. A
+    /// fresh chain starts its counters at zero and enters its first
+    /// section on its first step, taking entry 0 of its own id; the root
+    /// walk continues the counters of the H1 pass it follows. The chain's
     /// `var` slot seeds from `var` (a call chain's or arm's caller
     /// snapshot, discarded with the chain). `arm` carries the fanout-arm
     /// state for an arm chain.
@@ -23,26 +45,30 @@ impl<'a> Scheduler<'a> {
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the chain keeps its context fork, position, parent, var seed, depth, and arm state explicit and linear"
+        reason = "the chain keeps its lineage, counters, context fork, position, parent, var seed, depth, and arm state explicit and linear"
     )]
     pub(super) fn start_chain(
         &mut self,
+        lineage: ChainId,
+        counters: Counters,
         ctx: RunState,
         slice: &'a [Section],
         index: usize,
-        parent: Option<ChainId>,
+        parent: Option<ChainIndex>,
         var: &serde_json::Value,
         call_depth: usize,
         arm: Option<ArmState<'a>>,
-    ) -> Result<ChainId> {
+    ) -> Result<ChainIndex> {
         if self.chains.len() >= self.max_chains {
             return Err(Error::internal("a run's chain count cannot exceed u32"));
         }
-        let id = ChainId(
+        let id = ChainIndex(
             u32::try_from(self.chains.len())
                 .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
         );
         self.chains.push(Chain {
+            lineage,
+            counters,
             ctx,
             access: None,
             frame: None,
@@ -73,7 +99,7 @@ impl<'a> Scheduler<'a> {
     /// walk that ran off its slice's last section, or the chain's failure.
     pub(super) fn finish(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         outcome: Result<Option<String>>,
         root_result: &mut Option<Result<String>>,
     ) {
@@ -147,7 +173,7 @@ impl<'a> Scheduler<'a> {
     /// and its state drops in the teardown order (the suspended coroutine,
     /// then the frame unarmed - no `SECTION_FINISHED` - then the arm state,
     /// whose finalizer drop reports `FANOUT_ARM_CANCELLED`).
-    pub(super) fn abort_subtree(&mut self, id: ChainId) {
+    pub(super) fn abort_subtree(&mut self, id: ChainIndex) {
         // Nested fanouts this chain parents: their arms abort with it, and
         // the removed join has no answer to deliver - the parent is dead.
         let nested: Vec<FanoutId> = self
@@ -164,12 +190,12 @@ impl<'a> Scheduler<'a> {
         }
         // The arena is u32-bounded at insertion (`start_chain`), so the
         // index conversion cannot fail.
-        let children: Vec<ChainId> = self
+        let children: Vec<ChainIndex> = self
             .chains
             .iter()
             .enumerate()
             .filter(|(_, chain)| chain.parent == Some(id))
-            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainId))
+            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainIndex))
             .collect();
         for child in children {
             self.abort_subtree(child);

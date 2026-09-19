@@ -2,8 +2,8 @@
 //! inference end-to-end on a current-thread runtime), cancellation while
 //! suspended on an infer, the per-chain call-depth cap, and the walk
 //! rules mirrored from the legacy suite (fall-through order, explicit
-//! `var` and return-value handoffs, the run-global id
-//! counter), plus the control-transfer rules: jump targets (sibling moves
+//! `var` and return-value handoffs, the hierarchical chain-local
+//! `sys.id`), plus the control-transfer rules: jump targets (sibling moves
 //! and child descents with the parent resuming after the jumper), the
 //! scalar return's chain scoping, and the section-boundary observations.
 //! The fanout coverage mirrors the legacy engine's mechanics (ordering,
@@ -297,7 +297,8 @@ async fn generic_result_when_nothing_produced() {
 #[tokio::test(flavor = "current_thread")]
 async fn sys_id_increments_per_section() {
     // Mirror of the legacy `sys_id_increments_per_section`: every section
-    // entry takes the next run-global id.
+    // entry takes the walk chain's next entry id (`0.N`; entry 0 is the
+    // H1 pass, present or not).
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
         ## First\n\n\
@@ -311,7 +312,7 @@ async fn sys_id_increments_per_section() {
         .await
         .expect("each section entry takes the next id");
 
-    assert_eq!(out, "2");
+    assert_eq!(out, "0.2");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -409,31 +410,31 @@ async fn call_clones_var_in_and_discards_child_writes() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_call_chain_continues_the_global_sys_id_sequence() {
-    // Mirror of the legacy case of the same name: the contained chain's
-    // entries take the next run-global ids, and the outer walk resumes the
-    // same sequence when the chain ends.
+async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_sequence() {
+    // Mirror of the legacy case of the same name: the contained chain is
+    // the walk's first child `0.0`, so its entries are `0.0.N`, and the
+    // outer walk resumes its own `0.N` sequence when the chain ends.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sequence\n\n\
         ## Main\n\n\
         ```lua\n\
-        assert(sys.id == 1, 'the first walked section takes id 1')\n\
+        assert(sys.id == '0.1', 'the first walked section takes entry 1 of the root chain')\n\
         local r = call('## Sub')\n\
         store.append('order.txt', r .. '\\n')\n\
         ```\n\n\
         ## B\n\n\
         ```lua\n\
-        assert(sys.id == 4, 'the outer walk resumes the global sequence')\n\
+        assert(sys.id == '0.2', 'the outer walk resumes its own sequence')\n\
         return store.read('order.txt')\n\
         ```\n\n\
         ## Sub\n\n\
         ```lua\n\
-        assert(sys.id == 2, 'the contained chain continues the global sequence')\n\
+        assert(sys.id == '0.0.0', 'the contained chain is child 0 and starts at entry 0')\n\
         ```\n\n\
         ## Tail\n\n\
         ```lua\n\
-        assert(sys.id == 3, 'the chain fall-through takes the next global id')\n\
+        assert(sys.id == '0.0.1', 'the chain fall-through takes its next entry')\n\
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
@@ -441,7 +442,7 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("a call chain must continue the global sys.id sequence");
+        .expect("a call chain must take ids nested under its own chain");
 
     assert_eq!(out, "tail-reply\n");
 }
@@ -449,7 +450,8 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
 #[tokio::test(flavor = "current_thread")]
 async fn entering_the_same_section_twice_takes_two_ids() {
     // Mirror of the legacy case of the same name: entering the same
-    // section twice hands out two run-global `sys.id` values.
+    // section twice hands out two distinct `sys.id` values - two call
+    // children of the walk, so two chains `0.0` and `0.1`.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Twice\n\n\
         ## Main\n\n\
@@ -467,7 +469,7 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         .await
         .expect("re-entering a section must take a fresh id");
 
-    assert_eq!(out, "2,3");
+    assert_eq!(out, "0.0.0,0.1.0");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -882,10 +884,11 @@ async fn jump_to_a_niece_errors() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn sys_id_counts_sections_entered_run_wide() {
+async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_level() {
     // Mirror of the legacy case of the same name: `sys.id` counts the
-    // sections the walk has entered run-wide - the detour into a child
-    // level continues the count rather than restarting it.
+    // sections the walk chain has entered - the detour into a child level
+    // is the same chain, so it continues the count rather than
+    // restarting it.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
@@ -908,9 +911,98 @@ async fn sys_id_counts_sections_entered_run_wide() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("sys.id must count sections entered run-wide");
+        .expect("sys.id must count the sections the one chain enters");
 
-    assert_eq!(out, "1\n2\n3\n4\n");
+    assert_eq!(out, "0.1\n0.2\n0.3\n0.4\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_call_child_takes_ids_nested_under_its_own_chain_distinct_from_the_parent() {
+    // Hierarchical identity: the parent walk is the root chain `0`, so its
+    // entries are `0.N`; a `call` child is the root's first child chain
+    // `0.0`, so its entries are `0.0.N`. The two never collide because
+    // they are different chains, and a fanout inside the child nests its
+    // arms under the child's chain id, not the root's.
+    let store = TestStore::new();
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Identity\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        store.append('ids.txt', 'main:' .. sys.id .. '\\n')\n\
+        call('## Sub')\n\
+        store.append('ids.txt', 'after:' .. sys.id .. '\\n')\n\
+        return store.read('ids.txt')\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\n\
+        store.append('ids.txt', 'sub:' .. sys.id .. '\\n')\n\
+        local r = fanout('## Worker', {'a', 'b'})\n\
+        store.append('ids.txt', r[1].text .. '\\n' .. r[2].text .. '\\n')\n\
+        return 'sub-done'\n\
+        ```\n\n\
+        ## Worker\n\n\
+        ```lua\n\
+        return 'arm' .. sys.index .. ':' .. sys.id\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the call child and its fanout complete");
+
+    assert_eq!(
+        out, "main:0.1\nsub:0.0.0\narm1:0.0.0.0\narm2:0.0.1.0\nafter:0.1\n",
+        "parent entries are `0.N`, the call child's are `0.0.N`, and the \
+         child's fanout arms nest under `0.0`"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_runs_of_the_same_prompt_produce_identical_ids() {
+    // No run-global counter: every id is a path of chain-local counters,
+    // so two runs of one prompt allocate the same ids for the walk, a call
+    // child, a fanout's arms, and a section entered after both.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Identity\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        local ids = { sys.id }\n\
+        ids[#ids + 1] = call('## Sub')\n\
+        local r = fanout('## Worker', {'x', 'y', 'z'})\n\
+        for i = 1, #r do ids[#ids + 1] = r[i].text end\n\
+        ids[#ids + 1] = call('## Sub')\n\
+        var.ids = table.concat(ids, ',')\n\
+        ```\n\n\
+        ## Last\n\n\
+        ```lua\n\
+        return var.ids .. ',' .. sys.id\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\n\
+        return sys.id\n\
+        ```\n\n\
+        ## Worker\n\n\
+        ```lua\n\
+        return sys.id\n\
+        ```\n";
+    let prompt = parse(md);
+    let mut outputs = Vec::new();
+    for _ in 0..2 {
+        let ctx = scheduler_context(&prompt);
+        let out = Scheduler::new(&ctx, None)
+            .drive()
+            .await
+            .expect("the identity prompt completes");
+        outputs.push(out);
+    }
+
+    assert_eq!(outputs[0], outputs[1], "two runs allocate the same ids");
+    assert_eq!(
+        outputs[0], "0.1,0.0.0,0.1.0,0.2.0,0.3.0,0.4.0,0.2",
+        "the walk's entries are `0.N`, and call children and fanout arms \
+         share the root's child counter in dispatch order"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1345,17 +1437,18 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
-    // Mirror of the legacy case of the same name: the H1 pass holds id 0
-    // off the run-global counter, so the first walked section takes id 1.
+async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
+    // Mirror of the legacy case of the same name: the H1 pass is the root
+    // chain's entry 0, so the first walked section takes entry 1 of the
+    // same chain.
     let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
-        assert(sys.id == 0, 'the H1 chunk keeps sys.id 0')\n\
+        assert(sys.id == '0.0', 'the H1 chunk takes the root chain entry 0')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\n\
-        assert(sys.id == 1, 'the first walked section takes sys.id 1')\n\
+        assert(sys.id == '0.1', 'the first walked section takes entry 1')\n\
         return 'ok'\n\
         ```\n";
     let prompt = parse(md);
@@ -1363,7 +1456,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("the H1 chunk keeps id 0 and the first walked section takes id 1");
+        .expect("the H1 chunk takes root entry 0 and the first walked section root entry 1");
 
     assert_eq!(out, "ok");
 }
@@ -1523,6 +1616,37 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
         .expect("call from H1 runs the target section");
 
     assert_eq!(out, "called from h1");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutive_child_ids() {
+    // The H1 pass and the walk that follows it are one root chain, so the
+    // hand-off carries the pass's child counter into the walk: a `call`
+    // the pass made is child `0.0`, and the walk's first `call` is child
+    // `0.1`, not a second `0.0`. Were the counter copy dropped at the
+    // hand-off, both calls would read `0.0.0`. The walk's own entry
+    // counter continues too: its first section is still `0.1`.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Test prompt\n\n\
+        ```lua\nvar.first = call('## Answer')\n```\n\n\
+        ## Result\n\n\
+        ```lua\n\
+        assert(sys.id == '0.1', 'the first walked section takes root entry 1')\n\
+        return var.first .. ',' .. call('## Answer')\n\
+        ```\n\n\
+        ## Answer\n\n\
+        ```lua\nreturn sys.id\n```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a call from H1 and a call from the walk both complete");
+
+    assert_eq!(
+        out, "0.0.0,0.1.0",
+        "the H1 call is root child 0 and the walk's call is root child 1"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2087,10 +2211,12 @@ async fn fanout_concurrency_window_limits_active_arms() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
-    // Mirror of the legacy `fanout_arms_take_global_ids_and_per_fanout_index`
+async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_structured_results() {
+    // Mirror of the legacy
+    // `fanout_arms_take_child_ids_in_collection_order_and_a_per_fanout_index`
     // plus the structured-result shape of `fanout_returns_structured_results`:
-    // each arm entry takes the next run-global id, `sys.index` is the
+    // each arm is a child chain of the caller (`0.0`, `0.1`) whose worker
+    // entry is `0.K.0`, `sys.index` is the
     // 1-based per-fanout position, and the packed sequence carries `.ok`
     // and `.item` with `__tostring` driving `table.concat`. The ids log is
     // arm-scoped (the pattern the claims model teaches): every store op is
@@ -2122,18 +2248,18 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
     assert_eq!(out, "a,b");
     assert_eq!(
         store.read("ids-1.txt").expect("arm 1's ids log"),
-        "2:1\n",
-        "arm 1 takes the next run-global id with its per-fanout index"
+        "0.0.0:1\n",
+        "arm 1 is the caller's child 0 with its per-fanout index"
     );
     assert_eq!(
         store.read("ids-2.txt").expect("arm 2's ids log"),
-        "3:2\n",
-        "arm 2 takes the following run-global id with its per-fanout index"
+        "0.1.0:2\n",
+        "arm 2 is the caller's child 1 with its per-fanout index"
     );
     assert_eq!(
         store.read("ids.txt").expect("the parent's ids log"),
-        "parent:1\n",
-        "the parent keeps the run's first id"
+        "parent:0.1\n",
+        "the parent keeps the walk's first entry id"
     );
 }
 
@@ -2284,7 +2410,7 @@ async fn the_shared_replay_sees_the_arm_item() {
 async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
     // Mirror of the legacy `jump_inside_a_fanout_arm_drives_a_child_walk`:
     // the arm's remaining blocks are skipped, the walk continues on the
-    // target's own slice from the target (the run-global id sequence
+    // target's own slice from the target (the arm chain's entry sequence
     // continues, the walk falls through to the target's following
     // siblings), and the walk's reply becomes the arm's text. A
     // `resolve_arm_target` that resolved over the wrong set would error
@@ -2304,7 +2430,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         ```\n\n\
         ### Target\n\n\
         ```lua\n\
-        assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+        assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
         store.append('order.txt', 'Target\\n')\n\
         ```\n\n\
         ### Tail\n\n\
@@ -2333,7 +2459,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
     // Mirror of the legacy
     // `jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice`:
     // the descent runs the worker's child slice from the target, the target
-    // takes the next run-global id with no `item` seed (the transfer clears
+    // takes the arm chain's next entry id with no `item` seed (the transfer clears
     // the arm's at-worker state, so the child walk runs as plain sections),
     // and the walk falls through to the target's child siblings.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -2350,7 +2476,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         ```\n\n\
         #### Child\n\n\
         ```lua\n\
-        assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+        assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
         assert(item == nil, 'the child walk runs as a plain section')\n\
         store.append('order.txt', 'Child\\n')\n\
         ```\n\n\

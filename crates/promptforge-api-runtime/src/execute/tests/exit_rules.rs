@@ -40,12 +40,13 @@ async fn generic_result_when_nothing_produced() {
 
 #[tokio::test]
 async fn sys_id_increments_per_section() {
-    // First section files nothing and falls through; second returns its id.
+    // First section files nothing and falls through; second returns its id:
+    // entry 2 of the root chain (entry 0 is the H1 pass, present or not).
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
     let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "2");
+    assert_eq!(out, "0.2");
 }
 
 // --- H1-only prompts (no ## sections) ---

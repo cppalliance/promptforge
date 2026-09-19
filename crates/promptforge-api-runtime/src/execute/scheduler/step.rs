@@ -16,7 +16,7 @@ use crate::observe::detail;
 use crate::parser::Block;
 use crate::{Error, Result, cancel};
 
-use super::{ChainId, Scheduler};
+use super::{ChainIndex, Scheduler};
 
 impl Scheduler<'_> {
     /// Runs one ready chain to its next suspension point. An arm chain's
@@ -26,7 +26,7 @@ impl Scheduler<'_> {
     /// legacy engine needed a spawn boundary crossing for (PF-CANCEL-002).
     pub(super) async fn step(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
         let cancel = self.chains[id.index()]
@@ -45,7 +45,11 @@ impl Scheduler<'_> {
     /// entering the next section, starting the next Lua block's coroutine,
     /// stashing one prose block as the pending Markdown buffer, or falling
     /// through at a section's end.
-    fn step_inner(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+    fn step_inner(
+        &mut self,
+        id: ChainIndex,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
@@ -128,7 +132,7 @@ impl Scheduler<'_> {
     /// Resumes a chain's suspended coroutine with its delivered answer.
     fn resume_block(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         thread: &Thread,
         answer: Answer<Error>,
         root_result: &mut Option<Result<String>>,
@@ -153,7 +157,11 @@ impl Scheduler<'_> {
     /// driver owns the chunk observation
     /// boundaries: STARTED at the block's start, SUCCEEDED or FAILED when
     /// its coroutine finally returns or fails - a suspension is neither.
-    fn start_lua(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+    fn start_lua(
+        &mut self,
+        id: ChainIndex,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
         let pending = self.chains[id.index()].pending_prose.take();
         let chain = &self.chains[id.index()];
         let observer = Arc::clone(chain.ctx.observer());
@@ -180,7 +188,7 @@ impl Scheduler<'_> {
     /// reports the chunk's closing observation boundary.
     fn handle_coro_result(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         result: Result<CoroStep>,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {

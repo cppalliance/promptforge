@@ -7,7 +7,7 @@
 //! in parameters or on the per-section frame.
 
 use std::fmt;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use promptforge_parser::ModelKeyword;
@@ -165,10 +165,6 @@ pub(crate) struct RunState {
     /// The model-turn counter this context advances (the run's, or one
     /// shared by all arms of a fanout).
     turns: Arc<AtomicU32>,
-    /// The run-global execution-id counter: every section entry and every
-    /// fanout arm takes the next value (H1 keeps id 0). A fanout shares it
-    /// without resetting, unlike `turns`.
-    ids: Arc<AtomicU64>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library, so
     /// the startup sequence carries no `Option` branch.
@@ -210,8 +206,8 @@ pub(crate) struct RunState {
 }
 
 impl RunState {
-    /// Builds the context for one run of `prompt`. The turn and id counters
-    /// are minted here (both start at zero), as are the run's shared tool
+    /// Builds the context for one run of `prompt`. The turn counter is
+    /// minted here (starting at zero), as are the run's shared tool
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
@@ -238,7 +234,6 @@ impl RunState {
             observer: Arc::clone(&ctx.observer),
             debug: ctx.debug.clone(),
             turns: Arc::new(AtomicU32::new(0)),
-            ids: Arc::new(AtomicU64::new(0)),
             shared: Arc::new(shared),
             tools: tool_set.clone(),
             tool_set,
@@ -312,11 +307,6 @@ impl RunState {
     /// The model-turn counter this context advances.
     pub(crate) fn turns(&self) -> &Arc<AtomicU32> {
         &self.turns
-    }
-
-    /// The run-global execution-id counter.
-    pub(crate) fn ids(&self) -> &Arc<AtomicU64> {
-        &self.ids
     }
 
     /// The concrete handle behind the tools view, shared with every
@@ -451,12 +441,12 @@ impl RunState {
 
     /// The `sys` JSON for one section or arm of this run: a fresh `now`
     /// timestamp under the walk's `when`, with the driver supplying only the
-    /// next value from the run-global id counter and the section name.
+    /// section entry's hierarchical id and the section name.
     ///
     /// # Errors
     /// Returns [`Error::TimestampFormat`](crate::Error::TimestampFormat) when
     /// the current time fails to format.
-    pub(crate) fn sys_json(&self, id: u64, section_name: &str) -> Result<serde_json::Value> {
+    pub(crate) fn sys_json(&self, id: &str, section_name: &str) -> Result<serde_json::Value> {
         let now = now_rfc3339_checked()?;
         Ok(sys_json(
             &self.when,
@@ -485,7 +475,6 @@ impl fmt::Debug for RunState {
             .field("observer", &"<dyn Observer>")
             .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
             .field("turns", &self.turns)
-            .field("ids", &self.ids)
             .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)

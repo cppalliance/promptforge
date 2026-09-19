@@ -26,7 +26,7 @@ use crate::observe::{Observer, detail};
 use crate::{Error, Result, cancel};
 
 use super::dispatch::unbound_tool_call;
-use super::{Arrival, ChainId, RequestId, Scheduler};
+use super::{Arrival, ChainIndex, RequestId, Scheduler};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
@@ -113,7 +113,7 @@ impl Scheduler<'_> {
     /// catches it exactly as a tool failure.
     pub(super) fn dispatch_tool_call(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         alias: &str,
         args: serde_json::Value,
         call_id: Option<String>,
@@ -144,7 +144,7 @@ impl Scheduler<'_> {
     /// body classified by the binding's declared output kind at completion.
     fn prepare_tool_call(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         alias: &str,
         args: serde_json::Value,
         call_id: Option<String>,

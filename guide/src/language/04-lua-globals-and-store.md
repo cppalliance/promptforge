@@ -32,7 +32,7 @@ Every section receives a `sys` JSON value carrying `when`, `now`, `id`, `section
 
 The `sys.when` and `sys.now` values are the current UTC time formatted as RFC 3339 strings. The `when` value is stamped once at the walk's start, so every section agrees on when the run began, while `now` is fresh at each read.
 
-The `sys.id` value is a run-global counter. The H1 pass keeps id 0, and every section entry and every fanout arm takes the next value, so entering the same section twice yields two distinct ids.
+The `sys.id` value is a hierarchical id rendered as a dot-separated path: the running chain's id followed by the entry's position in that chain. The main walk is chain `0`, so the H1 pass is `0.0` and the walked sections are `0.1`, `0.2`, and so on; a `call` child or a fanout arm is a child chain of its caller (`0.0`, `0.1`, ...) whose entries nest under it (`0.0.0`, `0.0.1`, ...). Every entry's id is unique within a run, so entering the same section twice yields two distinct ids, and two runs of the same prompt with the same inputs yield the same ids.
 
 One field is conditional. `sys.index` exists only when the section runs as one arm of a fanout, a concurrent walk over a collection. Reading it in an ordinary walked section raises an unknown-field error. Arms of a nested fanout restart `sys.index` numbering at 1.
 

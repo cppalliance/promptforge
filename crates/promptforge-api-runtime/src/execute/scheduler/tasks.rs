@@ -16,6 +16,8 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
+use promptforge_api_types::ids::ChainId;
+
 use crate::client::GatewayClient;
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
@@ -27,7 +29,7 @@ use crate::parser::Section;
 use crate::store::Access;
 use crate::{Error, Result, cancel, subst};
 
-use super::{ChainId, Scheduler, prompt_origin};
+use super::{ChainIndex, Counters, Scheduler, prompt_origin};
 
 /// Join-table key for a live fanout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -43,7 +45,7 @@ pub(super) struct JoinState<'a> {
     /// One slot per collection index, so results land in collection order.
     results: Vec<Option<LuaFanoutResult>>,
     /// The chain that yielded the fanout, blocked until the join completes.
-    pub(super) parent: ChainId,
+    pub(super) parent: ChainIndex,
     /// Arms currently active (unblocked or pending on I/O); bounded by
     /// `window`.
     active: usize,
@@ -51,6 +53,11 @@ pub(super) struct JoinState<'a> {
     next: usize,
     /// The converted collection members, indexed by arm.
     items: Vec<serde_json::Value>,
+    /// One chain id per arm, indexed by arm and allocated from the
+    /// caller's child counter at dispatch in collection order, so an arm's
+    /// id depends on its position in the collection, never on the finish
+    /// order of the arms whose completion freed its window slot.
+    arm_ids: Vec<ChainId>,
     /// At most this many arms active at once: the run's
     /// `max_fanout_concurrency`.
     window: usize,
@@ -143,7 +150,7 @@ impl<'a> Scheduler<'a> {
     /// legacy callback path.
     pub(super) fn dispatch_fanout(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         worker: &str,
         items: &[serde_json::Value],
         var: &serde_json::Value,
@@ -164,7 +171,7 @@ impl<'a> Scheduler<'a> {
     /// first window of arm chains created.
     fn prepare_fanout(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         worker_name: &str,
         items: &[serde_json::Value],
         var: &serde_json::Value,
@@ -218,6 +225,12 @@ impl<'a> Scheduler<'a> {
                 worker.name()
             )));
         }
+        // Every arm's id is allocated now, in collection order, from the
+        // caller's child counter: the window refills as arms finish, and
+        // finish order must not reach the ids.
+        let arm_ids = (0..items.len())
+            .map(|_| self.allocate_child_id(id))
+            .collect::<Result<Vec<ChainId>>>()?;
         let fanout_id = FanoutId(self.next_fanout);
         self.next_fanout += 1;
         self.joins.insert(
@@ -229,6 +242,7 @@ impl<'a> Scheduler<'a> {
                 active: 0,
                 next: 0,
                 items: items.to_vec(),
+                arm_ids,
                 window: ctx.limits().fanout_concurrency().get(),
                 template: ArmTemplate {
                     caller_slice,
@@ -282,7 +296,7 @@ impl<'a> Scheduler<'a> {
     /// refuses an arm's acquisition.
     fn refill_fanout(&mut self, fanout: FanoutId) -> Result<()> {
         loop {
-            let (index, item, template) = {
+            let (index, item, chain_id, template) = {
                 let Some(join) = self.joins.get_mut(&fanout) else {
                     return Err(Error::internal("a window refill implies a live join"));
                 };
@@ -292,7 +306,12 @@ impl<'a> Scheduler<'a> {
                 let index = join.next;
                 join.next += 1;
                 join.active += 1;
-                (index, join.items[index].clone(), join.template.clone())
+                (
+                    index,
+                    join.items[index].clone(),
+                    join.arm_ids[index].clone(),
+                    join.template.clone(),
+                )
             };
             let worker_slice = template.worker_slice;
             let worker = &worker_slice[template.worker_index];
@@ -322,6 +341,8 @@ impl<'a> Scheduler<'a> {
                 ),
             };
             let chain = self.start_chain(
+                chain_id,
+                Counters::default(),
                 template.ctx.clone(),
                 std::slice::from_ref(worker),
                 0,
@@ -460,14 +481,14 @@ impl<'a> Scheduler<'a> {
     /// The arena ids of one fanout's live arm chains. An arm whose chain
     /// already finished is absent: `finish` took its arm state, so only
     /// arms still running, suspended, or blocked carry it.
-    pub(super) fn arm_chains_of(&self, fanout: FanoutId) -> Vec<ChainId> {
+    pub(super) fn arm_chains_of(&self, fanout: FanoutId) -> Vec<ChainIndex> {
         // The arena is u32-bounded at insertion (`start_chain`), so the
         // index conversion cannot fail.
         self.chains
             .iter()
             .enumerate()
             .filter(|(_, chain)| chain.arm.as_ref().is_some_and(|arm| arm.fanout == fanout))
-            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainId))
+            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainIndex))
             .collect()
     }
 }

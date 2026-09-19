@@ -375,42 +375,43 @@ error('a return must end the chain before fall-through')\n\
     assert_eq!(out, "A:sub-reply\nB\n");
 }
 
-/// A `call` chain's sections continue the run-global `sys.id` sequence:
-/// the contained chain's entries take the next ids, and the outer walk
-/// resumes the same sequence when the chain ends.
+/// A `call` chain's sections take ids nested under the chain's own id: the
+/// contained chain is the walk's child `0.0`, so its entries are `0.0.N`,
+/// and the outer walk resumes its own `0.N` sequence when the chain ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_call_chain_continues_the_global_sys_id_sequence() {
+async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_sequence() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
-assert(sys.id == 1, 'the first walked section takes id 1')\n\
+assert(sys.id == '0.1', 'the first walked section takes entry 1 of the root chain')\n\
 local r = call('## Sub')\n\
 store.append('order.txt', r .. '\\n')\n\
 ```\n\n\
 ## B\n\n\
 ```lua\n\
-assert(sys.id == 4, 'the outer walk resumes the global sequence')\n\
+assert(sys.id == '0.2', 'the outer walk resumes its own sequence')\n\
 return store.read('order.txt')\n\
 ```\n\n\
 ## Sub\n\n\
 ```lua\n\
-assert(sys.id == 2, 'the contained chain continues the global sequence')\n\
+assert(sys.id == '0.0.0', 'the contained chain is child 0 and starts at entry 0')\n\
 ```\n\n\
 ## Tail\n\n\
 ```lua\n\
-assert(sys.id == 3, 'the chain fall-through takes the next global id')\n\
+assert(sys.id == '0.0.1', 'the chain fall-through takes its next entry')\n\
 return 'tail-reply'\n\
 ```\n"
     );
     let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("a call chain must continue the global sys.id sequence");
+        .expect("a call chain must take ids nested under its own chain");
     assert_eq!(out, "tail-reply\n");
 }
 
-/// Entering the same section twice hands out two run-global `sys.id` values.
+/// Entering the same section twice hands out two distinct `sys.id` values:
+/// two call children of the walk are two chains.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn entering_the_same_section_twice_takes_two_ids() {
     let md = flow_prompt!(
@@ -429,25 +430,26 @@ return tostring(sys.id)\n\
     let out = run_offline(md)
         .await
         .expect("re-entering a section must take a fresh id");
-    assert_eq!(out, "2,3");
+    assert_eq!(out, "0.0.0,0.1.0");
 }
 
-/// Fanout arms take unique run-global `sys.id` values (continuing the walk's
-/// sequence, so the fanout does not reset the counter) and a per-fanout
-/// 1-based `sys.index`.
+/// Fanout arms take unique `sys.id` values nested under the caller's chain
+/// (each arm is a child chain, allocated in collection order at dispatch,
+/// so the ids never depend on finish order) and a per-fanout 1-based
+/// `sys.index`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_arms_take_global_ids_and_per_fanout_index() {
+async fn fanout_arms_take_child_ids_in_collection_order_and_a_per_fanout_index() {
     let md = flow_prompt!(
         "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', {'a', 'b'})\n\
-local function parts(s) return string.match(s, '^(%d+):(%d+)$') end\n\
+local function parts(s) return string.match(s, '^(%d+):([%d%.]+)$') end\n\
 local i1, id1 = parts(r[1].text)\n\
 local i2, id2 = parts(r[2].text)\n\
 assert(i1 == '1' and i2 == '2', 'sys.index is the 1-based per-fanout position')\n\
-assert(id1 ~= id2, 'arms take unique global ids')\n\
-assert((id1 == '2' and id2 == '3') or (id1 == '3' and id2 == '2'), 'arm ids continue the run-global sequence')\n\
+assert(id1 ~= id2, 'arms take unique ids')\n\
+assert(id1 == '0.0.0' and id2 == '0.1.0', 'arm ids are the caller children in collection order')\n\
 return 'ok'\n\
 ```\n\n\
 ### Worker\n\n\
@@ -457,7 +459,7 @@ return tostring(sys.index) .. ':' .. tostring(sys.id)\n\
     );
     let out = run_offline(md)
         .await
-        .expect("arms must take global ids and a per-fanout index");
+        .expect("arms must take child ids in collection order and a per-fanout index");
     assert_eq!(out, "ok");
 }
 
@@ -874,10 +876,11 @@ return 'niece-ran'\n\
     );
 }
 
-/// `sys.id` counts the sections the walk has entered run-wide: the detour
-/// into a child level continues the count rather than restarting it.
+/// `sys.id` counts the sections the walk chain has entered: the detour into
+/// a child level is the same chain, so it continues the count rather than
+/// restarting it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sys_id_counts_sections_entered_run_wide() {
+async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_level() {
     let md = flow_prompt!(
         "\
 ## A\n\n\
@@ -902,8 +905,8 @@ return store.read('ids.txt')\n\
     let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("sys.id must count sections entered run-wide");
-    assert_eq!(out, "1\n2\n3\n4\n");
+        .expect("sys.id must count the sections the one chain enters");
+    assert_eq!(out, "0.1\n0.2\n0.3\n0.4\n");
 }
 
 /// An off-walk child section still runs as a fanout worker.
@@ -1168,7 +1171,7 @@ return item .. ':' .. table.concat(items, ',')\n\
 }
 
 /// `call` inside a fanout arm runs a contained chain over the worker's
-/// visible set: the chain continues the run-global `sys.id` sequence, runs
+/// visible set: the chain is the arm's child (`0.0.0` under arm `0.0`), runs
 /// as plain
 /// sections (no `item` seed), and its final reply is the call's return value.
 /// The arm and the contained chain also see the run's `sys.section_count`.
@@ -1184,7 +1187,7 @@ return 'worker:' .. got .. ':' .. item\n\
 ```\n\n\
 ### Sub\n\n\
 ```lua\n\
-assert(sys.id == 3, 'a contained chain continues the run-global sys.id sequence')\n\
+assert(sys.id == '0.0.0.0', 'a contained chain is the arm chain child and starts at entry 0')\n\
 assert(item == nil, 'a contained chain runs as a plain section')\n\
 assert(sys.section_count == 1, 'a contained chain sees the run section count')\n\
 ```\n\n\
@@ -1232,7 +1235,7 @@ return item .. '!'\n\
 
 /// A jump inside a fanout arm transfers control: the arm's remaining blocks
 /// are skipped, a child walk runs from the target under the engine's
-/// chain-slice rule (continuing the run-global `sys.id` sequence, falling
+/// chain-slice rule (continuing the arm chain's `sys.id` sequence, falling
 /// through to the
 /// target's following siblings), and the child walk's reply becomes the arm's
 /// text.
@@ -1247,7 +1250,7 @@ error('the arm remaining blocks are skipped')\n\
 ```\n\n\
 ### Target\n\n\
 ```lua\n\
-assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
 store.append('order.txt', 'Target\\n')\n\
 ```\n\n\
 ### Tail\n\n\
@@ -1270,8 +1273,8 @@ return 'tail-reply'\n\
 }
 
 /// A jump from an arm into one of the worker's own children drives the
-/// child-level walk over the worker's child slice: the target takes the next
-/// run-global `sys.id` and no `item` seed, and the walk falls
+/// child-level walk over the worker's child slice: the target takes the arm
+/// chain's next `sys.id` and no `item` seed, and the walk falls
 /// through to the target's child siblings.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice() {
@@ -1284,7 +1287,7 @@ error('the arm remaining blocks are skipped')\n\
 ```\n\n\
 #### Child\n\n\
 ```lua\n\
-assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
 assert(item == nil, 'the child walk runs as a plain section')\n\
 store.append('order.txt', 'Child\\n')\n\
 ```\n\n\

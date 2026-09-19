@@ -15,13 +15,15 @@
 //! the [`Capability`](capabilities::Capability) trait, the
 //! [`RunServices`](capabilities::RunServices) a capability is given at
 //! activation, and the [`Contribution`](capabilities::Contribution) it
-//! returns. This
+//! returns. [`ids`] is the hierarchical, deterministic identity of a run's
+//! chains and tasks. This
 //! crate's only workspace dependency is the std-only `shared-vfs`, so every
 //! promptforge crate may depend on it.
 
 pub mod cancel;
 pub mod capabilities;
 pub mod events;
+pub mod ids;
 pub mod models;
 pub mod names;
 pub mod observe;

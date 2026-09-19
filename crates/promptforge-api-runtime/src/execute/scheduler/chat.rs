@@ -33,7 +33,7 @@ use crate::observe::detail;
 use crate::{Error, Result};
 
 use super::dispatch::unbound_tool_call;
-use super::{Arrival, ChainId, RequestId, Scheduler};
+use super::{Arrival, ChainIndex, RequestId, Scheduler};
 
 /// The answer for a round refused as too large by `reason`'s gate, before
 /// or by the provider: no round ran, so every other field is absent.
@@ -121,7 +121,7 @@ impl Scheduler<'_> {
     /// on the other dispatch paths.
     pub(super) fn dispatch_chat(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         messages: &[MessageRecord],
         binding: Option<ModelBinding>,
         model: Option<&str>,
@@ -151,7 +151,7 @@ impl Scheduler<'_> {
     /// the spawned round.
     fn prepare_chat(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         messages: &[MessageRecord],
         binding: Option<ModelBinding>,
         model: Option<&str>,
@@ -266,7 +266,7 @@ impl Scheduler<'_> {
     /// cannot be read.
     pub(super) fn accept_chat(
         &self,
-        id: ChainId,
+        id: ChainIndex,
         result: Result<Box<Completion>>,
     ) -> Result<Answer<Error>> {
         let chain = &self.chains[id.index()];
