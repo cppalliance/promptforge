@@ -567,6 +567,32 @@ pub trait Observer: Send + Sync {
     /// `text` is untrusted user input. The default body discards the report.
     #[expect(unused_variables, reason = "the default body discards the report")]
     fn on_user_input(&self, execution: &str, section: &str, text: &str) {}
+
+    /// Reports one model-task notice as it is queued for the task's owner:
+    /// the engine's own sentence telling the model how a task it started
+    /// ended, read by the model in the owner's next round or as its
+    /// `await_tasks` answer.
+    ///
+    /// `task` is the task that ended and `text` is what the model reads.
+    /// A completed task's final text is embedded nonce-wrapped as
+    /// untrusted; the rest of the sentence is the engine's. Reported under
+    /// the owner's section. The default body discards the report.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a content report names its full run coordinates in one call"
+    )]
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_task_notice(
+        &self,
+        execution: &str,
+        section: &str,
+        chain_id: u32,
+        depth: u32,
+        turn: u32,
+        task: &TaskId,
+        text: &str,
+    ) {
+    }
 }
 
 /// An [`Observer`] that discards every observation.
@@ -693,6 +719,16 @@ mod tests {
         );
         observer.on_thinking("example-run", "chat", 0, 0, 1, "llama-3", "thinking text");
         observer.on_user_input("example-run", "chat", "hello");
+        let task: TaskId = "0.0".parse().expect("a task id parses");
+        observer.on_task_notice(
+            "example-run",
+            "chat",
+            0,
+            0,
+            1,
+            &task,
+            "Task id=0.0 (## Child) completed: done",
+        );
     }
 
     #[test]

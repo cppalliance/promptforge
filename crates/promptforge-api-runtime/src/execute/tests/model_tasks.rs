@@ -18,7 +18,7 @@ use crate::lua::ToolSet;
 
 /// A broker that never answers, so a child parked on `user_input()` stays
 /// live until its owner ends or cancels it.
-struct NeverBroker;
+pub(super) struct NeverBroker;
 
 #[async_trait::async_trait]
 impl InputBroker for NeverBroker {
@@ -33,7 +33,7 @@ impl InputBroker for NeverBroker {
 
 /// A child body that parks on operator input the never-answering broker
 /// never gives, so the task stays live until something ends it.
-const PARKED_CHILD: &str = "user_input()\nreturn 'never'";
+pub(super) const PARKED_CHILD: &str = "user_input()\nreturn 'never'";
 
 pub(super) fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
@@ -43,9 +43,24 @@ pub(super) fn task(id: &str) -> TaskId {
 /// model set pre-filled, no bound tools, the recorder as observer, and the
 /// never-answering broker so a parked child stays parked.
 pub(super) fn model_task_context(prompt: &Prompt, recorder: &Arc<TaskRecorder>) -> RunState {
+    model_task_context_with(
+        prompt,
+        Arc::clone(recorder) as Arc<dyn Observer>,
+        Arc::new(NeverBroker),
+    )
+}
+
+/// [`model_task_context`] under a caller-chosen observer and input broker,
+/// for the suites that time a parked child's release or record content
+/// reports.
+pub(super) fn model_task_context_with(
+    prompt: &Prompt,
+    observer: Arc<dyn Observer>,
+    broker: Arc<dyn InputBroker>,
+) -> RunState {
     let config = RunContext::new(EXECUTION)
-        .observer(Arc::clone(recorder) as Arc<dyn Observer>)
-        .input_broker(Arc::new(NeverBroker));
+        .observer(observer)
+        .input_broker(broker);
     let ctx = RunState::new(
         prompt,
         "",
@@ -121,8 +136,8 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let bodies = gateway.requests();
     assert_eq!(
         advertised(&bodies[0]),
-        vec!["task", "task_cancel", "task_status"],
-        "allow_tasks advertises exactly the three built-ins: {bodies:?}"
+        vec!["task", "task_cancel", "task_status", "await_tasks"],
+        "allow_tasks advertises exactly the answered built-ins: {bodies:?}"
     );
     let records = recorder.records();
     assert!(

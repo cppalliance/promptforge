@@ -1,9 +1,10 @@
 //! Protocol tests: yield parsing and answer envelopes.
 //!
 //! The submodules follow the protocol's own split: `parse` the generic
-//! yield-to-request validation, `parse_chat` the message-list request, and
-//! `answer` the answer-to-envelope round trips. The helpers below are
-//! shared.
+//! yield-to-request validation, `parse_chat` the message-list request,
+//! `parse_tasks` the task-operation requests, `answer` the
+//! answer-to-envelope round trips, and `answer_chat` the `chat` answer's
+//! shapes. The helpers below are shared.
 
 use std::num::NonZeroU32;
 
@@ -102,6 +103,7 @@ fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
 }
 
 mod answer;
+mod answer_chat;
 mod parse;
 mod parse_chat;
 mod parse_tasks;

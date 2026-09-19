@@ -654,7 +654,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-23>
 
-### Step 23: Notices and `await_tasks`
+### Step 23: Notices and `await_tasks` [completed]
 
 - Component: Model tasks
 - Piece: delivery

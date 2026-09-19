@@ -1,4 +1,5 @@
-//! The `timer` arm: the internal timeout behind a timed wait, as an
+//! The `timer` arm: the internal timeout behind a timed wait (an author's
+//! `opts.timeout`, or the model's `await_tasks { timeout }`), as an
 //! effect-backed task slot.
 //!
 //! A timer is the one task whose work is not a chain: its backing is an
@@ -44,10 +45,11 @@ impl Scheduler<'_> {
         self.ready.push_back(id);
     }
 
-    /// The fallible half of timer dispatch: the duration check (the parse
-    /// already bounds it, so a failure here is defensive), the id
-    /// allocation, the slot, and the spawned sleep.
-    fn prepare_timer(&mut self, id: ChainIndex, seconds: f64) -> Result<TaskId> {
+    /// The fallible half of timer dispatch, shared with the model's
+    /// `await_tasks`: the duration check (the parse already bounds it, so
+    /// a failure here is defensive), the id allocation, the slot, and the
+    /// spawned sleep.
+    pub(super) fn prepare_timer(&mut self, id: ChainIndex, seconds: f64) -> Result<TaskId> {
         let duration = Duration::try_from_secs_f64(seconds).map_err(|_| {
             Error::Lua(format!(
                 "timeout must be a non-negative finite number of seconds, got {seconds}"

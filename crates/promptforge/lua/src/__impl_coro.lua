@@ -151,17 +151,24 @@ local function chat(messages, opts)
   return result
 end
 
--- Drains pending model-task notices into the author's list ahead of a
--- round. No task exists yet, so nothing drains; the hook is the seam the
--- tasks namespace fills in.
-local function drain_task_notices(messages)
-end
-
 -- Appends one record to the author's list. The list is a plain array (a
 -- messages.new() list keeps its builders behind __index, never as
 -- fields), so the append is an ordinary sequence store.
 local function append_record(messages, record)
   messages[#messages + 1] = record
+end
+
+-- Drains the chain's pending model-task notices into the author's list
+-- ahead of a round: one yield, answered at once with the notices queued
+-- since the last drain (the engine's sentences saying how the model's
+-- tasks ended), each appended as a user record so the model reads them
+-- in its next round. A chain with no model tasks drains an empty list.
+local function drain_task_notices(messages)
+  local ok, notices = yield({ op = "drain_task_notices" })
+  if not ok then fail(notices) end
+  for index = 1, #notices do
+    append_record(messages, { role = "user", content = notices[index] })
+  end
 end
 
 -- The message the exit rules raise for an empty round when the round

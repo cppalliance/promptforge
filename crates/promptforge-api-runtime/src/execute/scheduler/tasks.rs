@@ -39,6 +39,7 @@ use crate::execute::support::MAX_CALL_DEPTH;
 use crate::observe::Observation;
 use crate::{Error, Result};
 
+use super::notices::TaskEnd;
 use super::{ChainIndex, Counters, RequestId, Scheduler, prompt_origin};
 
 /// Where a task's work runs.
@@ -270,9 +271,11 @@ impl Scheduler<'_> {
 
     /// Applies a task chain's end to its slot: the outcome lands in the
     /// slot, the slot moves to `Done`, the task's terminal observation
-    /// fires under its target section, and an owner parked on a set
-    /// containing the task is woken with it delivered. Otherwise the slot
-    /// holds the outcome until a wait takes it.
+    /// fires under its target section, a model task's notice is queued on
+    /// its owner, and an owner parked on a set containing the task is
+    /// woken with it delivered (the notice is queued first, so a model
+    /// parked in `await_tasks` reads it in the wake's answer). Otherwise
+    /// the slot holds the outcome until a wait takes it.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the chain has no slot, which only a
@@ -293,9 +296,20 @@ impl Scheduler<'_> {
         };
         slot.state = TaskState::Done;
         slot.ok = Some(outcome.is_ok());
-        slot.outcome = Some(outcome);
         let owner = slot.owner;
-        observer.observe(&execution, &slot.target, event);
+        let origin = slot.origin;
+        let target = slot.target.clone();
+        observer.observe(&execution, &target, event);
+        if origin == TaskOrigin::Model {
+            let end = match &outcome {
+                Ok(text) => TaskEnd::Completed(text),
+                Err(error) => TaskEnd::Failed(error),
+            };
+            self.queue_task_notice(owner, &task, &target, end);
+        }
+        if let Some(slot) = self.tasks.get_mut(&task) {
+            slot.outcome = Some(outcome);
+        }
         self.wake_waiter(owner, &task);
         Ok(())
     }
@@ -328,13 +342,15 @@ impl Scheduler<'_> {
     /// slot moves to `Abandoned`, its backing chain aborts with everything
     /// it owns in turn (or its in-flight request is dropped), and its
     /// terminal observation fires under its target with `reason` - the
-    /// observation is the reason's only record, since no wait can reach
-    /// an abandoned slot once its owner is gone. An internal timer slot
-    /// ends the same way but reports nothing and never counts as leaked:
-    /// it is the wait's detail, not a task the author started. Returns
-    /// the abandoned author-origin ids in spawn order, for the owner's
-    /// `tasks_live` outcome; the caller discards them for an owner that
-    /// is itself being aborted, whose outcome no one receives.
+    /// observation is the reason's record, since no wait can reach an
+    /// abandoned slot once its owner is gone; a model task's abandonment
+    /// notice is queued and reported too, though the ending owner never
+    /// reads it. An internal timer slot ends the same way but reports
+    /// nothing and never counts as leaked: it is the wait's detail, not a
+    /// task the author started. Returns the abandoned author-origin ids in
+    /// spawn order, for the owner's `tasks_live` outcome; the caller
+    /// discards them for an owner that is itself being aborted, whose
+    /// outcome no one receives.
     pub(super) fn abandon_owned_tasks(
         &mut self,
         owner: ChainIndex,
@@ -376,8 +392,11 @@ impl Scheduler<'_> {
                     reason,
                 },
             );
-            if origin == TaskOrigin::Author {
-                leaked.push(task);
+            match origin {
+                TaskOrigin::Author => leaked.push(task),
+                TaskOrigin::Model => {
+                    self.queue_task_notice(owner, &task, &target, TaskEnd::Abandoned(reason));
+                }
             }
         }
         leaked
