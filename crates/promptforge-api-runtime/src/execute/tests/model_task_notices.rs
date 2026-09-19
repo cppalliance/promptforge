@@ -84,7 +84,7 @@ impl Observer for NoticeRecorder {
 }
 
 impl NoticeRecorder {
-    fn events(&self) -> Vec<(String, Observation)> {
+    pub(super) fn events(&self) -> Vec<(String, Observation)> {
         self.events
             .lock()
             .expect("the recorder mutex is not poisoned")
