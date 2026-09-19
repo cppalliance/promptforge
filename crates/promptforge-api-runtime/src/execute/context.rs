@@ -10,6 +10,7 @@ use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
+use promptforge_api_types::ids::TaskId;
 use promptforge_parser::ModelKeyword;
 
 use crate::Result;
@@ -441,17 +442,24 @@ impl RunState {
 
     /// The `sys` JSON for one section or arm of this run: a fresh `now`
     /// timestamp under the walk's `when`, with the driver supplying only the
-    /// section entry's hierarchical id and the section name.
+    /// section entry's hierarchical id, the entering chain's task id, and
+    /// the section name.
     ///
     /// # Errors
     /// Returns [`Error::TimestampFormat`](crate::Error::TimestampFormat) when
     /// the current time fails to format.
-    pub(crate) fn sys_json(&self, id: &str, section_name: &str) -> Result<serde_json::Value> {
+    pub(crate) fn sys_json(
+        &self,
+        id: &str,
+        task_id: &TaskId,
+        section_name: &str,
+    ) -> Result<serde_json::Value> {
         let now = now_rfc3339_checked()?;
         Ok(sys_json(
             &self.when,
             &now,
             id,
+            &task_id.to_string(),
             section_name,
             &self.execution,
             self.section_count(),

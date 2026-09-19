@@ -32,6 +32,18 @@ use crate::{Error, Result, subst};
 
 use super::context::RunState;
 
+/// The seeds a spawned task chain's first section entry carries beyond the
+/// shared host contract: `tasks.spawn`'s `opts.item` (installed as the
+/// `item` global and the `{{ item }}` substitution source) and `opts.index`
+/// (reported as `sys.index`). Empty for every other entry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TaskSeed {
+    /// The chain's `item` global, when the spawn gave one.
+    pub(crate) item: Option<serde_json::Value>,
+    /// The chain's `sys.index`, when the spawn gave one.
+    pub(crate) index: Option<u64>,
+}
+
 /// One section entry's owned frame within a run.
 ///
 /// The frame is born at a section entry and dies at its teardown. One

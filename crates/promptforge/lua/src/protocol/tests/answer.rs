@@ -34,6 +34,22 @@ fn an_ok_call_answer_round_trips_through_lua() {
 }
 
 #[test]
+fn an_ok_spawn_answer_resumes_the_task_id_as_its_path_text() {
+    let lua = Lua::new();
+    let task: TaskId = "0.2".parse().expect("a task id parses");
+    let (envelope, retained) = Answer::<Error>::Spawn(Ok(task))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, result) = echo_through_lua(&lua, envelope);
+    assert!(ok);
+    let Value::String(text) = result else {
+        panic!("expected a string result, got {result:?}");
+    };
+    assert_eq!(text.to_str().expect("the text is UTF-8"), "0.2");
+}
+
+#[test]
 fn an_err_answer_round_trips_and_retains_the_typed_error() {
     let lua = Lua::new();
     let (envelope, retained) = Answer::Call(Err(Error::LuaQuota {

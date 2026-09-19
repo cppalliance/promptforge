@@ -14,6 +14,10 @@
 //! `0.2`, `0.2.0`), chosen over a packed integer because the depth and the
 //! width of a run are both unbounded (call nesting, fanout arm count) and
 //! because the path reads as the hierarchy it names in a log or a UI.
+//!
+//! [`TaskOrigin`] names the principal that started a task - the prompt's
+//! author through `tasks.spawn`, or the model through its `task` tool -
+//! and rides beside the task's id wherever the task is reported.
 
 use std::fmt;
 use std::str::FromStr;
@@ -158,5 +162,41 @@ impl Serialize for TaskId {
 impl<'de> Deserialize<'de> for TaskId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         ChainId::deserialize(deserializer).map(Self)
+    }
+}
+
+/// The principal that started a task.
+///
+/// The two are treated differently at the owner's chain end: an author
+/// task that outlives its owner is the author's bug and fails the chain,
+/// a model task that outlives its owner is abandoned and reported. The
+/// tag is the string the Lua shims and the `tasks.pending` filter use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskOrigin {
+    /// The prompt's author, through `tasks.spawn` (and `fanout` over it).
+    Author,
+    /// The model, through its `task` tool.
+    Model,
+}
+
+impl TaskOrigin {
+    /// The tag the shims and filters use: `author` or `model`.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            TaskOrigin::Author => "author",
+            TaskOrigin::Model => "model",
+        }
+    }
+
+    /// Parses a tag; `None` for anything outside the two exact tags.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "author" => Some(TaskOrigin::Author),
+            "model" => Some(TaskOrigin::Model),
+            _ => None,
+        }
     }
 }

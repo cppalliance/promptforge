@@ -120,23 +120,24 @@ Args: {{ args }}\n\n\
     );
 }
 
-/// The `tasks` table is gone (note 42): the global is absent, so indexing it
-/// is an ordinary Lua error, and control flow takes heading strings only.
+/// The `tasks` global is the task namespace (`tasks.spawn` and, later, the
+/// waits), not the retired control-flow table (note 42): indexing it by a
+/// heading string reads nil, and control flow takes heading strings only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tasks_global_is_absent() {
+async fn tasks_global_is_the_task_namespace() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
-assert(tasks == nil, 'the tasks global is not installed')\n\
-local ok = pcall(function() return tasks['## Main'] end)\n\
-assert(not ok, 'indexing the absent tasks global errors')\n\
+assert(type(tasks) == 'table', 'the tasks namespace is installed')\n\
+assert(type(tasks.spawn) == 'function', 'tasks.spawn is a namespace function')\n\
+assert(tasks['## Main'] == nil, 'the namespace is not a heading table')\n\
 return 'ok'\n\
 ```\n"
     );
     let out = run_offline(md)
         .await
-        .expect("the absent tasks global reads as nil and errors on indexing");
+        .expect("the tasks namespace installs as a plain table");
     assert_eq!(out, "ok");
 }
 
@@ -484,29 +485,27 @@ return tostring(sys.index)\n\
     );
 }
 
-/// `sys.taskid` is retired: a fanout arm reading it raises the sealed-sys
-/// unknown-field error, same as a walked section reading `sys.index`.
+/// `sys.taskid` is the nearest enclosing task: a fanout arm is the caller's
+/// own work, so it reports the caller's task - the main walk's, task `0`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sys_taskid_inside_a_fanout_errors() {
+async fn sys_taskid_inside_a_fanout_is_the_callers_task() {
     let md = flow_prompt!(
         "\
 ## Parent\n\n\
 ```lua\n\
-fanout('### Worker', {'a'})\n\
+assert(sys.taskid == '0', 'the main walk is task 0, got ' .. sys.taskid)\n\
+local results = fanout('### Worker', {'a'})\n\
+return results[1].text\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\n\
-return tostring(sys.taskid)\n\
+return sys.taskid\n\
 ```\n"
     );
-    let error = run_offline(md)
+    let out = run_offline(md)
         .await
-        .expect_err("sys.taskid inside a fanout must fail");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("unknown sys field 'taskid'"),
-        "sys.taskid is retired: {rendered}"
-    );
+        .expect("an arm reads its caller's task id");
+    assert_eq!(out, "0");
 }
 
 /// Nested `call()` is capped at [`MAX_CALL_DEPTH`]. Locks the

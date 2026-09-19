@@ -11,6 +11,7 @@ use mlua::{AnyUserData, Function, Lua, MultiValue, Value};
 use serde_json::json;
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
+use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
 
 use crate::{Error, LuaFanoutResult, LuaModelHandle};

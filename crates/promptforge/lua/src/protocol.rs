@@ -2,7 +2,8 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer(handle?, prompt)`, `call`,
-//! `fanout`, `tools.call`, the section-only `user_input()` and `store.*`,
+//! `tasks.spawn`, `fanout`, `tools.call`, the section-only `user_input()`
+//! and `store.*`,
 //! the agent-only `models.chat`, and the `chat` and `tool_call` rounds the
 //! section-only `models.loop` shim yields on the author's behalf) is a
 //! Lua-side shim that yields a request table; the driver validates the

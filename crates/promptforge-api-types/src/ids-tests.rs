@@ -1,4 +1,4 @@
-use super::{ChainId, TaskId};
+use super::{ChainId, TaskId, TaskOrigin};
 
 #[test]
 fn the_root_chain_is_zero_and_children_extend_it_by_index() {
@@ -60,5 +60,23 @@ fn ids_serialize_as_their_path_text() {
     assert!(
         serde_json::from_str::<ChainId>("\"0.x\"").is_err(),
         "a malformed path fails to deserialize"
+    );
+}
+
+#[test]
+fn a_task_origin_round_trips_through_its_tag() {
+    assert_eq!(TaskOrigin::Author.tag(), "author");
+    assert_eq!(TaskOrigin::Model.tag(), "model");
+    for origin in [TaskOrigin::Author, TaskOrigin::Model] {
+        assert_eq!(TaskOrigin::from_tag(origin.tag()), Some(origin));
+    }
+    assert_eq!(
+        TaskOrigin::from_tag("Author"),
+        None,
+        "the tag vocabulary is exact, never case-folded"
+    );
+    assert_eq!(
+        serde_json::to_string(&TaskOrigin::Model).expect("an origin serializes"),
+        "\"model\""
     );
 }

@@ -8,6 +8,7 @@
 mod chat;
 
 use mlua::{Lua, LuaSerdeExt, Value};
+use promptforge_api_types::ids::TaskOrigin;
 use promptforge_model_client::model::ModelBinding;
 
 use chat::parse_chat;
@@ -175,6 +176,7 @@ impl Request {
         match op.as_str() {
             "infer" => classify(parse_infer(table), |error| Answer::Infer(Err(error))),
             "call" => classify(parse_call(lua, table), |error| Answer::Call(Err(error))),
+            "spawn" => classify(parse_spawn(lua, table), |error| Answer::Spawn(Err(error))),
             "fanout" => classify(parse_fanout(lua, table), |error| Answer::Fanout(Err(error))),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
@@ -258,6 +260,69 @@ fn parse_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, Fi
     let input = call_optional_string(table, "input")?;
     let var = shim_var(lua, table)?;
     Ok(Request::Call { target, input, var })
+}
+
+/// Parses a `spawn` request: the author-supplied `target` (validated with
+/// the `resolve_section_target` rule, as `call`'s is), the optional
+/// author-supplied `input`, `item`, and `index` seeds, plus the
+/// shim-produced `var` snapshot and `origin`.
+fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let target = match table.raw_get::<Value>("target") {
+        Ok(value) => {
+            resolve_section_target(value).map_err(|error| FieldFailure::Call(Error::lua(error)))?
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let input = call_optional_string(table, "input")?;
+    let item = match table.raw_get::<Value>("item") {
+        Ok(Value::Nil) => None,
+        Ok(value @ (Value::Function(_) | Value::UserData(_) | Value::Thread(_))) => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "item must be JSON data, got {}",
+                value.type_name()
+            ))));
+        }
+        Ok(value) => Some(lua.from_value(value).map_err(|_| {
+            FieldFailure::Call(Error::Lua(
+                "item must be a JSON-representable value".to_owned(),
+            ))
+        })?),
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let index = match table.raw_get::<Value>("index") {
+        Ok(Value::Nil) => None,
+        Ok(Value::Integer(index)) => Some(u64::try_from(index).map_err(|_| {
+            FieldFailure::Call(Error::Lua(format!(
+                "index must be a non-negative integer, got {index}"
+            )))
+        })?),
+        Ok(other) => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "index must be a non-negative integer, got {}",
+                other.type_name()
+            ))));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let var = shim_var(lua, table)?;
+    // The origin is shim-produced: the author shim always says `author`,
+    // so any other shape is a hand-built yield.
+    let origin = match table.raw_get::<Value>("origin") {
+        Ok(Value::String(tag)) => tag
+            .to_str()
+            .ok()
+            .and_then(|tag| TaskOrigin::from_tag(&tag))
+            .ok_or(FieldFailure::Malformed)?,
+        Ok(_) | Err(_) => return Err(FieldFailure::Malformed),
+    };
+    Ok(Request::Spawn {
+        target,
+        input,
+        item,
+        index,
+        var,
+        origin,
+    })
 }
 
 /// Parses a `fanout` request: the author-supplied `worker` heading and

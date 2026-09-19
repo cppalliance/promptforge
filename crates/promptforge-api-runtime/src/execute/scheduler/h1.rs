@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::ids::ChainId;
+use promptforge_api_types::ids::{ChainId, TaskId};
 
 use crate::execute::engine::section_position;
 use crate::execute::support::{GENERIC_COMPLETION, now_rfc3339_checked};
@@ -48,6 +48,12 @@ impl Scheduler<'_> {
         self.chains.push(Chain {
             lineage: ChainId::root(),
             counters: Counters::default(),
+            task: TaskId::from(ChainId::root()),
+            owner: None,
+            seed: None,
+            waiting_on: Vec::new(),
+            task_notices: Vec::new(),
+            note: None,
             ctx: self.ctx.clone(),
             access: Some(Arc::new(access)),
             frame: None,

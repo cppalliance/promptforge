@@ -8,6 +8,8 @@
 
 use std::sync::Arc;
 
+use promptforge_api_types::ids::{ChainId, TaskId};
+
 use crate::execute::context::RunState;
 use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
@@ -18,7 +20,7 @@ use crate::parser::Section;
 use crate::store::Access;
 use crate::{Error, Result};
 
-use super::SectionContext;
+use super::{SectionContext, TaskSeed};
 
 impl SectionContext {
     /// Constructs the frame for one walked section and runs its setup
@@ -33,24 +35,38 @@ impl SectionContext {
     /// visible set (its siblings minus itself, plus its direct children) is
     /// built for the `list_from_section` callback. `section_id` is the
     /// section's `sys.id`: the entering chain's hierarchical id extended
-    /// by its local entry counter, allocated by the scheduler.
-    /// `var` is the walk's current clipboard, seeded into the
-    /// section's VM.
+    /// by its local entry counter, allocated by the scheduler; `task_id`
+    /// is the entering chain's `sys.taskid`. `var` is the walk's current
+    /// clipboard, seeded into the section's VM. `seed` carries a spawned
+    /// chain's `item` and `sys.index` on its first entry and is empty on
+    /// every other entry.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the walk frame keeps its context, capability, section, visible slice, entry id, task id, var seed, and task seed explicit and linear"
+    )]
     pub(crate) fn new(
         ctx: &RunState,
         access: &Arc<Access>,
         section: &Section,
         siblings: &[Section],
         section_id: &str,
+        task_id: &TaskId,
         var: &serde_json::Value,
+        seed: TaskSeed,
     ) -> Result<Self> {
-        let sys = ctx.sys_json(section_id, section.name())?;
+        let mut sys = ctx.sys_json(section_id, task_id, section.name())?;
+        // A spawned chain's `sys.index` is the spawn's own value, verbatim;
+        // absent otherwise, so a walked section reading `sys.index` raises
+        // the sealed-sys unknown-field error exactly as before.
+        if let Some(index) = seed.index {
+            sys["index"] = serde_json::Value::from(index);
+        }
         ctx.observer()
             .observe(ctx.execution(), section.name(), detail::SECTION_STARTED);
         let mut vm = SectionVm::new_for_section(
@@ -80,7 +96,7 @@ impl SectionContext {
             &sys,
             VmSeed {
                 var: Some(var),
-                item: None,
+                item: seed.item.as_ref(),
             },
             access,
             section.name(),
@@ -98,7 +114,7 @@ impl SectionContext {
             completed: false,
             sys,
             var: var.clone(),
-            item: None,
+            item: seed.item,
             counts: None,
             observer: Arc::clone(ctx.observer()),
             debug: ctx.debug().cloned(),
@@ -132,10 +148,13 @@ impl SectionContext {
     ) -> Result<Self> {
         let title = ctx.prompt().title();
         let now = now_rfc3339_checked()?;
+        // The pass is the root chain, and the root chain is task `0`.
+        let root_task = TaskId::from(ChainId::root());
         let sys = sys_json(
             &now,
             &now,
             section_id,
+            &root_task.to_string(),
             title,
             ctx.execution(),
             ctx.prompt().sections().len(),
@@ -193,7 +212,8 @@ impl SectionContext {
     ///
     /// The seed is the fanout's own: the collection `item`, the arm's
     /// spawned access capability (its claims-model identity), and the
-    /// caller's cloned `var`. The
+    /// caller's cloned `var`; `task_id` is the fanout caller's task, which
+    /// the arm reports as its `sys.taskid`. The
     /// effective reporting handles
     /// are the fanout's too: the run's own observer and debug sink with the
     /// fanout's fresh turn counter arrive through the context's fanout fork,
@@ -209,7 +229,7 @@ impl SectionContext {
     /// once.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the arm frame keeps its context, capability, worker, visible set, entry id, index, item, and var seed explicit and linear"
+        reason = "the arm frame keeps its context, capability, worker, visible set, entry id, task id, index, item, and var seed explicit and linear"
     )]
     pub(crate) fn new_fanout_arm(
         ctx: &RunState,
@@ -217,6 +237,7 @@ impl SectionContext {
         worker: &Section,
         home: &[Section],
         section_id: &str,
+        task_id: &TaskId,
         index: usize,
         item: serde_json::Value,
         var: &serde_json::Value,
@@ -240,7 +261,7 @@ impl SectionContext {
             )
             .map_err(Error::from)
             .and_then(|()| {
-                let mut sys = ctx.sys_json(section_id, worker.name())?;
+                let mut sys = ctx.sys_json(section_id, task_id, worker.name())?;
                 // The arm's own sys extra: its 1-based position within this
                 // fanout. Absent outside a fanout, so a walked section
                 // reading `sys.index` raises the sealed-sys unknown-field

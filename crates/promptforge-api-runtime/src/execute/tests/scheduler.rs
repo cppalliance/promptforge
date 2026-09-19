@@ -53,7 +53,7 @@ fn scheduler_context(prompt: &Prompt) -> RunState {
 
 /// Builds the run context on the given store and observer, so a walk test
 /// can inspect the store's contents and the observation stream afterward.
-fn scheduler_context_on(
+pub(super) fn scheduler_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,

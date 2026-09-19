@@ -165,8 +165,10 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Enters the chain's next section and reports whether one was entered:
-    /// constructs the frame with the chain's next entry id, seeded from
-    /// the chain's `var` and client slots. The pending Markdown buffer
+    /// constructs the frame with the chain's next entry id and its task id,
+    /// seeded from the chain's `var` and client slots (and, on a spawned
+    /// chain's first entry, its `item` and `sys.index` seeds). The pending
+    /// Markdown buffer
     /// resets: a previous section's unconsumed prose never crosses the
     /// boundary. `Ok(false)` means the
     /// slice is exhausted and the chain ends.
@@ -203,12 +205,14 @@ impl<'a> Scheduler<'a> {
             let caller = &caller_slice[caller_index];
             let home = home_without(&visible_sections(caller_slice, caller), worker);
             let section_id = Self::next_entry_id(chain)?;
+            let task = chain.task.clone();
             let frame = SectionContext::new_fanout_arm(
                 &chain.ctx,
                 chain.access()?,
                 worker,
                 &home,
                 &section_id,
+                &task,
                 item_index,
                 item,
                 &chain.var,
@@ -225,13 +229,19 @@ impl<'a> Scheduler<'a> {
         // construction can borrow the chain's own context and slots.
         let slice = chain.slice;
         let section_id = Self::next_entry_id(chain)?;
+        let task = chain.task.clone();
+        // A spawned chain's first entry consumes its `item` and `sys.index`
+        // seeds; every later entry, and every other chain's, has none.
+        let seed = chain.seed.take().unwrap_or_default();
         let frame = SectionContext::new(
             &chain.ctx,
             chain.access()?,
             &slice[index],
             slice,
             &section_id,
+            &task,
             &chain.var,
+            seed,
         )?;
         chain.frame = Some(frame);
         chain.block = 0;
