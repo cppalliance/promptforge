@@ -666,7 +666,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-24>
 
-### Step 24: Checkpoint 2b, model tasks complete
+### Step 24: Checkpoint 2b, model tasks complete [completed]
 
 - Component: Model tasks
 - Piece: checkpoint
