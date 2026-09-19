@@ -678,7 +678,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-25>
 
-### Step 25: Engine vocabulary types
+### Step 25: Engine vocabulary types [completed]
 
 - Component: Run API and engine purity
 - Piece: vocabulary

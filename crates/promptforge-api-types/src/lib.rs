@@ -16,17 +16,25 @@
 //! [`RunServices`](capabilities::RunServices) a capability is given at
 //! activation, and the [`Contribution`](capabilities::Contribution) it
 //! returns. [`ids`] is the hierarchical, deterministic identity of a run's
-//! chains and tasks. This
+//! chains and tasks and the [`Provenance`](ids::Provenance) replay key
+//! stamped on every effect and event. [`event`] is the value form of a
+//! run's reports, the [`Event`](event::Event) enum a host appends to its
+//! log; [`timestamp`] is the UTC instant a run starts from, rendered over
+//! std alone; and [`replay`] holds the behavior [`Flags`](replay::Flags) a
+//! run records and the [`ReplayError`](replay::ReplayError) kinds. This
 //! crate's only workspace dependency is the std-only `shared-vfs`, so every
 //! promptforge crate may depend on it.
 
 pub mod cancel;
 pub mod capabilities;
+pub mod event;
 pub mod events;
 pub mod ids;
 pub mod models;
 pub mod names;
 pub mod observe;
+pub mod replay;
+pub mod timestamp;
 pub mod tools;
 pub mod untrusted;
 pub mod wire;
