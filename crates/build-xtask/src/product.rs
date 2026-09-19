@@ -4,24 +4,30 @@
 //! family, and its dependencies of every kind (normal, dev, build, and
 //! target-specific) are checked against the matrix:
 //!
-//! - `promptforge-*` crates must not depend on gateway or workshop crates.
-//! - `gateway`/`gateway-*` crates must not depend on promptforge or
-//!   workshop crates.
+//! - `promptforge-*` crates must not depend on gateway, workshop, or
+//!   harness crates.
+//! - `gateway`/`gateway-*` crates must not depend on promptforge,
+//!   workshop, or harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
 //!   except the family's public pair (`gateway-api`,
-//!   `gateway-api-discovery`).
+//!   `gateway-api-discovery`), and may depend on `harness-*` only through
+//!   `harness-api`.
+//! - `harness-*` crates must not depend on workshop crates, and may depend
+//!   on gateway crates only through the public pair.
 //! - `shared-*` crates must not depend on any product crate.
 //! - One door: a crate outside the promptforge family may depend on
 //!   `promptforge-*` only through `promptforge-api-runtime` or
 //!   `promptforge-api-types`.
-//! - Container privacy: the manifestless `crates/promptforge/` and
-//!   `crates/gateway/` directories are private to their families; only the
-//!   crates inside a container and the container's named outside exception
-//!   (`promptforge-api-runtime` for `crates/promptforge/`; the gateway
-//!   containers name none) may depend on the crates it holds. Containers
-//!   nest: `crates/gateway/stt/` is a subsystem private to the gateway
-//!   family, with `gateway-stt` as its public member - the one crate inside
-//!   the family outside the subsystem may name.
+//! - Container privacy: the manifestless `crates/promptforge/`,
+//!   `crates/gateway/`, `crates/workshop/`, and `crates/harness/`
+//!   directories are private to their families; only the crates inside a
+//!   container and the container's named outside exception
+//!   (`promptforge-api-runtime` for `crates/promptforge/`, `harness-api`
+//!   for `crates/harness/`; the gateway and workshop containers name none)
+//!   may depend on the crates it holds. Containers nest:
+//!   `crates/gateway/stt/` is a subsystem private to the gateway family,
+//!   with `gateway-stt` as its public member - the one crate inside the
+//!   family outside the subsystem may name.
 //! - Shell boundary: the `workshop` shell depends on `workshop-server-api`
 //!   and never on `workshop-server`.
 
@@ -37,6 +43,7 @@ enum Family {
     Promptforge,
     Gateway,
     Workshop,
+    Harness,
     Shared,
     Build,
     /// Named after no product family; carries no matrix rules of its own.
@@ -51,6 +58,8 @@ fn family(package: &str) -> Family {
         Family::Gateway
     } else if package == "workshop" || package.starts_with("workshop-") {
         Family::Workshop
+    } else if package.starts_with("harness-") {
+        Family::Harness
     } else if package.starts_with("shared-") {
         Family::Shared
     } else if package.starts_with("build-") {
@@ -99,6 +108,9 @@ const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge-api-runtime", "promptforge-a
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api", "gateway-api-discovery"];
+/// The harness family's door: the only harness crate workshop crates may
+/// name, and the one outside crate permitted into `crates/harness/`.
+const HARNESS_DOOR: &str = "harness-api";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -141,19 +153,30 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         }
     }
     let (from, to) = (family(&package.package), family(&dep.package));
+    let public_gateway = PUBLIC_GATEWAY.contains(&dep.package.as_str());
     let family_rule = match (from, to) {
-        (Family::Promptforge, Family::Gateway | Family::Workshop) => {
-            Some("promptforge crates must not depend on gateway or workshop crates")
+        (Family::Promptforge, Family::Gateway | Family::Workshop | Family::Harness) => {
+            Some("promptforge crates must not depend on gateway, workshop, or harness crates")
         }
-        (Family::Gateway, Family::Promptforge | Family::Workshop) => {
-            Some("gateway crates must not depend on promptforge or workshop crates")
+        (Family::Gateway, Family::Promptforge | Family::Workshop | Family::Harness) => {
+            Some("gateway crates must not depend on promptforge, workshop, or harness crates")
         }
-        (Family::Workshop, Family::Gateway) if !PUBLIC_GATEWAY.contains(&dep.package.as_str()) => {
+        (Family::Workshop, Family::Gateway) if !public_gateway => {
             Some("workshop crates must not depend on gateway crates")
         }
-        (Family::Shared, Family::Promptforge | Family::Gateway | Family::Workshop) => {
-            Some("shared crates must not depend on product crates")
+        (Family::Workshop, Family::Harness) if dep.package != HARNESS_DOOR => {
+            Some("workshop crates may depend on harness-* only through harness-api")
         }
+        (Family::Harness, Family::Workshop) => {
+            Some("harness crates must not depend on workshop crates")
+        }
+        (Family::Harness, Family::Gateway) if !public_gateway => Some(
+            "harness crates may depend on gateway-* only through gateway-api and gateway-api-discovery",
+        ),
+        (
+            Family::Shared,
+            Family::Promptforge | Family::Gateway | Family::Workshop | Family::Harness,
+        ) => Some("shared crates must not depend on product crates"),
         _ => None,
     };
     family_rule.map(str::to_owned).or_else(|| {
@@ -201,6 +224,7 @@ fn parent_scope(container: &str) -> Option<&str> {
 fn container_named_exception(container: &str) -> Option<&'static str> {
     match container {
         "promptforge" => Some("promptforge-api-runtime"),
+        "harness" => Some(HARNESS_DOOR),
         _ => None,
     }
 }
@@ -314,19 +338,8 @@ fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: 
 /// dev, build, and target-specific tables, resolving `package` renames.
 fn manifest_dependencies(manifest: &toml::Value) -> Vec<String> {
     let mut names = Vec::new();
-    for kind in DEP_KINDS {
-        if let Some(table) = manifest.get(kind).and_then(toml::Value::as_table) {
-            collect_deps(table, &mut names);
-        }
-    }
-    if let Some(targets) = manifest.get("target").and_then(toml::Value::as_table) {
-        for target in targets.values() {
-            for kind in DEP_KINDS {
-                if let Some(table) = target.get(kind).and_then(toml::Value::as_table) {
-                    collect_deps(table, &mut names);
-                }
-            }
-        }
+    for (_, table) in crate::manifest::dependency_tables(manifest, &DEP_KINDS) {
+        collect_deps(table, &mut names);
     }
     names
 }

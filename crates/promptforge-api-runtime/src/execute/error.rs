@@ -89,9 +89,17 @@ impl RunError {
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::ContextExhausted { .. } => RunErrorKind::ContextExhausted,
             Error::Input { .. } => RunErrorKind::Input,
-            Error::LuaCompile { .. } | Error::Lua(_) | Error::LuaRuntime { .. } => {
-                RunErrorKind::Lua
-            }
+            // A leaked task, a task reached for by a chain that does not
+            // own it, a result waited on twice, and a wait's delivery of a
+            // cancelled task surfacing uncaught are the author's program
+            // failing, as any Lua fault is.
+            Error::LuaCompile { .. }
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::TasksLive { .. }
+            | Error::TaskNotOwned { .. }
+            | Error::TaskConsumed { .. }
+            | Error::TaskCancelled { .. } => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::RequirementsUnmet { .. } => RunErrorKind::RequirementsUnmet,
             Error::MissingEnv(_)

@@ -38,7 +38,7 @@ pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 pub(crate) use mlua::thread::ThreadStatus;
 pub(crate) use mlua::{
     Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue,
-    StdLib, Thread, UserData, UserDataFields, UserDataMethods, Value, VmState,
+    StdLib, Thread, UserData, UserDataMethods, Value, VmState,
 };
 pub(crate) use serde_json::Value as Json;
 
@@ -87,10 +87,14 @@ mod argv;
 mod collection;
 mod compactors;
 mod error;
+#[path = "error-value.rs"]
+mod error_value;
+#[doc(hidden)]
+pub use error_value::{ErrorKind, ErrorValue, Raised, error_table};
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
-pub(crate) use coro::install_shim_prelude;
+pub(crate) use coro::{block_guard, install_shim_prelude, take_failure};
 mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
@@ -100,14 +104,13 @@ pub use host::install_ui;
 pub(crate) use host::{install_log, install_store_table, install_untrusted};
 mod tools;
 pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
-mod vm;
-pub(crate) use vm::pack_sequence;
 mod handles;
 mod messages;
 mod program;
 mod projection;
 mod prose;
 mod scope;
+mod vm;
 pub(crate) use handles::resolve_section_target;
 mod models;
 mod protocol;
@@ -119,18 +122,23 @@ mod runtime_events;
 #[doc(hidden)]
 pub use crate::argv::Argv;
 #[doc(hidden)]
-pub use compactors::{Compactor, OverflowReason, invoke_selected, is_context_overflow, precheck};
+pub use collection::render_item;
+#[doc(hidden)]
+pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use coro::install_model_tool_call_shim;
 #[doc(hidden)]
 pub use coro::{
     install_agent_chat_shim, install_section_loop_shim, install_section_user_input_shim,
     install_store_shims,
 };
 #[doc(hidden)]
-pub use dispatch::{ScriptReport, ToolDispatch, dispatch_tool};
-#[doc(hidden)]
-pub use handles::{
-    LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolSet, ToolView,
+pub use dispatch::{
+    ModelReport, ScriptReport, ToolDispatch, dispatch_model_tool, dispatch_tool, prepare_dispatch,
 };
+#[doc(hidden)]
+pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
 #[doc(hidden)]
 pub use host::run_store_op;
 #[doc(hidden)]
@@ -142,13 +150,13 @@ pub use prose::ProseState;
 #[doc(hidden)]
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
-    StoreOutcome, ToolCallOutcome, ToolCallRecord, UserInputOutcome, YieldParse,
-    append_message_record,
+    StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, UserInputOutcome,
+    YieldParse,
 };
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};
 #[doc(hidden)]
-pub use scope::{ToolCallCounts, ToolRuntime};
+pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 #[doc(hidden)]
 pub use sys::enrich_sys_model;
 #[doc(hidden)]

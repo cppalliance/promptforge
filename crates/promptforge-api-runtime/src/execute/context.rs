@@ -7,124 +7,42 @@
 //! in parameters or on the per-section frame.
 
 use std::fmt;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
-use promptforge_parser::ModelKeyword;
+#[path = "context-bound.rs"]
+mod bound;
+
+#[cfg(test)]
+use promptforge_api_types::event::Event;
+use promptforge_api_types::ids::{ChainId, TaskId};
 
 use crate::Result;
 use crate::debug::DebugCapture;
 use crate::input::InputBroker;
-use crate::lua::{LuaProgram, ToolBinding, ToolSet, ToolView};
-use crate::model::{ModelBinding, ModelInvocation, ModelSet, ModelView};
+use crate::lua::{LuaProgram, ToolSet, ToolView};
+use crate::model::{ModelSet, ModelView};
 use crate::observe::Observer;
 use crate::parser::Prompt;
 use crate::store::{Access, VfsRef};
 use crate::untrusted::GuardNonce;
 
 use super::config::{RunContext, RunLimits};
+use super::event_buffer::{Emitter, EventSink};
+use super::events_to_observer::forward;
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{now_rfc3339_checked, sys_json};
+use bound::{bound_model_set, bound_tool_set, derive_argv};
 
-/// Builds the run's shared tool set from the prepared bindings: every
-/// filled slot becomes a binding carrying its resolved implementation, so
-/// run-time execution never consults the assembled catalog again. Unfilled
-/// slots produce no binding: advertising or calling the alias fails at run
-/// time, exactly as prepare's report promised.
-fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
-    let mut set = ToolSet::default();
-    for (alias, _) in prompt.frontmatter().tools().iter() {
-        let Some(tool) = ctx.tool_bindings.resolve(alias) else {
-            continue;
-        };
-        // The exact path says nothing prose-like; the tool's own catalog
-        // text stands in as the binding's description.
-        set.bindings.push(ToolBinding {
-            alias: alias.to_owned(),
-            description: tool.description().to_owned(),
-            id: tool.id(),
-            model_description: None,
-            tool: Arc::clone(tool),
-            output_kind: crate::lua::ToolOutputKind::Plain,
-        });
-    }
-    set
-}
-
-/// The keyword's stable kebab-case spelling, journaled onto the binding as
-/// the role's capability set.
-fn keyword_name(keyword: ModelKeyword) -> &'static str {
-    match keyword {
-        ModelKeyword::Thinking => "thinking",
-        ModelKeyword::NoThinking => "no-thinking",
-        ModelKeyword::Frontier => "frontier",
-        ModelKeyword::Fast => "fast",
-        ModelKeyword::Small => "small",
-        ModelKeyword::Creative => "creative",
-        ModelKeyword::Chat => "chat",
-        // The vocabulary is closed today; a future keyword reports its
-        // debug spelling rather than breaking the fill.
-        _ => "unknown",
-    }
-}
-
-/// Builds the run's shared model set from the prepared bindings: every
-/// filled role becomes a binding under its label, carrying the role's
-/// keyword set (the handle's `capabilities`) and the hard-keyword thinking
-/// switch as the frozen invocation. Unfilled roles produce no binding:
-/// `models.use` on the label fails at run time.
-fn bound_model_set(prompt: &Prompt, ctx: &RunContext) -> ModelSet {
-    let mut set = ModelSet::default();
-    for (label, role) in prompt.frontmatter().models().iter() {
-        let Some(descriptor) = ctx.model_bindings.resolve(label) else {
-            continue;
-        };
-        let mut thinking = None;
-        for keyword in role.keywords() {
-            match keyword {
-                ModelKeyword::Thinking => thinking = Some(true),
-                ModelKeyword::NoThinking => thinking = Some(false),
-                _ => {}
-            }
-        }
-        let binding = ModelBinding::new(
-            label,
-            role.description()
-                .unwrap_or_else(|| descriptor.description()),
-            descriptor.id().clone(),
-            ModelInvocation {
-                temperature: None,
-                max_tokens: None,
-                thinking,
-            },
-            descriptor.context(),
-        )
-        .with_capabilities(
-            role.keywords()
-                .iter()
-                .map(|keyword| keyword_name(*keyword))
-                .map(str::to_owned)
-                .collect(),
-        );
-        set.bindings.push(binding);
-    }
-    set
-}
-
-/// Derives a section's `argv` from the args string under the prompt's
-/// declaration: a default-declared prompt wraps the interface prose into
-/// the default shape (`argv.prose`, with the empty string present, not
-/// absent); a structured declaration parses the string as JSON, and a parse
-/// failure or a JSON `null` reads as nil (`if argv then` is the malformed
-/// check). The executor never hard-errors on shape.
-fn derive_argv(prompt: &Prompt, args: &str) -> Option<serde_json::Value> {
-    if prompt.frontmatter().args().is_default() {
-        return Some(serde_json::json!({ "prose": args }));
-    }
-    match serde_json::from_str(args) {
-        Ok(serde_json::Value::Null) | Err(_) => None,
-        Ok(value) => Some(value),
-    }
+/// The host's report seams the drained events are forwarded to: the
+/// observer every run carries and the opt-in raw capture. Held once per
+/// run and never handed to a chain: the engine reports into its buffer,
+/// and only the driver's drain reaches these.
+struct HostSinks {
+    /// The host's progress observer.
+    observer: Arc<dyn Observer>,
+    /// The host's opt-in raw request/response capture.
+    debug: Option<Arc<dyn DebugCapture>>,
 }
 
 /// The ambient state one run shares across the execute subtree.
@@ -132,10 +50,10 @@ fn derive_argv(prompt: &Prompt, args: &str) -> Option<serde_json::Value> {
 /// Immutable for the run's lifetime and cheap to clone: every field is
 /// shared ownership or `Copy`, so a clone points at the same run state.
 /// The three sanctioned forks: [`with_walk_state`](Self::with_walk_state)
-/// at the H1-to-walk handoff,
-/// [`with_effective_handles`](Self::with_effective_handles) for a fanout's
-/// proxy reporting handles, and [`with_args`](Self::with_args) carrying a
-/// `call` call's args override into its contained chain.
+/// at the H1-to-walk handoff, [`with_task`](Self::with_task) giving a
+/// spawned chain its own task emitter and turn counter, and
+/// [`with_args`](Self::with_args) carrying a `call` call's args override
+/// into its contained chain.
 #[derive(Clone)]
 pub(crate) struct RunState {
     /// The prompt this run executes.
@@ -158,17 +76,27 @@ pub(crate) struct RunState {
     argv: Option<Arc<serde_json::Value>>,
     /// The run's resource limits.
     limits: RunLimits,
-    /// The run's observer handle.
+    /// The run's event buffer, shared by every chain's emitter and every
+    /// spawned leaf task, drained by the driver after each dispatch round.
+    events: EventSink,
+    /// This context's task-scoped emitter: the root task's at
+    /// construction, a spawned chain's own after [`with_task`](Self::with_task).
+    emitter: Arc<Emitter>,
+    /// The same emitter as the observer trait object the Lua layer's
+    /// `&dyn Observer` seams (the shared replay, `log`, teardown, the
+    /// shared tool-dispatch body) take, so their reports land in the buffer
+    /// in order with the scheduler's own.
     observer: Arc<dyn Observer>,
-    /// Opt-in raw request/response capture for each model turn.
-    debug: Option<Arc<dyn DebugCapture>>,
+    /// The host's seams the drained events are forwarded to.
+    host: Arc<HostSinks>,
+    /// Test-only: a copy of every drained event, so a test can assert on
+    /// the values themselves - their provenance included - rather than on
+    /// what the host observer was handed.
+    #[cfg(test)]
+    tap: Option<Arc<Mutex<Vec<Event>>>>,
     /// The model-turn counter this context advances (the run's, or one
     /// shared by all arms of a fanout).
     turns: Arc<AtomicU32>,
-    /// The run-global execution-id counter: every section entry and every
-    /// fanout arm takes the next value (H1 keeps id 0). A fanout shares it
-    /// without resetting, unlike `turns`.
-    ids: Arc<AtomicU64>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library, so
     /// the startup sequence carries no `Option` branch.
@@ -201,11 +129,17 @@ pub(crate) struct RunState {
     /// The host's live streaming-delta callback, forwarded by every model
     /// round; `None` drops deltas at the leaf.
     on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
+    /// Test-only: install the raw protocol shims (`models.chat`,
+    /// `tools.call_as_model`) in every section VM, so a fixture section
+    /// can yield one raw `chat` round or one model-issued `tool_call` at
+    /// the scheduler's dispatch arms without going through a loop shim.
+    #[cfg(test)]
+    raw_shims: bool,
 }
 
 impl RunState {
-    /// Builds the context for one run of `prompt`. The turn and id counters
-    /// are minted here (both start at zero), as are the run's shared tool
+    /// Builds the context for one run of `prompt`. The turn counter is
+    /// minted here (starting at zero), as are the run's shared tool
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
@@ -221,18 +155,33 @@ impl RunState {
     ) -> Self {
         let tool_set = Arc::new(Mutex::new(bound_tool_set(prompt, ctx)));
         let model_set = Arc::new(Mutex::new(bound_model_set(prompt, ctx)));
+        let execution: Arc<str> = Arc::from(ctx.name.as_str());
+        let events = EventSink::default();
+        // The root chain - the main walk - is task `0`.
+        let emitter = Arc::new(Emitter::new(
+            events.clone(),
+            TaskId::from(ChainId::root()),
+            Arc::clone(&execution),
+            ctx.debug.is_some(),
+        ));
         Self {
             prompt: Arc::new(prompt.clone()),
             nonce: GuardNonce::fresh(),
             vfs: vfs.clone(),
-            execution: Arc::from(ctx.name.as_str()),
+            execution,
             args: Arc::from(args),
             argv: derive_argv(prompt, args).map(Arc::from),
             limits: ctx.limits,
-            observer: Arc::clone(&ctx.observer),
-            debug: ctx.debug.clone(),
+            events,
+            observer: Arc::clone(&emitter) as Arc<dyn Observer>,
+            emitter,
+            host: Arc::new(HostSinks {
+                observer: Arc::clone(&ctx.observer),
+                debug: ctx.debug.clone(),
+            }),
+            #[cfg(test)]
+            tap: None,
             turns: Arc::new(AtomicU32::new(0)),
-            ids: Arc::new(AtomicU64::new(0)),
             shared: Arc::new(shared),
             tools: tool_set.clone(),
             tool_set,
@@ -242,7 +191,29 @@ impl RunState {
             input: ctx.input.clone(),
             ui: ctx.ui.clone(),
             on_delta: ctx.on_delta.clone(),
+            #[cfg(test)]
+            raw_shims: false,
         }
+    }
+
+    /// Exposes the raw protocol shims (`models.chat`, `tools.call_as_model`)
+    /// in every section VM this run starts, so a test fixture can drive the
+    /// scheduler's `Chat` arm with one raw round or its `tool_call` arm
+    /// with one model-issued call.
+    #[cfg(test)]
+    pub(crate) fn expose_raw_shims_for_test(&mut self) {
+        self.raw_shims = true;
+    }
+
+    /// Keeps a copy of every event the driver drains from this run's
+    /// buffer, so a test can assert on the values - provenance included.
+    /// Install before the scheduler is built: the drain reads the tap
+    /// through the scheduler's root context.
+    #[cfg(test)]
+    pub(crate) fn record_events_for_test(&mut self) -> Arc<Mutex<Vec<Event>>> {
+        let tap = Arc::new(Mutex::new(Vec::new()));
+        self.tap = Some(Arc::clone(&tap));
+        tap
     }
 
     /// The prompt this run executes.
@@ -282,35 +253,43 @@ impl RunState {
         self.limits
     }
 
-    /// The run's observer handle.
+    /// This context's task-scoped emitter: where every report the
+    /// scheduler makes on this chain goes.
+    pub(crate) fn emitter(&self) -> &Arc<Emitter> {
+        &self.emitter
+    }
+
+    /// The emitter as the observer trait object the Lua layer takes. Only
+    /// the seams that still name `&dyn Observer` should reach for this;
+    /// the scheduler's own reports go through [`emitter`](Self::emitter).
     pub(crate) fn observer(&self) -> &Arc<dyn Observer> {
         &self.observer
     }
 
-    /// The opt-in raw request/response capture sink.
-    pub(crate) fn debug(&self) -> Option<&Arc<dyn DebugCapture>> {
-        self.debug.as_ref()
+    /// Drains the run's event buffer and forwards the batch, in order, to
+    /// the host's observer and capture. The driver calls this after every
+    /// dispatch round and once more when the run ends.
+    pub(crate) fn flush_events(&self) {
+        let events = self.events.take();
+        if events.is_empty() {
+            return;
+        }
+        #[cfg(test)]
+        if let Some(tap) = &self.tap {
+            tap.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend(events.iter().cloned());
+        }
+        forward(
+            events,
+            self.host.observer.as_ref(),
+            self.host.debug.as_deref(),
+        );
     }
 
     /// The model-turn counter this context advances.
     pub(crate) fn turns(&self) -> &Arc<AtomicU32> {
         &self.turns
-    }
-
-    /// The run-global execution-id counter.
-    pub(crate) fn ids(&self) -> &Arc<AtomicU64> {
-        &self.ids
-    }
-
-    /// The run's tool set, read-only.
-    ///
-    /// Unused until the `models.loop` step reads the call-time tool scope.
-    #[expect(
-        dead_code,
-        reason = "unused until the models.loop step reads the call-time tool scope"
-    )]
-    pub(crate) fn tools(&self) -> &dyn ToolView {
-        &*self.tools
     }
 
     /// The concrete handle behind the tools view, shared with every
@@ -395,29 +374,24 @@ impl RunState {
         ctx
     }
 
-    /// The context a fanout's arms run under: the proxy observer/debug over
-    /// the bounded side channels and the fanout's fresh turn counter in
-    /// place of the run's own, so arm reporting stays report-only and arm
-    /// turns count against the fanout's cap.
+    /// The context a spawned task chain runs under: an emitter stamping
+    /// the chain's own `task` on every report, and `turns` in place of the
+    /// run's counter, so the task's turns count against its own cap.
     #[must_use]
-    pub(crate) fn with_effective_handles(
-        &self,
-        observer: Arc<dyn Observer>,
-        debug: Option<Arc<dyn DebugCapture>>,
-        turns: Arc<AtomicU32>,
-    ) -> Self {
+    pub(crate) fn with_task(&self, task: TaskId, turns: Arc<AtomicU32>) -> Self {
         let mut ctx = self.clone();
-        ctx.observer = observer;
-        ctx.debug = debug;
+        let emitter = Arc::new(self.emitter.for_task(task));
+        ctx.observer = Arc::clone(&emitter) as Arc<dyn Observer>;
+        ctx.emitter = emitter;
         ctx.turns = turns;
         ctx
     }
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, `observer`, `shared`) from this
-    /// context; the driver supplies only its own deltas: the `sys` JSON,
-    /// the seed, the chain step's access capability (the walk's own, a
-    /// call chain's borrowed parent capability, a fanout arm's spawned
+    /// run-wide slots (`args`, `observer`, `shared`, the shim caps) from
+    /// this context; the driver supplies only its own deltas: the `sys`
+    /// JSON, the seed, the chain step's access capability (the walk's own,
+    /// a call chain's borrowed parent capability, a task chain's spawned
     /// one), and the section name.
     pub(crate) fn vm_setup<'a>(
         &'a self,
@@ -436,23 +410,34 @@ impl RunState {
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,
+            max_tool_iterations: self.max_tool_iterations(),
+            max_fanout_concurrency: self.limits.fanout_concurrency().get(),
             ui: self.ui.as_ref(),
+            #[cfg(test)]
+            raw_shims: self.raw_shims,
         }
     }
 
     /// The `sys` JSON for one section or arm of this run: a fresh `now`
     /// timestamp under the walk's `when`, with the driver supplying only the
-    /// next value from the run-global id counter and the section name.
+    /// section entry's hierarchical id, the entering chain's task id, and
+    /// the section name.
     ///
     /// # Errors
     /// Returns [`Error::TimestampFormat`](crate::Error::TimestampFormat) when
     /// the current time fails to format.
-    pub(crate) fn sys_json(&self, id: u64, section_name: &str) -> Result<serde_json::Value> {
+    pub(crate) fn sys_json(
+        &self,
+        id: &str,
+        task_id: &TaskId,
+        section_name: &str,
+    ) -> Result<serde_json::Value> {
         let now = now_rfc3339_checked()?;
         Ok(sys_json(
             &self.when,
             &now,
             id,
+            &task_id.to_string(),
             section_name,
             &self.execution,
             self.section_count(),
@@ -462,7 +447,12 @@ impl RunState {
 
 impl fmt::Debug for RunState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunState")
+        let mut state = f.debug_struct("RunState");
+        #[cfg(test)]
+        state
+            .field("raw_shims", &self.raw_shims)
+            .field("tap", &self.tap.is_some());
+        state
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)
             .field("vfs", &"<VfsRef>")
@@ -470,10 +460,11 @@ impl fmt::Debug for RunState {
             .field("args", &self.args)
             .field("argv", &self.argv)
             .field("limits", &self.limits)
-            .field("observer", &"<dyn Observer>")
-            .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
+            .field("events", &self.events)
+            .field("emitter", &self.emitter)
+            .field("observer", &"<Emitter as dyn Observer>")
+            .field("host", &"<HostSinks>")
             .field("turns", &self.turns)
-            .field("ids", &self.ids)
             .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)
@@ -488,70 +479,5 @@ impl fmt::Debug for RunState {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::observe::NullObserver;
-
-    fn test_prompt() -> Prompt {
-        let source = concat!(
-            "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
-            "# Title\n\n## Only\n\ndone\n",
-        );
-        Prompt::parse(source, "run-context-test", &NullObserver::default())
-            .expect("the test prompt parses")
-    }
-
-    fn test_context(prompt: &Prompt) -> RunState {
-        RunState::new(
-            prompt,
-            "",
-            &promptforge_vfs::empty(),
-            LuaProgram::empty().expect("the empty chunk compiles"),
-            &RunContext::new("run-context-test"),
-        )
-    }
-
-    #[test]
-    fn new_builds_a_context_over_the_prompt() {
-        let prompt = test_prompt();
-        let ctx = test_context(&prompt);
-        assert_eq!(ctx.prompt().title(), prompt.title());
-    }
-
-    #[test]
-    fn accessor_returns_the_run_prompt() {
-        let prompt = test_prompt();
-        let ctx = test_context(&prompt);
-        assert_eq!(ctx.prompt(), &prompt);
-    }
-
-    #[test]
-    fn clones_share_the_prompt_allocation() {
-        let ctx = test_context(&test_prompt());
-        let clone = ctx.clone();
-        assert!(Arc::ptr_eq(&ctx.prompt, &clone.prompt));
-    }
-
-    #[test]
-    fn derived_values_come_from_the_prompt_and_limits() {
-        let prompt = test_prompt();
-        let ctx = test_context(&prompt);
-        assert_eq!(ctx.section_count(), prompt.sections().len());
-        assert_eq!(ctx.max_tool_iterations(), 24);
-    }
-
-    #[test]
-    fn forks_swap_only_their_own_fields() {
-        let ctx = test_context(&test_prompt());
-        let chain = ctx.with_args("chain-args");
-        assert_eq!(chain.args(), "chain-args");
-        assert!(Arc::ptr_eq(&ctx.prompt, &chain.prompt));
-        assert_eq!(ctx.args(), "");
-
-        let turns = Arc::new(AtomicU32::new(7));
-        let arm =
-            ctx.with_effective_handles(Arc::new(NullObserver::default()), None, Arc::clone(&turns));
-        assert!(Arc::ptr_eq(arm.turns(), &turns));
-        assert!(Arc::ptr_eq(&ctx.prompt, &arm.prompt));
-    }
-}
+#[path = "context-tests.rs"]
+mod tests;

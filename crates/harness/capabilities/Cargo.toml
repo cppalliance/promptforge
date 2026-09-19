@@ -1,0 +1,19 @@
+[package]
+name = "harness-capabilities"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge harness capabilities: the capability registry, activation, and the Capability, Tool, and InputBroker traits the first-party capability crates implement"
+readme = "README.md"
+keywords = ["promptforge", "llm", "agent", "harness", "tools"]
+categories = ["development-tools", "api-bindings"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

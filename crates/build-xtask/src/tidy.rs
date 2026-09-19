@@ -1,9 +1,12 @@
-//! Tidy-style architecture checks for the workshop server decomposition.
+//! Tidy-style architecture checks for the workshop server decomposition
+//! and the harness family.
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
 //! enforces the architecture; `cargo xtask tidy` prints the same report
-//! on demand.
+//! on demand. The file ceiling and lint inheritance checks bind every
+//! crate whose crate docs carry the `## Invariants` marker: the
+//! `workshop-*` crates today and the `harness-*` crates as they land.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,7 +29,8 @@ const MAX_FILE_LINES: usize = 500;
 
 /// Marker in a crate's `lib.rs` (or `main.rs`) crate docs opting the crate
 /// into the decomposed-architecture checks. The `new-crate` scaffolder emits
-/// it; crates outside the decomposition are left alone.
+/// it; every `workshop-*` and `harness-*` crate carries it, and crates
+/// outside those families are left alone.
 const INVARIANT_MARKER: &str = "//! ## Invariants";
 
 /// Run every check and return all violations.
@@ -36,6 +40,10 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     violations.extend(file_ceiling_violations(root));
     violations.extend(lint_inheritance_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
+    violations.extend(crate::harness_bans::harness_clippy_bans(
+        &root.join("crates").join("harness"),
+        &root.join("crates").join("harness-api"),
+    ));
     violations
 }
 
@@ -115,19 +123,9 @@ pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
 /// build, and target-specific) declared in a manifest.
 fn workshop_dependencies(manifest: &toml::Value) -> Vec<String> {
     let mut names = Vec::new();
-    for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        if let Some(table) = manifest.get(kind).and_then(toml::Value::as_table) {
-            collect_workshop_deps(table, &mut names);
-        }
-    }
-    if let Some(targets) = manifest.get("target").and_then(toml::Value::as_table) {
-        for target in targets.values() {
-            for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                if let Some(table) = target.get(kind).and_then(toml::Value::as_table) {
-                    collect_workshop_deps(table, &mut names);
-                }
-            }
-        }
+    let kinds = ["dependencies", "dev-dependencies", "build-dependencies"];
+    for (_, table) in crate::manifest::dependency_tables(manifest, &kinds) {
+        collect_workshop_deps(table, &mut names);
     }
     names
 }
@@ -217,7 +215,8 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
 /// Crates under `crates/` whose crate docs carry the invariant marker. A
 /// directory containing a `Cargo.toml` is a crate and is not descended
 /// into; any other directory is a container and the walk descends one
-/// level, so crates nested under `crates/promptforge/` stay visible.
+/// level, so crates nested under `crates/workshop/` and `crates/harness/`
+/// stay visible.
 fn participating_crates(root: &Path) -> Vec<PathBuf> {
     let mut crates = Vec::new();
     let Ok(entries) = fs::read_dir(root.join("crates")) else {
@@ -333,6 +332,52 @@ mod tests {
                 "{name} is named in the violations: {violations:?}"
             );
         }
+    }
+
+    /// Write a crate under `crates/<dir>/` with the given `lib.rs` docs and
+    /// one source file of `lines` lines.
+    fn write_marked_crate(root: &Path, dir: &str, lib_docs: &str, lines: usize) {
+        let src = root.join("crates").join(dir).join("src");
+        std::fs::create_dir_all(&src).expect("the crate source directory creates");
+        std::fs::write(
+            src.parent().expect("src has a parent").join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\n[lints]\nworkspace = true\n",
+        )
+        .expect("the manifest writes");
+        std::fs::write(src.join("lib.rs"), lib_docs).expect("lib.rs writes");
+        std::fs::write(src.join("big.rs"), "// line\n".repeat(lines)).expect("big.rs writes");
+    }
+
+    #[test]
+    fn a_harness_crate_carrying_the_marker_is_held_to_the_ceiling() {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        write_marked_crate(
+            root.path(),
+            "harness/runner",
+            "//! Effect loop.\n//!\n//! ## Invariants\n//!\n//! - none\n",
+            MAX_FILE_LINES + 1,
+        );
+        let violations = file_ceiling_violations(root.path());
+        assert_eq!(violations.len(), 1, "{violations:?}");
+        assert!(
+            violations[0].contains("big.rs") && violations[0].contains("over the 500-line ceiling"),
+            "the oversized harness file is reported: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn a_harness_crate_without_the_marker_is_outside_the_ceiling() {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        write_marked_crate(
+            root.path(),
+            "harness/runner",
+            "//! Effect loop, not yet opted in.\n",
+            MAX_FILE_LINES + 1,
+        );
+        assert!(
+            file_ceiling_violations(root.path()).is_empty(),
+            "the marker is what opts a harness crate into the ceiling"
+        );
     }
 
     #[test]

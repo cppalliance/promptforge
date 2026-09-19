@@ -13,11 +13,11 @@
 //! replacement belong to the deferred compactor framework.
 //!
 //! The surface lives in this crate for the same reason the projection does:
-//! it owns the message records, both dispatch points (the agent today, the
-//! executor's `models.loop` next) depend on it, and the agent cannot depend
-//! on the executor.
+//! it owns the message records, the `chat` arm's precheck and overflow
+//! classification depend on it, and the loop shim's compactor invocation
+//! runs in Lua over the `compactors` global installed here.
 
-use mlua::{Function, RegistryKey, Table};
+use mlua::{Function, Table};
 use serde_json::Value;
 
 use super::{Error, Lua, NonZeroU32, Result};
@@ -41,7 +41,7 @@ pub enum OverflowReason {
 
 impl OverflowReason {
     /// Parses the invocation tag the compactor callback receives.
-    fn from_tag(tag: &str) -> Option<OverflowReason> {
+    pub(crate) fn from_tag(tag: &str) -> Option<OverflowReason> {
         match tag {
             "precheck" => Some(OverflowReason::Precheck),
             "provider" => Some(OverflowReason::Provider),
@@ -49,8 +49,10 @@ impl OverflowReason {
         }
     }
 
-    /// The invocation tag the compactor callback receives.
-    fn tag(self) -> &'static str {
+    /// The invocation tag the compactor callback receives, also the
+    /// `reason` field of a `context_exhausted` error table.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
         match self {
             OverflowReason::Precheck => "precheck",
             OverflowReason::Provider => "provider",
@@ -184,68 +186,17 @@ pub fn is_context_overflow(status: u16, body: &str) -> bool {
         .any(|signature| body.contains(signature))
 }
 
-/// Invokes the selected compactor on one overflow and returns the error the
-/// loop raises.
-///
-/// The omitted compactor (`None`) defaults to `compactors.fail`, invoked
-/// directly: the only shipped policy always raises typed context exhaustion,
-/// so the default needs no Lua round trip. An author-selected callback
-/// (`Some`, stashed by the loop request's parse) is invoked with the reason
-/// tag; `compactors.fail` raises [`Error::ContextExhausted`] across the Lua
-/// boundary as a downcastable external error (LUA-012), recovered here as
-/// the typed value. A callback that returns instead of raising is the
-/// deferred replacement-compactor shape, which the active surface rejects.
-///
-/// `#[doc(hidden)]`: a cross-crate seam for the executor's `models.loop`
-/// driver, not host API.
-#[doc(hidden)]
-#[must_use]
-pub fn invoke_selected(
-    lua: &Lua,
-    compactor: Option<&RegistryKey>,
-    reason: OverflowReason,
-) -> Error {
-    let Some(key) = compactor else {
-        return Compactor::Fail.invoke(reason);
-    };
-    let function: Function = match lua.registry_value(key) {
-        Ok(function) => function,
-        Err(error) => return Error::lua(error),
-    };
-    match function.call::<()>(reason.tag()) {
-        Ok(()) => Error::Lua(
-            "the selected compactor returned without raising: replacement compactors are \
-             deferred; compactors.fail is the only shipped policy"
-                .to_owned(),
-        ),
-        Err(error) => {
-            // mlua wraps a callback's error in CallbackError for the
-            // traceback; the compactor's typed raise rides as its cause.
-            let cause = match &error {
-                mlua::Error::CallbackError { cause, .. } => cause.as_ref(),
-                other => other,
-            };
-            match cause {
-                mlua::Error::ExternalError(cause) => match cause.downcast_ref::<Error>() {
-                    Some(Error::ContextExhausted { reason }) => {
-                        Error::ContextExhausted { reason: *reason }
-                    }
-                    _ => Error::lua(error),
-                },
-                _ => Error::lua(error),
-            }
-        }
-    }
-}
-
 /// Installs the `compactors` global carrying the shipped policies.
 ///
 /// `compactors.fail` is a Rust-backed function: invoked with the overflow
 /// reason tag, it raises typed context exhaustion as an external error, so
 /// the [`Error::ContextExhausted`] value crosses the Lua boundary
-/// downcastable rather than flattened to text (LUA-012). The namespace
-/// needs no privileged captures, so it installs with the host tables during
-/// host injection, beside `messages`.
+/// downcastable rather than flattened to text (LUA-012); the loop shim,
+/// which invokes the selected compactor on an overflow round, normalizes
+/// that raise into the structured error table before re-raising it, so
+/// the kind reaches author code and the host alike. The namespace needs no
+/// privileged captures, so it installs with the host tables during host
+/// injection, beside `messages`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the function or the global install fails.

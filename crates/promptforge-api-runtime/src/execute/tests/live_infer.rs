@@ -451,23 +451,23 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
-    // The H1 driver holds id 0 off the run-global counter, so the first
-    // walked section takes id 1.
+async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
+    // The H1 pass is the root chain's entry 0, so the first walked section
+    // takes entry 1 of the same chain.
     let source = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
-        assert(sys.id == 0, 'the live H1 chunk keeps sys.id 0')\n\
+        assert(sys.id == '0.0', 'the live H1 chunk takes the root chain entry 0')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\n\
-        assert(sys.id == 1, 'the first walked section takes sys.id 1')\n\
+        assert(sys.id == '0.1', 'the first walked section takes entry 1')\n\
         return 'ok'\n\
         ```\n";
     let prompt = parse(source);
     let env = Environment::new();
     let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
-        panic!("the H1 chunk keeps id 0 and the first walked section takes id 1");
+        panic!("the H1 chunk takes root entry 0 and the first walked section root entry 1");
     };
 
     assert_eq!(out, "ok");

@@ -7,10 +7,10 @@ use super::{
 /// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are
 /// never loaded.
 ///
-/// Also wraps `table.concat` so userdata with `__tostring` (fanout result
-/// objects) coerce like `tostring`, keeping existing `table.concat(results)`
-/// callers working after fanout returns structured objects. Tables and
-/// booleans still error as stock Lua would.
+/// Also wraps `table.concat` so a value with a `__tostring` metamethod
+/// (fanout result objects, host userdata) coerces like `tostring`, keeping
+/// existing `table.concat(results)` callers working with structured
+/// results. Plain tables, booleans, and nil still error as stock Lua would.
 pub(crate) fn harden(lua: &Lua) -> Result<()> {
     let globals = lua.globals();
     for name in [
@@ -34,6 +34,11 @@ pub(crate) fn harden(lua: &Lua) -> Result<()> {
     lua.load(
         r#"
 local orig = table.concat
+local getmetatable = getmetatable
+local function renders(v)
+  local mt = getmetatable(v)
+  return type(mt) == "table" and mt.__tostring ~= nil
+end
 function table.concat(list, sep, i, j)
   i = i or 1
   j = j or #list
@@ -44,8 +49,11 @@ function table.concat(list, sep, i, j)
     if ty == "string" or ty == "number" then
       parts[#parts + 1] = v
     elseif ty == "userdata" then
-      -- Fanout result objects (and any other userdata with __tostring).
-      -- mlua metatables are not readable via getmetatable, so type-gate here.
+      -- Host userdata with __tostring. mlua metatables are not readable
+      -- via getmetatable, so type-gate here.
+      parts[#parts + 1] = tostring(v)
+    elseif ty == "table" and renders(v) then
+      -- Fanout result objects: plain tables under a __tostring metatable.
       parts[#parts + 1] = tostring(v)
     elseif v == nil then
       error("invalid value (nil) at index " .. k .. " in table for 'concat'")

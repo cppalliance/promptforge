@@ -71,6 +71,36 @@ impl ToolCallCounts {
     }
 }
 
+/// Which targets the model may start a task over in one section, once
+/// the author has opted in through `tools.allow_tasks`.
+///
+/// The allowlist is the section's fact, recorded on its tool runtime
+/// beside the scope: the `chat` arm advertises the task built-ins to the
+/// model while it is set, and the `tool_call` arm checks a `task` call's
+/// target against it. Targets are compared as the author wrote them (a
+/// heading such as `## Research`), whitespace-trimmed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskAllowlist {
+    /// Any section the owner's chain can resolve.
+    Any,
+    /// Only the named targets.
+    Only(Vec<String>),
+}
+
+impl TaskAllowlist {
+    /// Whether `target` may be started under this allowlist.
+    #[must_use]
+    pub fn permits(&self, target: &str) -> bool {
+        match self {
+            TaskAllowlist::Any => true,
+            TaskAllowlist::Only(targets) => {
+                let target = target.trim();
+                targets.iter().any(|allowed| allowed.trim() == target)
+            }
+        }
+    }
+}
+
 /// Tracks tools added to one section VM and their description overrides.
 #[derive(Debug)]
 pub struct ToolRuntime {
@@ -78,4 +108,8 @@ pub struct ToolRuntime {
     pub added: Vec<String>,
     /// Per-alias author overrides for model-facing schema descriptions.
     pub description_overrides: BTreeMap<String, String>,
+    /// The model's task allowlist, once `tools.allow_tasks` has run in the
+    /// section; `None` leaves the task built-ins off the model's tool
+    /// surface.
+    pub allowed_tasks: Option<TaskAllowlist>,
 }

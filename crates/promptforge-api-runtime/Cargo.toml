@@ -35,9 +35,15 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+criterion.workspace = true
+promptforge-lua = { workspace = true, features = ["test-support"] }
 promptforge-parser = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber.workspace = true
+
+[[bench]]
+name = "models_loop"
+harness = false
 
 [lints]
 workspace = true

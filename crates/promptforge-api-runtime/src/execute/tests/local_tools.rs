@@ -1,95 +1,43 @@
 //! Tests for `tools.add_local`: the registration rules run end to end, and
-//! the model-tool loop's local-dispatch arm is driven directly through the
-//! test shim. Routing a local call back into the section VM returns with
-//! the `models.loop` step; the loop arm's behavior is pinned here.
+//! the `models.loop` shim's local-tool rounds are driven at prompt level,
+//! so a model-issued call to a local tool is answered on the section VM
+//! and its trusted result rides back to the model verbatim.
 
 use super::super::*;
+use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;
 use super::*;
+use crate::execute::scheduler::Scheduler;
+use crate::lua::ToolSet;
 
-/// A response asking the model to call one tool twice in a single turn.
-fn resp_two_tool_calls(name: &str, first: (&str, &str), second: (&str, &str)) -> GatewayReply {
-    GatewayReply::Json(json!({
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": null,
-                "tool_calls": [
-                    {
-                        "id": first.0,
-                        "type": "function",
-                        "function": { "name": name, "arguments": first.1 }
-                    },
-                    {
-                        "id": second.0,
-                        "type": "function",
-                        "function": { "name": name, "arguments": second.1 }
-                    }
-                ]
-            }
-        }]
-    }))
+/// The `grab` local tool registration the loop tests open with, followed
+/// by one loop over a single user message; `handler` is the Lua body of
+/// the handler function, given `args`.
+fn grab_loop(handler: &str) -> String {
+    loop_prompt(&format!(
+        "tools.add_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)\n\
+           {handler}\n\
+         end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('Use the tool.')\n\
+         models.loop(msgs)\n\
+         return msgs[#msgs].content"
+    ))
 }
 
-/// The advertised schema for the `grab` local tool the loop tests share.
-fn local_grab_schema() -> ToolSchema {
-    ToolSchema::new(
-        "grab".to_string(),
-        "Grab a value".to_string(),
-        json!({
-            "type": "object",
-            "properties": { "value": { "type": "string" } },
-            "required": ["value"]
-        }),
-    )
-    .expect("the local tool schema is valid")
-}
-
-/// The dispatch map marking `grab` as a local tool routed through the
-/// section's local dispatcher.
-fn local_grab_dispatch() -> BTreeMap<String, DispatchTarget> {
-    let mut dispatch = BTreeMap::new();
-    dispatch.insert("grab".to_string(), DispatchTarget::Local);
-    dispatch
-}
-
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn local_tool_handler_result_returns_to_the_model() {
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
         resp_text("final answer"),
     ])
     .await;
-    let client = gateway_client(gateway.addr());
-    let schemas = vec![local_grab_schema()];
-    let dispatch = local_grab_dispatch();
-    let local = |_name: &str, args: serde_json::Value| -> Result<String> {
-        Ok(format!(
-            "got {}",
-            args["value"].as_str().expect("the value argument")
-        ))
-    };
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        Some(&local),
-    )
-    .await
-    .unwrap();
+    let prompt = parse(&grab_loop("return 'got ' .. args.value"));
+    let ctx = loop_context(&prompt, ToolSet::default());
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the local handler answers the model's call");
     assert_eq!(out, "final answer");
 
     let bodies = gateway.requests();
@@ -108,7 +56,7 @@ async fn local_tool_handler_result_returns_to_the_model() {
     assert_eq!(last_tool_turn_content(&bodies), "got hi");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn local_tool_multiple_calls_in_one_response_all_run() {
     let gateway = ScriptedGateway::start(vec![
         resp_two_tool_calls(
@@ -119,50 +67,26 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
         resp_text("final answer"),
     ])
     .await;
-    let client = gateway_client(gateway.addr());
-    let schemas = vec![local_grab_schema()];
-    let dispatch = local_grab_dispatch();
-    let calls = Mutex::new(Vec::new());
-    let local = |_name: &str, args: serde_json::Value| -> Result<String> {
-        let value = args["value"]
-            .as_str()
-            .expect("the value argument")
-            .to_string();
-        calls
-            .lock()
-            .expect("the calls mutex must not be poisoned")
-            .push(value.clone());
-        Ok(format!("ok {value}"))
-    };
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver::default(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        Some(&local),
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "final answer");
+    let md = loop_prompt(
+        "local calls = {}\n\
+         tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           calls[#calls + 1] = args.value\n\
+           return 'ok ' .. args.value\n\
+         end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('Use the tool.')\n\
+         models.loop(msgs)\n\
+         return table.concat(calls, ',') .. '|' .. msgs[#msgs].content",
+    );
+    let prompt = parse(&md);
+    let ctx = loop_context(&prompt, ToolSet::default());
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("both calls in the one response run");
     assert_eq!(
-        calls
-            .lock()
-            .expect("the calls mutex must not be poisoned")
-            .as_slice(),
-        ["a".to_string(), "b".to_string()],
-        "both calls in the one response must run"
+        out, "a,b|final answer",
+        "both calls in the one response must run, in order"
     );
 
     let bodies = gateway.requests();
@@ -178,41 +102,24 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
         resp_text("unreachable"),
     ])
     .await;
-    let client = gateway_client(gateway.addr());
-    let schemas = vec![local_grab_schema()];
-    let dispatch = local_grab_dispatch();
-    let local = |_name: &str, _args: serde_json::Value| -> Result<String> {
-        Err(Error::Lua("handler exploded".to_string()))
-    };
+    let prompt = parse(&grab_loop("error('handler exploded')"));
     let recorder = Arc::new(Recorder::default());
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let nonce = GuardNonce::fresh();
-    let error = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "Use the tool.".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        recorder.as_ref(),
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        Some(&local),
-    )
-    .await
-    .expect_err("a handler Lua error must fail the tool call");
+    let ctx = loop_context_observed(
+        &prompt,
+        ToolSet::default(),
+        Arc::clone(&recorder) as Arc<dyn Observer>,
+    );
+    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect_err("a handler Lua error must fail the tool call");
     assert!(
         error.to_string().contains("handler exploded"),
         "the handler's error must surface: {error}"
@@ -222,6 +129,11 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
             .events()
             .contains(&("Only".to_string(), detail::TOOL_CALL_FAILED.to_string())),
         "the failed handler must be observed as a tool-call failure"
+    );
+    assert_eq!(
+        gateway.call_count(),
+        1,
+        "the author's own program failing ends the loop before another round"
     );
 }
 

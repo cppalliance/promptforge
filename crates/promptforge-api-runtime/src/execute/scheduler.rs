@@ -25,68 +25,87 @@
 //! callbacks, while the scheduler must stay unreachable from the callback
 //! layer.
 //!
-//! This module carries the scheduler core plus the walk rules: sections run
-//! in fall-through order, `var` rolls
-//! forward across sections and jumps, every section entry
-//! takes the next run-global id, and a jump transfers control - a sibling
-//! move within the chain's slice, or a descent into the jumper's child
-//! slice with the parent position suspended on the chain's own position
-//! stack until the child level exhausts. A prompt with H1 blocks runs them
-//! first as section 0: the driver loop's first chain, under the walk's
-//! rules with three deltas - the frame keeps id 0, a scalar return
-//! short-circuits the run, and a Lua failure is the prompt's failed hard
-//! gate, mapped to [`Error::RequirementsUnmet`] - with the root walk
-//! starting from the H1 `var` hand-off. A `fanout` request forks N arm
-//! chains (one per collection
-//! member) interleaved by the driver: at most the run's
-//! `max_fanout_concurrency` arms are active at once, each arm runs the
-//! same walk machinery as any chain over the worker's blocks, and the join
-//! state's preallocated per-index slots deliver the results to the parent
-//! in collection order, never finish order. The fanout failure semantics
-//! match the legacy engine: an empty collection errors before any
-//! scheduling, a fatal arm error aborts the sibling arms (each aborted
-//! arm's finalizer reports `FANOUT_ARM_CANCELLED`, so exactly one terminal
-//! observation fires per arm), [`Error::ToolLoopExhausted`] soft-degrades
-//! its arm to the incomplete stub, and two live arms of one fanout touching
-//! the same store path with at least one write terminate the whole run with
-//! the claims model's fatal determinism violation, intercepted at the
-//! answer boundary so no author `pcall` can catch it. Every store operation
-//! is such a leaf yield, answered on the blocking pool uniformly for all
-//! backends - no inline fast path - so interleaving behavior never depends
-//! on which backend serves the mount. A received `mcp` request
-//! is the protocol's typed reserved error.
+//! This file carries the scheduler core: the chain record and arena, the
+//! ready queue, the pending table, the call stack, and the task arena. The
+//! submodules carry the rest: `drive` the driver loop, `chain` the chain
+//! lifecycle (arena insertion and the two chain-end paths), `step` one
+//! chain's step to its next suspension point, `walk` the section walk
+//! rules, `h1` the live H1 pass and its hand-off to the walk, `dispatch`
+//! the request arms, `chat` the one-round `chat` arm and its answer
+//! application, `tool_call` the script and model-issued `tool_call` arm
+//! (the two arms the section-visible `models.loop` shim drives),
+//! `builtins` the model's task built-ins (`task`, `task_cancel`,
+//! `task_status`) answered over the arena and advertised once a section
+//! runs `tools.allow_tasks`, `await_tasks` the fourth built-in, the
+//! model's wait over its live tasks, `notices` the model-task notices
+//! (queued at a model task's end, drained into the owner's next round or
+//! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm, and
+//! the chain-end rules for tasks, `waits` the `when_any` wait and the
+//! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
+//! and `timer` the wait shims' internal timeout as an effect-backed slot.
+//! A fanout is Lua over those arms (the `fanout` shim spawns one task per
+//! member and waits on the live set), so the scheduler keeps no fanout
+//! state of its own.
+
+mod await_tasks;
+mod builtins;
+mod chain;
+mod chat;
+mod dispatch;
+mod drive;
+mod h1;
+mod notices;
+mod step;
+mod tasks;
+mod timer;
+mod tool_call;
+mod waits;
+mod walk;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 
-use mlua::{RegistryKey, Thread};
+use mlua::Thread;
+use promptforge_api_types::ids::{ChainId, TaskId};
 use shared_vfs::Origin;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::client::GatewayClient;
-use crate::fanout;
-use crate::fanout::ArmFinalizer;
-use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputOutcome};
-use crate::lua::{
-    CoroStep, LuaBlockResult, LuaFanoutResult, MessageRecord, OverflowReason, ScriptReport,
-    UserInputOutcome, append_message_record, current_tool_bindings, dispatch_tool, invoke_selected,
-    project_messages, resolve_model_binding, run_store_op,
-};
-use crate::model::ModelBinding;
-use crate::observe::{Observation, detail};
+use crate::client::{Completion, GatewayClient};
 use crate::parser::{Block, Prompt, Section};
-use crate::store::{Access, Store, StoreError};
-use crate::tools::ToolId;
-use crate::{Error, Result, cancel, subst};
+use crate::store::Access;
+use crate::{Error, Result};
 
 use super::context::RunState;
-use super::engine::{
-    JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
-};
 use super::gateway::GatewaySource;
-use super::protocol::{Answer, Request, StoreOp, ToolCallOutcome, YieldParse};
+use super::protocol::Answer;
+use super::scope::DispatchTarget;
+use super::section_context::{SectionContext, TaskSeed};
+use await_tasks::AwaitTasks;
+use tasks::TaskSlot;
+#[cfg(test)]
+pub(crate) use tasks::TaskState;
+
+/// Run-global monotonic id of an in-flight leaf request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct RequestId(u64);
+
+/// What a spawned leaf task posts back for its request.
+///
+/// Most leaf work posts its finished [`Answer`]. A `chat` round posts the
+/// raw completion instead: the round's events and the advertised-scope
+/// check need the parked chain, so the driver classifies the completion
+/// into the answer on its own thread when it applies it.
+enum Arrival {
+    /// A finished answer, resumed into the chain as delivered.
+    Answer(Answer<Error>),
+    /// One `chat` round's completion or failure, classified by the driver.
+    /// Boxed so the body-carrying completion does not size every arrival.
+    Chat(std::result::Result<Box<Completion>, Error>),
+    /// A timer's firing: no answer resumes a chain, the slot backed by the
+    /// request completes and its waiting owner is woken.
+    Timer,
+}
 
 /// The most precise prompt-source line known for `blocks`: the first
 /// compiled chunk's absolute source line, else the prompt's opening line.
@@ -107,197 +126,34 @@ fn first_chunk_line(blocks: &[Block]) -> u32 {
 fn prompt_origin(prompt: &Prompt, label: &str, blocks: &[Block]) -> Origin {
     Origin::at(label, prompt.title(), first_chunk_line(blocks))
 }
-use super::scope::prepare_effective_scope;
-use super::section_context::SectionContext;
-use super::support::{GENERIC_COMPLETION, MAX_CALL_DEPTH, next_id, now_rfc3339_checked};
-use super::tool_loop::run_models_loop;
-use super::tools::infer_round;
 
-/// Arena index of a chain: ids, not references, so no chain ever holds a
-/// pointer to another.
+/// Arena index of a chain: indices, not references, so no chain ever holds
+/// a pointer to another. The index is the scheduler's private handle; the
+/// chain's identity for authors and hosts is its hierarchical
+/// [`ChainId`], which never depends on arena order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct ChainId(u32);
+struct ChainIndex(u32);
 
-impl ChainId {
+impl ChainIndex {
     /// The arena index as a `usize`.
     fn index(self) -> usize {
         self.0 as usize
     }
 }
 
-/// Run-global monotonic id of an in-flight leaf request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct RequestId(u64);
-
-/// Join-table key for a live fanout.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct FanoutId(u32);
-
-/// One live fanout's join state: the arms still running, the preallocated
-/// per-index result slots (collection order, never finish order), the
-/// parent chain blocked on the join, the concurrency-window accounting, and
-/// the template every arm chain starts from.
-struct JoinState<'a> {
-    /// Arms still running; at zero the parent resumes with the sequence.
-    remaining: usize,
-    /// One slot per collection index, so results land in collection order.
-    results: Vec<Option<LuaFanoutResult>>,
-    /// The chain that yielded the fanout, blocked until the join completes.
-    parent: ChainId,
-    /// Arms currently active (unblocked or pending on I/O); bounded by
-    /// `window`.
-    active: usize,
-    /// The next collection index to start when a window slot frees.
-    next: usize,
-    /// The converted collection members, indexed by arm.
-    items: Vec<serde_json::Value>,
-    /// At most this many arms active at once: the run's
-    /// `max_fanout_concurrency`.
-    window: usize,
-    /// Everything an arm chain starts from, shared by every arm of the
-    /// fanout.
-    template: ArmTemplate<'a>,
-}
-
-/// The arm-chain construction inputs one fanout's arms share.
-#[derive(Clone)]
-struct ArmTemplate<'a> {
-    /// The fanout caller's walk position: an arm's visible set derives from
-    /// it (the caller's slice minus the caller, plus the caller's children,
-    /// minus the worker, plus the worker's children).
-    caller_slice: &'a [Section],
-    /// The caller's index in `caller_slice`.
-    caller_index: usize,
-    /// The slice the worker was resolved from (the caller's own slice or
-    /// the caller's children).
-    worker_slice: &'a [Section],
-    /// The worker's index in `worker_slice`.
-    worker_index: usize,
-    /// The fanout's run-context fork: the run's own observer and debug sink
-    /// (the legacy proxies exist to cross the spawned-task boundary, which
-    /// a chain never crosses) with a fresh turn counter, so arm turns count
-    /// against the fanout's own cap.
-    ctx: RunState,
-    /// The fanout caller's access capability: each arm spawns its own
-    /// capability from it at dispatch, so the spawn retires the caller's
-    /// claims (the happens-before edge) and two live arms touching one
-    /// path meet the claims model's conflict rule.
-    access: Arc<Access>,
-    /// The caller's `var` snapshot; each arm seeds from its own clone and
-    /// its writes never reach the caller.
-    var: serde_json::Value,
-    /// The arms' call depth: the fanout caller's depth plus one.
-    call_depth: usize,
-    /// The caller's client snapshot: each arm starts from it, resolving one
-    /// lazily when absent.
-    client: Option<GatewayClient>,
-    /// The run's cancellation handle, captured at dispatch and handed to
-    /// each arm chain directly (the scheduler has no spawned arm tasks to
-    /// carry one across).
-    cancel: Option<cancel::CancelHandle>,
-}
-
-/// One arm chain's fanout state: where its result lands and what its
-/// worker entry is seeded with.
-struct ArmState<'a> {
-    /// The join this arm reports to.
-    fanout: FanoutId,
-    /// The arm's 0-based collection index: its result slot and (plus one)
-    /// its `sys.index`.
-    item_index: usize,
-    /// The arm's collection member: the `item` global and `{{ item }}`
-    /// substitution seed for the worker entry.
-    item: serde_json::Value,
-    /// True while the worker is the chain's current section: the worker
-    /// entry gets the arm seeds, and a control transfer out of the worker
-    /// resolves over the arm's visible set. Cleared by the first jump.
-    at_worker: bool,
-    /// The fanout caller's walk position, as on the template.
-    caller_slice: &'a [Section],
-    /// The caller's index in `caller_slice`.
-    caller_index: usize,
-    /// The resolved worker's home slice position.
-    worker_slice: &'a [Section],
-    /// The worker's index in `worker_slice`.
-    worker_index: usize,
-    /// The run's cancellation handle, installed as the task-local around
-    /// each of the arm's steps, so cancellation reaches the arm's running
-    /// Lua through its instruction hook exactly as on the driver task.
-    cancel: Option<cancel::CancelHandle>,
-    /// The arm's terminal-observation guard: the driver finishes it with
-    /// the arm's real outcome (succeeded, exhausted, or failed), and its
-    /// drop reports `FANOUT_ARM_CANCELLED` - a sibling's fatal error
-    /// aborting this arm, or the run's cancellation dropping the
-    /// scheduler, both pass through that drop. Exactly one terminal event
-    /// fires per arm (the legacy `ArmFinalizer` contract).
-    finalizer: ArmFinalizer,
-}
-
-/// A heading resolved against a chain's visible set: the slice the walk or
-/// a contained chain continues on, the target's index in it, and whether
-/// the target is a direct child of the current section (a descent).
-struct ChainTarget<'a> {
-    /// The slice the walk or chain continues on.
-    slice: &'a [Section],
-    /// The target's index in `slice`.
-    index: usize,
-    /// True when the target is a direct child of the current section.
-    child: bool,
-}
-
-/// Resolves `heading` against an at-worker arm's visible set: the fanout
-/// caller's visible set minus the worker, plus the worker's children - the
-/// set the legacy arm's control globals resolve over, built with the same
-/// helpers so resolution and its error listings match exactly.
-///
-/// A sibling-level target walks its own prompt slice from its index: the
-/// worker's home slice when it lives there, else the caller's children or
-/// the caller's slice. The resolved `(level, name)` pair is unique across
-/// the visible set (an ambiguous resolve already failed), so at most one
-/// slice contains it. One legacy edge narrows here: the legacy arm walks
-/// its materialized home slice (the caller's slice minus the caller and
-/// the worker, concatenated with the caller's children), so a target that
-/// precedes the worker never falls through back into it, and a
-/// level-matched member of the caller's sibling slice walks on into the
-/// caller's children; the scheduler walks the target's own prompt slice
-/// instead.
-///
-/// # Errors
-/// Returns [`Error::Lua`] when the heading is malformed, matches no
-/// visible section, or matches more than one (see
-/// [`fanout::resolve_sibling`]); [`Error::Internal`] when a resolved
-/// target is absent from every home slice (an invariant violation).
-fn resolve_arm_target<'a>(
-    caller_slice: &'a [Section],
-    caller_index: usize,
-    worker_slice: &'a [Section],
-    worker_index: usize,
-    heading: &str,
-) -> Result<ChainTarget<'a>> {
-    let caller = &caller_slice[caller_index];
-    let worker = &worker_slice[worker_index];
-    let mut visible = home_without(&visible_sections(caller_slice, caller), worker);
-    visible.extend(worker.children().iter().cloned());
-    let target = fanout::resolve_sibling(heading, &visible)?;
-    if let Some(index) = section_position(worker.children(), target) {
-        return Ok(ChainTarget {
-            slice: worker.children(),
-            index,
-            child: true,
-        });
-    }
-    for slice in [worker_slice, caller.children(), caller_slice] {
-        if let Some(index) = section_position(slice, target) {
-            return Ok(ChainTarget {
-                slice,
-                index,
-                child: false,
-            });
-        }
-    }
-    Err(Error::internal(
-        "a resolved arm target is absent from its home slices",
-    ))
+/// A chain's local id counters: the indices its next child chain and its
+/// next section entry take under its lineage. Set once at chain start:
+/// zero for a fresh chain (`Default`), or the values the chain continues
+/// from when it carries on an earlier chain's identity (the walk after
+/// the H1 pass).
+#[derive(Clone, Copy, Debug, Default)]
+struct Counters {
+    /// The next index a `call` child or a spawned arm takes under the
+    /// chain's lineage. The two share the counter.
+    next_child: u32,
+    /// The next index a section entry takes under the chain's lineage as
+    /// its `sys.id`.
+    next_entry: u32,
 }
 
 /// One chain: a contained line of section execution, the scheduler's
@@ -311,18 +167,68 @@ fn resolve_arm_target<'a>(
 /// one frame; the fall-through advance tears the old frame down and the
 /// next entry constructs the next.
 struct Chain<'a> {
+    /// The chain's hierarchical id: the parent chain's id extended by the
+    /// parent's local child counter (the root chain, the main walk, is
+    /// `0`; the H1 pass and the walk that follows it are the same chain).
+    /// Every id the chain hands out - its children's, its section
+    /// entries' - extends this path, so two runs of one prompt allocate
+    /// identical ids however their chains interleave.
+    lineage: ChainId,
+    /// The chain's local child and entry counters under `lineage`. The
+    /// root chain's entry 0 is the H1 pass (section 0), consumed whether
+    /// or not the prompt has H1 blocks, so the first walked section is
+    /// always `0.1`.
+    counters: Counters,
+    /// The nearest enclosing task: the chain's own id when the chain is a
+    /// spawned task (a fanout arm included), its caller's task for a
+    /// `call` child (a blocking child never interleaves with its caller,
+    /// so the two share one task), and task `0` for the root chain. Every
+    /// section the chain enters reads it as `sys.taskid`.
+    task: TaskId,
+    /// The chain that spawned this chain, when the chain is a task's
+    /// backing chain: the task's owner, the only chain allowed to wait on,
+    /// inspect, or cancel it. `None` for the root and a `call` child.
+    owner: Option<ChainIndex>,
+    /// A spawned chain's `item` and `sys.index` seeds, consumed by its
+    /// first section entry; `None` afterward and on every other chain.
+    seed: Option<TaskSeed>,
+    /// The tasks the chain is parked on in a `when_any` wait (or the
+    /// model's `await_tasks`); empty while the chain is not waiting. A
+    /// member's chain end delivers it and clears the set.
+    waiting_on: Vec<TaskId>,
+    /// The model's `await_tasks` call the chain is parked in, when
+    /// `waiting_on` is that call's set rather than an author `when_any`:
+    /// the member's end answers the model's tool call with the drained
+    /// notices instead of delivering the member to the shim. `None`
+    /// otherwise.
+    awaiting: Option<AwaitTasks>,
+    /// What the chain's suspended request is parked on, as `tasks.status`
+    /// reports it (`chat`, `tool_call`, `user_input`, `store`, `timer`,
+    /// `tasks`, `call`): set at dispatch, cleared when the answer resumes
+    /// the chain. `None` while the chain runs or between blocks.
+    blocked: Option<&'static str>,
+    /// Model-task notices not yet delivered into the chain's next model
+    /// round, in arrival order: queued when a model task the chain owns
+    /// ends, drained by the loop shim's per-round request or by the
+    /// model's `await_tasks` answer. The H1 hand-off moves them to the
+    /// walk with the pass's tasks.
+    task_notices: Vec<String>,
+    /// The latest progress note published through `tasks.note` for the
+    /// task this chain backs, reported by `tasks.status`.
+    note: Option<String>,
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for a call chain's input override.
     ctx: RunState,
     /// The chain's VFS access capability, installed into each section VM
     /// the chain enters: the walk and the live H1 pass acquire their own,
     /// a call chain borrows its parent's (a blocking child is the same
-    /// serial thread - no new identity, no false conflicts), and a fanout
-    /// arm spawns its own from the fanout caller's. `None` only after the
+    /// serial thread - no new identity, no false conflicts), and a task
+    /// chain spawns its own from its spawner's. `None` only after the
     /// chain ends: the arena is append-only, so `finish` and
     /// `abort_subtree` take the slot to release the identity's claims at
-    /// chain end rather than at scheduler drop - a fanout's join merge
-    /// must not meet a finished arm's lingering claims.
+    /// chain end rather than at scheduler drop - a fanout caller's merge
+    /// after its arms are delivered must not meet a finished arm's
+    /// lingering claims.
     access: Option<Arc<Access>>,
     /// The per-section frame (VM, `sys`, conversation, counts): `Some`
     /// while a section is entered, `None` before the first entry and
@@ -360,21 +266,23 @@ struct Chain<'a> {
     /// is discarded with the chain, so the caller never sees the chain's
     /// writes.
     var: serde_json::Value,
-    /// The chain's call nesting depth: each call child runs one level
-    /// deeper. The recursion cap checks this field, never the chain-stack
-    /// length - fanout arms live on the ready queue, not the stack, so only
-    /// the field carries the accounting across a fanout boundary.
+    /// The chain's call nesting depth: each call child and each spawned
+    /// task runs one level deeper. The recursion cap checks this field,
+    /// never the chain-stack length - task chains live on the ready queue,
+    /// not the stack, so only the field carries the accounting across a
+    /// spawn boundary.
     call_depth: usize,
     /// The chain's client slot: seeded from the parent, resolved lazily on
     /// first inference through the scheduler's gateway source, so a
     /// construction error surfaces at first use rather than being swallowed.
     client: Option<GatewayClient>,
     /// The call parent blocked on this chain, if any.
-    parent: Option<ChainId>,
-    /// The fanout-arm state when this chain is a fanout arm: the arm runs
-    /// the same walk machinery as any chain, and its finish writes its
-    /// join's result slot instead of a call answer.
-    arm: Option<ArmState<'a>>,
+    parent: Option<ChainIndex>,
+    /// The tool scope the chain's last `chat` round advertised, keyed by
+    /// alias: the round's answer is checked against it, so a tool name the
+    /// model invents or reaches for outside the scope fails as out of
+    /// scope. `None` before the chain's first round.
+    advertised: Option<BTreeMap<String, DispatchTarget>>,
     /// The H1 marker: the prompt's H1 blocks under its title - section 0.
     /// `Some` chains run the walk's rules with three deltas: the frame
     /// keeps id 0 (no section observations fire), a scalar return
@@ -418,72 +326,39 @@ impl<'a> Chain<'a> {
     }
 }
 
-/// The succeeded/failed observation pair one store operation reports,
-/// matching the legacy direct closures event for event; `exists` reported
-/// nothing there and reports nothing here.
-fn store_observations(op: &StoreOp) -> Option<(Observation, Observation)> {
-    let pair = match op {
-        StoreOp::Write { .. } => (detail::STORE_WRITE_SUCCEEDED, detail::STORE_WRITE_FAILED),
-        StoreOp::Append { .. } => (detail::STORE_APPEND_SUCCEEDED, detail::STORE_APPEND_FAILED),
-        StoreOp::Read { .. } => (detail::STORE_READ_SUCCEEDED, detail::STORE_READ_FAILED),
-        StoreOp::ReadNumbered { .. } => (
-            detail::STORE_READ_NUMBERED_SUCCEEDED,
-            detail::STORE_READ_NUMBERED_FAILED,
-        ),
-        StoreOp::StrReplace { .. } => (
-            detail::STORE_REPLACE_SUCCEEDED,
-            detail::STORE_REPLACE_FAILED,
-        ),
-        StoreOp::Delete { .. } => (detail::STORE_DELETE_SUCCEEDED, detail::STORE_DELETE_FAILED),
-        StoreOp::Glob { .. } => (detail::STORE_GLOB_SUCCEEDED, detail::STORE_GLOB_FAILED),
-        StoreOp::Exists { .. } => return None,
-    };
-    Some(pair)
-}
-
-/// Classifies one store operation's failure for the answer channel. A
-/// claims-model conflict becomes the fatal determinism violation: the
-/// driver intercepts it at the answer boundary and ends the run on the
-/// spot rather than resuming it into Lua, so no author `pcall` can catch
-/// it. Every other failure rides back as the call's answer carrying the
-/// store's own message, exactly as the legacy closure's external error
-/// surfaced at the call site (and classified `Lua` if it aborts the chunk
-/// uncaught, exactly as then).
-fn classify_store_failure(error: &StoreError) -> Error {
-    if let Some(detail) = error.conflict_detail() {
-        return Error::Determinism(detail.to_owned());
-    }
-    Error::Lua(error.to_string())
-}
-
 /// The coroutine protocol's driver: the chain arena, ready queue, pending
-/// table, join table, and answer channel, owned outright by the driver
+/// table, task arena, and answer channel, owned outright by the driver
 /// loop's stack frame.
 pub(crate) struct Scheduler<'a> {
     /// The ambient run context, borrowed by chain steps and forked by
     /// call chains.
     ctx: &'a RunState,
-    /// The chain arena: append-only, indexed by [`ChainId`].
+    /// The chain arena: append-only, indexed by [`ChainIndex`].
     chains: Vec<Chain<'a>>,
     /// The call-nesting chain stack (LIFO): a call dispatch pushes
     /// the child, the child's finish pops it.
-    stack: Vec<ChainId>,
+    stack: Vec<ChainIndex>,
     /// Chains eligible to resume (FIFO); the driver drains it before
     /// awaiting anything.
-    ready: VecDeque<ChainId>,
+    ready: VecDeque<ChainIndex>,
     /// One entry per in-flight leaf request, mapping it to the parked chain.
-    pending: HashMap<RequestId, ChainId>,
-    /// One join state per live fanout.
-    joins: HashMap<FanoutId, JoinState<'a>>,
+    pending: HashMap<RequestId, ChainIndex>,
+    /// The task arena: one slot per task the run has started, keyed by the
+    /// task's id (its backing chain's id). A slot outlives its chain: it
+    /// holds the terminal state and the undelivered outcome at least until
+    /// the owner takes the result or ends, and in fact for the run - the
+    /// arena is append-only like the chain arena, so `status` can report a
+    /// terminal state at any later time.
+    tasks: HashMap<TaskId, TaskSlot>,
     /// The send half every spawned leaf task posts its answer to. The
     /// channel is unbounded: each task sends exactly once, and the in-flight
     /// count is already bounded by the chains that produced them.
-    answer_tx: mpsc::UnboundedSender<(RequestId, Answer<Error>)>,
+    answer_tx: mpsc::UnboundedSender<(RequestId, Arrival)>,
     /// The receive half the driver awaits when no chain is ready.
-    answers: mpsc::UnboundedReceiver<(RequestId, Answer<Error>)>,
+    answers: mpsc::UnboundedReceiver<(RequestId, Arrival)>,
     /// Join handles of the in-flight leaf I/O tasks, keyed by request so
-    /// a fatal fanout arm can abort a sibling arm's own in-flight round;
-    /// every handle is aborted on cancellation or on the driver future's
+    /// a cancelled task chain's own in-flight round can be aborted with
+    /// it; every handle is aborted on cancellation or on the driver future's
     /// drop, and aborting a completed task is a no-op. The handles are
     /// kept joinable (not bare abort handles) so a terminal run outcome
     /// can drain them: a store op runs on the blocking pool, where abort
@@ -505,27 +380,9 @@ pub(crate) struct Scheduler<'a> {
     max_chains: usize,
     /// The next leaf-request id.
     next_request: u64,
-    /// The next fanout id.
-    next_fanout: u32,
     /// The run's gateway source: chains resolve their client slot through
     /// it on first inference.
     client: GatewaySource,
-}
-
-/// Aborts every in-flight leaf task when the driver future is dropped
-/// mid-suspension - a host tearing the run down without polling it to a
-/// terminal state. Dropping a bare `JoinHandle` detaches the task, which
-/// would strand a broker wait or gateway round forever (a session close
-/// would leak its pending input wait and never emit `input_cancelled`),
-/// so the drop path applies the same abort the cancellation path does.
-/// The claims-release join in [`Self::drain_io_tasks`] is unnecessary
-/// here: a dropped run delivers no result.
-impl Drop for Scheduler<'_> {
-    fn drop(&mut self) {
-        for handle in self.io_tasks.values() {
-            handle.abort();
-        }
-    }
 }
 
 impl<'a> Scheduler<'a> {
@@ -540,14 +397,13 @@ impl<'a> Scheduler<'a> {
             stack: Vec::new(),
             ready: VecDeque::new(),
             pending: HashMap::new(),
-            joins: HashMap::new(),
+            tasks: HashMap::new(),
             answer_tx,
             answers,
             io_tasks: HashMap::new(),
             aborted_requests: HashSet::new(),
             max_chains: u32::MAX as usize,
             next_request: 0,
-            next_fanout: 0,
             client: GatewaySource::from_optional(client, ctx.limits()),
         }
     }
@@ -559,1990 +415,26 @@ impl<'a> Scheduler<'a> {
         self.max_chains = limit;
     }
 
+    /// The number of leaf requests the run has issued so far, so a test
+    /// can prove a dispatch was answered inline with no spawned leaf work.
+    #[cfg(test)]
+    pub(crate) fn leaf_requests_issued(&self) -> u64 {
+        self.next_request
+    }
+
+    /// The state of one task's slot, or `None` when no task with that id
+    /// was ever started, so a test can prove a chain's end moved its slot.
+    #[cfg(test)]
+    pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {
+        self.tasks.get(task).map(|slot| slot.state)
+    }
+
     /// Posts an answer for an arbitrary request id, so a test can drive
     /// the driver's unknown-answer paths directly.
     #[cfg(test)]
     pub(crate) fn post_answer_for_test(&self, request: u64, answer: Answer<Error>) {
         self.answer_tx
-            .send((RequestId(request), answer))
+            .send((RequestId(request), Arrival::Answer(answer)))
             .expect("the scheduler holds its own receiver");
-    }
-
-    /// Drives the run until it ends and returns the run's result: the H1
-    /// pass first when the prompt has H1 blocks, then the root chain over
-    /// the prompt's sections.
-    ///
-    /// Leaf dispatch spawns plain tasks (not `spawn_local`): an infer task
-    /// touches no scheduler state and no Lua value - it awaits one gateway
-    /// round and posts the answer to the channel - so the driver future
-    /// stays `Send` and a caller may spawn the run onto a multi-thread
-    /// runtime. On a current-thread runtime the spawned tasks run on that
-    /// one thread anyway.
-    ///
-    /// # Errors
-    /// Returns the [`Error`] of whichever step failed: frame construction,
-    /// a Lua block, or a dispatched request's answer.
-    /// Returns [`Error::Interrupted`] when the run's cancellation handle is
-    /// signaled while chains are running or suspended.
-    pub(crate) async fn drive(&mut self) -> Result<String> {
-        let result = self.drive_inner().await;
-        self.drain_io_tasks().await;
-        result
-    }
-
-    /// Claims-release ordering constraint: the run's result - success,
-    /// determinism failure, or cancellation alike - must not be delivered
-    /// while an in-flight leaf op still holds its access clone. A store
-    /// op runs on the blocking pool, where aborting the task detaches
-    /// rather than interrupts, so an abandoned op would release its
-    /// identity's claims only when the closure finishes - past the run's
-    /// end, where a fresh access could meet the lingering claim. Abort
-    /// every task still recorded (prompt for an async task, a no-op for
-    /// a blocking op already running, which runs to completion), then
-    /// await each handle: the join resolves only once the op's access
-    /// clone - and with it the identity's claims - is gone. This changes
-    /// when claims release, never what an operation does.
-    async fn drain_io_tasks(&mut self) {
-        let tasks = std::mem::take(&mut self.io_tasks);
-        for task in tasks.values() {
-            task.abort();
-        }
-        for (_, task) in tasks {
-            let _ = task.await;
-        }
-    }
-
-    async fn drive_inner(&mut self) -> Result<String> {
-        // The H1 pass runs when the prompt has H1 blocks; an H1-less prompt
-        // goes straight to the walk, so its shared library never pays for a
-        // throwaway section-0 replay.
-        if self.ctx.prompt().h1_blocks().is_empty() {
-            let sections = self.ctx.prompt().sections();
-            if sections.is_empty() {
-                return Ok(GENERIC_COMPLETION.to_owned());
-            }
-            self.start_root_walk(sections, &serde_json::json!({}))?;
-        } else {
-            let h1 = self.start_live_h1()?;
-            self.ready.push_back(h1);
-        }
-        let mut root_result = None;
-        loop {
-            while let Some(id) = self.ready.pop_front() {
-                // Cancellation between steps: the instruction hook covers
-                // running Lua and the select below covers suspension, but a
-                // run whose chains never suspend on I/O would otherwise
-                // finish without ever observing the handle - the legacy
-                // fanout driver's select loop observed it at arm
-                // boundaries.
-                if cancel::is_cancelled() {
-                    return Err(Error::Interrupted);
-                }
-                if let Err(error) = self.step(id, &mut root_result).await {
-                    self.finish(id, Err(error), &mut root_result);
-                }
-                if let Some(result) = root_result.take() {
-                    return result;
-                }
-            }
-            // Every unfinished chain is ready, pending on I/O, or blocked on
-            // a child that transitively bottoms out in a ready or pending
-            // chain, so an empty ready queue with an empty pending table can
-            // only be a driver bug - fail loudly rather than hang.
-            if self.pending.is_empty() {
-                return Err(Error::internal(
-                    "the scheduler stalled with no ready chain and no in-flight request",
-                ));
-            }
-            tokio::select! {
-                biased;
-                // Cancellation while suspended: abort the in-flight leaf
-                // tasks and fail the run. The suspended chains' frames drop
-                // unarmed with the scheduler - the same outcome as the
-                // hook-driven path while running - and each fanout arm's
-                // finalizer drop reports its FANOUT_ARM_CANCELLED terminal
-                // observation, so the exactly-once terminal contract holds
-                // on this path too.
-                () = cancel::wait_cancelled() => {
-                    for handle in self.io_tasks.values() {
-                        handle.abort();
-                    }
-                    return Err(Error::Interrupted);
-                }
-                answer = self.answers.recv() => {
-                    let Some((request_id, answer)) = answer else {
-                        return Err(Error::internal(
-                            "the answer channel cannot close while the scheduler holds its sender",
-                        ));
-                    };
-                    self.io_tasks.remove(&request_id);
-                    let Some(chain_id) = self.pending.remove(&request_id) else {
-                        // A late answer from an I/O task whose chain was
-                        // already aborted (a fatal sibling's fanout abort
-                        // races a task that sent before the abort landed):
-                        // the abort recorded the request id, so the answer
-                        // is moot. Any other unknown id means the driver
-                        // dropped a pending entry early - answer loss that
-                        // must fail loudly, not pass silently.
-                        if self.aborted_requests.remove(&request_id) {
-                            continue;
-                        }
-                        return Err(Error::internal(
-                            "an answer arrived for a request with no pending entry and no recorded abort",
-                        ));
-                    };
-                    match answer {
-                        // A claims-model conflict is fatal: the run ends on
-                        // the spot with the determinism violation rather
-                        // than resuming it into Lua, where an author
-                        // `pcall` could catch it. The suspended chains drop
-                        // unarmed with the scheduler, each fanout arm's
-                        // finalizer reporting its cancelled terminal
-                        // observation, exactly as on the cancellation path.
-                        Answer::Store(Err(error @ Error::Determinism(_))) => return Err(error),
-                        answer => {
-                            self.chains[chain_id.index()].incoming = Some(answer);
-                            self.ready.push_back(chain_id);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    /// Creates one chain over `slice` from `index` and returns its id. The
-    /// chain enters its first section on its first step. The chain's
-    /// `var` slot seeds from `var` (a call chain's or arm's caller
-    /// snapshot, discarded with the chain). `arm` carries the fanout-arm
-    /// state for an arm chain.
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the chain keeps its context fork, position, parent, var seed, depth, and arm state explicit and linear"
-    )]
-    fn start_chain(
-        &mut self,
-        ctx: RunState,
-        slice: &'a [Section],
-        index: usize,
-        parent: Option<ChainId>,
-        var: &serde_json::Value,
-        call_depth: usize,
-        arm: Option<ArmState<'a>>,
-    ) -> Result<ChainId> {
-        if self.chains.len() >= self.max_chains {
-            return Err(Error::internal("a run's chain count cannot exceed u32"));
-        }
-        let id = ChainId(
-            u32::try_from(self.chains.len())
-                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
-        );
-        self.chains.push(Chain {
-            ctx,
-            access: None,
-            frame: None,
-            slice,
-            index,
-            positions: Vec::new(),
-            block: 0,
-            coroutine: None,
-            incoming: None,
-            pending_prose: None,
-            var: var.clone(),
-            call_depth,
-            client: None,
-            parent,
-            arm,
-            h1: None,
-        });
-        Ok(id)
-    }
-
-    /// Starts the root walk chain over `sections`, seeded with the H1
-    /// pass's hand-off `var` (empty when the drive has no H1 phase), and
-    /// enqueues it.
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
-    /// or [`Error::Store`] when the backend refuses acquisition.
-    fn start_root_walk(&mut self, sections: &'a [Section], var: &serde_json::Value) -> Result<()> {
-        let root = self.start_chain(self.ctx.clone(), sections, 0, None, var, 0, None)?;
-        self.install_root_slots(root)?;
-        self.ready.push_back(root);
-        Ok(())
-    }
-
-    /// Seeds a fresh root walk chain's slots: its own access capability -
-    /// the walk is its own serial thread of execution, and a fresh acquire
-    /// (the H1 pass's identity ended with its chain) means nothing the pass
-    /// touched can false-conflict with the walk - and its client slot from
-    /// the run's configured client, as the legacy walk's slot is seeded
-    /// from run()'s client: a prose block before any infer must use it
-    /// rather than fall back to building an environment client.
-    ///
-    /// # Errors
-    /// Returns [`Error::Store`] when the backend refuses acquisition.
-    fn install_root_slots(&mut self, root: ChainId) -> Result<()> {
-        // The walk capability serves every section in turn, so its label
-        // is the prompt's own; the line is where the walk starts.
-        let prompt = self.ctx.prompt();
-        let blocks: &[Block] = prompt
-            .sections()
-            .first()
-            .map_or(&[], |section| section.blocks());
-        let origin = prompt_origin(prompt, prompt.title(), blocks);
-        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
-        self.chains[root.index()].access = Some(Arc::new(access));
-        self.chains[root.index()].client = self.client.ready().cloned();
-        Ok(())
-    }
-
-    /// Starts the H1 pass as the driver loop's first chain: the prompt's
-    /// H1 blocks under its title - section 0 - driven through the same
-    /// coroutine machinery as any section.
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
-    /// or [`Error::Store`] when the backend refuses acquisition.
-    fn start_live_h1(&mut self) -> Result<ChainId> {
-        let id = ChainId(
-            u32::try_from(self.chains.len())
-                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
-        );
-        // The pass owns its client slot, seeded from the run's configured
-        // client, exactly as the legacy pass seeds its own.
-        let client = self.client.ready().cloned();
-        // The live H1 pass runs under the prompt's title, from its first
-        // compiled H1 chunk.
-        let origin = prompt_origin(
-            self.ctx.prompt(),
-            self.ctx.prompt().title(),
-            self.ctx.prompt().h1_blocks(),
-        );
-        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
-        self.chains.push(Chain {
-            ctx: self.ctx.clone(),
-            access: Some(Arc::new(access)),
-            frame: None,
-            slice: &[],
-            index: 0,
-            positions: Vec::new(),
-            block: 0,
-            coroutine: None,
-            incoming: None,
-            pending_prose: None,
-            var: serde_json::json!({}),
-            call_depth: 0,
-            client,
-            parent: None,
-            arm: None,
-            h1: Some(self.ctx.prompt().h1_blocks()),
-        });
-        Ok(id)
-    }
-
-    /// Ends the H1 pass at its fall-through: the final `var` read back
-    /// while the VM is live, then the frame drops unarmed - the
-    /// pass never arms completion, so `SECTION_FINISHED` never fires for
-    /// it. The root walk then starts from the `var` hand-off at section
-    /// `start` (0 on a fall-through, the resolved target on a jump out)
-    /// under the walk's own context fork; with no sections the run's
-    /// result is the shared generic completion.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the final `var` read-back fails or H1
-    /// left `argv` as non-JSON data,
-    /// [`Error::TimestampFormat`] when the walk's `when` fails to format,
-    /// [`Error::Store`] when the backend refuses the walk's acquisition,
-    /// or [`Error::Internal`] when the chain holds no frame.
-    fn end_live_h1(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-        start: usize,
-    ) -> Result<()> {
-        let chain = &mut self.chains[id.index()];
-        let Some(mut frame) = chain.frame.take() else {
-            return Err(Error::internal("the H1 pass ends with a live frame"));
-        };
-        let var = frame.read_var()?;
-        // The freeze: whatever `argv` H1 leaves behind - the derived parse
-        // or its repair - is what every walked section inherits, frozen.
-        let argv = frame.read_argv()?;
-        drop(frame);
-        // The pass's chain ends here: release its capability (and with it
-        // the identity's claims) before the walk acquires its own.
-        chain.access = None;
-        let sections = self.ctx.prompt().sections();
-        if sections.is_empty() {
-            *root_result = Some(Ok(GENERIC_COMPLETION.to_owned()));
-            return Ok(());
-        }
-        // The H1-to-walk handoff: the walk's context takes its live `when`
-        // and the frozen `argv`; H1's prompt-wide records already landed in
-        // the shared sets the views read.
-        let when = now_rfc3339_checked()?;
-        let walk_ctx = self.ctx.with_walk_state(&when, argv);
-        let root = self.start_chain(walk_ctx, sections, start, None, &var, 0, None)?;
-        self.install_root_slots(root)?;
-        self.ready.push_back(root);
-        Ok(())
-    }
-
-    /// Ends the H1 pass on a jump out: the heading resolves against the
-    /// top-level sections (H1's visible set - section 0 excludes nothing
-    /// and has no children), then the pass ends and the root walk starts
-    /// at the target.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the heading is malformed, matches no
-    /// top-level section, or matches more than one; the pass's own ending
-    /// can fail as [`end_live_h1`](Self::end_live_h1) documents.
-    fn end_live_h1_at_jump(
-        &mut self,
-        id: ChainId,
-        heading: &str,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let sections = self.ctx.prompt().sections();
-        let target = fanout::resolve_sibling(heading, sections)?;
-        let start = section_position(sections, target).ok_or(Error::internal(
-            "a resolved H1 jump target is absent from the top-level slice",
-        ))?;
-        self.end_live_h1(id, root_result, start)
-    }
-
-    /// Enters the chain's next section and reports whether one was entered:
-    /// constructs the frame with the next run-global id, seeded from
-    /// the chain's `var` and client slots. The pending Markdown buffer
-    /// resets: a previous section's unconsumed prose never crosses the
-    /// boundary. `Ok(false)` means the
-    /// slice is exhausted and the chain ends.
-    ///
-    /// # Errors
-    /// Returns the [`Error`] of frame construction, as documented on
-    /// [`SectionContext::new`].
-    fn enter_section(&mut self, id: ChainId) -> Result<bool> {
-        let chain = &mut self.chains[id.index()];
-        chain.pending_prose = None;
-        if chain.h1.is_some() {
-            // The H1 pass enters its frame exactly once: section 0 under
-            // the prompt's title, through the same install path as any
-            // section - and no SECTION_STARTED, the pass is not a walked
-            // section.
-            let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?)?;
-            chain.frame = Some(frame);
-            chain.block = 0;
-            return Ok(true);
-        }
-        // A fanout arm's first entry constructs the worker frame with the
-        // arm's own seeds: the collection item, the store-write scope, the
-        // caller's cloned `var`, and the worker's visible set for the
-        // `list_from_section` callback. Later entries of the arm's walk
-        // (after a jump) are plain sections on the walk path below.
-        if let Some(arm) = &chain.arm
-            && arm.at_worker
-        {
-            let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
-            let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
-            let (item_index, item) = (arm.item_index, arm.item.clone());
-            let worker = &worker_slice[worker_index];
-            let caller = &caller_slice[caller_index];
-            let home = home_without(&visible_sections(caller_slice, caller), worker);
-            let frame = SectionContext::new_fanout_arm(
-                &chain.ctx,
-                chain.access()?,
-                worker,
-                &home,
-                item_index,
-                item,
-                &chain.var,
-            )?;
-            chain.frame = Some(frame);
-            chain.block = 0;
-            return Ok(true);
-        }
-        let index = chain.index;
-        if index >= chain.slice.len() {
-            return Ok(false);
-        }
-        // `slice` borrows the prompt tree, not the arena, so the frame
-        // construction can borrow the chain's own context and slots.
-        let slice = chain.slice;
-        let frame = SectionContext::new(
-            &chain.ctx,
-            chain.access()?,
-            &slice[index],
-            slice,
-            next_id(chain.ctx.ids()),
-            &chain.var,
-        )?;
-        chain.frame = Some(frame);
-        chain.block = 0;
-        Ok(true)
-    }
-
-    /// Runs one ready chain to its next suspension point. An arm chain's
-    /// step runs inside the arm's own cancel scope: the handle is the
-    /// run's, cloned at dispatch, so the scope re-installs the same
-    /// task-local the driver already runs under - the per-arm wiring the
-    /// legacy engine needed a spawn boundary crossing for (PF-CANCEL-002).
-    async fn step(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
-        let cancel = self.chains[id.index()]
-            .arm
-            .as_ref()
-            .and_then(|arm| arm.cancel.clone());
-        // The step body awaits only inside a `models.loop` dispatch, so the
-        // scoped future carries the call, not a suspended step frame.
-        cancel::maybe_scope(
-            cancel,
-            async move { self.step_inner(id, root_result).await },
-        )
-        .await
-    }
-
-    /// Runs one ready chain to its next suspension point: resume a
-    /// suspended coroutine with its delivered answer, or advance the walk -
-    /// entering the next section, starting the next Lua block's coroutine,
-    /// stashing one prose block as the pending Markdown buffer, or falling
-    /// through at a section's end.
-    async fn step_inner(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        /// What the chain does next, decided under the chain borrow so the
-        /// action phase can touch the scheduler's other fields.
-        enum Advance {
-            /// Resume the suspended coroutine with its delivered answer.
-            Resume(Thread, Answer<Error>),
-            /// The chain is between sections: enter the next section, or
-            /// end the chain when the slice is exhausted.
-            EnterSection,
-            /// Start the current Lua block as a fresh coroutine.
-            StartLua,
-            /// Stash the current prose block as the pending Markdown buffer
-            /// the next Lua fence consumes.
-            StashProse,
-            /// The section's blocks are exhausted: fall through.
-            SectionEnd,
-        }
-        let advance = {
-            let chain = &mut self.chains[id.index()];
-            if let Some(answer) = chain.incoming.take() {
-                let Some(thread) = chain.coroutine.take() else {
-                    return Err(Error::internal(
-                        "a delivered answer implies a suspended coroutine",
-                    ));
-                };
-                Advance::Resume(thread, answer)
-            } else if chain.coroutine.is_some() {
-                return Err(Error::internal(
-                    "a ready chain's suspended coroutine waits on its answer",
-                ));
-            } else if chain.frame.is_none() {
-                Advance::EnterSection
-            } else if chain.block >= chain.blocks().len() {
-                Advance::SectionEnd
-            } else {
-                match &chain.blocks()[chain.block] {
-                    Block::Lua(_) => Advance::StartLua,
-                    Block::Prose { .. } => Advance::StashProse,
-                    // `Block` is `#[non_exhaustive]` across the crate seam; a
-                    // future variant has no advance rule yet.
-                    _ => {
-                        return Err(Error::internal("an unrecognized block kind cannot advance"));
-                    }
-                }
-            }
-        };
-        match advance {
-            Advance::EnterSection => self.advance_entry(id, root_result),
-            Advance::Resume(thread, answer) => {
-                self.resume_block(id, &thread, answer, root_result).await
-            }
-            Advance::StartLua => self.start_lua(id, root_result).await,
-            Advance::StashProse => {
-                let chain = &mut self.chains[id.index()];
-                let text = match &chain.blocks()[chain.block] {
-                    Block::Prose { text, .. } => text.clone(),
-                    _ => {
-                        return Err(Error::internal("the advance matched the block kind"));
-                    }
-                };
-                // The parser emits one prose block per inter-fence gap,
-                // already accumulated and reset at thematic breaks, so the
-                // block IS the pending buffer the next Lua fence consumes.
-                // Prose never infers: the buffer waits for the following
-                // block's lazy `prose` install, unevaluated until read.
-                chain.pending_prose = Some(text);
-                chain.block += 1;
-                self.ready.push_back(id);
-                Ok(())
-            }
-            Advance::SectionEnd => {
-                if self.chains[id.index()].h1.is_some() {
-                    self.end_live_h1(id, root_result, 0)?;
-                } else {
-                    self.end_section(id)?;
-                    self.ready.push_back(id);
-                }
-                Ok(())
-            }
-        }
-    }
-
-    /// Resumes a chain's suspended coroutine with its delivered answer.
-    async fn resume_block(
-        &mut self,
-        id: ChainId,
-        thread: &Thread,
-        answer: Answer<Error>,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let chain = &self.chains[id.index()];
-        let Block::Lua(program) = &chain.blocks()[chain.block] else {
-            return Err(Error::internal("a suspended coroutine's block is Lua"));
-        };
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let result = frame
-            .vm()?
-            .resume_block_coro_answer(program, thread, answer);
-        self.handle_coro_result(id, result, root_result).await
-    }
-
-    /// Starts the chain's current Lua block as a fresh coroutine: the
-    /// pending Markdown buffer installs as the block's fresh read-only
-    /// lazy `prose` template first. The
-    /// driver owns the chunk observation
-    /// boundaries: STARTED at the block's start, SUCCEEDED or FAILED when
-    /// its coroutine finally returns or fails - a suspension is neither.
-    async fn start_lua(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let pending = self.chains[id.index()].pending_prose.take();
-        let chain = &self.chains[id.index()];
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
-        let name = chain.section_name().to_owned();
-        observer.observe(&execution, &name, detail::LUA_CHUNK_STARTED);
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        if let Err(error) = frame.install_lazy_prose(&chain.ctx, pending.as_deref().unwrap_or("")) {
-            observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
-            return Err(error);
-        }
-        let Block::Lua(program) = &chain.blocks()[chain.block] else {
-            return Err(Error::internal("the advance matched the block kind"));
-        };
-        let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
-        self.handle_coro_result(id, result, root_result).await
-    }
-
-    /// Enters the chain's next section and requeues it, or finishes the
-    /// chain when its slice is exhausted.
-    ///
-    /// # Errors
-    /// Returns the [`Error`] of frame construction, as documented on
-    /// [`SectionContext::new`].
-    fn advance_entry(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        if self.enter_section(id)? {
-            self.ready.push_back(id);
-        } else if self.pop_position(id) {
-            // A jump-started child level exhausted: the parent walk resumes
-            // after the jumper.
-            self.ready.push_back(id);
-        } else {
-            // The walk ran off the slice's last section: the chain ends.
-            self.finish(id, Ok(None), root_result);
-        }
-        Ok(())
-    }
-
-    /// Resumes a jump-suspended parent position when a child level
-    /// exhausts, returning `false` when the chain holds no suspended
-    /// position - meaning its own root slice exhausted and the chain ends.
-    /// The `var` slot needs no handling: the child walk shared
-    /// it, so it already carries the child level's last value.
-    fn pop_position(&mut self, id: ChainId) -> bool {
-        let chain = &mut self.chains[id.index()];
-        let Some((slice, jumper)) = chain.positions.pop() else {
-            return false;
-        };
-        chain.slice = slice;
-        chain.index = jumper + 1;
-        true
-    }
-
-    /// Falls the chain through at its section's end: the section's final
-    /// `var` replaces the chain's clipboard, read back while the VM is
-    /// live; the frame's drop is
-    /// the teardown boundary, firing `SECTION_FINISHED` for this completed
-    /// section; then the walk advances to the next section.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the final `var` read-back fails (the
-    /// frame drops unarmed, as on the legacy path), or
-    /// [`Error::Internal`] when the chain holds no frame.
-    fn end_section(&mut self, id: ChainId) -> Result<()> {
-        let chain = &mut self.chains[id.index()];
-        let Some(mut frame) = chain.frame.take() else {
-            return Err(Error::internal("a section end implies a live frame"));
-        };
-        chain.var = frame.read_var()?;
-        frame.mark_completed();
-        drop(frame);
-        if let Some(arm) = &mut chain.arm {
-            // The worker's own entry is complete; the arm's walk continues
-            // (or ends) as plain sections, exactly as after a jump out.
-            arm.at_worker = false;
-        }
-        chain.index += 1;
-        Ok(())
-    }
-
-    /// Applies a jump's control transfer: closes the jumper's frame as
-    /// completed (the final `var`
-    /// rolled forward; the armed drop firing `SECTION_FINISHED`, a jump
-    /// being a completion), resolves the heading against the jumper's
-    /// visible set, and moves the walk. A sibling target sets the index
-    /// within the target's slice; a child target pushes the
-    /// current position onto the chain's position stack and descends into
-    /// the jumper's child slice from the target.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the `var` read-back fails (the
-    /// frame drops unarmed, as on the legacy path) or when the heading
-    /// matches no visible section or more than one - the jumper's frame has
-    /// already closed as completed, exactly as the legacy walk resolves
-    /// after the jumper's teardown.
-    fn apply_jump(&mut self, id: ChainId, heading: &str) -> Result<()> {
-        let (slice, index) = {
-            let chain = &mut self.chains[id.index()];
-            let Some(mut frame) = chain.frame.take() else {
-                return Err(Error::internal("a jump implies a live frame"));
-            };
-            chain.var = frame.read_var()?;
-            frame.mark_completed();
-            drop(frame);
-            (chain.slice, chain.index)
-        };
-        let target = self.resolve_chain_target(id, heading)?;
-        let chain = &mut self.chains[id.index()];
-        if let Some(arm) = &mut chain.arm {
-            // The worker's own entry is left behind by the transfer; later
-            // entries of the arm's walk are plain sections.
-            arm.at_worker = false;
-        }
-        if target.child {
-            chain.positions.push((slice, index));
-        }
-        chain.slice = target.slice;
-        chain.index = target.index;
-        Ok(())
-    }
-
-    /// Resolves `heading` against the chain's current section's visible set
-    /// and returns the slice the walk or a contained chain continues on:
-    /// the jumper's child slice for a direct child, the target's own slice
-    /// otherwise.
-    ///
-    /// For an arm chain still at its worker, the visible set is the fanout
-    /// caller's visible set minus the worker, plus the worker's children -
-    /// the set the legacy arm's control globals resolve over.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the heading is malformed, matches no
-    /// visible section, or matches more than one (see
-    /// [`fanout::resolve_sibling`]).
-    fn resolve_chain_target(&self, id: ChainId, heading: &str) -> Result<ChainTarget<'a>> {
-        let chain = &self.chains[id.index()];
-        if chain.h1.is_some() {
-            // H1 is section 0: its visible set is the whole top-level
-            // slice - it excludes nothing and has no children, so every
-            // target is a flat index into that slice.
-            let sections = self.ctx.prompt().sections();
-            let target = fanout::resolve_sibling(heading, sections)?;
-            let index = section_position(sections, target).ok_or(Error::internal(
-                "a resolved H1 target is absent from the top-level slice",
-            ))?;
-            return Ok(ChainTarget {
-                slice: sections,
-                index,
-                child: false,
-            });
-        }
-        if let Some(arm) = &chain.arm
-            && arm.at_worker
-        {
-            let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
-            let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
-            return resolve_arm_target(
-                caller_slice,
-                caller_index,
-                worker_slice,
-                worker_index,
-                heading,
-            );
-        }
-        let slice = chain.slice;
-        let index = chain.index;
-        // `slice` borrows the prompt tree, not the arena, so the jumper
-        // outlives the chain borrow above.
-        let jumper = &slice[index];
-        match resolve_jump_target(heading, slice, jumper)? {
-            JumpTarget::Child(child) => Ok(ChainTarget {
-                slice: jumper.children(),
-                index: child,
-                child: true,
-            }),
-            JumpTarget::Sibling(sibling) => Ok(ChainTarget {
-                slice,
-                index: sibling,
-                child: false,
-            }),
-        }
-    }
-
-    /// Applies one Lua block coroutine's outcome: parks a yielded chain on
-    /// its request's dispatch, advances or finishes a completed block, and
-    /// reports the chunk's closing observation boundary.
-    async fn handle_coro_result(
-        &mut self,
-        id: ChainId,
-        result: Result<CoroStep>,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let (observer, execution, name) = {
-            let chain = &self.chains[id.index()];
-            (
-                Arc::clone(chain.ctx.observer()),
-                chain.ctx.execution().to_owned(),
-                chain.section_name().to_owned(),
-            )
-        };
-        let step = match result {
-            Ok(step) => step,
-            Err(error) => {
-                observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
-                // A failed H1 assertion ends the run before the walk:
-                // H1's remaining job is the prompt's hard gates, so the
-                // prompt chunk's own Lua failure IS the failed assertion
-                // and its message is the failure notice. Only the chunk's
-                // error remaps: the machinery around it (the shared
-                // replay, the final `var` read-back, jump-target
-                // resolution) keeps its own kind - a prompt bug under
-                // `Error::Lua`, not an unsatisfiable environment. Fatal
-                // run conditions (cancellation, the claims violation)
-                // keep their own classification either way.
-                let error = if self.chains[id.index()].h1.is_some() {
-                    match error {
-                        Error::Lua(_) | Error::LuaRuntime { .. } => Error::RequirementsUnmet {
-                            notice: error.to_string(),
-                        },
-                        other => other,
-                    }
-                } else {
-                    error
-                };
-                return Err(error);
-            }
-        };
-        match step {
-            CoroStep::Yielded(thread, values) => {
-                let chain = &mut self.chains[id.index()];
-                let frame = chain
-                    .frame
-                    .as_ref()
-                    .ok_or(Error::internal("a live chain holds its frame"))?;
-                match frame.vm()?.request_from_yield(&values) {
-                    YieldParse::Request(request) => {
-                        chain.coroutine = Some(thread);
-                        self.dispatch(id, request).await
-                    }
-                    YieldParse::Call(answer) => {
-                        // An argument-validation failure is the call's
-                        // answer: the shim raises it at the call site, so
-                        // an author `pcall` catches it exactly as on the
-                        // legacy callback path.
-                        chain.coroutine = Some(thread);
-                        chain.incoming = Some(answer.map_error(Error::from));
-                        self.ready.push_back(id);
-                        Ok(())
-                    }
-                    YieldParse::Malformed(error) => {
-                        observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
-                        Err(Error::from(error))
-                    }
-                }
-            }
-            CoroStep::Done(LuaBlockResult::Jump(heading)) => {
-                // A jump is a control transfer, not a failure: the chunk
-                // boundary reports success and the walk moves to the
-                // resolved target. A jump out of H1 ends the pass and
-                // starts the walk at the target.
-                observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
-                if self.chains[id.index()].h1.is_some() {
-                    return self.end_live_h1_at_jump(id, &heading, root_result);
-                }
-                self.apply_jump(id, &heading)?;
-                self.ready.push_back(id);
-                Ok(())
-            }
-            CoroStep::Done(LuaBlockResult::Returned(value)) => {
-                observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
-                if self.chains[id.index()].h1.is_some() {
-                    let chain = &mut self.chains[id.index()];
-                    if let Some(value) = value {
-                        // A scalar return from the H1 pass
-                        // short-circuits the whole run. The final `var`
-                        // read-back runs here exactly as the walk
-                        // reads it on every exit, so a reassigned `var`
-                        // global fails the run instead of returning the
-                        // value; the frame then drops unarmed - the pass
-                        // never fires SECTION_FINISHED.
-                        let mut frame = chain
-                            .frame
-                            .take()
-                            .ok_or(Error::internal("a live chain holds its frame"))?;
-                        frame.read_var()?;
-                        drop(frame);
-                        *root_result = Some(Ok(value));
-                        return Ok(());
-                    }
-                    // H1 does not read the `reply` global back after a
-                    // Lua block: the pass's reply slot rolls forward through
-                    // prose alone.
-                    chain.block += 1;
-                    self.ready.push_back(id);
-                    return Ok(());
-                }
-                if let Some(value) = value {
-                    // A scalar return ends the chain it fired in.
-                    self.finish(id, Ok(Some(value)), root_result);
-                    return Ok(());
-                }
-                let chain = &mut self.chains[id.index()];
-                chain.block += 1;
-                self.ready.push_back(id);
-                Ok(())
-            }
-        }
-    }
-
-    /// Dispatches one validated request from a suspended chain.
-    ///
-    /// # Errors
-    /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces yet, or a `models.loop` cancellation, which
-    /// fails the run rather than resuming into the caller.
-    async fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
-        match request {
-            Request::Infer { prompt, binding } => {
-                self.dispatch_infer(id, prompt, binding);
-                Ok(())
-            }
-            Request::Call { target, input, var } => {
-                self.dispatch_call(id, &target, input.as_deref(), &var);
-                Ok(())
-            }
-            Request::Fanout { worker, items, var } => {
-                self.dispatch_fanout(id, &worker, &items, &var);
-                Ok(())
-            }
-            Request::ToolCall { alias, args } => {
-                self.dispatch_tool_call(id, &alias, args);
-                Ok(())
-            }
-            Request::Loop {
-                messages,
-                messages_key,
-                binding,
-                compactor,
-            } => {
-                self.dispatch_loop(id, binding, messages, messages_key, compactor)
-                    .await
-            }
-            Request::UserInput => {
-                self.dispatch_user_input(id);
-                Ok(())
-            }
-            Request::Store { op } => self.dispatch_store(id, op),
-            // Unreachable: no section VM installs the models.chat shim, and
-            // stripped coroutines make a hand-rolled yield fail validation
-            // before dispatch - the mirror of the agent driver's guards for
-            // the section-only requests.
-            Request::Chat { .. } => Err(Error::internal(
-                "a section VM cannot yield a chat request: the models.chat shim is never installed",
-            )),
-            Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
-        }
-    }
-
-    /// Dispatches an `infer` request: resolves the binding and the chain's
-    /// client, spawns the single gateway round onto the answer channel, and
-    /// parks the chain in the pending table. A resolution failure is the
-    /// call's answer, resumed into the caller so an author `pcall` can catch
-    /// it exactly as on the legacy callback path.
-    fn dispatch_infer(&mut self, id: ChainId, prompt: String, binding: Option<ModelBinding>) {
-        match self.prepare_infer(id, prompt, binding) {
-            Ok((request_id, task)) => {
-                self.io_tasks.insert(request_id, task);
-                self.pending.insert(request_id, id);
-            }
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Infer(Err(error)));
-                self.ready.push_back(id);
-            }
-        }
-    }
-
-    /// The fallible half of infer dispatch: the binding resolution (the
-    /// handle's frozen binding, else the section's current model), the lazy
-    /// client resolution, and the spawned round.
-    fn prepare_infer(
-        &mut self,
-        id: ChainId,
-        prompt: String,
-        binding: Option<ModelBinding>,
-    ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
-        let chain = &mut self.chains[id.index()];
-        let binding = if let Some(binding) = binding {
-            binding
-        } else {
-            let frame = chain
-                .frame
-                .as_ref()
-                .ok_or(Error::internal("a live chain holds its frame"))?;
-            resolve_model_binding(chain.ctx.models(), &frame.vm()?.model_runtime)?.ok_or_else(
-                || Error::ModelRequired {
-                    section: chain.section_name().to_owned(),
-                },
-            )?
-        };
-        if chain.client.is_none() {
-            chain.client = Some(self.client.resolve()?);
-        }
-        let client = chain
-            .client
-            .as_ref()
-            .ok_or(Error::internal("the client slot was just resolved"))?
-            .clone();
-        let observer = Arc::clone(chain.ctx.observer());
-        let debug = chain.ctx.debug().cloned();
-        let execution = chain.ctx.execution().to_owned();
-        let section = chain.section_name().to_owned();
-        let turns = Arc::clone(chain.ctx.turns());
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        let task = tokio::spawn(async move {
-            let result = infer_round(
-                &client,
-                &binding,
-                &prompt,
-                observer.as_ref(),
-                debug.as_deref(),
-                &execution,
-                &section,
-                &turns,
-            )
-            .await;
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Answer::Infer(result)));
-        });
-        Ok((request_id, task))
-    }
-
-    /// Dispatches a `tool_call` request: resolves the alias against the
-    /// run's full bound tool catalog, spawns the shared dispatch body onto
-    /// the answer channel, and parks the chain in the pending table. Every
-    /// dispatch failure - an unbound alias, the counts install - is the
-    /// call's answer, resumed into the caller so an author `pcall` can
-    /// catch it exactly as a tool failure.
-    fn dispatch_tool_call(&mut self, id: ChainId, alias: &str, args: serde_json::Value) {
-        match self.prepare_tool_call(id, alias, args) {
-            Ok((request_id, task)) => {
-                self.io_tasks.insert(request_id, task);
-                self.pending.insert(request_id, id);
-            }
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
-                self.ready.push_back(id);
-            }
-        }
-    }
-
-    /// The fallible half of tool-call dispatch: the alias resolved against
-    /// the run's full bound tool catalog (the section's effective scope
-    /// shapes what the model is offered, and the author's own script is not
-    /// the model, so the scope does not gate it - the model-advertised set
-    /// stays section-scoped), the one-time counts install, and the spawned
-    /// dispatch through the shared `dispatch_tool` body, classified by the
-    /// binding's declared output kind at completion.
-    fn prepare_tool_call(
-        &mut self,
-        id: ChainId,
-        alias: &str,
-        args: serde_json::Value,
-    ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
-        let chain = &mut self.chains[id.index()];
-        let tool_set = chain.ctx.tool_set_snapshot()?;
-        let Some(binding) = tool_set.binding(alias).cloned() else {
-            return Err(Error::UnboundToolCall {
-                name: alias.to_owned(),
-                bound: tool_set
-                    .bindings()
-                    .iter()
-                    .map(|binding| binding.alias().to_owned())
-                    .collect(),
-            });
-        };
-        let ctx = chain.ctx.clone();
-        let counts = {
-            let frame = chain
-                .frame
-                .as_mut()
-                .ok_or(Error::internal("a live chain holds its frame"))?;
-            let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
-            frame.script_call_counts(&ctx, &effective)?
-        };
-        // The counts seed from the section's effective scope; a bound alias
-        // outside it must still be seeded here, because the shared dispatch
-        // body's increment errors on an unseeded alias.
-        counts.ensure(binding.alias())?;
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
-        let section = chain.section_name().to_owned();
-        let nonce = chain.ctx.nonce().clone();
-        let report = ScriptReport {
-            chain_id: id.0,
-            // The call depth is capped at MAX_CALL_DEPTH, far inside
-            // u32; the saturation is a defensive no-op.
-            depth: u32::try_from(chain.call_depth).unwrap_or(u32::MAX),
-            turn: chain.ctx.turns().load(Ordering::Relaxed),
-        };
-        let output_kind = binding.output_kind;
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        // A spawned task does not inherit the cancel task-local; the
-        // current handle rides into the task explicitly so the shared
-        // dispatch body's cancel race stays armed there. The driver also
-        // aborts the task handle on cancellation, so both paths end a slow
-        // tool promptly.
-        let cancel = cancel::current();
-        let task = tokio::spawn(async move {
-            let result = cancel::maybe_scope(cancel, async {
-                match dispatch_tool(
-                    &binding,
-                    args,
-                    Some(&counts),
-                    &nonce,
-                    observer.as_ref(),
-                    &execution,
-                    &section,
-                    Some(report),
-                )
-                .await
-                {
-                    Ok(outcome) => ToolCallOutcome::from_dispatch(
-                        output_kind,
-                        binding.alias(),
-                        outcome.into_content(),
-                    )
-                    .map_err(Error::from),
-                    Err(error) => Err(Error::from(error)),
-                }
-            })
-            .await;
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, Answer::ToolCallResult(result)));
-        });
-        Ok((request_id, task))
-    }
-
-    /// Dispatches a `user_input` request: the run's input broker answers on
-    /// a spawned task exactly as a leaf I/O round does, so a blocking wait
-    /// parks its chain - the section's VM and message history intact -
-    /// without blocking the driver, and cancellation aborts it through the
-    /// shared in-flight abort path. With no broker configured the
-    /// unavailable-fallback policy answers immediately: the fixed fallback
-    /// sentence with `available` false. The wait and a delivered response
-    /// are recorded through the run's observer; an unavailable answer opens
-    /// no wait and records no input.
-    fn dispatch_user_input(&mut self, id: ChainId) {
-        let chain = &self.chains[id.index()];
-        let Some(broker) = chain.ctx.input_broker().cloned() else {
-            self.chains[id.index()].incoming = Some(Answer::UserInput(Ok(UserInputOutcome {
-                text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
-                available: false,
-            })));
-            self.ready.push_back(id);
-            return;
-        };
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
-        let section = chain.section_name().to_owned();
-        observer.observe(&execution, &section, detail::USER_INPUT_WAIT_STARTED);
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        let task = tokio::spawn(async move {
-            let answer = match broker.user_input(&execution, &section).await {
-                Ok(InputOutcome::Text(text)) => {
-                    observer.on_user_input(&execution, &section, &text);
-                    Answer::UserInput(Ok(UserInputOutcome {
-                        text,
-                        available: true,
-                    }))
-                }
-                Ok(InputOutcome::Unavailable) => Answer::UserInput(Ok(UserInputOutcome {
-                    text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
-                    available: false,
-                })),
-                Err(error) => Answer::UserInput(Err(Error::from(error))),
-            };
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((request_id, answer));
-        });
-        self.io_tasks.insert(request_id, task);
-        self.pending.insert(request_id, id);
-    }
-
-    /// Dispatches a `store` request: the chain's access capability runs the
-    /// operation on the blocking pool and posts the answer to the channel,
-    /// parking the chain in the pending table exactly as a leaf I/O round
-    /// does. Every store operation takes this yield path uniformly -
-    /// memory- and host-backed alike, with no inline fast path - so
-    /// interleaving behavior never depends on which backend serves the
-    /// mount. The operation's observation fires before the answer posts, so
-    /// the event stream keeps the legacy closure path's ordering (the op's
-    /// outcome precedes the chunk's closing boundary).
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] when the live chain's access capability
-    /// is gone, which only the chain-end paths take.
-    fn dispatch_store(&mut self, id: ChainId, op: StoreOp) -> Result<()> {
-        let chain = &self.chains[id.index()];
-        let access = Arc::clone(chain.access()?);
-        let observer = Arc::clone(chain.ctx.observer());
-        let execution = chain.ctx.execution().to_owned();
-        let section = chain.section_name().to_owned();
-        let observations = store_observations(&op);
-        let request_id = RequestId(self.next_request);
-        self.next_request += 1;
-        let tx = self.answer_tx.clone();
-        // spawn_blocking, not a plain task: the Vfs is sync by design, and
-        // the blocking pool keeps a slow host-backend op from stalling the
-        // driver. Aborting the handle detaches rather than interrupts, so a
-        // cancelled run's in-flight op completes without delivering.
-        let task = tokio::task::spawn_blocking(move || {
-            let result = run_store_op(&Store::new(&access), op);
-            if let Some((succeeded, failed)) = observations {
-                observer.observe(
-                    &execution,
-                    &section,
-                    if result.is_ok() { succeeded } else { failed },
-                );
-            }
-            // Claims-release ordering constraint: the access clone must
-            // drop after the op and its observation and before the answer
-            // posts, so the claims it holds release before a resumed chain
-            // can acquire overlapping claims; the fix changes when claims
-            // release, never whether an operation succeeds.
-            drop(access);
-            // A send fails only when the driver is gone (a cancelled run);
-            // the answer is then moot.
-            let _ = tx.send((
-                request_id,
-                Answer::Store(result.map_err(|e| classify_store_failure(&e))),
-            ));
-        });
-        self.io_tasks.insert(request_id, task);
-        self.pending.insert(request_id, id);
-        Ok(())
-    }
-
-    /// Dispatches a `loop` request: runs the Rust-backed model-tool loop on
-    /// the driver thread, then resumes the chain with the nil answer. The
-    /// loop holds the section VM through its append sink and local-tool
-    /// dispatcher, so it cannot cross a spawned-task boundary; while it
-    /// runs, other chains wait (a fanout arm's loop serializes its sibling
-    /// arms' steps behind its rounds). Every loop failure but cancellation
-    /// is the call's answer, resumed into the caller so an author `pcall`
-    /// catches it exactly as on the other dispatch paths; cancellation
-    /// fails the run, exactly as the agent driver treats it.
-    async fn dispatch_loop(
-        &mut self,
-        id: ChainId,
-        binding: Option<ModelBinding>,
-        messages: Vec<MessageRecord>,
-        messages_key: RegistryKey,
-        compactor: Option<RegistryKey>,
-    ) -> Result<()> {
-        // Boxed: the loop's future carries the whole dissolved frame
-        // context, and the driver future must stay small (the workspace's
-        // large-futures lint gates `run`).
-        let outcome =
-            Box::pin(self.run_loop(id, binding, &messages, &messages_key, compactor)).await;
-        match outcome {
-            Ok(()) => {
-                self.chains[id.index()].incoming = Some(Answer::Loop(Ok(())));
-                self.ready.push_back(id);
-                Ok(())
-            }
-            Err(Error::Interrupted) => Err(Error::Interrupted),
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Loop(Err(error)));
-                self.ready.push_back(id);
-                Ok(())
-            }
-        }
-    }
-
-    /// The fallible half of loop dispatch: the binding resolution (the
-    /// handle's frozen binding, else the section's current model), the lazy
-    /// client resolution, the call-time tool scope (the effective bindings
-    /// plus the section's local tools, near-duplicate checked), the
-    /// one-time counts install, the per-dispatch projection, and the loop
-    /// itself, run with the section VM behind the append sink, the
-    /// compactor invocation, and the local-tool dispatcher.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the preparation lifts every loop input out of the chain borrow in one linear sequence before the VM-borrowed loop phase"
-    )]
-    async fn run_loop(
-        &mut self,
-        id: ChainId,
-        binding: Option<ModelBinding>,
-        messages: &[MessageRecord],
-        messages_key: &RegistryKey,
-        compactor: Option<RegistryKey>,
-    ) -> Result<()> {
-        let (
-            client,
-            binding,
-            schemas,
-            dispatch,
-            global_aliases,
-            counts,
-            mut conversation,
-            execution,
-            section,
-            observer,
-            debug,
-            turns,
-            nonce,
-            max_iterations,
-            on_delta,
-        ) = {
-            let chain = &mut self.chains[id.index()];
-            let execution = chain.ctx.execution().to_owned();
-            let section = chain.section_name().to_owned();
-            let binding = if let Some(binding) = binding {
-                binding
-            } else {
-                let frame = chain
-                    .frame
-                    .as_ref()
-                    .ok_or(Error::internal("a live chain holds its frame"))?;
-                resolve_model_binding(chain.ctx.models(), &frame.vm()?.model_runtime)?.ok_or_else(
-                    || Error::ModelRequired {
-                        section: section.clone(),
-                    },
-                )?
-            };
-            if chain.client.is_none() {
-                chain.client = Some(self.client.resolve()?);
-            }
-            let client = chain
-                .client
-                .as_ref()
-                .ok_or(Error::internal("the client slot was just resolved"))?
-                .clone();
-            let tool_set = chain.ctx.tool_set_snapshot()?;
-            let max_iterations = chain.ctx.max_tool_iterations();
-            let nonce = chain.ctx.nonce().clone();
-            let on_delta = chain.ctx.on_delta().cloned();
-            let frame = chain
-                .frame
-                .as_mut()
-                .ok_or(Error::internal("a live chain holds its frame"))?;
-            // The scope is read at call time: `tools.add` and
-            // `tools.add_local` calls since the last model operation shape
-            // this call's advertised set.
-            let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
-            let handles = frame.reporting_handles();
-            let observer = handles.observer;
-            let debug = handles.debug;
-            let turns = handles.turns;
-            let counts = frame.script_call_counts(&chain.ctx, &effective)?;
-            let local_schemas = frame.vm()?.local_tool_schemas()?;
-            // The shared dispatch body's increment errors on an unseeded
-            // alias, so the local aliases seed alongside the bound scope.
-            for schema in &local_schemas {
-                counts.ensure(&schema.name)?;
-            }
-            let (schemas, dispatch) = prepare_effective_scope(
-                &effective,
-                &local_schemas,
-                &execution,
-                observer.as_ref(),
-                &section,
-            )?;
-            let global_aliases: BTreeMap<String, ToolId> = tool_set
-                .bindings()
-                .iter()
-                .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
-                .collect();
-            // The per-dispatch projection, over the list as the author
-            // holds it now. A projection failure reports a failed turn
-            // before its call-site error resumes into Lua, the agent
-            // driver's precedent.
-            let conversation = match project_messages(messages) {
-                Ok(conversation) => conversation,
-                Err(error) => {
-                    observer.observe(&execution, &section, detail::MODEL_TURN_FAILED);
-                    return Err(Error::from(error));
-                }
-            };
-            (
-                client,
-                binding,
-                schemas,
-                dispatch,
-                global_aliases,
-                counts,
-                conversation,
-                execution,
-                section,
-                observer,
-                debug,
-                turns,
-                nonce,
-                max_iterations,
-                on_delta,
-            )
-        };
-        let completion_options = binding.completion_options();
-        let context = binding.context();
-        let chain = &self.chains[id.index()];
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let vm = frame.vm()?;
-        // The append sink: every assistant message and correlated tool
-        // result lands in the author's own message list as its round
-        // completes.
-        let mut append = |record: &MessageRecord| -> Result<()> {
-            append_message_record(vm.lua(), messages_key, record).map_err(Error::from)
-        };
-        // The selected compactor, invoked with the overflow reason: the
-        // omitted default is `compactors.fail`; an explicit callback runs
-        // on this VM and its typed raise crosses back downcastable.
-        let invoke = |reason: OverflowReason| -> Error {
-            invoke_selected(vm.lua(), compactor.as_ref(), reason).into()
-        };
-        // Local tools are Lua functions on this section VM; route their
-        // calls back into it rather than the bound dispatch body.
-        let local = |alias: &str, args: serde_json::Value| -> Result<String> {
-            vm.call_local_tool(alias, &args).map_err(Error::from)
-        };
-        run_models_loop(
-            &client,
-            &schemas,
-            &dispatch,
-            &mut conversation,
-            &mut append,
-            max_iterations,
-            context,
-            &invoke,
-            &execution,
-            observer.as_ref(),
-            &section,
-            &turns,
-            debug.as_deref(),
-            &completion_options,
-            &nonce,
-            Some(&counts),
-            Some(&global_aliases),
-            Some(&local),
-            on_delta.as_deref(),
-        )
-        .await
-    }
-
-    /// Dispatches a `call` request: constructs the child chain, pushes
-    /// it on the chain stack, and enqueues it; the parent blocks until the
-    /// child's finish delivers its final text as the answer. Every dispatch
-    /// failure - the depth cap, target resolution, child construction - is
-    /// the call's answer, resumed into the caller so an author `pcall` can
-    /// catch it exactly as on the legacy callback path.
-    fn dispatch_call(
-        &mut self,
-        id: ChainId,
-        target: &str,
-        input: Option<&str>,
-        var: &serde_json::Value,
-    ) {
-        match self.prepare_call(id, target, input, var) {
-            Ok(child) => {
-                self.stack.push(child);
-                self.ready.push_back(child);
-            }
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Call(Err(error)));
-                self.ready.push_back(id);
-            }
-        }
-    }
-
-    /// The fallible half of call dispatch: the depth cap checked against
-    /// the caller's call-depth field, the target resolved over the
-    /// caller's visible set, and the child chain constructed one level
-    /// deeper under the call's args and `var` snapshot.
-    fn prepare_call(
-        &mut self,
-        id: ChainId,
-        target: &str,
-        input: Option<&str>,
-        var: &serde_json::Value,
-    ) -> Result<ChainId> {
-        let chain = &self.chains[id.index()];
-        let depth = chain.call_depth + 1;
-        if depth > MAX_CALL_DEPTH {
-            return Err(Error::Lua(format!(
-                "call recursion exceeded cap of {MAX_CALL_DEPTH}"
-            )));
-        }
-        // An explicit input forks the chain's args (and `argv` re-derives
-        // from them); a no-input call inherits the caller's context whole,
-        // so the run's frozen `argv` - H1's repair included - carries into
-        // the chain rather than re-deriving from the unchanged args.
-        let child_ctx = match input {
-            Some(input) => chain.ctx.with_args(input),
-            None => chain.ctx.clone(),
-        };
-        let client = chain.client.clone();
-        // A call chain is a blocking child: it borrows the caller's access
-        // capability (the same serial thread of execution), so the caller's
-        // standing claims never false-conflict with the child's ops.
-        let access = chain.access.clone();
-        // `chain`'s arena borrow ends here; the resolution borrows the
-        // prompt tree, so the target's slice outlives it.
-        let target_section = self.resolve_chain_target(id, target)?;
-        let child = self.start_chain(
-            child_ctx,
-            target_section.slice,
-            target_section.index,
-            Some(id),
-            var,
-            depth,
-            None,
-        )?;
-        // The child inherits the caller's client slot: an already-resolved
-        // client is shared, an unresolved one stays lazy.
-        self.chains[child.index()].client = client;
-        self.chains[child.index()].access = access;
-        Ok(child)
-    }
-
-    /// Dispatches a `fanout` request: resolves the worker, creates the join
-    /// state with its preallocated per-index result slots, and starts the
-    /// first window of arm chains; the parent blocks until the join
-    /// completes. Every dispatch failure - the depth cap, an empty
-    /// collection, worker resolution - is the call's answer, resumed into
-    /// the caller so an author `pcall` can catch it exactly as on the
-    /// legacy callback path.
-    fn dispatch_fanout(
-        &mut self,
-        id: ChainId,
-        worker: &str,
-        items: &[serde_json::Value],
-        var: &serde_json::Value,
-    ) {
-        match self.prepare_fanout(id, worker, items, var) {
-            Ok(()) => {}
-            Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Fanout(Err(error)));
-                self.ready.push_back(id);
-            }
-        }
-    }
-
-    /// The fallible half of fanout dispatch: the depth cap checked against
-    /// the caller's call-depth field (each arm runs one level deeper),
-    /// the empty collection rejected before any scheduling, the worker
-    /// resolved over the caller's visible set, and the join state and
-    /// first window of arm chains created.
-    fn prepare_fanout(
-        &mut self,
-        id: ChainId,
-        worker_name: &str,
-        items: &[serde_json::Value],
-        var: &serde_json::Value,
-    ) -> Result<()> {
-        let chain = &self.chains[id.index()];
-        let depth = chain.call_depth + 1;
-        if depth > MAX_CALL_DEPTH {
-            return Err(Error::Lua(format!(
-                "fanout recursion exceeded cap of {MAX_CALL_DEPTH}"
-            )));
-        }
-        // An empty collection runs zero arms; that is an authoring bug (a
-        // list section that parsed empty, a wrong variable), not a valid
-        // run.
-        if items.is_empty() {
-            return Err(Error::Lua(
-                "fanout over an empty collection: no work is likely a bug".to_owned(),
-            ));
-        }
-        // An at-worker arm's fanout resolves over the worker's visible set
-        // (handled inside `resolve_chain_target`); the new arms in turn
-        // treat the worker as their caller.
-        //
-        // H1 has no position in the top-level slice: the worker's own
-        // position stands in as the caller's, so the arm's visible set
-        // comes out as the worker's siblings plus its children either way.
-        let h1_caller = chain.h1.is_some();
-        let (caller_slice, caller_index) = match &chain.arm {
-            _ if h1_caller => {
-                let target = self.resolve_chain_target(id, worker_name)?;
-                (target.slice, target.index)
-            }
-            Some(arm) if arm.at_worker => (arm.worker_slice, arm.worker_index),
-            _ => (chain.slice, chain.index),
-        };
-        let ctx = chain.ctx.clone();
-        let client = chain.client.clone();
-        // The caller's capability: each arm spawns its own from it, so the
-        // spawn is the happens-before edge that retires the caller's claims.
-        let access = chain
-            .access
-            .clone()
-            .ok_or(Error::internal("a live chain holds its access capability"))?;
-        // `chain`'s arena borrow ends here; the resolution borrows the
-        // prompt tree, so the worker's slice outlives it.
-        let target = self.resolve_chain_target(id, worker_name)?;
-        let worker = &target.slice[target.index];
-        if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items().is_empty() {
-            return Err(Error::Lua(format!(
-                "section `{}` is a list section, not a worker template",
-                worker.name()
-            )));
-        }
-        let fanout_id = FanoutId(self.next_fanout);
-        self.next_fanout += 1;
-        self.joins.insert(
-            fanout_id,
-            JoinState {
-                remaining: items.len(),
-                results: vec![None; items.len()],
-                parent: id,
-                active: 0,
-                next: 0,
-                items: items.to_vec(),
-                window: ctx.limits().fanout_concurrency().get(),
-                template: ArmTemplate {
-                    caller_slice,
-                    caller_index,
-                    worker_slice: target.slice,
-                    worker_index: target.index,
-                    // Arms report through the run's own observer and debug
-                    // sink directly - the legacy proxies exist to cross the
-                    // spawned-task boundary, which a chain never crosses -
-                    // while the fanout's turn counter stays fresh, so arm
-                    // turns count against the fanout's own cap.
-                    ctx: ctx.with_effective_handles(
-                        Arc::clone(ctx.observer()),
-                        ctx.debug().cloned(),
-                        Arc::new(AtomicU32::new(0)),
-                    ),
-                    access,
-                    var: var.clone(),
-                    call_depth: depth,
-                    client,
-                    cancel: cancel::current(),
-                },
-            },
-        );
-        // A mid-refill failure (the run's chain count exceeding the bound)
-        // must not propagate with the join live and a partial window
-        // enqueued: the caller resumes with this error as the fanout's
-        // answer, and a late arm completion against the live join would
-        // resume the parent a second time. Tear the fanout down instead -
-        // the join goes and the started arms abort, each finalizer drop
-        // reporting FANOUT_ARM_CANCELLED exactly as on fail_fanout's path -
-        // and leave the parent's answer to the caller.
-        if let Err(error) = self.refill_fanout(fanout_id) {
-            self.joins.remove(&fanout_id);
-            for arm in self.arm_chains_of(fanout_id) {
-                self.abort_subtree(arm);
-            }
-            return Err(error);
-        }
-        Ok(())
-    }
-
-    /// Starts arm chains for one fanout while a window slot is free and
-    /// items remain, enqueuing each on the ready queue. Each arm is a chain
-    /// over the worker alone (a singleton slice); a jump out of the worker
-    /// retargets the arm's walk.
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] when the join is not live or the run's
-    /// chain count exceeds `u32`, or [`Error::Store`] when the backend
-    /// refuses an arm's acquisition.
-    fn refill_fanout(&mut self, fanout: FanoutId) -> Result<()> {
-        loop {
-            let (index, item, template) = {
-                let Some(join) = self.joins.get_mut(&fanout) else {
-                    return Err(Error::internal("a window refill implies a live join"));
-                };
-                if join.next >= join.items.len() || join.active >= join.window {
-                    return Ok(());
-                }
-                let index = join.next;
-                join.next += 1;
-                join.active += 1;
-                (index, join.items[index].clone(), join.template.clone())
-            };
-            let worker_slice = template.worker_slice;
-            let worker = &worker_slice[template.worker_index];
-            // Arm creation is the dispatch boundary, so it carries the
-            // arm's STARTED observation, exactly as the legacy arm task's
-            // start did; the finalizer guards the exactly-once terminal
-            // event from here on.
-            template.ctx.observer().observe(
-                template.ctx.execution(),
-                worker.name(),
-                detail::FANOUT_ARM_STARTED,
-            );
-            let arm = ArmState {
-                fanout,
-                item_index: index,
-                item,
-                at_worker: true,
-                caller_slice: template.caller_slice,
-                caller_index: template.caller_index,
-                worker_slice,
-                worker_index: template.worker_index,
-                cancel: template.cancel.clone(),
-                finalizer: ArmFinalizer::new(
-                    Arc::clone(template.ctx.observer()),
-                    template.ctx.execution().to_owned(),
-                    worker.name().to_owned(),
-                ),
-            };
-            let chain = self.start_chain(
-                template.ctx.clone(),
-                std::slice::from_ref(worker),
-                0,
-                None,
-                &template.var,
-                template.call_depth,
-                Some(arm),
-            )?;
-            // The arm is a new concurrent thread of execution: its
-            // capability spawns from the fanout caller's, retiring the
-            // caller's claims (the happens-before edge), and drops with
-            // the chain so a finished arm's claims never linger into the
-            // join's merge. The arm's origin is the worker section's.
-            let origin = prompt_origin(template.ctx.prompt(), worker.name(), worker.blocks());
-            let access = template.access.spawn(origin).map_err(Error::Store)?;
-            self.chains[chain.index()].access = Some(Arc::new(access));
-            // The arm inherits the caller's client slot: an
-            // already-resolved client is shared, an unresolved one stays
-            // lazy.
-            self.chains[chain.index()]
-                .client
-                .clone_from(&template.client);
-            self.ready.push_back(chain);
-        }
-    }
-
-    /// Applies one arm chain's end to its join, finishing the arm's
-    /// terminal observation with its real outcome: a success writes the
-    /// arm's preallocated slot (so results land in collection order) and
-    /// refills the window; the last arm's landing resumes the parent with
-    /// the packed sequence. [`Error::ToolLoopExhausted`] soft-degrades the
-    /// arm to the incomplete stub, so one stuck arm cannot kill sibling
-    /// evidence. Any other arm error is fatal: it fails the join and
-    /// aborts the sibling arms.
-    fn complete_arm(&mut self, mut arm: ArmState<'a>, outcome: Result<String>) {
-        /// How the join moves on one arm's end.
-        enum ArmEnd {
-            /// The slot is written and arms remain: refill the window.
-            Continue,
-            /// The last arm landed: pack the sequence for the parent.
-            Complete,
-            /// A fatal arm error: fail the fanout and abort the siblings.
-            Fail(Error),
-        }
-        let end = {
-            let Some(join) = self.joins.get_mut(&arm.fanout) else {
-                // The join already failed on a sibling's fatal error and was
-                // removed; this arm's outcome is discarded with it, and the
-                // arm's drop reports the cancelled terminal event.
-                return;
-            };
-            join.active -= 1;
-            match outcome {
-                Ok(text) => {
-                    arm.finalizer.finish(detail::FANOUT_ARM_SUCCEEDED);
-                    join.results[arm.item_index] = Some(LuaFanoutResult::success(arm.item, text));
-                    join.remaining -= 1;
-                    if join.remaining == 0 {
-                        ArmEnd::Complete
-                    } else {
-                        ArmEnd::Continue
-                    }
-                }
-                // One stuck arm must not kill sibling evidence facets.
-                Err(Error::ToolLoopExhausted) => {
-                    let stub = format!(
-                        "## {}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)",
-                        subst::render_item(&arm.item)
-                    );
-                    arm.finalizer.finish(detail::FANOUT_ARM_EXHAUSTED);
-                    join.results[arm.item_index] =
-                        Some(LuaFanoutResult::exhausted_stub(arm.item, stub));
-                    join.remaining -= 1;
-                    if join.remaining == 0 {
-                        ArmEnd::Complete
-                    } else {
-                        ArmEnd::Continue
-                    }
-                }
-                Err(error) => {
-                    arm.finalizer.finish(detail::FANOUT_ARM_FAILED);
-                    ArmEnd::Fail(error)
-                }
-            }
-        };
-        match end {
-            ArmEnd::Continue => {
-                if let Err(error) = self.refill_fanout(arm.fanout) {
-                    self.fail_fanout(arm.fanout, error);
-                }
-            }
-            ArmEnd::Complete => {
-                let Some(join) = self.joins.remove(&arm.fanout) else {
-                    return;
-                };
-                // Every slot is Some here: `remaining` reached zero, so
-                // every arm wrote its slot. The `ok_or_else` keeps that
-                // invariant guarded, mirroring the legacy driver's check.
-                let results = join
-                    .results
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, slot)| {
-                        slot.ok_or_else(|| {
-                            Error::Lua(format!(
-                                "fanout arm {} finished without a result",
-                                index + 1
-                            ))
-                        })
-                    })
-                    .collect();
-                self.chains[join.parent.index()].incoming = Some(Answer::Fanout(results));
-                self.ready.push_back(join.parent);
-            }
-            ArmEnd::Fail(error) => self.fail_fanout(arm.fanout, error),
-        }
-    }
-
-    /// Fails one fanout's join: the sibling arms still alive are aborted
-    /// (the legacy `JoinSet::abort_all` port - an aborted arm's frame drops
-    /// unarmed and its finalizer reports `FANOUT_ARM_CANCELLED`), the
-    /// parent resumes with the error, and the join is removed. Items never
-    /// dispatched stay unstarted: with the join gone, no refill can create
-    /// their arms.
-    fn fail_fanout(&mut self, fanout: FanoutId, error: Error) {
-        let Some(join) = self.joins.remove(&fanout) else {
-            return;
-        };
-        for sibling in self.arm_chains_of(fanout) {
-            self.abort_subtree(sibling);
-        }
-        self.chains[join.parent.index()].incoming = Some(Answer::Fanout(Err(error)));
-        self.ready.push_back(join.parent);
-    }
-
-    /// The arena ids of one fanout's live arm chains. An arm whose chain
-    /// already finished is absent: `finish` took its arm state, so only
-    /// arms still running, suspended, or blocked carry it.
-    fn arm_chains_of(&self, fanout: FanoutId) -> Vec<ChainId> {
-        // The arena is u32-bounded at insertion (`start_chain`), so the
-        // index conversion cannot fail.
-        self.chains
-            .iter()
-            .enumerate()
-            .filter(|(_, chain)| chain.arm.as_ref().is_some_and(|arm| arm.fanout == fanout))
-            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainId))
-            .collect()
-    }
-
-    /// Aborts one chain and everything it transitively blocks on - its
-    /// call children and the arms of its nested fanouts - the scheduler
-    /// port of dropping a spawned arm task: the chain leaves the ready
-    /// queue and the pending table, its in-flight leaf I/O task is aborted,
-    /// and its state drops in the teardown order (the suspended coroutine,
-    /// then the frame unarmed - no `SECTION_FINISHED` - then the arm state,
-    /// whose finalizer drop reports `FANOUT_ARM_CANCELLED`).
-    fn abort_subtree(&mut self, id: ChainId) {
-        // Nested fanouts this chain parents: their arms abort with it, and
-        // the removed join has no answer to deliver - the parent is dead.
-        let nested: Vec<FanoutId> = self
-            .joins
-            .iter()
-            .filter(|(_, join)| join.parent == id)
-            .map(|(fanout, _)| *fanout)
-            .collect();
-        for fanout in nested {
-            self.joins.remove(&fanout);
-            for arm in self.arm_chains_of(fanout) {
-                self.abort_subtree(arm);
-            }
-        }
-        // The arena is u32-bounded at insertion (`start_chain`), so the
-        // index conversion cannot fail.
-        let children: Vec<ChainId> = self
-            .chains
-            .iter()
-            .enumerate()
-            .filter(|(_, chain)| chain.parent == Some(id))
-            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainId))
-            .collect();
-        for child in children {
-            self.abort_subtree(child);
-        }
-        self.ready.retain(|ready| *ready != id);
-        let request = self
-            .pending
-            .iter()
-            .find_map(|(request, chain)| (*chain == id).then_some(*request));
-        if let Some(request) = request {
-            self.pending.remove(&request);
-            // Record the aborted request so its task's late answer (a send
-            // that landed before the abort) is the one unknown-id answer
-            // the driver discards; anything else stays a loud invariant
-            // failure.
-            self.aborted_requests.insert(request);
-            // The handle stays in `io_tasks`: aborting a blocking-pool op
-            // detaches rather than interrupts, so the op's access clone -
-            // and the claims it holds - releases only when the op finishes.
-            // The run-end drain awaits the handle, keeping claim release
-            // bounded to the run's lifetime on this path too; if the op's
-            // late answer arrives first, the answer loop takes the handle.
-            if let Some(task) = self.io_tasks.get(&request) {
-                task.abort();
-            }
-        }
-        // A chain on the call stack is the top here: only its own
-        // descendants sit above it, and the recursion already removed them.
-        if self.stack.last() == Some(&id) {
-            self.stack.pop();
-        }
-        let chain = &mut self.chains[id.index()];
-        chain.coroutine = None;
-        chain.incoming = None;
-        chain.frame = None;
-        chain.access = None;
-        chain.arm = None;
-    }
-
-    /// Finishes one chain: the frame's teardown boundary when the chain
-    /// ends mid-section, then the outcome's delivery - the run's result for
-    /// the root chain, the call answer for a child chain, the join
-    /// slot's result for a fanout arm.
-    ///
-    /// `outcome` is the chain's end: a scalar return's value, `None` for a
-    /// walk that ran off its slice's last section, or the chain's failure.
-    fn finish(
-        &mut self,
-        id: ChainId,
-        outcome: Result<Option<String>>,
-        root_result: &mut Option<Result<String>>,
-    ) {
-        let chain = &mut self.chains[id.index()];
-        let parent = chain.parent;
-        let arm = chain.arm.take();
-        // `None` when the chain ended by exhausting its slice: the last
-        // section's frame already dropped at the fall-through.
-        let mut frame = chain.frame.take();
-        // Taken now, dropped after the frame: the VM's store closures hold
-        // their own Arc clones of the capability, so the identity's claims
-        // release only when both are gone - at chain end, before a fanout
-        // join resumes the parent into its merge. A call chain's slot is a
-        // borrowed clone, so its drop never releases the parent's identity.
-        let access = chain.access.take();
-        // The live H1 pass never arms completion: SECTION_FINISHED is a
-        // walked section's boundary, not the setup pass's. Its completion
-        // paths (fall-through, scalar return) handle the frame themselves;
-        // this guard keeps an H1 frame that reaches here - an error path -
-        // unarmed.
-        let is_h1 = chain.h1.is_some();
-        let outcome = outcome.and_then(|returned| {
-            // A chain ending mid-section (a scalar return) reads its final
-            // var back before teardown, exactly as a completed section does
-            // at fall-through (the walk rolls it forward; a call chain
-            // or a fanout arm discards its clone), and arms the completion
-            // flag so the frame's drop fires SECTION_FINISHED. A failure -
-            // the read-back's included - drops the frame unarmed.
-            if let Some(frame) = frame.as_mut() {
-                frame.read_var()?;
-                if !is_h1 {
-                    frame.mark_completed();
-                }
-            }
-            let text = match returned {
-                Some(value) => value,
-                // A walk that ran off its slice produced no scalar result:
-                // the top-level chain falls back to the shared generic
-                // completion; a call chain or a fanout arm to the empty
-                // string.
-                None if parent.is_none() && arm.is_none() => GENERIC_COMPLETION.to_owned(),
-                None => String::new(),
-            };
-            Ok(text)
-        });
-        // The frame drops here: the single teardown boundary.
-        drop(frame);
-        drop(access);
-        if let Some(arm) = arm {
-            self.complete_arm(arm, outcome);
-            return;
-        }
-        match parent {
-            None => *root_result = Some(outcome),
-            Some(parent_id) => {
-                debug_assert_eq!(
-                    self.stack.pop(),
-                    Some(id),
-                    "a finishing child chain is the call stack's top"
-                );
-                self.chains[parent_id.index()].incoming = Some(Answer::Call(outcome));
-                self.ready.push_back(parent_id);
-            }
-        }
     }
 }

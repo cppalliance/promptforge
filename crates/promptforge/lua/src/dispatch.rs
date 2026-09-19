@@ -1,15 +1,21 @@
 //! The shared tool-dispatch body every executor invokes.
 //!
-//! [`dispatch_tool`] is the one place a bound tool's call composes the
-//! cancel race, the per-VM call counts, the untrusted nonce wrap, and the
-//! observer events. Core's model tool loop and its scheduler's `tools.call`
-//! arm both call it; the agent driver adopts it unchanged. Keeping the body
-//! here - the crate every executor already depends on - is what stops
-//! dispatch semantics from forking.
+//! [`prepare_dispatch`] is the one place a bound tool's answer composes the
+//! per-VM call counts, the succeeded/failed observation, the untrusted nonce
+//! wrap, and the `ToolResult` report. It is synchronous and takes the tool's
+//! outcome as a value, so a host that performed the call elsewhere applies
+//! the same rules when the answer arrives. [`dispatch_tool`] is the async
+//! wrapper that still performs the call here: it counts the attempt, races
+//! the tool against cancellation, and hands the outcome to
+//! `prepare_dispatch`. Core's model
+//! tool loop and its scheduler's `tools.call` arm both call it; the agent
+//! driver adopts it unchanged. Keeping the body here - the crate every
+//! executor already depends on - is what stops dispatch semantics from
+//! forking.
 
 use promptforge_api_types::cancel;
 use promptforge_api_types::observe::{Observer, detail};
-use promptforge_api_types::tools::OutputTrust;
+use promptforge_api_types::tools::{OutputTrust, ToolError, ToolOutput};
 use promptforge_api_types::untrusted::GuardNonce;
 
 use crate::error::{Error, Result};
@@ -17,8 +23,8 @@ use crate::{ToolBinding, ToolCallCounts};
 
 /// The run coordinates a script-initiated dispatch reports under.
 ///
-/// [`dispatch_tool`] fires [`Observer::on_tool_result`] with them; a model
-/// tool-loop dispatch passes `None` instead and reports the result itself,
+/// [`prepare_dispatch`] fires [`Observer::on_tool_result`] with them; a
+/// model tool-loop dispatch passes `None` instead and reports the result itself,
 /// because it owns the model-issued call id the script path lacks. A script
 /// call carries no model-issued call id, so the report's `tool_call_id` is
 /// empty.
@@ -32,11 +38,25 @@ pub struct ScriptReport {
     pub turn: u32,
 }
 
+/// The run coordinates a model-issued dispatch reports under: the chain's
+/// script coordinates plus the call id the model issued.
+///
+/// [`dispatch_model_tool`] fires [`Observer::on_tool_result`] under
+/// `call_id`, so a host transcript correlates the result with the
+/// assistant tool-call record that requested it.
+#[derive(Debug, Clone)]
+pub struct ModelReport {
+    /// The chain, depth, and turn the call fired in.
+    pub script: ScriptReport,
+    /// The model-issued call id the result answers.
+    pub call_id: String,
+}
+
 /// The resolved outcome of one dispatched tool call: the final content -
 /// nonce-wrapped when untrusted - beside its trust marking. A model
 /// tool-loop dispatch reports the pair through [`Observer::on_tool_result`]
 /// itself; a script-initiated dispatch reads only the content, its report
-/// already fired inside [`dispatch_tool`].
+/// already fired inside [`prepare_dispatch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolDispatch {
     content: String,
@@ -64,29 +84,34 @@ impl ToolDispatch {
     }
 }
 
-/// Dispatches one bound tool call: the shared body the executors invoke.
+/// Applies the dispatch rules to one bound tool call's answer: the shared
+/// synchronous body every executor invokes once the tool has spoken.
 ///
-/// The sequence is fixed: the counts increment (dispatch attempted, even if
-/// the tool later errors), the call raced against cancellation, the
-/// succeeded/failed observation, then the trust rule - a trusted output
-/// passes verbatim, anything else is nonce-wrapped before it can reach a
-/// model turn or a calling script. A script-initiated call (`script` is
-/// `Some`) also fires [`Observer::on_tool_result`] with the final content;
-/// a model-loop call fires no content event here: the loop reports the
-/// returned [`ToolDispatch`] under the model-issued call id.
+/// The sequence is fixed: the counts increment when `counts` is `Some` (a
+/// host that counts the attempt itself, as [`dispatch_tool`] does, passes
+/// `None`), the succeeded/failed observation,
+/// then the trust rule - a trusted output passes verbatim, anything else is
+/// nonce-wrapped before it can reach a model turn or a calling script. A
+/// script-initiated call (`script` is `Some`) also fires
+/// [`Observer::on_tool_result`] with the final content; a model-loop call
+/// fires no content event here: the loop reports the returned
+/// [`ToolDispatch`] under the model-issued call id.
+///
+/// `call_result` is the tool's own answer, however the host obtained it.
+/// Nothing here awaits, so a host that performed the call on its own
+/// executor applies exactly these rules when the answer arrives.
 ///
 /// # Errors
-/// Returns [`Error::Interrupted`] when the run is cancelled mid-call,
-/// [`Error::Tool`] when the tool itself fails (its typed error retained as
-/// the cause), or the counts' own error when `binding`'s alias was never
-/// seeded.
+/// Returns [`Error::Tool`] when `call_result` is the tool's failure (its
+/// typed error retained as the cause), or the counts' own error when
+/// `binding`'s alias was never seeded.
 #[expect(
     clippy::too_many_arguments,
     reason = "the dispatch body names its full run coordinates in one call, exactly as the loop it was extracted from did"
 )]
-pub async fn dispatch_tool(
+pub fn prepare_dispatch(
     binding: &ToolBinding,
-    args: serde_json::Value,
+    call_result: std::result::Result<ToolOutput, ToolError>,
     counts: Option<&ToolCallCounts>,
     nonce: &GuardNonce,
     observer: &dyn Observer,
@@ -97,17 +122,6 @@ pub async fn dispatch_tool(
     if let Some(counts) = counts {
         counts.increment(binding.alias())?;
     }
-    // Race the tool call against cancellation so a slow or stuck tool
-    // cannot hold the run past a Ctrl-C. On cancel the tool future is
-    // dropped and the run ends promptly.
-    let call_result = tokio::select! {
-        biased;
-        () = cancel::wait_cancelled() => {
-            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-            return Err(Error::Interrupted);
-        }
-        result = binding.tool().call(args) => result,
-    };
     observer.observe(
         execution,
         section,
@@ -147,377 +161,113 @@ pub async fn dispatch_tool(
     Ok(ToolDispatch { content, trusted })
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use promptforge_api_types::cancel::CancelHandle;
-    use promptforge_api_types::observe::{NullObserver, Observation};
-    use promptforge_api_types::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
-    use serde_json::json;
-
-    use super::*;
-
-    const EXECUTION: &str = "dispatch-test";
-    const SECTION: &str = "Test";
-
-    /// Echoes the `value` argument, trusted or untrusted per construction.
-    struct EchoTool {
-        trusted: bool,
+/// Dispatches one bound tool call: performs the call here, then applies
+/// [`prepare_dispatch`] to its answer.
+///
+/// The counts increment first (a dispatch attempted, as this wrapper has
+/// always counted it), so an unseeded alias fails before the tool runs and
+/// a cancelled dispatch still counts. The call is then raced against
+/// cancellation so a slow or stuck tool cannot hold the run past a Ctrl-C;
+/// on cancel the tool future is dropped, the failed observation fires, and
+/// the run ends promptly. Everything else - observation, trust, the
+/// `ToolResult` report - is `prepare_dispatch`'s, which is handed `None`
+/// for the counts so the answer is not counted twice.
+///
+/// # Errors
+/// Returns the counts' own error when `binding`'s alias was never seeded,
+/// [`Error::Interrupted`] when the run is cancelled mid-call, or whatever
+/// [`prepare_dispatch`] returns for the tool's answer.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the async wrapper names the same run coordinates as the body it hands the answer to"
+)]
+pub async fn dispatch_tool(
+    binding: &ToolBinding,
+    args: serde_json::Value,
+    counts: Option<&ToolCallCounts>,
+    nonce: &GuardNonce,
+    observer: &dyn Observer,
+    execution: &str,
+    section: &str,
+    script: Option<ScriptReport>,
+) -> Result<ToolDispatch> {
+    if let Some(counts) = counts {
+        counts.increment(binding.alias())?;
     }
-
-    #[async_trait::async_trait]
-    impl Tool for EchoTool {
-        fn id(&self) -> ToolId {
-            ToolId::parse("tests/tools/echo").expect("valid id")
+    let call_result = tokio::select! {
+        biased;
+        () = cancel::wait_cancelled() => {
+            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+            return Err(Error::Interrupted);
         }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn wire_name(&self) -> &str {
-            "echo"
-        }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn description(&self) -> &str {
-            "echo the value argument"
-        }
-
-        fn parameters_schema(&self) -> serde_json::Value {
-            json!({ "type": "object" })
-        }
-
-        async fn call(
-            &self,
-            args: serde_json::Value,
-        ) -> std::result::Result<ToolOutput, ToolError> {
-            let text = format!("echoed: {}", args["value"].as_str().unwrap_or_default());
-            Ok(if self.trusted {
-                ToolOutput::trusted(text)
-            } else {
-                ToolOutput::untrusted(text)
-            })
-        }
-    }
-
-    /// Fails every call with a typed backend error carrying a cause.
-    struct FailingTool;
-
-    #[async_trait::async_trait]
-    impl Tool for FailingTool {
-        fn id(&self) -> ToolId {
-            ToolId::parse("tests/tools/failing").expect("valid id")
-        }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn wire_name(&self) -> &str {
-            "failing"
-        }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn description(&self) -> &str {
-            "always fail"
-        }
-
-        fn parameters_schema(&self) -> serde_json::Value {
-            json!({ "type": "object" })
-        }
-
-        async fn call(
-            &self,
-            _args: serde_json::Value,
-        ) -> std::result::Result<ToolOutput, ToolError> {
-            let cause = std::io::Error::other("upstream socket reset");
-            Err(
-                ToolError::with_source("the tool's own backend failed", cause)
-                    .with_kind(ToolErrorKind::Backend),
-            )
-        }
-    }
-
-    /// Sleeps far past any test deadline, so only cancellation can end it.
-    struct SlowTool;
-
-    #[async_trait::async_trait]
-    impl Tool for SlowTool {
-        fn id(&self) -> ToolId {
-            ToolId::parse("tests/tools/slow").expect("valid id")
-        }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn wire_name(&self) -> &str {
-            "slow"
-        }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn description(&self) -> &str {
-            "a deliberately slow tool"
-        }
-
-        fn parameters_schema(&self) -> serde_json::Value {
-            json!({ "type": "object" })
-        }
-
-        async fn call(
-            &self,
-            _args: serde_json::Value,
-        ) -> std::result::Result<ToolOutput, ToolError> {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            Ok(ToolOutput::trusted("too late"))
-        }
-    }
-
-    /// One recorded `on_tool_result` report: chain id, depth, turn, call
-    /// id, alias, content, and the trusted flag, field for field.
-    type ToolResultRecord = (u32, u32, u32, String, String, String, bool);
-
-    /// Records fixed observations and `on_tool_result` content reports.
-    #[derive(Default)]
-    struct Recorder {
-        observations: Mutex<Vec<Observation>>,
-        tool_results: Mutex<Vec<ToolResultRecord>>,
-    }
-
-    impl Observer for Recorder {
-        fn observe(&self, _execution: &str, _section: &str, event: Observation) {
-            self.observations
-                .lock()
-                .expect("the recorder mutex must not be poisoned")
-                .push(event);
-        }
-
-        fn on_tool_result(
-            &self,
-            _execution: &str,
-            _section: &str,
-            chain_id: u32,
-            depth: u32,
-            turn: u32,
-            tool_call_id: &str,
-            alias: &str,
-            content: &str,
-            trusted: bool,
-        ) {
-            self.tool_results
-                .lock()
-                .expect("the recorder mutex must not be poisoned")
-                .push((
-                    chain_id,
-                    depth,
-                    turn,
-                    tool_call_id.to_owned(),
-                    alias.to_owned(),
-                    content.to_owned(),
-                    trusted,
-                ));
-        }
-    }
-
-    fn binding(alias: &str, tool: Arc<dyn Tool>) -> ToolBinding {
-        ToolBinding::for_test(alias, "fixture capability", tool)
-    }
-
-    #[tokio::test]
-    async fn a_trusted_output_passes_verbatim_and_counts_increment() {
-        let counts = ToolCallCounts::new(["echo".to_owned()]);
-        let echo = binding("echo", Arc::new(EchoTool { trusted: true }));
-        let outcome = dispatch_tool(
-            &echo,
-            json!({ "value": "hi" }),
-            Some(&counts),
-            &GuardNonce::fresh(),
-            &NullObserver::default(),
-            EXECUTION,
-            SECTION,
-            None,
-        )
-        .await
-        .expect("the dispatch succeeds");
-        assert_eq!(outcome.content(), "echoed: hi");
-        assert!(outcome.trusted(), "a trusted output keeps its marking");
-        assert_eq!(
-            counts.get("echo").expect("the counts read"),
-            Some(1),
-            "an attempted dispatch increments the alias count"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_untrusted_output_is_nonce_wrapped() {
-        let echo = binding("echo", Arc::new(EchoTool { trusted: false }));
-        let outcome = dispatch_tool(
-            &echo,
-            json!({ "value": "hi" }),
-            None,
-            &GuardNonce::fresh(),
-            &NullObserver::default(),
-            EXECUTION,
-            SECTION,
-            None,
-        )
-        .await
-        .expect("the dispatch succeeds");
-        assert!(
-            !outcome.trusted(),
-            "an untrusted output reports its marking"
-        );
-        let content = outcome.content();
-        assert!(
-            content.contains("<untrusted_input_") && content.contains("</untrusted_input_"),
-            "an untrusted output must be wrapped, got: {content}"
-        );
-        assert!(
-            content.contains("echoed: hi"),
-            "the wrapped block must still carry the tool output, got: {content}"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn cancellation_interrupts_the_dispatch() {
-        let recorder = Recorder::default();
-        let slow = binding("slow", Arc::new(SlowTool));
-        let handle = CancelHandle::new();
-        handle.cancel();
-        let result = cancel::scope(
-            handle,
-            dispatch_tool(
-                &slow,
-                json!({}),
-                None,
-                &GuardNonce::fresh(),
-                &recorder,
-                EXECUTION,
-                SECTION,
-                None,
-            ),
-        )
-        .await;
-        assert!(
-            matches!(result, Err(Error::Interrupted)),
-            "a cancelled dispatch must interrupt, got {result:?}"
-        );
-        assert_eq!(
-            *recorder
-                .observations
-                .lock()
-                .expect("the recorder mutex must not be poisoned"),
-            vec![Observation::ToolCallFailed],
-            "a cancelled dispatch reports the failed observation"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_tool_failure_is_a_typed_tool_error_with_its_cause() {
-        let recorder = Recorder::default();
-        let failing = binding("failing", Arc::new(FailingTool));
-        let error = dispatch_tool(
-            &failing,
-            json!({}),
-            None,
-            &GuardNonce::fresh(),
-            &recorder,
-            EXECUTION,
-            SECTION,
-            None,
-        )
-        .await
-        .expect_err("the failing tool must fail the dispatch");
-        match &error {
-            Error::Tool { source, .. } => {
-                assert!(
-                    source.downcast_ref::<ToolError>().is_some(),
-                    "the tool's typed error must survive as the cause"
-                );
-            }
-            other => panic!("expected the typed tool error, got {other:?}"),
-        }
-        assert_eq!(
-            *recorder
-                .observations
-                .lock()
-                .expect("the recorder mutex must not be poisoned"),
-            vec![Observation::ToolCallFailed],
-        );
-    }
-
-    #[tokio::test]
-    async fn a_script_report_fires_on_tool_result_exactly_once() {
-        let recorder = Recorder::default();
-        let echo = binding("echo", Arc::new(EchoTool { trusted: true }));
-        dispatch_tool(
-            &echo,
-            json!({ "value": "hi" }),
-            None,
-            &GuardNonce::fresh(),
-            &recorder,
-            EXECUTION,
-            SECTION,
-            Some(ScriptReport {
-                chain_id: 3,
-                depth: 1,
-                turn: 2,
-            }),
-        )
-        .await
-        .expect("the dispatch succeeds");
-        assert_eq!(
-            *recorder
-                .tool_results
-                .lock()
-                .expect("the recorder mutex must not be poisoned"),
-            vec![(
-                3,
-                1,
-                2,
-                String::new(),
-                "echo".to_owned(),
-                "echoed: hi".to_owned(),
-                true,
-            )],
-            "a script-initiated dispatch reports its result exactly once"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_model_loop_dispatch_fires_no_content_report() {
-        let recorder = Recorder::default();
-        let echo = binding("echo", Arc::new(EchoTool { trusted: true }));
-        dispatch_tool(
-            &echo,
-            json!({ "value": "hi" }),
-            None,
-            &GuardNonce::fresh(),
-            &recorder,
-            EXECUTION,
-            SECTION,
-            None,
-        )
-        .await
-        .expect("the dispatch succeeds");
-        assert!(
-            recorder
-                .tool_results
-                .lock()
-                .expect("the recorder mutex must not be poisoned")
-                .is_empty(),
-            "a model-loop dispatch must fire no on_tool_result"
-        );
-    }
+        result = binding.tool().call(args) => result,
+    };
+    prepare_dispatch(
+        binding,
+        call_result,
+        None,
+        nonce,
+        observer,
+        execution,
+        section,
+        script,
+    )
 }
+
+/// Dispatches one model-issued bound tool call: the shared
+/// [`dispatch_tool`] body under the model-loop failure rule, then the
+/// [`Observer::on_tool_result`] report under the model's call id.
+///
+/// A model-issued call always resumes with content: the tool's own failure
+/// ([`Error::Tool`]) becomes the call's result - the error message
+/// nonce-wrapped as untrusted - so the model reads the failure and the
+/// round continues; `prepare_dispatch` has already fired the failed
+/// observation. Cancellation, the counts increment, and every other
+/// dispatch failure still propagate.
+///
+/// # Errors
+/// Returns [`Error::Interrupted`] when the run is cancelled mid-call, or
+/// the counts' own error when `binding`'s alias was never seeded.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the model-issued body names the same run coordinates as the script body it wraps"
+)]
+pub async fn dispatch_model_tool(
+    binding: &ToolBinding,
+    args: serde_json::Value,
+    counts: Option<&ToolCallCounts>,
+    nonce: &GuardNonce,
+    observer: &dyn Observer,
+    execution: &str,
+    section: &str,
+    report: &ModelReport,
+) -> Result<ToolDispatch> {
+    let outcome = match dispatch_tool(
+        binding, args, counts, nonce, observer, execution, section, None,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(Error::Tool { message, .. }) => ToolDispatch {
+            content: nonce.wrap(&message),
+            trusted: false,
+        },
+        Err(error) => return Err(error),
+    };
+    observer.on_tool_result(
+        execution,
+        section,
+        report.script.chain_id,
+        report.script.depth,
+        report.script.turn,
+        &report.call_id,
+        binding.alias(),
+        &outcome.content,
+        outcome.trusted,
+    );
+    Ok(outcome)
+}
+
+#[cfg(test)]
+#[path = "dispatch-tests.rs"]
+mod tests;

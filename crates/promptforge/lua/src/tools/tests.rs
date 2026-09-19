@@ -6,8 +6,8 @@ use serde_json::json;
 use super::decode::{add_local_params_schema, collect_tools_add_entries, tool_alias};
 use super::userdata::LuaToolHandle;
 use super::{install_tool_call_counts, install_tools};
-use crate::handles::{LuaFanoutResult, ToolSet};
-use crate::scope::ToolRuntime;
+use crate::handles::ToolSet;
+use crate::scope::{TaskAllowlist, ToolRuntime};
 use crate::{SectionVm, ToolBinding};
 use promptforge_api_types::tools::ToolId;
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,11 @@ fn fresh_access() -> Arc<promptforge_store::Access> {
             .expect("the stock backend acquires"),
     )
 }
+
+/// A userdata that is not a Tool object, for the foreign-userdata rejection.
+struct Foreign;
+
+impl mlua::UserData for Foreign {}
 
 fn echo_handle() -> LuaToolHandle {
     LuaToolHandle::from_binding(
@@ -62,10 +67,8 @@ fn tool_alias_rejects_other_types_and_other_userdata() {
     );
     // A userdata that is not a Tool object takes the same rejection; the
     // borrow failure must not leak mlua's type-mismatch wording.
-    let fanout = lua
-        .create_userdata(LuaFanoutResult::success(json!(1), "text"))
-        .expect("userdata");
-    let other = tool_alias(&Value::UserData(fanout)).expect_err("not a Tool object");
+    let foreign = lua.create_userdata(Foreign).expect("userdata");
+    let other = tool_alias(&Value::UserData(foreign)).expect_err("not a Tool object");
     assert!(
         other
             .to_string()
@@ -144,13 +147,15 @@ fn add_local_params_schema_rejects_an_unsupported_type() {
     );
 }
 
-/// Installs the tools namespace on a fresh VM and returns it.
-fn lua_with_tools() -> Lua {
+/// Installs the tools namespace on a fresh VM and returns it with the
+/// runtime the namespace records into.
+fn lua_with_tools_and_runtime() -> (Lua, Arc<Mutex<ToolRuntime>>) {
     let lua = Lua::new();
     let globals = lua.globals();
     let runtime = Arc::new(Mutex::new(ToolRuntime {
         added: Vec::new(),
         description_overrides: std::collections::BTreeMap::default(),
+        allowed_tasks: None,
     }));
     install_tools(
         &lua,
@@ -160,7 +165,62 @@ fn lua_with_tools() -> Lua {
         &crate::vm::LocalTools::default(),
     )
     .expect("the tools install cannot fail on a fresh VM");
-    lua
+    (lua, runtime)
+}
+
+/// Installs the tools namespace on a fresh VM and returns it.
+fn lua_with_tools() -> Lua {
+    lua_with_tools_and_runtime().0
+}
+
+#[test]
+fn allow_tasks_records_the_section_allowlist_and_rejects_bad_targets() {
+    let (lua, runtime) = lua_with_tools_and_runtime();
+    let allowlist = || {
+        runtime
+            .lock()
+            .expect("the runtime mutex is not poisoned")
+            .allowed_tasks
+            .clone()
+    };
+    assert_eq!(allowlist(), None, "nothing is allowed before the call");
+    lua.load("tools.allow_tasks()")
+        .exec()
+        .expect("the bare call allows any target");
+    assert_eq!(allowlist(), Some(TaskAllowlist::Any));
+    lua.load("tools.allow_tasks({ '## Research', ' ## Draft ' })")
+        .exec()
+        .expect("a list narrows the allowlist");
+    let narrowed = allowlist().expect("the list is recorded");
+    assert_eq!(
+        narrowed,
+        TaskAllowlist::Only(vec!["## Research".to_owned(), "## Draft".to_owned()]),
+        "the latest call replaces the earlier grant, headings trimmed"
+    );
+    assert!(narrowed.permits(" ## Draft") && !narrowed.permits("## Other"));
+    for (call, fragment) in [
+        ("tools.allow_tasks('## Research')", "got string"),
+        ("tools.allow_tasks({})", "at least one section"),
+        ("tools.allow_tasks({ 7 })", "got integer"),
+        ("tools.allow_tasks({ '  ' })", "non-empty"),
+    ] {
+        let error = lua
+            .load(call)
+            .exec()
+            .expect_err("a malformed allowlist is refused");
+        assert!(
+            error.to_string().contains(fragment),
+            "{call} names its fault: {error}"
+        );
+    }
+    assert_eq!(
+        allowlist(),
+        Some(TaskAllowlist::Only(vec![
+            "## Research".to_owned(),
+            "## Draft".to_owned()
+        ])),
+        "a refused call leaves the recorded allowlist alone"
+    );
 }
 
 #[test]
@@ -196,7 +256,8 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
         .expect("section VM construction cannot fail");
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host injection cannot fail");
-    vm.install_coro_shims().expect("the shim prelude installs");
+    vm.install_coro_shims(24, 8)
+        .expect("the shim prelude installs");
     let (call_is_function, bare_is_nil): (bool, bool) = vm
         .lua()
         .load("return type(tools.call) == 'function', tool_call == nil")

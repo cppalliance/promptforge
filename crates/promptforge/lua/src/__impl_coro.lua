@@ -5,13 +5,84 @@
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
 -- the host helper returning the hidden `var` data table as a plain deep
--- copy, and `models`/`tools` are the section's namespace tables, passed in
--- so the chunk never reads a global.
-local yield, var_snapshot, models, tools = ...
+-- copy, `models`/`tools`/`compactors` are the section's namespace tables,
+-- passed in so the chunk never reads a global, `max_tool_iterations` is
+-- the run's resolved round cap for `models.loop`, `error_value` builds the
+-- structured error table (`{ kind, message, ... }` under the host's shared
+-- metatable, whose `__tostring` is `message`), `stash_failure` records a
+-- block's raised value for the host before the guard re-raises it, and
+-- `normalize_failure` turns a Rust callback's raised failure (mlua's
+-- opaque userdata) into the error table, passing every other value
+-- through unchanged. The `tasks` namespace and the `fanout` shim live in
+-- their own chunks (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by
+-- the host right after this one over the failure helpers this chunk
+-- returns.
+local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
+  error_value, stash_failure, normalize_failure = ...
 
--- The (ok, result) envelope: level 0 suppresses the position prefix, so a
--- shim-raised error carries exactly the host's message.
---
+-- The base library's pcall and xpcall, captured before the replacements
+-- below are installed over the globals: the block guard needs the raw
+-- failure value so the host's runtime-error mapping keeps its source.
+local raw_pcall, raw_xpcall = pcall, xpcall
+
+-- math.type, captured at install for the same reason: the shim's type
+-- names must not move when author code rebinds `math`.
+local math_type = math.type
+
+-- The host's name for a value's type, as the protocol parse reports it:
+-- Lua folds integers and floats into "number", while the host names an
+-- integer "integer" and a float "number", so a shim-raised argument error
+-- reads exactly as the parse-raised one for the same value.
+local function host_type(value)
+  if math_type(value) == "integer" then return "integer" end
+  return type(value)
+end
+
+-- Every failure that reaches author code is one error table: `tostring`
+-- gives exactly the message, and a caller that branches reads `kind` and
+-- the kind's fields. Level 0 suppresses the position prefix (a table never
+-- gets one, but a string fallback would), so a shim-raised error carries
+-- exactly the host's message.
+local function raise(kind, fields)
+  error(error_value(kind, fields), 0)
+end
+
+-- The (ok, result) envelope's failure path. The host renders its typed
+-- error as the table already; a bare string (a hand-built envelope) is
+-- normalized to a `lua`-kind table so the shape holds without exception.
+local function fail(result)
+  if type(result) == "table" then error(result, 0) end
+  raise("lua", { message = tostring(result) })
+end
+
+-- pcall and xpcall, replacing the base library's over the globals so a
+-- host callback that fails directly from Rust (`tools.add`, `models.get`,
+-- a `sys` or `var` guard) reaches author code as the same error table a
+-- shim raise does, instead of mlua's opaque userdata that `err.kind`
+-- cannot index. Only a Rust-raised failure is rewritten; a string, an
+-- author's own table, and an error table already built pass through
+-- untouched. The raw pcall is yieldable, and so is this Lua frame, so a
+-- shim yield inside the protected function still suspends the block.
+local function pcall_outcome(ok, ...)
+  if ok then return true, ... end
+  return false, normalize_failure((...))
+end
+
+local function protected_call(f, ...)
+  return pcall_outcome(raw_pcall(f, ...))
+end
+
+-- The message handler sees the normalized failure; a non-function handler
+-- is left to the raw xpcall so its own argument error is unchanged.
+local function protected_xcall(f, handler, ...)
+  if type(handler) ~= "function" then
+    return raw_xpcall(f, handler, ...)
+  end
+  return raw_xpcall(f, function(failure)
+    return handler(normalize_failure(failure))
+  end, ...)
+end
+
 -- models.infer(handle?, prompt): an optional leading model handle runs the
 -- round on the handle's frozen binding; without one the driver resolves the
 -- section's current model. Invocation is namespace-only (A9): handles are
@@ -19,14 +90,14 @@ local yield, var_snapshot, models, tools = ...
 local function infer(...)
   local handle, prompt
   if select('#', ...) > 2 then
-    error("models.infer takes (handle?, prompt)", 0)
+    raise("lua", { message = "models.infer takes (handle?, prompt)" })
   elseif select('#', ...) == 2 then
     handle, prompt = ...
   else
     prompt = ...
   end
   local ok, result = yield({ op = "infer", prompt = prompt, handle = handle })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -37,20 +108,7 @@ local function call_section(target, input)
     input = input,
     var = var_snapshot(),
   })
-  if not ok then error(result, 0) end
-  return result
-end
-
--- The collection passes through unconverted; the driver runs the
--- member-wise conversion at the protocol boundary.
-local function fanout_collection(worker, collection)
-  local ok, result = yield({
-    op = "fanout",
-    worker = worker,
-    collection = collection,
-    var = var_snapshot(),
-  })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -61,7 +119,24 @@ end
 -- string, a structured binding's JSON output as a table.
 local function tools_call(alias_or_tool, args)
   local ok, result = yield({ op = "tool_call", alias = alias_or_tool, args = args })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
+  return result
+end
+
+-- The model-issued form of the same dispatch: `call_id` is the id the model
+-- attached to its tool call. The driver always resumes it with content (a
+-- tool's own failure becomes untrusted failure text) and fires ToolResult
+-- under the id. Shim-internal: the loop shim calls it per requested tool
+-- call; authors never see it, and a hand-built yield carrying `call_id` is
+-- refused as a malformed request when its shape is wrong.
+local function tools_call_as_model(call_id, alias_or_tool, args)
+  local ok, result = yield({
+    op = "tool_call",
+    alias = alias_or_tool,
+    args = args,
+    call_id = call_id,
+  })
+  if not ok then fail(result) end
   return result
 end
 
@@ -72,39 +147,127 @@ end
 -- site (pcall-able) with no second validator anywhere.
 local function chat(messages, opts)
   local ok, result = yield({ op = "chat", messages = messages, opts = opts })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
--- models.loop(handle?, messages, compactor?): the Rust-backed model-tool
--- loop over an author-owned message list. The host installs this as
--- models.loop in section VMs only; an agent VM never sees it. The leading
--- handle is optional: a userdata first argument selects the handle's frozen
--- binding, anything else is the messages argument (a wrong handle type is
--- the protocol parse's call error, exactly as for models.infer). The loop
--- appends every assistant message and correlated tool result to the list
--- and returns nil.
+-- Appends one record to the author's list. The list is a plain array (a
+-- messages.new() list keeps its builders behind __index, never as
+-- fields), so the append is an ordinary sequence store.
+local function append_record(messages, record)
+  messages[#messages + 1] = record
+end
+
+-- Drains the chain's pending model-task notices into the author's list
+-- ahead of a round: one yield, answered at once with the notices queued
+-- since the last drain (the engine's sentences saying how the model's
+-- tasks ended), each appended as a user record so the model reads them
+-- in its next round. A chain with no model tasks drains an empty list.
+local function drain_task_notices(messages)
+  local ok, notices = yield({ op = "drain_task_notices" })
+  if not ok then fail(notices) end
+  for index = 1, #notices do
+    append_record(messages, { role = "user", content = notices[index] })
+  end
+end
+
+-- The message the exit rules raise for an empty round when the round
+-- carried no phrase of its own.
+local EMPTY_MODEL_REPLY = "empty model reply"
+
+-- Invokes the selected compactor on an overflow round with the reason tag.
+-- The shipped policy raises typed context exhaustion from Rust; the raise
+-- is normalized into the structured error table before re-raising, so the
+-- kind reaches an author pcall and the host alike. A compactor that
+-- returns instead of raising is the deferred replacement shape, which the
+-- active surface refuses.
+local function compact(compactor, reason)
+  local ok, failure = raw_pcall(compactor, reason)
+  if ok then
+    raise("lua", {
+      message = "the selected compactor returned without raising: replacement compactors are "
+        .. "deferred; compactors.fail is the only shipped policy",
+    })
+  end
+  error(normalize_failure(failure), 0)
+end
+
+-- models.loop(handle?, messages, compactor?): the model-tool loop over an
+-- author-owned message list, driven here over `chat` and `tool_call`
+-- yields so every network wait inside it is an ordinary suspension. The
+-- host installs this as models.loop in section VMs only; an agent VM
+-- never sees it. The leading handle is optional: a userdata first argument
+-- selects the handle's frozen binding, anything else is the messages
+-- argument (a wrong handle type is the protocol parse's call error,
+-- exactly as for models.infer). The compactor defaults to compactors.fail.
+--
+-- Per round: drain pending task notices, yield one `chat` over the list;
+-- on an overflow round invoke the compactor; on tool calls yield one
+-- `tool_call` per call under its call id, buffer every result, then append
+-- the assistant tool-call record and one tool record per result, so the
+-- list never shows a half-answered batch; on a reply append it and return
+-- nil; on an empty reply with `finish_reason == "stop"` after at least one
+-- answered tool call append an empty assistant record and return nil (the
+-- model's clean exit); on any other empty reply raise empty_model_reply.
+-- Past the round cap raise tool_loop_exhausted. The shim emits no events:
+-- the scheduler reports each round as it applies the round's answer.
 local function models_loop(...)
   local handle, messages, compactor
   if type((...)) == 'userdata' then
     if select('#', ...) > 3 then
-      error("models.loop takes (handle?, messages, compactor?)", 0)
+      raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
     end
     handle, messages, compactor = ...
   else
     if select('#', ...) > 2 then
-      error("models.loop takes (handle?, messages, compactor?)", 0)
+      raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
     end
     messages, compactor = ...
   end
-  local ok, result = yield({
-    op = "loop",
-    handle = handle,
-    messages = messages,
-    compactor = compactor,
-  })
-  if not ok then error(result, 0) end
-  return result
+  if compactor == nil then
+    compactor = compactors.fail
+  elseif type(compactor) ~= "function" then
+    raise("lua", { message = "compactor must be a function, got " .. host_type(compactor) })
+  end
+  -- Answered dispatches: any call that received a result record, a tool's
+  -- own failure included, counts toward the clean-exit rule.
+  local answered = 0
+  for _ = 1, max_tool_iterations do
+    drain_task_notices(messages)
+    local ok, round = yield({ op = "chat", messages = messages, handle = handle })
+    if not ok then fail(round) end
+    if round.overflow then
+      compact(compactor, round.overflow_reason)
+    end
+    local calls = round.tool_calls
+    if calls then
+      local results = {}
+      for index, call in ipairs(calls) do
+        results[index] = tools_call_as_model(call.id, call.name, call.arguments)
+      end
+      local record_calls = {}
+      for index, call in ipairs(calls) do
+        record_calls[index] = { id = call.id, name = call.name, arguments = call.arguments }
+      end
+      append_record(messages, { role = "assistant", content = "", tool_calls = record_calls })
+      for index, call in ipairs(calls) do
+        append_record(messages, { role = "tool", content = results[index], tool_call_id = call.id })
+      end
+      answered = answered + #calls
+    elseif round.reply then
+      append_record(messages, { role = "assistant", content = round.reply })
+      return nil
+    elseif round.finish_reason == "stop" and answered > 0 then
+      append_record(messages, { role = "assistant", content = "" })
+      return nil
+    else
+      raise("empty_model_reply", {
+        message = round.empty_detail or EMPTY_MODEL_REPLY,
+        finish_reason = round.finish_reason,
+      })
+    end
+  end
+  raise("tool_loop_exhausted", { message = "tool-call loop did not converge" })
 end
 
 -- user_input(): direct operator input through the run's input broker. The
@@ -115,10 +278,10 @@ end
 -- the call raises the host's message at the call site.
 local function user_input(...)
   if select('#', ...) > 0 then
-    error("user_input takes no arguments", 0)
+    raise("lua", { message = "user_input takes no arguments" })
   end
   local ok, text, available = yield({ op = "user_input" })
-  if not ok then error(text, 0) end
+  if not ok then fail(text) end
   return text, available
 end
 
@@ -133,8 +296,36 @@ local function store_request(store_op, fields)
   fields.op = "store"
   fields.store_op = store_op
   local ok, result = yield(fields)
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
+end
+
+-- The block guard: the host runs every block coroutine through it so a
+-- raised value is seen before mlua stringifies it. The raw `xpcall` is
+-- yieldable, so the block's shim yields pass straight through; a return
+-- passes through unchanged; a failure is stashed for the host (which reads
+-- it back as the structured error when it is one of our tables) and
+-- re-raised as the same value, so mlua's rendering, the retained-error
+-- substitution, and the jump transfer marker all behave exactly as without
+-- the guard. The stash happens in the message handler, which runs at the
+-- raise point with the failing frames still on the stack, so the host can
+-- record the real traceback there; by the time the guard re-raises, the
+-- block's frames are unwound and mlua would see only the guard's own. The
+-- guard deliberately bypasses the normalizing `pcall`: a Rust callback's
+-- failure must reach the host as mlua's own error so the runtime-error
+-- mapping keeps its source.
+local function guard_handler(failure)
+  stash_failure(failure)
+  return failure
+end
+
+local function guard_outcome(ok, ...)
+  if ok then return ... end
+  error((...), 0)
+end
+
+local function guard(block)
+  return guard_outcome(raw_xpcall(block, guard_handler))
 end
 
 local function store_write(path, contents)
@@ -182,11 +373,18 @@ end
 
 return {
   call = call_section,
-  fanout = fanout_collection,
+  -- The failure helpers, handed to the `tasks` and `fanout` chunks
+  -- (`__impl_tasks.lua`, `__impl_fanout.lua`) so their shims raise the one
+  -- error shape this prelude defines.
+  helpers = { raise = raise, fail = fail, host_type = host_type },
   chat = chat,
   infer = infer,
   loop = models_loop,
+  model_tool_call = tools_call_as_model,
   user_input = user_input,
+  guard = guard,
+  pcall = protected_call,
+  xpcall = protected_xcall,
   store = {
     write = store_write,
     append = store_append,

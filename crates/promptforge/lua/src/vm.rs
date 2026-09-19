@@ -4,11 +4,11 @@ use super::{
     Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
     ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer,
     Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
-    ToolRuntime, ToolSet, Value, detail, guarded_var, harden, install_compactors,
+    ToolRuntime, ToolSet, Value, block_guard, detail, guarded_var, harden, install_compactors,
     install_instruction_budget, install_log, install_messages, install_models,
     install_shim_prelude, install_store_table,
     install_tool_call_counts as install_tool_call_counts_impl, install_tools, install_untrusted,
-    log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
+    log_byte_budget, resolve_section_target, scalar_return, seal_sys, take_failure, var_to_json,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -261,6 +261,7 @@ impl SectionVm {
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
+                allowed_tasks: None,
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             jump_slot: Arc::new(Mutex::new(None)),
@@ -553,33 +554,29 @@ impl SectionVm {
         )
     }
 
-    /// Installs `call`, `jump`, `fanout`, and `list_from_section` as
-    /// persistent globals for the section's whole lifecycle.
+    /// Installs `call`, `jump`, and `list_from_section` as persistent
+    /// globals for the section's whole lifecycle.
     ///
     /// Called once by the engine after host injection. The callbacks own
     /// their run context, so the closures stay valid across every chunk this
     /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
     /// clone of the VM's jump slot; the slot is reset before each chunk and
-    /// read after it by the control-run path. The `call` and `fanout`
-    /// closures snapshot this VM's `var` at call time (reading the hidden
-    /// data table through the in-scope `&Lua`) and hand the JSON to their
-    /// callback, so a contained chain or arm seeds from a clone and its
-    /// writes never reach this VM.
+    /// read after it by the control-run path. The `call` closure snapshots
+    /// this VM's `var` at call time (reading the hidden data table through
+    /// the in-scope `&Lua`) and hands the JSON to its callback, so a
+    /// contained chain seeds from a clone and its writes never reach this
+    /// VM.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
     #[cfg(test)]
-    pub(crate) fn install_control_globals<E, F, L>(
+    pub(crate) fn install_control_globals<E, L>(
         &self,
         call_callback: E,
-        fanout_callback: F,
         list_callback: L,
     ) -> Result<()>
     where
         E: Fn(Value, Option<String>, Json) -> std::result::Result<String, Error> + Send + 'static,
-        F: Fn(String, Vec<Json>, Json) -> std::result::Result<Vec<super::LuaFanoutResult>, Error>
-            + Send
-            + 'static,
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
     {
         let globals = self.lua.globals();
@@ -592,17 +589,6 @@ impl SectionVm {
             .map_err(Error::lua)?;
         globals.raw_set("call", call_fn).map_err(Error::lua)?;
         self.install_jump_global(&globals)?;
-        let fanout_fn = self
-            .lua
-            .create_function(move |lua, (worker, collection): (String, Value)| {
-                let items = crate::collection::collection_to_items(lua, &collection)
-                    .map_err(mlua::Error::external)?;
-                let var = var_to_json(lua).map_err(mlua::Error::external)?;
-                let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
-                pack_sequence(lua, replies)
-            })
-            .map_err(Error::lua)?;
-        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)?;
         self.install_list_global(&globals, list_callback)
     }
 
@@ -610,7 +596,7 @@ impl SectionVm {
     /// `list_from_section` as Rust callbacks (neither suspends).
     ///
     /// The suspending calls (`models.infer`, `call`, `fanout`,
-    /// `tools.call`) are the yield shims installed by
+    /// `tools.call`, `tasks.*`) are the yield shims installed by
     /// [`install_coro_shims`](Self::install_coro_shims).
     ///
     /// # Errors
@@ -626,12 +612,20 @@ impl SectionVm {
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `call`,
-    /// `fanout`, `tools.call`).
+    /// `fanout`, `tools.call`, the `tasks` namespace). `max_tool_iterations`
+    /// is the run's resolved round cap for the `models.loop` shim a section
+    /// install adds afterward; a VM that never installs the loop shim
+    /// passes any value. `max_fanout_concurrency` is the run's cap on the
+    /// arms one `fanout` keeps live at once.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
-    pub fn install_coro_shims(&mut self) -> Result<()> {
-        install_shim_prelude(&self.lua)
+    pub fn install_coro_shims(
+        &mut self,
+        max_tool_iterations: usize,
+        max_fanout_concurrency: usize,
+    ) -> Result<()> {
+        install_shim_prelude(&self.lua, max_tool_iterations, max_fanout_concurrency)
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {
@@ -968,8 +962,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
-    #[expect(dead_code, reason = "wired up by the local-tools dispatch step")]
-    pub(crate) fn has_local_tool(&self, alias: &str) -> Result<bool> {
+    pub fn has_local_tool(&self, alias: &str) -> Result<bool> {
         self.local_tools.contains(alias)
     }
 
@@ -1086,10 +1079,19 @@ impl SectionVm {
     /// with [`resume_block_coro`](Self::resume_block_coro). No observation
     /// events fire here; the driver owns the chunk observation boundaries.
     ///
+    /// The coroutine body is the shim's block guard, resumed first with
+    /// the block function: the guard runs the block under `xpcall`, whose
+    /// handler stashes a failure and its raise-point traceback, and
+    /// re-raises the same value, so a structured error table a shim raised
+    /// reaches the host as a typed [`Error::Raised`] rather than only as
+    /// mlua's stringification, and a Lua-raised error keeps the author's
+    /// frames for the prompt-line mapping.
+    ///
     /// # Errors
     /// Returns [`Error::Lua`] if the jump slot is poisoned, the program
-    /// cannot load, or the thread cannot be created or hooked; a block
-    /// failure returns the mapped runtime error.
+    /// cannot load, the shim prelude never ran on this VM, or the thread
+    /// cannot be created or hooked; a block failure returns the mapped
+    /// runtime error.
     pub fn start_block_coro(&self, program: &LuaProgram) -> Result<CoroStep> {
         {
             let mut slot = self
@@ -1099,9 +1101,10 @@ impl SectionVm {
             *slot = None;
         }
         let function = program.load(&self.lua)?;
-        let thread = self.lua.create_thread(function).map_err(Error::lua)?;
+        let guard = block_guard(&self.lua)?;
+        let thread = self.lua.create_thread(guard).map_err(Error::lua)?;
         self.instruction_budget.install_on_thread(&thread)?;
-        let result = thread.resume::<MultiValue>(());
+        let result = thread.resume::<MultiValue>(function);
         self.step_block_coro(program, thread, result)
     }
 
@@ -1137,14 +1140,16 @@ impl SectionVm {
     /// Resumes a suspended block coroutine with the driver's answer.
     ///
     /// The answer renders to its `(ok, result)` envelope on this VM. On a
-    /// failure answer the envelope carries only the display string for the
-    /// shim to raise, and the typed error the answer owned is
-    /// substituted back when the shim-raised error surfaces as the
-    /// coroutine's failure (the LUA-012 contract), so the Rust caller
-    /// receives the structured error rather than a string.
+    /// failure answer the envelope carries the error's structured table
+    /// (`kind`, `message`, fields) for the shim to raise, and the typed
+    /// error the answer owned is substituted back when the shim-raised
+    /// error surfaces as the coroutine's failure (the LUA-012 contract), so
+    /// the Rust caller receives the structured error rather than a string.
     ///
     /// The error type is the driver's own (`E`); this crate's internal
-    /// failures convert into it through [`From`].
+    /// failures convert into it through [`From`], and its
+    /// [`ErrorValue`](crate::ErrorValue) rendering supplies the table's
+    /// kind.
     ///
     /// # Errors
     /// Same contract as [`start_block_coro`](Self::start_block_coro), plus
@@ -1156,7 +1161,7 @@ impl SectionVm {
         answer: Answer<E>,
     ) -> std::result::Result<CoroStep, E>
     where
-        E: std::fmt::Display + From<Error>,
+        E: crate::ErrorValue + From<Error>,
     {
         let (envelope, retained) = answer.into_envelope(&self.lua).map_err(Error::lua)?;
         match self.resume_block_coro(program, thread, envelope) {
@@ -1186,22 +1191,47 @@ impl SectionVm {
                 if let Some(heading) = self.take_jump()? {
                     return Ok(CoroStep::Done(LuaBlockResult::Jump(heading)));
                 }
-                let returned = result.map_err(|error| program.map_runtime_error(&error))?;
+                let returned = match result {
+                    Ok(returned) => returned,
+                    Err(error) => return Err(self.block_failure(program, &error)?),
+                };
                 Ok(CoroStep::Done(LuaBlockResult::Returned(scalar_return(
                     returned,
                 )?)))
             }
         }
     }
+
+    /// Classifies a block coroutine's failure: the guard's stash restores
+    /// the raise-point traceback onto a Lua-raised error first (the guard's
+    /// re-raise is what killed the coroutine, so mlua's own traceback shows
+    /// only the guard's frame); cancellation and host quotas then map
+    /// through [`LuaProgram::map_runtime_error`]; otherwise a structured
+    /// error table the guard stashed is kept as [`Error::Raised`], except a
+    /// `lua`-kind table, whose mapped runtime error carries the same
+    /// message with its source and the mapped prompt line. The stash is
+    /// taken on every failure so it never goes stale.
+    fn block_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Result<Error> {
+        let stashed = take_failure(&self.lua)?;
+        let mapped = program.map_runtime_error(&stashed.restore_traceback(error));
+        if matches!(mapped, Error::Interrupted | Error::LuaQuota { .. }) {
+            return Ok(mapped);
+        }
+        Ok(match stashed.raised {
+            Some(raised) if raised.kind != crate::ErrorKind::Lua => Error::Raised(raised),
+            _ => mapped,
+        })
+    }
 }
 
 /// Whether a block coroutine's failure is the shim's re-raise of the
-/// answer's retained typed error: the shim raises `error(result, 0)`, so the
-/// inner `mlua` runtime message's first line is exactly the retained error's
-/// display. The comparison reads the retained `mlua` source rather than the
-/// mapped message, whose `Display` carries mlua's `runtime error: ` prefix.
-/// A block that caught the shim's error and failed on its own keeps its own
-/// error.
+/// answer's retained typed error: the shim raises `error(result, 0)` on the
+/// error table, whose `tostring` is the message, so the inner `mlua`
+/// runtime message's first line (or the kept table's message) is exactly
+/// the retained error's display. The comparison reads the retained `mlua`
+/// source rather than the mapped message, whose `Display` carries mlua's
+/// `runtime error: ` prefix. A block that caught the shim's error and
+/// failed on its own keeps its own error.
 fn coroutine_failure_is<E: std::fmt::Display>(failure: &Error, retained: &E) -> bool {
     let display = retained.to_string();
     match failure {
@@ -1212,6 +1242,7 @@ fn coroutine_failure_is<E: std::fmt::Display>(failure: &Error, retained: &E) -> 
             _ => false,
         },
         Error::Lua(message) => message.lines().next() == Some(display.as_str()),
+        Error::Raised(raised) => raised.message.lines().next() == Some(display.as_str()),
         _ => false,
     }
 }

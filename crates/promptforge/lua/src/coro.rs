@@ -1,10 +1,11 @@
 //! The coroutine-protocol shim layer: per-VM Lua yield wrappers for the
 //! suspending host calls.
 //!
-//! Yield cannot cross the C boundary, so `models.infer`, `call`, `fanout`,
-//! and `tools.call` are Lua shims (source in `__impl_coro.lua` beside this
-//! file) that `coroutine.yield` a request table and interpret the two
-//! resume values as the `(ok, result)` envelope; coroutine driving itself
+//! Yield cannot cross the C boundary, so `models.infer`, `call`,
+//! `tools.call`, the `tasks` namespace, and `fanout` are Lua shims (source
+//! in the `__impl_*.lua` files beside this one) that `coroutine.yield` a
+//! request table and interpret the resume values as the `(ok, result)`
+//! envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
 //! pulled in with `include_str!` so chunk line 1 is file line 1, compiled
 //! once through the usual [`LuaProgram`] machinery, and loaded per VM. The
@@ -17,6 +18,7 @@ use std::sync::LazyLock;
 use mlua::{Function, Table, Value};
 
 use super::{Error, Lua, LuaProgram, Result, SharedSource, StdLib, var_snapshot_table};
+use crate::error_value::{Raised, install_error_value, install_normalize_failure, raised_from};
 
 /// The shim chunk's name: `@`-prefixed so PUC renders it verbatim as a file
 /// path, making unexpected shim errors clickable `file:line:` references.
@@ -24,6 +26,23 @@ const SHIM_CHUNK_NAME: &str = "@crates/promptforge-api-runtime/src/lua/__impl_co
 
 /// The shim source, embedded verbatim so chunk line 1 is file line 1.
 const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
+
+/// The `tasks` namespace chunk's name, `@`-prefixed as the prelude's is.
+const TASKS_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_tasks.lua";
+
+/// The `tasks` namespace source: spawn, the waits, the checks, note, and
+/// cancel, split from the prelude so neither chunk outgrows the file
+/// ceiling. It runs over the prelude's failure helpers.
+const TASKS_SOURCE: &str = include_str!("__impl_tasks.lua");
+
+/// The `fanout` chunk's name, `@`-prefixed as the prelude's is.
+const FANOUT_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_fanout.lua";
+
+/// The `fanout` shim source: Lua over the task protocol (`spawn`,
+/// `when_any`, `cancel`), split from the prelude for the same file-ceiling
+/// reason. It runs over the prelude's failure helpers plus the collection
+/// enumerator, the item renderer, and the run's arm-concurrency cap.
+const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
 
 /// The registry key for the shim's `chat`, stashed by the prelude install so
 /// an agent host can install it as `models.chat`. The registry is host-side
@@ -36,6 +55,14 @@ const CHAT_REGISTRY: &str = "promptforge.impl_coro.chat";
 /// host-side only: an agent VM's `models.loop` stays nil because nothing
 /// ever reads this stash there.
 const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
+
+/// The registry key for the shim's model-issued `tool_call` form, stashed
+/// by the prelude install so a test host can install it as
+/// `tools.call_as_model` and drive the driver's `call_id` path from a
+/// fixture section. The registry is host-side only: in production the
+/// loop shim reaches the function directly inside the prelude chunk, and
+/// no VM ever installs it as a global.
+const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
 
 /// The registry key for the shim's `user_input`, stashed by the prelude
 /// install so a section VM's host can install it as the `user_input`
@@ -51,6 +78,23 @@ const USER_INPUT_REGISTRY: &str = "promptforge.impl_coro.user_input";
 /// interleaving for the claims model to govern.
 const STORE_REGISTRY: &str = "promptforge.impl_coro.store";
 
+/// The registry key for the shim's block guard, stashed by the prelude
+/// install so [`block_guard`] can wrap every block coroutine the VM starts.
+const GUARD_REGISTRY: &str = "promptforge.impl_coro.guard";
+
+/// The registry key of the last value a guarded block raised, written by
+/// the guard's `stash_failure` capture from the message handler at the
+/// raise point and taken by [`take_failure`] when the failure reaches the
+/// host.
+const FAILURE_REGISTRY: &str = "promptforge.impl_coro.failure";
+
+/// The registry key of the traceback recorded beside the stashed failure:
+/// the coroutine's stack at the raise point, before the guard's `xpcall`
+/// unwinds the block's frames. The guard's re-raise happens after that
+/// unwinding, so the traceback mlua appends to the re-raised error shows
+/// only the guard's own frame; this one carries the author's.
+const FAILURE_TRACEBACK_REGISTRY: &str = "promptforge.impl_coro.failure_traceback";
+
 /// The shim program, compiled once and loaded per VM. Compilation of the
 /// bundled source fails only on a crate bug, so the payload is a shareable
 /// [`SharedSource`] cause (the crate `Error` is not `Clone`), re-wrapped as
@@ -60,23 +104,59 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
         LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME).map_err(SharedSource::new)
     });
 
+/// The `tasks` namespace program, compiled once and loaded per VM after the
+/// prelude, under the same failure contract.
+static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(TASKS_SOURCE, TASKS_CHUNK_NAME).map_err(SharedSource::new)
+    });
+
+/// The `fanout` program, compiled once and loaded per VM after the prelude,
+/// under the same failure contract.
+static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(FANOUT_SOURCE, FANOUT_CHUNK_NAME).map_err(SharedSource::new)
+    });
+
 /// Installs the yield shims on a VM whose host tables already exist.
 ///
 /// Scheduler-mode VMs load the coroutine standard library for the shim's
 /// `yield` capture (legacy VMs keep exactly `STRING | TABLE | MATH`); the
 /// `coroutine` global is stripped again before returning, so author code
 /// cannot yield directly and a hand-rolled yield fails the driver's strict
-/// validation. The `models` and `tools` tables are passed to the shim chunk
-/// as arguments, so the chunk never reads a global; the chunk shims
-/// `models.infer` and installs `tools.call`, and the `call`/`fanout` shims
-/// come back for the host to install. The `models.loop` shim is stashed in
-/// the registry for [`install_section_loop_shim`], so agent VMs - which run
-/// this prelude too - never receive it.
+/// validation. The `models`, `tools`, and `compactors` tables are passed
+/// to the shim chunk as arguments, so the chunk never reads a global; the
+/// chunk shims `models.infer` and installs `tools.call`, and the `call`
+/// shim comes back for the host to install as a global. The `tasks`
+/// namespace is a second chunk, run over the same `yield` and
+/// `var_snapshot` captures plus the prelude's returned failure helpers,
+/// and installed as the `tasks` global; `fanout` is a third, run over the
+/// same captures plus the collection enumerator, the item renderer, and
+/// `max_fanout_concurrency` (the run's cap on live arms), and installed
+/// as the `fanout` global. The `models.loop` shim is stashed in the
+/// registry for [`install_section_loop_shim`], so agent VMs - which run
+/// this prelude too - never receive it. `max_tool_iterations` is the
+/// loop's round cap, the run's resolved value, captured by the chunk so
+/// the shim needs no host call to read it.
+///
+/// Three further captures give the chunk the structured error shape:
+/// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
+/// every failure takes on its way to author code, `stash_failure` lets
+/// the block guard record a raised value for [`take_failure`] before mlua
+/// stringifies it, and `normalize_failure` rewrites a Rust callback's
+/// raised failure into the same table. The chunk's `pcall` and `xpcall`
+/// replacements, which run every caught value through that capture, are
+/// installed over the base library's globals here, so a host callback that
+/// fails directly from Rust reaches author code in the one shape.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
 /// install step fails.
-pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
+pub(crate) fn install_shim_prelude(
+    lua: &Lua,
+    max_tool_iterations: usize,
+    max_fanout_concurrency: usize,
+) -> Result<()> {
     lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
     let globals = lua.globals();
     let coroutine: Table = globals.raw_get("coroutine").map_err(Error::lua)?;
@@ -86,20 +166,92 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = globals.raw_get("models").map_err(Error::lua)?;
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
+    let compactors: Table = globals.raw_get("compactors").map_err(Error::lua)?;
+    let error_value = install_error_value(lua).map_err(Error::lua)?;
+    let stash_failure = lua
+        .create_function(|lua, failure: Value| {
+            // Called from the guard's message handler, so the failing
+            // frames are still on this coroutine's stack: level 1 starts
+            // the traceback at the handler, above this capture's own frame.
+            let traceback = lua.traceback(None, 1)?;
+            lua.set_named_registry_value(FAILURE_TRACEBACK_REGISTRY, traceback)?;
+            lua.set_named_registry_value(FAILURE_REGISTRY, failure)
+        })
+        .map_err(Error::lua)?;
+    let normalize_failure = install_normalize_failure(lua).map_err(Error::lua)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
-        .call((yield_fn, var_snapshot, models, tools))
+        .call((
+            yield_fn.clone(),
+            var_snapshot.clone(),
+            models,
+            tools,
+            compactors,
+            max_tool_iterations,
+            error_value,
+            stash_failure,
+            normalize_failure,
+        ))
         .map_err(Error::lua)?;
+    let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;
+    lua.set_named_registry_value(GUARD_REGISTRY, guard)
+        .map_err(Error::lua)?;
+    for name in ["pcall", "xpcall"] {
+        let protected: Function = shims.raw_get(name).map_err(Error::lua)?;
+        globals.raw_set(name, protected).map_err(Error::lua)?;
+    }
     let call: Function = shims.raw_get("call").map_err(Error::lua)?;
     globals.raw_set("call", call).map_err(Error::lua)?;
-    let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
+    let helpers: Table = shims.raw_get("helpers").map_err(Error::lua)?;
+    let tasks: Table = TASKS_PROGRAM
+        .as_ref()
+        .map_err(Error::shared)?
+        .load(lua)?
+        .call((yield_fn.clone(), var_snapshot.clone(), helpers.clone()))
+        .map_err(Error::lua)?;
+    globals.raw_set("tasks", tasks).map_err(Error::lua)?;
+    // The enumerator answers `(members)` or `(nil, message)` so the shim
+    // raises the message as its own call error, exactly as the other
+    // author-argument failures surface at the call site.
+    let collection_members = lua
+        .create_function(|lua, collection: Value| {
+            match crate::collection::collection_members(lua, &collection) {
+                Ok(members) => Ok((Value::Table(members), Value::Nil)),
+                Err(error) => Ok((
+                    Value::Nil,
+                    Value::String(lua.create_string(error.to_string())?),
+                )),
+            }
+        })
+        .map_err(Error::lua)?;
+    let render_item = lua
+        .create_function(|lua, item: Value| {
+            crate::collection::render_item_value(lua, item).map_err(mlua::Error::external)
+        })
+        .map_err(Error::lua)?;
+    let fanout: Function = FANOUT_PROGRAM
+        .as_ref()
+        .map_err(Error::shared)?
+        .load(lua)?
+        .call((
+            yield_fn,
+            var_snapshot,
+            helpers,
+            max_fanout_concurrency,
+            collection_members,
+            render_item,
+        ))
+        .map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
     let chat: Function = shims.raw_get("chat").map_err(Error::lua)?;
     lua.set_named_registry_value(CHAT_REGISTRY, chat)
         .map_err(Error::lua)?;
     let models_loop: Function = shims.raw_get("loop").map_err(Error::lua)?;
     lua.set_named_registry_value(LOOP_REGISTRY, models_loop)
+        .map_err(Error::lua)?;
+    let model_tool_call: Function = shims.raw_get("model_tool_call").map_err(Error::lua)?;
+    lua.set_named_registry_value(MODEL_TOOL_CALL_REGISTRY, model_tool_call)
         .map_err(Error::lua)?;
     let user_input: Function = shims.raw_get("user_input").map_err(Error::lua)?;
     lua.set_named_registry_value(USER_INPUT_REGISTRY, user_input)
@@ -111,6 +263,87 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .raw_set("coroutine", Value::Nil)
         .map_err(Error::lua)?;
     Ok(())
+}
+
+/// Returns the shim's block guard for a VM whose shim prelude already ran.
+///
+/// The host creates every block coroutine from the guard and resumes it
+/// first with the block function: the guard runs the block under `xpcall`
+/// (yields pass through), stashes a raised value and the raise-point
+/// traceback for [`take_failure`] from the message handler, and re-raises
+/// the same value, so a shim's structured error table reaches the host
+/// intact instead of only as mlua's stringification.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude never ran on this VM.
+pub(crate) fn block_guard(lua: &Lua) -> Result<Function> {
+    lua.named_registry_value(GUARD_REGISTRY).map_err(Error::lua)
+}
+
+/// What the guard stashed for the last failure of a guarded block.
+#[derive(Debug, Default)]
+pub(crate) struct StashedFailure {
+    /// The raised value read back as a [`Raised`] when it is a structured
+    /// error table built on this VM; `None` when it was a plain string, an
+    /// author's own table, or a Rust callback's wrapped failure.
+    pub(crate) raised: Option<Raised>,
+    /// The coroutine's traceback at the raise point, `stack traceback:`
+    /// heading included, when the handler recorded one.
+    pub(crate) traceback: Option<String>,
+}
+
+impl StashedFailure {
+    /// Restores the raise-point traceback onto a Lua-raised failure.
+    ///
+    /// mlua appends the coroutine's traceback to a runtime error when the
+    /// coroutine dies, but the guard's re-raise is what kills it, so that
+    /// traceback shows the guard's frame and nothing of the block's. When
+    /// this stash recorded the real one, the appended tail is replaced with
+    /// it, so the line mapper sees the author's frames. A Rust callback's
+    /// wrapped failure carries its own traceback and is left untouched.
+    pub(crate) fn restore_traceback<'e>(
+        &self,
+        error: &'e mlua::Error,
+    ) -> std::borrow::Cow<'e, mlua::Error> {
+        let (mlua::Error::RuntimeError(message), Some(traceback)) = (error, &self.traceback) else {
+            return std::borrow::Cow::Borrowed(error);
+        };
+        let head = message
+            .rfind("\nstack traceback:")
+            .map_or(message.as_str(), |at| &message[..at]);
+        std::borrow::Cow::Owned(mlua::Error::RuntimeError(format!("{head}\n{traceback}")))
+    }
+}
+
+/// Takes what the guard stashed for the last failure of a guarded block.
+/// Both slots are cleared on every call, so a later failure never sees a
+/// stale value; the default (nothing raised, no traceback) when nothing
+/// was stashed.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if a registry slot cannot be read or cleared.
+pub(crate) fn take_failure(lua: &Lua) -> Result<StashedFailure> {
+    let failure: Value = lua
+        .named_registry_value(FAILURE_REGISTRY)
+        .map_err(Error::lua)?;
+    let traceback: Value = lua
+        .named_registry_value(FAILURE_TRACEBACK_REGISTRY)
+        .map_err(Error::lua)?;
+    if matches!(failure, Value::Nil) {
+        return Ok(StashedFailure::default());
+    }
+    lua.set_named_registry_value(FAILURE_REGISTRY, Value::Nil)
+        .map_err(Error::lua)?;
+    lua.set_named_registry_value(FAILURE_TRACEBACK_REGISTRY, Value::Nil)
+        .map_err(Error::lua)?;
+    let traceback = match traceback {
+        Value::String(text) => Some(text.to_str().map_err(Error::lua)?.to_owned()),
+        _ => None,
+    };
+    Ok(StashedFailure {
+        raised: raised_from(lua, &failure).map_err(Error::lua)?,
+        traceback,
+    })
 }
 
 /// Installs the section-only `models.loop` yield shim on a VM whose shim
@@ -171,6 +404,29 @@ pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
     models.raw_set("chat", chat).map_err(Error::lua)
+}
+
+/// Installs the model-issued `tool_call` form as `tools.call_as_model` on a
+/// VM whose shim prelude already ran, so a fixture section can yield a
+/// `tool_call` carrying a `call_id` straight at the driver's dispatch arm.
+///
+/// Test hosts are the only callers, so the install exists only under the
+/// `test-support` feature: in production the loop shim reaches the
+/// function directly inside the prelude chunk, and `tools.call_as_model`
+/// never exists in any VM - not stubbed, simply absent.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude was never installed on this
+/// VM, the `tools` table is absent, or the install fails.
+#[cfg(feature = "test-support")]
+pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
+    let model_tool_call: Function = lua
+        .named_registry_value(MODEL_TOOL_CALL_REGISTRY)
+        .map_err(Error::lua)?;
+    let tools: Table = lua.globals().raw_get("tools").map_err(Error::lua)?;
+    tools
+        .raw_set("call_as_model", model_tool_call)
+        .map_err(Error::lua)
 }
 
 /// Installs the store yield shims onto a VM's `store` table, replacing the

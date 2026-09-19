@@ -7,12 +7,25 @@
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
+use std::borrow::Cow;
+
+use promptforge_api_types::ids::TaskId;
 use promptforge_lua::Error as LuaError;
 use promptforge_model_client::Error as GatewayClientError;
 use promptforge_parser::Error as ParserError;
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+
+/// Renders task ids as a comma-separated list: the [`Error::TasksLive`]
+/// message and its `tasks` field.
+fn join_task_ids(tasks: &[TaskId]) -> String {
+    tasks
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// The crate's internal error substrate, spanning parsing, HTTP, and execution
 /// failures.
@@ -163,8 +176,11 @@ pub(crate) enum Error {
     #[error("{detail}")]
     #[non_exhaustive]
     EmptyModelReply {
-        /// Fixed phrase naming the empty product (and ignored reasoning).
-        detail: &'static str,
+        /// The phrase naming the empty product (and ignored reasoning): the
+        /// model client's fixed text when the client classified the turn,
+        /// or the message a Lua-side `empty_model_reply` raise carried, so
+        /// the error re-renders with the text the author saw.
+        detail: Cow<'static, str>,
         /// The choice's `finish_reason`, when the backend supplied one.
         finish_reason: Option<String>,
     },
@@ -252,6 +268,52 @@ pub(crate) enum Error {
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
     ToolLoopExhausted,
+
+    /// A chain ended while author-origin tasks it owned were still live.
+    ///
+    /// A spawned task ends with its owner, so a task the author neither
+    /// waited on nor cancelled is the author's bug: the chain's outcome
+    /// becomes this error (the run's for the root walk, the call's answer
+    /// for a `call` chain) and the leaked tasks are abandoned. The message
+    /// names the ids in spawn order; the Lua table carries them as `tasks`.
+    #[error(
+        "chain ended with author tasks still live: {}; wait on or cancel every task a chain spawns before it ends",
+        join_task_ids(.tasks)
+    )]
+    TasksLive {
+        /// The live author tasks, in spawn order.
+        tasks: Vec<TaskId>,
+    },
+
+    /// A task operation named a task the caller does not own.
+    ///
+    /// Only the spawning chain may wait on, inspect, or cancel a task; a
+    /// chain may additionally read the status of, and annotate, the task
+    /// it runs inside. An id that names no task at all is refused the same
+    /// way, so a caller learns nothing about tasks it never started.
+    #[error("task `{task}` is not a task this chain owns")]
+    TaskNotOwned {
+        /// The task the caller reached for.
+        task: TaskId,
+    },
+
+    /// A wait named a task whose result was already delivered once.
+    #[error("task `{task}` was already delivered: a task's result is taken by one wait")]
+    TaskConsumed {
+        /// The task whose result was taken.
+        task: TaskId,
+    },
+
+    /// The failure a wait delivers for a task its owner cancelled instead
+    /// of letting it end on its own: the member's `ok = false` error value,
+    /// kind `cancelled`, with a `task` field. An abandoned task is never
+    /// delivered - it lost its owner, and only the owner may wait - so
+    /// this is the one non-`Done` delivery.
+    #[error("task `{task}` was cancelled")]
+    TaskCancelled {
+        /// The task that was cancelled.
+        task: TaskId,
+    },
 
     /// The model referenced a tool outside the section's advertised scope.
     ///
@@ -491,7 +553,7 @@ impl From<GatewayClientError> for Error {
                 detail,
                 finish_reason,
             } => Error::EmptyModelReply {
-                detail,
+                detail: Cow::Borrowed(detail),
                 finish_reason,
             },
             GatewayClientError::ModelSetLock(message) => Error::Lua(message),
@@ -573,6 +635,122 @@ impl From<LuaError> for Error {
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
             LuaError::Internal(message) => Error::internal(message),
+            LuaError::Raised(raised) => Error::from_raised(raised),
+        }
+    }
+}
+
+/// The `task` field of a raised task-error table, when it parses.
+fn raised_task(raised: &promptforge_lua::Raised) -> Option<TaskId> {
+    raised.fields.get("task").and_then(|task| task.parse().ok())
+}
+
+impl Error {
+    /// Maps a structured error table that surfaced as a block's failure
+    /// onto the variant its kind names, so a Lua-side raise classifies as
+    /// the Rust-raised error it stands in for. A kind whose variant needs
+    /// structure the table does not carry (the tool-scope errors, the task
+    /// errors, `internal`) keeps its message as a Lua failure; those
+    /// classifications arrive with the shims that raise them.
+    fn from_raised(raised: promptforge_lua::Raised) -> Error {
+        match raised.kind {
+            promptforge_lua::ErrorKind::ToolLoopExhausted => Error::ToolLoopExhausted,
+            promptforge_lua::ErrorKind::ContextExhausted => match raised.overflow_reason() {
+                Some(reason) => Error::ContextExhausted { reason },
+                None => Error::Lua(raised.message),
+            },
+            promptforge_lua::ErrorKind::EmptyModelReply => Error::EmptyModelReply {
+                finish_reason: raised.fields.get("finish_reason").cloned(),
+                detail: Cow::Owned(raised.message),
+            },
+            promptforge_lua::ErrorKind::Cancelled => Error::Interrupted,
+            promptforge_lua::ErrorKind::Tool => Error::Tool {
+                message: raised.message.clone(),
+                source: Box::new(raised),
+            },
+            promptforge_lua::ErrorKind::TaskNotOwned => match raised_task(&raised) {
+                Some(task) => Error::TaskNotOwned { task },
+                None => Error::Lua(raised.message),
+            },
+            promptforge_lua::ErrorKind::TaskConsumed => match raised_task(&raised) {
+                Some(task) => Error::TaskConsumed { task },
+                None => Error::Lua(raised.message),
+            },
+            promptforge_lua::ErrorKind::OutOfScopeTool
+            | promptforge_lua::ErrorKind::UnboundTool
+            | promptforge_lua::ErrorKind::TasksLive
+            | promptforge_lua::ErrorKind::Lua
+            | promptforge_lua::ErrorKind::Internal => Error::Lua(raised.message),
+        }
+    }
+}
+
+/// The substrate's rendering into the Lua error table: the kind an author
+/// branches on and the kind's fields. Host-side failures the author cannot
+/// act on (transport, backend, configuration, store, input) render as
+/// `internal`; every Lua-phase failure renders as `lua`.
+impl promptforge_lua::ErrorValue for Error {
+    fn kind(&self) -> promptforge_lua::ErrorKind {
+        use promptforge_lua::ErrorKind;
+        match self {
+            Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::LuaQuota { .. }
+            | Error::Substitution(_) => ErrorKind::Lua,
+            Error::ContextExhausted { .. } => ErrorKind::ContextExhausted,
+            Error::EmptyModelReply { .. } => ErrorKind::EmptyModelReply,
+            Error::Interrupted | Error::TaskCancelled { .. } => ErrorKind::Cancelled,
+            Error::ToolLoopExhausted => ErrorKind::ToolLoopExhausted,
+            Error::TasksLive { .. } => ErrorKind::TasksLive,
+            Error::TaskNotOwned { .. } => ErrorKind::TaskNotOwned,
+            Error::TaskConsumed { .. } => ErrorKind::TaskConsumed,
+            Error::OutOfScopeToolCall { .. } => ErrorKind::OutOfScopeTool,
+            Error::UnboundToolCall { .. } => ErrorKind::UnboundTool,
+            Error::Tool { .. } => ErrorKind::Tool,
+            Error::ParseFrontmatter { .. }
+            | Error::ParseStructured { .. }
+            | Error::MissingEnv(_)
+            | Error::InvalidEnv(_)
+            | Error::InvalidConfig(_)
+            | Error::Config { .. }
+            | Error::GatewayDisabled
+            | Error::Http(_)
+            | Error::Backend { .. }
+            | Error::MalformedResponse(_)
+            | Error::MalformedResponseSource { .. }
+            | Error::BackendBodyRead { .. }
+            | Error::BindSchema { .. }
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::RequirementsUnmet { .. }
+            | Error::Internal { .. }
+            | Error::Input { .. }
+            | Error::Store(_)
+            | Error::Determinism(_)
+            | Error::TimestampFormat(_) => ErrorKind::Internal,
+        }
+    }
+
+    fn fields(&self) -> Vec<(String, String)> {
+        match self {
+            Error::ContextExhausted { reason } => {
+                vec![("reason".to_owned(), reason.tag().to_owned())]
+            }
+            Error::EmptyModelReply {
+                finish_reason: Some(finish_reason),
+                ..
+            } => vec![("finish_reason".to_owned(), finish_reason.clone())],
+            Error::OutOfScopeToolCall { name, .. } | Error::UnboundToolCall { name, .. } => {
+                vec![("name".to_owned(), name.clone())]
+            }
+            Error::TasksLive { tasks } => vec![("tasks".to_owned(), join_task_ids(tasks))],
+            Error::TaskNotOwned { task }
+            | Error::TaskConsumed { task }
+            | Error::TaskCancelled { task } => {
+                vec![("task".to_owned(), task.to_string())]
+            }
+            _ => Vec::new(),
         }
     }
 }

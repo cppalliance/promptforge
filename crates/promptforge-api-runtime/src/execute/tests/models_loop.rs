@@ -1,21 +1,25 @@
-//! Tests for the section-visible `models.loop`: the Rust-backed model-tool
+//! Tests for the section-visible `models.loop`: the shim-driven model-tool
 //! loop over an author-owned message list. One terminal turn with no tools,
 //! repeated model-tool rounds with automatic assistant and tool-result
 //! appends, the nil return, explicit terminal removal, local and bound
-//! tools, call-time tool scope, the omitted-compactor default,
-//! `compactors.fail` invocation with the overflow reason, typed context
-//! exhaustion, and explicit-handle calls on a frozen binding.
+//! tools, call-time tool scope, explicit-handle calls on a frozen binding,
+//! and the atomic append of a tool-call batch. The shared loop fixtures
+//! (`loop_models`, `loop_context`, `loop_prompt`, the tool sets, and the
+//! `loop_events` filter) live here for every loop-driven sibling. The
+//! compactor argument's tests live in `models_loop_compactors`; the loop's
+//! exit rules in `exit_rules`; its cap, scope gate, and result-record
+//! trust in `tool_loop`.
 
 use super::*;
 use crate::execute::scheduler::Scheduler;
-use crate::lua::{OverflowReason, ToolSet};
+use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelId};
 use promptforge_model_client::model::ModelInvocation;
 
 /// The model set a loop test's run carries: `writer` (the prompt-wide
 /// default, model `test-model`) and `other` (model `other-model`), so an
 /// explicit handle provably runs on its own frozen binding.
-fn loop_models() -> ModelSet {
+pub(super) fn loop_models() -> ModelSet {
     let binding = |alias: &str, description: &str, model: &str| {
         ModelBinding::new(
             alias,
@@ -38,16 +42,21 @@ fn loop_models() -> ModelSet {
     }
 }
 
-/// Builds the run context for a loop test: the parsed prompt, an empty
-/// shared library, and the shared model and tool sets pre-filled (the
-/// scheduler tests bypass the live H1 pass that would fill them).
-fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
+/// Builds the run context for a loop test under the given observer: the
+/// parsed prompt, an empty shared library, and the shared model and tool
+/// sets pre-filled (the scheduler tests bypass the live H1 pass that would
+/// fill them).
+pub(super) fn loop_context_observed(
+    prompt: &Prompt,
+    tools: ToolSet,
+    observer: Arc<dyn Observer>,
+) -> RunState {
     let ctx = RunState::new(
         prompt,
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunContext::new(EXECUTION),
+        &RunContext::new(EXECUTION).observer(observer),
     );
     *ctx.model_set()
         .lock()
@@ -58,20 +67,46 @@ fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
     ctx
 }
 
-/// The tool set with the `echo` fixture bound and always in scope.
-fn echo_tools() -> ToolSet {
+/// [`loop_context_observed`] under the null observer.
+pub(super) fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
+    loop_context_observed(prompt, tools, Arc::new(NullObserver::default()))
+}
+
+/// The tool set with `tool` bound as `alias` and always in scope.
+pub(super) fn always_tool(alias: &str, tool: Arc<dyn Tool>) -> ToolSet {
     ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo capability",
-            Arc::new(EchoTool),
-        )],
-        vec!["echo".to_owned()],
+        vec![ToolBinding::for_test(alias, "fixture capability", tool)],
+        vec![alias.to_owned()],
     )
 }
 
+/// The tool set with the `echo` fixture bound and always in scope.
+pub(super) fn echo_tools() -> ToolSet {
+    always_tool("echo", Arc::new(EchoTool))
+}
+
+/// The model-turn and tool-call observations `recorder` saw, in order,
+/// with every other boundary event (chunk, section, run) dropped, so a
+/// prompt-level test reads exactly the sequence the loop's rounds report.
+pub(super) fn loop_events(recorder: &Recorder) -> Vec<String> {
+    let loop_details = [
+        detail::MODEL_TURN_COMPLETED,
+        detail::MODEL_TURN_FAILED,
+        detail::MODEL_TURN_TRUNCATED,
+        detail::TOOL_CALL_SUCCEEDED,
+        detail::TOOL_CALL_FAILED,
+    ]
+    .map(|observation| observation.to_string());
+    recorder
+        .events()
+        .into_iter()
+        .map(|(_, detail)| detail)
+        .filter(|detail| loop_details.contains(detail))
+        .collect()
+}
+
 /// The one-section prompt shell every loop test drives.
-fn loop_prompt(lua: &str) -> String {
+pub(super) fn loop_prompt(lua: &str) -> String {
     format!(
         "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
     )
@@ -249,91 +284,6 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() {
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user(string.rep('x', 100000))\n\
-         models.loop(msgs)\n\
-         return 'unreachable'",
-    );
-    let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect_err("an over-window request must exhaust the context");
-    assert!(
-        matches!(
-            error,
-            Error::ContextExhausted {
-                reason: OverflowReason::Precheck
-            }
-        ),
-        "the omitted compactor defaults to compactors.fail with the precheck reason, got {error:?}"
-    );
-    assert_eq!(
-        gateway.call_count(),
-        0,
-        "the precheck fires before any request leaves"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn models_loop_raises_context_exhaustion_at_the_call_site() {
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user(string.rep('x', 100000))\n\
-         local ok, err = pcall(models.loop, msgs)\n\
-         assert(not ok, 'the overflow raises')\n\
-         assert(#msgs == 1, 'a refused dispatch appends nothing')\n\
-         return tostring(err)",
-    );
-    let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
-    assert!(
-        out.starts_with("context exhausted: "),
-        "the raised error is the typed exhaustion's message, got: {out}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn an_explicit_compactors_fail_invocation_carries_the_provider_reason() {
-    let gateway = ScriptedGateway::start(vec![resp_status(
-        400,
-        "This model's maximum context length is 4096 tokens.",
-    )])
-    .await;
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('a small prompt')\n\
-         models.loop(msgs, compactors.fail)\n\
-         return 'unreachable'",
-    );
-    let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let error = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect_err("a provider context rejection must exhaust the context");
-    assert!(
-        matches!(
-            error,
-            Error::ContextExhausted {
-                reason: OverflowReason::Provider
-            }
-        ),
-        "the explicit compactors.fail invocation carries the provider reason, got {error:?}"
-    );
-    assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn models_loop_with_a_leading_handle_runs_on_its_frozen_binding() {
     let gateway = ScriptedGateway::start(vec![resp_text("first"), resp_text("second")]).await;
     let md = loop_prompt(
@@ -361,4 +311,58 @@ async fn models_loop_with_a_leading_handle_runs_on_its_frozen_binding() {
             "the handle's frozen binding serves, not the section default: {bodies:?}"
         );
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_author_list_never_shows_a_half_answered_tool_batch() {
+    // Two calls in one round: each handler runs while its sibling is
+    // unanswered, and the list it reads must not yet hold the batch's
+    // assistant record. After the round the assistant record and both
+    // results land together, in call order, ahead of the terminal text.
+    let gateway = ScriptedGateway::start(vec![
+        resp_two_tool_calls(
+            "grab",
+            ("c1", "{\"value\":\"a\"}"),
+            ("c2", "{\"value\":\"b\"}"),
+        ),
+        resp_text("done"),
+    ])
+    .await;
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user('grab twice')\n\
+         local seen = {}\n\
+         tools.add_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
+           seen[#seen + 1] = #msgs\n\
+           for _, m in ipairs(msgs) do\n\
+             assert(m.tool_calls == nil, 'no assistant call record is visible mid-batch')\n\
+             assert(m.role ~= 'tool', 'no tool record is visible mid-batch')\n\
+           end\n\
+           return 'grabbed ' .. args.value\n\
+         end)\n\
+         models.loop(msgs)\n\
+         assert(#seen == 2, 'both calls in the batch ran')\n\
+         assert(seen[1] == 1 and seen[2] == 1, 'each handler saw only the user message')\n\
+         assert(#msgs == 5, 'user, the batch record, two results, and the terminal text')\n\
+         assert(msgs[2].role == 'assistant' and #msgs[2].tool_calls == 2, 'one record carries the whole batch')\n\
+         assert(msgs[2].tool_calls[1].id == 'c1' and msgs[2].tool_calls[2].id == 'c2', 'calls keep their order')\n\
+         assert(msgs[3].tool_call_id == 'c1' and msgs[3].content == 'grabbed a', 'the first result follows')\n\
+         assert(msgs[4].tool_call_id == 'c2' and msgs[4].content == 'grabbed b', 'the second result follows')\n\
+         assert(msgs[5].role == 'assistant' and msgs[5].content == 'done', 'the terminal text is last')\n\
+         return 'ok'",
+    );
+    let prompt = parse(&md);
+    let ctx = loop_context(&prompt, ToolSet::default());
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("a two-call batch appends atomically");
+    assert_eq!(out, "ok");
+    let tool_turns = gateway.requests()[1]["messages"]
+        .as_array()
+        .expect("a request body must carry a messages array")
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .count();
+    assert_eq!(tool_turns, 2, "both results ride the terminal round");
 }

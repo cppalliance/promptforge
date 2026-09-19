@@ -7,8 +7,9 @@
 //! prompt-wide alias (conventionally from H1, not privileged to it),
 //! `add_local` registers a prompt-author Lua function as a tool, `call`
 //! dispatches a bound tool by alias or Tool object (installed by the
-//! coroutine shim prelude, since dispatch suspends), and `calls` is the
-//! read-only per-alias dispatch counter surface. Only filled slots are
+//! coroutine shim prelude, since dispatch suspends), `allow_tasks` records
+//! the section's allowlist for the model's task built-ins, and `calls` is
+//! the read-only per-alias dispatch counter surface. Only filled slots are
 //! visible: scoping or advertising an unfilled alias is a hard error. The
 //! installation logic lives here, out of the VM driver; the VM only calls
 //! the installers in setup order.
@@ -21,7 +22,7 @@ use promptforge_model_client::client::ToolSchema;
 use crate::alias::validate_alias;
 use crate::error::{Error, Result};
 use crate::handles::{ToolBinding, ToolSet};
-use crate::scope::{ToolCallCounts, ToolRuntime};
+use crate::scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 use crate::vm::LocalTools;
 
 mod decode;
@@ -240,8 +241,71 @@ pub(crate) fn install_tools(
         )
         .map_err(Error::lua)?;
     tools.set("add_local", add_local_fn).map_err(Error::lua)?;
+    install_allow_tasks(lua, &tools, runtime)?;
 
     globals.raw_set("tools", tools).map_err(Error::lua)
+}
+
+/// Installs `tools.allow_tasks(targets?)`, the author's opt-in for the
+/// model's task built-ins: the decoded allowlist is recorded on the
+/// section's tool runtime. The latest call is the section's allowlist - a
+/// second call replaces rather than unions, so a library's broad grant can
+/// be narrowed by the section that follows it.
+fn install_allow_tasks(lua: &Lua, tools: &Table, runtime: &Arc<Mutex<ToolRuntime>>) -> Result<()> {
+    let state = Arc::clone(runtime);
+    let allow_tasks = lua
+        .create_function(move |_, targets: Option<Value>| {
+            let allowlist = task_allowlist_from(targets)?;
+            let mut state = state
+                .lock()
+                .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
+            state.allowed_tasks = Some(allowlist);
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    tools.set("allow_tasks", allow_tasks).map_err(Error::lua)
+}
+
+/// Decodes `tools.allow_tasks`'s argument: absent for any target, else a
+/// non-empty sequence of non-empty heading strings.
+fn task_allowlist_from(targets: Option<Value>) -> mlua::Result<TaskAllowlist> {
+    let table = match targets {
+        None | Some(Value::Nil) => return Ok(TaskAllowlist::Any),
+        Some(Value::Table(table)) => table,
+        Some(other) => {
+            return Err(mlua::Error::external(format!(
+                "tools.allow_tasks targets must be a list of section headings, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let mut headings = Vec::new();
+    for entry in table.sequence_values::<Value>() {
+        match entry? {
+            Value::String(heading) => {
+                let heading = heading.to_str()?.trim().to_owned();
+                if heading.is_empty() {
+                    return Err(mlua::Error::external(
+                        "tools.allow_tasks targets must be non-empty section headings",
+                    ));
+                }
+                headings.push(heading);
+            }
+            other => {
+                return Err(mlua::Error::external(format!(
+                    "tools.allow_tasks targets must be section heading strings, got {}",
+                    other.type_name()
+                )));
+            }
+        }
+    }
+    if headings.is_empty() {
+        return Err(mlua::Error::external(
+            "tools.allow_tasks targets must name at least one section; \
+             call it with no argument to allow any section",
+        ));
+    }
+    Ok(TaskAllowlist::Only(headings))
 }
 
 #[cfg(test)]

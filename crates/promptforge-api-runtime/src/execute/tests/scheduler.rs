@@ -2,8 +2,8 @@
 //! inference end-to-end on a current-thread runtime), cancellation while
 //! suspended on an infer, the per-chain call-depth cap, and the walk
 //! rules mirrored from the legacy suite (fall-through order, explicit
-//! `var` and return-value handoffs, the run-global id
-//! counter), plus the control-transfer rules: jump targets (sibling moves
+//! `var` and return-value handoffs, the hierarchical chain-local
+//! `sys.id`), plus the control-transfer rules: jump targets (sibling moves
 //! and child descents with the parent resuming after the jumper), the
 //! scalar return's chain scoping, and the section-boundary observations.
 //! The fanout coverage mirrors the legacy engine's mechanics (ordering,
@@ -18,6 +18,7 @@ use std::sync::Condvar;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use super::models_loop::{echo_tools, loop_context_observed};
 use super::*;
 use crate::execute::protocol::Answer;
 use crate::execute::scheduler::Scheduler;
@@ -28,7 +29,7 @@ use shared_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, V
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
 /// pre-fill the run's shared set directly.
-fn writer_models() -> ModelSet {
+pub(super) fn writer_models() -> ModelSet {
     ModelSet {
         bindings: vec![ModelBinding::new(
             "writer",
@@ -53,17 +54,33 @@ fn scheduler_context(prompt: &Prompt) -> RunState {
 
 /// Builds the run context on the given store and observer, so a walk test
 /// can inspect the store's contents and the observation stream afterward.
-fn scheduler_context_on(
+pub(super) fn scheduler_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,
+) -> RunState {
+    scheduler_context_from(
+        prompt,
+        store,
+        &RunContext::new(EXECUTION).observer(observer),
+    )
+}
+
+/// Builds the run context from a finished `RunContext` on the given store:
+/// the parsed prompt, an empty shared library, and the model set pre-filled.
+/// Every scheduler-side context builder routes through here so a test that
+/// needs an observer, limits, or both composes the `RunContext` itself.
+pub(super) fn scheduler_context_from(
+    prompt: &Prompt,
+    store: &TestStore,
+    run_context: &RunContext,
 ) -> RunState {
     let ctx = RunState::new(
         prompt,
         "",
         &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunContext::new(EXECUTION).observer(observer),
+        run_context,
     );
     *ctx.model_set()
         .lock()
@@ -297,7 +314,8 @@ async fn generic_result_when_nothing_produced() {
 #[tokio::test(flavor = "current_thread")]
 async fn sys_id_increments_per_section() {
     // Mirror of the legacy `sys_id_increments_per_section`: every section
-    // entry takes the next run-global id.
+    // entry takes the walk chain's next entry id (`0.N`; entry 0 is the
+    // H1 pass, present or not).
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
         ## First\n\n\
@@ -311,7 +329,7 @@ async fn sys_id_increments_per_section() {
         .await
         .expect("each section entry takes the next id");
 
-    assert_eq!(out, "2");
+    assert_eq!(out, "0.2");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -409,31 +427,31 @@ async fn call_clones_var_in_and_discards_child_writes() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_call_chain_continues_the_global_sys_id_sequence() {
-    // Mirror of the legacy case of the same name: the contained chain's
-    // entries take the next run-global ids, and the outer walk resumes the
-    // same sequence when the chain ends.
+async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_sequence() {
+    // Mirror of the legacy case of the same name: the contained chain is
+    // the walk's first child `0.0`, so its entries are `0.0.N`, and the
+    // outer walk resumes its own `0.N` sequence when the chain ends.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sequence\n\n\
         ## Main\n\n\
         ```lua\n\
-        assert(sys.id == 1, 'the first walked section takes id 1')\n\
+        assert(sys.id == '0.1', 'the first walked section takes entry 1 of the root chain')\n\
         local r = call('## Sub')\n\
         store.append('order.txt', r .. '\\n')\n\
         ```\n\n\
         ## B\n\n\
         ```lua\n\
-        assert(sys.id == 4, 'the outer walk resumes the global sequence')\n\
+        assert(sys.id == '0.2', 'the outer walk resumes its own sequence')\n\
         return store.read('order.txt')\n\
         ```\n\n\
         ## Sub\n\n\
         ```lua\n\
-        assert(sys.id == 2, 'the contained chain continues the global sequence')\n\
+        assert(sys.id == '0.0.0', 'the contained chain is child 0 and starts at entry 0')\n\
         ```\n\n\
         ## Tail\n\n\
         ```lua\n\
-        assert(sys.id == 3, 'the chain fall-through takes the next global id')\n\
+        assert(sys.id == '0.0.1', 'the chain fall-through takes its next entry')\n\
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
@@ -441,7 +459,7 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("a call chain must continue the global sys.id sequence");
+        .expect("a call chain must take ids nested under its own chain");
 
     assert_eq!(out, "tail-reply\n");
 }
@@ -449,7 +467,8 @@ async fn a_call_chain_continues_the_global_sys_id_sequence() {
 #[tokio::test(flavor = "current_thread")]
 async fn entering_the_same_section_twice_takes_two_ids() {
     // Mirror of the legacy case of the same name: entering the same
-    // section twice hands out two run-global `sys.id` values.
+    // section twice hands out two distinct `sys.id` values - two call
+    // children of the walk, so two chains `0.0` and `0.1`.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Twice\n\n\
         ## Main\n\n\
@@ -467,7 +486,7 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         .await
         .expect("re-entering a section must take a fresh id");
 
-    assert_eq!(out, "2,3");
+    assert_eq!(out, "0.0.0,0.1.0");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -882,10 +901,11 @@ async fn jump_to_a_niece_errors() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn sys_id_counts_sections_entered_run_wide() {
+async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_level() {
     // Mirror of the legacy case of the same name: `sys.id` counts the
-    // sections the walk has entered run-wide - the detour into a child
-    // level continues the count rather than restarting it.
+    // sections the walk chain has entered - the detour into a child level
+    // is the same chain, so it continues the count rather than
+    // restarting it.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
@@ -908,9 +928,98 @@ async fn sys_id_counts_sections_entered_run_wide() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("sys.id must count sections entered run-wide");
+        .expect("sys.id must count the sections the one chain enters");
 
-    assert_eq!(out, "1\n2\n3\n4\n");
+    assert_eq!(out, "0.1\n0.2\n0.3\n0.4\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_call_child_takes_ids_nested_under_its_own_chain_distinct_from_the_parent() {
+    // Hierarchical identity: the parent walk is the root chain `0`, so its
+    // entries are `0.N`; a `call` child is the root's first child chain
+    // `0.0`, so its entries are `0.0.N`. The two never collide because
+    // they are different chains, and a fanout inside the child nests its
+    // arms under the child's chain id, not the root's.
+    let store = TestStore::new();
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Identity\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        store.append('ids.txt', 'main:' .. sys.id .. '\\n')\n\
+        call('## Sub')\n\
+        store.append('ids.txt', 'after:' .. sys.id .. '\\n')\n\
+        return store.read('ids.txt')\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\n\
+        store.append('ids.txt', 'sub:' .. sys.id .. '\\n')\n\
+        local r = fanout('## Worker', {'a', 'b'})\n\
+        store.append('ids.txt', r[1].text .. '\\n' .. r[2].text .. '\\n')\n\
+        return 'sub-done'\n\
+        ```\n\n\
+        ## Worker\n\n\
+        ```lua\n\
+        return 'arm' .. sys.index .. ':' .. sys.id\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the call child and its fanout complete");
+
+    assert_eq!(
+        out, "main:0.1\nsub:0.0.0\narm1:0.0.0.0\narm2:0.0.1.0\nafter:0.1\n",
+        "parent entries are `0.N`, the call child's are `0.0.N`, and the \
+         child's fanout arms nest under `0.0`"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_runs_of_the_same_prompt_produce_identical_ids() {
+    // No run-global counter: every id is a path of chain-local counters,
+    // so two runs of one prompt allocate the same ids for the walk, a call
+    // child, a fanout's arms, and a section entered after both.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Identity\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        local ids = { sys.id }\n\
+        ids[#ids + 1] = call('## Sub')\n\
+        local r = fanout('## Worker', {'x', 'y', 'z'})\n\
+        for i = 1, #r do ids[#ids + 1] = r[i].text end\n\
+        ids[#ids + 1] = call('## Sub')\n\
+        var.ids = table.concat(ids, ',')\n\
+        ```\n\n\
+        ## Last\n\n\
+        ```lua\n\
+        return var.ids .. ',' .. sys.id\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\n\
+        return sys.id\n\
+        ```\n\n\
+        ## Worker\n\n\
+        ```lua\n\
+        return sys.id\n\
+        ```\n";
+    let prompt = parse(md);
+    let mut outputs = Vec::new();
+    for _ in 0..2 {
+        let ctx = scheduler_context(&prompt);
+        let out = Scheduler::new(&ctx, None)
+            .drive()
+            .await
+            .expect("the identity prompt completes");
+        outputs.push(out);
+    }
+
+    assert_eq!(outputs[0], outputs[1], "two runs allocate the same ids");
+    assert_eq!(
+        outputs[0], "0.1,0.0.0,0.1.0,0.2.0,0.3.0,0.4.0,0.2",
+        "the walk's entries are `0.N`, and call children and fanout arms \
+         share the root's child counter in dispatch order"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1345,17 +1454,18 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
-    // Mirror of the legacy case of the same name: the H1 pass holds id 0
-    // off the run-global counter, so the first walked section takes id 1.
+async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
+    // Mirror of the legacy case of the same name: the H1 pass is the root
+    // chain's entry 0, so the first walked section takes entry 1 of the
+    // same chain.
     let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
-        assert(sys.id == 0, 'the H1 chunk keeps sys.id 0')\n\
+        assert(sys.id == '0.0', 'the H1 chunk takes the root chain entry 0')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\n\
-        assert(sys.id == 1, 'the first walked section takes sys.id 1')\n\
+        assert(sys.id == '0.1', 'the first walked section takes entry 1')\n\
         return 'ok'\n\
         ```\n";
     let prompt = parse(md);
@@ -1363,7 +1473,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("the H1 chunk keeps id 0 and the first walked section takes id 1");
+        .expect("the H1 chunk takes root entry 0 and the first walked section root entry 1");
 
     assert_eq!(out, "ok");
 }
@@ -1523,6 +1633,37 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
         .expect("call from H1 runs the target section");
 
     assert_eq!(out, "called from h1");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutive_child_ids() {
+    // The H1 pass and the walk that follows it are one root chain, so the
+    // hand-off carries the pass's child counter into the walk: a `call`
+    // the pass made is child `0.0`, and the walk's first `call` is child
+    // `0.1`, not a second `0.0`. Were the counter copy dropped at the
+    // hand-off, both calls would read `0.0.0`. The walk's own entry
+    // counter continues too: its first section is still `0.1`.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Test prompt\n\n\
+        ```lua\nvar.first = call('## Answer')\n```\n\n\
+        ## Result\n\n\
+        ```lua\n\
+        assert(sys.id == '0.1', 'the first walked section takes root entry 1')\n\
+        return var.first .. ',' .. call('## Answer')\n\
+        ```\n\n\
+        ## Answer\n\n\
+        ```lua\nreturn sys.id\n```\n";
+    let prompt = parse(md);
+    let ctx = h1_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a call from H1 and a call from the walk both complete");
+
+    assert_eq!(
+        out, "0.0.0,0.1.0",
+        "the H1 call is root child 0 and the walk's call is root child 1"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1931,21 +2072,15 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
 /// Builds the run context for a scheduler fanout test with the given
 /// limits, so a window test can narrow the concurrency.
 fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState {
-    let ctx = RunState::new(
+    scheduler_context_from(
         prompt,
-        "",
-        &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
+        &TestStore::new(),
         &RunContext::new(EXECUTION).limits(limits),
-    );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = writer_models();
-    ctx
+    )
 }
 
 /// The prompt each gateway request carried, in arrival order.
-fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
+pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
     gateway
         .requests()
         .iter()
@@ -2087,10 +2222,12 @@ async fn fanout_concurrency_window_limits_active_arms() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
-    // Mirror of the legacy `fanout_arms_take_global_ids_and_per_fanout_index`
+async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_structured_results() {
+    // Mirror of the legacy
+    // `fanout_arms_take_child_ids_in_collection_order_and_a_per_fanout_index`
     // plus the structured-result shape of `fanout_returns_structured_results`:
-    // each arm entry takes the next run-global id, `sys.index` is the
+    // each arm is a child chain of the caller (`0.0`, `0.1`) whose worker
+    // entry is `0.K.0`, `sys.index` is the
     // 1-based per-fanout position, and the packed sequence carries `.ok`
     // and `.item` with `__tostring` driving `table.concat`. The ids log is
     // arm-scoped (the pattern the claims model teaches): every store op is
@@ -2122,18 +2259,18 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
     assert_eq!(out, "a,b");
     assert_eq!(
         store.read("ids-1.txt").expect("arm 1's ids log"),
-        "2:1\n",
-        "arm 1 takes the next run-global id with its per-fanout index"
+        "0.0.0:1\n",
+        "arm 1 is the caller's child 0 with its per-fanout index"
     );
     assert_eq!(
         store.read("ids-2.txt").expect("arm 2's ids log"),
-        "3:2\n",
-        "arm 2 takes the following run-global id with its per-fanout index"
+        "0.1.0:2\n",
+        "arm 2 is the caller's child 1 with its per-fanout index"
     );
     assert_eq!(
         store.read("ids.txt").expect("the parent's ids log"),
-        "parent:1\n",
-        "the parent keeps the run's first id"
+        "parent:0.1\n",
+        "the parent keeps the walk's first entry id"
     );
 }
 
@@ -2284,7 +2421,7 @@ async fn the_shared_replay_sees_the_arm_item() {
 async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
     // Mirror of the legacy `jump_inside_a_fanout_arm_drives_a_child_walk`:
     // the arm's remaining blocks are skipped, the walk continues on the
-    // target's own slice from the target (the run-global id sequence
+    // target's own slice from the target (the arm chain's entry sequence
     // continues, the walk falls through to the target's following
     // siblings), and the walk's reply becomes the arm's text. A
     // `resolve_arm_target` that resolved over the wrong set would error
@@ -2304,7 +2441,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         ```\n\n\
         ### Target\n\n\
         ```lua\n\
-        assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+        assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
         store.append('order.txt', 'Target\\n')\n\
         ```\n\n\
         ### Tail\n\n\
@@ -2333,7 +2470,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
     // Mirror of the legacy
     // `jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice`:
     // the descent runs the worker's child slice from the target, the target
-    // takes the next run-global id with no `item` seed (the transfer clears
+    // takes the arm chain's next entry id with no `item` seed (the transfer clears
     // the arm's at-worker state, so the child walk runs as plain sections),
     // and the walk falls through to the target's child siblings.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -2350,7 +2487,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         ```\n\n\
         #### Child\n\n\
         ```lua\n\
-        assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+        assert(sys.id == '0.0.1', 'the child walk continues the arm chain sys.id sequence')\n\
         assert(item == nil, 'the child walk runs as a plain section')\n\
         store.append('order.txt', 'Child\\n')\n\
         ```\n\n\
@@ -2375,18 +2512,94 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
     );
 }
 
-// --- Fanout failure semantics on the scheduler ---
-// Each mirrored test names the legacy case it mirrors. The legacy cases
-// keep exercising the legacy fanout driver untouched; these prove the
-// scheduler's arm chains.
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_hash_collection_iterates_in_sorted_key_order() {
+    // The hash part of a collection has no Lua-defined order (`pairs` walks
+    // the string hash seed's layout, which differs per state), so the shim
+    // sorts it by key: the arms take their ids, `sys.index`, and result
+    // slots in key order on every run. A shim that walked `pairs` order
+    // would place `zeta` first on some runs and fail the fixed expectation.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', { zeta = 1, alpha = 2, mid = 3 })\n\
+        assert(r[1].item.key == 'alpha' and r[3].item.key == 'zeta', 'results land by sorted key')\n\
+        return table.concat(r, ',')\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        return item.key .. '=' .. item.value .. '@' .. sys.index .. ':' .. sys.id\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a hash-shaped collection fans out");
 
-/// Counts one terminal observation kind in the recorder's event stream.
-fn terminal_count(recorder: &Recorder, event: &Observation) -> usize {
-    let rendered = event.to_string();
+    assert_eq!(out, "alpha=2@1:0.0.0,mid=3@2:0.1.0,zeta=1@3:0.2.0");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
+    // The A9 seal on a result object: an assignment raises, `setmetatable`
+    // is refused (the guard cannot be swapped out), `getmetatable` hands
+    // back a decoy that exposes no `__index` (so the hidden fields table
+    // cannot be reached and mutated), and the decoy still carries
+    // `__tostring` so the hardened `table.concat` renders the result. The
+    // fields and `tostring` read as before.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        local ok, err = pcall(function() r[1].text = 'forged' end)\n\
+        assert(not ok and tostring(err):find('read-only', 1, true), 'a write raises: ' .. tostring(err))\n\
+        ok, err = pcall(setmetatable, r[1], nil)\n\
+        assert(not ok and tostring(err):find('protected metatable', 1, true), 'setmetatable is refused: ' .. tostring(err))\n\
+        ok, err = pcall(setmetatable, r[1], {})\n\
+        assert(not ok, 'no replacement metatable is accepted')\n\
+        local decoy = getmetatable(r[1])\n\
+        assert(type(decoy) == 'table' and decoy.__index == nil and decoy.__newindex == nil, 'the guard is hidden')\n\
+        assert(type(decoy.__tostring) == 'function', 'the decoy still renders')\n\
+        assert(r[1].text == 'alpha-1' and r[1].ok == true and r[1].item == 'alpha' and r[1].exhausted == false)\n\
+        assert(tostring(r[1]) == 'alpha-1')\n\
+        return table.concat(r, ',')\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        return item .. '-' .. sys.index\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the sealed results read and render");
+
+    assert_eq!(out, "alpha-1,beta-2");
+}
+
+// --- Fanout failure semantics on the scheduler ---
+// Each mirrored test names the legacy case it mirrors. The arms are task
+// chains the `fanout` shim spawns, so their lifecycle reports through the
+// `Task*` observations: started under the caller's section, the terminal
+// under the worker's.
+
+/// The stable labels of the task lifecycle observations a fanout's arms
+/// report, as the recorder renders them.
+const TASK_STARTED: &str = "Task started";
+const TASK_SUCCEEDED: &str = "Task succeeded";
+const TASK_FAILED: &str = "Task failed";
+const TASK_CANCELLED: &str = "Task cancelled";
+
+/// Counts one observation label in the recorder's event stream.
+fn terminal_count(recorder: &Recorder, label: &str) -> usize {
     recorder
         .events()
         .iter()
-        .filter(|(_, event)| event == &rendered)
+        .filter(|(_, event)| event == label)
         .count()
 }
 
@@ -2421,7 +2634,7 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
         "the worker never ran: the rejection precedes scheduling"
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        terminal_count(&recorder, TASK_STARTED),
         0,
         "no arm was ever started: {:?}",
         recorder.events()
@@ -2459,8 +2672,12 @@ async fn fanout_depth_cap_reads_the_chain_field() {
     // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong calls
     // down the chain stack, and the chain that lands at depth 8 calls
     // fanout - each arm would run one level deeper, so the cap fires from
-    // the requesting chain's call-depth field with the fanout message,
-    // not the call one.
+    // the requesting chain's call-depth field. The arm's spawn carries the
+    // fanout mark, so the spawn arm names the cap after `fanout` in the
+    // typed error itself; the shim re-raises that table and the retained
+    // typed `Lua` error is substituted back at every `call` level, so the
+    // run's error is byte-identical to the retired Rust raise: the exact
+    // variant, the exact text, no runtime-error prefix or traceback.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
@@ -2483,10 +2700,103 @@ async fn fanout_depth_cap_reads_the_chain_field() {
         .await
         .expect_err("the fanout depth cap must fail the run");
 
-    match &error {
-        Error::Lua(message) => assert_eq!(message, "fanout recursion exceeded cap of 8"),
-        other => panic!("expected the typed fanout depth-cap Lua error, got {other:?}"),
-    }
+    assert!(
+        matches!(&error, Error::Lua(message) if message == "fanout recursion exceeded cap of 8"),
+        "expected the typed Lua depth-cap error with fanout's own wording, got {error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "fanout recursion exceeded cap of 8",
+        "the rendered text is exactly the fanout cap message: no call wording, no prefix"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_lands() {
+    // The `tool_loop_exhausted` arm rule: one arm's `models.loop` runs its
+    // round cap against a never-converging model and fails as
+    // `tool_loop_exhausted`; the shim turns that arm's slot into the
+    // incomplete stub (`ok = false`, `exhausted = true`) and the fanout
+    // continues, so the sibling's plain result lands beside it. Only the
+    // looping arm touches the gateway, so the scripted replies serve one
+    // arm and the run is deterministic. The exhausted arm still reports
+    // `TaskFailed` (the stub is the fanout's recovery, not the arm's), and
+    // the sibling `TaskSucceeded`.
+    let cap = 2;
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_0", "echo", "{\"value\":\"x\"}"),
+        resp_tool_call("call_1", "echo", "{\"value\":\"x\"}"),
+    ])
+    .await;
+    let md = format!(
+        "---\nname: t\ndescription: d\npromptforge: 0\nmax_tool_iterations: {cap}\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {{'loop', 'plain'}})\n\
+        assert(#r == 2, 'both slots are filled')\n\
+        assert(r[1].ok == false and r[1].exhausted == true, 'the exhausted arm is flagged')\n\
+        assert(r[1].item == 'loop', 'the stub keeps its item')\n\
+        assert(r[2].ok == true and r[2].exhausted == false, 'the sibling is a plain success')\n\
+        assert(r[2].item == 'plain', 'the sibling keeps its item')\n\
+        return r[1].text .. '|' .. r[2].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        if item == 'loop' then\n\
+          local msgs = messages.new()\n\
+          msgs:user('loop forever')\n\
+          models.loop(msgs)\n\
+          return 'unreachable'\n\
+        end\n\
+        return 'plain:' .. item\n\
+        ```\n"
+    );
+    let prompt = parse(&md);
+    let recorder = Arc::new(Recorder::default());
+    let ctx = loop_context_observed(
+        &prompt,
+        echo_tools(),
+        Arc::clone(&recorder) as Arc<dyn Observer>,
+    );
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("an exhausted arm must not fail the fanout");
+
+    assert_eq!(
+        out, "## loop\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)|plain:plain",
+        "the exhausted slot is the stub and the sibling's result lands"
+    );
+    assert_eq!(
+        gateway.call_count(),
+        cap,
+        "the looping arm made exactly `cap` round trips before exhausting"
+    );
+    assert_eq!(
+        terminal_count(&recorder, TASK_STARTED),
+        2,
+        "both arms started: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, TASK_FAILED),
+        1,
+        "the exhausted arm reports its failure: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, TASK_SUCCEEDED),
+        1,
+        "the sibling reports its success: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, TASK_CANCELLED),
+        0,
+        "an exhausted arm cancels nothing: {:?}",
+        recorder.events()
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2510,8 +2820,9 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
     // so the winner's thread may complete its write and post first; the
     // driver then resumes the winner into Lua and that arm succeeds before
     // the fatal answer ends the run. Either interleaving satisfies the
-    // contract: no arm fails, the loser is cancelled, and each arm reports
-    // exactly one terminal.
+    // contract: both arms started, no arm fails on its own, and at most
+    // the winner reports a terminal - the loser is stranded mid-chain by
+    // the run's own failure, which is the record of how it ended.
     let recorder = Arc::new(Recorder::default());
     let gate = Arc::new(StoreGate::default());
     let store = gated_store(&gate);
@@ -2550,23 +2861,20 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         other => panic!("expected the fatal determinism violation, got {other:?}"),
     }
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
+        terminal_count(&recorder, TASK_STARTED),
+        2,
+        "both arms started before the conflict: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, TASK_FAILED),
         0,
         "no arm fails on its own; the run ends at the answer boundary: {:?}",
         recorder.events()
     );
-    let cancelled = terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED);
-    let succeeded = terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED);
     assert!(
-        cancelled >= 1,
-        "the losing arm is parked at the fatal answer and reports cancelled: {:?}",
-        recorder.events()
-    );
-    assert_eq!(
-        cancelled + succeeded,
-        2,
-        "each arm reports exactly one terminal, cancelled or (for a winner whose \
-         answer landed first) succeeded: {:?}",
+        terminal_count(&recorder, TASK_SUCCEEDED) <= 1,
+        "at most the winner (whose answer landed first) reports a terminal: {:?}",
         recorder.events()
     );
 }
@@ -2920,11 +3228,9 @@ async fn fatal_arm_aborts_queued_siblings() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = RunState::new(
+    let ctx = scheduler_context_from(
         &prompt,
-        "",
-        &store.vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
+        &store,
         &RunContext::new(EXECUTION)
             .limits(
                 RunLimits::new()
@@ -2932,9 +3238,6 @@ async fn fatal_arm_aborts_queued_siblings() {
             )
             .observer(recorder.clone()),
     );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = writer_models();
     let error = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -2947,19 +3250,19 @@ async fn fatal_arm_aborts_queued_siblings() {
     let log = store.read("log.txt").expect("the fatal arm wrote its item");
     assert_eq!(log, "boom\n", "blocked siblings must never run: {log:?}");
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        terminal_count(&recorder, TASK_STARTED),
         1,
         "only the fatal arm was ever started: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
+        terminal_count(&recorder, TASK_FAILED),
         1,
         "the fatal arm reports failed: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        terminal_count(&recorder, TASK_SUCCEEDED),
         0,
         "no arm succeeded: {:?}",
         recorder.events()
@@ -2969,13 +3272,13 @@ async fn fatal_arm_aborts_queued_siblings() {
 #[tokio::test(flavor = "current_thread")]
 async fn fatal_arm_aborts_an_in_flight_sibling() {
     // The sibling-abort port: the failing arm and a sibling parked on a
-    // slow infer are both live when the failure lands. The abort removes
-    // the sibling from the pending table and aborts its I/O task, so the
-    // sibling's CANCELLED terminal observation fires BEFORE the parent's
-    // chunk failure - a scheduler that only discarded late siblings at the
-    // join would report it only when the scheduler dropped, after the
-    // parent. The 30-second sibling answer and the timeout guard prove the
-    // driver never waits on the aborted arm.
+    // slow infer are both live when the failure lands. The fanout shim
+    // cancels the live sibling before it re-raises, so the cancel removes
+    // the sibling from the pending table, aborts its I/O task, and fires
+    // the sibling's TaskCancelled BEFORE the parent's chunk failure - a
+    // shim that raised first would leak the sibling into `tasks_live`.
+    // The 30-second sibling answer and the timeout guard prove the driver
+    // never waits on the aborted arm.
     let gateway = ScriptedGateway::start(vec![
         resp_text("boom-answer"),
         resp_delayed_text("slow-answer", std::time::Duration::from_secs(30)),
@@ -3011,19 +3314,19 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         "the arm's own error surfaces: {error}"
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
+        terminal_count(&recorder, TASK_FAILED),
         1,
         "the fatal arm reports failed: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
+        terminal_count(&recorder, TASK_CANCELLED),
         1,
         "the in-flight sibling reports cancelled: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        terminal_count(&recorder, TASK_SUCCEEDED),
         0,
         "no arm succeeded: {:?}",
         recorder.events()
@@ -3031,7 +3334,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     let events = recorder.events();
     let cancelled_at = events
         .iter()
-        .position(|(_, event)| event == &detail::FANOUT_ARM_CANCELLED.to_string())
+        .position(|(_, event)| event == TASK_CANCELLED)
         .expect("the sibling's cancelled event fired");
     let parent_failed_at = events
         .iter()
@@ -3092,9 +3395,9 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
 async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // Cancellation while suspended in an arm: both arms are parked on slow
     // infers when the cancel lands, so the driver aborts the in-flight I/O
-    // tasks and fails the run with Error::Interrupted, and each arm's
-    // finalizer drop reports its CANCELLED terminal observation - the
-    // exactly-once terminal contract holds on the cancellation path. The
+    // tasks and fails the run with Error::Interrupted. The arms are task
+    // chains stranded by the run's end: they started, and no task terminal
+    // fires for them - the run's own interruption is the record. The
     // 30-second answers and the timeout guard prove the aborted I/O is
     // never awaited.
     use crate::cancel::CancelHandle;
@@ -3151,19 +3454,19 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         "both arms were suspended on their infers when the cancel landed"
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        terminal_count(&recorder, TASK_STARTED),
         2,
         "both arms started: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
-        2,
-        "each suspended arm reports cancelled exactly once: {:?}",
+        terminal_count(&recorder, TASK_CANCELLED) + terminal_count(&recorder, TASK_FAILED),
+        0,
+        "a stranded arm reports no terminal of its own: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        terminal_count(&recorder, TASK_SUCCEEDED),
         0,
         "no arm succeeded: {:?}",
         recorder.events()
@@ -3171,14 +3474,15 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_mid_refill_arm_start_failure_tears_down_the_join() {
-    // With the chain-count bound shrunk so the second arm's start fails
-    // mid-refill, the fanout dispatch must discard the join and abort the
-    // partial window: the parent resumes with the error answer exactly
-    // once, and no late arm completion against a still-live join can
-    // re-resume it while it sits suspended on its own infer. The second
-    // arm's half-built state drops at the failure (STARTED then
-    // CANCELLED), and the first arm aborts with the torn-down join.
+async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
+    // With the chain-count bound shrunk so the second arm's spawn fails
+    // while the shim fills its window, the shim must cancel the arm it
+    // already started before it re-raises: the parent catches the error
+    // exactly once, the started arm never runs its block (its chain gets
+    // at most the one step that enters its section before the spawner's
+    // cancel aborts it), and nothing is left live for the chain-end leak
+    // check. The second arm never reaches the arena, so only one
+    // TaskStarted fires.
     let gateway = ScriptedGateway::start(vec![resp_text("after-answer")]).await;
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -3200,7 +3504,7 @@ async fn a_mid_refill_arm_start_failure_tears_down_the_join() {
     let out = scheduler
         .drive()
         .await
-        .expect("the caught refill failure lets the caller continue");
+        .expect("the caught spawn failure lets the caller continue");
 
     assert_eq!(out, "caught:after-answer");
     assert_eq!(
@@ -3209,21 +3513,29 @@ async fn a_mid_refill_arm_start_failure_tears_down_the_join() {
         "no arm ran an infer; only the caller's own request fired"
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
-        2,
-        "both window arms reached the dispatch boundary: {:?}",
+        terminal_count(&recorder, TASK_STARTED),
+        1,
+        "only the first arm reached the arena: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
-        2,
-        "the half-built arm drops at the failure and the started arm aborts: {:?}",
+        terminal_count(&recorder, TASK_CANCELLED),
+        1,
+        "the shim cancels the started arm before it re-raises: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        terminal_count(&recorder, TASK_SUCCEEDED),
         0,
         "no arm ran to completion: {:?}",
+        recorder.events()
+    );
+    assert!(
+        !recorder
+            .events()
+            .iter()
+            .any(|(section, event)| section == "Worker" && event == "Lua chunk started"),
+        "the cancelled arm never ran its block: {:?}",
         recorder.events()
     );
 }

@@ -73,10 +73,21 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
+    /// The run's resolved per-section tool-loop cap, captured by the
+    /// `models.loop` shim as its round cap.
+    pub(crate) max_tool_iterations: usize,
+    /// The run's cap on the arms one `fanout` keeps live at once, captured
+    /// by the `fanout` shim as its window.
+    pub(crate) max_fanout_concurrency: usize,
     /// The run's host-state snapshot provider, when the host configured
     /// one: its presence is the Agent-window context, so the section VM
     /// gains the `ui()` global and the raw-id `models.get` fallback.
     pub(crate) ui: Option<&'a Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
+    /// Test-only: install the raw protocol shims (`models.chat`,
+    /// `tools.call_as_model`), so a fixture section can yield one raw
+    /// `chat` round or one model-issued `tool_call`.
+    #[cfg(test)]
+    pub(crate) raw_shims: bool,
 }
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
@@ -126,9 +137,14 @@ where
         vm.set_global_json("item", item)?;
     }
     vm.install_scheduler_control_globals(list_callback)?;
-    vm.install_coro_shims()?;
+    vm.install_coro_shims(setup.max_tool_iterations, setup.max_fanout_concurrency)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
     crate::lua::install_section_user_input_shim(vm.lua())?;
+    #[cfg(test)]
+    if setup.raw_shims {
+        promptforge_lua::install_agent_chat_shim(vm.lua())?;
+        promptforge_lua::install_model_tool_call_shim(vm.lua())?;
+    }
     vm.replay_shared(
         setup.shared,
         setup.observer_arc.as_ref(),

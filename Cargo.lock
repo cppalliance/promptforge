@@ -2574,6 +2574,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-api"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-capabilities"
+version = "0.3.0"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-log"
+version = "0.3.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "turso",
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-models"
+version = "0.3.0"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-runner"
+version = "0.3.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-sessions"
+version = "0.3.0"
+dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4633,6 +4684,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
+ "criterion",
  "mlua",
  "promptforge-api-types",
  "promptforge-lua",
@@ -4664,6 +4716,7 @@ dependencies = [
  "serde_json",
  "shared-vfs",
  "thiserror 2.0.19",
+ "time",
  "tokio",
  "tokio-util",
  "workspace-hack",

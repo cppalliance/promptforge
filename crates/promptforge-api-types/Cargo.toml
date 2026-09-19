@@ -24,6 +24,9 @@ tokio-util.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
+# The reference the std-only `Timestamp::to_rfc3339` formatter is checked
+# against; the engine itself never depends on `time`.
+time.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]

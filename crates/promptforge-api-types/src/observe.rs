@@ -25,6 +25,9 @@
 //! - `section` - the prompt's H2 heading text, authored in the prompt file;
 //! - [`Observation::Lua`] and [`Observation::Other`] messages - a validated Lua
 //!   `log(message)` checkpoint and the forward-compatible escape hatch;
+//! - [`Observation::TaskStarted`]'s spawn seeds (`target`, `input`, `item`,
+//!   `var`) - author-supplied data a task chain starts from, recorded so a
+//!   task can be re-executed from its start;
 //! - every `on_*` content payload - text, arguments, and results are model-,
 //!   tool-, or user-authored.
 //!
@@ -37,6 +40,7 @@
 use std::fmt;
 
 use crate::events::{CallMetrics, ToolCallEvent};
+use crate::ids::{AbandonReason, TaskId, TaskOrigin};
 
 /// One typed operational observation emitted by the runtime.
 ///
@@ -49,8 +53,8 @@ use crate::events::{CallMetrics, ToolCallEvent};
 /// [`Observation::Lua`] carries the one intentionally author-controlled
 /// checkpoint (the Lua `log(message)` callback); [`Observation::Other`] is a
 /// forward-compatible escape hatch. Both own their message, so an observation
-/// crosses a thread boundary (fanout arms report through a channel) without
-/// borrowing the emitting frame.
+/// crosses a thread boundary (a leaf I/O task reports its outcome from the
+/// runtime's pool) without borrowing the emitting frame.
 ///
 /// # Examples
 /// Match the variants a consumer cares about, use [`label`](Observation::label)
@@ -179,34 +183,64 @@ pub enum Observation {
     StoreGlobSucceeded,
     /// A harness-mediated store glob failed.
     StoreGlobFailed,
-    /// A fanout arm began execution.
-    ///
-    /// Every arm emits exactly one [`FanoutArmStarted`](Observation::FanoutArmStarted)
-    /// followed by exactly one terminal event: one of
-    /// [`FanoutArmSucceeded`](Observation::FanoutArmSucceeded),
-    /// [`FanoutArmExhausted`](Observation::FanoutArmExhausted),
-    /// [`FanoutArmFailed`](Observation::FanoutArmFailed), or
-    /// [`FanoutArmCancelled`](Observation::FanoutArmCancelled). The runtime
-    /// enforces this state machine with a drop guard, so an aborted or
-    /// cancelled arm still reports a terminal event.
-    FanoutArmStarted,
-    /// Legacy generic terminal, retained only so an older consumer's match arm
-    /// stays valid. The current runtime never emits it: a finishing arm always
-    /// reports one of the specific terminal variants below (succeeded /
-    /// exhausted / failed / cancelled).
-    FanoutArmFinished,
-    /// Terminal: a fanout arm finished with a normal successful result.
-    FanoutArmSucceeded,
-    /// Terminal: a fanout arm soft-degraded because its tool loop was exhausted.
-    FanoutArmExhausted,
-    /// Terminal: a fanout arm ended with a hard error.
-    FanoutArmFailed,
-    /// Terminal: a fanout arm was cancelled or aborted (Ctrl-C or a sibling's
-    /// hard error) before it could finalize.
-    FanoutArmCancelled,
     /// A section began waiting on operator input through the run's input
     /// broker.
     UserInputWaitStarted,
+    /// A task chain was started by `tasks.spawn`, by the `fanout` shim for
+    /// each of its arms, or (later) by the model's `task` tool. The payload
+    /// is the task's spawn seeds: everything a host needs to start the
+    /// same chain again under the same id. The seeds are author-supplied
+    /// data and are untrusted metadata, as the module docs say. Reported
+    /// under the spawning section.
+    TaskStarted {
+        /// The task's id: its chain's hierarchical id.
+        task: TaskId,
+        /// The name of the section the task's chain starts at.
+        target: String,
+        /// The principal that started the task.
+        origin: TaskOrigin,
+        /// The `opts.input` override of the chain's `args`, when given.
+        input: Option<String>,
+        /// The `opts.item` seed installed as the chain's `item` global,
+        /// when given.
+        item: Option<serde_json::Value>,
+        /// The `opts.index` seed reported as the chain's `sys.index`, when
+        /// given.
+        index: Option<u64>,
+        /// The spawner's `var` snapshot the chain seeds from.
+        var: serde_json::Value,
+    },
+    /// Terminal: a task's chain ended with a result. Reported under the
+    /// task's target section.
+    TaskSucceeded {
+        /// The task's id.
+        task: TaskId,
+    },
+    /// Terminal: a task's chain ended with an error. Reported under the
+    /// task's target section.
+    TaskFailed {
+        /// The task's id.
+        task: TaskId,
+    },
+    /// Terminal: the task was cancelled on purpose - by its owner through
+    /// `tasks.cancel` (or, later, the model's `task_cancel`). Reported
+    /// once under the task's target section; a repeated cancel is a no-op
+    /// and reports nothing.
+    TaskCancelled {
+        /// The task's id.
+        task: TaskId,
+    },
+    /// Terminal: the task's owner chain ended while the task was live, so
+    /// the engine ended the task. Distinct from a cancellation - the task
+    /// lost its owner rather than being stopped on purpose. Reported under
+    /// the task's target section. Its trace line appends the reason's
+    /// phrase ([`AbandonReason::why`]): `Task abandoned: the section ended`.
+    TaskAbandoned {
+        /// The task's id.
+        task: TaskId,
+        /// How the owner ended.
+        reason: AbandonReason,
+    },
     /// The one author-controlled checkpoint: a validated Lua `log(message)`.
     ///
     /// Prompt authors must never place arguments, replies, tool data,
@@ -220,8 +254,10 @@ pub enum Observation {
 impl Observation {
     /// Returns the fixed trace label for a fixed variant, or `None` for the
     /// message-carrying [`Observation::Lua`] / [`Observation::Other`].
-    /// [`Display`](fmt::Display) is the human trace line for any variant;
-    /// `label` is the stable machine key for fixed variants only.
+    /// [`Display`](fmt::Display) is the human trace line for any variant
+    /// (for [`TaskAbandoned`](Observation::TaskAbandoned) it appends the
+    /// reason's phrase); `label` is the stable machine key for fixed
+    /// variants only.
     #[must_use]
     pub fn label(&self) -> Option<&'static str> {
         let label = match self {
@@ -272,13 +308,12 @@ impl Observation {
             Observation::StoreDeleteFailed => "Store delete failed",
             Observation::StoreGlobSucceeded => "Store glob succeeded",
             Observation::StoreGlobFailed => "Store glob failed",
-            Observation::FanoutArmStarted => "Fanout arm started",
-            Observation::FanoutArmFinished => "Fanout arm finished",
-            Observation::FanoutArmSucceeded => "Fanout arm succeeded",
-            Observation::FanoutArmExhausted => "Fanout arm exhausted",
-            Observation::FanoutArmFailed => "Fanout arm failed",
-            Observation::FanoutArmCancelled => "Fanout arm cancelled",
             Observation::UserInputWaitStarted => "User input wait started",
+            Observation::TaskStarted { .. } => "Task started",
+            Observation::TaskSucceeded { .. } => "Task succeeded",
+            Observation::TaskFailed { .. } => "Task failed",
+            Observation::TaskCancelled { .. } => "Task cancelled",
+            Observation::TaskAbandoned { .. } => "Task abandoned",
             Observation::Lua(_) | Observation::Other(_) => return None,
         };
         Some(label)
@@ -290,6 +325,11 @@ impl fmt::Display for Observation {
         match self {
             Observation::Lua(message) => write!(f, "Lua: {message}"),
             Observation::Other(message) => f.write_str(message),
+            // The trace line says how the owner ended; the label stays the
+            // machine key.
+            Observation::TaskAbandoned { reason, .. } => {
+                write!(f, "Task abandoned: {}", reason.why())
+            }
             fixed => f.write_str(fixed.label().unwrap_or_default()),
         }
     }
@@ -358,11 +398,6 @@ pub mod detail {
     pub const STORE_DELETE_FAILED: Observation = Observation::StoreDeleteFailed;
     pub const STORE_GLOB_SUCCEEDED: Observation = Observation::StoreGlobSucceeded;
     pub const STORE_GLOB_FAILED: Observation = Observation::StoreGlobFailed;
-    pub const FANOUT_ARM_STARTED: Observation = Observation::FanoutArmStarted;
-    pub const FANOUT_ARM_SUCCEEDED: Observation = Observation::FanoutArmSucceeded;
-    pub const FANOUT_ARM_EXHAUSTED: Observation = Observation::FanoutArmExhausted;
-    pub const FANOUT_ARM_FAILED: Observation = Observation::FanoutArmFailed;
-    pub const FANOUT_ARM_CANCELLED: Observation = Observation::FanoutArmCancelled;
     pub const USER_INPUT_WAIT_STARTED: Observation = Observation::UserInputWaitStarted;
 }
 
@@ -532,6 +567,32 @@ pub trait Observer: Send + Sync {
     /// `text` is untrusted user input. The default body discards the report.
     #[expect(unused_variables, reason = "the default body discards the report")]
     fn on_user_input(&self, execution: &str, section: &str, text: &str) {}
+
+    /// Reports one model-task notice as it is queued for the task's owner:
+    /// the engine's own sentence telling the model how a task it started
+    /// ended, read by the model in the owner's next round or as its
+    /// `await_tasks` answer.
+    ///
+    /// `task` is the task that ended and `text` is what the model reads.
+    /// A completed task's final text is embedded nonce-wrapped as
+    /// untrusted; the rest of the sentence is the engine's. Reported under
+    /// the owner's section. The default body discards the report.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a content report names its full run coordinates in one call"
+    )]
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_task_notice(
+        &self,
+        execution: &str,
+        section: &str,
+        chain_id: u32,
+        depth: u32,
+        turn: u32,
+        task: &TaskId,
+        text: &str,
+    ) {
+    }
 }
 
 /// An [`Observer`] that discards every observation.
@@ -598,6 +659,12 @@ mod tests {
         assert_eq!(Observation::Other("x".to_owned()).to_string(), "x");
         assert_eq!(Observation::RunStarted.label(), Some("Run started"));
         assert_eq!(Observation::Lua("hi".to_owned()).label(), None);
+        let abandoned = Observation::TaskAbandoned {
+            task: "0.0".parse().expect("a task id parses"),
+            reason: AbandonReason::OwnerReturned,
+        };
+        assert_eq!(abandoned.to_string(), "Task abandoned: the section ended");
+        assert_eq!(abandoned.label(), Some("Task abandoned"));
     }
 
     #[test]
@@ -652,6 +719,16 @@ mod tests {
         );
         observer.on_thinking("example-run", "chat", 0, 0, 1, "llama-3", "thinking text");
         observer.on_user_input("example-run", "chat", "hello");
+        let task: TaskId = "0.0".parse().expect("a task id parses");
+        observer.on_task_notice(
+            "example-run",
+            "chat",
+            0,
+            0,
+            1,
+            &task,
+            "Task id=0.0 (## Child) completed: done",
+        );
     }
 
     #[test]

@@ -23,35 +23,37 @@ const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-f
 const FANOUT_CROSS_ARM_APPEND: &str =
     include_str!("../prompts/execution/fanout-cross-arm-append.md");
 
-/// The worker-template section name both fanout arms execute under. The
-/// observation stream keys arm events by this section, not by `sys.index`
-/// (which the runtime injects only into arm Lua), so the exact per-arm index
-/// pairing is proven by the arms' index-bearing result rather than the event
-/// stream.
+/// The section that calls `fanout` in the two-arm fixtures: an arm is a
+/// task the shim spawns, so its `Task started` reports under the caller.
+const CALLER_SECTION: &str = "Research";
+
+/// The worker-template section name both fanout arms execute under: an
+/// arm's terminal task observation reports under it. The stream keys arm
+/// events by section, not by `sys.index` (which the runtime injects only
+/// into arm Lua), so the exact per-arm index pairing is proven by the arms'
+/// index-bearing result rather than the event stream.
 const WORKER_SECTION: &str = "Worker";
 
-/// Asserts the worker section emitted exactly one start and one success per arm
-/// and no other arm terminal (failed, cancelled, exhausted, or the legacy
-/// generic finished).
+/// Asserts the caller section started exactly two tasks, the worker section
+/// reported exactly two task successes, and no other task terminal (failed,
+/// cancelled, or abandoned) fired anywhere.
 fn assert_two_arms_all_succeeded(records: &[Record]) {
-    let events: Vec<&str> = records
+    let events: Vec<(&str, &str)> = records
         .iter()
-        .filter(|record| {
-            record.section == WORKER_SECTION && record.detail.starts_with("Fanout arm ")
-        })
-        .map(|record| record.detail.as_str())
+        .filter(|record| record.detail.starts_with("Task "))
+        .map(|record| (record.section.as_str(), record.detail.as_str()))
         .collect();
     let started = events
         .iter()
-        .filter(|detail| **detail == "Fanout arm started")
+        .filter(|(section, detail)| *section == CALLER_SECTION && *detail == "Task started")
         .count();
     let succeeded = events
         .iter()
-        .filter(|detail| **detail == "Fanout arm succeeded")
+        .filter(|(section, detail)| *section == WORKER_SECTION && *detail == "Task succeeded")
         .count();
     assert_eq!(
         started, 2,
-        "two arms must start under the worker section: {events:?}"
+        "two arms must start under the caller section: {events:?}"
     );
     assert_eq!(
         succeeded, 2,
@@ -60,7 +62,7 @@ fn assert_two_arms_all_succeeded(records: &[Record]) {
     assert_eq!(
         events.len(),
         started + succeeded,
-        "each arm must pair one start with one success and emit no failed, cancelled, or exhausted event: {events:?}"
+        "each arm must pair one start with one success and emit no failed, cancelled, or abandoned event: {events:?}"
     );
 }
 

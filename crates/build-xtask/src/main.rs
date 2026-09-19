@@ -7,8 +7,18 @@
 //!   `cargo xtask tidy` prints the same report on demand.
 //! - Every file in this crate stays under 500 lines; split first, then edit.
 
+// Fixture-tested now; Step 39 of the sans-I/O engine plan wires the guard
+// into `tidy`, at which point the allowance goes.
+#[cfg_attr(not(test), allow(dead_code))]
+mod engine_deps;
+mod harness_bans;
+mod manifest;
 mod new_crate;
 mod product;
+// Fixture-tested now; Step 39 seeds the scan with the retired engine
+// symbols and runs it over the engine crates from `tidy`.
+#[cfg_attr(not(test), allow(dead_code))]
+mod retired_symbols;
 mod tidy;
 
 use std::path::Path;
