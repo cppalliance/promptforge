@@ -581,7 +581,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-17>
 
-### Step 17: Chain-end rules for tasks
+### Step 17: Chain-end rules for tasks [completed]
 
 - Component: Tasks and fanout
 - Piece: arena

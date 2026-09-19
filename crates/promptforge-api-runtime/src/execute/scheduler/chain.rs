@@ -1,9 +1,10 @@
 //! The chain lifecycle: arena insertion, and the two chain-end paths - a
-//! chain's finish (the frame's teardown boundary and the outcome's
-//! delivery to the root, a call parent, a fanout join, or a task slot) and
-//! the abort of a chain with everything it transitively blocks on.
+//! chain's finish (the frame's teardown boundary, the chain-end rules for
+//! the tasks it owns, and the outcome's delivery to the root, a call
+//! parent, a fanout join, or a task slot) and the abort of a chain with
+//! everything it transitively blocks on or owns.
 
-use promptforge_api_types::ids::{ChainId, TaskId};
+use promptforge_api_types::ids::{AbandonReason, ChainId, TaskId};
 
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
@@ -12,7 +13,7 @@ use crate::parser::Section;
 use crate::{Error, Result};
 
 use super::joins::{ArmState, FanoutId};
-use super::{Chain, ChainIndex, Counters, Scheduler};
+use super::{Chain, ChainIndex, Counters, RequestId, Scheduler};
 
 impl<'a> Scheduler<'a> {
     /// Allocates the next child id under `owner`'s chain: the owner's id
@@ -103,7 +104,9 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Finishes one chain: the frame's teardown boundary when the chain
-    /// ends mid-section, then the outcome's delivery - the run's result for
+    /// ends mid-section, the chain-end rules for the tasks it owns (a live
+    /// author task makes the outcome `tasks_live`; every live task is
+    /// abandoned), then the outcome's delivery - the run's result for
     /// the root chain, the call answer for a child chain, the join
     /// slot's result for a fanout arm, the task slot's outcome for a
     /// spawned chain.
@@ -164,6 +167,9 @@ impl<'a> Scheduler<'a> {
         // The frame drops here: the single teardown boundary.
         drop(frame);
         drop(access);
+        // The chain's tasks end with it: a live author task turns a
+        // success into `tasks_live`, and every live task is abandoned.
+        let outcome = self.settle_owned_tasks(id, outcome);
         if let Some(arm) = arm {
             self.complete_arm(arm, outcome);
             return;
@@ -190,13 +196,17 @@ impl<'a> Scheduler<'a> {
         }
     }
 
-    /// Aborts one chain and everything it transitively blocks on - its
-    /// call children and the arms of its nested fanouts - the scheduler
-    /// port of dropping a spawned arm task: the chain leaves the ready
-    /// queue and the pending table, its in-flight leaf I/O task is aborted,
-    /// and its state drops in the teardown order (the suspended coroutine,
-    /// then the frame unarmed - no `SECTION_FINISHED` - then the arm state,
-    /// whose finalizer drop reports `FANOUT_ARM_CANCELLED`).
+    /// Aborts one chain and everything it transitively blocks on or owns -
+    /// its call children, the arms of its nested fanouts, and the tasks it
+    /// spawned (each abandoned as `owner_aborted`, its own subtree aborted
+    /// in turn) - the scheduler port of dropping a spawned arm task: the
+    /// chain leaves the ready queue and the pending table, its in-flight
+    /// leaf I/O task is aborted, and its state drops in the teardown order
+    /// (the suspended coroutine, then the frame unarmed - no
+    /// `SECTION_FINISHED` - then the arm state, whose finalizer drop
+    /// reports `FANOUT_ARM_CANCELLED`). The chain's own task slot, if it
+    /// is a task, is the caller's to settle: the owner's chain end
+    /// abandons it, a cancel arm cancels it.
     pub(super) fn abort_subtree(&mut self, id: ChainIndex) {
         // Nested fanouts this chain parents: their arms abort with it, and
         // the removed join has no answer to deliver - the parent is dead.
@@ -224,27 +234,16 @@ impl<'a> Scheduler<'a> {
         for child in children {
             self.abort_subtree(child);
         }
+        // The tasks this chain owns end with it; their outcomes have no
+        // one to reach, so the leaked-author list is moot here.
+        self.abandon_owned_tasks(id, AbandonReason::OwnerAborted);
         self.ready.retain(|ready| *ready != id);
         let request = self
             .pending
             .iter()
             .find_map(|(request, chain)| (*chain == id).then_some(*request));
         if let Some(request) = request {
-            self.pending.remove(&request);
-            // Record the aborted request so its task's late answer (a send
-            // that landed before the abort) is the one unknown-id answer
-            // the driver discards; anything else stays a loud invariant
-            // failure.
-            self.aborted_requests.insert(request);
-            // The handle stays in `io_tasks`: aborting a blocking-pool op
-            // detaches rather than interrupts, so the op's access clone -
-            // and the claims it holds - releases only when the op finishes.
-            // The run-end drain awaits the handle, keeping claim release
-            // bounded to the run's lifetime on this path too; if the op's
-            // late answer arrives first, the answer loop takes the handle.
-            if let Some(task) = self.io_tasks.get(&request) {
-                task.abort();
-            }
+            self.abort_request(request);
         }
         // A chain on the call stack is the top here: only its own
         // descendants sit above it, and the recursion already removed them.
@@ -257,5 +256,26 @@ impl<'a> Scheduler<'a> {
         chain.frame = None;
         chain.access = None;
         chain.arm = None;
+    }
+
+    /// Drops one in-flight leaf request whose chain is going away: the
+    /// pending entry leaves, the id is recorded as aborted, and the leaf
+    /// task is aborted.
+    pub(super) fn abort_request(&mut self, request: RequestId) {
+        self.pending.remove(&request);
+        // Record the aborted request so its task's late answer (a send
+        // that landed before the abort) is the one unknown-id answer
+        // the driver discards; anything else stays a loud invariant
+        // failure.
+        self.aborted_requests.insert(request);
+        // The handle stays in `io_tasks`: aborting a blocking-pool op
+        // detaches rather than interrupts, so the op's access clone -
+        // and the claims it holds - releases only when the op finishes.
+        // The run-end drain awaits the handle, keeping claim release
+        // bounded to the run's lifetime on this path too; if the op's
+        // late answer arrives first, the answer loop takes the handle.
+        if let Some(task) = self.io_tasks.get(&request) {
+            task.abort();
+        }
     }
 }

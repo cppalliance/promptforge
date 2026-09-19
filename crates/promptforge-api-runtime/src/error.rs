@@ -9,12 +9,23 @@
 
 use std::borrow::Cow;
 
+use promptforge_api_types::ids::TaskId;
 use promptforge_lua::Error as LuaError;
 use promptforge_model_client::Error as GatewayClientError;
 use promptforge_parser::Error as ParserError;
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+
+/// Renders task ids as a comma-separated list: the [`Error::TasksLive`]
+/// message and its `tasks` field.
+fn join_task_ids(tasks: &[TaskId]) -> String {
+    tasks
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// The crate's internal error substrate, spanning parsing, HTTP, and execution
 /// failures.
@@ -257,6 +268,22 @@ pub(crate) enum Error {
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
     ToolLoopExhausted,
+
+    /// A chain ended while author-origin tasks it owned were still live.
+    ///
+    /// A spawned task ends with its owner, so a task the author neither
+    /// waited on nor cancelled is the author's bug: the chain's outcome
+    /// becomes this error (the run's for the root walk, the call's answer
+    /// for a `call` chain) and the leaked tasks are abandoned. The message
+    /// names the ids in spawn order; the Lua table carries them as `tasks`.
+    #[error(
+        "chain ended with author tasks still live: {}; wait on or cancel every task a chain spawns before it ends",
+        join_task_ids(.tasks)
+    )]
+    TasksLive {
+        /// The live author tasks, in spawn order.
+        tasks: Vec<TaskId>,
+    },
 
     /// The model referenced a tool outside the section's advertised scope.
     ///
@@ -634,6 +661,7 @@ impl promptforge_lua::ErrorValue for Error {
             Error::EmptyModelReply { .. } => ErrorKind::EmptyModelReply,
             Error::Interrupted => ErrorKind::Cancelled,
             Error::ToolLoopExhausted => ErrorKind::ToolLoopExhausted,
+            Error::TasksLive { .. } => ErrorKind::TasksLive,
             Error::OutOfScopeToolCall { .. } => ErrorKind::OutOfScopeTool,
             Error::UnboundToolCall { .. } => ErrorKind::UnboundTool,
             Error::Tool { .. } => ErrorKind::Tool,
@@ -673,6 +701,7 @@ impl promptforge_lua::ErrorValue for Error {
             Error::OutOfScopeToolCall { name, .. } | Error::UnboundToolCall { name, .. } => {
                 vec![("name".to_owned(), name.clone())]
             }
+            Error::TasksLive { tasks } => vec![("tasks".to_owned(), join_task_ids(tasks))],
             _ => Vec::new(),
         }
     }

@@ -40,7 +40,7 @@
 use std::fmt;
 
 use crate::events::{CallMetrics, ToolCallEvent};
-use crate::ids::{TaskId, TaskOrigin};
+use crate::ids::{AbandonReason, TaskId, TaskOrigin};
 
 /// One typed operational observation emitted by the runtime.
 ///
@@ -246,6 +246,16 @@ pub enum Observation {
         /// The task's id.
         task: TaskId,
     },
+    /// Terminal: the task's owner chain ended while the task was live, so
+    /// the engine ended the task. Distinct from a cancellation - the task
+    /// lost its owner rather than being stopped on purpose. Reported under
+    /// the task's target section.
+    TaskAbandoned {
+        /// The task's id.
+        task: TaskId,
+        /// How the owner ended.
+        reason: AbandonReason,
+    },
     /// The one author-controlled checkpoint: a validated Lua `log(message)`.
     ///
     /// Prompt authors must never place arguments, replies, tool data,
@@ -321,6 +331,7 @@ impl Observation {
             Observation::TaskStarted { .. } => "Task started",
             Observation::TaskSucceeded { .. } => "Task succeeded",
             Observation::TaskFailed { .. } => "Task failed",
+            Observation::TaskAbandoned { .. } => "Task abandoned",
             Observation::Lua(_) | Observation::Other(_) => return None,
         };
         Some(label)

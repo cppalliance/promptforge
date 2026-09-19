@@ -89,9 +89,12 @@ impl RunError {
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::ContextExhausted { .. } => RunErrorKind::ContextExhausted,
             Error::Input { .. } => RunErrorKind::Input,
-            Error::LuaCompile { .. } | Error::Lua(_) | Error::LuaRuntime { .. } => {
-                RunErrorKind::Lua
-            }
+            // A leaked task is the author's program failing, as any Lua
+            // fault is.
+            Error::LuaCompile { .. }
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::TasksLive { .. } => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::RequirementsUnmet { .. } => RunErrorKind::RequirementsUnmet,
             Error::MissingEnv(_)
