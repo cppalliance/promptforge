@@ -1,4 +1,4 @@
-use super::{ChainId, TaskId, TaskOrigin};
+use super::{ChainId, Provenance, TaskId, TaskOrigin};
 
 #[test]
 fn the_root_chain_is_zero_and_children_extend_it_by_index() {
@@ -78,5 +78,33 @@ fn a_task_origin_round_trips_through_its_tag() {
     assert_eq!(
         serde_json::to_string(&TaskOrigin::Model).expect("an origin serializes"),
         "\"model\""
+    );
+}
+
+#[test]
+fn provenance_orders_by_task_then_sequence_and_round_trips() {
+    let task: TaskId = "0.2".parse().expect("a task id parses");
+    let first = Provenance {
+        task: task.clone(),
+        seq: 0,
+    };
+    let later = Provenance { task, seq: 7 };
+    let other_task = Provenance {
+        task: "0.3".parse().expect("a task id parses"),
+        seq: 0,
+    };
+    assert!(first < later, "within one task the sequence orders");
+    assert!(
+        later < other_task,
+        "the task path orders before the sequence"
+    );
+    assert_eq!(
+        serde_json::to_string(&later).expect("provenance serializes"),
+        r#"{"task":"0.2","seq":7}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<Provenance>(r#"{"task":"0.2","seq":7}"#)
+            .expect("provenance deserializes"),
+        later
     );
 }

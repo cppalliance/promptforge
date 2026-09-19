@@ -19,7 +19,9 @@
 //! author through `tasks.spawn`, or the model through its `task` tool -
 //! and rides beside the task's id wherever the task is reported.
 //! [`AbandonReason`] names how a task's owner ended while the task was
-//! still live, for the `abandoned` terminal state.
+//! still live, for the `abandoned` terminal state. [`Provenance`] extends a
+//! task's id with a per-task sequence number: the replay key stamped on
+//! every effect and event the engine emits.
 //!
 //! Ids order as paths: a chain before its descendants, siblings by index.
 //! The tasks one chain owns are its direct children, so sorting their ids
@@ -170,6 +172,45 @@ impl<'de> Deserialize<'de> for TaskId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         ChainId::deserialize(deserializer).map(Self)
     }
+}
+
+/// The replay key of one effect or event: the nearest enclosing task and
+/// the effect's or event's position within that task.
+///
+/// `task` is the task whose chain emitted the item. The main walk is task
+/// `0`; a `call` child reports its parent's task, which is unambiguous
+/// because a `call` blocks its parent, so the two never interleave. `seq`
+/// is a counter local to that task, shared by its effects and its events
+/// so the two kinds order against each other within one task. Two runs of
+/// the same prompt with the same inputs and answers stamp the same
+/// provenance on the same items regardless of how their chains interleave,
+/// which is what lets a log slice by task, order within a task, and later
+/// replay a run against its record: in durable-execution vocabulary this is
+/// the replay key. The in-flight `EffectId` is a separate, opaque run-wide
+/// handle that need not reproduce.
+///
+/// The name is chosen over `Origin` because [`shared_vfs::Origin`] already
+/// names the claims origin label one crate below and [`TaskOrigin`] names
+/// the spawning principal.
+///
+/// Orders by task path, then by sequence.
+///
+/// # Examples
+/// ```
+/// use promptforge_api_types::ids::{Provenance, TaskId};
+///
+/// let task: TaskId = "0.2".parse()?;
+/// let first = Provenance { task: task.clone(), seq: 0 };
+/// let second = Provenance { task, seq: 1 };
+/// assert!(first < second);
+/// # Ok::<(), promptforge_api_types::ids::ParseIdError>(())
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Provenance {
+    /// The nearest enclosing task.
+    pub task: TaskId,
+    /// The item's position among the task's effects and events.
+    pub seq: u32,
 }
 
 /// The principal that started a task.
