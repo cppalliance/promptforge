@@ -6,10 +6,16 @@
 //! observes the handle through its instruction hook, the scheduler
 //! observes it between chain steps and while chains are suspended, and
 //! model turns poll [`wait_cancelled`].
+//!
+//! [`sync`] holds the runtime-free handle the engine moves to once it stops
+//! awaiting cancellation and only polls a flag.
 
 use std::future::Future;
 
 use tokio_util::sync::CancellationToken;
+
+#[path = "cancel-sync.rs"]
+pub mod sync;
 
 tokio::task_local! {
     static CURRENT: CancelHandle;

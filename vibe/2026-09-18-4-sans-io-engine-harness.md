@@ -690,7 +690,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-26>
 
-### Step 26: Sync `CancelHandle`
+### Step 26: Sync `CancelHandle` [completed]
 
 - Component: Run API and engine purity
 - Piece: vocabulary
