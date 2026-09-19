@@ -33,6 +33,29 @@ fn task_status_table(lua: &Lua, status: TaskStatus) -> mlua::Result<mlua::Table>
     Ok(table)
 }
 
+/// The serde options an event table is built under: an absent optional
+/// field (`finish_reason`, `metrics`, a spawn seed) reads as nil in author
+/// code, never as the bridge's NULL sentinel, so an author tests presence
+/// with a plain truth test.
+const EVENT_TABLE_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
+    .serialize_none_to_null(false)
+    .serialize_unit_to_null(false);
+
+/// Renders one task's events as a 1-based sequence of plain tables, each
+/// the event's serialized shape: `kind`, `execution`, `section`,
+/// `provenance = { task, seq }`, then the variant's own fields. The one
+/// serde-boundary conversion for events; no codec reaches author code.
+fn event_sequence(
+    lua: &Lua,
+    events: &[promptforge_api_types::event::Event],
+) -> mlua::Result<mlua::Table> {
+    let sequence = lua.create_table_with_capacity(events.len(), 0)?;
+    for (position, event) in events.iter().enumerate() {
+        sequence.raw_set(position + 1, lua.to_value_with(event, EVENT_TABLE_OPTIONS)?)?;
+    }
+    Ok(sequence)
+}
+
 /// Renders task ids as a 1-based sequence of their path strings.
 fn task_id_sequence(
     lua: &Lua,
@@ -164,6 +187,9 @@ impl<E: ErrorValue> Answer<E> {
             Answer::Note(Ok(())) | Answer::Cancel(Ok(())) => vec![Value::Nil],
             // Always a sequence, empty included, so the shim's `#` and
             // `ipairs` need no nil check.
+            Answer::TaskEvents(Ok(events)) => vec![Value::Table(event_sequence(lua, &events)?)],
+            // Always a sequence, empty included, so the shim's `#` and
+            // `ipairs` need no nil check.
             Answer::DrainTaskNotices(Ok(notices)) => {
                 vec![Value::Table(lua.create_sequence_from(notices)?)]
             }
@@ -192,6 +218,7 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Pending(Err(error))
             | Answer::Note(Err(error))
             | Answer::Cancel(Err(error))
+            | Answer::TaskEvents(Err(error))
             | Answer::DrainTaskNotices(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))

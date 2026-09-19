@@ -7,13 +7,15 @@
 //! The loop is `step -> perform -> await an answer -> resume`. Every
 //! effect the step hands out is spawned as one performer that posts its
 //! answer on a channel under the effect's id; the loop resumes the run
-//! with each arriving answer and steps again. When the run reports itself
-//! decided ([`Run::decided`]) every performer still out is aborted and
-//! joined - a blocking-pool store operation runs to completion, so its
-//! access clone and the claims it holds release before the result is
-//! delivered - and its effect is answered `Dropped`, as is every effect
-//! issued in the deciding step itself, which is never performed; so the
-//! run reaches `Done` with every effect answered exactly once.
+//! with each arriving answer and steps again. A `TaskEvents` read is
+//! answered at issue from the driver's own history of forwarded events.
+//! When the run reports itself decided ([`Run::decided`]) every performer
+//! still out is aborted and joined - a blocking-pool store operation runs
+//! to completion, so its access clone and the claims it holds release
+//! before the result is delivered - and its effect is answered `Dropped`,
+//! as is every effect issued in the deciding step itself, which is never
+//! performed; so the run reaches `Done` with every effect answered exactly
+//! once.
 //!
 //! Cancellation is the run's synchronous flag: the host sets it (through
 //! the context's handle or [`Run::cancel`]), running Lua observes it from
@@ -80,6 +82,11 @@ pub(crate) struct TokioDriver {
     outstanding: HashMap<EffectId, JoinHandle<()>>,
     /// The run's cancel flag, awaited while the loop waits on answers.
     cancel: CancelHandle,
+    /// Every event the run has reported, in step order: the history a
+    /// `TaskEvents` effect is answered from. A step's events are appended
+    /// before its effects are performed, so a task reading its own record
+    /// sees everything reported before the read.
+    history: Vec<Event>,
     /// Test-only: the record of every effect performed, in issue order.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
@@ -110,6 +117,7 @@ impl TokioDriver {
             tx,
             rx,
             outstanding: HashMap::new(),
+            history: Vec::new(),
             #[cfg(test)]
             tap: None,
         }
@@ -225,19 +233,20 @@ impl TokioDriver {
         while self.rx.try_recv().is_ok() {}
     }
 
-    /// Forwards one step's events to the host's observer and capture.
-    fn forward(&self, events: Vec<Event>) {
-        let Some(state) = &self.state else {
-            return;
-        };
+    /// Forwards one step's events to the host's observer and capture, and
+    /// appends them to the history `TaskEvents` reads answer from.
+    fn forward(&mut self, events: Vec<Event>) {
         if events.is_empty() {
             return;
         }
-        super::events_to_observer::forward(
-            events,
-            state.host_observer().as_ref(),
-            state.host_debug().map(Arc::as_ref),
-        );
+        if let Some(state) = &self.state {
+            super::events_to_observer::forward(
+                events.clone(),
+                state.host_observer().as_ref(),
+                state.host_debug().map(Arc::as_ref),
+            );
+        }
+        self.history.extend(events);
     }
 
     /// The run's gateway client, resolved on first use and cached.
@@ -367,6 +376,14 @@ impl TokioDriver {
                     tokio::time::sleep(duration).await;
                     post(&tx, id, EffectAnswer::Timer);
                 })
+            }
+            Effect::TaskEvents { task, last } => {
+                // Answered from the driver's own history, at issue: the
+                // step's events are already appended, so the read sees
+                // everything reported before it.
+                let events = super::task_history(&self.history, &task, last);
+                self.run.resume(id, EffectAnswer::TaskEvents(events));
+                return false;
             }
         };
         self.outstanding.insert(id, handle);

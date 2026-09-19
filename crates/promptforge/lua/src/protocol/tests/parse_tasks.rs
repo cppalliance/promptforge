@@ -221,6 +221,62 @@ fn timer_seconds_out_of_domain_are_the_calls_error() {
 }
 
 #[test]
+fn task_events_parses_the_task_and_the_optional_last_bound() {
+    let lua = Lua::new();
+    let table = request_table(&lua, "task_events");
+    table.raw_set("task", "0.2").expect("raw_set");
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::TaskEvents { task, last } => {
+            assert_eq!(task, "0.2".parse::<TaskId>().expect("a task id parses"));
+            assert_eq!(last, None, "an absent `last` reads from the start");
+        }
+        other => panic!("expected a task_events request, got {other:?}"),
+    }
+    for (value, expected) in [(Value::Integer(7), 7), (Value::Number(3.0), 3)] {
+        let table = request_table(&lua, "task_events");
+        table.raw_set("task", "0.2").expect("raw_set");
+        table.raw_set("last", value).expect("raw_set");
+        match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+            Request::TaskEvents { last, .. } => assert_eq!(last, Some(expected)),
+            other => panic!("expected a task_events request, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn task_events_last_out_of_domain_is_the_calls_error() {
+    // `last` is the author's `opts.last`: a negative, fractional, or
+    // non-numeric value rides back as the call's answer so the shim raises
+    // it at the call site; a malformed id is the id's own error.
+    let lua = Lua::new();
+    for (value, needle) in [
+        (Value::Integer(-1), "-1"),
+        (Value::Number(1.5), "1.5"),
+        (Value::Number(f64::from(u32::MAX) + 1.0), "4294967296"),
+        (Value::Boolean(true), "boolean"),
+    ] {
+        let table = request_table(&lua, "task_events");
+        table.raw_set("task", "0.2").expect("raw_set");
+        table.raw_set("last", value).expect("raw_set");
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Call(Answer::TaskEvents(Err(Error::Lua(message)))) => assert!(
+                message.starts_with("last must be") && message.contains(needle),
+                "the message names the option and the value: {message}"
+            ),
+            other => panic!("expected the `last` call error for {needle}, got {other:?}"),
+        }
+    }
+    let table = request_table(&lua, "task_events");
+    table.raw_set("task", "nope").expect("raw_set");
+    match Request::from_yield(&lua, &Value::Table(table)) {
+        YieldParse::Call(Answer::TaskEvents(Err(Error::Lua(message)))) => {
+            assert!(message.contains("is not a task id"), "got {message}");
+        }
+        other => panic!("expected the task id call error, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_timer_answer_resumes_the_task_id_as_its_path_text() {
     let lua = Lua::new();
     let task: TaskId = "0.3".parse().expect("a task id parses");

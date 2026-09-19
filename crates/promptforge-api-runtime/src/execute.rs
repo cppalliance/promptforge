@@ -120,10 +120,10 @@ pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
+pub use run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
 
 use std::sync::Arc;
 
-use run::Run;
 use tokio_driver::TokioDriver;
 
 use crate::Error;
@@ -142,6 +142,26 @@ pub enum RunResult {
     Cancelled,
     /// The run failed; the typed error classifies the failure.
     Failure(RunError),
+}
+
+/// One task's history out of a host's event log: every event whose
+/// provenance names `task` with a sequence number after `last` (every one
+/// of the task's events when `last` is `None`), in log order - which is
+/// sequence order within one task, since a task's events are pushed in
+/// the order its counter stamps them. The answer to a
+/// [`Effect::TaskEvents`] read, shared by the in-crate drivers.
+pub(crate) fn task_history(
+    log: &[promptforge_api_types::event::Event],
+    task: &promptforge_api_types::ids::TaskId,
+    last: Option<u32>,
+) -> Vec<promptforge_api_types::event::Event> {
+    log.iter()
+        .filter(|event| {
+            let provenance = event.provenance();
+            provenance.task == *task && last.is_none_or(|last| provenance.seq > last)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Executes a parsed prompt and returns its final text.

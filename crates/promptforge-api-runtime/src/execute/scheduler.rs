@@ -32,28 +32,30 @@
 //! This file carries the scheduler core: the chain record and arena, the
 //! ready queue, the pending table, the call stack, the task arena, and
 //! the one `issue` path every leaf arm hands its effect through. The
-//! submodules carry the rest: `drive` the run-level step (the ready-queue
-//! drain, the terminal rules, and the teardown), `apply` the answer
-//! application, `chain` the chain lifecycle (arena insertion and the two
-//! chain-end paths), `step` one chain's step to its next suspension
-//! point, `walk` the section walk rules, `h1` the live H1 pass and its
-//! hand-off to the walk, `dispatch` the request arms, `chat` the
+//! submodules carry the rest: `pending` the pending table's entry (the
+//! `Continuation` an answer is applied by), `drive` the run-level step
+//! (the ready-queue drain, the terminal rules, and the teardown), `apply`
+//! the answer application, `chain` the chain lifecycle (arena insertion
+//! and the two chain-end paths), `step` one chain's step to its next
+//! suspension point, `walk` the section walk rules, `h1` the live H1 pass
+//! and its hand-off to the walk, `dispatch` the request arms, `chat` the
 //! one-round `chat` arm and its answer application, `tool_call` the
 //! script and model-issued `tool_call` arm (the two arms the
 //! section-visible `models.loop` shim drives), `builtins` the model's
 //! task built-ins (`task`, `task_cancel`, `task_status`) answered over
 //! the arena and advertised once a section runs `tools.allow_tasks`,
 //! `await_tasks` the fourth built-in, the model's wait over its live
-//! tasks, `notices` the model-task notices (queued at a model task's end,
-//! drained into the owner's next round or its `await_tasks` answer),
-//! `tasks` the task arena, the `spawn` arm, and the chain-end rules for
-//! tasks, `waits` the `when_any` wait and the `ready`, `status`,
-//! `pending`, `note`, and `cancel` arms over the arena, `timer` the wait
-//! shims' internal timeout as an effect-backed slot, and `test_hooks`
-//! (test builds only) the seams the suites inspect the arena through.
-//! A fanout is Lua over those arms (the `fanout` shim spawns one task per
-//! member and waits on the live set), so the scheduler keeps no fanout
-//! state of its own.
+//! tasks, `task_events` the fifth, the host-answered history read the
+//! author's `tasks.events` shares, `notices` the model-task notices
+//! (queued at a model task's end, drained into the owner's next round or
+//! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm, and
+//! the chain-end rules for tasks, `waits` the `when_any` wait and the
+//! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
+//! `timer` the wait shims' internal timeout as an effect-backed slot, and
+//! `test_hooks` (test builds only) the seams the suites inspect the arena
+//! through. A fanout is Lua over those arms (the `fanout` shim spawns one
+//! task per member and waits on the live set), so the scheduler keeps no
+//! fanout state of its own.
 
 mod apply;
 mod await_tasks;
@@ -64,7 +66,9 @@ mod dispatch;
 mod drive;
 mod h1;
 mod notices;
+mod pending;
 mod step;
+mod task_events;
 mod tasks;
 #[cfg(test)]
 mod test_hooks;
@@ -80,8 +84,7 @@ use mlua::Thread;
 use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
 use shared_vfs::Origin;
 
-use crate::lua::{ScriptReport, ToolBinding};
-use crate::observe::{Observation, detail};
+use crate::observe::detail;
 use crate::parser::{Block, Prompt, Section};
 use crate::store::Access;
 use crate::{Error, Result};
@@ -92,6 +95,7 @@ use super::run::{Effect, EffectAnswer, EffectId};
 use super::scope::DispatchTarget;
 use super::section_context::{SectionContext, TaskSeed};
 use await_tasks::AwaitTasks;
+use pending::{Continuation, Pending, ToolCallContinuation};
 use tasks::TaskSlot;
 #[cfg(test)]
 pub(crate) use tasks::TaskState;
@@ -128,57 +132,6 @@ impl SlicePath {
         }
         slice
     }
-}
-
-/// The driver-side half of one issued leaf effect: what the parked chain
-/// asked for, in the terms `apply_answer` needs to turn the performer's
-/// raw [`EffectAnswer`] into the chain's protocol [`Answer`] and emit the
-/// round's events. The effect itself carries none of this: it describes
-/// the work, this describes what the work means to the chain.
-enum Continuation {
-    /// A nested `models.infer`: the completion becomes the round's text
-    /// under the single-prose-round reporting rules.
-    Infer,
-    /// A `chat` round: the completion is classified against the scope the
-    /// chain advertised and reported as one model turn.
-    Chat,
-    /// A bound tool call: the tool's own output goes through the shared
-    /// dispatch body (counts already taken at dispatch, then the
-    /// succeeded/failed event, the trust rule, and the `ToolResult`).
-    ToolCall(ToolCallContinuation),
-    /// A `user_input` wait: the broker's text is reported and resumes with
-    /// its availability flag.
-    UserInput,
-    /// A store operation: the succeeded/failed observation pair its
-    /// outcome reports, `None` for `exists`, which reports nothing.
-    Store(Option<(Observation, Observation)>),
-    /// The internal timer behind a timed wait: the firing completes the
-    /// slot backed by the effect and wakes its waiting owner; no chain
-    /// resumes.
-    Timer,
-}
-
-/// What a bound `tool_call`'s answer is applied with: the binding the call
-/// resolved to (its alias, output kind, and trust rules), the coordinates
-/// the `ToolResult` reports under, and the model's call id when the model
-/// issued the call.
-struct ToolCallContinuation {
-    /// The binding the alias resolved to at dispatch.
-    binding: ToolBinding,
-    /// The chain, depth, and turn the call fired in.
-    report: ScriptReport,
-    /// The model-issued call id, or `None` for a script call.
-    call_id: Option<String>,
-}
-
-/// One in-flight leaf effect's pending entry: the chain parked on it and
-/// how its answer resumes that chain.
-struct Pending {
-    /// The parked chain (for a timer, the owner whose wait the timer
-    /// serves).
-    chain: ChainIndex,
-    /// How the answer is applied.
-    resume: Continuation,
 }
 
 /// The most precise prompt-source line known for `blocks`: the first

@@ -1,9 +1,10 @@
 //! The task-operation request parsers: the wait shims' internal `timer`
 //! and its author-supplied seconds, the `when_any` set, the single-task
-//! `ready`, `status`, and `cancel`, the `pending` origin filter, and the
-//! `note` text. The shims resolve a `Task` handle to its bare id before
-//! yielding, so every task field arrives as a path string; an id that does
-//! not parse is the author's argument error, raised at the call site.
+//! `ready`, `status`, and `cancel`, the `task_events` id and `last`
+//! bound, the `pending` origin filter, and the `note` text. The shims
+//! resolve a `Task` handle to its bare id before yielding, so every task
+//! field arrives as a path string; an id that does not parse is the
+//! author's argument error, raised at the call site.
 
 use std::time::Duration;
 
@@ -103,6 +104,47 @@ pub(super) fn parse_cancel(table: &mlua::Table) -> std::result::Result<Request, 
     Ok(Request::Cancel {
         task: call_task(table)?,
     })
+}
+
+/// Parses a `task_events` request: the one task id and the optional
+/// author-supplied `last` sequence number, which must be a non-negative
+/// integer `u32` can hold when present; any other shape is the call's
+/// error, raised at the call site.
+pub(super) fn parse_task_events(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let task = call_task(table)?;
+    let last = match table.raw_get::<Value>("last") {
+        Ok(Value::Nil) => None,
+        Ok(Value::Integer(last)) => Some(u32::try_from(last).map_err(|_| {
+            FieldFailure::Call(Error::Lua(format!(
+                "last must be a non-negative integer sequence number, got {last}"
+            )))
+        })?),
+        Ok(Value::Number(last)) => {
+            // A float with an integral value is the author writing `3.0`;
+            // anything fractional, negative, or non-finite is no sequence
+            // number. The range check happens in the integer conversion.
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the value is checked integral, finite, and in u32 range before the cast"
+            )]
+            let converted = (last.fract() == 0.0 && last >= 0.0 && last <= f64::from(u32::MAX))
+                .then_some(last as u32);
+            Some(converted.ok_or_else(|| {
+                FieldFailure::Call(Error::Lua(format!(
+                    "last must be a non-negative integer sequence number, got {last}"
+                )))
+            })?)
+        }
+        Ok(other) => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "last must be an integer, got {}",
+                other.type_name()
+            ))));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    Ok(Request::TaskEvents { task, last })
 }
 
 /// Parses a `pending` request: the optional author-supplied `origin`

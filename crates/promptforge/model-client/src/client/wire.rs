@@ -1,5 +1,9 @@
 //! Wire types for the chat-completions protocol: messages, tool schemas,
-//! tool calls, and completion results.
+//! tool calls, and completion results. The constructors a host that ran no
+//! transport builds a completion from live in the `canned` sibling.
+
+#[path = "wire-canned.rs"]
+mod canned;
 
 use promptforge_api_types::events::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::Value;

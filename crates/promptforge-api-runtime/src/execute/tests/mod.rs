@@ -1428,6 +1428,8 @@ mod models_loop_compactors;
 mod observations;
 mod provenance;
 mod scheduler;
+mod serial_driver;
+mod task_events;
 mod tasks;
 mod timeouts;
 mod tool_call_arm;

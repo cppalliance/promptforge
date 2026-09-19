@@ -750,7 +750,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-31>
 
-### Step 31: Serial driver, `TaskEvents`, and the determinism tests
+### Step 31: Serial driver, `TaskEvents`, and the determinism tests [completed]
 
 - Component: Run API and engine purity
 - Piece: drivers

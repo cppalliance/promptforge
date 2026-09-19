@@ -35,9 +35,7 @@ use promptforge_api_types::ids::Provenance;
 #[path = "run-effect.rs"]
 mod effect;
 
-#[cfg(test)]
-pub(crate) use effect::EffectRecord;
-pub(crate) use effect::{Effect, EffectAnswer, EffectId};
+pub use effect::{Effect, EffectAnswer, EffectId, EffectRecord};
 
 use crate::cancel::CancelHandle;
 use crate::parser::{ParseErrorKind, Prompt};
@@ -52,7 +50,7 @@ use super::scheduler::Scheduler;
 
 /// What one [`Run::step`] produced.
 #[derive(Debug)]
-pub(crate) enum Step {
+pub enum Step {
     /// The run is not over. `effects` are the leaf effects this step
     /// issued, in issue order, each with the provenance of the task that
     /// built it; an empty list means every chain waits on an effect
@@ -81,7 +79,27 @@ pub(crate) enum Step {
 /// `Run` is `Send`: one caller drives it at a time, and the thread may
 /// change between calls. It owns its prompt through an `Arc`, so the host
 /// keeps parsing once and running many times.
-pub(crate) struct Run {
+///
+/// # Examples
+/// A prompt whose only section returns a literal issues no effect, so a
+/// host drives it to `Done` in one step:
+/// ```
+/// use std::sync::Arc;
+///
+/// use promptforge_api_runtime::execute::{Run, RunContext, RunResult, Step};
+/// use promptforge_api_runtime::parser::Prompt;
+/// use promptforge_api_types::observe::NullObserver;
+///
+/// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
+/// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
+/// let mut run = Run::new(Arc::new(prompt), "", RunContext::new("doc-example"));
+/// let Step::Done { result: RunResult::Ok(text), .. } = run.step() else {
+///     panic!("the literal run is done at once");
+/// };
+/// assert_eq!(text, "hello");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub struct Run {
     /// The scheduler, present unless construction failed.
     scheduler: Option<Scheduler>,
     /// A construction failure, delivered as the first step's `Done`.
@@ -109,7 +127,7 @@ impl Run {
     /// backend fails, yields a run whose first `step` is `Done` with the
     /// failure.
     #[must_use]
-    pub(crate) fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
+    pub fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
         // The context's one flag, held here so a stillborn run still has
         // the handle `cancel` and `cancel_handle` name.
         let cancel = ctx.cancel.clone();
@@ -141,7 +159,7 @@ impl Run {
     /// [`Step::Done`] once the run is over and every issued effect is
     /// answered. A step after `Done` is a host error and reports an
     /// internal failure.
-    pub(crate) fn step(&mut self) -> Step {
+    pub fn step(&mut self) -> Step {
         if let Some(error) = self.stillborn.take() {
             return Step::Done {
                 result: RunResult::Failure(RunError::from(error)),
@@ -165,7 +183,7 @@ impl Run {
     /// that step. An answer for an effect whose chain stopped waiting is
     /// discarded. An answer for an id the run never issued, or a second
     /// answer for one effect, is an internal error that ends the run.
-    pub(crate) fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
+    pub fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
         if let Some(scheduler) = self.scheduler.as_mut() {
             scheduler.resume(id, answer);
         }
@@ -174,20 +192,13 @@ impl Run {
     /// Sets the run's cancel flag. Running Lua observes it from its
     /// instruction hook; the next `step` tears every chain down and, once
     /// the outstanding effects are answered, reports the run as cancelled.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the in-crate tokio host cancels through the context's handle; the harness is the first host to cancel through the run"
-        )
-    )]
-    pub(crate) fn cancel(&mut self) {
+    pub fn cancel(&mut self) {
         self.cancel.cancel();
     }
 
     /// The run's cancel flag, for a host that cancels from another thread.
     #[must_use]
-    pub(crate) fn cancel_handle(&self) -> CancelHandle {
+    pub fn cancel_handle(&self) -> CancelHandle {
         self.cancel.clone()
     }
 
@@ -197,7 +208,7 @@ impl Run {
     /// a `Pending` step to learn it may drop what it holds, so control
     /// never rides on the events, which are a report and not a decision.
     #[must_use]
-    pub(crate) fn decided(&self) -> bool {
+    pub fn decided(&self) -> bool {
         self.scheduler.as_ref().is_none_or(Scheduler::decided)
     }
 

@@ -33,6 +33,13 @@ time.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 workspace-hack.workspace = true
 
+[features]
+# The engine's own test drivers, for companion crates' suites: the serial
+# sans-IO driver (`test_support::drive`) that performs a run's effects
+# through a caller's closure with no runtime and no HTTP. Never enabled by a
+# production dependent.
+test-support = []
+
 [dev-dependencies]
 axum.workspace = true
 criterion.workspace = true

@@ -117,6 +117,19 @@ pub enum Request {
         /// The task to cancel.
         task: TaskId,
     },
+    /// `tasks.events(task, opts?)`: the events one task has reported so
+    /// far, read from the host's history. Owner-or-self, as `status` is: the
+    /// caller may read a task it owns or the task it runs inside. A leaf
+    /// request: the engine holds no history of its own, so the host answers
+    /// it from its log (a test driver from its event buffer).
+    TaskEvents {
+        /// The task whose events are read.
+        task: TaskId,
+        /// `opts.last`: the highest task sequence number the caller has
+        /// already seen; only events after it are returned. `None` reads
+        /// from the task's start.
+        last: Option<u32>,
+    },
     /// The loop shim's per-round drain of the chain's undelivered
     /// model-task notices: the engine's sentences telling the model how
     /// the tasks it started ended, answered at once in arrival order and

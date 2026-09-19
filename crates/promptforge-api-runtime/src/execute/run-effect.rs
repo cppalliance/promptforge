@@ -19,6 +19,8 @@
 
 use std::sync::Arc;
 
+use promptforge_api_types::event::Event;
+use promptforge_api_types::ids::TaskId;
 use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,11 +36,11 @@ use crate::execute::protocol::{StoreOp, StoreOutcome};
 /// between an issued [`Effect`] and its [`EffectAnswer`]. Allocated from a
 /// run-wide counter; it need not reproduce across runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct EffectId(pub(crate) u64);
+pub struct EffectId(pub(crate) u64);
 
 /// One piece of work the engine asks its host to perform.
 #[derive(Debug)]
-pub(crate) enum Effect {
+pub enum Effect {
     /// One model round over `messages` with `tools` advertised, under
     /// `binding`'s frozen `options`. A nested `models.infer` is a round
     /// over one user message with no tools and no live deltas.
@@ -96,6 +98,20 @@ pub(crate) enum Effect {
         /// The duration in seconds, non-negative and finite.
         seconds: f64,
     },
+    /// One read of a task's reported history: every event whose
+    /// provenance names `task` with a sequence number after `last` (all of
+    /// them when `last` is `None`), in sequence order. The engine keeps no
+    /// history of its own, so the host answers from its log - the events
+    /// it was handed by earlier steps, which it commits before performing
+    /// the step's effects, so a task reading its history sees everything
+    /// reported before the read was issued.
+    TaskEvents {
+        /// The task whose events are read.
+        task: TaskId,
+        /// The highest sequence number the reader has already seen, when
+        /// it has seen any.
+        last: Option<u32>,
+    },
 }
 
 /// One value's serde wire form. Every type recorded here serializes
@@ -109,14 +125,8 @@ fn wire_value<T: Serialize>(value: &T) -> Value {
 impl Effect {
     /// The effect's record: the same request minus its live handles, in a
     /// form a log stores and a replay compares.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the engine issues effects and never reads them back; the run log is the record's first production reader"
-        )
-    )]
-    pub(crate) fn record(&self) -> EffectRecord {
+    #[must_use]
+    pub fn record(&self) -> EffectRecord {
         match self {
             Effect::Chat {
                 binding,
@@ -146,6 +156,10 @@ impl Effect {
             },
             Effect::Store { op, .. } => EffectRecord::Store { op: op.clone() },
             Effect::Timer { seconds } => EffectRecord::Timer { seconds: *seconds },
+            Effect::TaskEvents { task, last } => EffectRecord::TaskEvents {
+                task: task.clone(),
+                last: *last,
+            },
         }
     }
 }
@@ -158,7 +172,7 @@ impl Effect {
 /// messages in their wire form, so the record reads the same as the
 /// request body the host would build from it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) enum EffectRecord {
+pub enum EffectRecord {
     /// One model round.
     Chat {
         /// The bound model's name.
@@ -202,13 +216,20 @@ pub(crate) enum EffectRecord {
         /// The duration in seconds.
         seconds: f64,
     },
+    /// One read of a task's reported history.
+    TaskEvents {
+        /// The task whose events are read.
+        task: TaskId,
+        /// The highest sequence number the reader has already seen.
+        last: Option<u32>,
+    },
 }
 
 /// What a performer answers one [`Effect`] with: one variant per effect
 /// kind, plus [`Dropped`](EffectAnswer::Dropped) for an effect the host
 /// gave up on. Every effect receives exactly one answer.
 #[derive(Debug)]
-pub(crate) enum EffectAnswer {
+pub enum EffectAnswer {
     /// The model round's completion or its failure. Boxed: a completion
     /// carries both request and response bodies, and the box keeps every
     /// other answer's size from being set by this one.
@@ -222,6 +243,9 @@ pub(crate) enum EffectAnswer {
     Store(std::result::Result<StoreOutcome, StoreError>),
     /// The timer fired.
     Timer,
+    /// The task's events after the read's `last`, in sequence order, as
+    /// the host's log holds them.
+    TaskEvents(Vec<Event>),
     /// The host dropped the effect without performing it (a cancelled
     /// run, or an effect whose task ended first): the chain, if it still
     /// waits, resumes with a cancelled error. A drop is an answer like any

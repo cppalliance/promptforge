@@ -7,8 +7,9 @@
 //! `task_events`, `await_tasks`) are recognized before alias lookup - a
 //! model-issued call to the first three is answered by the `builtins`
 //! module over the task arena, `await_tasks` by its own module (answered
-//! at once or parked on the chain's model tasks), every other form (a
-//! script call, or a name whose arm has not landed) answers as unbound; a
+//! at once or parked on the chain's model tasks), `task_events` by its
+//! own module (issued as a `TaskEvents` effect the host answers from its
+//! log), and a script call to any of them answers as unbound; a
 //! local Lua tool is
 //! answered inline on the parked chain's VM, since its handler is Lua on
 //! that VM and no leaf work exists to issue; a bound tool resolves against
@@ -35,9 +36,9 @@ use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation};
 
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
-/// them. A model-issued `task`, `task_cancel`, `task_status`, or
-/// `await_tasks` is answered over the task arena; `task_events` answers
-/// as unbound until its arm lands.
+/// them. A model-issued call to any of them is answered over the task
+/// arena (`task_events` through a host-answered effect); a script call
+/// to any of them is unbound.
 const RESERVED_TOOL_NAMES: [&str; 5] = [
     "task",
     "task_cancel",
@@ -149,17 +150,16 @@ impl Scheduler {
     }
 
     /// The fallible half of tool-call dispatch: the reserved-name check
-    /// (a model-issued task built-in answered over the arena, any other
-    /// reserved form unbound), the one-time counts install, the local-tool
-    /// inline answer, then the
-    /// alias resolved against the run's full bound tool catalog (the
-    /// section's effective scope shapes what the model is offered, and the
-    /// author's own script is not the model, so the scope does not gate it;
-    /// the model-advertised set stays section-scoped), the attempt
-    /// counted, and the issued effect. The answer's rules - the
-    /// model-issued body under a `call_id`, else the script body
-    /// classified by the binding's declared output kind - are the
-    /// continuation's, applied when the answer lands.
+    /// (a model-issued task built-in answered over the arena, a script
+    /// call to a reserved name unbound), the one-time counts install, the
+    /// local-tool inline answer, then the alias resolved against the run's
+    /// full bound tool catalog (the section's effective scope shapes what
+    /// the model is offered, and the author's own script is not the model,
+    /// so the scope does not gate it; the model-advertised set stays
+    /// section-scoped), the attempt counted, and the issued effect. The
+    /// answer's rules - the model-issued body under a `call_id`, else the
+    /// script body classified by the binding's declared output kind - are
+    /// the continuation's, applied when the answer lands.
     fn prepare_tool_call(
         &mut self,
         id: ChainIndex,

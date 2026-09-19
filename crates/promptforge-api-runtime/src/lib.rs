@@ -82,8 +82,8 @@ pub(crate) mod observe;
 pub mod parser;
 pub(crate) mod store;
 pub(crate) mod subst;
-#[cfg(test)]
-pub(crate) mod test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub(crate) mod tools;
 pub(crate) mod untrusted;
 
@@ -92,8 +92,9 @@ pub(crate) use crate::error::{Error, Result};
 pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind, Web};
 pub use crate::client::{CompletionError, CompletionErrorKind};
 pub use crate::execute::{
-    Environment, RequirementCheck, Requirements, RunContext, RunError, RunErrorKind, RunLimits,
-    RunResult, SourceLocation, UnmetRequirement, run,
+    Effect, EffectAnswer, EffectId, EffectRecord, Environment, RequirementCheck, Requirements, Run,
+    RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
+    UnmetRequirement, run,
 };
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};
 pub use promptforge_api_types as types;

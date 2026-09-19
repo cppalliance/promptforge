@@ -51,6 +51,67 @@ fn an_ok_spawn_answer_resumes_the_task_id_as_its_path_text() {
 }
 
 #[test]
+fn a_task_events_answer_resumes_event_tables_with_absent_fields_nil() {
+    // Two events, one lifecycle and one content: the sequence keeps their
+    // order, each table carries the event's serialized shape, and an
+    // absent optional field (`finish_reason`, `metrics`) is nil rather
+    // than the serde bridge's NULL sentinel, so an author's truth test
+    // works. An empty answer is still a sequence.
+    use promptforge_api_types::event::Event;
+    use promptforge_api_types::ids::Provenance;
+    let lua = Lua::new();
+    let task: TaskId = "0.1".parse().expect("a task id parses");
+    let events = vec![
+        Event::SectionStarted {
+            execution: "run".to_owned(),
+            section: "Child".to_owned(),
+            provenance: Provenance {
+                task: task.clone(),
+                seq: 0,
+            },
+        },
+        Event::AssistantReply {
+            execution: "run".to_owned(),
+            section: "Child".to_owned(),
+            provenance: Provenance { task, seq: 3 },
+            turn: 1,
+            text: "hi".to_owned(),
+            finish_reason: None,
+            model: "m".to_owned(),
+            metrics: None,
+        },
+    ];
+    let (envelope, retained) = Answer::<Error>::TaskEvents(Ok(events))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, result) = echo_through_lua(&lua, envelope);
+    assert!(ok);
+    let summary: String = lua
+        .load(
+            "local events = ...\n\
+             assert(#events == 2)\n\
+             assert(events[2].finish_reason == nil, 'an absent field is nil')\n\
+             assert(events[2].metrics == nil, 'an absent field is nil')\n\
+             return events[1].kind .. '|' .. events[1].provenance.seq .. '|' \
+             .. events[2].kind .. '|' .. events[2].provenance.seq .. '|' .. events[2].text",
+        )
+        .call(result)
+        .expect("the event tables read back through Lua");
+    assert_eq!(summary, "section_started|0|assistant_reply|3|hi");
+
+    let (envelope, _) = Answer::<Error>::TaskEvents(Ok(Vec::new()))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    let (ok, result) = echo_through_lua(&lua, envelope);
+    assert!(ok);
+    assert!(
+        matches!(&result, Value::Table(table) if table.raw_len() == 0),
+        "an empty answer is an empty sequence, got {result:?}"
+    );
+}
+
+#[test]
 fn an_err_answer_round_trips_and_retains_the_typed_error() {
     let lua = Lua::new();
     let (envelope, retained) = Answer::Call(Err(Error::LuaQuota {
