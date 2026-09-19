@@ -2494,15 +2494,24 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
     // Restructured for the leaf-yield store path: each arm's write is a
     // yield answered from the blocking pool, so two live arms writing one
     // path race and the loser's op booms. The violation is fatal to the
-    // whole run at the answer boundary - it never resumes into Lua, so no
-    // author pcall can catch it - and both parked arms drop unarmed,
-    // reporting cancelled rather than failed.
+    // whole run at the answer boundary - the loser never resumes into Lua,
+    // so no author pcall can catch it - and every arm still parked when
+    // the fatal answer lands drops unarmed, reporting cancelled rather
+    // than failed.
     //
-    // The gate makes the race deterministic: the first write to reach the
-    // backend parks with its claim held, so the second write's claim check
-    // meets it no matter how late the second blocking-pool thread starts.
-    // Without the gate the winner could write, return, and retire its
-    // claim before the loser's op ran, and the run would succeed.
+    // The gate makes the conflict deterministic: the first write to reach
+    // the backend parks with its claim held, so the second write's claim
+    // check meets it no matter how late the second blocking-pool thread
+    // starts. Without the gate the winner could write, return, and retire
+    // its claim before the loser's op ran, and the run would succeed.
+    //
+    // The gate does not order the two answers. It opens on the loser's
+    // failed observation, which fires before the loser posts its answer,
+    // so the winner's thread may complete its write and post first; the
+    // driver then resumes the winner into Lua and that arm succeeds before
+    // the fatal answer ends the run. Either interleaving satisfies the
+    // contract: no arm fails, the loser is cancelled, and each arm reports
+    // exactly one terminal.
     let recorder = Arc::new(Recorder::default());
     let gate = Arc::new(StoreGate::default());
     let store = gated_store(&gate);
@@ -2546,10 +2555,18 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         "no arm fails on its own; the run ends at the answer boundary: {:?}",
         recorder.events()
     );
+    let cancelled = terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED);
+    let succeeded = terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED);
+    assert!(
+        cancelled >= 1,
+        "the losing arm is parked at the fatal answer and reports cancelled: {:?}",
+        recorder.events()
+    );
     assert_eq!(
-        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
+        cancelled + succeeded,
         2,
-        "both parked arms drop unarmed and report cancelled: {:?}",
+        "each arm reports exactly one terminal, cancelled or (for a winner whose \
+         answer landed first) succeeded: {:?}",
         recorder.events()
     );
 }
