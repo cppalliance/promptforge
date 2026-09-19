@@ -16,7 +16,7 @@ async fn live_h1_infer_runs_once() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(addr))).await else {
         panic!("live H1 path must run");
     };
 
@@ -25,15 +25,15 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_environment_client_serves_a_run_when_the_context_carries_none() {
-    // `Environment::run` defaults a client-less context to the environment's
-    // client: the run's own client overrides it, and with none on the
-    // context the environment's client must serve the run's completions.
-    let gateway = ScriptedGateway::start(vec![resp_text("env answer")]).await;
+async fn the_hosts_client_serves_a_run_the_context_never_names() {
+    // The context is the engine's input and carries no client; the host's
+    // `RunHost` does, and `Environment::run` performs the run's completions
+    // with it. Nothing about the gateway crosses the engine's boundary.
+    let gateway = ScriptedGateway::start(vec![resp_text("host answer")]).await;
     let addr = gateway.addr();
 
-    let source = "---\nname: env-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Env Client\n\n\
+    let source = "---\nname: host-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Host Client\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
@@ -41,18 +41,17 @@ async fn the_environment_client_serves_a_run_when_the_context_carries_none() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let env = Environment::new().client(gateway_client(addr));
-    // The context deliberately carries no client: the defaulting in
-    // `Environment::run` is the only path to the gateway.
-    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
-        panic!("the environment's client must serve a client-less context");
+    let env = Environment::new();
+    let host = RunHost::new().client(gateway_client(addr));
+    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent()), host).await else {
+        panic!("the host's client must serve the run");
     };
 
-    assert_eq!(out, "env answer");
+    assert_eq!(out, "host answer");
     assert_eq!(
         gateway.call_count(),
         1,
-        "the completion must have gone to the environment's client"
+        "the completion must have gone to the host's client"
     );
 }
 
@@ -97,9 +96,7 @@ async fn shared_function_resolves_host_globals_when_called() {
         ```lua\nreturn read_args()\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env
-        .run(&prompt, "later host value", to_context(silent()))
-        .await
+    let RunResult::Ok(out) = env_run(&env, &prompt, "later host value", to_context(silent())).await
     else {
         panic!("shared function must resolve host globals when called");
     };
@@ -131,7 +128,9 @@ async fn shared_library_calls_host_apis_at_load_time() {
         "the fixture declares nothing: {requirements:?}"
     );
     let store = TestStore::from_vfs(ctx.vfs_handle().clone());
-    let RunResult::Ok(out) = crate::execute::run(&prompt, "load-time args", ctx).await else {
+    let RunResult::Ok(out) =
+        crate::execute::run(&prompt, "load-time args", ctx, RunHost::new()).await
+    else {
         panic!("top-level shared host calls must succeed");
     };
 
@@ -171,10 +170,20 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn Tool>; 1] = [echo];
-    let env = Environment::new().registry(tools_registry(&tools));
-    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
-        panic!("captured bindings must be installed in every section VM");
-    };
+    // The host pattern: the fixture capability is activated into the
+    // catalog and the host's table, and the run's tool slot fills by id.
+    let out = super::run(
+        &TestPrompt {
+            prompt,
+            models: test_model_catalog(),
+        },
+        "",
+        &tools,
+        &TestStore::new(),
+        silent(),
+    )
+    .await
+    .expect("captured bindings must be installed in every section VM");
 
     assert_eq!(
         out,
@@ -199,9 +208,8 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env
-        .run(&prompt, "", to_context(gatewayed(gateway.addr())))
-        .await
+    let RunResult::Ok(out) =
+        env_run(&env, &prompt, "", to_context(gatewayed(gateway.addr()))).await
     else {
         panic!("live H1 models.infer must run");
     };
@@ -245,18 +253,18 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     let recorder = Arc::new(Recorder::default());
     let env = Environment::new();
 
-    let RunResult::Ok(out) = env
-        .run(
-            &prompt,
-            "",
-            to_context(RunOptions {
-                execution: EXECUTION,
-                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-                client: Some(gateway_client(addr)),
-                debug: None,
-            }),
-        )
-        .await
+    let RunResult::Ok(out) = env_run(
+        &env,
+        &prompt,
+        "",
+        to_context(RunOptions {
+            execution: EXECUTION,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
+            client: Some(gateway_client(addr)),
+            debug: None,
+        }),
+    )
+    .await
     else {
         panic!("nested infer must run");
     };
@@ -309,17 +317,17 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         canceller.cancel();
     });
     let env = Environment::new();
-    let result = env
-        .run(
-            &prompt,
-            "",
-            test_context(EXECUTION)
-                .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
-                .model(test_model_catalog().models()[0].clone())
-                .client(gateway_client(gateway.addr()))
-                .cancel(cancel),
-        )
-        .await;
+    let result = env_run(
+        &env,
+        &prompt,
+        "",
+        test_context(EXECUTION)
+            .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
+            .model(test_model_catalog().models()[0].clone())
+            .client(gateway_client(gateway.addr()))
+            .cancel(cancel),
+    )
+    .await;
     assert!(
         matches!(result, RunResult::Cancelled),
         "cancelling an in-flight infer must interrupt the run: {result:?}"
@@ -391,7 +399,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         ```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&prompt, "", to_context(gatewayed(addr))).await else {
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(gatewayed(addr))).await else {
         panic!("live H1 prose infers explicitly");
     };
 
@@ -420,9 +428,8 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         ```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env
-        .run(&prompt, "", to_context(gatewayed(gateway.addr())))
-        .await
+    let RunResult::Ok(out) =
+        env_run(&env, &prompt, "", to_context(gatewayed(gateway.addr()))).await
     else {
         panic!("H1 prose and H2 prose each infer explicitly");
     };
@@ -466,7 +473,7 @@ async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_
         ```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&prompt, "", to_context(silent())).await else {
+    let RunResult::Ok(out) = env_run(&env, &prompt, "", to_context(silent())).await else {
         panic!("the H1 chunk takes root entry 0 and the first walked section root entry 1");
     };
 

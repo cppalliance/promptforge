@@ -12,7 +12,7 @@
 
 use super::*;
 use crate::execute::tokio_driver::TokioDriver;
-use crate::lua::{ToolBinding, ToolSet};
+use crate::lua::ToolSet;
 use crate::model::{ModelBinding, ModelId};
 use promptforge_model_client::model::ModelInvocation;
 
@@ -48,7 +48,7 @@ pub(super) fn loop_models() -> ModelSet {
 /// fill them).
 pub(super) fn loop_context_observed(
     prompt: &Prompt,
-    tools: ToolSet,
+    tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
 ) -> RunState {
     let ctx = RunState::new(
@@ -61,27 +61,26 @@ pub(super) fn loop_context_observed(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = tools;
+    tools.into().install(&ctx);
     ctx
 }
 
 /// [`loop_context_observed`] under the null observer.
-pub(super) fn loop_context(prompt: &Prompt, tools: ToolSet) -> RunState {
+pub(super) fn loop_context(prompt: &Prompt, tools: impl Into<FixtureTools>) -> RunState {
     loop_context_observed(prompt, tools, Arc::new(NullObserver::default()))
 }
 
-/// The tool set with `tool` bound as `alias` and always in scope.
-pub(super) fn always_tool(alias: &str, tool: Arc<dyn Tool>) -> ToolSet {
-    ToolSet::for_test(
-        vec![ToolBinding::for_test(alias, "fixture capability", tool)],
+/// The tool set with `tool` bound as `alias` and always in scope, beside
+/// its implementation.
+pub(super) fn always_tool(alias: &str, tool: Arc<dyn Tool>) -> FixtureTools {
+    FixtureTools::new(
+        vec![fixture_binding(alias, "fixture capability", tool)],
         vec![alias.to_owned()],
     )
 }
 
 /// The tool set with the `echo` fixture bound and always in scope.
-pub(super) fn echo_tools() -> ToolSet {
+pub(super) fn echo_tools() -> FixtureTools {
     always_tool("echo", Arc::new(EchoTool))
 }
 
@@ -253,8 +252,8 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
     let prompt = parse(&md);
     // Nothing always-scoped: the first call advertises no tools, the
     // `tools.add` between calls scopes `echo` in for the second.
-    let tools = ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
+    let tools = FixtureTools::new(
+        vec![fixture_binding(
             "echo",
             "echo capability",
             Arc::new(EchoTool),

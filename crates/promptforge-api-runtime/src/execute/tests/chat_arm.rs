@@ -112,7 +112,7 @@ impl Observer for RoundRecorder {
 /// given observer installed on the run.
 pub(super) fn chat_context(
     prompt: &Prompt,
-    tools: ToolSet,
+    tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
 ) -> RunState {
     let base = test_context(EXECUTION).observer(observer);
@@ -126,9 +126,7 @@ pub(super) fn chat_context(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = tools;
+    tools.into().install(&ctx);
     ctx.expose_raw_shims_for_test();
     ctx
 }

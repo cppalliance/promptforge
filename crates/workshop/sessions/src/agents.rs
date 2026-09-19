@@ -49,7 +49,7 @@ use crate::input::WaitRegistry;
 
 use self::lifecycle::RunLifecycle;
 
-pub use environment::session_environment;
+pub use environment::session_registry;
 pub(crate) use session::{AgentDelta, AgentSession, AgentSource, SessionObserver};
 pub(crate) use session::{delta_stamp, reply_stamp, ui_provider};
 

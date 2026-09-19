@@ -33,7 +33,11 @@ fn assert_round_trips(records: &[EffectRecord]) {
 /// shared library, and the shared model and tool sets pre-filled (the
 /// scheduler tests bypass the live H1 pass that would fill them), under
 /// the given run configuration.
-fn effect_context(prompt: &Prompt, tools: ToolSet, config: &RunContext) -> RunState {
+fn effect_context(
+    prompt: &Prompt,
+    tools: impl Into<FixtureTools>,
+    config: &RunContext,
+) -> RunState {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -44,9 +48,7 @@ fn effect_context(prompt: &Prompt, tools: ToolSet, config: &RunContext) -> RunSt
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = tools;
+    tools.into().install(&ctx);
     ctx
 }
 

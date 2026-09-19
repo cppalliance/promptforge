@@ -31,17 +31,19 @@
 //! reported it (its nearest enclosing task and that task's next sequence
 //! number). Every `step` of the run drains the buffer and returns the
 //! batch to the host; the in-crate tokio driver behind [`run`] forwards
-//! it to the [`RunContext`] observer and debug capture through the
+//! it to the [`RunHost`]'s observer and debug capture through the
 //! `events_to_observer` adapter. Reporting is a side channel and never a
 //! decision, so passing
 //! [`NullObserver`](promptforge_api_types::observe::NullObserver) changes
 //! nothing but the silence.
 //!
 //! Rust installs the run's filled tool and model slots - bound at prepare
-//! from the frontmatter - into each section VM. Prompt-wide aliases and
-//! section additions form the effective model-visible scope, whose
-//! concrete tools are advertised under their local aliases and dispatched
-//! through the implementation each binding carries.
+//! from the frontmatter against the host-supplied catalog - into each
+//! section VM. Prompt-wide aliases and section additions form the
+//! effective model-visible scope, whose tools are advertised under their
+//! local aliases from the descriptor each binding carries; a call is
+//! issued as a `ToolCall` effect naming the tool's id, and the host
+//! resolves the implementation.
 //!
 //! Lua `call()` starts a contained chain at a visible section (fresh VM,
 //! recursion capped at 8): the chain runs from the target
@@ -68,7 +70,10 @@
 //! The orchestration boundary ([`run`]) lives here; the rest is split into
 //! focused private children: `error` (the public [`RunError`]), `config`
 //! ([`RunContext`]/[`RunLimits`]), `environment` (the public
-//! [`Environment`]), `requirements` (the preflight
+//! [`Environment`]), `activation` (the public host-side capability
+//! activation producing the tool catalog and the implementation table),
+//! `host` (the public [`RunHost`] bundle of the in-crate loop's
+//! resources), `requirements` (the preflight
 //! [`Requirements`] report), `context` (the ambient `RunState` run
 //! state), `event_buffer` (the run-level event buffer and the
 //! task-scoped emitter every report goes through), `events_to_observer`
@@ -93,6 +98,7 @@
 //! (tool-scope validation and schema/dispatch preparation), and
 //! `support` (shared helpers).
 
+pub mod activation;
 mod bindings;
 mod config;
 mod context;
@@ -103,6 +109,7 @@ mod event_buffer;
 mod events_to_observer;
 mod fill;
 mod gateway;
+mod host;
 pub(crate) mod protocol;
 mod requirements;
 pub(crate) mod run;
@@ -115,10 +122,12 @@ pub(crate) mod tokio_driver;
 mod tools;
 
 // Public API surface.
+pub use activation::{Activation, ToolTable, activate};
 pub use bindings::{ModelBindings, ToolBindings};
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
+pub use host::RunHost;
 pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
 pub use run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
 
@@ -175,8 +184,10 @@ pub(crate) fn task_history(
 /// The free `run` receives an already-prepared [`RunContext`] and has
 /// nothing to prepare from: a context that never passed through
 /// [`Environment::prepare`] runs capability-free (empty tool and model
-/// sets). Hosts normally go through [`Environment::run`], the
-/// zero-burden path.
+/// sets). `host` is the loop's side of the run - the client, the tool
+/// implementations, the broker, the delta hook, and the observer and
+/// capture the events are replayed onto; the engine never sees it. Hosts
+/// normally go through [`Environment::run`], the zero-burden path.
 ///
 /// # Outcomes
 /// - [`RunResult::Ok`] - the run completed with its final text.
@@ -216,7 +227,7 @@ pub(crate) fn task_history(
 /// structural request the scheduler drives on the run's one thread, so the
 /// current-thread runtime below runs the whole prompt, host calls included:
 /// ```
-/// use promptforge_api_runtime::execute::{RunContext, RunResult, run};
+/// use promptforge_api_runtime::execute::{RunContext, RunHost, RunResult, run};
 /// use promptforge_api_runtime::parser::Prompt;
 /// use promptforge_api_types::observe::NullObserver;
 /// use promptforge_api_types::timestamp::Timestamp;
@@ -232,7 +243,7 @@ pub(crate) fn task_history(
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
 /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
 /// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
-/// let output = runtime.block_on(run(&prompt, "", ctx));
+/// let output = runtime.block_on(run(&prompt, "", ctx, RunHost::new()));
 /// let RunResult::Ok(text) = output else {
 ///     panic!("the doc example run succeeds: {output:?}");
 /// };
@@ -247,25 +258,17 @@ pub(crate) fn task_history(
 /// calls (`models.infer`, `call`, `fanout`) are coroutine yields the
 /// scheduler turns into effects, so no host call parks a worker thread.
 /// The tokio loop behind this function performs those effects with the
-/// context's client, tools, and broker and feeds the answers back.
+/// host's client, tools, and broker and feeds the answers back.
 /// Concurrency (a fanout's arms) comes from interleaving chains at their
 /// effect boundaries, not from threads; on a multi-thread runtime only
 /// the performers, which never touch Lua or scheduler state, may run on
 /// other workers.
-pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
-    // The caller-supplied client honors the run's HTTP limits, as a
-    // lazily built environment client does.
-    let limits = ctx.limits;
-    let mut ctx = ctx;
-    let client = ctx
-        .client
-        .take()
-        .map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
+pub async fn run(prompt: &Prompt, args: &str, ctx: RunContext, host: RunHost) -> RunResult {
     let run = Run::new(Arc::new(prompt.clone()), args, ctx);
     // Boxed: the driver future carries the whole step machinery, and
     // `run`'s own future must stay small for its callers (the workspace's
     // large-futures lint gates every one of them).
-    let mut driver = TokioDriver::over(run, client);
+    let mut driver = TokioDriver::over(run, host);
     let result = Box::pin(driver.drive()).await;
     match result {
         Ok(text) => RunResult::Ok(text),

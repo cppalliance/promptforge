@@ -30,7 +30,7 @@ use tokio::sync::broadcast;
 use promptforge_api_runtime::client::{
     GatewayClient as ModelClient, GatewayEndpoint, SecretString,
 };
-use promptforge_api_runtime::{Prompt, RunContext, RunResult};
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
 use promptforge_api_types::cancel::sync::CancelHandle;
 use promptforge_api_types::events::{EventLog as _, RuntimeEventKind};
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
@@ -338,8 +338,8 @@ struct RestoredChat {
 
 /// The relaunch half of the restart gate: the supervisor's own pieces -
 /// the session's wait registry behind the generic input broker, the
-/// embedded chat prompt, the shared session environment carrying the
-/// first-party capabilities, and a client aimed at the mock gateway - run
+/// embedded chat prompt, the shared session registry of first-party
+/// capabilities on the host, and a client aimed at the mock gateway - run
 /// on the unified runtime over the restored log. The context carries the
 /// current model directly: the supervisor resolves the dropdown's
 /// selection at launch, and this harness drives the run beneath that
@@ -358,8 +358,8 @@ fn spawn_restored_chat(
     );
     let cancel = CancelHandle::new();
     let observer: Arc<dyn Observer> = restored.clone();
-    let env = workshop_sessions::session_environment(gateway_url, "test-key")
-        .expect("the mock gateway shape builds the session environment");
+    let registry = workshop_sessions::session_registry(gateway_url, "test-key")
+        .expect("the mock gateway shape builds the session registry");
     let model = ModelDescriptor::new(
         ModelId::gateway("test-model").expect("the test model id is valid"),
         "test model",
@@ -371,17 +371,19 @@ fn spawn_restored_chat(
         1,
         promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
     )
-    .observer(Arc::clone(&observer))
-    .client(client)
     .cancel(cancel.clone())
-    .input_broker(broker)
     .model(model);
+    let host = RunHost::new()
+        .observer(Arc::clone(&observer))
+        .client(client)
+        .registry(Arc::new(registry))
+        .input_broker(broker);
     let execution = session.to_owned();
     let run = tokio::spawn(async move {
         let result = async {
             let prompt = Prompt::parse(CHAT_MD, &execution, observer.as_ref())
                 .expect("the embedded chat prompt parses");
-            env.run(&prompt, "", ctx).await
+            Environment::new().run(&prompt, "", ctx, host).await
         }
         .await;
         match result {

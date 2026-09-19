@@ -774,7 +774,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-33>
 
-### Step 33: Tool bindings by id and the `Environment` shrink
+### Step 33: Tool bindings by id and the `Environment` shrink [completed]
 
 - Component: Run API and engine purity
 - Piece: context

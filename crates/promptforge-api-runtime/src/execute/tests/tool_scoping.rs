@@ -20,12 +20,8 @@ fn declared_tools_are_not_injected_without_always_or_add() {
         "canonical_wire",
         "Concrete description.",
     ));
-    let tool_set = crate::lua::ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
-            "local_alias",
-            "capability",
-            tool,
-        )],
+    let tools = FixtureTools::new(
+        vec![fixture_binding("local_alias", "capability", tool)],
         Vec::new(),
     );
     let runtime = Mutex::new(promptforge_lua::ToolRuntime {
@@ -33,7 +29,7 @@ fn declared_tools_are_not_injected_without_always_or_add() {
         description_overrides: BTreeMap::new(),
         allowed_tasks: None,
     });
-    let effective = current_tool_bindings(&tool_set, &runtime).expect("the scope must snapshot");
+    let effective = current_tool_bindings(tools.set(), &runtime).expect("the scope must snapshot");
     assert!(
         effective.is_empty(),
         "declaring a bind must not expose it without explicit scope"
@@ -48,10 +44,10 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         "canonical_wire",
         "Concrete description.",
     ));
-    let tool_set = crate::lua::ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
+    let tools = FixtureTools::new(
+        vec![fixture_binding(
             "local_alias",
-            "capability",
+            "Concrete description.",
             Arc::clone(&tool) as Arc<dyn Tool>,
         )],
         vec!["local_alias".to_owned()],
@@ -61,14 +57,15 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         description_overrides: BTreeMap::new(),
         allowed_tasks: None,
     });
-    let effective = current_tool_bindings(&tool_set, &runtime).expect("the always scope snapshots");
+    let effective =
+        current_tool_bindings(tools.set(), &runtime).expect("the always scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].name, "local_alias");
     assert_eq!(schemas[0].description, "Concrete description.");
 
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let ctx = loop_context(&prompt, tool_set);
+    let ctx = loop_context(&prompt, tools);
     let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
@@ -99,8 +96,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         "canonical_wire",
         "Section concrete.",
     ));
-    let bindings = crate::lua::ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
+    let tools = FixtureTools::new(
+        vec![fixture_binding(
             "section_tool",
             "capability",
             Arc::clone(&tool) as Arc<dyn Tool>,
@@ -109,7 +106,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     );
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        &Arc::new(Mutex::new(bindings)),
+        &Arc::new(Mutex::new(tools.set().clone())),
         &Arc::new(Mutex::new(ModelSet::default())),
         EXECUTION,
         &NullObserver::default(),
@@ -147,15 +144,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     // tool behind it.
     let md = loop_prompt(&format!("tools.add('section_tool')\n{LOOP_TO_TEXT}"));
     let prompt = parse(&md);
-    let bindings = crate::lua::ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
-            "section_tool",
-            "capability",
-            Arc::clone(&tool) as Arc<dyn Tool>,
-        )],
-        Vec::new(),
-    );
-    let ctx = loop_context(&prompt, bindings);
+    let ctx = loop_context(&prompt, tools);
     let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await

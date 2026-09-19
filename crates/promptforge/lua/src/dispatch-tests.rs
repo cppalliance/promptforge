@@ -1,10 +1,12 @@
 //! Tests for the shared tool-dispatch body: the fixture tools and recorder
 //! every dispatch test uses, and the synchronous `prepare_dispatch` tests.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use promptforge_api_types::observe::Observation;
-use promptforge_api_types::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge_api_types::tools::{
+    Tool, ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput,
+};
 use serde_json::json;
 
 use super::*;
@@ -137,15 +139,15 @@ impl Observer for Recorder {
     }
 }
 
-fn binding(alias: &str, tool: Arc<dyn Tool>) -> ToolBinding {
-    ToolBinding::for_test(alias, "fixture capability", tool)
+fn binding(alias: &str, tool: &dyn Tool) -> ToolBinding {
+    ToolBinding::for_test(alias, "fixture capability", &ToolDescriptor::describe(tool))
 }
 
 #[test]
 fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
     let recorder = Recorder::default();
     let counts = ToolCallCounts::new(["echo".to_owned()]);
-    let echo = binding("echo", Arc::new(EchoTool { trusted: false }));
+    let echo = binding("echo", &EchoTool { trusted: false });
     let nonce = GuardNonce::fresh();
     let outcome = prepare_dispatch(
         &echo,
@@ -202,7 +204,7 @@ fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
 #[test]
 fn prepare_dispatch_turns_a_canned_tool_error_into_the_typed_error() {
     let recorder = Recorder::default();
-    let failing = binding("failing", Arc::new(FailingTool));
+    let failing = binding("failing", &FailingTool);
     let error = prepare_dispatch(
         &failing,
         Err(ToolError::message("canned failure").with_kind(ToolErrorKind::Backend)),
@@ -242,7 +244,7 @@ fn model_report(call_id: &str) -> ModelReport {
 #[test]
 fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id() {
     let recorder = Recorder::default();
-    let failing = binding("failing", Arc::new(FailingTool));
+    let failing = binding("failing", &FailingTool);
     let nonce = GuardNonce::fresh();
     let outcome = prepare_model_dispatch(
         &failing,
@@ -289,7 +291,7 @@ fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id(
 #[test]
 fn a_model_issued_dispatch_reports_its_result_under_the_call_id() {
     let recorder = Recorder::default();
-    let echo = binding("echo", Arc::new(EchoTool { trusted: true }));
+    let echo = binding("echo", &EchoTool { trusted: true });
     let outcome = prepare_model_dispatch(
         &echo,
         Ok(ToolOutput::trusted("echoed: hi")),

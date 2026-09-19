@@ -3551,13 +3551,9 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
 
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope carries them
-/// without an H1 pass.
-fn arm_tool_set(ctx: &RunState, bindings: Vec<crate::lua::ToolBinding>) {
-    let always = bindings
-        .iter()
-        .map(|binding| binding.alias().to_owned())
-        .collect();
-    arm_tool_set_scoped(ctx, bindings, always);
+/// without an H1 pass; the implementations go to the driver's host table.
+fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>) {
+    arm_tools(ctx, bindings);
 }
 
 /// Arms the run's shared tool set with `bindings` and exactly `always` as
@@ -3565,13 +3561,10 @@ fn arm_tool_set(ctx: &RunState, bindings: Vec<crate::lua::ToolBinding>) {
 /// without entering any section's effective scope.
 fn arm_tool_set_scoped(
     ctx: &RunState,
-    bindings: Vec<crate::lua::ToolBinding>,
+    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>,
     always: Vec<String>,
 ) {
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") =
-        crate::lua::ToolSet::for_test(bindings, always);
+    arm_tools_scoped(ctx, bindings, always);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -3591,11 +3584,7 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
+        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -3620,11 +3609,7 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
+        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -3646,11 +3631,7 @@ async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
+        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -3683,11 +3664,7 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set_scoped(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
+        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
         Vec::new(),
     );
     let out = TokioDriver::new(&ctx, None)
@@ -3750,7 +3727,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
     let started = Arc::new(AtomicUsize::new(0));
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
+        vec![fixture_binding(
             "slow",
             "slow tool",
             Arc::new(SignallingSlowTool {
@@ -3800,7 +3777,7 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
+        vec![fixture_binding(
             "fetch",
             "untrusted echo tool",
             Arc::new(UntrustedEchoTool),
@@ -3831,7 +3808,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let mut binding = crate::lua::ToolBinding::for_test(
+    let mut binding = fixture_binding(
         "form",
         "structured fixture",
         Arc::new(StructuredFixtureTool {
@@ -3839,7 +3816,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
             trusted: true,
         }),
     );
-    binding.output_kind = crate::lua::ToolOutputKind::Structured;
+    binding.0.output_kind = crate::lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -3856,7 +3833,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
         ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let mut binding = crate::lua::ToolBinding::for_test(
+    let mut binding = fixture_binding(
         "form",
         "structured fixture",
         Arc::new(StructuredFixtureTool {
@@ -3864,7 +3841,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
             trusted: true,
         }),
     );
-    binding.output_kind = crate::lua::ToolOutputKind::Structured;
+    binding.0.output_kind = crate::lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -3893,7 +3870,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
-    let mut binding = crate::lua::ToolBinding::for_test(
+    let mut binding = fixture_binding(
         "form",
         "structured fixture",
         Arc::new(StructuredFixtureTool {
@@ -3901,7 +3878,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
             trusted: false,
         }),
     );
-    binding.output_kind = crate::lua::ToolOutputKind::Structured;
+    binding.0.output_kind = crate::lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -3934,11 +3911,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
+        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
     let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
@@ -3959,11 +3932,7 @@ async fn a_document_prompt_without_tools_call_is_unaffected() {
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
         &ctx,
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            Arc::new(EchoTool),
-        )],
+        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
     let out = TokioDriver::new(&ctx, None)
         .drive()

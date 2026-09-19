@@ -17,16 +17,18 @@ pub struct Requirements {
     /// 200000 against a 32k model; `thinking` against a Never model).
     /// Populated by the model fill; capability activation adds none.
     pub unmet_requirements: Vec<UnmetRequirement>,
-    /// The required capabilities the run cannot have: absent from the
-    /// environment's registry, or present but failed to activate. The
-    /// run fails until every one is satisfied.
+    /// The required capabilities the run cannot have: reported by
+    /// activation when absent from the host's registry or failed to
+    /// activate, and by prepare when an exact tool slot names a
+    /// capability that contributed nothing to the catalog. The run fails
+    /// until every one is satisfied.
     pub missing_required: Vec<CapabilityId>,
     /// The declared co-activation conflicts: pairs of present
     /// capabilities that cannot activate in one run (bashkit vs
     /// terminal - two filesystem realities, and a context gets one or
     /// the other, never both). Neither member of a conflicting pair
     /// activates; the run fails until the prompt declares one or the
-    /// other.
+    /// other. Reported by activation, never by prepare.
     pub conflicts: Vec<CapabilityConflict>,
 }
 
@@ -41,6 +43,19 @@ impl Requirements {
             && self.conflicts.is_empty()
     }
 
+    /// Folds `other` into this report: the host merges what activation
+    /// could not satisfy into what prepare could not, so one refusal names
+    /// every gap. A capability already reported missing is not repeated.
+    pub fn merge(&mut self, other: Requirements) {
+        for id in other.missing_required {
+            if !self.missing_required.contains(&id) {
+                self.missing_required.push(id);
+            }
+        }
+        self.conflicts.extend(other.conflicts);
+        self.unmet_requirements.extend(other.unmet_requirements);
+    }
+
     /// The refusal notice [`Environment::run`](super::Environment::run)
     /// fails with when the report is unsatisfied.
     ///
@@ -49,7 +64,7 @@ impl Requirements {
     /// sub-run tool. Each line names what is missing or unmet, with
     /// required versus actual.
     #[must_use]
-    pub(crate) fn notice(&self) -> String {
+    pub fn notice(&self) -> String {
         // Writing to a String is infallible; the `let _` mirrors the
         // crate's established pattern (subst.rs) under the denied
         // `unwrap_used`/`expect_used` lints.

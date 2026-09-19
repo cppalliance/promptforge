@@ -2290,8 +2290,13 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     );
     let test = fixture(md);
     let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
-    let RunResult::Ok(out) =
-        crate::execute::run(&test.prompt, "", test_context(EXECUTION).vfs(vfs.clone())).await
+    let RunResult::Ok(out) = crate::execute::run(
+        &test.prompt,
+        "",
+        test_context(EXECUTION).vfs(vfs.clone()),
+        RunHost::new(),
+    )
+    .await
     else {
         panic!("a mount-less handle gets the defensive memory-store overlay");
     };
@@ -2322,7 +2327,10 @@ async fn default_environment_runs_a_capability_free_prompt() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
+    let RunResult::Ok(out) = env
+        .run(&test.prompt, "", test_context(EXECUTION), RunHost::new())
+        .await
+    else {
         panic!("a capability-free prompt runs under the default environment");
     };
     assert_eq!(out, "no capabilities");
@@ -2339,7 +2347,10 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
+    let RunResult::Ok(out) = env
+        .run(&test.prompt, "", test_context(EXECUTION), RunHost::new())
+        .await
+    else {
         panic!("the default store handle carries the stock mount");
     };
     assert_eq!(out, "stock");
@@ -2357,8 +2368,16 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
         ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );
     let test = fixture(md);
-    let env = Environment::new().registry(tools_registry(&[Arc::new(EchoTool) as Arc<dyn Tool>]));
-    let RunResult::Failure(error) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
+    let registry = Arc::new(tools_registry(&[Arc::new(EchoTool) as Arc<dyn Tool>]));
+    let RunResult::Failure(error) = Environment::new()
+        .run(
+            &test.prompt,
+            "",
+            test_context(EXECUTION),
+            RunHost::new().registry(registry),
+        )
+        .await
+    else {
         panic!("advertising an unfilled alias must fail");
     };
     assert!(
@@ -2381,7 +2400,10 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Failure(error) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
+    let RunResult::Failure(error) = env
+        .run(&test.prompt, "", test_context(EXECUTION), RunHost::new())
+        .await
+    else {
         panic!("a models.bind call must fail");
     };
     assert_eq!(

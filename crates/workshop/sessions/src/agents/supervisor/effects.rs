@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use promptforge_api_runtime::client::GatewayClient as ModelClient;
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api_runtime::{
+    CapabilityRegistry, Environment, Prompt, RunContext, RunHost, RunResult,
+};
 use promptforge_api_types::cancel::sync::CancelHandle as CancelFlag;
 use promptforge_api_types::observe::Observer;
 use promptforge_api_types::timestamp::Timestamp;
@@ -14,7 +16,7 @@ use workshop_gateway::GatewaySnapshot;
 use workshop_menu::ChatCatalog;
 use workshop_protocol::Activity;
 
-use crate::agents::environment::{current_model, session_environment};
+use crate::agents::environment::{current_model, session_registry};
 use crate::agents::{
     AgentSession, AgentSource, SessionHost, SessionObserver, agent_client, delta_stamp, ui_provider,
 };
@@ -87,11 +89,11 @@ impl RunFactory {
         &self,
         run: RunId,
         client: ModelClient,
-        environment: Arc<Environment>,
+        registry: Arc<CapabilityRegistry>,
         gateway: Arc<GatewaySnapshot>,
     ) -> RunFuture {
         let AgentSource::Markdown(source) = self.session.source.clone();
-        self.launch_markdown(run, source, client, environment, gateway)
+        self.launch_markdown(run, source, client, registry, gateway)
     }
 
     /// Builds one unified-runtime run of a Markdown prompt document. The
@@ -103,7 +105,7 @@ impl RunFactory {
         run: RunId,
         source: String,
         client: ModelClient,
-        environment: Arc<Environment>,
+        registry: Arc<CapabilityRegistry>,
         gateway: Arc<GatewaySnapshot>,
     ) -> RunFuture {
         let parts = MarkdownRunParts {
@@ -116,8 +118,7 @@ impl RunFactory {
             host: self.host.clone(),
         };
         Box::pin(async move {
-            let result =
-                run_markdown_agent(&source, parts, run, client, &environment, &gateway).await;
+            let result = run_markdown_agent(&source, parts, run, client, registry, &gateway).await;
             (run, result)
         })
     }
@@ -141,16 +142,18 @@ struct MarkdownRunParts {
 /// Runs one Markdown agent prompt on the unified runtime: the session's
 /// wait registry behind the generic input broker, the launch-time menu
 /// selection behind `ui().selected_model`, deltas forwarded to the
-/// session's channel. The run prepares against the session's shared
-/// environment - the first-party capabilities the prompt's frontmatter
-/// declares - and the context carries the dropdown's current model
-/// resolved at launch, so a selection change takes effect on the next run.
+/// session's channel. The host carries the session's shared registry, and
+/// the engine's loop activates the first-party capabilities the prompt's
+/// frontmatter declares against it - the catalog goes to the engine, the
+/// implementations stay on the host's side - while the context carries
+/// the dropdown's current model resolved at launch, so a selection change
+/// takes effect on the next run.
 async fn run_markdown_agent(
     source: &str,
     parts: MarkdownRunParts,
     run: RunId,
     client: ModelClient,
-    environment: &Environment,
+    registry: Arc<CapabilityRegistry>,
     gateway: &GatewaySnapshot,
 ) -> Result<(), AgentRunError> {
     let MarkdownRunParts {
@@ -183,16 +186,21 @@ async fn run_markdown_agent(
     };
     let (cancel, bridge) = bridge_cancel(session.arm_cancel(run));
     let mut ctx = RunContext::new(session.id.clone(), seed, started_at)
-        .observer(observer)
-        .client(client)
         .cancel(cancel)
-        .input_broker(broker)
-        .ui(ui)
-        .on_delta(on_delta);
+        .ui(ui);
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    let outcome = environment.run(&prompt, "", ctx).await;
+    // The engine's context carries the run's inputs; everything the loop
+    // performs with - the client, the registry it activates, the broker,
+    // the delta hook, the observer - rides the host.
+    let host = RunHost::new()
+        .observer(observer)
+        .client(client)
+        .registry(registry)
+        .input_broker(broker)
+        .on_delta(on_delta);
+    let outcome = Environment::new().run(&prompt, "", ctx, host).await;
     // The run is over, so nothing reads the flag: the bridge ends with it.
     bridge.abort();
     match outcome {
@@ -239,12 +247,12 @@ pub(super) struct EffectExecutor {
     session: Arc<AgentSession>,
     host: SessionHost,
     factory: RunFactory,
-    /// The shared model-free environment every run prepares against,
-    /// rebuilt when the gateway generation changes so a replacement
-    /// gateway's root and key reach the contributed tools.
-    environment: Option<Arc<Environment>>,
-    /// The gateway generation `environment` was built from.
-    environment_generation: u64,
+    /// The shared registry of first-party capabilities every run activates
+    /// against, rebuilt when the gateway generation changes so a
+    /// replacement gateway's root and key reach the contributed tools.
+    registry: Option<Arc<CapabilityRegistry>>,
+    /// The gateway generation `registry` was built from.
+    registry_generation: u64,
     latest_catalog: Option<ChatCatalog>,
     active_catalog: Option<ChatCatalog>,
     latest_gateway: Arc<GatewaySnapshot>,
@@ -260,13 +268,12 @@ impl EffectExecutor {
         initial_catalog: Option<ChatCatalog>,
         initial_gateway: Arc<GatewaySnapshot>,
     ) -> Self {
-        let environment =
-            session_environment(initial_gateway.base_url(), initial_gateway.api_key())
-                .map(Arc::new);
+        let registry =
+            session_registry(initial_gateway.base_url(), initial_gateway.api_key()).map(Arc::new);
         Self {
             factory: RunFactory::new(Arc::clone(&session), &host),
-            environment_generation: initial_gateway.generation(),
-            environment,
+            registry_generation: initial_gateway.generation(),
+            registry,
             session,
             host,
             latest_catalog: initial_catalog,
@@ -361,12 +368,11 @@ impl EffectExecutor {
             );
             return failed_relaunch(relaunch.run);
         };
-        if gateway.generation() != self.environment_generation {
-            self.environment =
-                session_environment(gateway.base_url(), gateway.api_key()).map(Arc::new);
-            self.environment_generation = gateway.generation();
+        if gateway.generation() != self.registry_generation {
+            self.registry = session_registry(gateway.base_url(), gateway.api_key()).map(Arc::new);
+            self.registry_generation = gateway.generation();
         }
-        let Some(environment) = self.environment.clone() else {
+        let Some(registry) = self.registry.clone() else {
             report_failure(
                 &self.session,
                 &self.host,
@@ -379,10 +385,7 @@ impl EffectExecutor {
         }
         self.active_catalog = Some(catalog);
         self.active_gateway = Some(Arc::clone(&gateway));
-        self.active_run = Some(
-            self.factory
-                .launch(relaunch.run, client, environment, gateway),
-        );
+        self.active_run = Some(self.factory.launch(relaunch.run, client, registry, gateway));
         EffectOutcome::Continue
     }
 }

@@ -11,7 +11,7 @@ use super::models_loop::{
 };
 use super::*;
 use crate::execute::tokio_driver::TokioDriver;
-use crate::lua::{ToolBinding, ToolSet};
+use crate::lua::ToolSet;
 
 /// The one-section prompt shell with an explicit frontmatter round cap.
 fn capped_loop_prompt(cap: usize, lua: &str) -> String {
@@ -30,7 +30,7 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 
 /// The tool set with the always-failing fixture bound as `echo` (the name
 /// the mock gateway's tool-call replies ask for) and in scope.
-fn failing_echo_tools() -> ToolSet {
+fn failing_echo_tools() -> FixtureTools {
     always_tool("echo", Arc::new(FailingTool))
 }
 
@@ -308,9 +308,9 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
         "{\"value\":\"x\"}",
     )])
     .await;
-    let tools = ToolSet::for_test(
+    let tools = FixtureTools::new(
         vec![
-            ToolBinding::for_test(
+            fixture_binding(
                 "scoped",
                 "A scoped tool.",
                 Arc::new(ScopedFixtureTool::new(
@@ -319,7 +319,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
                     "A scoped tool.",
                 )),
             ),
-            ToolBinding::for_test(
+            fixture_binding(
                 "global_tool",
                 "A global tool.",
                 Arc::new(ScopedFixtureTool::new(

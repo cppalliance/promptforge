@@ -11,7 +11,7 @@
 use super::models_loop::loop_models;
 use super::*;
 use crate::execute::tokio_driver::TokioDriver;
-use crate::lua::{ToolBinding, ToolSet};
+use crate::lua::ToolSet;
 
 /// Records every observation and every `on_tool_result` report as one
 /// rendered line, so a test reads the arm's whole reporting sequence.
@@ -61,7 +61,11 @@ impl Observer for ToolRecorder {
 /// model and tool sets pre-filled (the scheduler tests bypass the live H1
 /// pass that would fill them), the given observer, and the raw protocol
 /// shims exposed so a fixture can yield a model-issued call.
-fn tool_context(prompt: &Prompt, tools: ToolSet, observer: Arc<dyn Observer>) -> RunState {
+fn tool_context(
+    prompt: &Prompt,
+    tools: impl Into<FixtureTools>,
+    observer: Arc<dyn Observer>,
+) -> RunState {
     let base = test_context(EXECUTION).observer(observer);
     let mut ctx = RunState::new(
         Arc::new(prompt.clone()),
@@ -73,18 +77,16 @@ fn tool_context(prompt: &Prompt, tools: ToolSet, observer: Arc<dyn Observer>) ->
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = tools;
+    tools.into().install(&ctx);
     ctx.expose_raw_shims_for_test();
     ctx
 }
 
 /// The tool set with the always-failing fixture bound as `fail` and in
 /// scope.
-fn failing_tools() -> ToolSet {
-    ToolSet::for_test(
-        vec![ToolBinding::for_test(
+fn failing_tools() -> FixtureTools {
+    FixtureTools::new(
+        vec![fixture_binding(
             "fail",
             "failing capability",
             Arc::new(FailingTool),
@@ -175,6 +177,44 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
     assert!(
         !lines.iter().any(|line| line.contains("tool_result")),
         "a failed script call reports no ToolResult: {lines:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_bound_alias_with_no_implementation_in_the_host_table_resumes_as_a_tool_error() {
+    // The binding names an identity the engine advertises and journals,
+    // but the host's table holds nothing under it: the performer answers
+    // the effect with the error instead of a call, and a script call
+    // raises it at the call site.
+    let md = arm_prompt(
+        "local ok, err = pcall(tools.call, 'echo', { value = 'hi' })\n\
+         assert(not ok, 'an unresolvable identity raises at the call site')\n\
+         return err.kind .. '|' .. tostring(err)",
+    );
+    let prompt = parse(&md);
+    let (binding, _unregistered) = fixture_binding("echo", "echo capability", Arc::new(EchoTool));
+    let recorder = Arc::new(ToolRecorder::default());
+    let ctx = tool_context(
+        &prompt,
+        ToolSet::for_test(vec![binding], vec!["echo".to_owned()]),
+        Arc::clone(&recorder) as Arc<dyn Observer>,
+    );
+    let out = TokioDriver::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the missing implementation is pcall-able");
+    assert!(
+        out.starts_with("tool|"),
+        "the missing implementation reads as kind `tool`, got: {out}"
+    );
+    assert!(
+        out.contains("no implementation in the host's table"),
+        "the raised message names the host table, got: {out}"
+    );
+    let lines = recorder.lines();
+    assert!(
+        !lines.iter().any(|line| line.contains("tool_result")),
+        "nothing was called, so no ToolResult is reported: {lines:?}"
     );
 }
 

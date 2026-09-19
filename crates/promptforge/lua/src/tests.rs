@@ -4,7 +4,7 @@ use super::*;
 use crate::program::map_chunk_line_to_absolute;
 use crate::vm::{LocalTools, LuaOutcome, run_chunk};
 use promptforge_api_types::observe::{NullObserver, Observation};
-use promptforge_api_types::tools::{Tool, ToolError, ToolOutput};
+use promptforge_api_types::tools::{Tool, ToolDescriptor, ToolError, ToolOutput};
 use promptforge_store::Store;
 use serde_json::json;
 use shared_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
@@ -263,7 +263,11 @@ fn fixture_set(bindings: &[(&str, &str, &'static str)], always: &[&str]) -> Tool
         bindings
             .iter()
             .map(|(alias, description, fixture)| {
-                ToolBinding::for_test(alias, description, Arc::new(FixtureTool(fixture)))
+                ToolBinding::for_test(
+                    alias,
+                    description,
+                    &ToolDescriptor::describe(&FixtureTool(fixture)),
+                )
             })
             .collect(),
         always.iter().map(|alias| (*alias).to_owned()).collect(),
@@ -367,7 +371,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            Arc::new(FixtureTool("search")),
+            &ToolDescriptor::describe(&FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1128,7 +1132,7 @@ fn captured_bindings_are_installed_without_payload_reports() {
         vec![ToolBinding::for_test(
             "private_alias",
             "private capability",
-            Arc::new(FixtureTool("search")),
+            &ToolDescriptor::describe(&FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1243,7 +1247,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            Arc::new(FixtureTool("search")),
+            &ToolDescriptor::describe(&FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1524,7 +1528,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            Arc::new(FixtureTool("search")),
+            &ToolDescriptor::describe(&FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1579,7 +1583,7 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            Arc::new(FixtureTool("search")),
+            &ToolDescriptor::describe(&FixtureTool("search")),
         )],
         Vec::new(),
     );

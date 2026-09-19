@@ -88,7 +88,7 @@ fn test_tools() -> ToolSet {
         vec![ToolBinding::for_test(
             "echo",
             "echo tool",
-            Arc::new(StubTool),
+            &promptforge_api_types::tools::ToolDescriptor::describe(&StubTool),
         )],
         Vec::new(),
     )

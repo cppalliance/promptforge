@@ -1,4 +1,7 @@
-use super::{Arc, Error, Mutex, Result, Tool, ToolId, Value};
+use promptforge_api_types::capabilities::CapabilityId;
+use promptforge_api_types::tools::ToolDescriptor;
+
+use super::{Error, Json, Mutex, Result, ToolId, Value};
 
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
@@ -18,11 +21,13 @@ pub enum ToolOutputKind {
 }
 
 /// One prompt-local alias bound to one stable live tool identity, carrying
-/// the resolved implementation attached when the slot was filled.
+/// the tool's data - its schema, description, output kind, and the
+/// contributing capability's conflicts - and never its implementation.
 ///
-/// The implementation rides with the binding so run-time execution (schema
-/// preparation, dispatch) never consults the assembled catalog again.
-#[derive(Clone)]
+/// Run-time execution (schema preparation, script dispatch) reads the
+/// binding alone; a call is issued as an effect naming the identity, and
+/// the host resolves the implementation against its own table.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolBinding {
     /// The exact prompt-local alias.
     pub alias: String,
@@ -35,58 +40,50 @@ pub struct ToolBinding {
     /// When set, the executor advertises this instead of the bound tool's
     /// default description.
     pub model_description: Option<String>,
-    /// The resolved implementation, attached at fill time.
-    pub tool: Arc<dyn Tool>,
+    /// The JSON-Schema `object` the tool's arguments must match, advertised
+    /// under the alias.
+    pub schema: Json,
     /// How a script-initiated `tools.call` resumes this binding's output;
     /// the model tool loop ignores it.
     pub output_kind: ToolOutputKind,
-}
-
-/// Equality is keyed on the binding's data (alias, capability text, stable
-/// identity, override); the attached implementation is a trait object and
-/// takes no part in comparison.
-impl PartialEq for ToolBinding {
-    fn eq(&self, other: &Self) -> bool {
-        self.alias == other.alias
-            && self.description == other.description
-            && self.id == other.id
-            && self.model_description == other.model_description
-            && self.output_kind == other.output_kind
-    }
-}
-
-impl Eq for ToolBinding {}
-
-/// Shows the stable identity, never the trait object.
-impl std::fmt::Debug for ToolBinding {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ToolBinding")
-            .field("alias", &self.alias)
-            .field("description", &self.description)
-            .field("id", &self.id)
-            .field("model_description", &self.model_description)
-            .field("output_kind", &self.output_kind)
-            .finish_non_exhaustive()
-    }
+    /// The co-activation conflicts of the capability that contributed the
+    /// tool, carried for the record.
+    pub conflicts: Vec<CapabilityId>,
 }
 
 impl ToolBinding {
-    /// Builds a binding for a test double: the identity comes from the tool,
-    /// with no override.
+    /// Binds `alias` to the tool `descriptor` describes: the slot's
+    /// description is the tool's own, the output kind follows the
+    /// descriptor's structured-output flag, and no override is set.
+    #[must_use]
+    pub fn from_descriptor(alias: &str, descriptor: &ToolDescriptor) -> Self {
+        Self {
+            alias: alias.to_owned(),
+            description: descriptor.description.clone(),
+            id: descriptor.id.clone(),
+            model_description: None,
+            schema: descriptor.parameters_schema.clone(),
+            output_kind: if descriptor.structured_output {
+                ToolOutputKind::Structured
+            } else {
+                ToolOutputKind::Plain
+            },
+            conflicts: descriptor.conflicts.clone(),
+        }
+    }
+
+    /// Builds a binding for a test double: the identity and schema come
+    /// from the descriptor, the slot's description is `description`, with
+    /// no override.
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s executor
     /// tests, not host API.
     #[doc(hidden)]
     #[must_use]
-    pub fn for_test(alias: &str, description: &str, tool: Arc<dyn Tool>) -> Self {
+    pub fn for_test(alias: &str, description: &str, descriptor: &ToolDescriptor) -> Self {
         Self {
-            alias: alias.to_owned(),
             description: description.to_owned(),
-            id: tool.id(),
-            model_description: None,
-            tool,
-            output_kind: ToolOutputKind::default(),
+            ..Self::from_descriptor(alias, descriptor)
         }
     }
 
@@ -114,10 +111,10 @@ impl ToolBinding {
         self.model_description.as_deref()
     }
 
-    /// Returns the resolved implementation attached at bind time.
+    /// Returns the JSON-Schema `object` the tool's arguments must match.
     #[must_use]
-    pub fn tool(&self) -> &dyn Tool {
-        self.tool.as_ref()
+    pub fn schema(&self) -> &Json {
+        &self.schema
     }
 }
 
@@ -240,3 +237,7 @@ impl ToolView for Mutex<ToolSet> {
         Ok(lock_tool_set(self)?.binding(alias).cloned())
     }
 }
+
+#[cfg(test)]
+#[path = "handles-tests.rs"]
+mod tests;

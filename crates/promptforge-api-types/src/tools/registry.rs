@@ -1,24 +1,25 @@
-//! The [`Tool`] trait, the caller-provided [`ToolCatalog`] of executable
-//! tool implementations, and the catalog's construction error.
+//! The [`Tool`] trait, the host-supplied [`ToolCatalog`] of tool
+//! descriptors, and the catalog's construction error.
 
 use std::sync::Arc;
 
+use super::descriptor::ToolDescriptor;
 use super::ids::{ToolId, validate_identifier};
 use super::output::{ToolError, ToolOutput};
 
-/// The caller-provided catalog of tool implementations a run may bind.
+/// The host-supplied catalog of the tools a run may bind, as descriptors.
 ///
-/// The harness builds and validates the catalog once and then shares it by
-/// reference across every run, mirroring the model catalog: construction
-/// rejects a repeated [`ToolId`] or a transport-illegal
-/// [`wire_name`](Tool::wire_name), so the bind-phase [`get`](Self::get)
-/// lookup (where `tools.bind` attaches the resolved implementation to its
-/// binding) trusts the invariant without rescanning. Cloning is cheap: the
-/// tools live behind one refcounted slice.
+/// The host assembles the catalog from its activated capabilities and keeps
+/// the implementations in a table of its own: the engine fills its tool
+/// slots against the descriptors and never holds an implementation.
+/// Construction rejects a repeated [`ToolId`] or a transport-illegal wire
+/// name, so the bind-phase [`get`](Self::get) lookup trusts the invariant
+/// without rescanning. Cloning is cheap: the descriptors live behind one
+/// refcounted slice.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct ToolCatalog {
-    tools: Arc<[Arc<dyn Tool>]>,
+    tools: Arc<[ToolDescriptor]>,
 }
 
 impl std::fmt::Debug for ToolCatalog {
@@ -27,23 +28,23 @@ impl std::fmt::Debug for ToolCatalog {
             .debug_struct("ToolCatalog")
             .field(
                 "ids",
-                &self.tools.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
+                &self.tools.iter().map(|tool| &tool.id).collect::<Vec<_>>(),
             )
             .finish()
     }
 }
 
 impl ToolCatalog {
-    /// Builds a catalog from caller-owned tool arcs.
+    /// Builds a catalog from tool descriptors.
     ///
     /// Validates identity uniqueness and wire-name legality once, here, so
     /// [`Self::get`] can trust the invariant without rescanning.
     ///
     /// # Errors
-    /// Returns [`ToolCatalogError::DuplicateId`] if two tools share a
-    /// [`ToolId`], or [`ToolCatalogError::InvalidWireName`] if a tool's
-    /// [`wire_name`](Tool::wire_name) is empty or carries a `/` separator or
-    /// a control character.
+    /// Returns [`ToolCatalogError::DuplicateId`] if two descriptors share a
+    /// [`ToolId`], or [`ToolCatalogError::InvalidWireName`] if a
+    /// descriptor's wire name is empty or carries a `/` separator or a
+    /// control character.
     ///
     /// # Examples
     ///
@@ -54,20 +55,21 @@ impl ToolCatalog {
     /// assert!(catalog.tools().is_empty());
     /// # Ok::<(), promptforge_api_types::tools::ToolCatalogError>(())
     /// ```
-    pub fn new(tools: &[Arc<dyn Tool>]) -> Result<Self, ToolCatalogError> {
+    pub fn new(tools: &[ToolDescriptor]) -> Result<Self, ToolCatalogError> {
         let mut seen = std::collections::BTreeSet::new();
         for tool in tools {
             // The catalog is the transport boundary: reject a wire name that
             // is empty or carries a separator/control character (tools.rs F4).
-            if let Err(error) = validate_identifier("wire name", tool.wire_name()) {
+            if let Err(error) = validate_identifier("wire name", &tool.wire_name) {
                 return Err(ToolCatalogError::InvalidWireName {
-                    wire_name: tool.wire_name().to_owned(),
+                    wire_name: tool.wire_name.clone(),
                     reason: error.reason(),
                 });
             }
-            let id = tool.id();
-            if !seen.insert(id.clone()) {
-                return Err(ToolCatalogError::DuplicateId { id });
+            if !seen.insert(tool.id.clone()) {
+                return Err(ToolCatalogError::DuplicateId {
+                    id: tool.id.clone(),
+                });
             }
         }
         Ok(Self {
@@ -77,11 +79,11 @@ impl ToolCatalog {
         })
     }
 
-    /// Returns the shared implementation for `id`, if one is in the catalog.
+    /// Returns the descriptor for `id`, if one is in the catalog.
     ///
-    /// This is the bind-time lookup (`tools.bind` attaches the resolved
-    /// implementation to its binding), a cold path run once per declaration,
-    /// so it scans linearly rather than carrying a cached-identity index.
+    /// This is the bind-time lookup, a cold path run once per declared
+    /// slot, so it scans linearly rather than carrying a cached-identity
+    /// index.
     ///
     /// # Examples
     ///
@@ -94,14 +96,11 @@ impl ToolCatalog {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn get(&self, id: &ToolId) -> Option<Arc<dyn Tool>> {
-        self.tools
-            .iter()
-            .find(|tool| tool.id() == *id)
-            .map(Arc::clone)
+    pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
+        self.tools.iter().find(|tool| tool.id == *id)
     }
 
-    /// Returns the catalog's tool arcs in supplied order.
+    /// Returns the catalog's descriptors in supplied order.
     ///
     /// # Examples
     ///
@@ -113,9 +112,67 @@ impl ToolCatalog {
     /// # Ok::<(), promptforge_api_types::tools::ToolCatalogError>(())
     /// ```
     #[must_use]
-    pub fn tools(&self) -> &[Arc<dyn Tool>] {
+    pub fn tools(&self) -> &[ToolDescriptor] {
         &self.tools
     }
+}
+
+impl ToolDescriptor {
+    /// Describes an implementation: the descriptor a host derives from a
+    /// [`Tool`] when it assembles its catalog, with no conflicts recorded
+    /// (the contributing capability's are added by the host).
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_api_types::tools::{Tool, ToolDescriptor, ToolError, ToolId, ToolOutput};
+    ///
+    /// struct Echo;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl Tool for Echo {
+    ///     fn id(&self) -> ToolId {
+    ///         ToolId::parse("example/echo/echo").expect("the id is valid")
+    ///     }
+    ///     fn wire_name(&self) -> &str {
+    ///         "echo"
+    ///     }
+    ///     fn description(&self) -> &str {
+    ///         "Echo the `text` argument back."
+    ///     }
+    ///     fn parameters_schema(&self) -> serde_json::Value {
+    ///         serde_json::json!({"type": "object", "properties": {}})
+    ///     }
+    ///     async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    ///         Ok(ToolOutput::trusted(args.to_string()))
+    ///     }
+    /// }
+    ///
+    /// let descriptor = ToolDescriptor::describe(&Echo);
+    /// assert_eq!(descriptor.wire_name, "echo");
+    /// assert_eq!(descriptor.id.name(), "echo");
+    /// ```
+    #[must_use]
+    pub fn describe(tool: &dyn Tool) -> ToolDescriptor {
+        ToolDescriptor::new(
+            tool.id(),
+            tool.wire_name(),
+            tool.description(),
+            tool.parameters_schema(),
+        )
+        .structured(tool.structured_output())
+    }
+}
+
+/// Describes every implementation in `tools`, in order.
+///
+/// A convenience over [`ToolDescriptor::describe`] for a host assembling a
+/// catalog from a contribution's tool arcs.
+#[must_use]
+pub fn describe_all(tools: &[Arc<dyn Tool>]) -> Vec<ToolDescriptor> {
+    tools
+        .iter()
+        .map(|tool| ToolDescriptor::describe(tool.as_ref()))
+        .collect()
 }
 
 /// A stable, matchable classification of a [`ToolCatalogError`].
@@ -243,7 +300,8 @@ impl ToolCatalogError {
 /// # Invariants
 ///
 /// - [`id`](Tool::id) returns the same value on every call for a given tool; it
-///   is the catalog key and must be unique within a [`ToolCatalog`].
+///   is the catalog key and must be unique within a [`ToolCatalog`] (whose
+///   entries are the tool's [`ToolDescriptor`]).
 /// - [`wire_name`](Tool::wire_name) is the transport name, not identity; it is
 ///   distinct from [`id`](Tool::id) and may be aliased when advertised.
 /// - [`parameters_schema`](Tool::parameters_schema) returns a JSON-Schema
@@ -256,7 +314,7 @@ pub trait Tool: Send + Sync {
     /// Returns the tool's stable live identity.
     ///
     /// This is the catalog key. It must be stable across calls and unique
-    /// within any [`ToolCatalog`] the tool is registered in.
+    /// within any [`ToolCatalog`] the tool is described into.
     fn id(&self) -> ToolId;
 
     /// Returns the concrete name used by the current model transport.

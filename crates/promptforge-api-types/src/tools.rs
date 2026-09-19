@@ -6,19 +6,22 @@
 //! an executor can dispatch them uniformly. Stable identity ([`ToolId`]) is
 //! separate from the wire name used by the current model transport.
 //!
-//! This module holds vocabulary only: the [`Tool`] trait, the caller-provided
-//! [`ToolCatalog`], trusted output ([`ToolOutput`], [`OutputTrust`]), the
-//! model-safe [`ToolError`], and the contract errors. Concrete tool
-//! implementations, the prompt parser, and the executor live in their own
-//! crates and depend on `promptforge-api-types`.
+//! This module holds vocabulary only: the [`Tool`] trait, the
+//! implementation-free [`ToolDescriptor`] and the host-supplied
+//! [`ToolCatalog`] of descriptors, trusted output ([`ToolOutput`],
+//! [`OutputTrust`]), the model-safe [`ToolError`], and the contract errors.
+//! Concrete tool implementations, the prompt parser, and the executor live
+//! in their own crates and depend on `promptforge-api-types`.
 
+mod descriptor;
 mod ids;
 mod output;
 mod registry;
 
+pub use descriptor::ToolDescriptor;
 pub use ids::{ToolId, ToolIdError, ToolIdErrorKind};
 pub use output::{OutputTrust, ToolError, ToolErrorKind, ToolOutput};
-pub use registry::{Tool, ToolCatalog, ToolCatalogError, ToolCatalogErrorKind};
+pub use registry::{Tool, ToolCatalog, ToolCatalogError, ToolCatalogErrorKind, describe_all};
 
 #[cfg(test)]
 mod tests;

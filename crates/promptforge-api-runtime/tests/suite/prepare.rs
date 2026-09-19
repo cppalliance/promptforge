@@ -1,18 +1,22 @@
-//! Prepare-pass integration tests: capability resolution against the
+//! Prepare-pass integration tests: host-side activation against the
 //! registry (missing required reported, absent optional skipped and
 //! logged), the run's services reaching `create`, activation failure
-//! semantics, the per-run VFS claims isolation matrix, and model
-//! satisfaction - the trivial fill binding every declared role to the
-//! context's current model, the hard-keyword and context-minimum checks
-//! against its descriptor, and `Environment::run` refusing an
-//! unsatisfiable prompt.
+//! semantics, the per-run VFS claims isolation matrix, slot filling by
+//! identity against the host-supplied catalog, and model satisfaction -
+//! the trivial fill binding every declared role to the context's current
+//! model, the hard-keyword and context-minimum checks against its
+//! descriptor, and `Environment::run` refusing an unsatisfiable prompt
+//! with today's model-readable notice.
 
 use std::io;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use promptforge_api_runtime::capabilities::CapabilityRegistry;
-use promptforge_api_runtime::execute::{Environment, RequirementCheck, RunErrorKind, RunResult};
+use promptforge_api_runtime::execute::{
+    Activation, Environment, RequirementCheck, Requirements, RunContext, RunErrorKind, RunHost,
+    RunResult, activate,
+};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_types::cancel::sync::CancelHandle;
 use promptforge_api_types::capabilities::{
@@ -20,10 +24,48 @@ use promptforge_api_types::capabilities::{
 };
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::NullObserver;
-use promptforge_api_types::tools::{Tool, ToolError, ToolId, ToolOutput};
+use promptforge_api_types::tools::{
+    Tool, ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput,
+};
 use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
 
 use super::support::context;
+
+/// The loop path's activate-then-prepare ceremony spelled out, so a test
+/// can inspect what `Environment::run` folds into one refusal: builds the
+/// run's VFS from `env`, activates the prompt's declared capabilities
+/// against `registry` with the run's own services, installs the resulting
+/// catalog, prepares the context over that VFS, and merges activation's
+/// report into prepare's. Returns the prepared context, the merged report,
+/// and the activation (for its implementation table).
+fn prepare_activated(
+    env: Environment,
+    registry: Option<&CapabilityRegistry>,
+    prompt: &Prompt,
+    ctx: RunContext,
+) -> (RunContext, Requirements, Activation) {
+    let vfs = env.run_vfs();
+    let services = RunServices::new(vfs.clone(), ctx.cancel_handle());
+    let activation = activate(registry, prompt, &services);
+    let env = env.tools(activation.catalog.clone());
+    let (ctx, mut requirements) = env.prepare(prompt, ctx.vfs(vfs));
+    requirements.merge(activation.requirements.clone());
+    (ctx, requirements, activation)
+}
+
+/// The host's zero-burden flow with capabilities: hands `registry` to the
+/// host and runs through `Environment::run`, which builds the run's VFS,
+/// activates, installs the catalog, prepares, merges the activation
+/// report, and refuses an unsatisfiable prompt.
+async fn run_activated(
+    registry: CapabilityRegistry,
+    prompt: &Prompt,
+    ctx: RunContext,
+) -> RunResult {
+    Environment::new()
+        .run(prompt, "", ctx, RunHost::new().registry(Arc::new(registry)))
+        .await
+}
 
 /// A prompt declaring `promptforge/web` as a required capability.
 const DECLARES_REQUIRED: &str = concat!(
@@ -74,7 +116,7 @@ fn parse(source: &str, execution: &str) -> Prompt {
 /// What one activation observed: the marker round-trip through the
 /// services VFS and the cancellation handle it was handed.
 #[derive(Debug)]
-struct Activation {
+struct Observed {
     /// The marker read back through the services VFS, when it round-tripped.
     marker: Option<String>,
     /// The cancellation handle `create` received.
@@ -87,12 +129,12 @@ struct Fixture {
     id: CapabilityId,
     description: String,
     fail: bool,
-    activations: Arc<Mutex<Vec<Activation>>>,
+    activations: Arc<Mutex<Vec<Observed>>>,
 }
 
 impl Fixture {
     /// Builds a fixture capability registered under `id`.
-    fn new(id: &str, fail: bool) -> (Arc<Fixture>, Arc<Mutex<Vec<Activation>>>) {
+    fn new(id: &str, fail: bool) -> (Arc<Fixture>, Arc<Mutex<Vec<Observed>>>) {
         let activations = Arc::new(Mutex::new(Vec::new()));
         let fixture = Arc::new(Fixture {
             id: CapabilityId::parse(id).expect("the fixture id is valid"),
@@ -132,7 +174,7 @@ impl Capability for Fixture {
         self.activations
             .lock()
             .expect("the activations lock is not poisoned")
-            .push(Activation {
+            .push(Observed {
                 marker,
                 cancel: services.cancel.clone(),
             });
@@ -204,8 +246,14 @@ impl Drop for TempDir {
 #[test]
 fn a_missing_required_capability_is_reported() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    let env = Environment::new();
-    let (_ctx, requirements) = env.prepare(&prompt, context("prepare-missing"));
+    // No registry: activation reports the declared required capability
+    // absent, and the merged prepare report carries it.
+    let (_ctx, requirements, _) = prepare_activated(
+        Environment::new(),
+        None,
+        &prompt,
+        context("prepare-missing"),
+    );
     assert!(requirements.unmet_requirements.is_empty());
     assert_eq!(
         requirements.missing_required,
@@ -217,9 +265,13 @@ fn a_missing_required_capability_is_reported() {
 #[test]
 fn an_absent_optional_capability_is_skipped_and_logged() {
     let prompt = parse(DECLARES_OPTIONAL, "declares-optional");
-    let env = Environment::new();
     let logs = captured_logs(|| {
-        let (_ctx, requirements) = env.prepare(&prompt, context("prepare-optional"));
+        let (_ctx, requirements, _) = prepare_activated(
+            Environment::new(),
+            None,
+            &prompt,
+            context("prepare-optional"),
+        );
         assert!(requirements.missing_required.is_empty());
         assert!(requirements.is_satisfied());
     });
@@ -235,10 +287,13 @@ fn activation_receives_the_runs_own_services() {
     let (fixture, activations) = Fixture::new("promptforge/web", false);
     let mut registry = CapabilityRegistry::new();
     registry.register(fixture).expect("the fixture registers");
-    let env = Environment::new().registry(registry);
     let cancel = CancelHandle::new();
-    let (ctx, requirements) =
-        env.prepare(&prompt, context("prepare-services").cancel(cancel.clone()));
+    let (ctx, requirements, _) = prepare_activated(
+        Environment::new(),
+        Some(&registry),
+        &prompt,
+        context("prepare-services").cancel(cancel.clone()),
+    );
     assert!(requirements.is_satisfied());
     // The host-supplied cancellation handle reached `create` unchanged.
     let activations = activations.lock().expect("the lock is not poisoned");
@@ -251,8 +306,9 @@ fn activation_receives_the_runs_own_services() {
         "the activated handle is the run's own"
     );
     drop(activations);
-    // The services VFS is the run's prepared handle: the activation's
-    // marker is readable through the context's store mount.
+    // The services VFS is the run's own handle: the host built the run's
+    // router, handed it to activation, and set it on the context, so the
+    // activation's marker is readable through the context's store mount.
     let access = ctx
         .vfs_handle()
         .acquire(Origin::new("post-prepare read"))
@@ -270,12 +326,16 @@ fn a_required_activation_failure_is_logged_and_reported() {
     let (fixture, _activations) = Fixture::new("promptforge/web", true);
     let mut registry = CapabilityRegistry::new();
     registry.register(fixture).expect("the fixture registers");
-    let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
         // A present-but-failing required capability leaves the run
         // without something the prompt declared: it is reported like an
         // absent one, and the failure is also a log line.
-        let (_ctx, requirements) = env.prepare(&prompt, context("prepare-failing"));
+        let (_ctx, requirements, _) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("prepare-failing"),
+        );
         assert_eq!(
             requirements.missing_required,
             [CapabilityId::parse("promptforge/web").expect("the id is valid")]
@@ -294,11 +354,15 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
     let (fixture, _activations) = Fixture::new("promptforge/web", true);
     let mut registry = CapabilityRegistry::new();
     registry.register(fixture).expect("the fixture registers");
-    let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
         // An optional capability that fails to activate is only a log
         // line: the prompt declared it could run without.
-        let (_ctx, requirements) = env.prepare(&prompt, context("prepare-failing"));
+        let (_ctx, requirements, _) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("prepare-failing"),
+        );
         assert!(requirements.is_satisfied());
     });
     assert!(
@@ -528,6 +592,7 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
             &prompt,
             "",
             context("refuse").model(current_model(32_000, ThinkingMode::Never)),
+            RunHost::new(),
         )
         .await;
     let RunResult::Failure(error) = result else {
@@ -536,17 +601,24 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     let notice = error.to_string();
     // The notice is written to be read by a model: it names the role,
-    // each failed check, and required versus actual.
+    // each failed check, and required versus actual - today's text,
+    // unchanged by the catalog moving to the host.
     assert!(
-        notice.contains("analyst"),
-        "the notice names the role: {notice}"
+        notice.starts_with("the environment cannot satisfy this prompt:"),
+        "the notice opens with the standing refusal line: {notice}"
     );
     assert!(
-        notice.contains("200000") && notice.contains("32000"),
+        notice.contains(
+            "role 'analyst': requires a context of at least 200000 tokens; \
+             the current model provides 32000"
+        ),
         "the notice gives required versus actual context: {notice}"
     );
     assert!(
-        notice.contains("thinking") && notice.contains("Never"),
+        notice.contains(
+            "role 'analyst': requires 'thinking'; \
+             the current model's thinking capability is Never"
+        ),
         "the notice gives required versus actual keywords: {notice}"
     );
 }
@@ -554,9 +626,15 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
 #[tokio::test]
 async fn env_run_refuses_a_missing_required_capability_with_a_notice_naming_it() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
-    // No registry: the declared required capability is absent.
-    let env = Environment::new();
-    let result = env.run(&prompt, "", context("refuse-missing")).await;
+    // An empty registry: activation reports the declared required
+    // capability absent, and the zero-burden path folds that report into
+    // its refusal.
+    let result = run_activated(
+        CapabilityRegistry::new(),
+        &prompt,
+        context("refuse-missing"),
+    )
+    .await;
     let RunResult::Failure(error) = result else {
         panic!("a prompt missing a required capability is refused: {result:?}");
     };
@@ -565,6 +643,44 @@ async fn env_run_refuses_a_missing_required_capability_with_a_notice_naming_it()
     assert!(
         notice.contains("missing required capability: promptforge/web"),
         "the notice names the missing capability: {notice}"
+    );
+}
+
+/// A prompt declaring `promptforge/web` as required and returning the
+/// marker its activation wrote into the run's store.
+const READS_ACTIVATION_MARKER: &str = concat!(
+    "---\n",
+    "name: reads-activation-marker\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "capabilities:\n",
+    "  - promptforge/web\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "```lua\n",
+    "return store.read('activated.txt')\n",
+    "```\n",
+);
+
+#[tokio::test]
+async fn env_run_activates_over_the_store_the_run_reads() {
+    let prompt = parse(READS_ACTIVATION_MARKER, "reads-activation-marker");
+    let (fixture, activations) = Fixture::new("promptforge/web", false);
+    let mut registry = CapabilityRegistry::new();
+    registry.register(fixture).expect("the fixture registers");
+    // The loop path activates exactly once, over the run's own router:
+    // the marker the capability wrote through its services is what the
+    // prompt reads back through `store`.
+    let result = run_activated(registry, &prompt, context("activate-once")).await;
+    let RunResult::Ok(text) = result else {
+        panic!("the activated run reads its capability's marker: {result:?}");
+    };
+    assert_eq!(text, "active");
+    assert_eq!(
+        activations.lock().expect("the lock is not poisoned").len(),
+        1,
+        "create ran exactly once"
     );
 }
 
@@ -579,6 +695,7 @@ async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
             &prompt,
             "",
             context("implicit").model(current_model(200_000, ThinkingMode::Always)),
+            RunHost::new(),
         )
         .await;
     let RunResult::Ok(text) = result else {
@@ -587,10 +704,11 @@ async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
     assert_eq!(text, "done");
 }
 
-// Catalog assembly and conflict checks: prepare assembles the activated
-// capabilities' contributed tools into the run's catalog in declaration
-// order, enforcing tool prefix-containment at assembly, and rejects
-// capability co-activation conflicts naming both.
+// Catalog assembly and conflict checks: activation assembles the
+// activated capabilities' contributed tools into the run's catalog in
+// declaration order, enforcing tool prefix-containment at assembly, and
+// rejects capability co-activation conflicts naming both; prepare fills
+// against the catalog it is handed.
 
 /// A prompt declaring `promptforge/bashkit` and `promptforge/terminal`,
 /// in that order.
@@ -742,8 +860,12 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
                 vec![fixture_tool("promptforge/terminal/run")],
             )))
             .expect("terminal registers");
-        let env = Environment::new().registry(registry);
-        let (ctx, requirements) = env.prepare(&prompt, context("prepare-conflict"));
+        let (ctx, requirements, activation) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("prepare-conflict"),
+        );
         assert!(!requirements.is_satisfied());
         let [conflict] = requirements.conflicts.as_slice() else {
             panic!(
@@ -756,8 +878,9 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
         assert_eq!(conflict.second.to_string(), "promptforge/terminal");
         // A context gets one filesystem reality or the other, never
         // both: neither member of the conflicting pair activated, so
-        // neither tool reached the catalog.
+        // neither tool reached the catalog or the implementation table.
         assert!(ctx.tools().tools().is_empty());
+        assert!(activation.tools.is_empty());
     }
 }
 
@@ -779,8 +902,7 @@ async fn env_run_refuses_a_conflicting_pair_with_a_notice_naming_both() {
             vec![],
         )))
         .expect("terminal registers");
-    let env = Environment::new().registry(registry);
-    let result = env.run(&prompt, "", context("refuse-conflict")).await;
+    let result = run_activated(registry, &prompt, context("refuse-conflict")).await;
     let RunResult::Failure(error) = result else {
         panic!("a conflicting pair is refused: {result:?}");
     };
@@ -809,11 +931,16 @@ fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
     registry
         .register(Arc::new(fixture))
         .expect("the fixture registers");
-    let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, context("prepare-containment"));
+        let (ctx, requirements, activation) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("prepare-containment"),
+        );
         // Containment is enforced at assembly, not reported: the run is
-        // satisfiable and the stray tool simply never enters the catalog.
+        // satisfiable and the stray tool simply never enters the catalog
+        // or the implementation table.
         assert!(requirements.is_satisfied());
         let catalog = ctx.tools();
         assert!(
@@ -825,6 +952,8 @@ fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
             "the containment violation is rejected at assembly"
         );
         assert_eq!(catalog.tools().len(), 1);
+        assert!(activation.tools.get(&good).is_some());
+        assert!(activation.tools.get(&stray).is_none());
     });
     assert!(
         logs.contains("promptforge/other/fetch") && logs.contains("promptforge/web"),
@@ -851,14 +980,18 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
     let mut registry = CapabilityRegistry::new();
     registry.register(Arc::new(web)).expect("web registers");
     registry.register(Arc::new(fs)).expect("fs registers");
-    let env = Environment::new().registry(registry);
-    let (ctx, requirements) = env.prepare(&prompt, context("prepare-order"));
+    let (ctx, requirements, _) = prepare_activated(
+        Environment::new(),
+        Some(&registry),
+        &prompt,
+        context("prepare-order"),
+    );
     assert!(requirements.is_satisfied());
     let ids: Vec<String> = ctx
         .tools()
         .tools()
         .iter()
-        .map(|tool| tool.id().to_string())
+        .map(|tool| tool.id.to_string())
         .collect();
     assert_eq!(
         ids,
@@ -923,9 +1056,13 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
     registry
         .register(Arc::new(fixture))
         .expect("the fixture registers");
-    let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, context("prepare-duplicate"));
+        let (ctx, requirements, _) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("prepare-duplicate"),
+        );
         // The repeat is rejected at assembly, not reported: the first
         // contribution stands and the run is satisfiable.
         assert!(requirements.is_satisfied());
@@ -962,9 +1099,13 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
     registry
         .register(Arc::new(fixture))
         .expect("the fixture registers");
-    let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, context("prepare-wire-name"));
+        let (ctx, requirements, _) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("prepare-wire-name"),
+        );
         // One bad tool costs only itself: the run is satisfiable and
         // the well-formed tool still assembles.
         assert!(requirements.is_satisfied());
@@ -982,9 +1123,10 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
 }
 
 // ToolBindings and slot filling: exact slots fill by identity against
-// the assembled catalog (an exact path's first two segments name its
-// capability, so a slot whose capability is inactive is reported as
-// missing), with every fill journaled into the run's tool bindings.
+// the host-supplied catalog (an exact path's first two segments name its
+// capability, so a slot whose capability contributed nothing to the
+// catalog is reported as missing), with every fill journaled into the
+// run's tool bindings as descriptors, never implementations.
 
 /// A prompt declaring `promptforge/web` and one exact tool slot.
 const DECLARES_EXACT_SLOT: &str = concat!(
@@ -1033,31 +1175,118 @@ fn web_registry() -> CapabilityRegistry {
     registry
 }
 
+/// The step's first test: `prepare` fills a slot by identity against a
+/// catalog the host supplied directly - no registry, no activation, no
+/// implementation anywhere near the engine - and the binding journals the
+/// descriptor's data.
 #[test]
-fn an_exact_slot_fills_against_the_assembled_catalog() {
+fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
-    let env = Environment::new().registry(web_registry());
-    let (ctx, requirements) = env.prepare(&prompt, context("fill-exact"));
+    let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
+    let descriptor = ToolDescriptor::new(
+        id.clone(),
+        "fetch",
+        "Fetch a web page over HTTP",
+        serde_json::json!({"type": "object", "properties": {"url": {"type": "string"}}}),
+    )
+    .structured(true);
+    let catalog = ToolCatalog::new(std::slice::from_ref(&descriptor)).expect("the catalog builds");
+    let env = Environment::new().tools(catalog);
+    let (ctx, requirements) = env.prepare(&prompt, context("fill-by-id"));
+    assert!(
+        requirements.is_satisfied(),
+        "a slot the catalog satisfies reports nothing: {requirements:?}"
+    );
+    let bindings = ctx.tool_bindings();
+    assert_eq!(bindings.len(), 1);
+    // Handles resolve alias -> id -> descriptor, and the journaled
+    // descriptor is the catalog's entry verbatim.
+    assert_eq!(bindings.alias_id("fetch"), Some(&id));
+    assert_eq!(bindings.resolve("fetch"), Some(&descriptor));
+    assert_eq!(bindings.tool(&id), Some(&descriptor));
+    assert!(bindings.resolve("undeclared").is_none());
+    // The context's catalog is the environment's, so the host can read
+    // back what the run was prepared against.
+    assert_eq!(ctx.tools().tools(), [descriptor]);
+}
+
+/// The step's second test: an unmet requirement found at prepare refuses
+/// the run with today's model-readable notice text, line for line.
+#[tokio::test]
+async fn an_unmet_requirement_produces_todays_model_readable_notice() {
+    let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
+    // An empty catalog: the slot's capability contributed nothing, which
+    // prepare reports as the missing capability.
+    let result = Environment::new()
+        .run(&prompt, "", context("notice"), RunHost::new())
+        .await;
+    let RunResult::Failure(error) = result else {
+        panic!("an unfilled required slot is refused: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    assert_eq!(
+        error.to_string(),
+        "the environment cannot satisfy this prompt:\n\
+         - missing required capability: promptforge/web"
+    );
+}
+
+#[tokio::test]
+async fn a_capability_both_activation_and_prepare_report_missing_is_named_once() {
+    let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
+    // The declared capability is absent from an empty registry (activation
+    // reports it) and its exact slot finds nothing in the catalog (prepare
+    // reports it): the merged refusal names it once.
+    let result = run_activated(CapabilityRegistry::new(), &prompt, context("refuse-once")).await;
+    let RunResult::Failure(error) = result else {
+        panic!("an absent required capability is refused: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    assert_eq!(
+        error.to_string(),
+        "the environment cannot satisfy this prompt:\n\
+         - missing required capability: promptforge/web"
+    );
+}
+
+#[test]
+fn an_exact_slot_fills_against_the_activated_catalog() {
+    let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
+    let (ctx, requirements, activation) = prepare_activated(
+        Environment::new(),
+        Some(&web_registry()),
+        &prompt,
+        context("fill-exact"),
+    );
     assert!(requirements.is_satisfied());
     let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
     let bindings = ctx.tool_bindings();
     assert_eq!(bindings.len(), 1);
-    // Handles resolve alias -> id -> tool.
+    // Handles resolve alias -> id -> descriptor; the implementation is the
+    // host's, in the activation's table under the same id.
     assert_eq!(bindings.alias_id("fetch"), Some(&id));
     assert_eq!(
-        bindings.resolve("fetch").map(|tool| tool.id()),
+        bindings.resolve("fetch").map(|tool| tool.id.clone()),
         Some(id.clone())
+    );
+    assert_eq!(
+        bindings
+            .resolve("fetch")
+            .map(|tool| tool.description.as_str()),
+        Some("Fetch a web page over HTTP")
     );
     assert!(bindings.tool(&id).is_some());
     assert!(bindings.resolve("undeclared").is_none());
+    assert!(activation.tools.get(&id).is_some());
 }
 
 #[test]
 fn an_exact_slot_whose_capability_is_inactive_is_reported() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
-    // No registry and no declaration: the slot's capability is inactive.
-    let env = Environment::new();
-    let (ctx, requirements) = env.prepare(&prompt, context("fill-orphan"));
+    // No registry and no declaration: the slot's capability contributed
+    // nothing to the catalog.
+    let (ctx, requirements, _) =
+        prepare_activated(Environment::new(), None, &prompt, context("fill-orphan"));
     // The exact path's first two segments name its capability.
     assert_eq!(
         requirements.missing_required,
@@ -1081,9 +1310,13 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
             vec![described_tool("promptforge/web/search", "Search the web")],
         )))
         .expect("web registers");
-    let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
+        let (ctx, requirements, _) = prepare_activated(
+            Environment::new(),
+            Some(&registry),
+            &prompt,
+            context("fill-absent-tool"),
+        );
         assert!(
             requirements.missing_required.is_empty(),
             "an active capability is never reported missing: {:?}",

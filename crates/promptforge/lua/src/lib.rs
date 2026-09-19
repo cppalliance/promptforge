@@ -43,7 +43,7 @@ pub(crate) use mlua::{
 pub(crate) use serde_json::Value as Json;
 
 pub(crate) use promptforge_api_types::observe::{Observation, Observer, detail};
-pub(crate) use promptforge_api_types::tools::{Tool, ToolId};
+pub(crate) use promptforge_api_types::tools::ToolId;
 pub(crate) use promptforge_api_types::untrusted::GuardNonce;
 pub(crate) use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
 pub(crate) use promptforge_store::{Access, Store};

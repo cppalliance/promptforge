@@ -1,8 +1,6 @@
 //! The run-scoped sets built from the prepared bindings, and the `argv`
 //! derivation: the pieces `RunState::new` assembles once per run.
 
-use std::sync::Arc;
-
 use promptforge_parser::ModelKeyword;
 
 use crate::lua::{ToolBinding, ToolSet};
@@ -12,8 +10,9 @@ use crate::parser::Prompt;
 use super::super::config::RunContext;
 
 /// Builds the run's shared tool set from the prepared bindings: every
-/// filled slot becomes a binding carrying its resolved implementation, so
-/// run-time execution never consults the assembled catalog again. Unfilled
+/// filled slot becomes a binding carrying the tool's descriptor data (its
+/// schema, description, and output kind), so run-time execution never
+/// consults the catalog again and never holds an implementation. Unfilled
 /// slots produce no binding: advertising or calling the alias fails at run
 /// time, exactly as prepare's report promised.
 pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
@@ -24,14 +23,7 @@ pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
         };
         // The exact path says nothing prose-like; the tool's own catalog
         // text stands in as the binding's description.
-        set.bindings.push(ToolBinding {
-            alias: alias.to_owned(),
-            description: tool.description().to_owned(),
-            id: tool.id(),
-            model_description: None,
-            tool: Arc::clone(tool),
-            output_kind: crate::lua::ToolOutputKind::Plain,
-        });
+        set.bindings.push(ToolBinding::from_descriptor(alias, tool));
     }
     set
 }

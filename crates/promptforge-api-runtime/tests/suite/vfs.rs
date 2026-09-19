@@ -101,7 +101,7 @@ fn offline_run(
 ) {
     let recorder = Arc::new(Recorder::default());
     let prompt = prompt.clone();
-    let (ctx, vfs) = prepare_run(
+    let (ctx, host, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -109,7 +109,7 @@ fn offline_run(
             observer: recorder,
         },
     );
-    let run = async move { drive(&prompt, "", ctx).await };
+    let run = async move { drive(&prompt, "", ctx, host).await };
     (vfs, run)
 }
 
@@ -131,7 +131,7 @@ return store.read('handoff.txt')\n\
 ```\n";
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, "vfs-end-to-end", "vfs-e2e", recorder.as_ref());
-    let (ctx, vfs) = prepare_run(
+    let (ctx, host, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -139,7 +139,7 @@ return store.read('handoff.txt')\n\
             observer: recorder,
         },
     );
-    let result = drive(&prompt, "", ctx)
+    let result = drive(&prompt, "", ctx, host)
         .await
         .expect("the run threads the prepared handle through both sections");
     assert_eq!(result, "across the reset");

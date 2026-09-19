@@ -1,10 +1,8 @@
 //! The run's journaled bindings: [`ModelBindings`] and [`ToolBindings`].
 
 use std::collections::BTreeMap;
-use std::fmt;
-use std::sync::Arc;
 
-use promptforge_api_types::tools::Tool;
+use promptforge_api_types::tools::ToolDescriptor;
 
 use crate::model::{ModelDescriptor, ModelId};
 use crate::tools::ToolId;
@@ -67,30 +65,35 @@ impl ModelBindings {
     }
 }
 
-/// The run's tool bindings: which concrete tool each declared alias is
-/// bound to, and the tools this run may dispatch.
+/// The run's tool bindings: which tool each declared alias is bound to,
+/// and the descriptors of every tool this run may call.
 ///
-/// Written by [`prepare`](super::Environment::prepare)'s slot fill:
-/// exact slots fill by identity against the assembled catalog, and every
+/// Written by [`prepare`](super::Environment::prepare)'s slot fill: exact
+/// slots fill by identity against the host-supplied catalog, and every
 /// fill is journaled here so hosts and evals see what each alias resolved
-/// to. The model only ever sees the prompt-local alias, never the global
-/// path. Handles resolve alias -> id -> tool.
-#[derive(Clone, Default)]
+/// to. The bindings carry descriptors, never implementations: the engine
+/// advertises and calls a tool by its data, and the host resolves the id
+/// a `ToolCall` effect names. The model only ever sees the prompt-local
+/// alias, never the global path. Handles resolve alias -> id -> descriptor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolBindings {
     /// The decision, journaled: prompt-local alias to the bound tool's
     /// identity.
     aliases: BTreeMap<String, ToolId>,
-    /// What this run may dispatch: identity to tool.
-    tools: BTreeMap<ToolId, Arc<dyn Tool>>,
+    /// What this run may call: identity to descriptor.
+    tools: BTreeMap<ToolId, ToolDescriptor>,
 }
 
 impl ToolBindings {
-    /// Binds the prompt-local `alias` to `tool`, recording the tool under
-    /// its identity. The slot fill's only writer.
-    pub(crate) fn bind(&mut self, alias: &str, tool: Arc<dyn Tool>) {
-        self.aliases.insert(alias.to_owned(), tool.id());
-        self.tools.entry(tool.id()).or_insert(tool);
+    /// Binds the prompt-local `alias` to the tool `descriptor` describes,
+    /// recording the descriptor under its identity. The slot fill's only
+    /// writer.
+    pub(crate) fn bind(&mut self, alias: &str, descriptor: ToolDescriptor) {
+        self.aliases.insert(alias.to_owned(), descriptor.id.clone());
+        self.tools
+            .entry(descriptor.id.clone())
+            .or_insert(descriptor);
     }
 
     /// Returns the identity bound to `alias`, when the slot was filled.
@@ -99,16 +102,16 @@ impl ToolBindings {
         self.aliases.get(alias)
     }
 
-    /// Resolves a prompt-local alias all the way to its tool:
-    /// alias -> id -> tool.
+    /// Resolves a prompt-local alias all the way to its descriptor:
+    /// alias -> id -> descriptor.
     #[must_use]
-    pub fn resolve(&self, alias: &str) -> Option<&Arc<dyn Tool>> {
+    pub fn resolve(&self, alias: &str) -> Option<&ToolDescriptor> {
         self.aliases.get(alias).and_then(|id| self.tools.get(id))
     }
 
-    /// Returns the tool bound under `id`, when this run may dispatch it.
+    /// Returns the descriptor bound under `id`, when this run may call it.
     #[must_use]
-    pub fn tool(&self, id: &ToolId) -> Option<&Arc<dyn Tool>> {
+    pub fn tool(&self, id: &ToolId) -> Option<&ToolDescriptor> {
         self.tools.get(id)
     }
 
@@ -125,23 +128,9 @@ impl ToolBindings {
     }
 }
 
-impl fmt::Debug for ToolBindings {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The tools are trait objects; their identities stand in, and
-        // the journaled decision (alias to identity) is the content.
-        f.debug_struct("ToolBindings")
-            .field("aliases", &self.aliases)
-            .field("tools", &self.tools.keys().collect::<Vec<_>>())
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
-    use std::sync::Arc;
-
-    use promptforge_api_types::tools::{ToolError, ToolOutput};
 
     use super::*;
     use crate::model::ThinkingMode;
@@ -186,39 +175,15 @@ mod tests {
         );
     }
 
-    /// A fixture tool: a static id and an empty trusted output.
-    struct FixtureTool {
-        id: ToolId,
-    }
-
-    #[async_trait::async_trait]
-    impl Tool for FixtureTool {
-        fn id(&self) -> ToolId {
-            self.id.clone()
-        }
-
-        fn wire_name(&self) -> &'static str {
-            "fixture"
-        }
-
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn description(&self) -> &str {
-            "A fixture tool."
-        }
-
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({"type": "object", "properties": {}})
-        }
-
-        async fn call(
-            &self,
-            _arguments: serde_json::Value,
-        ) -> std::result::Result<ToolOutput, ToolError> {
-            Ok(ToolOutput::trusted(String::new()))
-        }
+    /// A fixture descriptor under `id`: a static wire name and an empty
+    /// schema.
+    fn fixture(id: &ToolId) -> ToolDescriptor {
+        ToolDescriptor::new(
+            id.clone(),
+            "fixture",
+            "A fixture tool.",
+            serde_json::json!({"type": "object", "properties": {}}),
+        )
     }
 
     #[test]
@@ -235,19 +200,19 @@ mod tests {
         // Two slots may fill to the same tool; the tool table holds it
         // once and both aliases resolve alias -> id -> tool.
         let id = ToolId::parse("promptforge/web/fetch").expect("the test id is valid");
-        let tool: Arc<dyn Tool> = Arc::new(FixtureTool { id: id.clone() });
+        let tool = fixture(&id);
         let mut bindings = ToolBindings::default();
-        bindings.bind("fetch", Arc::clone(&tool));
-        bindings.bind("getter", Arc::clone(&tool));
+        bindings.bind("fetch", tool.clone());
+        bindings.bind("getter", tool);
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings.alias_id("fetch"), Some(&id));
         assert_eq!(bindings.alias_id("getter"), Some(&id));
         assert_eq!(
-            bindings.resolve("fetch").map(|tool| tool.id()),
+            bindings.resolve("fetch").map(|tool| tool.id.clone()),
             Some(id.clone())
         );
         assert_eq!(
-            bindings.resolve("getter").map(|tool| tool.id()),
+            bindings.resolve("getter").map(|tool| tool.id.clone()),
             Some(id.clone())
         );
         assert!(bindings.tool(&id).is_some());

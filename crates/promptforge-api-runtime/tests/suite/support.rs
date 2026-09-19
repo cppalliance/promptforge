@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunResult};
+use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunHost, RunResult};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_types::observe::{Observation, Observer};
 use promptforge_api_types::timestamp::Timestamp;
@@ -41,33 +41,42 @@ impl Record {
 }
 
 /// Owned run inputs a fixture supplies: the run name and an `Arc` observer
-/// so the offline `run` helper can build a [`RunContext`]. These fixtures never
-/// reach a model, so no client or debug sink is configured.
+/// so the offline `run` helper can build the [`RunHost`] the observer
+/// rides on. These fixtures never reach a model, so no client or debug
+/// sink is configured.
 pub(super) struct RunOptions {
     pub(super) execution: &'static str,
     pub(super) observer: Arc<dyn Observer>,
 }
 
+impl RunOptions {
+    /// The host side of the fixture run: the observer, nothing else.
+    fn host(self) -> RunHost {
+        RunHost::new().observer(self.observer)
+    }
+}
+
 /// Prepares a fixture run against the default environment and returns the
-/// prepared context plus the run's own VFS handle - the prepared router -
-/// for seeding before the run and extraction after. The fixture tools are
-/// accepted for signature parity only; contributing them to a run takes a
-/// capability and a declared slot.
+/// prepared context, the host the observer rides on, and the run's own VFS
+/// handle - the prepared router - for seeding before the run and
+/// extraction after. The fixture tools are accepted for signature parity
+/// only; contributing them to a run takes a capability and a declared
+/// slot.
 pub(super) fn prepare_run(
     prompt: &Prompt,
     tools: &[Arc<dyn Tool>],
     opts: RunOptions,
-) -> (RunContext, VfsRef) {
+) -> (RunContext, RunHost, VfsRef) {
     let _ = tools;
     let env = Environment::new();
-    let ctx = context(opts.execution).observer(opts.observer);
-    let (ctx, requirements) = env.prepare(prompt, ctx);
+    let execution = opts.execution;
+    let (ctx, requirements) = env.prepare(prompt, context(execution));
     assert!(
         requirements.is_satisfied(),
         "fixture prompts declare no capabilities or model roles: {requirements:?}"
     );
     let vfs = ctx.vfs_handle().clone();
-    (ctx, vfs)
+    (ctx, opts.host(), vfs)
 }
 
 /// Drives a prepared context to its result through the free `run`.
@@ -75,8 +84,9 @@ pub(super) async fn drive(
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
+    host: RunHost,
 ) -> Result<String, RunError> {
-    match promptforge_api_runtime::execute::run(prompt, args, ctx).await {
+    match promptforge_api_runtime::execute::run(prompt, args, ctx, host).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),
         RunResult::Failure(error) => Err(error),
@@ -90,8 +100,8 @@ pub(super) async fn run(
     tools: &[Arc<dyn Tool>],
     opts: RunOptions,
 ) -> Result<String, RunError> {
-    let (ctx, _vfs) = prepare_run(prompt, tools, opts);
-    drive(prompt, args, ctx).await
+    let (ctx, host, _vfs) = prepare_run(prompt, tools, opts);
+    drive(prompt, args, ctx, host).await
 }
 
 /// Runs `prompt` over a caller-built handle with no prepare pass: the raw
@@ -104,8 +114,8 @@ pub(super) async fn run_unprepared(
     vfs: VfsRef,
     opts: RunOptions,
 ) -> Result<String, RunError> {
-    let ctx = context(opts.execution).observer(opts.observer).vfs(vfs);
-    drive(prompt, args, ctx).await
+    let execution = opts.execution;
+    drive(prompt, args, context(execution).vfs(vfs), opts.host()).await
 }
 
 /// A synchronized observer shared by concurrent fixture runs.
@@ -194,7 +204,7 @@ pub(super) async fn run_fixture(
         .await;
         (result, vfs)
     } else {
-        let (ctx, vfs) = prepare_run(
+        let (ctx, host, vfs) = prepare_run(
             &prompt,
             &[],
             RunOptions {
@@ -202,7 +212,7 @@ pub(super) async fn run_fixture(
                 observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         );
-        let result = drive(&prompt, args, ctx).await;
+        let result = drive(&prompt, args, ctx, host).await;
         (result, vfs)
     };
     FixtureRun {

@@ -16,16 +16,20 @@ promptforge-api-runtime = "0.1"
 ```rust
 use promptforge_api_runtime::types::observe::NullObserver;
 use promptforge_api_runtime::types::timestamp::Timestamp;
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
 
 async fn execute(source: &str, seed: u64, started_at: Timestamp) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = Prompt::parse(source, "readme", &NullObserver::default())?;
-    // Capability-free agents use the default environment (no registry, empty
-    // catalogs); the store handle defaults to a stock in-memory mount. The
+    // Capability-free agents use the default environment (an empty tool
+    // catalog); the store handle defaults to a stock in-memory mount. The
     // host draws the seed (from a CSPRNG) and stamps the start instant: the
-    // engine reads neither the OS RNG nor the clock.
+    // engine reads neither the OS RNG nor the clock. The host's side of the
+    // run - the client, tool implementations, broker, observer - rides a
+    // `RunHost`; the silent default builds its gateway client from the
+    // process environment.
     let env = Environment::new();
-    match env.run(&prompt, "", RunContext::new("readme", seed, started_at)).await {
+    let ctx = RunContext::new("readme", seed, started_at);
+    match env.run(&prompt, "", ctx, RunHost::new()).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => Err("the run was cancelled".into()),
         RunResult::Failure(error) => Err(error.into()),

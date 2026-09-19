@@ -32,6 +32,6 @@ mod relay;
 mod session;
 pub mod state;
 
-pub use agents::{AgentSessions, SessionHost, session_environment};
+pub use agents::{AgentSessions, SessionHost, session_registry};
 pub use input::{SessionInputBroker, WaitError, WaitRegistry, deliver_input_response};
 pub use state::{SessionsState, register, routes};

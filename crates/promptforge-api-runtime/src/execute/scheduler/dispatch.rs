@@ -17,8 +17,7 @@ use crate::execute::protocol::{Answer, Request, StoreOp};
 use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
-use crate::input::INPUT_UNAVAILABLE_FALLBACK;
-use crate::lua::{ToolSet, UserInputOutcome, resolve_model_binding};
+use crate::lua::{ToolSet, resolve_model_binding};
 use crate::model::ModelBinding;
 use crate::observe::{Observation, detail};
 use crate::store::StoreError;
@@ -254,21 +253,14 @@ impl Scheduler {
     /// `UserInput` effect exactly as a leaf I/O round does, so a blocking
     /// wait parks its chain - the section's VM and message history intact -
     /// without blocking the run, and a cancel drops it with every other
-    /// outstanding effect. With no broker configured the
-    /// unavailable-fallback policy answers immediately: the fixed fallback
-    /// sentence with `available` false. The wait is reported here; a
+    /// outstanding effect. The engine does not know whether the host has
+    /// an operator to ask: every request is issued, and a host without one
+    /// answers with the unavailable-fallback policy (the fixed fallback
+    /// sentence with `available` false). The wait is reported here; a
     /// delivered response is reported when its answer is applied; an
-    /// unavailable answer opens no wait and records no input.
+    /// unavailable answer records no input.
     fn dispatch_user_input(&mut self, id: ChainIndex) {
         let chain = &self.chains[id.index()];
-        if chain.ctx.input_broker().is_none() {
-            self.chains[id.index()].incoming = Some(Answer::UserInput(Ok(UserInputOutcome {
-                text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
-                available: false,
-            })));
-            self.ready.push_back(id);
-            return;
-        }
         let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();
         chain

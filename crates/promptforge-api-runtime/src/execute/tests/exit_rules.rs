@@ -172,7 +172,7 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 /// turn count.
 async fn drive_loop(
     replies: Vec<GatewayReply>,
-    tools: ToolSet,
+    tools: impl Into<FixtureTools>,
 ) -> (Result<String>, Vec<String>, u32) {
     let gateway = ScriptedGateway::start(replies).await;
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
@@ -256,7 +256,7 @@ async fn empty_stop_turn_without_tool_calls_fails() {
     // empty "stop" turn is an `EmptyModelReply` failure. The round itself
     // completed - the scheduler counts and reports it - and the shim's exit
     // rule raises against its finish reason.
-    for tools in [ToolSet::default(), echo_tools()] {
+    for tools in [FixtureTools::default(), echo_tools()] {
         let (out, events, turns) = drive_loop(vec![resp_text_finish("", "stop")], tools).await;
         match out {
             Err(Error::EmptyModelReply {

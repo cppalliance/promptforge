@@ -18,8 +18,6 @@ use promptforge_api_types::ids::{ChainId, TaskId};
 
 use crate::Result;
 use crate::cancel::CancelHandle;
-use crate::debug::DebugCapture;
-use crate::input::InputBroker;
 use crate::lua::{LuaProgram, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::observe::Observer;
@@ -32,18 +30,6 @@ use super::event_buffer::{Emitter, EventSink};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::sys_json;
 use bound::{bound_model_set, bound_tool_set, derive_argv};
-
-/// The host's report seams: the observer every run carries and the
-/// opt-in raw capture. Held once per run and never read by the engine,
-/// which reports into its buffer as values; the in-crate tokio driver
-/// forwards each drained batch to these on the host's behalf until the
-/// seams leave the run context.
-struct HostSinks {
-    /// The host's progress observer.
-    observer: Arc<dyn Observer>,
-    /// The host's opt-in raw request/response capture.
-    debug: Option<Arc<dyn DebugCapture>>,
-}
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -86,8 +72,12 @@ pub(crate) struct RunState {
     /// through [`observer`](Self::observer), so their reports land in the
     /// buffer in order with the scheduler's own.
     emitter: Arc<Emitter>,
-    /// The host's report seams, read only by the in-crate tokio driver.
-    host: Arc<HostSinks>,
+    /// Test-only: the host seams the suites set on their `RunContext`,
+    /// carried here so the test driver's constructor can build its
+    /// `RunHost` from the state alone. Shared, so a suite arms the tool
+    /// implementations on a state it holds by reference.
+    #[cfg(test)]
+    test_host: Arc<Mutex<super::host::RunHost>>,
     /// The run's cancel flag: polled between chain steps and installed on
     /// every section VM's instruction hook. The context's one handle, the
     /// same flag the activated capabilities and the run's `cancel` share.
@@ -123,15 +113,9 @@ pub(crate) struct RunState {
     /// The run's `started_at` rendered as RFC 3339, stamped into every
     /// section's `sys.when`, the H1 pass included.
     when: Arc<str>,
-    /// The run's input broker, when the host configured one; `None` is the
-    /// unavailable-fallback policy.
-    input: Option<Arc<dyn InputBroker>>,
     /// The run's host-state snapshot; its presence is the Agent-window
     /// context (the `ui()` global plus raw-id `models.get`).
     ui: Option<Arc<serde_json::Value>>,
-    /// The host's live streaming-delta callback, forwarded by every model
-    /// round; `None` drops deltas at the leaf.
-    on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
     /// Test-only: install the raw protocol shims (`models.chat`,
     /// `tools.call_as_model`) in every section VM, so a fixture section
     /// can yield one raw `chat` round or one model-issued `tool_call` at
@@ -166,7 +150,7 @@ impl RunState {
             events.clone(),
             TaskId::from(ChainId::root()),
             Arc::clone(&execution),
-            ctx.debug.is_some(),
+            ctx.report_debug,
         ));
         let derived_argv = derive_argv(&prompt, args).map(Arc::from);
         Self {
@@ -179,10 +163,8 @@ impl RunState {
             limits: ctx.limits,
             events,
             emitter,
-            host: Arc::new(HostSinks {
-                observer: Arc::clone(&ctx.observer),
-                debug: ctx.debug.clone(),
-            }),
+            #[cfg(test)]
+            test_host: Arc::new(Mutex::new(ctx.test_host.clone())),
             cancel: ctx.cancel.clone(),
             #[cfg(test)]
             tap: None,
@@ -193,12 +175,30 @@ impl RunState {
             models: model_set.clone(),
             model_set,
             when: Arc::from(ctx.started_at.to_rfc3339()),
-            input: ctx.input.clone(),
             ui: ctx.ui.clone().map(Arc::new),
-            on_delta: ctx.on_delta.clone(),
             #[cfg(test)]
             raw_shims: false,
         }
+    }
+
+    /// The host seams the suite set on its context, for the test driver's
+    /// constructor.
+    #[cfg(test)]
+    pub(crate) fn test_host(&self) -> super::host::RunHost {
+        self.test_host
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replaces the test host: how a suite that builds the state itself
+    /// arms the tool implementations or the observer its driver uses.
+    #[cfg(test)]
+    pub(crate) fn set_test_host(&self, host: super::host::RunHost) {
+        *self
+            .test_host
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = host;
     }
 
     /// Exposes the raw protocol shims (`models.chat`, `tools.call_as_model`)
@@ -296,17 +296,6 @@ impl RunState {
         events
     }
 
-    /// The host's progress observer, for the driver that forwards the
-    /// drained events on the host's behalf.
-    pub(crate) fn host_observer(&self) -> &Arc<dyn Observer> {
-        &self.host.observer
-    }
-
-    /// The host's opt-in raw capture, for the same driver.
-    pub(crate) fn host_debug(&self) -> Option<&Arc<dyn DebugCapture>> {
-        self.host.debug.as_ref()
-    }
-
     /// The model-turn counter this context advances.
     pub(crate) fn turns(&self) -> &Arc<AtomicU32> {
         &self.turns
@@ -354,18 +343,6 @@ impl RunState {
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) fn section_count(&self) -> usize {
         self.prompt.sections().len()
-    }
-
-    /// The run's input broker, when the host configured one.
-    pub(crate) fn input_broker(&self) -> Option<&Arc<dyn InputBroker>> {
-        self.input.as_ref()
-    }
-
-    /// The host's live streaming-delta callback, when one was configured.
-    pub(crate) fn on_delta(
-        &self,
-    ) -> Option<&Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>> {
-        self.on_delta.as_ref()
     }
 
     /// The H1-to-walk handoff: the `argv` H1 left behind at the freeze,
@@ -462,7 +439,8 @@ impl fmt::Debug for RunState {
         #[cfg(test)]
         state
             .field("raw_shims", &self.raw_shims)
-            .field("tap", &self.tap.is_some());
+            .field("tap", &self.tap.is_some())
+            .field("test_host", &self.test_host);
         state
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)
@@ -473,7 +451,6 @@ impl fmt::Debug for RunState {
             .field("limits", &self.limits)
             .field("events", &self.events)
             .field("emitter", &self.emitter)
-            .field("host", &"<HostSinks>")
             .field("cancel", &self.cancel)
             .field("turns", &self.turns)
             .field("shared", &self.shared)
@@ -482,9 +459,7 @@ impl fmt::Debug for RunState {
             .field("models", &"<dyn ModelView>")
             .field("model_set", &self.model_set)
             .field("when", &self.when)
-            .field("input", &self.input.is_some())
             .field("ui", &self.ui)
-            .field("on_delta", &self.on_delta.is_some())
             .finish()
     }
 }

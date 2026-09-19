@@ -1,8 +1,8 @@
 //! The in-crate tokio host: a loop over [`Run`] that performs its effects
-//! with today's resources - the gateway client, the run's bound tools, the
-//! input broker, the blocking pool for store operations, and the tokio
-//! timer wheel - and forwards its events to the host's observer and
-//! capture.
+//! with the resources a [`RunHost`] bundles - the gateway client, the tool
+//! implementation table, the input broker, the blocking pool for store
+//! operations, and the tokio timer wheel - and forwards its events to the
+//! host's observer and capture.
 //!
 //! The loop is `step -> perform -> await an answer -> resume`. Every
 //! effect the step hands out is spawned as one performer that posts its
@@ -26,9 +26,8 @@
 //! it; the suites drive it in place of the scheduler they used to drive.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 #[cfg(test)]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use promptforge_api_types::event::Event;
@@ -44,8 +43,10 @@ use crate::store::Store;
 use crate::{Error, Result};
 
 use super::RunResult;
+#[cfg(test)]
 use super::context::RunState;
 use super::gateway::GatewaySource;
+use super::host::RunHost;
 #[cfg(test)]
 use super::run::EffectRecord;
 use super::run::{Effect, EffectAnswer, EffectId, Run, Step};
@@ -59,12 +60,11 @@ type AnswerSender = mpsc::UnboundedSender<(EffectId, EffectAnswer)>;
 pub(crate) struct TokioDriver {
     /// The run being driven.
     run: Run,
-    /// The run's context: the host resources the performers draw on (the
-    /// tool set, the input broker, the delta hook) and the observer and
-    /// capture the events are forwarded to. `None` for a run that failed
-    /// to start, whose first step is `Done` and performs nothing.
-    state: Option<RunState>,
-    /// The run's gateway source: the client the caller supplied, or the
+    /// The host resources the performers draw on (the tool table, the
+    /// input broker, the delta hook) and the observer and capture the
+    /// events are forwarded to.
+    host: RunHost,
+    /// The run's gateway source: the client the host supplied, or the
     /// environment with the run's HTTP limits, resolved on the first
     /// `Chat` effect so a construction error surfaces as that round's
     /// failure rather than being swallowed.
@@ -94,24 +94,36 @@ pub(crate) struct TokioDriver {
 
 impl TokioDriver {
     /// Builds the driver for one run over `state`: the suites' entry, which
-    /// shape the context themselves. `client` is the run's gateway client,
-    /// if the caller supplied one.
+    /// shape the context themselves. The host is the one the suite set on
+    /// its context (observer, broker, tools, delta hook), with `client` as
+    /// the run's gateway client when the suite supplies one.
     #[cfg(test)]
     pub(crate) fn new(state: &RunState, client: Option<GatewayClient>) -> Self {
-        Self::over(Run::from_state(state.clone()), client)
+        let mut host = state.test_host();
+        if let Some(client) = client {
+            host = host.client(client);
+        }
+        Self::over(Run::from_state(state.clone()), host)
     }
 
-    /// Builds the driver over an assembled run. `client` is the run's
-    /// gateway client, if the caller supplied one; the HTTP limits a
-    /// lazily built client honors are the run's own.
-    pub(crate) fn over(run: Run, client: Option<GatewayClient>) -> Self {
+    /// Builds the driver over an assembled run with the host's resources.
+    /// A client the host supplies is used as given; otherwise one is built
+    /// from the environment on the first `Chat`, honoring the run's HTTP
+    /// limits.
+    pub(crate) fn over(run: Run, host: RunHost) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let state = run.state().cloned();
-        let limits = state.as_ref().map(RunState::limits).unwrap_or_default();
+        let limits = run
+            .state()
+            .map(super::context::RunState::limits)
+            .unwrap_or_default();
+        let client = host
+            .client
+            .clone()
+            .map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
         Self {
             cancel: run.cancel_handle(),
             run,
-            state,
+            host,
             gateway: GatewaySource::from_optional(client, limits),
             client: None,
             tx,
@@ -239,13 +251,11 @@ impl TokioDriver {
         if events.is_empty() {
             return;
         }
-        if let Some(state) = &self.state {
-            super::events_to_observer::forward(
-                events.clone(),
-                state.host_observer().as_ref(),
-                state.host_debug().map(Arc::as_ref),
-            );
-        }
+        super::events_to_observer::forward(
+            events.clone(),
+            self.host.observer.as_ref(),
+            self.host.debug.as_deref(),
+        );
         self.history.extend(events);
     }
 
@@ -266,15 +276,9 @@ impl TokioDriver {
     /// Performs one effect: spawns the performer that will post the
     /// effect's answer under `id` and returns `true`, or answers at once
     /// and returns `false` when the effect cannot be performed (no client
-    /// can be built for a `Chat`, the tool a `ToolCall` names is not
-    /// bound, no broker serves a `UserInput`).
+    /// can be built for a `Chat`, the tool a `ToolCall` names is not in
+    /// the host's table, no broker serves a `UserInput`).
     fn perform(&mut self, id: EffectId, effect: Effect) -> bool {
-        let Some(state) = self.state.clone() else {
-            // A run that never started issues nothing; an effect here is
-            // unreachable, and dropping it is the honest answer.
-            self.run.resume(id, EffectAnswer::Dropped);
-            return false;
-        };
         let tx = self.tx.clone();
         let handle = match effect {
             Effect::Chat {
@@ -295,7 +299,7 @@ impl TokioDriver {
                 // streaming round; without one, or for a round the effect
                 // marks non-streaming (a nested infer), the chunks drop at
                 // the leaf and the completed reply is the repair.
-                let on_delta = stream.then(|| state.on_delta().cloned()).flatten();
+                let on_delta = stream.then(|| self.host.on_delta.clone()).flatten();
                 tokio::spawn(async move {
                     let tool_arg = (!tools.is_empty()).then_some(tools.as_slice());
                     let result = client
@@ -310,30 +314,18 @@ impl TokioDriver {
                 })
             }
             Effect::ToolCall { tool, args, .. } => {
-                // Resolved by the stable identity, as a host resolves it
-                // against its activated capabilities; the alias is the
-                // record's, not the resolver's. A snapshot failure keeps
-                // its own message: it is the set's fault, not an unbound
-                // tool's.
-                let resolved = match state.tool_set_snapshot() {
-                    Ok(set) => set
-                        .bindings()
-                        .iter()
-                        .find(|binding| *binding.id() == tool)
-                        .map(|binding| Arc::clone(&binding.tool))
-                        .ok_or_else(|| {
-                            ToolError::message(
-                                "the tool the call names is not bound in the run's catalog",
-                            )
-                        }),
-                    Err(error) => Err(ToolError::message(error.to_string())),
-                };
-                let tool = match resolved {
-                    Ok(tool) => tool,
-                    Err(error) => {
-                        self.run.resume(id, EffectAnswer::ToolCall(Err(error)));
-                        return false;
-                    }
+                // Resolved by the stable identity against the host's
+                // implementation table, as a harness resolves it against
+                // its activated capabilities; the alias is the record's,
+                // not the resolver's.
+                let Some(tool) = self.host.tools.get(&tool) else {
+                    self.run.resume(
+                        id,
+                        EffectAnswer::ToolCall(Err(ToolError::message(
+                            "the tool the call names has no implementation in the host's table",
+                        ))),
+                    );
+                    return false;
                 };
                 tokio::spawn(async move {
                     let result = tool.call(args).await;
@@ -341,7 +333,7 @@ impl TokioDriver {
                 })
             }
             Effect::UserInput { execution, section } => {
-                let Some(broker) = state.input_broker().cloned() else {
+                let Some(broker) = self.host.input.clone() else {
                     self.run
                         .resume(id, EffectAnswer::UserInput(Ok(InputOutcome::Unavailable)));
                     return false;

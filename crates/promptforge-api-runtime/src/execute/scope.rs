@@ -64,11 +64,12 @@ pub(crate) fn prepare_scoped_tools(
         // `tools.bind`/`tools.always` override > the bound tool's catalog
         // text. The first two layers are already folded together by
         // `binding_for_scope` (the H2 add runtime overwrites the frozen
-        // binding's `model_description`); the catalog fallback reads the
-        // implementation attached at bind time.
+        // binding's `model_description`); the catalog fallback is the
+        // description the binding copied from the tool's descriptor at
+        // fill time.
         let description = binding
             .model_description()
-            .unwrap_or_else(|| binding.tool().description())
+            .unwrap_or_else(|| binding.description())
             .to_owned();
         // F7: build every advertised schema through the validated constructor,
         // so an unusable wire name or a non-object JSON Schema is refused here
@@ -76,7 +77,7 @@ pub(crate) fn prepare_scoped_tools(
         let schema = ToolSchema::new(
             binding.alias().to_owned(),
             description,
-            binding.tool().parameters_schema(),
+            binding.schema().clone(),
         )
         .map_err(|error| Error::BindSchema {
             alias: binding.alias().to_owned(),

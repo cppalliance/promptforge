@@ -1,6 +1,7 @@
 //! Per-run context and resource limits: [`RunContext`] and [`RunLimits`].
 
 use std::fmt;
+#[cfg(test)]
 use std::sync::Arc;
 
 #[path = "config-limits.rs"]
@@ -12,11 +13,7 @@ use promptforge_api_types::timestamp::Timestamp;
 pub use limits::RunLimits;
 
 use crate::cancel::CancelHandle;
-use crate::client::{GatewayClient, StreamDelta};
-use crate::debug::DebugCapture;
-use crate::input::InputBroker;
 use crate::model::ModelDescriptor;
-use crate::observe::{NullObserver, Observer};
 use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
 
@@ -24,11 +21,14 @@ use super::bindings::{ModelBindings, ToolBindings};
 
 /// One run. Created by the host from the
 /// [`Environment`](super::Environment) carrying the per-run inputs,
-/// enriched at prepare, owned by the executor during
-/// [`run`](super::run). Never shared between runs.
+/// enriched at prepare, owned by the engine for the run. Never shared
+/// between runs.
 ///
-/// `RunContext` is owned (no borrows), so its observer and debug sinks reach
-/// the nested `models.infer` path that a borrowed option could not.
+/// The context is the engine's input and nothing else: it holds no
+/// observer, client, tool implementation, broker, or capture. Those are
+/// the host's, bundled for the in-crate loop as a
+/// [`RunHost`](super::RunHost); the engine reports events and issues
+/// effects as values and never reaches for a host seam.
 ///
 /// The engine reads no clock and draws no randomness of its own: the
 /// run's `seed` and `started_at` are inputs the host supplies to
@@ -66,21 +66,26 @@ pub struct RunContext {
     /// Always 0 today - the sub-run adapter that increments it lands with
     /// the deferred prompt-pack.
     pub(crate) depth: u32,
-    pub(crate) observer: Arc<dyn Observer>,
-    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
-    pub(crate) client: Option<GatewayClient>,
+    /// Whether the run reports each model round's raw request and response
+    /// bodies as `Request` and `Response` events. Off by default: the
+    /// bodies already travel in the `Chat` effect and its answer, so a host
+    /// that logs effects has them, and the events are for a host that
+    /// wants the pair in the event stream too.
+    pub(crate) report_debug: bool,
     /// The run's cancel flag: minted once at construction, replaced by
-    /// [`cancel`](RunContext::cancel), and shared from here by the
-    /// activated capabilities, every section VM's instruction hook, and
-    /// the run's own `cancel`, so one flag reaches them all.
+    /// [`cancel`](RunContext::cancel), and shared from here by every
+    /// section VM's instruction hook and the run's own `cancel`, so one
+    /// flag reaches them all; the host hands the same flag to the
+    /// capabilities it activates.
     pub(crate) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
-    pub(crate) input: Option<Arc<dyn InputBroker>>,
     /// The host-state snapshot the `ui()` global serves, taken by the host
     /// at run start; its presence is the Agent-window context.
     pub(crate) ui: Option<serde_json::Value>,
-    pub(crate) on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
     pub(crate) vfs: VfsRef,
+    /// Whether the host set `vfs` itself ([`vfs`](RunContext::vfs)), in
+    /// which case prepare keeps it rather than building the per-run router.
+    pub(crate) vfs_explicit: bool,
     /// The run's current model: the host's selection (in Workshop, the
     /// dropdown), set before prepare. Input to prepare's fill function,
     /// which binds every declared role to it. Grows into a catalog or
@@ -102,14 +107,19 @@ pub struct RunContext {
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
     pub(crate) tool_bindings: ToolBindings,
+    /// Test-only: the host seams the in-crate suites still set through the
+    /// context's old builder methods, carried to the run state and read by
+    /// the test driver's constructor. Production hosts build a
+    /// [`RunHost`](super::RunHost) and hand it to the loop directly.
+    #[cfg(test)]
+    pub(crate) test_host: super::host::RunHost,
 }
 
 impl RunContext {
     /// Builds a context for the run `name` under the host's `seed` and
-    /// `started_at`, with default observer, no client, no capture, a fresh
-    /// cancel flag, no input broker, no `ui` snapshot, no delta callback,
-    /// default [`RunLimits`], empty [`Flags`], and the stock store handle
-    /// (`promptforge_vfs::empty()`).
+    /// `started_at`, with a fresh cancel flag, no `ui` snapshot, no debug
+    /// reporting, default [`RunLimits`], empty [`Flags`], and the stock
+    /// store handle (`promptforge_vfs::empty()`).
     ///
     /// `seed` is the source of the untrusted-envelope nonce, so a live host
     /// draws it from a CSPRNG (a predictable seed is a guessable nonce);
@@ -124,54 +134,38 @@ impl RunContext {
             flags: Flags::EMPTY,
             started_at,
             depth: 0,
-            observer: Arc::new(NullObserver::default()),
-            debug: None,
-            client: None,
+            report_debug: false,
             cancel: CancelHandle::new(),
             limits: RunLimits::new(),
-            input: None,
             ui: None,
-            on_delta: None,
             vfs: promptforge_vfs::empty(),
+            vfs_explicit: false,
             model: None,
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
             tool_bindings: ToolBindings::default(),
+            #[cfg(test)]
+            test_host: super::host::RunHost::new(),
         }
     }
 
-    /// Sets the progress observer, retained for the whole run and its infer hook.
+    /// Sets whether the run reports each model round's raw request and
+    /// response bodies as `Request` and `Response` events. The default
+    /// (`false`) reports neither; a host that wants the pair in the event
+    /// stream (a debug capture) turns it on.
     #[must_use]
-    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunContext {
-        self.observer = observer;
-        self
-    }
-
-    /// Sets the opt-in raw request/response capture sink.
-    #[must_use]
-    pub fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunContext {
-        self.debug = Some(debug);
-        self
-    }
-
-    /// Sets the gateway client, overriding the
-    /// [`Environment`](super::Environment)'s; `None` builds one from the
-    /// process environment on first use.
-    #[must_use]
-    pub fn client(mut self, client: GatewayClient) -> RunContext {
-        self.client = Some(client);
+    pub fn report_debug(mut self, report: bool) -> RunContext {
+        self.report_debug = report;
         self
     }
 
     /// Sets the run's cancellation flag: the synchronous
     /// [`CancelHandle`](promptforge_api_types::cancel::sync::CancelHandle)
     /// the engine polls between chain steps and from the Lua instruction
-    /// hook, and the one the activated capabilities are handed. A host
-    /// that cancels through an awaitable token bridges it to this flag
-    /// (set the flag when the token fires). Replaces the flag minted at
-    /// construction, so it must be set before
-    /// [`Environment::prepare`](super::Environment::prepare) hands the
-    /// flag to the capabilities.
+    /// hook. A host that cancels through an awaitable token bridges it to
+    /// this flag (set the flag when the token fires), and hands the same
+    /// flag to the capabilities it activates so one cancel reaches them
+    /// all. Replaces the flag minted at construction.
     #[must_use]
     pub fn cancel(mut self, handle: CancelHandle) -> RunContext {
         self.cancel = handle;
@@ -182,17 +176,6 @@ impl RunContext {
     #[must_use]
     pub fn limits(mut self, limits: RunLimits) -> RunContext {
         self.limits = limits;
-        self
-    }
-
-    /// Sets the run's input broker, the host policy behind `user_input()`
-    /// and the model-visible input tool. The default (`None`) is the
-    /// unavailable-fallback policy: every input request resolves to
-    /// [`INPUT_UNAVAILABLE_FALLBACK`](crate::input::INPUT_UNAVAILABLE_FALLBACK)
-    /// with `available` false.
-    #[must_use]
-    pub fn input_broker(mut self, broker: Arc<dyn InputBroker>) -> RunContext {
-        self.input = Some(broker);
         self
     }
 
@@ -218,15 +201,6 @@ impl RunContext {
         self
     }
 
-    /// Sets the live streaming-delta callback that `models.loop` rounds
-    /// forward their chunks to. The default (`None`) drops deltas at the
-    /// leaf.
-    #[must_use]
-    pub fn on_delta(mut self, hook: Arc<dyn Fn(StreamDelta) + Send + Sync>) -> RunContext {
-        self.on_delta = Some(hook);
-        self
-    }
-
     /// Sets the run's current model: the host's selection (in Workshop,
     /// the dropdown). Input to
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
@@ -245,23 +219,30 @@ impl RunContext {
     /// handle (`promptforge_vfs::empty()`), a fresh memory backend at the
     /// store mount.
     ///
-    /// [`Environment::prepare`](super::Environment::prepare) - and so
-    /// [`Environment::run`](super::Environment::run) - replaces this
-    /// handle unconditionally with the per-run router (the shared base
-    /// mounted at `/` plus the run's fresh store), so a handle set here
-    /// is discarded on the zero-burden path. Hosts that seed before the
-    /// run or extract after it go through the prepared handle
-    /// ([`vfs_handle`](RunContext::vfs_handle)) instead.
+    /// A handle set here is the host's: [`Environment::prepare`]
+    /// keeps it rather than building the per-run router, so a host that
+    /// activates capabilities before prepare builds the run's router
+    /// first ([`Environment::run_vfs`]), hands it to
+    /// activation's services and to this builder, and the capabilities
+    /// and the run share one store. Without it, prepare builds the router
+    /// (the shared base mounted at `/` plus the run's fresh store) and
+    /// hosts that seed before the run or extract after it go through the
+    /// prepared handle ([`vfs_handle`](RunContext::vfs_handle)).
+    ///
+    /// [`Environment::prepare`]: super::Environment::prepare
+    /// [`Environment::run_vfs`]: super::Environment::run_vfs
     #[must_use]
     pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
         self.vfs = vfs;
+        self.vfs_explicit = true;
         self
     }
 
     /// Returns the run's VFS handle. After
     /// [`Environment::prepare`](super::Environment::prepare) this is the
     /// per-run router - the shared base mounted at `/` plus the run's
-    /// fresh store - and hosts extract run output through it.
+    /// fresh store, or the handle the host set - and hosts extract run
+    /// output through it.
     ///
     /// Named `vfs_handle` because the builder half already owns
     /// [`vfs`](RunContext::vfs).
@@ -274,6 +255,15 @@ impl RunContext {
     #[must_use]
     pub fn current_model(&self) -> Option<&ModelDescriptor> {
         self.model.as_ref()
+    }
+
+    /// Returns the run's cancel flag: the handle the host hands to the
+    /// capabilities it activates so one cancel reaches them and the run.
+    /// Named `cancel_handle` because the builder half already owns
+    /// [`cancel`](RunContext::cancel).
+    #[must_use]
+    pub fn cancel_handle(&self) -> CancelHandle {
+        self.cancel.clone()
     }
 
     /// Returns the run's model satisfaction, written by
@@ -339,23 +329,59 @@ impl RunContext {
     }
 }
 
+/// The in-crate suites' seams: the host resources a test used to set on
+/// the context, routed into the test host the test driver's constructor
+/// reads. Production hosts build a [`RunHost`](super::RunHost) instead;
+/// none of these exist outside `cfg(test)`.
+#[cfg(test)]
+impl RunContext {
+    pub(crate) fn observer(mut self, observer: Arc<dyn crate::observe::Observer>) -> RunContext {
+        self.test_host = self.test_host.observer(observer);
+        self
+    }
+
+    pub(crate) fn debug(mut self, debug: Arc<dyn crate::debug::DebugCapture>) -> RunContext {
+        self.report_debug = true;
+        self.test_host = self.test_host.debug(debug);
+        self
+    }
+
+    pub(crate) fn client(mut self, client: crate::client::GatewayClient) -> RunContext {
+        self.test_host = self.test_host.client(client);
+        self
+    }
+
+    pub(crate) fn input_broker(mut self, broker: Arc<dyn crate::input::InputBroker>) -> RunContext {
+        self.test_host = self.test_host.input_broker(broker);
+        self
+    }
+
+    pub(crate) fn on_delta(
+        mut self,
+        hook: Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>,
+    ) -> RunContext {
+        self.test_host = self.test_host.on_delta(hook);
+        self
+    }
+}
+
 impl fmt::Debug for RunContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunContext")
+        let mut state = f.debug_struct("RunContext");
+        #[cfg(test)]
+        state.field("test_host", &self.test_host);
+        state
             .field("name", &self.name)
             .field("seed", &self.seed)
             .field("flags", &self.flags)
             .field("started_at", &self.started_at)
             .field("depth", &self.depth)
-            .field("observer", &"<dyn Observer>")
-            .field("client", &self.client)
-            .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
+            .field("report_debug", &self.report_debug)
             .field("cancel", &self.cancel)
             .field("limits", &self.limits)
-            .field("input", &self.input.is_some())
             .field("ui", &self.ui)
-            .field("on_delta", &self.on_delta.is_some())
             .field("vfs", &self.vfs)
+            .field("vfs_explicit", &self.vfs_explicit)
             .field("model", &self.model)
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)

@@ -33,7 +33,7 @@ fn input_models() -> ModelSet {
 /// shared library, and the shared model and tool sets pre-filled (the
 /// scheduler tests bypass the live H1 pass that would fill them). The
 /// broker arrives through the [`RunContext`].
-fn input_context(prompt: &Prompt, tools: ToolSet, config: &RunContext) -> RunState {
+fn input_context(prompt: &Prompt, tools: impl Into<FixtureTools>, config: &RunContext) -> RunState {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -44,9 +44,7 @@ fn input_context(prompt: &Prompt, tools: ToolSet, config: &RunContext) -> RunSta
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = input_models();
-    *ctx.tool_set()
-        .lock()
-        .expect("the tool set mutex is not poisoned") = tools;
+    tools.into().install(&ctx);
     ctx
 }
 
@@ -233,11 +231,14 @@ async fn a_run_without_a_broker_gets_the_unavailable_fallback() {
         recorder.inputs().is_empty(),
         "the fallback records no operator input"
     );
+    // The engine cannot know the host has no operator: it issues the
+    // wait as an effect and reports it, and the broker-less host answers
+    // with the unavailable fallback.
     assert!(
-        !recorder
+        recorder
             .events()
             .contains(&detail::USER_INPUT_WAIT_STARTED.to_string()),
-        "the immediate fallback opens no wait"
+        "the wait is issued as an effect the host answers"
     );
 }
 

@@ -9,7 +9,6 @@ use super::chat_arm::chat_context;
 use super::models_loop::{echo_tools, loop_prompt};
 use super::*;
 use crate::execute::tokio_driver::TokioDriver;
-use crate::lua::{ToolBinding, ToolSet};
 
 /// The function names one request advertised, in wire order.
 fn advertised_names(body: &serde_json::Value) -> Vec<&str> {
@@ -27,11 +26,11 @@ fn advertised_names(body: &serde_json::Value) -> Vec<&str> {
 
 /// The tool set with `echo` always in scope and `spare` bound in the
 /// catalog but never scoped into the section.
-fn echo_and_spare_tools() -> ToolSet {
-    ToolSet::for_test(
+fn echo_and_spare_tools() -> FixtureTools {
+    FixtureTools::new(
         vec![
-            ToolBinding::for_test("echo", "echo capability", Arc::new(EchoTool)),
-            ToolBinding::for_test("spare", "a bound but unscoped echo", Arc::new(EchoTool)),
+            fixture_binding("echo", "echo capability", Arc::new(EchoTool)),
+            fixture_binding("spare", "a bound but unscoped echo", Arc::new(EchoTool)),
         ],
         vec!["echo".to_owned()],
     )

@@ -1,79 +1,58 @@
 //! The deployment environment: [`Environment`].
 
 use std::fmt;
-use std::sync::Arc;
 
-use promptforge_api_types::capabilities::{Capability, CapabilityId, Contribution, RunServices};
+use promptforge_api_types::capabilities::RunServices;
 
-use crate::capabilities::CapabilityRegistry;
-use crate::client::GatewayClient;
 use crate::parser::Prompt;
 use crate::store::VfsRef;
+use crate::tools::ToolCatalog;
 
 use super::RunResult;
 use super::config::RunContext;
-use super::fill::{assemble_catalog, fill_model_bindings, fill_tool_bindings};
-use super::requirements::{CapabilityConflict, Requirements};
+use super::fill::{fill_model_bindings, fill_tool_bindings};
+use super::host::RunHost;
+use super::requirements::Requirements;
 
-/// What exists in this deployment and its standing policy.
+/// What exists in this deployment and its standing policy: the host roots,
+/// the nesting cap, and the catalog of tools the host has made available.
 ///
-/// Safe to share across concurrent [`run`](Environment::run) calls
-/// (`Sync`); built once per host and never rebuilt: everything that can
-/// change per run rides the [`RunContext`]. Model-free: the gateway's
-/// model list is a host-UI concern and never crosses this interface.
+/// Safe to share across concurrent runs (`Sync`) and holds nothing live:
+/// everything that can change per run rides the [`RunContext`], and the
+/// tool implementations stay with the host (see
+/// [`activation`](super::activation)). Model-free: the gateway's model
+/// list is a host-UI concern and never crosses this interface.
 ///
-/// [`prepare`](Environment::prepare) resolves the prompt's declared
-/// capabilities against the registry (rejecting co-activation conflicts),
-/// assembles the activated contributions into the run's tool catalog,
-/// builds the per-run router from `base_vfs`, fills the tool slots against
-/// the assembled catalog, and fills the model bindings from the context's
-/// current model; the `max_depth` guard lands with the sub-run adapter in
-/// the deferred prompt-pack work and is carried, not consulted, until then.
+/// [`prepare`](Environment::prepare) builds the per-run router from
+/// `base_vfs`, fills the prompt's tool slots by identity against the
+/// catalog, and fills the model bindings from the context's current model;
+/// the `max_depth` guard lands with the sub-run adapter in the deferred
+/// prompt-pack work and is carried, not consulted, until then.
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// The deployment's gateway client; a run's own client overrides it.
-    client: Option<GatewayClient>,
-    /// The explicit host-built set of installed capabilities a prompt's
-    /// frontmatter declarations resolve against at prepare.
-    registry: Option<CapabilityRegistry>,
     /// Host roots the per-run router mounts at `/`; never carries the
     /// store mount (prepare adds a fresh per-run memory backend there).
     base_vfs: VfsRef,
     /// Maximum model-orchestrated prompt-tool nesting, copied into every
     /// run. Inert until the sub-run adapter lands with the prompt-pack.
     max_depth: u32,
+    /// The tools a run may bind, as descriptors: assembled by the host from
+    /// its activated capabilities. The default is empty, so every exact
+    /// slot's capability is reported missing.
+    tools: ToolCatalog,
 }
 
 impl Environment {
-    /// Builds the default environment: no client, no registry, no host
-    /// roots, and a nesting cap of 3.
+    /// Builds the default environment: no host roots, a nesting cap of 3,
+    /// and an empty catalog.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
-            client: None,
-            registry: None,
             base_vfs: VfsRef::builder().build(),
             max_depth: 3,
+            tools: ToolCatalog::default(),
         }
-    }
-
-    /// Sets the deployment's gateway client; a run's own client overrides
-    /// it, and with neither, one is built from the process environment on
-    /// first use.
-    #[must_use]
-    pub fn client(mut self, client: GatewayClient) -> Environment {
-        self.client = Some(client);
-        self
-    }
-
-    /// Sets the deployment's capability registry: the explicit host-built
-    /// set of installed capabilities a prompt's frontmatter declarations
-    /// resolve against at [`prepare`](Environment::prepare). The default
-    /// (`None`) resolves every declared capability as absent.
-    #[must_use]
-    pub fn registry(mut self, registry: CapabilityRegistry) -> Environment {
-        self.registry = Some(registry);
-        self
     }
 
     /// Sets the host roots the per-run router mounts at `/`. Consulted by
@@ -94,13 +73,20 @@ impl Environment {
         self
     }
 
-    /// Enriches the caller-created context against the prompt's
-    /// declarations: installs the environment's client default, builds the
-    /// run's VFS, activates every declared capability, assembles the run's
-    /// tool catalog, and fills the tool slots and model bindings -
-    /// reporting what the caller must still satisfy.
-    ///
-    /// The per-run VFS is a fresh router mounting the environment's
+    /// Sets the catalog of tools a run may bind: the descriptors the host
+    /// assembled from its activated capabilities.
+    /// [`prepare`](Environment::prepare) fills the prompt's exact slots
+    /// against it by identity. A host running through
+    /// [`run`](Environment::run) with a registry on its
+    /// [`RunHost`] never sets this: the activated catalog is installed
+    /// there.
+    #[must_use]
+    pub fn tools(mut self, tools: ToolCatalog) -> Environment {
+        self.tools = tools;
+        self
+    }
+
+    /// Builds one run's VFS: a fresh router mounting the environment's
     /// [`base_vfs`](Environment::base_vfs) at `/` plus a fresh memory
     /// backend at the store mount - never an overlay: an overlay shares
     /// the base's claims table, which is only correct for two views of
@@ -108,23 +94,42 @@ impl Environment {
     /// storage. The shared base's own claims table still catches two
     /// runs conflicting on one host file under the caller's identity.
     ///
-    /// Declared capabilities resolve against the registry in declaration
-    /// order. A missing required capability lands in
-    /// [`Requirements::missing_required`]; an absent optional capability
-    /// is skipped with a log line. Present capabilities are checked for
-    /// co-activation conflicts (bashkit vs terminal: two filesystem
-    /// realities, and a context gets one or the other, never both); a
-    /// conflicting pair activates neither member and lands in
-    /// [`Requirements::conflicts`] naming both. Each remaining capability
-    /// is activated with the run's services (its VFS and cancellation
-    /// handle); an activation failure is logged and the capability
-    /// contributes nothing to the run - and when the failed capability
-    /// is required, it also lands in [`Requirements::missing_required`],
-    /// since the run cannot have what the prompt declared. The activated
-    /// contributions are assembled into the run's tool catalog in
-    /// declaration order, with tool prefix-containment enforced at
-    /// assembly: a contributed tool whose id escapes its capability's id
-    /// is rejected - logged and never admitted to the catalog.
+    /// [`prepare`](Environment::prepare) builds one unless the host set
+    /// the context's handle itself; [`run`](Environment::run) builds it
+    /// here before activating, hands it to activation's services, and
+    /// sets it on the context so the capabilities and the run share one
+    /// store.
+    #[must_use]
+    pub fn run_vfs(&self) -> VfsRef {
+        VfsRef::builder()
+            .mount("/", self.base_vfs.clone())
+            .mount(
+                promptforge_vfs::STORE_MOUNT,
+                shared_vfs::MemoryBackend::new(),
+            )
+            .build()
+    }
+
+    /// Enriches the caller-created context against the prompt's
+    /// declarations: builds the run's VFS (unless the host set one),
+    /// installs the catalog, and fills the tool slots and model bindings -
+    /// reporting what the caller must still satisfy.
+    ///
+    /// The per-run VFS is [`run_vfs`](Environment::run_vfs): a fresh
+    /// router over the shared base with the run's own store.
+    ///
+    /// Tool slot filling runs against the catalog: exact slots fill by
+    /// identity - an exact path's first two segments name its capability,
+    /// so a slot whose capability contributed nothing to the catalog lands
+    /// in [`Requirements::missing_required`], while a slot whose
+    /// capability is in the catalog but contributed no such tool is
+    /// warned and left unfilled (advertising an unfilled alias fails at
+    /// run time). Every fill is journaled into the context's tool
+    /// bindings. Capability resolution, co-activation conflicts, and
+    /// activation itself happen before prepare
+    /// ([`activation::activate`](super::activation::activate)), on the
+    /// loop path in [`run`](Environment::run), which merges that report
+    /// into this one.
     ///
     /// Model satisfaction is a fill function over the declared roles, and
     /// v1's fill is deliberately trivial: every role binds to the
@@ -135,124 +140,68 @@ impl Environment {
     /// never shopped for. Soft keywords document author intent. With no
     /// current model there is nothing to fill or check, and declared
     /// roles stay unbound.
-    ///
-    /// Tool slot filling follows catalog assembly: exact slots fill by
-    /// identity against the run's catalog - an exact path's first two
-    /// segments name its capability, so a slot whose capability is
-    /// inactive lands in [`Requirements::missing_required`], while a
-    /// slot whose capability is active but contributed no such tool is
-    /// warned and left unfilled (advertising an unfilled alias fails at
-    /// run time). Every fill is journaled into the context's tool
-    /// bindings.
+    #[must_use]
     pub fn prepare(&self, prompt: &Prompt, ctx: RunContext) -> (RunContext, Requirements) {
         let mut ctx = ctx;
-        if ctx.client.is_none() {
-            ctx.client.clone_from(&self.client);
+        if !ctx.vfs_explicit {
+            ctx.vfs = self.run_vfs();
         }
-        ctx.vfs = VfsRef::builder()
-            .mount("/", self.base_vfs.clone())
-            .mount(
-                promptforge_vfs::STORE_MOUNT,
-                shared_vfs::MemoryBackend::new(),
-            )
-            .build();
-        let services = RunServices::new(ctx.vfs.clone(), ctx.cancel.clone());
         let mut requirements = Requirements::default();
-        // Resolve the declarations against the registry, preserving
-        // declaration order.
-        let mut present: Vec<(CapabilityId, Arc<dyn Capability>, bool)> = Vec::new();
-        for declaration in prompt.frontmatter().capabilities() {
-            // The parser validated the id's arity and charset at parse
-            // time, so the checked constructor's validation cannot fail.
-            let id = CapabilityId::from_validated(&declaration.id().to_string());
-            let capability = self
-                .registry
-                .as_ref()
-                .and_then(|registry| registry.get(&id));
-            let Some(capability) = capability else {
-                if declaration.is_optional() {
-                    tracing::info!(capability = %id, "optional capability absent; skipped");
-                } else {
-                    requirements.missing_required.push(id);
-                }
-                continue;
-            };
-            present.push((id, Arc::clone(capability), declaration.is_optional()));
-        }
-        // Co-activation conflicts are declared by the capabilities
-        // themselves; the check is symmetric, so only one member of a
-        // pair needs to name the other. A conflicting pair activates
-        // neither member and fails preparation naming both.
-        let mut conflicted = vec![false; present.len()];
-        for (i, (first_id, first, _)) in present.iter().enumerate() {
-            for (j, (second_id, second, _)) in present.iter().enumerate().skip(i + 1) {
-                if first.conflicts().contains(second_id) || second.conflicts().contains(first_id) {
-                    tracing::warn!(
-                        first = %first_id,
-                        second = %second_id,
-                        "conflicting capabilities declared; neither activates"
-                    );
-                    requirements.conflicts.push(CapabilityConflict {
-                        first: first_id.clone(),
-                        second: second_id.clone(),
-                    });
-                    conflicted[i] = true;
-                    conflicted[j] = true;
-                }
-            }
-        }
-        let mut activated: Vec<(CapabilityId, Contribution)> = Vec::new();
-        for ((id, capability, optional), is_conflicted) in
-            present.iter().zip(conflicted.iter().copied())
-        {
-            if is_conflicted {
-                continue;
-            }
-            match capability.create(&services) {
-                Ok(contribution) => {
-                    tracing::info!(capability = %id, "capability activated");
-                    activated.push((id.clone(), contribution));
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        capability = %id,
-                        %error,
-                        "capability activation failed; it contributes nothing to the run"
-                    );
-                    // A required capability that cannot activate leaves
-                    // the run without something the prompt declared:
-                    // report it like an absent one so the run fails
-                    // until satisfied.
-                    if !*optional {
-                        requirements.missing_required.push(id.clone());
-                    }
-                }
-            }
-        }
-        ctx.tools = assemble_catalog(&activated);
-        let activated_ids: Vec<CapabilityId> = activated.iter().map(|(id, _)| id.clone()).collect();
-        ctx.tool_bindings =
-            fill_tool_bindings(prompt, &ctx.tools, &activated_ids, &mut requirements);
+        ctx.tools = self.tools.clone();
+        ctx.tool_bindings = fill_tool_bindings(prompt, &ctx.tools, &mut requirements);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
     }
 
-    /// The zero-burden path: [prepares](Environment::prepare) implicitly
-    /// and refuses an unsatisfiable prompt - missing required
-    /// capabilities, or unmet model requirements - with
+    /// The zero-burden path: activates, [prepares](Environment::prepare),
+    /// and runs.
+    ///
+    /// When `host` carries a [registry](RunHost::registry), this is the
+    /// one place the prompt's declared capabilities activate: the run's
+    /// VFS is built first ([`run_vfs`](Environment::run_vfs), unless the
+    /// host set the context's handle itself) so the capabilities'
+    /// services and the run share one store; each declaration activates
+    /// with those services ([`activation::activate`](super::activation::activate));
+    /// the activated catalog is the run's catalog, its implementations
+    /// go to the loop's tool performer, and what activation could not
+    /// satisfy is folded into prepare's report. Without a registry
+    /// nothing activates and the environment's own catalog stands.
+    ///
+    /// An unsatisfiable prompt - missing required capabilities,
+    /// conflicts, or unmet model requirements - is refused with
     /// [`RunResult::Failure`] carrying
     /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and
-    /// a model-readable notice naming each gap. The notice may arrive as
-    /// tool output when the prompt runs as a sub-run tool, so it is
-    /// written for a model to reason about.
-    pub async fn run(&self, prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
-        let (ctx, requirements) = self.prepare(prompt, ctx);
+    /// a model-readable notice naming each gap once. The notice may
+    /// arrive as tool output when the prompt runs as a sub-run tool, so
+    /// it is written for a model to reason about.
+    #[must_use]
+    pub async fn run(
+        &self,
+        prompt: &Prompt,
+        args: &str,
+        ctx: RunContext,
+        host: RunHost,
+    ) -> RunResult {
+        let mut ctx = ctx;
+        let mut host = host;
+        let mut env = self.clone();
+        if let Some(registry) = host.registry.take() {
+            if !ctx.vfs_explicit {
+                ctx = ctx.vfs(self.run_vfs());
+            }
+            let services = RunServices::new(ctx.vfs.clone(), ctx.cancel_handle());
+            let mut activation = super::activation::activate(Some(&registry), prompt, &services);
+            env.tools = std::mem::take(&mut activation.catalog);
+            host = host.activated(activation);
+        }
+        let (ctx, mut requirements) = env.prepare(prompt, ctx);
+        requirements.merge(host.requirements.clone());
         if !requirements.is_satisfied() {
             return RunResult::Failure(crate::RunError::from(crate::Error::RequirementsUnmet {
                 notice: requirements.notice(),
             }));
         }
-        super::run(prompt, args, ctx).await
+        super::run(prompt, args, ctx, host).await
     }
 }
 
@@ -265,10 +214,9 @@ impl Default for Environment {
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Environment")
-            .field("client", &self.client)
-            .field("registry", &self.registry.is_some())
             .field("base_vfs", &self.base_vfs)
             .field("max_depth", &self.max_depth)
+            .field("tools", &self.tools)
             .finish()
     }
 }

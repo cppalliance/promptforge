@@ -275,7 +275,7 @@ fn tool_call_counts_seed_read_and_reject_unknown_keys() {
         vec![ToolBinding::for_test(
             "echo",
             "echo tool",
-            Arc::new(EchoTool),
+            &promptforge_api_types::tools::ToolDescriptor::describe(&EchoTool),
         )],
         Vec::new(),
     );

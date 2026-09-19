@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::{Tool, ToolCatalog, ToolCatalogErrorKind, ToolError, ToolId, ToolOutput};
+use super::{
+    Tool, ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolError, ToolId, ToolOutput,
+    describe_all,
+};
 use crate::capabilities::CapabilityId;
 
 fn inspect_id() -> ToolId {
@@ -151,14 +154,32 @@ fn structured_output_defaults_to_plain_text() {
 }
 
 #[test]
+fn a_descriptor_carries_the_tools_surface_and_never_the_implementation() {
+    // The descriptor is the tool as data: identity, wire name, description,
+    // schema, and the output kind, so a catalog built from descriptors holds
+    // no implementation and round-trips through serde.
+    let descriptor = ToolDescriptor::describe(&FixtureTool);
+    assert_eq!(descriptor.id, inspect_id());
+    assert_eq!(descriptor.wire_name, "inspect_wire");
+    assert_eq!(descriptor.description, "Inspect a fixture.");
+    assert_eq!(descriptor.parameters_schema["required"], json!(["path"]));
+    assert!(!descriptor.structured_output);
+    assert!(descriptor.conflicts.is_empty());
+    let wire = serde_json::to_string(&descriptor).expect("the descriptor serializes");
+    let back: ToolDescriptor = serde_json::from_str(&wire).expect("the descriptor deserializes");
+    assert_eq!(back, descriptor);
+}
+
+#[test]
 fn catalog_lookup_uses_stable_identity_not_wire_name() {
     let tool: Arc<dyn Tool> = Arc::new(FixtureTool);
-    let catalog = ToolCatalog::new(std::slice::from_ref(&tool)).expect("unique catalog");
+    let catalog =
+        ToolCatalog::new(&describe_all(std::slice::from_ref(&tool))).expect("unique catalog");
 
     let found = catalog
         .get(&inspect_id())
         .expect("the stable identity should resolve");
-    assert_eq!(found.wire_name(), "inspect_wire");
+    assert_eq!(found.wire_name, "inspect_wire");
     assert!(
         catalog
             .get(&ToolId::parse("fixtures/tools/inspect_wire").expect("valid id"))
@@ -179,13 +200,14 @@ fn catalog_preserves_order_and_first_match_lookup() {
             wire_name: "summarize",
         }),
     ];
-    let catalog = ToolCatalog::new(&tools).expect("distinct identities build a catalog");
+    let catalog =
+        ToolCatalog::new(&describe_all(&tools)).expect("distinct identities build a catalog");
 
     assert_eq!(
         catalog
             .tools()
             .iter()
-            .map(|tool| tool.wire_name())
+            .map(|tool| tool.wire_name.as_str())
             .collect::<Vec<_>>(),
         ["first_inspect", "summarize"]
     );
@@ -194,7 +216,7 @@ fn catalog_preserves_order_and_first_match_lookup() {
         catalog
             .get(&inspect_id())
             .expect("the identity should resolve")
-            .wire_name(),
+            .wire_name,
         "first_inspect",
     );
 }
@@ -211,7 +233,7 @@ fn catalog_rejects_duplicate_tool_ids() {
             wire_name: "second_inspect",
         }),
     ];
-    let error = ToolCatalog::new(&tools)
+    let error = ToolCatalog::new(&describe_all(&tools))
         .expect_err("a repeated tool identity must be rejected at catalog construction");
     assert_eq!(error.kind(), ToolCatalogErrorKind::DuplicateId);
     assert_eq!(
@@ -379,7 +401,7 @@ fn catalog_rejects_illegal_wire_name() {
     }
 
     let bad: Arc<dyn Tool> = Arc::new(BadWire);
-    let error = ToolCatalog::new(std::slice::from_ref(&bad))
+    let error = ToolCatalog::new(&describe_all(std::slice::from_ref(&bad)))
         .expect_err("an illegal wire name must be rejected at catalog construction");
     assert_eq!(error.kind(), ToolCatalogErrorKind::InvalidWireName);
     assert!(error.duplicate_id().is_none());

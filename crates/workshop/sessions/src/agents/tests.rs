@@ -293,29 +293,31 @@ fn test_model() -> ModelDescriptor {
 
 /// Runs the embedded chat prompt on the unified runtime with the given
 /// broker configuration, against a client no model call can survive. The
-/// environment carries the first-party capabilities exactly as the
-/// session wiring builds them, and the context carries the current model,
-/// because the prompt now declares its contract in frontmatter.
+/// host carries the first-party capabilities exactly as the session
+/// wiring builds them, and the context carries the current model, because
+/// the prompt now declares its contract in frontmatter.
 async fn run_builtin_chat(
     broker: Option<Arc<dyn promptforge_api_runtime::input::InputBroker>>,
 ) -> Result<String, promptforge_api_runtime::execute::RunError> {
-    use promptforge_api_runtime::{Prompt, RunContext, RunResult};
+    use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
     let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
     let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
         .expect("the embedded chat prompt parses");
-    let env = session_environment("http://127.0.0.1:9", "k")
-        .expect("a well-shaped gateway root builds the session environment");
-    let mut ctx = RunContext::new(
+    let registry = session_registry("http://127.0.0.1:9", "k")
+        .expect("a well-shaped gateway root builds the session registry");
+    let ctx = RunContext::new(
         "chat-unit",
         1,
         promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
     )
-    .observer(observer)
     .model(test_model());
+    let mut host = RunHost::new()
+        .observer(observer)
+        .registry(Arc::new(registry));
     if let Some(broker) = broker {
-        ctx = ctx.input_broker(broker);
+        host = host.input_broker(broker);
     }
-    match env.run(&prompt, "", ctx).await {
+    match Environment::new().run(&prompt, "", ctx, host).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => panic!("the chat unit run is never cancelled"),
         RunResult::Failure(error) => Err(error),
@@ -365,12 +367,12 @@ async fn an_undersized_model_is_refused_before_the_first_turn() {
     // conversation that outgrew it. The declared minimum turns that into a
     // refusal at prepare naming the role.
     use promptforge_api_runtime::execute::RunErrorKind;
-    use promptforge_api_runtime::{Prompt, RunContext, RunResult};
+    use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
     let observer: Arc<dyn Observer> = Arc::new(WorkshopObserver::new(None).expect("memory log"));
     let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit", observer.as_ref())
         .expect("the embedded chat prompt parses");
-    let env = session_environment("http://127.0.0.1:9", "k")
-        .expect("a well-shaped gateway root builds the session environment");
+    let registry = session_registry("http://127.0.0.1:9", "k")
+        .expect("a well-shaped gateway root builds the session registry");
     let small = ModelDescriptor::new(
         ModelId::gateway("small-model").expect("the test model id is valid"),
         "small model",
@@ -382,10 +384,12 @@ async fn an_undersized_model_is_refused_before_the_first_turn() {
         1,
         promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
     )
-    .observer(observer)
     .model(small);
+    let host = RunHost::new()
+        .observer(observer)
+        .registry(Arc::new(registry));
 
-    let RunResult::Failure(error) = env.run(&prompt, "", ctx).await else {
+    let RunResult::Failure(error) = Environment::new().run(&prompt, "", ctx, host).await else {
         panic!("an 8192-token model cannot satisfy the chat role");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);

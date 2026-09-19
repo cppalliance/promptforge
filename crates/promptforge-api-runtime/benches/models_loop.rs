@@ -29,7 +29,7 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_api_runtime::client::{GatewayClient, GatewayEndpoint, SecretString};
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunHost, RunResult};
 use promptforge_api_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::NullObserver;
 
@@ -171,9 +171,8 @@ fn models_loop(c: &mut Criterion) {
                         1,
                         promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
                     )
-                    .observer(Arc::new(NullObserver::default()))
-                    .model(bench_catalog(131_072).models()[0].clone())
-                    .client(gateway.client()),
+                    .model(bench_catalog(131_072).models()[0].clone()),
+                    RunHost::new().client(gateway.client()),
                 ),
             );
             assert!(
@@ -211,9 +210,8 @@ fn compactors_fail(c: &mut Criterion) {
                         1,
                         promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
                     )
-                    .observer(Arc::new(NullObserver::default()))
-                    .model(bench_catalog(1).models()[0].clone())
-                    .client(gateway.client()),
+                    .model(bench_catalog(1).models()[0].clone()),
+                    RunHost::new().client(gateway.client()),
                 ),
             );
             let RunResult::Failure(error) = result else {

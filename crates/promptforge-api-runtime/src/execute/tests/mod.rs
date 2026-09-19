@@ -349,39 +349,129 @@ async fn run(
     store: &TestStore,
     opts: RunOptions,
 ) -> Result<String> {
-    let mut env = Environment::new();
+    let env = Environment::new();
+    let mut host = RunHost::new().observer(opts.observer);
+    // The run's own router (a fresh store backend per run) is built here
+    // and set on the context, so the test store can reconnect to the
+    // handle the run will use and read back what the run actually wrote.
+    let vfs = env.run_vfs();
+    store.reconnect(vfs.clone());
+    let mut ctx = test_context(opts.execution).vfs(vfs);
     if !tools.is_empty() {
-        // The fixture capability contributes the test's tools, so the
-        // prompt's declared slots fill against them at prepare.
-        env = env.registry(tools_registry(tools));
+        // The host pattern with capabilities: the fixture capability
+        // contributes the test's tools, and `Environment::run` activates
+        // it into the catalog the run binds against and the table the
+        // host's performer resolves against.
+        host = host.registry(Arc::new(tools_registry(tools)));
     }
-    let mut ctx = test_context(opts.execution).observer(opts.observer);
     // The host pattern: the context carries the current model, and
     // prepare's trivial fill binds every declared role to it.
     if let Some(model) = test.models.models().first() {
         ctx = ctx.model(model.clone());
     }
     if let Some(client) = opts.client {
-        ctx = ctx.client(client);
+        host = host.client(client);
     }
     if let Some(debug) = opts.debug {
-        ctx = ctx.debug(debug);
+        ctx = ctx.report_debug(true);
+        host = host.debug(debug);
     }
-    // The multi-step path: prepare builds the run's own router (a fresh
-    // store backend per run), so the test store reconnects to the
-    // prepared handle for its post-run assertions to read what the run
-    // actually wrote.
-    let (ctx, requirements) = env.prepare(&test.prompt, ctx);
-    assert!(
-        requirements.is_satisfied(),
-        "fixture prompts declare no capabilities or model roles: {requirements:?}"
-    );
-    store.reconnect(ctx.vfs_handle().clone());
-    match super::run(&test.prompt, args, ctx).await {
+    match env.run(&test.prompt, args, ctx, host).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
     }
+}
+
+/// A binding for a fixture tool beside its implementation: the binding
+/// goes into the run's tool set, the implementation into the host table
+/// [`arm_tools`] hands the driver, so a script or model call on the alias
+/// resolves through the same id the binding journals.
+fn fixture_binding(
+    alias: &str,
+    description: &str,
+    tool: Arc<dyn Tool>,
+) -> (crate::lua::ToolBinding, Arc<dyn Tool>) {
+    let binding = crate::lua::ToolBinding::for_test(
+        alias,
+        description,
+        &promptforge_api_types::tools::ToolDescriptor::describe(tool.as_ref()),
+    );
+    (binding, tool)
+}
+
+/// A run's tool set beside the implementations behind it: the set goes to
+/// the run state (what the engine advertises and journals), the table to
+/// the state's test host (what the driver performs a `ToolCall` with).
+/// A bare [`ToolSet`](crate::lua::ToolSet) converts into a fixture with no
+/// implementations, for the tests whose tools are never called.
+#[derive(Clone, Default)]
+pub(super) struct FixtureTools {
+    set: crate::lua::ToolSet,
+    table: ToolTable,
+}
+
+impl FixtureTools {
+    /// Builds the fixture from bindings paired with their implementations
+    /// and the prompt-wide `always` aliases.
+    fn new(bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>, always: Vec<String>) -> Self {
+        let mut table = ToolTable::new();
+        let bindings = bindings
+            .into_iter()
+            .map(|(binding, tool)| {
+                table.insert(tool);
+                binding
+            })
+            .collect();
+        Self {
+            set: crate::lua::ToolSet::for_test(bindings, always),
+            table,
+        }
+    }
+
+    /// The bindings as the run's set, for a test that inspects them.
+    fn set(&self) -> &crate::lua::ToolSet {
+        &self.set
+    }
+
+    /// Installs the set on the run state and the table on its test host.
+    fn install(&self, ctx: &RunState) {
+        *ctx.tool_set()
+            .lock()
+            .expect("the tool set mutex is not poisoned") = self.set.clone();
+        ctx.set_test_host(ctx.test_host().tools(self.table.clone()));
+    }
+}
+
+impl From<crate::lua::ToolSet> for FixtureTools {
+    fn from(set: crate::lua::ToolSet) -> Self {
+        Self {
+            set,
+            table: ToolTable::new(),
+        }
+    }
+}
+
+/// Arms the run state's shared tool set with `bindings` (every alias
+/// prompt-wide through `always`) and its test host with the
+/// implementations, so `TokioDriver::new` performs the calls.
+fn arm_tools(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>) {
+    let always = bindings
+        .iter()
+        .map(|(binding, _)| binding.alias().to_owned())
+        .collect();
+    arm_tools_scoped(ctx, bindings, always);
+}
+
+/// Arms the run state's shared tool set with `bindings` and exactly
+/// `always` as the prompt-wide scope, and its test host with the
+/// implementations.
+fn arm_tools_scoped(
+    ctx: &RunState,
+    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>,
+    always: Vec<String>,
+) {
+    FixtureTools::new(bindings, always).install(ctx);
 }
 
 /// The fixture capability: contributes the test's tools under
@@ -425,6 +515,13 @@ fn tools_registry(tools: &[Arc<dyn Tool>]) -> CapabilityRegistry {
     registry
 }
 
+/// [`Environment::run`] with the host the test set on its context through
+/// the context's test-only seams (observer, client, broker, capture).
+async fn env_run(env: &Environment, prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
+    let host = ctx.test_host.clone();
+    env.run(prompt, args, ctx, host).await
+}
+
 /// Runs a fixture offline through the real [`Environment::run`] entry point
 /// with a caller-customized [`RunContext`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
@@ -439,7 +536,8 @@ async fn run_with_context(
     {
         ctx = ctx.model(model.clone());
     }
-    match env.run(&test.prompt, "", ctx).await {
+    let host = ctx.test_host.clone();
+    match env.run(&test.prompt, "", ctx, host).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
         RunResult::Failure(error) => Err(error),
@@ -1105,14 +1203,10 @@ fn aliased_tool_script(alias: &str) -> Vec<GatewayReply> {
 #[test]
 fn tool_description_override_appears_in_model_schema() {
     let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let bindings = crate::lua::ToolSet::for_test(
-        vec![crate::lua::ToolBinding::for_test(
-            "echo",
-            "echo capability for live matching",
-            Arc::clone(&echo),
-        )],
-        Vec::new(),
-    );
+    // In production the binding's description is the descriptor's, copied
+    // at fill time; the test's slot text stands in for it here.
+    let (binding, _) = fixture_binding("echo", "echo capability for live matching", echo);
+    let bindings = crate::lua::ToolSet::for_test(vec![binding], Vec::new());
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
         &Arc::new(Mutex::new(bindings)),
@@ -1145,8 +1239,7 @@ fn tool_description_override_appears_in_model_schema() {
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(
-        schemas[0].description,
-        echo.description(),
+        schemas[0].description, "echo capability for live matching",
         "no override anywhere must advertise the bound tool's description"
     );
 
@@ -1181,8 +1274,9 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             description: "echo capability for live matching".to_owned(),
             id: ToolId::parse("tests/tools/echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
-            tool: Arc::new(EchoTool),
+            schema: EchoTool.parameters_schema(),
             output_kind: crate::lua::ToolOutputKind::Plain,
+            conflicts: Vec::new(),
         }],
         Vec::new(),
     );
@@ -1354,20 +1448,17 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     let test = bound_with_tools(md);
     let mut run_nonces = Vec::new();
     for seed in [1, 2] {
-        let env = Environment::new().registry(tools_registry(&[
-            Arc::new(UntrustedEchoTool) as Arc<dyn Tool>
-        ]));
-        let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT).observer(silent().observer);
+        let env = Environment::new();
+        let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT);
+        let host = RunHost::new().registry(Arc::new(tools_registry(&[
+            Arc::new(UntrustedEchoTool) as Arc<dyn Tool>,
+        ])));
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }
-        let (ctx, requirements) = env.prepare(&test.prompt, ctx);
-        assert!(
-            requirements.is_satisfied(),
-            "the fixture capability satisfies the prompt: {requirements:?}"
-        );
-        let RunResult::Ok(out) = super::run(&test.prompt, "", ctx).await else {
-            panic!("the echo run succeeds");
+        let out = match env.run(&test.prompt, "", ctx, host).await {
+            RunResult::Ok(out) => out,
+            other => panic!("the echo run succeeds: {other:?}"),
         };
         let marker = "<untrusted_input_";
         let start = out.find(marker).expect("the result is guard-wrapped") + marker.len();
