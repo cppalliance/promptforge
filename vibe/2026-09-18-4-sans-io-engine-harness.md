@@ -410,7 +410,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-3>
 
-### Step 3: Retired-symbol scan and harness clippy-ban check
+### Step 3: Retired-symbol scan and harness clippy-ban check [completed]
 
 - Component: Structural guards
 - Piece: engine guards
@@ -427,7 +427,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 - Component: Harness scaffolding
 - Piece: public door
 - Checkpoint: Step 40
-- Do: Create `crates/harness-api/` (workspace member, `publish = false`, metadata, `[lints] workspace = true`, `workspace-hack`, `//!` doc with `## Invariants`, and the `clippy.toml` with the two `disallowed-methods` entries that Step 3's check requires of the door). Define `HarnessConfig { agents_path, state_dir }`, `GatewayBinding { base_url, key, generation }`, `Harness::new(config)`, `Harness::set_gateway(binding)` storing the latest binding, `Harness::gateway()`, and the data types clients render: `SessionId`, `LaunchRequest`, `SessionEvent`, `Delta`. `Session` is declared as an opaque handle whose methods land in Step 48. Regenerate `workspace-hack`.
+- Do: Create `crates/harness-api/` (workspace member, `publish = false`, metadata, `[lints] workspace = true`, `workspace-hack`, `//!` doc with `## Invariants`, and the `clippy.toml` with the two `disallowed-methods` entries that Step 3's check requires of the door; a per-crate `clippy.toml` replaces the root one rather than merging with it, so it must also restate the root's `allow-unwrap-in-tests` and `allow-expect-in-tests` settings). Define `HarnessConfig { agents_path, state_dir }`, `GatewayBinding { base_url, key, generation }`, `Harness::new(config)`, `Harness::set_gateway(binding)` storing the latest binding, `Harness::gateway()`, and the data types clients render: `SessionId`, `LaunchRequest`, `SessionEvent`, `Delta`. `Session` is declared as an opaque handle whose methods land in Step 48. Regenerate `workspace-hack`.
 - Test: `set_gateway` called twice leaves `gateway().generation` at the latest value.
 
 </step-4>
@@ -439,7 +439,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 - Component: Harness scaffolding
 - Piece: container
 - Checkpoint: Step 40
-- Do: Create `harness-runner`, `harness-models`, `harness-capabilities`, `harness-log`, `harness-sessions` under `crates/harness/{runner,models,capabilities,log,sessions}/`, each with manifest metadata, `[lints] workspace = true`, `workspace-hack`, a `//!` doc carrying `## Invariants` (what the crate may and may not depend on; the marker is what puts the crate under the ceiling check extended in Step 1), and a `clippy.toml` with the two `disallowed-methods` entries. Add `crates/harness/runner/src/spawn.rs` with `spawn_tagged<T: Display>(tag, fut)` and `spawn_blocking_tagged<T: Display>(tag, f)`, the only sites that call `tokio::spawn` and `tokio::task::spawn_blocking` (under `#[allow(clippy::disallowed_methods)]`), each opening a `tracing` span named by the tag. Add the members to `Cargo.toml`; regenerate `workspace-hack`.
+- Do: Create `harness-runner`, `harness-models`, `harness-capabilities`, `harness-log`, `harness-sessions` under `crates/harness/{runner,models,capabilities,log,sessions}/`, each with manifest metadata, `[lints] workspace = true`, `workspace-hack`, a `//!` doc carrying `## Invariants` (what the crate may and may not depend on; the marker is what puts the crate under the ceiling check extended in Step 1), and a `clippy.toml` with the two `disallowed-methods` entries (restating the root `allow-unwrap-in-tests` and `allow-expect-in-tests` settings, as in Step 4). Add `crates/harness/runner/src/spawn.rs` with `spawn_tagged<T: Display>(tag, fut)` and `spawn_blocking_tagged<T: Display>(tag, f)`, the only sites that call `tokio::spawn` and `tokio::task::spawn_blocking` (under `#[allow(clippy::disallowed_methods)]`), each opening a `tracing` span named by the tag. Add the members to `Cargo.toml`; regenerate `workspace-hack`.
 - Test: `cargo test -p build-xtask` passes with the matrix and `harness_clippy_bans` reporting six crates (five in the container plus the door); the wrapper runs a future to completion in a `#[tokio::test]`.
 
 </step-5>

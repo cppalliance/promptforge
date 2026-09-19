@@ -40,6 +40,10 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     violations.extend(file_ceiling_violations(root));
     violations.extend(lint_inheritance_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
+    violations.extend(crate::harness_bans::harness_clippy_bans(
+        &root.join("crates").join("harness"),
+        &root.join("crates").join("harness-api"),
+    ));
     violations
 }
 
