@@ -87,10 +87,14 @@ mod argv;
 mod collection;
 mod compactors;
 mod error;
+#[path = "error-value.rs"]
+mod error_value;
+#[doc(hidden)]
+pub use error_value::{ErrorKind, ErrorValue, Raised, error_table};
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
-pub(crate) use coro::install_shim_prelude;
+pub(crate) use coro::{block_guard, install_shim_prelude, take_failure};
 mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};

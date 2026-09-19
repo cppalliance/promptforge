@@ -269,7 +269,7 @@ async fn a_broker_failure_raises_at_the_call_site() {
     let md = input_prompt(
         "local ok, err = pcall(user_input)\n\
          assert(not ok, 'a broker failure raises')\n\
-         return err",
+         return tostring(err)",
     );
     let prompt = parse(&md);
     let config = RunContext::new(EXECUTION).input_broker(Arc::new(FailingBroker));

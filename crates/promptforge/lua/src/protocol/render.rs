@@ -4,6 +4,7 @@
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
+use crate::error_value::{ErrorValue, error_table};
 use crate::{Error, Result, pack_sequence};
 
 use super::answer::{Answer, ChatResult, StoreOutcome, ToolCallOutcome};
@@ -131,15 +132,17 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
     Ok(table)
 }
 
-impl<E: std::fmt::Display> Answer<E> {
+impl<E: ErrorValue> Answer<E> {
     /// Renders the `(ok, result)` resume values for the shim.
     ///
     /// On success the envelope is `(true, text)` or, for a fanout, `(true,
     /// sequence)` with the packed 1-based result table built on the chain's
-    /// VM. On failure it is `(false, message)`, where `message` is the
-    /// error's display string - the shim raises it with `error(result, 0)`,
-    /// so the author sees exactly the host's message - and the typed
-    /// [`Error`] is returned alongside for the driver to retain.
+    /// VM. On failure it is `(false, table)`, where `table` is the error's
+    /// structured value (`kind`, `message` as the error's display string,
+    /// and the kind's fields, with `tostring` returning the message) - the
+    /// shim raises it with `error(result, 0)`, so a printing author sees
+    /// exactly the host's message and a branching one reads `kind` - and
+    /// the typed [`Error`] is returned alongside for the driver to retain.
     ///
     /// # Errors
     /// Returns an `mlua` error if a Lua string, userdata, or table cannot be
@@ -226,9 +229,9 @@ impl<E: std::fmt::Display> Answer<E> {
             | Answer::Loop(Err(error))
             | Answer::Store(Err(error))
             | Answer::UserInput(Err(error)) => {
-                let message = lua.create_string(error.to_string())?;
+                let table = error_table(lua, &error)?;
                 Ok((
-                    MultiValue::from_vec(vec![Value::Boolean(false), Value::String(message)]),
+                    MultiValue::from_vec(vec![Value::Boolean(false), Value::Table(table)]),
                     Some(error),
                 ))
             }

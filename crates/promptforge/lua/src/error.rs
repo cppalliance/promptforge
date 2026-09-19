@@ -149,6 +149,15 @@ pub enum Error {
     /// successful fall-through.
     #[error("internal invariant violated: {0}")]
     Internal(&'static str),
+
+    /// A structured error table raised in Lua surfaced as a block
+    /// coroutine's failure with no retained typed error to substitute: the
+    /// table's kind, message, and fields, kept rather than flattened to the
+    /// message string. The executor maps it back onto its own substrate by
+    /// kind, so a shim raise classifies as the Rust-raised error it stands
+    /// in for.
+    #[error("{0}")]
+    Raised(crate::error_value::Raised),
 }
 
 /// Stable messages emitted by Lua host-quota refusals.

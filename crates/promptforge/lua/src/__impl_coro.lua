@@ -5,13 +5,65 @@
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
 -- the host helper returning the hidden `var` data table as a plain deep
--- copy, and `models`/`tools` are the section's namespace tables, passed in
--- so the chunk never reads a global.
-local yield, var_snapshot, models, tools = ...
+-- copy, `models`/`tools` are the section's namespace tables, passed in so
+-- the chunk never reads a global, `error_value` builds the structured error
+-- table (`{ kind, message, ... }` under the host's shared metatable, whose
+-- `__tostring` is `message`), `stash_failure` records a block's raised
+-- value for the host before the guard re-raises it, and `normalize_failure`
+-- turns a Rust callback's raised failure (mlua's opaque userdata) into the
+-- error table, passing every other value through unchanged.
+local yield, var_snapshot, models, tools, error_value, stash_failure, normalize_failure = ...
 
--- The (ok, result) envelope: level 0 suppresses the position prefix, so a
--- shim-raised error carries exactly the host's message.
---
+-- The base library's pcall and xpcall, captured before the replacements
+-- below are installed over the globals: the block guard needs the raw
+-- failure value so the host's runtime-error mapping keeps its source.
+local raw_pcall, raw_xpcall = pcall, xpcall
+
+-- Every failure that reaches author code is one error table: `tostring`
+-- gives exactly the message, and a caller that branches reads `kind` and
+-- the kind's fields. Level 0 suppresses the position prefix (a table never
+-- gets one, but a string fallback would), so a shim-raised error carries
+-- exactly the host's message.
+local function raise(kind, fields)
+  error(error_value(kind, fields), 0)
+end
+
+-- The (ok, result) envelope's failure path. The host renders its typed
+-- error as the table already; a bare string (a hand-built envelope) is
+-- normalized to a `lua`-kind table so the shape holds without exception.
+local function fail(result)
+  if type(result) == "table" then error(result, 0) end
+  raise("lua", { message = tostring(result) })
+end
+
+-- pcall and xpcall, replacing the base library's over the globals so a
+-- host callback that fails directly from Rust (`tools.add`, `models.get`,
+-- a `sys` or `var` guard) reaches author code as the same error table a
+-- shim raise does, instead of mlua's opaque userdata that `err.kind`
+-- cannot index. Only a Rust-raised failure is rewritten; a string, an
+-- author's own table, and an error table already built pass through
+-- untouched. The raw pcall is yieldable, and so is this Lua frame, so a
+-- shim yield inside the protected function still suspends the block.
+local function pcall_outcome(ok, ...)
+  if ok then return true, ... end
+  return false, normalize_failure((...))
+end
+
+local function protected_call(f, ...)
+  return pcall_outcome(raw_pcall(f, ...))
+end
+
+-- The message handler sees the normalized failure; a non-function handler
+-- is left to the raw xpcall so its own argument error is unchanged.
+local function protected_xcall(f, handler, ...)
+  if type(handler) ~= "function" then
+    return raw_xpcall(f, handler, ...)
+  end
+  return raw_xpcall(f, function(failure)
+    return handler(normalize_failure(failure))
+  end, ...)
+end
+
 -- models.infer(handle?, prompt): an optional leading model handle runs the
 -- round on the handle's frozen binding; without one the driver resolves the
 -- section's current model. Invocation is namespace-only (A9): handles are
@@ -19,14 +71,14 @@ local yield, var_snapshot, models, tools = ...
 local function infer(...)
   local handle, prompt
   if select('#', ...) > 2 then
-    error("models.infer takes (handle?, prompt)", 0)
+    raise("lua", { message = "models.infer takes (handle?, prompt)" })
   elseif select('#', ...) == 2 then
     handle, prompt = ...
   else
     prompt = ...
   end
   local ok, result = yield({ op = "infer", prompt = prompt, handle = handle })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -37,7 +89,7 @@ local function call_section(target, input)
     input = input,
     var = var_snapshot(),
   })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -50,7 +102,7 @@ local function fanout_collection(worker, collection)
     collection = collection,
     var = var_snapshot(),
   })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -61,7 +113,7 @@ end
 -- string, a structured binding's JSON output as a table.
 local function tools_call(alias_or_tool, args)
   local ok, result = yield({ op = "tool_call", alias = alias_or_tool, args = args })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -72,7 +124,7 @@ end
 -- site (pcall-able) with no second validator anywhere.
 local function chat(messages, opts)
   local ok, result = yield({ op = "chat", messages = messages, opts = opts })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -88,12 +140,12 @@ local function models_loop(...)
   local handle, messages, compactor
   if type((...)) == 'userdata' then
     if select('#', ...) > 3 then
-      error("models.loop takes (handle?, messages, compactor?)", 0)
+      raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
     end
     handle, messages, compactor = ...
   else
     if select('#', ...) > 2 then
-      error("models.loop takes (handle?, messages, compactor?)", 0)
+      raise("lua", { message = "models.loop takes (handle?, messages, compactor?)" })
     end
     messages, compactor = ...
   end
@@ -103,7 +155,7 @@ local function models_loop(...)
     messages = messages,
     compactor = compactor,
   })
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
 end
 
@@ -115,10 +167,10 @@ end
 -- the call raises the host's message at the call site.
 local function user_input(...)
   if select('#', ...) > 0 then
-    error("user_input takes no arguments", 0)
+    raise("lua", { message = "user_input takes no arguments" })
   end
   local ok, text, available = yield({ op = "user_input" })
-  if not ok then error(text, 0) end
+  if not ok then fail(text) end
   return text, available
 end
 
@@ -133,8 +185,36 @@ local function store_request(store_op, fields)
   fields.op = "store"
   fields.store_op = store_op
   local ok, result = yield(fields)
-  if not ok then error(result, 0) end
+  if not ok then fail(result) end
   return result
+end
+
+-- The block guard: the host runs every block coroutine through it so a
+-- raised value is seen before mlua stringifies it. The raw `xpcall` is
+-- yieldable, so the block's shim yields pass straight through; a return
+-- passes through unchanged; a failure is stashed for the host (which reads
+-- it back as the structured error when it is one of our tables) and
+-- re-raised as the same value, so mlua's rendering, the retained-error
+-- substitution, and the jump transfer marker all behave exactly as without
+-- the guard. The stash happens in the message handler, which runs at the
+-- raise point with the failing frames still on the stack, so the host can
+-- record the real traceback there; by the time the guard re-raises, the
+-- block's frames are unwound and mlua would see only the guard's own. The
+-- guard deliberately bypasses the normalizing `pcall`: a Rust callback's
+-- failure must reach the host as mlua's own error so the runtime-error
+-- mapping keeps its source.
+local function guard_handler(failure)
+  stash_failure(failure)
+  return failure
+end
+
+local function guard_outcome(ok, ...)
+  if ok then return ... end
+  error((...), 0)
+end
+
+local function guard(block)
+  return guard_outcome(raw_xpcall(block, guard_handler))
 end
 
 local function store_write(path, contents)
@@ -187,6 +267,9 @@ return {
   infer = infer,
   loop = models_loop,
   user_input = user_input,
+  guard = guard,
+  pcall = protected_call,
+  xpcall = protected_xcall,
   store = {
     write = store_write,
     append = store_append,
