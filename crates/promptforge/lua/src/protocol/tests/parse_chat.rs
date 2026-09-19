@@ -51,7 +51,11 @@ fn chat_parses_messages_model_and_tools() {
             tools,
         } => {
             assert_eq!(model.as_deref(), Some("fast"));
-            assert_eq!(tools, vec!["echo".to_owned(), "search".to_owned()]);
+            assert_eq!(
+                tools,
+                Some(vec!["echo".to_owned(), "search".to_owned()]),
+                "an explicit list is the agent's advertised set"
+            );
             assert_eq!(messages.len(), 4);
             assert_eq!(messages[0].role, MessageRole::System);
             assert_eq!(
@@ -219,7 +223,9 @@ fn a_non_string_tool_call_id_is_a_typed_call_error() {
 }
 
 #[test]
-fn chat_without_opts_defaults_to_no_model_and_no_tools() {
+fn chat_without_opts_parses_no_model_and_the_tools_none_shape() {
+    // The `tools: None` shape: a section VM's chat yield carries no tool
+    // list, and the driver resolves the section's current tool scope.
     let lua = Lua::new();
     let table = chat_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
@@ -227,9 +233,50 @@ fn chat_without_opts_defaults_to_no_model_and_no_tools() {
         Request::Chat { model, tools, .. } => {
             assert_eq!(model, None);
             assert_eq!(
+                tools, None,
+                "an absent tools list is the None shape, not an empty explicit list"
+            );
+        }
+        other => panic!("expected a chat request, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_with_opts_but_no_tools_still_parses_the_tools_none_shape() {
+    let lua = Lua::new();
+    let table = chat_request(
+        &lua,
+        r#"{ { role = "user", content = "hi" } }"#,
+        Some(r#"{ model = "fast" }"#),
+    );
+    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+    match request {
+        Request::Chat { model, tools, .. } => {
+            assert_eq!(model.as_deref(), Some("fast"));
+            assert_eq!(tools, None, "opts without tools is still the None shape");
+        }
+        other => panic!("expected a chat request, got {other:?}"),
+    }
+}
+
+#[test]
+fn chat_with_an_empty_tools_list_parses_an_explicit_empty_set() {
+    // The agent VM's explicit list survives even when empty: `{}` means
+    // "advertise nothing", which the driver must never widen to the
+    // section scope the None shape names.
+    let lua = Lua::new();
+    let table = chat_request(
+        &lua,
+        r#"{ { role = "user", content = "hi" } }"#,
+        Some("{ tools = {} }"),
+    );
+    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+    match request {
+        Request::Chat { tools, .. } => {
+            assert_eq!(
                 tools,
-                Vec::<String>::new(),
-                "the advertised set defaults to none"
+                Some(Vec::new()),
+                "an explicit empty list is Some(empty), distinct from None"
             );
         }
         other => panic!("expected a chat request, got {other:?}"),

@@ -495,12 +495,12 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-10>
 
-### Step 10: Protocol additions for the Lua loop
+### Step 10: Protocol additions for the Lua loop [completed]
 
 - Component: Lua loop
 - Piece: vocabulary
 - Checkpoint: Step 14
-- Do: In `crates/promptforge/lua/src/protocol.rs` add `Chat.tools: Option<Vec<ToolSchema>>` (a section VM yields `None`; the agent VM keeps its explicit list), `ChatResult { overflow: bool, reply: Option<..>, finish_reason }` (an empty reply is a completed round with `reply` absent), and `ToolCall.call_id: Option<String>`. Render `overflow` and the absent reply into the Lua answer table.
+- Do: In `crates/promptforge/lua/src/protocol.rs` widen today's `Chat.tools: Vec<String>` (tool aliases; the yielded Lua table carries no catalog, so schemas are resolved in the dispatch arm and carried by the `Effect::Chat` of Step 29) to `Option<Vec<String>>` (a section VM yields `None`; the agent VM keeps its explicit list), `ChatResult { overflow: bool, reply: Option<..>, finish_reason }` (an empty reply is a completed round with `reply` absent), and `ToolCall.call_id: Option<String>`. Render `overflow` and the absent reply into the Lua answer table.
 - Test: parse and render round trips for each new field, including the `tools: None` shape.
 
 </step-10>

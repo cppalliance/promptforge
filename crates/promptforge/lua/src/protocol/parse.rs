@@ -104,6 +104,23 @@ fn call_optional_string(
     }
 }
 
+/// Reads one shim-produced optional string field: absent or nil is `None`,
+/// a string is `Some`, and any other shape is a malformed yield, since the
+/// shims set the field by construction and no author argument reaches it.
+fn shim_optional_string(
+    table: &mlua::Table,
+    name: &str,
+) -> std::result::Result<Option<String>, FieldFailure> {
+    match table.raw_get::<Value>(name) {
+        Ok(Value::Nil) => Ok(None),
+        Ok(Value::String(value)) => value
+            .to_str()
+            .map(|value| Some(value.to_owned()))
+            .map_err(|_| FieldFailure::Malformed),
+        Ok(_) | Err(_) => Err(FieldFailure::Malformed),
+    }
+}
+
 /// Reads the shim-produced `var` snapshot; a failure is a malformed yield,
 /// since the snapshot helper produces a plain JSON-representable table by
 /// construction.
@@ -253,12 +270,14 @@ fn parse_fanout(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, 
 
 /// Parses a `tools.call` request: the author-supplied `alias` (a string or
 /// a Tool object, decoded through the one alias-or-Tool polymorphism) and
-/// `args`.
+/// `args`, plus the shim-produced optional `call_id`.
 ///
 /// An absent or nil `args` parses as the empty object (the empty-argument
 /// call every tool accepts). A non-table or JSON-unrepresentable `args` is
 /// the call's error, framed exactly as the other author-argument failures,
-/// so an author `pcall` catches it at the call site.
+/// so an author `pcall` catches it at the call site. `call_id` is set only
+/// by the loop shim for a model-issued call, so a present non-string is a
+/// malformed yield rather than a call error.
 fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let alias = match table.raw_get::<Value>("alias") {
         // Flatten to the call-error string so the answer frames exactly as
@@ -284,7 +303,12 @@ fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Reques
         }
         Err(_) => return Err(FieldFailure::Malformed),
     };
-    Ok(Request::ToolCall { alias, args })
+    let call_id = shim_optional_string(table, "call_id")?;
+    Ok(Request::ToolCall {
+        alias,
+        args,
+        call_id,
+    })
 }
 
 /// Reads one author-supplied optional line bound: absent or nil is `None`,

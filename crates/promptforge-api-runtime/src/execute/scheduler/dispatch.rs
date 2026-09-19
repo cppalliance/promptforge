@@ -81,7 +81,13 @@ impl Scheduler<'_> {
                 self.dispatch_fanout(id, &worker, &items, &var);
                 Ok(())
             }
-            Request::ToolCall { alias, args } => {
+            // `call_id` is carried but not yet honored: the model-issued
+            // resume-with-content path lands with the tool_call arm.
+            Request::ToolCall {
+                alias,
+                args,
+                call_id: _,
+            } => {
                 self.dispatch_tool_call(id, &alias, args);
                 Ok(())
             }

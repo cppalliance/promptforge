@@ -229,9 +229,14 @@ fn tools_call_yields_a_well_formed_request() {
     // protocol's ToolCall variant with the author's args as JSON.
     let vm = scheduler_vm(&ModelSet::default(), None);
     match yielded_request(&vm, r#"return tools.call("echo", { value = "hi" })"#) {
-        Request::ToolCall { alias, args } => {
+        Request::ToolCall {
+            alias,
+            args,
+            call_id,
+        } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
+            assert_eq!(call_id, None, "a script tools.call carries no call id");
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }
@@ -256,7 +261,7 @@ fn tools_call_accepts_a_tool_handle_in_place_of_the_alias() {
     // as the leading argument dispatches the binding it names.
     let vm = scheduler_vm_with_tools(&ModelSet::default(), &test_tools(), None);
     match yielded_request(&vm, r#"return tools.call(echo, { value = "hi" })"#) {
-        Request::ToolCall { alias, args } => {
+        Request::ToolCall { alias, args, .. } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
         }

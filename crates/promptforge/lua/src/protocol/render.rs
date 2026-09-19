@@ -100,15 +100,21 @@ pub fn append_message_record(
 
 /// Renders one [`ChatResult`] as the plain Lua result table.
 ///
-/// Absent optional fields are never set, so they resume as nil and
-/// `result.tool_calls` presence-branching works; mapping them through the
-/// serde boundary would resume mlua's non-nil null sentinel instead. Each
+/// `overflow` is always set as a boolean, so the loop shim branches on it
+/// with a plain truth test. Absent optional fields are never set, so they
+/// resume as nil and `result.tool_calls` and `result.reply`
+/// presence-branching works; mapping them through the serde boundary would
+/// resume mlua's non-nil null sentinel instead. An empty `reply` string is
+/// dropped here as well, so an empty reply resumes as nil whether the
+/// producer left the field absent (its documented shape) or handed over
+/// `Some("")`: the shim's exit rules read presence, never length. Each
 /// call's `arguments` and the `metrics` sections cross the serde boundary
 /// as tables (the metrics types skip absent sections in serialization, so
 /// no null enters them).
 fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table> {
     let table = lua.create_table()?;
-    if let Some(reply) = result.reply {
+    table.raw_set("overflow", result.overflow)?;
+    if let Some(reply) = result.reply.filter(|reply| !reply.is_empty()) {
         table.raw_set("reply", reply)?;
     }
     if let Some(calls) = result.tool_calls {
