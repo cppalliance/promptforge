@@ -13,7 +13,9 @@
 -- block's raised value for the host before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
 -- opaque userdata) into the error table, passing every other value
--- through unchanged.
+-- through unchanged. The `tasks` namespace lives in its own chunk
+-- (`__impl_tasks.lua`), installed by the host right after this one over
+-- the failure helpers this chunk returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
   error_value, stash_failure, normalize_failure = ...
 
@@ -107,33 +109,6 @@ local function call_section(target, input)
   })
   if not ok then fail(result) end
   return result
-end
-
--- tasks.spawn(target, opts?): start a chain over `target` and return at
--- once with a Task handle. `opts.input` overrides the chain's args,
--- `opts.item` becomes its `item` global, `opts.index` its `sys.index`; the
--- caller's `var` seeds the chain. The handle is a plain methodless table
--- `{ task = id }` (A9): every `tasks.*` operation is a namespace function
--- that accepts the table or the bare id, so a handle stored in `var`
--- survives the serde boundary unchanged. The origin is the shim's own
--- fact, never an argument: this surface is the author's.
-local function tasks_spawn(target, opts)
-  if opts == nil then
-    opts = {}
-  elseif type(opts) ~= "table" then
-    raise("lua", { message = "tasks.spawn opts must be a table, got " .. host_type(opts) })
-  end
-  local ok, result = yield({
-    op = "spawn",
-    target = target,
-    input = opts.input,
-    item = opts.item,
-    index = opts.index,
-    var = var_snapshot(),
-    origin = "author",
-  })
-  if not ok then fail(result) end
-  return { task = result }
 end
 
 -- The collection passes through unconverted; the driver runs the
@@ -403,9 +378,9 @@ end
 
 return {
   call = call_section,
-  tasks = {
-    spawn = tasks_spawn,
-  },
+  -- The failure helpers, handed to the `tasks` chunk (`__impl_tasks.lua`)
+  -- so its shims raise the one error shape this prelude defines.
+  helpers = { raise = raise, fail = fail, host_type = host_type },
   fanout = fanout_collection,
   chat = chat,
   infer = infer,

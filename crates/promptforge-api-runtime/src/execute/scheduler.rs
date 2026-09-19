@@ -34,8 +34,10 @@
 //! the request arms, `chat` the one-round `chat` arm and its answer
 //! application, `tool_call` the script and model-issued `tool_call` arm
 //! (the two arms the section-visible `models.loop` shim drives), `tasks`
-//! the task arena, the `spawn` arm, and the chain-end rules for tasks, and
-//! `joins` the fanout join tables and arm bookkeeping.
+//! the task arena, the `spawn` arm, and the chain-end rules for tasks,
+//! `waits` the `when_any` wait and the `ready`, `status`, `pending`,
+//! `note`, and `cancel` arms over the arena, and `joins` the fanout join
+//! tables and arm bookkeeping.
 
 mod chain;
 mod chat;
@@ -46,6 +48,7 @@ mod joins;
 mod step;
 mod tasks;
 mod tool_call;
+mod waits;
 mod walk;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -177,19 +180,20 @@ struct Chain<'a> {
     /// first section entry; `None` afterward and on every other chain.
     seed: Option<TaskSeed>,
     /// The tasks the chain is parked on in a `when_any` wait; empty while
-    /// the chain is not waiting.
-    #[expect(
-        dead_code,
-        reason = "read and written by the wait arms of the next step"
-    )]
+    /// the chain is not waiting. A member's chain end delivers it and
+    /// clears the set.
     waiting_on: Vec<TaskId>,
+    /// What the chain's suspended request is parked on, as `tasks.status`
+    /// reports it (`chat`, `tool_call`, `user_input`, `store`, `timer`,
+    /// `tasks`, `call`): set at dispatch, cleared when the answer resumes
+    /// the chain. `None` while the chain runs or between blocks.
+    blocked: Option<&'static str>,
     /// Model-task notices not yet delivered into the chain's next model
     /// round, in arrival order. The H1 hand-off moves them to the walk
     /// with the pass's tasks; a later step fills and drains them.
     task_notices: Vec<String>,
-    /// The latest progress note the chain published through `tasks.note`,
-    /// reported by `tasks.status`.
-    #[expect(dead_code, reason = "written by the note arm of the next step")]
+    /// The latest progress note published through `tasks.note` for the
+    /// task this chain backs, reported by `tasks.status`.
     note: Option<String>,
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for a call chain's input override.

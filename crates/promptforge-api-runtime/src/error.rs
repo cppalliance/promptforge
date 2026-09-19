@@ -285,6 +285,36 @@ pub(crate) enum Error {
         tasks: Vec<TaskId>,
     },
 
+    /// A task operation named a task the caller does not own.
+    ///
+    /// Only the spawning chain may wait on, inspect, or cancel a task; a
+    /// chain may additionally read the status of, and annotate, the task
+    /// it runs inside. An id that names no task at all is refused the same
+    /// way, so a caller learns nothing about tasks it never started.
+    #[error("task `{task}` is not a task this chain owns")]
+    TaskNotOwned {
+        /// The task the caller reached for.
+        task: TaskId,
+    },
+
+    /// A wait named a task whose result was already delivered once.
+    #[error("task `{task}` was already delivered: a task's result is taken by one wait")]
+    TaskConsumed {
+        /// The task whose result was taken.
+        task: TaskId,
+    },
+
+    /// The failure a wait delivers for a task its owner cancelled instead
+    /// of letting it end on its own: the member's `ok = false` error value,
+    /// kind `cancelled`, with a `task` field. An abandoned task is never
+    /// delivered - it lost its owner, and only the owner may wait - so
+    /// this is the one non-`Done` delivery.
+    #[error("task `{task}` was cancelled")]
+    TaskCancelled {
+        /// The task that was cancelled.
+        task: TaskId,
+    },
+
     /// The model referenced a tool outside the section's advertised scope.
     ///
     /// This is the model tool loop's error alone: a script `tools.call`
@@ -610,6 +640,11 @@ impl From<LuaError> for Error {
     }
 }
 
+/// The `task` field of a raised task-error table, when it parses.
+fn raised_task(raised: &promptforge_lua::Raised) -> Option<TaskId> {
+    raised.fields.get("task").and_then(|task| task.parse().ok())
+}
+
 impl Error {
     /// Maps a structured error table that surfaced as a block's failure
     /// onto the variant its kind names, so a Lua-side raise classifies as
@@ -633,10 +668,16 @@ impl Error {
                 message: raised.message.clone(),
                 source: Box::new(raised),
             },
+            promptforge_lua::ErrorKind::TaskNotOwned => match raised_task(&raised) {
+                Some(task) => Error::TaskNotOwned { task },
+                None => Error::Lua(raised.message),
+            },
+            promptforge_lua::ErrorKind::TaskConsumed => match raised_task(&raised) {
+                Some(task) => Error::TaskConsumed { task },
+                None => Error::Lua(raised.message),
+            },
             promptforge_lua::ErrorKind::OutOfScopeTool
             | promptforge_lua::ErrorKind::UnboundTool
-            | promptforge_lua::ErrorKind::TaskNotOwned
-            | promptforge_lua::ErrorKind::TaskConsumed
             | promptforge_lua::ErrorKind::TasksLive
             | promptforge_lua::ErrorKind::Lua
             | promptforge_lua::ErrorKind::Internal => Error::Lua(raised.message),
@@ -659,9 +700,11 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::Substitution(_) => ErrorKind::Lua,
             Error::ContextExhausted { .. } => ErrorKind::ContextExhausted,
             Error::EmptyModelReply { .. } => ErrorKind::EmptyModelReply,
-            Error::Interrupted => ErrorKind::Cancelled,
+            Error::Interrupted | Error::TaskCancelled { .. } => ErrorKind::Cancelled,
             Error::ToolLoopExhausted => ErrorKind::ToolLoopExhausted,
             Error::TasksLive { .. } => ErrorKind::TasksLive,
+            Error::TaskNotOwned { .. } => ErrorKind::TaskNotOwned,
+            Error::TaskConsumed { .. } => ErrorKind::TaskConsumed,
             Error::OutOfScopeToolCall { .. } => ErrorKind::OutOfScopeTool,
             Error::UnboundToolCall { .. } => ErrorKind::UnboundTool,
             Error::Tool { .. } => ErrorKind::Tool,
@@ -702,6 +745,11 @@ impl promptforge_lua::ErrorValue for Error {
                 vec![("name".to_owned(), name.clone())]
             }
             Error::TasksLive { tasks } => vec![("tasks".to_owned(), join_task_ids(tasks))],
+            Error::TaskNotOwned { task }
+            | Error::TaskConsumed { task }
+            | Error::TaskCancelled { task } => {
+                vec![("task".to_owned(), task.to_string())]
+            }
             _ => Vec::new(),
         }
     }

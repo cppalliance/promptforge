@@ -246,6 +246,14 @@ pub enum Observation {
         /// The task's id.
         task: TaskId,
     },
+    /// Terminal: the task was cancelled on purpose - by its owner through
+    /// `tasks.cancel` (or, later, the model's `task_cancel`). Reported
+    /// once under the task's target section; a repeated cancel is a no-op
+    /// and reports nothing.
+    TaskCancelled {
+        /// The task's id.
+        task: TaskId,
+    },
     /// Terminal: the task's owner chain ended while the task was live, so
     /// the engine ended the task. Distinct from a cancellation - the task
     /// lost its owner rather than being stopped on purpose. Reported under
@@ -331,6 +339,7 @@ impl Observation {
             Observation::TaskStarted { .. } => "Task started",
             Observation::TaskSucceeded { .. } => "Task succeeded",
             Observation::TaskFailed { .. } => "Task failed",
+            Observation::TaskCancelled { .. } => "Task cancelled",
             Observation::TaskAbandoned { .. } => "Task abandoned",
             Observation::Lua(_) | Observation::Other(_) => return None,
         };

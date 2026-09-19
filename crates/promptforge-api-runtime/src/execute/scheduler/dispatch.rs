@@ -3,8 +3,8 @@
 //! blocking pool uniformly for all backends - no inline fast path - so
 //! interleaving behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
-//! `tool_call`, `chat`, `spawn`, and `fanout` arms live in their own
-//! modules.
+//! `tool_call`, `chat`, `spawn`, `fanout`, and task wait, inspection,
+//! note, and cancel arms live in their own modules.
 
 use std::sync::Arc;
 
@@ -59,6 +59,27 @@ fn store_observations(op: &StoreOp) -> Option<(Observation, Observation)> {
     Some(pair)
 }
 
+/// What a chain parks on when it yields `request`, as `tasks.status`
+/// reports it; `None` for the arms answered inline, whose chain is back on
+/// the ready queue before anyone can look.
+fn blocked_on(request: &Request) -> Option<&'static str> {
+    match request {
+        Request::Infer { .. } | Request::Chat { .. } => Some("chat"),
+        Request::Call { .. } => Some("call"),
+        Request::Fanout { .. } | Request::WhenAny { .. } => Some("tasks"),
+        Request::ToolCall { .. } => Some("tool_call"),
+        Request::UserInput => Some("user_input"),
+        Request::Store { .. } => Some("store"),
+        Request::Spawn { .. }
+        | Request::Ready { .. }
+        | Request::Status { .. }
+        | Request::Pending { .. }
+        | Request::Note { .. }
+        | Request::Cancel { .. }
+        | Request::Mcp { .. } => None,
+    }
+}
+
 /// Classifies one store operation's failure for the answer channel. A
 /// claims-model conflict becomes the fatal determinism violation: the
 /// driver intercepts it at the answer boundary and ends the run on the
@@ -82,6 +103,7 @@ impl Scheduler<'_> {
     /// no call surface produces yet, or the store arm's error when the
     /// chain's access capability is gone.
     pub(super) fn dispatch(&mut self, id: ChainIndex, request: Request) -> Result<()> {
+        self.chains[id.index()].blocked = blocked_on(&request);
         match request {
             Request::Infer { prompt, binding } => {
                 self.dispatch_infer(id, prompt, binding);
@@ -107,6 +129,30 @@ impl Scheduler<'_> {
                     &var,
                     origin,
                 );
+                Ok(())
+            }
+            Request::WhenAny { tasks } => {
+                self.dispatch_when_any(id, tasks);
+                Ok(())
+            }
+            Request::Ready { task } => {
+                self.dispatch_ready(id, &task);
+                Ok(())
+            }
+            Request::Status { task } => {
+                self.dispatch_status(id, &task);
+                Ok(())
+            }
+            Request::Pending { origin } => {
+                self.dispatch_pending(id, origin);
+                Ok(())
+            }
+            Request::Note { text } => {
+                self.dispatch_note(id, text);
+                Ok(())
+            }
+            Request::Cancel { task } => {
+                self.dispatch_cancel(id, &task);
                 Ok(())
             }
             Request::Fanout { worker, items, var } => {

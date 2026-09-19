@@ -26,7 +26,9 @@ mod request;
 #[cfg(test)]
 mod tests;
 
-pub use answer::{Answer, ChatResult, StoreOutcome, ToolCallOutcome, UserInputOutcome};
+pub use answer::{
+    Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, UserInputOutcome,
+};
 pub use parse::YieldParse;
 pub use request::{
     ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp, ToolCallRecord,

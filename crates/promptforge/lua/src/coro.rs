@@ -26,6 +26,14 @@ const SHIM_CHUNK_NAME: &str = "@crates/promptforge-api-runtime/src/lua/__impl_co
 /// The shim source, embedded verbatim so chunk line 1 is file line 1.
 const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
 
+/// The `tasks` namespace chunk's name, `@`-prefixed as the prelude's is.
+const TASKS_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_tasks.lua";
+
+/// The `tasks` namespace source: spawn, the waits, the checks, note, and
+/// cancel, split from the prelude so neither chunk outgrows the file
+/// ceiling. It runs over the prelude's failure helpers.
+const TASKS_SOURCE: &str = include_str!("__impl_tasks.lua");
+
 /// The registry key for the shim's `chat`, stashed by the prelude install so
 /// an agent host can install it as `models.chat`. The registry is host-side
 /// only: a section VM's `models.chat` stays nil because nothing ever reads
@@ -86,6 +94,13 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
         LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME).map_err(SharedSource::new)
     });
 
+/// The `tasks` namespace program, compiled once and loaded per VM after the
+/// prelude, under the same failure contract.
+static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(TASKS_SOURCE, TASKS_CHUNK_NAME).map_err(SharedSource::new)
+    });
+
 /// Installs the yield shims on a VM whose host tables already exist.
 ///
 /// Scheduler-mode VMs load the coroutine standard library for the shim's
@@ -95,8 +110,10 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// validation. The `models`, `tools`, and `compactors` tables are passed
 /// to the shim chunk as arguments, so the chunk never reads a global; the
 /// chunk shims `models.infer` and installs `tools.call`, and the
-/// `call`/`fanout` shims and the `tasks` namespace table come back for the
-/// host to install as globals. The
+/// `call`/`fanout` shims come back for the host to install as globals. The
+/// `tasks` namespace is a second chunk, run over the same `yield` and
+/// `var_snapshot` captures plus the prelude's returned failure helpers,
+/// and installed as the `tasks` global. The
 /// `models.loop` shim is stashed in the registry for
 /// [`install_section_loop_shim`], so agent VMs - which run this prelude
 /// too - never receive it. `max_tool_iterations` is the loop's round cap,
@@ -143,8 +160,8 @@ pub(crate) fn install_shim_prelude(lua: &Lua, max_tool_iterations: usize) -> Res
     let shims: Table = program
         .load(lua)?
         .call((
-            yield_fn,
-            var_snapshot,
+            yield_fn.clone(),
+            var_snapshot.clone(),
             models,
             tools,
             compactors,
@@ -163,7 +180,13 @@ pub(crate) fn install_shim_prelude(lua: &Lua, max_tool_iterations: usize) -> Res
     }
     let call: Function = shims.raw_get("call").map_err(Error::lua)?;
     globals.raw_set("call", call).map_err(Error::lua)?;
-    let tasks: Table = shims.raw_get("tasks").map_err(Error::lua)?;
+    let helpers: Table = shims.raw_get("helpers").map_err(Error::lua)?;
+    let tasks: Table = TASKS_PROGRAM
+        .as_ref()
+        .map_err(Error::shared)?
+        .load(lua)?
+        .call((yield_fn, var_snapshot, helpers))
+        .map_err(Error::lua)?;
     globals.raw_set("tasks", tasks).map_err(Error::lua)?;
     let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;

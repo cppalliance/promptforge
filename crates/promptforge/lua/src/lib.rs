@@ -149,7 +149,8 @@ pub use prose::ProseState;
 #[doc(hidden)]
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
-    StoreOutcome, ToolCallOutcome, ToolCallRecord, UserInputOutcome, YieldParse,
+    StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, UserInputOutcome,
+    YieldParse,
 };
 #[doc(hidden)]
 pub use runtime_events::{EventsSnapshot, install_runtime_events};
