@@ -93,13 +93,11 @@ impl Scheduler<'_> {
                 // Cancellation between steps: the instruction hook covers
                 // running Lua and the select below covers suspension, but a
                 // run whose chains never suspend on I/O would otherwise
-                // finish without ever observing the handle - the legacy
-                // fanout driver's select loop observed it at arm
-                // boundaries.
+                // finish without ever observing the handle.
                 if cancel::is_cancelled() {
                     return Err(Error::Interrupted);
                 }
-                if let Err(error) = self.step(id, &mut root_result).await {
+                if let Err(error) = self.step(id, &mut root_result) {
                     self.finish(id, Err(error), &mut root_result);
                 }
                 if let Some(result) = root_result.take() {
@@ -122,10 +120,9 @@ impl Scheduler<'_> {
                 // Cancellation while suspended: abort the in-flight leaf
                 // tasks and fail the run. The suspended chains' frames drop
                 // unarmed with the scheduler - the same outcome as the
-                // hook-driven path while running - and each fanout arm's
-                // finalizer drop reports its FANOUT_ARM_CANCELLED terminal
-                // observation, so the exactly-once terminal contract holds
-                // on this path too.
+                // hook-driven path while running - and a task chain
+                // stranded this way reports no terminal of its own: the
+                // run's interruption is the record.
                 () = cancel::wait_cancelled() => {
                     for handle in self.io_tasks.values() {
                         handle.abort();
@@ -141,7 +138,7 @@ impl Scheduler<'_> {
                     self.io_tasks.remove(&request_id);
                     let Some(parked) = self.pending.remove(&request_id) else {
                         // A late answer from an I/O task whose chain was
-                        // already aborted (a fatal sibling's fanout abort
+                        // already aborted (a cancelled task chain's abort
                         // races a task that sent before the abort landed):
                         // the abort recorded the request id, so the answer
                         // is moot. Any other unknown id means the driver
@@ -176,9 +173,8 @@ impl Scheduler<'_> {
                         // the spot with the determinism violation rather
                         // than resuming it into Lua, where an author
                         // `pcall` could catch it. The suspended chains drop
-                        // unarmed with the scheduler, each fanout arm's
-                        // finalizer reporting its cancelled terminal
-                        // observation, exactly as on the cancellation path.
+                        // unarmed with the scheduler, exactly as on the
+                        // cancellation path.
                         Answer::Store(Err(error @ Error::Determinism(_))) => return Err(error),
                         answer => {
                             self.chains[parked.index()].incoming = Some(answer);

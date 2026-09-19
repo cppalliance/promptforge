@@ -4,7 +4,6 @@
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
 use crate::error_value::{ErrorValue, error_table};
-use crate::pack_sequence;
 
 use super::answer::{Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome};
 
@@ -94,16 +93,6 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
     Ok(table)
 }
 
-/// Renders the arm results of a fanout as the packed 1-based sequence of
-/// result handles built on the chain's VM.
-fn fanout_sequence(lua: &Lua, results: Vec<crate::LuaFanoutResult>) -> mlua::Result<Value> {
-    let mut handles = Vec::with_capacity(results.len());
-    for result in results {
-        handles.push(lua.create_userdata(result)?);
-    }
-    Ok(Value::Table(pack_sequence(lua, handles)?))
-}
-
 /// Renders a store op's return value: nil for the mutating ops, the text
 /// for reads, a sequence table for glob, a boolean for exists - the legacy
 /// closures' exact return shapes.
@@ -120,35 +109,39 @@ fn store_value(lua: &Lua, outcome: StoreOutcome) -> mlua::Result<Value> {
 /// member's id as its path text (the shim wraps it in a `Task` handle),
 /// then the member's own `(ok, result)` pair - its final text, or its
 /// failure rendered as the error table the shim hands back unraised, so
-/// `when_all` reports it without raising.
+/// `when_all` reports it without raising. The failure is also returned as
+/// the typed error to retain: a shim that re-raises the member's failure at
+/// once (`fanout` on a fatal arm) surfaces the member's own typed error.
 fn delivery_values<E: ErrorValue>(
     lua: &Lua,
     delivery: TaskDelivery<E>,
-) -> mlua::Result<Vec<Value>> {
+) -> mlua::Result<(Vec<Value>, Option<E>)> {
     let id = Value::String(lua.create_string(delivery.task.to_string())?);
-    let (ok, result) = match delivery.outcome {
-        Ok(text) => (true, Value::String(lua.create_string(&text)?)),
-        Err(error) => (false, Value::Table(error_table(lua, &error)?)),
+    let (ok, result, retained) = match delivery.outcome {
+        Ok(text) => (true, Value::String(lua.create_string(&text)?), None),
+        Err(error) => (false, Value::Table(error_table(lua, &error)?), Some(error)),
     };
-    Ok(vec![id, Value::Boolean(ok), result])
+    Ok((vec![id, Value::Boolean(ok), result], retained))
 }
 
 impl<E: ErrorValue> Answer<E> {
     /// Renders the `(ok, result)` resume values for the shim.
     ///
-    /// On success the envelope is `(true, text)` or, for a fanout, `(true,
-    /// sequence)` with the packed 1-based result table built on the chain's
-    /// VM. On failure it is `(false, table)`, where `table` is the error's
-    /// structured value (`kind`, `message` as the error's display string,
-    /// and the kind's fields, with `tostring` returning the message) - the
-    /// shim raises it with `error(result, 0)`, so a printing author sees
-    /// exactly the host's message and a branching one reads `kind` - and
-    /// the typed [`Error`] is returned alongside for the driver to retain.
+    /// On success the envelope is `(true, value...)`. On failure it is
+    /// `(false, table)`, where `table` is the error's structured value
+    /// (`kind`, `message` as the error's display string, and the kind's
+    /// fields, with `tostring` returning the message) - the shim raises it
+    /// with `error(result, 0)`, so a printing author sees exactly the host's
+    /// message and a branching one reads `kind` - and the typed [`Error`]
+    /// is returned alongside for the driver to retain. A successful
+    /// `when_any` whose member failed retains the member's error the same
+    /// way, since a shim may re-raise it at once.
     ///
     /// # Errors
     /// Returns an `mlua` error if a Lua string, userdata, or table cannot be
     /// created on `lua`.
     pub fn into_envelope(self, lua: &Lua) -> mlua::Result<(MultiValue, Option<E>)> {
+        let mut retained = None;
         let values = match self {
             Answer::Infer(Ok(text))
             | Answer::Call(Ok(text))
@@ -160,7 +153,11 @@ impl<E: ErrorValue> Answer<E> {
             Answer::Spawn(Ok(task)) | Answer::Timer(Ok(task)) => {
                 vec![Value::String(lua.create_string(task.to_string())?)]
             }
-            Answer::WhenAny(Ok(delivery)) => delivery_values(lua, delivery)?,
+            Answer::WhenAny(Ok(delivery)) => {
+                let (values, member_error) = delivery_values(lua, delivery)?;
+                retained = member_error;
+                values
+            }
             Answer::Ready(Ok(ready)) => vec![Value::Boolean(ready)],
             Answer::Status(Ok(status)) => vec![Value::Table(task_status_table(lua, *status)?)],
             Answer::Pending(Ok(tasks)) => vec![Value::Table(task_id_sequence(lua, &tasks)?)],
@@ -171,7 +168,6 @@ impl<E: ErrorValue> Answer<E> {
             Answer::ToolCallResult(Ok(ToolCallOutcome::Structured(json))) => {
                 vec![lua.to_value(&json)?]
             }
-            Answer::Fanout(Ok(results)) => vec![fanout_sequence(lua, results)?],
             Answer::Chat(Ok(result)) => vec![Value::Table(chat_result_table(lua, *result)?)],
             // The availability flag rides beside the text as a third resume
             // value, so the shim returns both and the broker's fixed
@@ -191,7 +187,6 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Pending(Err(error))
             | Answer::Note(Err(error))
             | Answer::Cancel(Err(error))
-            | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
             | Answer::Store(Err(error))
@@ -206,6 +201,6 @@ impl<E: ErrorValue> Answer<E> {
         let mut envelope = Vec::with_capacity(values.len() + 1);
         envelope.push(Value::Boolean(true));
         envelope.extend(values);
-        Ok((MultiValue::from_vec(envelope), None))
+        Ok((MultiValue::from_vec(envelope), retained))
     }
 }

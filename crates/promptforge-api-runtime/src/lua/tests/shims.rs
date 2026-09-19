@@ -41,19 +41,54 @@ fn call_yields_target_input_and_the_var_snapshot() {
 }
 
 #[test]
-fn fanout_yields_a_well_formed_request() {
-    // The fanout shim is installed in scheduler mode: the global exists
-    // and its yield parses into the protocol's Fanout variant, with the
-    // collection converted member-wise at the boundary.
+fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
+    // The fanout shim is Lua over the task protocol: its first yield is the
+    // `spawn` of the first member, carrying the worker as the target, the
+    // member as the `item` seed, its 1-based position as `index`, the
+    // caller's `var` snapshot, the author origin, and the fanout mark.
     let vm = scheduler_vm(&ModelSet::default(), None);
     match yielded_request(&vm, r####"return fanout("### Worker", {"a", "b"})"####) {
-        Request::Fanout { worker, items, var } => {
-            assert_eq!(worker, "### Worker");
-            assert_eq!(items, vec![json!("a"), json!("b")]);
+        Request::Spawn {
+            target,
+            input,
+            item,
+            index,
+            var,
+            origin,
+            fanout,
+        } => {
+            assert_eq!(target, "### Worker");
+            assert_eq!(input, None);
+            assert_eq!(item, Some(json!("a")));
+            assert_eq!(index, Some(1));
             assert_eq!(var, json!({}));
+            assert_eq!(origin, TaskOrigin::Author);
+            assert!(fanout, "an arm's spawn carries the fanout mark");
         }
-        other => panic!("expected a fanout request, got {other:?}"),
+        other => panic!("expected a spawn request, got {other:?}"),
     }
+}
+
+#[test]
+fn fanout_rejects_an_empty_collection_before_any_spawn() {
+    // The empty-collection guard runs in the shim before the first spawn
+    // yield, so the call fails at the call site with the fixed message and
+    // the driver never sees a request.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (kind, message): (String, String) = vm
+        .lua()
+        .load(
+            "local ok, err = pcall(fanout, '### Worker', {})\n\
+             assert(not ok, 'an empty collection must fail')\n\
+             return err.kind, tostring(err)",
+        )
+        .call(())
+        .expect("the rejection is a pcall-able error table");
+    assert_eq!(kind, "lua");
+    assert_eq!(
+        message,
+        "fanout over an empty collection: no work is likely a bug"
+    );
 }
 
 #[test]
@@ -70,6 +105,7 @@ fn tasks_spawn_yields_the_target_seeds_var_and_author_origin() {
             index,
             var,
             origin,
+            fanout,
         } => {
             assert_eq!(target, "## Child");
             assert_eq!(input.as_deref(), Some("in"));
@@ -77,6 +113,7 @@ fn tasks_spawn_yields_the_target_seeds_var_and_author_origin() {
             assert_eq!(index, Some(2));
             assert_eq!(var, json!({ "k": 1 }));
             assert_eq!(origin, TaskOrigin::Author);
+            assert!(!fanout, "`tasks.spawn` is not a fanout arm");
         }
         other => panic!("expected a spawn request, got {other:?}"),
     }

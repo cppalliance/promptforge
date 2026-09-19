@@ -9,9 +9,9 @@ use crate::Error;
 
 /// A validated suspending host call, parsed from the yielded table.
 ///
-/// The parse happens at the resume boundary while the VM handle is live: the
-/// fanout collection converts through the existing member-wise rules and the
-/// handle userdata's [`ModelBinding`] is cloned out of its borrow, so nothing
+/// The parse happens at the resume boundary while the VM handle is live: a
+/// spawn's `item` seed converts through the serde bridge and the handle
+/// userdata's [`ModelBinding`] is cloned out of its borrow, so nothing
 /// lifetime-bound enters the enum.
 #[derive(Debug)]
 pub enum Request {
@@ -36,9 +36,10 @@ pub enum Request {
         /// when it ends.
         var: serde_json::Value,
     },
-    /// `tasks.spawn(target, opts?)`: start a task chain over the target's
-    /// slice and return at once. The chain shares `call`'s target
-    /// resolution and depth cap, and `fanout`'s worker validation.
+    /// `tasks.spawn(target, opts?)`, and each arm of the `fanout` shim:
+    /// start a task chain over the target's slice and return at once. The
+    /// chain shares `call`'s target resolution and depth cap, and refuses a
+    /// list section as the target (the worker-template check).
     Spawn {
         /// The heading string, validated with the `resolve_section_target`
         /// rule so a non-string target keeps its byte-identical error.
@@ -58,6 +59,12 @@ pub enum Request {
         /// The principal starting the task. Shim-produced, never
         /// author-supplied: the author shim always says `author`.
         origin: TaskOrigin,
+        /// Whether the spawn is a `fanout` arm. Shim-produced: the `fanout`
+        /// shim says `true`, `tasks.spawn` leaves it absent. The depth-cap
+        /// refusal is named after the author-facing call that tripped it
+        /// (`fanout` or `call`), so the typed error carries the wording the
+        /// author reads and no shim re-match is needed.
+        fanout: bool,
     },
     /// The wait shims' internal timeout timer: a leaf request whose work
     /// is one sleep, registered as an effect-backed task slot the caller
@@ -109,18 +116,6 @@ pub enum Request {
     Cancel {
         /// The task to cancel.
         task: TaskId,
-    },
-    /// `fanout(worker, collection)`: the collection already converted
-    /// member-wise through the existing rules.
-    Fanout {
-        /// The worker heading string, resolved by the driver against the
-        /// caller's visible set.
-        worker: String,
-        /// The converted collection members: the array part in order, then
-        /// the hash part as `{"key", "value"}` pairs.
-        items: Vec<serde_json::Value>,
-        /// The caller's `var` snapshot; each arm seeds from its own clone.
-        var: serde_json::Value,
     },
     /// `tools.call(alias_or_tool, args)`: suspending dispatch of a bound
     /// tool through the shared dispatch function.

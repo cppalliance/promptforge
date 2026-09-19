@@ -408,7 +408,7 @@ fn chat_handle_validation_names_the_loop_and_is_the_calls_error() {
     wrong_userdata
         .raw_set(
             "handle",
-            lua.create_userdata(LuaFanoutResult::success(json!(1), "x"))
+            lua.create_userdata(OtherUserData)
                 .expect("userdata creation cannot fail"),
         )
         .expect("raw_set");

@@ -13,9 +13,10 @@
 -- block's raised value for the host before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
 -- opaque userdata) into the error table, passing every other value
--- through unchanged. The `tasks` namespace lives in its own chunk
--- (`__impl_tasks.lua`), installed by the host right after this one over
--- the failure helpers this chunk returns.
+-- through unchanged. The `tasks` namespace and the `fanout` shim live in
+-- their own chunks (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by
+-- the host right after this one over the failure helpers this chunk
+-- returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
   error_value, stash_failure, normalize_failure = ...
 
@@ -105,19 +106,6 @@ local function call_section(target, input)
     op = "call",
     target = target,
     input = input,
-    var = var_snapshot(),
-  })
-  if not ok then fail(result) end
-  return result
-end
-
--- The collection passes through unconverted; the driver runs the
--- member-wise conversion at the protocol boundary.
-local function fanout_collection(worker, collection)
-  local ok, result = yield({
-    op = "fanout",
-    worker = worker,
-    collection = collection,
     var = var_snapshot(),
   })
   if not ok then fail(result) end
@@ -378,10 +366,10 @@ end
 
 return {
   call = call_section,
-  -- The failure helpers, handed to the `tasks` chunk (`__impl_tasks.lua`)
-  -- so its shims raise the one error shape this prelude defines.
+  -- The failure helpers, handed to the `tasks` and `fanout` chunks
+  -- (`__impl_tasks.lua`, `__impl_fanout.lua`) so their shims raise the one
+  -- error shape this prelude defines.
   helpers = { raise = raise, fail = fail, host_type = host_type },
-  fanout = fanout_collection,
   chat = chat,
   infer = infer,
   loop = models_loop,

@@ -13,9 +13,7 @@ use std::sync::Arc;
 
 use promptforge_api_types::ids::ChainId;
 
-use crate::execute::engine::{
-    JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
-};
+use crate::execute::engine::{JumpTarget, resolve_jump_target, section_position};
 use crate::execute::section_context::SectionContext;
 use crate::fanout;
 use crate::parser::{Block, Section};
@@ -33,61 +31,6 @@ pub(super) struct ChainTarget<'a> {
     pub(super) index: usize,
     /// True when the target is a direct child of the current section.
     pub(super) child: bool,
-}
-
-/// Resolves `heading` against an at-worker arm's visible set: the fanout
-/// caller's visible set minus the worker, plus the worker's children - the
-/// set the legacy arm's control globals resolve over, built with the same
-/// helpers so resolution and its error listings match exactly.
-///
-/// A sibling-level target walks its own prompt slice from its index: the
-/// worker's home slice when it lives there, else the caller's children or
-/// the caller's slice. The resolved `(level, name)` pair is unique across
-/// the visible set (an ambiguous resolve already failed), so at most one
-/// slice contains it. One legacy edge narrows here: the legacy arm walks
-/// its materialized home slice (the caller's slice minus the caller and
-/// the worker, concatenated with the caller's children), so a target that
-/// precedes the worker never falls through back into it, and a
-/// level-matched member of the caller's sibling slice walks on into the
-/// caller's children; the scheduler walks the target's own prompt slice
-/// instead.
-///
-/// # Errors
-/// Returns [`Error::Lua`] when the heading is malformed, matches no
-/// visible section, or matches more than one (see
-/// [`fanout::resolve_sibling`]); [`Error::Internal`] when a resolved
-/// target is absent from every home slice (an invariant violation).
-fn resolve_arm_target<'a>(
-    caller_slice: &'a [Section],
-    caller_index: usize,
-    worker_slice: &'a [Section],
-    worker_index: usize,
-    heading: &str,
-) -> Result<ChainTarget<'a>> {
-    let caller = &caller_slice[caller_index];
-    let worker = &worker_slice[worker_index];
-    let mut visible = home_without(&visible_sections(caller_slice, caller), worker);
-    visible.extend(worker.children().iter().cloned());
-    let target = fanout::resolve_sibling(heading, &visible)?;
-    if let Some(index) = section_position(worker.children(), target) {
-        return Ok(ChainTarget {
-            slice: worker.children(),
-            index,
-            child: true,
-        });
-    }
-    for slice in [worker_slice, caller.children(), caller_slice] {
-        if let Some(index) = section_position(slice, target) {
-            return Ok(ChainTarget {
-                slice,
-                index,
-                child: false,
-            });
-        }
-    }
-    Err(Error::internal(
-        "a resolved arm target is absent from its home slices",
-    ))
 }
 
 impl<'a> Scheduler<'a> {
@@ -117,7 +60,6 @@ impl<'a> Scheduler<'a> {
             None,
             &serde_json::json!({}),
             0,
-            None,
         )?;
         self.install_root_slots(root)?;
         self.ready.push_back(root);
@@ -186,37 +128,6 @@ impl<'a> Scheduler<'a> {
             // section. Its id is the root chain's entry 0.
             let section_id = Self::next_entry_id(chain)?;
             let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?, &section_id)?;
-            chain.frame = Some(frame);
-            chain.block = 0;
-            return Ok(true);
-        }
-        // A fanout arm's first entry constructs the worker frame with the
-        // arm's own seeds: the collection item, the store-write scope, the
-        // caller's cloned `var`, and the worker's visible set for the
-        // `list_from_section` callback. Later entries of the arm's walk
-        // (after a jump) are plain sections on the walk path below.
-        if let Some(arm) = &chain.arm
-            && arm.at_worker
-        {
-            let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
-            let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
-            let (item_index, item) = (arm.item_index, arm.item.clone());
-            let worker = &worker_slice[worker_index];
-            let caller = &caller_slice[caller_index];
-            let home = home_without(&visible_sections(caller_slice, caller), worker);
-            let section_id = Self::next_entry_id(chain)?;
-            let task = chain.task.clone();
-            let frame = SectionContext::new_fanout_arm(
-                &chain.ctx,
-                chain.access()?,
-                worker,
-                &home,
-                &section_id,
-                &task,
-                item_index,
-                item,
-                &chain.var,
-            )?;
             chain.frame = Some(frame);
             chain.block = 0;
             return Ok(true);
@@ -305,11 +216,6 @@ impl<'a> Scheduler<'a> {
         chain.var = frame.read_var()?;
         frame.mark_completed();
         drop(frame);
-        if let Some(arm) = &mut chain.arm {
-            // The worker's own entry is complete; the arm's walk continues
-            // (or ends) as plain sections, exactly as after a jump out.
-            arm.at_worker = false;
-        }
         chain.index += 1;
         Ok(())
     }
@@ -342,11 +248,6 @@ impl<'a> Scheduler<'a> {
         };
         let target = self.resolve_chain_target(id, heading)?;
         let chain = &mut self.chains[id.index()];
-        if let Some(arm) = &mut chain.arm {
-            // The worker's own entry is left behind by the transfer; later
-            // entries of the arm's walk are plain sections.
-            arm.at_worker = false;
-        }
         if target.child {
             chain.positions.push((slice, index));
         }
@@ -359,10 +260,6 @@ impl<'a> Scheduler<'a> {
     /// and returns the slice the walk or a contained chain continues on:
     /// the jumper's child slice for a direct child, the target's own slice
     /// otherwise.
-    ///
-    /// For an arm chain still at its worker, the visible set is the fanout
-    /// caller's visible set minus the worker, plus the worker's children -
-    /// the set the legacy arm's control globals resolve over.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the heading is malformed, matches no
@@ -388,19 +285,6 @@ impl<'a> Scheduler<'a> {
                 index,
                 child: false,
             });
-        }
-        if let Some(arm) = &chain.arm
-            && arm.at_worker
-        {
-            let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
-            let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
-            return resolve_arm_target(
-                caller_slice,
-                caller_index,
-                worker_slice,
-                worker_index,
-                heading,
-            );
         }
         let slice = chain.slice;
         let index = chain.index;

@@ -14,9 +14,15 @@ use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
 
-use crate::{Error, LuaFanoutResult, LuaModelHandle};
+use crate::{Error, LuaModelHandle};
 
 use super::*;
+
+/// A userdata that is neither a model handle nor a Tool object, for the
+/// wrong-userdata argument cases.
+struct OtherUserData;
+
+impl mlua::UserData for OtherUserData {}
 
 fn test_binding() -> ModelBinding {
     ModelBinding::new(

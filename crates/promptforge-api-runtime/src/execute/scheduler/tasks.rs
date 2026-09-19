@@ -1,10 +1,11 @@
 //! The task arena and the `spawn` arm. A task is a chain the scheduler
-//! runs beside its spawner instead of in place of it: `tasks.spawn` starts
-//! the chain over the target's slice - under `call`'s target resolution
-//! and depth cap and `fanout`'s worker validation - registers a slot for it
-//! keyed by the chain's own hierarchical id, and resumes the spawner at
-//! once with the id. The spawner runs first; the child runs when the
-//! spawner suspends or ends, exactly as any ready chain does.
+//! runs beside its spawner instead of in place of it: `tasks.spawn` (and
+//! the `fanout` shim, once per arm) starts the chain over the target's
+//! slice - under `call`'s target resolution and depth cap, refusing a list
+//! section as the target - registers a slot for it keyed by the chain's
+//! own hierarchical id, and resumes the spawner at once with the id. The
+//! spawner runs first; the child runs when the spawner suspends or ends,
+//! exactly as any ready chain does.
 //!
 //! The slot outlives the chain. When the chain ends, its outcome lands in
 //! the slot and the slot moves to `Done`; the owner later takes the result
@@ -23,9 +24,9 @@
 //! `tasks_live` naming the leaked ids; a model-origin task is abandoned
 //! quietly (the model learns through a notice). Tasks survive a section's
 //! fall-through and a `jump` - those move the walk within one chain - and
-//! end with the chain itself: the root walk, a `call` child, a fanout arm,
-//! or another task. The H1 pass and the walk after it are one chain, so
-//! the hand-off reassigns the pass's tasks to the walk.
+//! end with the chain itself: the root walk, a `call` child, or another
+//! task (a fanout arm among them). The H1 pass and the walk after it are
+//! one chain, so the hand-off reassigns the pass's tasks to the walk.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -114,7 +115,12 @@ impl Scheduler<'_> {
     /// enqueued behind the spawner, so `spawn` returns before the child
     /// runs. Every dispatch failure - the depth cap, target resolution, the
     /// worker check, chain construction - is the call's answer, resumed
-    /// into the spawner so an author `pcall` can catch it.
+    /// into the spawner so an author `pcall` can catch it. `fanout` marks
+    /// a `fanout` arm, whose depth-cap refusal is named after `fanout`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
+    )]
     pub(super) fn dispatch_spawn(
         &mut self,
         id: ChainIndex,
@@ -123,8 +129,9 @@ impl Scheduler<'_> {
         seed: TaskSeed,
         var: &serde_json::Value,
         origin: TaskOrigin,
+        fanout: bool,
     ) {
-        match self.prepare_spawn(id, target, input, seed, var, origin) {
+        match self.prepare_spawn(id, target, input, seed, var, origin, fanout) {
             Ok((task, child)) => {
                 self.chains[id.index()].incoming = Some(Answer::Spawn(Ok(task)));
                 self.ready.push_back(id);
@@ -138,12 +145,19 @@ impl Scheduler<'_> {
     }
 
     /// The fallible half of spawn dispatch: `call`'s depth cap against the
-    /// spawner's call-depth field, `call`'s target resolution over the
-    /// spawner's visible set, `fanout`'s worker validation, then the task
-    /// chain one level deeper under the spawn's `args` and `var` snapshot,
-    /// with its own access capability (a concurrent thread of execution
-    /// under the claims model, spawned from the spawner's so the spawn is
-    /// the happens-before edge) and a fresh turn counter.
+    /// spawner's call-depth field (the refusal named after the author-facing
+    /// call that tripped it, `fanout` for an arm and `call` otherwise, so
+    /// the text is the one each path always had), `call`'s target
+    /// resolution over the spawner's visible set, the worker-template check
+    /// (a list section is not a target), then the task chain one level
+    /// deeper under the spawn's `args` and `var` snapshot, with its own
+    /// access capability (a concurrent thread of execution under the claims
+    /// model, spawned from the spawner's so the spawn is the happens-before
+    /// edge) and a fresh turn counter.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
+    )]
     fn prepare_spawn(
         &mut self,
         id: ChainIndex,
@@ -152,18 +166,20 @@ impl Scheduler<'_> {
         seed: TaskSeed,
         var: &serde_json::Value,
         origin: TaskOrigin,
+        fanout: bool,
     ) -> Result<(TaskId, ChainIndex)> {
         let chain = &self.chains[id.index()];
         let depth = chain.call_depth + 1;
         if depth > MAX_CALL_DEPTH {
+            let tripped = if fanout { "fanout" } else { "call" };
             return Err(Error::Lua(format!(
-                "call recursion exceeded cap of {MAX_CALL_DEPTH}"
+                "{tripped} recursion exceeded cap of {MAX_CALL_DEPTH}"
             )));
         }
         // An explicit input forks the chain's args (and `argv` re-derives
         // from them), as a `call` with input does; otherwise the chain
         // inherits the spawner's context whole. The turn counter is the
-        // task's own, as a fanout arm's is.
+        // task's own, so its turns count against its own cap.
         let child_ctx = match input {
             Some(input) => chain.ctx.with_args(input),
             None => chain.ctx.clone(),
@@ -213,7 +229,6 @@ impl Scheduler<'_> {
             None,
             var,
             depth,
-            None,
         )?;
         let spawned = &mut self.chains[child.index()];
         spawned.access = Some(Arc::new(access));

@@ -392,10 +392,9 @@ impl RunState {
         ctx
     }
 
-    /// The context a fanout's arms run under: the proxy observer/debug over
-    /// the bounded side channels and the fanout's fresh turn counter in
-    /// place of the run's own, so arm reporting stays report-only and arm
-    /// turns count against the fanout's cap.
+    /// The context a spawned task chain runs under: the given observer and
+    /// debug handles and a fresh turn counter in place of the run's own, so
+    /// the task's turns count against its own cap.
     #[must_use]
     pub(crate) fn with_effective_handles(
         &self,
@@ -411,10 +410,10 @@ impl RunState {
     }
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, `observer`, `shared`) from this
-    /// context; the driver supplies only its own deltas: the `sys` JSON,
-    /// the seed, the chain step's access capability (the walk's own, a
-    /// call chain's borrowed parent capability, a fanout arm's spawned
+    /// run-wide slots (`args`, `observer`, `shared`, the shim caps) from
+    /// this context; the driver supplies only its own deltas: the `sys`
+    /// JSON, the seed, the chain step's access capability (the walk's own,
+    /// a call chain's borrowed parent capability, a task chain's spawned
     /// one), and the section name.
     pub(crate) fn vm_setup<'a>(
         &'a self,
@@ -434,6 +433,7 @@ impl RunState {
             section_name,
             shared: &self.shared,
             max_tool_iterations: self.max_tool_iterations(),
+            max_fanout_concurrency: self.limits.fanout_concurrency().get(),
             ui: self.ui.as_ref(),
             #[cfg(test)]
             raw_shims: self.raw_shims,

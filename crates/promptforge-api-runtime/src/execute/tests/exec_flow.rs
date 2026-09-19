@@ -485,10 +485,11 @@ return tostring(sys.index)\n\
     );
 }
 
-/// `sys.taskid` is the nearest enclosing task: a fanout arm is the caller's
-/// own work, so it reports the caller's task - the main walk's, task `0`.
+/// `sys.taskid` is the nearest enclosing task: a fanout arm is a task the
+/// `fanout` shim spawns, so it reports its own id - the caller's first
+/// child - while the main walk stays task `0`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sys_taskid_inside_a_fanout_is_the_callers_task() {
+async fn sys_taskid_inside_a_fanout_arm_is_the_arms_own_task() {
     let md = flow_prompt!(
         "\
 ## Parent\n\n\
@@ -502,10 +503,8 @@ return results[1].text\n\
 return sys.taskid\n\
 ```\n"
     );
-    let out = run_offline(md)
-        .await
-        .expect("an arm reads its caller's task id");
-    assert_eq!(out, "0");
+    let out = run_offline(md).await.expect("an arm reads its own task id");
+    assert_eq!(out, "0.0");
 }
 
 /// Nested `call()` is capped at [`MAX_CALL_DEPTH`]. Locks the

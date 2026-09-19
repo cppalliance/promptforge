@@ -2,18 +2,17 @@
 //!
 //! [`SectionContext`] is born at a section entry and dies at its teardown.
 //! It owns the section VM plus the state the block walk reads and writes -
-//! the `sys` JSON, the seeded `var`, the fanout arm's item, and the
+//! the `sys` JSON, the seeded `var`, a spawned chain's `item`, and the
 //! tool-call counts - and it
 //! carries the frame's effective reporting handles (observer, debug sink,
-//! turn counter) seeded out of the run context; a fanout arm's context is
-//! the fanout's fork, so the handles reach the frame and the arm's nested
+//! turn counter) seeded out of the run context; a task chain's context is
+//! the spawn's fork, so the handles reach the frame and the task's nested
 //! chains through the one value. Each driver is one
 //! construct-run-teardown cycle: the constructor absorbs the VM
 //! construction and setup preamble ([`SectionContext::new`] for a walked
-//! section, [`SectionContext::new_live_h1`] for the live H1 pass,
-//! [`SectionContext::new_fanout_arm`] for a fanout arm; the three live in
-//! the `construct` sibling), the scheduler's chain steps run the blocks,
-//! and the frame's [`Drop`] impl is the single teardown boundary.
+//! section, [`SectionContext::new_live_h1`] for the live H1 pass; the two
+//! live in the `construct` sibling), the scheduler's chain steps run the
+//! blocks, and the frame's [`Drop`] impl is the single teardown boundary.
 //!
 //! The run-scoped inputs
 //! (bindings, models, limits, the shared tools) arrive through the
@@ -74,14 +73,13 @@ pub(crate) struct SectionContext {
     /// The walk's clipboard: seeded into the VM at construction, read back
     /// out of it before teardown so the walk rolls it forward.
     var: serde_json::Value,
-    /// The fanout arm's collection member for `{{ item }}` substitution;
-    /// `None` outside an arm, so always `None` on the walk.
+    /// A spawned chain's `item` seed (a fanout arm's collection member) for
+    /// `{{ item }}` substitution; `None` on every other entry.
     item: Option<serde_json::Value>,
     /// The per-section tool-call counts, installed at the first
     /// script-initiated `tools.call`.
     counts: Option<ToolCallCounts>,
-    /// The frame's effective observer handle: the run's own on the walk, a
-    /// fanout arm's proxy in a fanout.
+    /// The frame's effective observer handle: the run's own.
     observer: Arc<dyn Observer>,
     /// Opt-in raw request/response capture for each model turn.
     debug: Option<Arc<dyn DebugCapture>>,

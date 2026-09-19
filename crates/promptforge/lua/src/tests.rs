@@ -1459,7 +1459,6 @@ fn jump_during_shared_replay_is_a_hard_error() {
         .expect("host APIs must install");
     vm.install_control_globals(
         |_, _, _| Err(Error::Lua("call is not needed here".to_owned())),
-        |_, _, _| Err(Error::Lua("fanout is not needed here".to_owned())),
         |_| {
             Err(Error::Lua(
                 "list_from_section is not needed here".to_owned(),
@@ -1493,7 +1492,6 @@ fn call_with_a_non_string_target_errors() {
         .expect("host APIs must install");
     vm.install_control_globals(
         |target, _, _| resolve_section_target(target).map_err(Error::lua),
-        |_, _, _| Err(Error::Lua("fanout is not needed here".to_owned())),
         |_| {
             Err(Error::Lua(
                 "list_from_section is not needed here".to_owned(),

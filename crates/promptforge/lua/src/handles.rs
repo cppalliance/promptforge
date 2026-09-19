@@ -1,7 +1,4 @@
-use super::{
-    Arc, Error, Json, LuaSerdeExt, MetaMethod, Mutex, Result, Tool, ToolId, UserData,
-    UserDataFields, UserDataMethods, Value,
-};
+use super::{Arc, Error, Mutex, Result, Tool, ToolId, Value};
 
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
@@ -121,57 +118,6 @@ impl ToolBinding {
     #[must_use]
     pub fn tool(&self) -> &dyn Tool {
         self.tool.as_ref()
-    }
-}
-
-/// One fanout arm result exposed to Lua as a structured object.
-///
-/// Authors read `.text`, `.ok`, `.item`, and `.exhausted`. `__tostring` returns
-/// `.text` so `tostring` and a tostring-coercing `table.concat` keep working.
-/// `.item` carries the arm's member value back as a Lua value via the same
-/// serde bridge that seeds `var`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LuaFanoutResult {
-    text: String,
-    ok: bool,
-    item: Json,
-    exhausted: bool,
-}
-
-impl LuaFanoutResult {
-    /// Builds a successful arm result.
-    #[must_use]
-    pub fn success(item: impl Into<Json>, text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            ok: true,
-            item: item.into(),
-            exhausted: false,
-        }
-    }
-
-    /// Builds a soft-degraded arm result after tool-loop exhaustion.
-    #[must_use]
-    pub fn exhausted_stub(item: impl Into<Json>, text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            ok: false,
-            item: item.into(),
-            exhausted: true,
-        }
-    }
-}
-
-impl UserData for LuaFanoutResult {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("text", |_, this| Ok(this.text.clone()));
-        fields.add_field_method_get("ok", |_, this| Ok(this.ok));
-        fields.add_field_method_get("item", |lua, this| lua.to_value(&this.item));
-        fields.add_field_method_get("exhausted", |_, this| Ok(this.exhausted));
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_method(MetaMethod::ToString, |_, this, ()| Ok(this.text.clone()));
     }
 }
 

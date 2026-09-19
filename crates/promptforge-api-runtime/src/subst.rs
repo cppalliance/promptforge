@@ -133,16 +133,14 @@ fn render_scalar(value: &Value) -> Option<String> {
     }
 }
 
-/// Renders a fanout arm's item for prose substitution and stub text:
-/// strings verbatim, numbers and booleans in their natural string form,
-/// arrays and objects as compact JSON.
+/// Renders a spawned chain's `item` for prose substitution: strings
+/// verbatim, numbers and booleans in their natural string form, arrays and
+/// objects as compact JSON. The one rule is the Lua crate's, shared with
+/// the `fanout` shim's exhausted-arm stub so `{{ item }}` and the stub's
+/// heading render a member identically.
 #[must_use]
 pub(crate) fn render_item(item: &Value) -> String {
-    if let Some(rendered) = render_scalar(item) {
-        return rendered;
-    }
-    // Serializing a `Value` cannot fail; the default is unreachable.
-    serde_json::to_string(item).unwrap_or_default()
+    crate::lua::render_item(item)
 }
 
 /// The value sources `{{ }}` placeholders resolve against.

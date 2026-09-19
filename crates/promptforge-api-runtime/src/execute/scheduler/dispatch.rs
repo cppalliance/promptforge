@@ -3,8 +3,8 @@
 //! blocking pool uniformly for all backends - no inline fast path - so
 //! interleaving behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
-//! `tool_call`, `chat`, `spawn`, `timer`, `fanout`, and task wait,
-//! inspection, note, and cancel arms live in their own modules.
+//! `tool_call`, `chat`, `spawn`, `timer`, and task wait, inspection, note,
+//! and cancel arms live in their own modules.
 
 use std::sync::Arc;
 
@@ -66,7 +66,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
     match request {
         Request::Infer { .. } | Request::Chat { .. } => Some("chat"),
         Request::Call { .. } => Some("call"),
-        Request::Fanout { .. } | Request::WhenAny { .. } => Some("tasks"),
+        Request::WhenAny { .. } => Some("tasks"),
         Request::ToolCall { .. } => Some("tool_call"),
         Request::UserInput => Some("user_input"),
         Request::Store { .. } => Some("store"),
@@ -121,6 +121,7 @@ impl Scheduler<'_> {
                 index,
                 var,
                 origin,
+                fanout,
             } => {
                 self.dispatch_spawn(
                     id,
@@ -129,6 +130,7 @@ impl Scheduler<'_> {
                     TaskSeed { item, index },
                     &var,
                     origin,
+                    fanout,
                 );
                 Ok(())
             }
@@ -158,10 +160,6 @@ impl Scheduler<'_> {
             }
             Request::Cancel { task } => {
                 self.dispatch_cancel(id, &task);
-                Ok(())
-            }
-            Request::Fanout { worker, items, var } => {
-                self.dispatch_fanout(id, &worker, &items, &var);
                 Ok(())
             }
             Request::ToolCall {
@@ -431,7 +429,7 @@ impl Scheduler<'_> {
         // prompt tree, so the target's slice outlives it.
         let target_section = self.resolve_chain_target(id, target)?;
         // The child's id is the caller's next child index: `call` children
-        // and spawned arms share the caller's counter, so the id depends
+        // and spawned tasks share the caller's counter, so the id depends
         // only on the caller's own dispatch order.
         let chain_id = self.allocate_child_id(id)?;
         let child = self.start_chain(
@@ -443,7 +441,6 @@ impl Scheduler<'_> {
             Some(id),
             var,
             depth,
-            None,
         )?;
         // The child inherits the caller's client slot: an already-resolved
         // client is shared, an unresolved one stays lazy.

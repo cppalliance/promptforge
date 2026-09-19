@@ -644,10 +644,11 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn aborting_a_chain_abandons_the_tasks_it_owns() {
-    // A fatal sibling arm aborts the spawning arm before it resumes; the
-    // abort takes the arm's task with it: the task's slot is Abandoned
-    // because its owner was aborted, its terminal observation fires, and
-    // its chain never enters its section.
+    // A fatal sibling arm makes the fanout shim cancel the spawning arm
+    // before it resumes; the abort takes the arm's task with it: the
+    // task's slot is Abandoned because its owner was aborted, its terminal
+    // observation fires, and its chain never runs its block (it gets at
+    // most the one step that enters its section before the cancel lands).
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Tasks\n\n\
         ## Main\n\n\
@@ -700,15 +701,15 @@ async fn aborting_a_chain_abandons_the_tasks_it_owns() {
     assert!(
         !records
             .iter()
-            .any(|(section, event)| section == "Child" && *event == detail::SECTION_STARTED),
-        "the abandoned task's chain never ran: {records:?}"
+            .any(|(section, event)| section == "Child" && *event == detail::LUA_CHUNK_STARTED),
+        "the abandoned task's chain never ran its block: {records:?}"
     );
     assert_eq!(
         records
             .iter()
-            .filter(|(_, event)| *event == detail::FANOUT_ARM_CANCELLED)
+            .filter(|(_, event)| *event == Observation::TaskCancelled { task: task("0.0") })
             .count(),
         1,
-        "the spawning arm reports cancelled exactly once: {records:?}"
+        "the fanout shim cancels the spawning arm exactly once: {records:?}"
     );
 }

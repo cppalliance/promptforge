@@ -36,16 +36,16 @@
 //! (the two arms the section-visible `models.loop` shim drives), `tasks`
 //! the task arena, the `spawn` arm, and the chain-end rules for tasks,
 //! `waits` the `when_any` wait and the `ready`, `status`, `pending`,
-//! `note`, and `cancel` arms over the arena, `timer` the wait shims'
-//! internal timeout as an effect-backed slot, and `joins` the fanout join
-//! tables and arm bookkeeping.
+//! `note`, and `cancel` arms over the arena, and `timer` the wait shims'
+//! internal timeout as an effect-backed slot. A fanout is Lua over those
+//! arms (the `fanout` shim spawns one task per member and waits on the
+//! live set), so the scheduler keeps no fanout state of its own.
 
 mod chain;
 mod chat;
 mod dispatch;
 mod drive;
 mod h1;
-mod joins;
 mod step;
 mod tasks;
 mod timer;
@@ -72,7 +72,6 @@ use super::gateway::GatewaySource;
 use super::protocol::Answer;
 use super::scope::DispatchTarget;
 use super::section_context::{SectionContext, TaskSeed};
-use joins::{ArmState, FanoutId, JoinState};
 use tasks::TaskSlot;
 #[cfg(test)]
 pub(crate) use tasks::TaskState;
@@ -171,15 +170,14 @@ struct Chain<'a> {
     /// always `0.1`.
     counters: Counters,
     /// The nearest enclosing task: the chain's own id when the chain is a
-    /// spawned task, its caller's task for a `call` child or a fanout arm
-    /// (a blocking child never interleaves with its caller, so the two
-    /// share one task), and task `0` for the root chain. Every section the
-    /// chain enters reads it as `sys.taskid`.
+    /// spawned task (a fanout arm included), its caller's task for a
+    /// `call` child (a blocking child never interleaves with its caller,
+    /// so the two share one task), and task `0` for the root chain. Every
+    /// section the chain enters reads it as `sys.taskid`.
     task: TaskId,
     /// The chain that spawned this chain, when the chain is a task's
     /// backing chain: the task's owner, the only chain allowed to wait on,
-    /// inspect, or cancel it. `None` for the root, a `call` child, and a
-    /// fanout arm.
+    /// inspect, or cancel it. `None` for the root and a `call` child.
     owner: Option<ChainIndex>,
     /// A spawned chain's `item` and `sys.index` seeds, consumed by its
     /// first section entry; `None` afterward and on every other chain.
@@ -206,12 +204,13 @@ struct Chain<'a> {
     /// The chain's VFS access capability, installed into each section VM
     /// the chain enters: the walk and the live H1 pass acquire their own,
     /// a call chain borrows its parent's (a blocking child is the same
-    /// serial thread - no new identity, no false conflicts), and a fanout
-    /// arm spawns its own from the fanout caller's. `None` only after the
+    /// serial thread - no new identity, no false conflicts), and a task
+    /// chain spawns its own from its spawner's. `None` only after the
     /// chain ends: the arena is append-only, so `finish` and
     /// `abort_subtree` take the slot to release the identity's claims at
-    /// chain end rather than at scheduler drop - a fanout's join merge
-    /// must not meet a finished arm's lingering claims.
+    /// chain end rather than at scheduler drop - a fanout caller's merge
+    /// after its arms are delivered must not meet a finished arm's
+    /// lingering claims.
     access: Option<Arc<Access>>,
     /// The per-section frame (VM, `sys`, conversation, counts): `Some`
     /// while a section is entered, `None` before the first entry and
@@ -249,10 +248,11 @@ struct Chain<'a> {
     /// is discarded with the chain, so the caller never sees the chain's
     /// writes.
     var: serde_json::Value,
-    /// The chain's call nesting depth: each call child runs one level
-    /// deeper. The recursion cap checks this field, never the chain-stack
-    /// length - fanout arms live on the ready queue, not the stack, so only
-    /// the field carries the accounting across a fanout boundary.
+    /// The chain's call nesting depth: each call child and each spawned
+    /// task runs one level deeper. The recursion cap checks this field,
+    /// never the chain-stack length - task chains live on the ready queue,
+    /// not the stack, so only the field carries the accounting across a
+    /// spawn boundary.
     call_depth: usize,
     /// The chain's client slot: seeded from the parent, resolved lazily on
     /// first inference through the scheduler's gateway source, so a
@@ -265,10 +265,6 @@ struct Chain<'a> {
     /// model invents or reaches for outside the scope fails as out of
     /// scope. `None` before the chain's first round.
     advertised: Option<BTreeMap<String, DispatchTarget>>,
-    /// The fanout-arm state when this chain is a fanout arm: the arm runs
-    /// the same walk machinery as any chain, and its finish writes its
-    /// join's result slot instead of a call answer.
-    arm: Option<ArmState<'a>>,
     /// The H1 marker: the prompt's H1 blocks under its title - section 0.
     /// `Some` chains run the walk's rules with three deltas: the frame
     /// keeps id 0 (no section observations fire), a scalar return
@@ -313,7 +309,7 @@ impl<'a> Chain<'a> {
 }
 
 /// The coroutine protocol's driver: the chain arena, ready queue, pending
-/// table, join table, and answer channel, owned outright by the driver
+/// table, task arena, and answer channel, owned outright by the driver
 /// loop's stack frame.
 pub(crate) struct Scheduler<'a> {
     /// The ambient run context, borrowed by chain steps and forked by
@@ -336,8 +332,6 @@ pub(crate) struct Scheduler<'a> {
     /// arena is append-only like the chain arena, so `status` can report a
     /// terminal state at any later time.
     tasks: HashMap<TaskId, TaskSlot>,
-    /// One join state per live fanout.
-    joins: HashMap<FanoutId, JoinState<'a>>,
     /// The send half every spawned leaf task posts its answer to. The
     /// channel is unbounded: each task sends exactly once, and the in-flight
     /// count is already bounded by the chains that produced them.
@@ -345,8 +339,8 @@ pub(crate) struct Scheduler<'a> {
     /// The receive half the driver awaits when no chain is ready.
     answers: mpsc::UnboundedReceiver<(RequestId, Arrival)>,
     /// Join handles of the in-flight leaf I/O tasks, keyed by request so
-    /// a fatal fanout arm can abort a sibling arm's own in-flight round;
-    /// every handle is aborted on cancellation or on the driver future's
+    /// a cancelled task chain's own in-flight round can be aborted with
+    /// it; every handle is aborted on cancellation or on the driver future's
     /// drop, and aborting a completed task is a no-op. The handles are
     /// kept joinable (not bare abort handles) so a terminal run outcome
     /// can drain them: a store op runs on the blocking pool, where abort
@@ -368,8 +362,6 @@ pub(crate) struct Scheduler<'a> {
     max_chains: usize,
     /// The next leaf-request id.
     next_request: u64,
-    /// The next fanout id.
-    next_fanout: u32,
     /// The run's gateway source: chains resolve their client slot through
     /// it on first inference.
     client: GatewaySource,
@@ -388,14 +380,12 @@ impl<'a> Scheduler<'a> {
             ready: VecDeque::new(),
             pending: HashMap::new(),
             tasks: HashMap::new(),
-            joins: HashMap::new(),
             answer_tx,
             answers,
             io_tasks: HashMap::new(),
             aborted_requests: HashSet::new(),
             max_chains: u32::MAX as usize,
             next_request: 0,
-            next_fanout: 0,
             client: GatewaySource::from_optional(client, ctx.limits()),
         }
     }
