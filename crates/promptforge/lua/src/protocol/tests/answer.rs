@@ -49,13 +49,9 @@ fn an_err_answer_round_trips_and_retains_the_typed_error() {
     }
     let (ok, result) = echo_through_lua(&lua, envelope);
     assert!(!ok);
-    let Value::String(message) = result else {
-        panic!("expected a string message, got {result:?}");
-    };
-    assert_eq!(
-        message.to_str().expect("the message is UTF-8"),
-        "lua instruction quota exceeded"
-    );
+    let (kind, message) = failure_parts(&lua, result);
+    assert_eq!(kind, "lua");
+    assert_eq!(message, "lua instruction quota exceeded");
 }
 
 #[test]
@@ -136,13 +132,9 @@ fn an_err_tool_call_answer_round_trips_and_retains_the_typed_error() {
     }
     let (ok, result) = echo_through_lua(&lua, envelope);
     assert!(!ok);
-    let Value::String(message) = result else {
-        panic!("expected a string message, got {result:?}");
-    };
-    assert_eq!(
-        message.to_str().expect("the message is UTF-8"),
-        "interrupted by Ctrl-C"
-    );
+    let (kind, message) = failure_parts(&lua, result);
+    assert_eq!(kind, "cancelled");
+    assert_eq!(message, "interrupted by Ctrl-C");
 }
 
 #[test]
@@ -305,13 +297,9 @@ fn an_err_chat_answer_round_trips_and_retains_the_typed_error() {
     }
     let (ok, result) = echo_through_lua(&lua, envelope);
     assert!(!ok);
-    let Value::String(message) = result else {
-        panic!("expected a string message, got {result:?}");
-    };
-    assert_eq!(
-        message.to_str().expect("the message is UTF-8"),
-        "interrupted by Ctrl-C"
-    );
+    let (kind, message) = failure_parts(&lua, result);
+    assert_eq!(kind, "cancelled");
+    assert_eq!(message, "interrupted by Ctrl-C");
 }
 
 #[test]
@@ -345,14 +333,15 @@ fn an_err_loop_answer_round_trips_and_retains_the_typed_error() {
     }
     let (ok, result) = echo_through_lua(&lua, envelope);
     assert!(!ok);
-    let Value::String(message) = result else {
-        panic!("expected a string message, got {result:?}");
-    };
+    let reason: String = lua
+        .load("local err = ...; return err.reason")
+        .call(result.clone())
+        .expect("the exhaustion table carries its reason");
+    assert_eq!(reason, "precheck", "the kind's field rides beside it");
+    let (kind, message) = failure_parts(&lua, result);
+    assert_eq!(kind, "context_exhausted");
     assert!(
-        message
-            .to_str()
-            .expect("the message is UTF-8")
-            .starts_with("context exhausted: "),
+        message.starts_with("context exhausted: "),
         "the envelope carries the typed exhaustion's message"
     );
 }
@@ -411,11 +400,7 @@ fn an_err_user_input_answer_round_trips_and_retains_the_typed_error() {
     }
     let (ok, result) = echo_through_lua(&lua, envelope);
     assert!(!ok);
-    let Value::String(message) = result else {
-        panic!("expected a string message, got {result:?}");
-    };
-    assert_eq!(
-        message.to_str().expect("the message is UTF-8"),
-        "broker down"
-    );
+    let (kind, message) = failure_parts(&lua, result);
+    assert_eq!(kind, "lua");
+    assert_eq!(message, "broker down");
 }

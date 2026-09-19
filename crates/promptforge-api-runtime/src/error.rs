@@ -7,6 +7,8 @@
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
+use std::borrow::Cow;
+
 use promptforge_lua::Error as LuaError;
 use promptforge_model_client::Error as GatewayClientError;
 use promptforge_parser::Error as ParserError;
@@ -163,8 +165,11 @@ pub(crate) enum Error {
     #[error("{detail}")]
     #[non_exhaustive]
     EmptyModelReply {
-        /// Fixed phrase naming the empty product (and ignored reasoning).
-        detail: &'static str,
+        /// The phrase naming the empty product (and ignored reasoning): the
+        /// model client's fixed text when the client classified the turn,
+        /// or the message a Lua-side `empty_model_reply` raise carried, so
+        /// the error re-renders with the text the author saw.
+        detail: Cow<'static, str>,
         /// The choice's `finish_reason`, when the backend supplied one.
         finish_reason: Option<String>,
     },
@@ -491,7 +496,7 @@ impl From<GatewayClientError> for Error {
                 detail,
                 finish_reason,
             } => Error::EmptyModelReply {
-                detail,
+                detail: Cow::Borrowed(detail),
                 finish_reason,
             },
             GatewayClientError::ModelSetLock(message) => Error::Lua(message),
@@ -573,6 +578,102 @@ impl From<LuaError> for Error {
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
             LuaError::Internal(message) => Error::internal(message),
+            LuaError::Raised(raised) => Error::from_raised(raised),
+        }
+    }
+}
+
+impl Error {
+    /// Maps a structured error table that surfaced as a block's failure
+    /// onto the variant its kind names, so a Lua-side raise classifies as
+    /// the Rust-raised error it stands in for. A kind whose variant needs
+    /// structure the table does not carry (the tool-scope errors, the task
+    /// errors, `internal`) keeps its message as a Lua failure; those
+    /// classifications arrive with the shims that raise them.
+    fn from_raised(raised: promptforge_lua::Raised) -> Error {
+        match raised.kind {
+            promptforge_lua::ErrorKind::ToolLoopExhausted => Error::ToolLoopExhausted,
+            promptforge_lua::ErrorKind::ContextExhausted => match raised.overflow_reason() {
+                Some(reason) => Error::ContextExhausted { reason },
+                None => Error::Lua(raised.message),
+            },
+            promptforge_lua::ErrorKind::EmptyModelReply => Error::EmptyModelReply {
+                finish_reason: raised.fields.get("finish_reason").cloned(),
+                detail: Cow::Owned(raised.message),
+            },
+            promptforge_lua::ErrorKind::Cancelled => Error::Interrupted,
+            promptforge_lua::ErrorKind::Tool => Error::Tool {
+                message: raised.message.clone(),
+                source: Box::new(raised),
+            },
+            promptforge_lua::ErrorKind::OutOfScopeTool
+            | promptforge_lua::ErrorKind::UnboundTool
+            | promptforge_lua::ErrorKind::TaskNotOwned
+            | promptforge_lua::ErrorKind::TaskConsumed
+            | promptforge_lua::ErrorKind::TasksLive
+            | promptforge_lua::ErrorKind::Lua
+            | promptforge_lua::ErrorKind::Internal => Error::Lua(raised.message),
+        }
+    }
+}
+
+/// The substrate's rendering into the Lua error table: the kind an author
+/// branches on and the kind's fields. Host-side failures the author cannot
+/// act on (transport, backend, configuration, store, input) render as
+/// `internal`; every Lua-phase failure renders as `lua`.
+impl promptforge_lua::ErrorValue for Error {
+    fn kind(&self) -> promptforge_lua::ErrorKind {
+        use promptforge_lua::ErrorKind;
+        match self {
+            Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::LuaQuota { .. }
+            | Error::Substitution(_) => ErrorKind::Lua,
+            Error::ContextExhausted { .. } => ErrorKind::ContextExhausted,
+            Error::EmptyModelReply { .. } => ErrorKind::EmptyModelReply,
+            Error::Interrupted => ErrorKind::Cancelled,
+            Error::ToolLoopExhausted => ErrorKind::ToolLoopExhausted,
+            Error::OutOfScopeToolCall { .. } => ErrorKind::OutOfScopeTool,
+            Error::UnboundToolCall { .. } => ErrorKind::UnboundTool,
+            Error::Tool { .. } => ErrorKind::Tool,
+            Error::ParseFrontmatter { .. }
+            | Error::ParseStructured { .. }
+            | Error::MissingEnv(_)
+            | Error::InvalidEnv(_)
+            | Error::InvalidConfig(_)
+            | Error::Config { .. }
+            | Error::GatewayDisabled
+            | Error::Http(_)
+            | Error::Backend { .. }
+            | Error::MalformedResponse(_)
+            | Error::MalformedResponseSource { .. }
+            | Error::BackendBodyRead { .. }
+            | Error::BindSchema { .. }
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::RequirementsUnmet { .. }
+            | Error::Internal { .. }
+            | Error::Input { .. }
+            | Error::Store(_)
+            | Error::Determinism(_)
+            | Error::TimestampFormat(_) => ErrorKind::Internal,
+        }
+    }
+
+    fn fields(&self) -> Vec<(String, String)> {
+        match self {
+            Error::ContextExhausted { reason } => {
+                vec![("reason".to_owned(), reason.tag().to_owned())]
+            }
+            Error::EmptyModelReply {
+                finish_reason: Some(finish_reason),
+                ..
+            } => vec![("finish_reason".to_owned(), finish_reason.clone())],
+            Error::OutOfScopeToolCall { name, .. } | Error::UnboundToolCall { name, .. } => {
+                vec![("name".to_owned(), name.clone())]
+            }
+            _ => Vec::new(),
         }
     }
 }

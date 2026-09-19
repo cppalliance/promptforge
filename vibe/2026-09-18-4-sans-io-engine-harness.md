@@ -483,7 +483,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-9>
 
-### Step 9: Structured error values
+### Step 9: Structured error values [completed]
 
 - Component: Lua loop
 - Piece: vocabulary

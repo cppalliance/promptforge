@@ -77,6 +77,15 @@ fn echo_through_lua(lua: &Lua, envelope: MultiValue) -> (bool, Value) {
         .expect("the envelope round-trips through Lua")
 }
 
+/// Reads a failure envelope's payload as `(kind, tostring)`: every failure
+/// that reaches Lua is a `{ kind, message, ... }` table whose `tostring` is
+/// the message.
+fn failure_parts(lua: &Lua, result: Value) -> (String, String) {
+    lua.load("local err = ...; return err.kind, tostring(err)")
+        .call(result)
+        .expect("the failure table reads back through Lua")
+}
+
 /// Evaluates a Lua table constructor, so chat tests build author-shaped
 /// message and opts tables from the exact source an author would write.
 fn lua_table(lua: &Lua, source: &str) -> mlua::Table {

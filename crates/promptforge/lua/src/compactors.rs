@@ -41,7 +41,7 @@ pub enum OverflowReason {
 
 impl OverflowReason {
     /// Parses the invocation tag the compactor callback receives.
-    fn from_tag(tag: &str) -> Option<OverflowReason> {
+    pub(crate) fn from_tag(tag: &str) -> Option<OverflowReason> {
         match tag {
             "precheck" => Some(OverflowReason::Precheck),
             "provider" => Some(OverflowReason::Provider),
@@ -49,8 +49,10 @@ impl OverflowReason {
         }
     }
 
-    /// The invocation tag the compactor callback receives.
-    fn tag(self) -> &'static str {
+    /// The invocation tag the compactor callback receives, also the
+    /// `reason` field of a `context_exhausted` error table.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
         match self {
             OverflowReason::Precheck => "precheck",
             OverflowReason::Provider => "provider",
