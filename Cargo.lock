@@ -4684,6 +4684,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
+ "criterion",
  "mlua",
  "promptforge-api-types",
  "promptforge-lua",

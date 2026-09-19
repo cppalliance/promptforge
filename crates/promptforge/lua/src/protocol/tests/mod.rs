@@ -1,0 +1,92 @@
+//! Protocol tests: yield parsing, answer envelopes, and record rendering.
+//!
+//! The submodules follow the protocol's own split: `parse` the generic
+//! yield-to-request validation, `parse_chat` and `parse_loop` the
+//! message-list requests, `answer` the answer-to-envelope round trips, and
+//! `render` the record-to-table rendering. The helpers below are shared.
+
+use std::num::NonZeroU32;
+
+use mlua::{AnyUserData, Function, Lua, MultiValue, Value};
+use serde_json::json;
+
+use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
+use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
+
+use crate::{Error, LuaFanoutResult, LuaModelHandle};
+
+use super::*;
+
+fn test_binding() -> ModelBinding {
+    ModelBinding::new(
+        "fast",
+        "a fast model",
+        ModelId::from_validated("gateway", "test-model"),
+        ModelInvocation {
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+        },
+        NonZeroU32::new(4096).expect("4096 is non-zero"),
+    )
+}
+
+fn handle_userdata(lua: &Lua) -> AnyUserData {
+    lua.create_userdata(LuaModelHandle::from_binding(&test_binding()))
+        .expect("userdata creation cannot fail on a fresh VM")
+}
+
+fn request_table(lua: &Lua, op: &str) -> mlua::Table {
+    let table = lua.create_table().expect("table creation cannot fail");
+    table
+        .raw_set("op", op)
+        .expect("raw_set on a fresh table cannot fail");
+    table
+}
+
+fn set_var_snapshot(lua: &Lua, table: &mlua::Table) {
+    let var = lua.create_table().expect("table creation cannot fail");
+    var.raw_set("k", 1)
+        .expect("raw_set on a fresh table cannot fail");
+    table
+        .raw_set("var", var)
+        .expect("raw_set on a fresh table cannot fail");
+}
+
+fn assert_direct_yield(parse: YieldParse) {
+    match parse {
+        YieldParse::Malformed(Error::Lua(message)) => {
+            assert_eq!(message, "scripts may not yield directly");
+        }
+        other => panic!("expected the direct-yield Lua error, got {other:?}"),
+    }
+}
+
+fn expect_request(parse: YieldParse) -> Request {
+    match parse {
+        YieldParse::Request(request) => request,
+        other => panic!("expected a well-formed request, got {other:?}"),
+    }
+}
+
+fn echo_through_lua(lua: &Lua, envelope: MultiValue) -> (bool, Value) {
+    let echo: Function = lua
+        .create_function(|_, (ok, result): (bool, Value)| Ok((ok, result)))
+        .expect("echo function creation cannot fail");
+    echo.call::<(bool, Value)>(envelope)
+        .expect("the envelope round-trips through Lua")
+}
+
+/// Evaluates a Lua table constructor, so chat tests build author-shaped
+/// message and opts tables from the exact source an author would write.
+fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
+    lua.load(source)
+        .eval()
+        .expect("test table source evaluates")
+}
+
+mod answer;
+mod parse;
+mod parse_chat;
+mod parse_loop;
+mod render;
