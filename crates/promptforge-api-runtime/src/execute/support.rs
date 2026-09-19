@@ -1,7 +1,7 @@
 //! Cross-cutting run helpers: the turn counter, the checked timestamp, and
 //! the shared run constants.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::{Error, Result};
 
@@ -28,23 +28,15 @@ pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
         .saturating_add(1)
 }
 
-/// Hands out the next run-global execution id.
-///
-/// H1 keeps id 0, so the counter starts at 0 and the first section or fanout
-/// arm takes 1. Every section entry and every arm takes the next value, so
-/// entering the same section twice yields two ids. A u64 cannot wrap in any
-/// reachable run, so unlike [`advance_turn`] this needs no saturation.
-pub(crate) fn next_id(ids: &AtomicU64) -> u64 {
-    ids.fetch_add(1, Ordering::Relaxed) + 1
-}
-
 /// The `sys` JSON every engine driver builds for its section or arm: the six
 /// shared fields in one construction. A driver with an extra field (the
-/// fanout arm's `index`) inserts it at its own call site.
+/// fanout arm's `index`) inserts it at its own call site. `id` is the
+/// section entry's hierarchical id (the entering chain's id extended by its
+/// local entry counter), rendered as a dot-separated path.
 pub(crate) fn sys_json(
     when: &str,
     now: &str,
-    id: u64,
+    id: &str,
     section_name: &str,
     execution: &str,
     section_count: usize,

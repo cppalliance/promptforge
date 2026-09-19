@@ -1,27 +1,27 @@
 //! The section walk: sections run in fall-through order, `var` rolls
-//! forward across sections and jumps, every section entry takes the next
-//! run-global id, and a jump transfers control - a sibling move within the
-//! chain's slice, or a descent into the jumper's child slice with the
-//! parent position suspended on the chain's own position stack until the
-//! child level exhausts. A prompt with H1 blocks runs them first as
-//! section 0: the driver loop's first chain, under the walk's rules with
-//! three deltas - the frame keeps id 0, a scalar return short-circuits the
-//! run, and a Lua failure is the prompt's failed hard gate, mapped to
-//! [`Error::RequirementsUnmet`] - with the root walk starting from the H1
-//! `var` hand-off.
+//! forward across sections and jumps, every section entry takes the
+//! chain's next entry id (the chain's hierarchical id extended by its
+//! local entry counter), and a jump transfers control - a sibling move
+//! within the chain's slice, or a descent into the jumper's child slice
+//! with the parent position suspended on the chain's own position stack
+//! until the child level exhausts. A prompt with H1 blocks runs them first
+//! as section 0 (the `h1` module), and the root walk starts from that
+//! pass's `var` hand-off as the same root chain; a prompt without H1
+//! blocks starts the root walk directly.
 
 use std::sync::Arc;
+
+use promptforge_api_types::ids::ChainId;
 
 use crate::execute::engine::{
     JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
 };
 use crate::execute::section_context::SectionContext;
-use crate::execute::support::{GENERIC_COMPLETION, next_id, now_rfc3339_checked};
 use crate::fanout;
 use crate::parser::{Block, Section};
 use crate::{Error, Result};
 
-use super::{Chain, ChainId, Scheduler, prompt_origin};
+use super::{Chain, ChainIndex, Counters, Scheduler, prompt_origin};
 
 /// A heading resolved against a chain's visible set: the slice the walk or
 /// a contained chain continues on, the target's index in it, and whether
@@ -91,19 +91,34 @@ fn resolve_arm_target<'a>(
 }
 
 impl<'a> Scheduler<'a> {
-    /// Starts the root walk chain over `sections`, seeded with the H1
-    /// pass's hand-off `var` (empty when the drive has no H1 phase), and
-    /// enqueues it.
+    /// Starts the root walk chain over `sections` when the prompt has no
+    /// H1 blocks, seeded with an empty `var`, and enqueues it. The walk is
+    /// the root chain `0`; its entry 0 stays reserved for the H1 pass the
+    /// prompt does not have, so the first walked section is `0.1` exactly
+    /// as on a prompt whose pass ran.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
     /// or [`Error::Store`] when the backend refuses acquisition.
-    pub(super) fn start_root_walk(
-        &mut self,
-        sections: &'a [Section],
-        var: &serde_json::Value,
-    ) -> Result<()> {
-        let root = self.start_chain(self.ctx.clone(), sections, 0, None, var, 0, None)?;
+    pub(super) fn start_root_walk(&mut self, sections: &'a [Section]) -> Result<()> {
+        // The pass the prompt does not have would have taken root entry 0
+        // and started no child, so the walk continues from the counters
+        // it would have left.
+        let after_h1 = Counters {
+            next_child: 0,
+            next_entry: 1,
+        };
+        let root = self.start_chain(
+            ChainId::root(),
+            after_h1,
+            self.ctx.clone(),
+            sections,
+            0,
+            None,
+            &serde_json::json!({}),
+            0,
+            None,
+        )?;
         self.install_root_slots(root)?;
         self.ready.push_back(root);
         Ok(())
@@ -119,7 +134,7 @@ impl<'a> Scheduler<'a> {
     ///
     /// # Errors
     /// Returns [`Error::Store`] when the backend refuses acquisition.
-    fn install_root_slots(&mut self, root: ChainId) -> Result<()> {
+    pub(super) fn install_root_slots(&mut self, root: ChainIndex) -> Result<()> {
         // The walk capability serves every section in turn, so its label
         // is the prompt's own; the line is where the walk starts.
         let prompt = self.ctx.prompt();
@@ -134,124 +149,23 @@ impl<'a> Scheduler<'a> {
         Ok(())
     }
 
-    /// Starts the H1 pass as the driver loop's first chain: the prompt's
-    /// H1 blocks under its title - section 0 - driven through the same
-    /// coroutine machinery as any section.
+    /// Hands out the chain's next section-entry id: its hierarchical id
+    /// extended by the local entry counter, the value the entered section
+    /// reads as `sys.id`.
     ///
     /// # Errors
-    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
-    /// or [`Error::Store`] when the backend refuses acquisition.
-    pub(super) fn start_live_h1(&mut self) -> Result<ChainId> {
-        let id = ChainId(
-            u32::try_from(self.chains.len())
-                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
-        );
-        // The pass owns its client slot, seeded from the run's configured
-        // client, exactly as the legacy pass seeds its own.
-        let client = self.client.ready().cloned();
-        // The live H1 pass runs under the prompt's title, from its first
-        // compiled H1 chunk.
-        let origin = prompt_origin(
-            self.ctx.prompt(),
-            self.ctx.prompt().title(),
-            self.ctx.prompt().h1_blocks(),
-        );
-        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
-        self.chains.push(Chain {
-            ctx: self.ctx.clone(),
-            access: Some(Arc::new(access)),
-            frame: None,
-            slice: &[],
-            index: 0,
-            positions: Vec::new(),
-            block: 0,
-            coroutine: None,
-            incoming: None,
-            pending_prose: None,
-            var: serde_json::json!({}),
-            call_depth: 0,
-            client,
-            parent: None,
-            advertised: None,
-            arm: None,
-            h1: Some(self.ctx.prompt().h1_blocks()),
-        });
-        Ok(id)
-    }
-
-    /// Ends the H1 pass at its fall-through: the final `var` read back
-    /// while the VM is live, then the frame drops unarmed - the
-    /// pass never arms completion, so `SECTION_FINISHED` never fires for
-    /// it. The root walk then starts from the `var` hand-off at section
-    /// `start` (0 on a fall-through, the resolved target on a jump out)
-    /// under the walk's own context fork; with no sections the run's
-    /// result is the shared generic completion.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the final `var` read-back fails or H1
-    /// left `argv` as non-JSON data,
-    /// [`Error::TimestampFormat`] when the walk's `when` fails to format,
-    /// [`Error::Store`] when the backend refuses the walk's acquisition,
-    /// or [`Error::Internal`] when the chain holds no frame.
-    pub(super) fn end_live_h1(
-        &mut self,
-        id: ChainId,
-        root_result: &mut Option<Result<String>>,
-        start: usize,
-    ) -> Result<()> {
-        let chain = &mut self.chains[id.index()];
-        let Some(mut frame) = chain.frame.take() else {
-            return Err(Error::internal("the H1 pass ends with a live frame"));
-        };
-        let var = frame.read_var()?;
-        // The freeze: whatever `argv` H1 leaves behind - the derived parse
-        // or its repair - is what every walked section inherits, frozen.
-        let argv = frame.read_argv()?;
-        drop(frame);
-        // The pass's chain ends here: release its capability (and with it
-        // the identity's claims) before the walk acquires its own.
-        chain.access = None;
-        let sections = self.ctx.prompt().sections();
-        if sections.is_empty() {
-            *root_result = Some(Ok(GENERIC_COMPLETION.to_owned()));
-            return Ok(());
-        }
-        // The H1-to-walk handoff: the walk's context takes its live `when`
-        // and the frozen `argv`; H1's prompt-wide records already landed in
-        // the shared sets the views read.
-        let when = now_rfc3339_checked()?;
-        let walk_ctx = self.ctx.with_walk_state(&when, argv);
-        let root = self.start_chain(walk_ctx, sections, start, None, &var, 0, None)?;
-        self.install_root_slots(root)?;
-        self.ready.push_back(root);
-        Ok(())
-    }
-
-    /// Ends the H1 pass on a jump out: the heading resolves against the
-    /// top-level sections (H1's visible set - section 0 excludes nothing
-    /// and has no children), then the pass ends and the root walk starts
-    /// at the target.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] when the heading is malformed, matches no
-    /// top-level section, or matches more than one; the pass's own ending
-    /// can fail as [`end_live_h1`](Self::end_live_h1) documents.
-    pub(super) fn end_live_h1_at_jump(
-        &mut self,
-        id: ChainId,
-        heading: &str,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let sections = self.ctx.prompt().sections();
-        let target = fanout::resolve_sibling(heading, sections)?;
-        let start = section_position(sections, target).ok_or(Error::internal(
-            "a resolved H1 jump target is absent from the top-level slice",
-        ))?;
-        self.end_live_h1(id, root_result, start)
+    /// Returns [`Error::Internal`] when one chain has entered `u32::MAX`
+    /// sections, which no reachable run does.
+    fn next_entry_id(chain: &mut Chain<'a>) -> Result<String> {
+        let index = chain.counters.next_entry;
+        chain.counters.next_entry = index
+            .checked_add(1)
+            .ok_or(Error::internal("a chain's entry count cannot exceed u32"))?;
+        Ok(chain.lineage.entry(index))
     }
 
     /// Enters the chain's next section and reports whether one was entered:
-    /// constructs the frame with the next run-global id, seeded from
+    /// constructs the frame with the chain's next entry id, seeded from
     /// the chain's `var` and client slots. The pending Markdown buffer
     /// resets: a previous section's unconsumed prose never crosses the
     /// boundary. `Ok(false)` means the
@@ -260,15 +174,16 @@ impl<'a> Scheduler<'a> {
     /// # Errors
     /// Returns the [`Error`] of frame construction, as documented on
     /// [`SectionContext::new`].
-    fn enter_section(&mut self, id: ChainId) -> Result<bool> {
+    fn enter_section(&mut self, id: ChainIndex) -> Result<bool> {
         let chain = &mut self.chains[id.index()];
         chain.pending_prose = None;
         if chain.h1.is_some() {
             // The H1 pass enters its frame exactly once: section 0 under
             // the prompt's title, through the same install path as any
             // section - and no SECTION_STARTED, the pass is not a walked
-            // section.
-            let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?)?;
+            // section. Its id is the root chain's entry 0.
+            let section_id = Self::next_entry_id(chain)?;
+            let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?, &section_id)?;
             chain.frame = Some(frame);
             chain.block = 0;
             return Ok(true);
@@ -287,11 +202,13 @@ impl<'a> Scheduler<'a> {
             let worker = &worker_slice[worker_index];
             let caller = &caller_slice[caller_index];
             let home = home_without(&visible_sections(caller_slice, caller), worker);
+            let section_id = Self::next_entry_id(chain)?;
             let frame = SectionContext::new_fanout_arm(
                 &chain.ctx,
                 chain.access()?,
                 worker,
                 &home,
+                &section_id,
                 item_index,
                 item,
                 &chain.var,
@@ -307,12 +224,13 @@ impl<'a> Scheduler<'a> {
         // `slice` borrows the prompt tree, not the arena, so the frame
         // construction can borrow the chain's own context and slots.
         let slice = chain.slice;
+        let section_id = Self::next_entry_id(chain)?;
         let frame = SectionContext::new(
             &chain.ctx,
             chain.access()?,
             &slice[index],
             slice,
-            next_id(chain.ctx.ids()),
+            &section_id,
             &chain.var,
         )?;
         chain.frame = Some(frame);
@@ -328,7 +246,7 @@ impl<'a> Scheduler<'a> {
     /// [`SectionContext::new`].
     pub(super) fn advance_entry(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
         if self.enter_section(id)? {
@@ -349,7 +267,7 @@ impl<'a> Scheduler<'a> {
     /// position - meaning its own root slice exhausted and the chain ends.
     /// The `var` slot needs no handling: the child walk shared
     /// it, so it already carries the child level's last value.
-    fn pop_position(&mut self, id: ChainId) -> bool {
+    fn pop_position(&mut self, id: ChainIndex) -> bool {
         let chain = &mut self.chains[id.index()];
         let Some((slice, jumper)) = chain.positions.pop() else {
             return false;
@@ -369,7 +287,7 @@ impl<'a> Scheduler<'a> {
     /// Returns [`Error::Lua`] when the final `var` read-back fails (the
     /// frame drops unarmed, as on the legacy path), or
     /// [`Error::Internal`] when the chain holds no frame.
-    pub(super) fn end_section(&mut self, id: ChainId) -> Result<()> {
+    pub(super) fn end_section(&mut self, id: ChainIndex) -> Result<()> {
         let chain = &mut self.chains[id.index()];
         let Some(mut frame) = chain.frame.take() else {
             return Err(Error::internal("a section end implies a live frame"));
@@ -401,7 +319,7 @@ impl<'a> Scheduler<'a> {
     /// matches no visible section or more than one - the jumper's frame has
     /// already closed as completed, exactly as the legacy walk resolves
     /// after the jumper's teardown.
-    pub(super) fn apply_jump(&mut self, id: ChainId, heading: &str) -> Result<()> {
+    pub(super) fn apply_jump(&mut self, id: ChainIndex, heading: &str) -> Result<()> {
         let (slice, index) = {
             let chain = &mut self.chains[id.index()];
             let Some(mut frame) = chain.frame.take() else {
@@ -442,7 +360,7 @@ impl<'a> Scheduler<'a> {
     /// [`fanout::resolve_sibling`]).
     pub(super) fn resolve_chain_target(
         &self,
-        id: ChainId,
+        id: ChainIndex,
         heading: &str,
     ) -> Result<ChainTarget<'a>> {
         let chain = &self.chains[id.index()];

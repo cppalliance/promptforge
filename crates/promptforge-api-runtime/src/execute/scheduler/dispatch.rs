@@ -17,7 +17,7 @@ use crate::observe::{Observation, detail};
 use crate::store::{Store, StoreError};
 use crate::{Error, Result};
 
-use super::{Arrival, ChainId, RequestId, Scheduler};
+use super::{Arrival, ChainIndex, Counters, RequestId, Scheduler};
 
 /// The error for an alias that names no binding in the run's tool catalog:
 /// the name and every bound alias, so the message reads required versus
@@ -79,7 +79,7 @@ impl Scheduler<'_> {
     /// Returns the typed protocol error for a received `mcp` request, which
     /// no call surface produces yet, or the store arm's error when the
     /// chain's access capability is gone.
-    pub(super) fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
+    pub(super) fn dispatch(&mut self, id: ChainIndex, request: Request) -> Result<()> {
         match request {
             Request::Infer { prompt, binding } => {
                 self.dispatch_infer(id, prompt, binding);
@@ -124,7 +124,7 @@ impl Scheduler<'_> {
     /// parks the chain in the pending table. A resolution failure is the
     /// call's answer, resumed into the caller so an author `pcall` can catch
     /// it exactly as on the legacy callback path.
-    fn dispatch_infer(&mut self, id: ChainId, prompt: String, binding: Option<ModelBinding>) {
+    fn dispatch_infer(&mut self, id: ChainIndex, prompt: String, binding: Option<ModelBinding>) {
         match self.prepare_infer(id, prompt, binding) {
             Ok((request_id, task)) => {
                 self.io_tasks.insert(request_id, task);
@@ -142,7 +142,7 @@ impl Scheduler<'_> {
     /// client resolution, and the spawned round.
     fn prepare_infer(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         prompt: String,
         binding: Option<ModelBinding>,
     ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
@@ -204,7 +204,7 @@ impl Scheduler<'_> {
     /// sentence with `available` false. The wait and a delivered response
     /// are recorded through the run's observer; an unavailable answer opens
     /// no wait and records no input.
-    fn dispatch_user_input(&mut self, id: ChainId) {
+    fn dispatch_user_input(&mut self, id: ChainIndex) {
         let chain = &self.chains[id.index()];
         let Some(broker) = chain.ctx.input_broker().cloned() else {
             self.chains[id.index()].incoming = Some(Answer::UserInput(Ok(UserInputOutcome {
@@ -257,7 +257,7 @@ impl Scheduler<'_> {
     /// # Errors
     /// Returns [`Error::Internal`] when the live chain's access capability
     /// is gone, which only the chain-end paths take.
-    fn dispatch_store(&mut self, id: ChainId, op: StoreOp) -> Result<()> {
+    fn dispatch_store(&mut self, id: ChainIndex, op: StoreOp) -> Result<()> {
         let chain = &self.chains[id.index()];
         let access = Arc::clone(chain.access()?);
         let observer = Arc::clone(chain.ctx.observer());
@@ -308,7 +308,7 @@ impl Scheduler<'_> {
     /// catch it exactly as on the legacy callback path.
     fn dispatch_call(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         target: &str,
         input: Option<&str>,
         var: &serde_json::Value,
@@ -331,11 +331,11 @@ impl Scheduler<'_> {
     /// deeper under the call's args and `var` snapshot.
     fn prepare_call(
         &mut self,
-        id: ChainId,
+        id: ChainIndex,
         target: &str,
         input: Option<&str>,
         var: &serde_json::Value,
-    ) -> Result<ChainId> {
+    ) -> Result<ChainIndex> {
         let chain = &self.chains[id.index()];
         let depth = chain.call_depth + 1;
         if depth > MAX_CALL_DEPTH {
@@ -359,7 +359,13 @@ impl Scheduler<'_> {
         // `chain`'s arena borrow ends here; the resolution borrows the
         // prompt tree, so the target's slice outlives it.
         let target_section = self.resolve_chain_target(id, target)?;
+        // The child's id is the caller's next child index: `call` children
+        // and spawned arms share the caller's counter, so the id depends
+        // only on the caller's own dispatch order.
+        let chain_id = self.allocate_child_id(id)?;
         let child = self.start_chain(
+            chain_id,
+            Counters::default(),
             child_ctx,
             target_section.slice,
             target_section.index,

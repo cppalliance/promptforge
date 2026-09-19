@@ -26,18 +26,21 @@
 //! layer.
 //!
 //! This file carries the scheduler core: the chain record and arena, the
-//! ready queue, the pending table, the call stack, and the driver loop.
-//! The submodules carry the rest: `chain` the chain lifecycle (arena
-//! insertion and the two chain-end paths), `step` one chain's step to its
-//! next suspension point, `walk` the section walk rules, `dispatch` the
-//! request arms, `chat` the one-round `chat` arm and its answer
-//! application, `tool_call` the script and model-issued `tool_call` arm
-//! (the two arms the section-visible `models.loop` shim drives), and
-//! `tasks` the fanout join tables and arm bookkeeping.
+//! ready queue, the pending table, and the call stack. The submodules
+//! carry the rest: `drive` the driver loop, `chain` the chain lifecycle
+//! (arena insertion and the two chain-end paths), `step` one chain's step
+//! to its next suspension point, `walk` the section walk rules, `h1` the
+//! live H1 pass and its hand-off to the walk, `dispatch` the request arms,
+//! `chat` the one-round `chat` arm and its answer application, `tool_call`
+//! the script and model-issued `tool_call` arm (the two arms the
+//! section-visible `models.loop` shim drives), and `tasks` the fanout join
+//! tables and arm bookkeeping.
 
 mod chain;
 mod chat;
 mod dispatch;
+mod drive;
+mod h1;
 mod step;
 mod tasks;
 mod tool_call;
@@ -47,6 +50,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use mlua::Thread;
+use promptforge_api_types::ids::ChainId;
 use shared_vfs::Origin;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -54,14 +58,13 @@ use tokio::task::JoinHandle;
 use crate::client::{Completion, GatewayClient};
 use crate::parser::{Block, Prompt, Section};
 use crate::store::Access;
-use crate::{Error, Result, cancel};
+use crate::{Error, Result};
 
 use super::context::RunState;
 use super::gateway::GatewaySource;
 use super::protocol::Answer;
 use super::scope::DispatchTarget;
 use super::section_context::SectionContext;
-use super::support::GENERIC_COMPLETION;
 use tasks::{ArmState, FanoutId, JoinState};
 
 /// Run-global monotonic id of an in-flight leaf request.
@@ -102,16 +105,33 @@ fn prompt_origin(prompt: &Prompt, label: &str, blocks: &[Block]) -> Origin {
     Origin::at(label, prompt.title(), first_chunk_line(blocks))
 }
 
-/// Arena index of a chain: ids, not references, so no chain ever holds a
-/// pointer to another.
+/// Arena index of a chain: indices, not references, so no chain ever holds
+/// a pointer to another. The index is the scheduler's private handle; the
+/// chain's identity for authors and hosts is its hierarchical
+/// [`ChainId`], which never depends on arena order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct ChainId(u32);
+struct ChainIndex(u32);
 
-impl ChainId {
+impl ChainIndex {
     /// The arena index as a `usize`.
     fn index(self) -> usize {
         self.0 as usize
     }
+}
+
+/// A chain's local id counters: the indices its next child chain and its
+/// next section entry take under its lineage. Set once at chain start:
+/// zero for a fresh chain (`Default`), or the values the chain continues
+/// from when it carries on an earlier chain's identity (the walk after
+/// the H1 pass).
+#[derive(Clone, Copy, Debug, Default)]
+struct Counters {
+    /// The next index a `call` child or a spawned arm takes under the
+    /// chain's lineage. The two share the counter.
+    next_child: u32,
+    /// The next index a section entry takes under the chain's lineage as
+    /// its `sys.id`.
+    next_entry: u32,
 }
 
 /// One chain: a contained line of section execution, the scheduler's
@@ -125,6 +145,18 @@ impl ChainId {
 /// one frame; the fall-through advance tears the old frame down and the
 /// next entry constructs the next.
 struct Chain<'a> {
+    /// The chain's hierarchical id: the parent chain's id extended by the
+    /// parent's local child counter (the root chain, the main walk, is
+    /// `0`; the H1 pass and the walk that follows it are the same chain).
+    /// Every id the chain hands out - its children's, its section
+    /// entries' - extends this path, so two runs of one prompt allocate
+    /// identical ids however their chains interleave.
+    lineage: ChainId,
+    /// The chain's local child and entry counters under `lineage`. The
+    /// root chain's entry 0 is the H1 pass (section 0), consumed whether
+    /// or not the prompt has H1 blocks, so the first walked section is
+    /// always `0.1`.
+    counters: Counters,
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for a call chain's input override.
     ctx: RunState,
@@ -184,7 +216,7 @@ struct Chain<'a> {
     /// construction error surfaces at first use rather than being swallowed.
     client: Option<GatewayClient>,
     /// The call parent blocked on this chain, if any.
-    parent: Option<ChainId>,
+    parent: Option<ChainIndex>,
     /// The tool scope the chain's last `chat` round advertised, keyed by
     /// alias: the round's answer is checked against it, so a tool name the
     /// model invents or reaches for outside the scope fails as out of
@@ -244,16 +276,16 @@ pub(crate) struct Scheduler<'a> {
     /// The ambient run context, borrowed by chain steps and forked by
     /// call chains.
     ctx: &'a RunState,
-    /// The chain arena: append-only, indexed by [`ChainId`].
+    /// The chain arena: append-only, indexed by [`ChainIndex`].
     chains: Vec<Chain<'a>>,
     /// The call-nesting chain stack (LIFO): a call dispatch pushes
     /// the child, the child's finish pops it.
-    stack: Vec<ChainId>,
+    stack: Vec<ChainIndex>,
     /// Chains eligible to resume (FIFO); the driver drains it before
     /// awaiting anything.
-    ready: VecDeque<ChainId>,
+    ready: VecDeque<ChainIndex>,
     /// One entry per in-flight leaf request, mapping it to the parked chain.
-    pending: HashMap<RequestId, ChainId>,
+    pending: HashMap<RequestId, ChainIndex>,
     /// One join state per live fanout.
     joins: HashMap<FanoutId, JoinState<'a>>,
     /// The send half every spawned leaf task posts its answer to. The
@@ -291,22 +323,6 @@ pub(crate) struct Scheduler<'a> {
     /// The run's gateway source: chains resolve their client slot through
     /// it on first inference.
     client: GatewaySource,
-}
-
-/// Aborts every in-flight leaf task when the driver future is dropped
-/// mid-suspension - a host tearing the run down without polling it to a
-/// terminal state. Dropping a bare `JoinHandle` detaches the task, which
-/// would strand a broker wait or gateway round forever (a session close
-/// would leak its pending input wait and never emit `input_cancelled`),
-/// so the drop path applies the same abort the cancellation path does.
-/// The claims-release join in [`Self::drain_io_tasks`] is unnecessary
-/// here: a dropped run delivers no result.
-impl Drop for Scheduler<'_> {
-    fn drop(&mut self) {
-        for handle in self.io_tasks.values() {
-            handle.abort();
-        }
-    }
 }
 
 impl<'a> Scheduler<'a> {
@@ -354,155 +370,5 @@ impl<'a> Scheduler<'a> {
         self.answer_tx
             .send((RequestId(request), Arrival::Answer(answer)))
             .expect("the scheduler holds its own receiver");
-    }
-
-    /// Drives the run until it ends and returns the run's result: the H1
-    /// pass first when the prompt has H1 blocks, then the root chain over
-    /// the prompt's sections.
-    ///
-    /// Leaf dispatch spawns plain tasks (not `spawn_local`): an infer task
-    /// touches no scheduler state and no Lua value - it awaits one gateway
-    /// round and posts the answer to the channel - so the driver future
-    /// stays `Send` and a caller may spawn the run onto a multi-thread
-    /// runtime. On a current-thread runtime the spawned tasks run on that
-    /// one thread anyway.
-    ///
-    /// # Errors
-    /// Returns the [`Error`] of whichever step failed: frame construction,
-    /// a Lua block, or a dispatched request's answer.
-    /// Returns [`Error::Interrupted`] when the run's cancellation handle is
-    /// signaled while chains are running or suspended.
-    pub(crate) async fn drive(&mut self) -> Result<String> {
-        let result = self.drive_inner().await;
-        self.drain_io_tasks().await;
-        result
-    }
-
-    /// Claims-release ordering constraint: the run's result - success,
-    /// determinism failure, or cancellation alike - must not be delivered
-    /// while an in-flight leaf op still holds its access clone. A store
-    /// op runs on the blocking pool, where aborting the task detaches
-    /// rather than interrupts, so an abandoned op would release its
-    /// identity's claims only when the closure finishes - past the run's
-    /// end, where a fresh access could meet the lingering claim. Abort
-    /// every task still recorded (prompt for an async task, a no-op for
-    /// a blocking op already running, which runs to completion), then
-    /// await each handle: the join resolves only once the op's access
-    /// clone - and with it the identity's claims - is gone. This changes
-    /// when claims release, never what an operation does.
-    async fn drain_io_tasks(&mut self) {
-        let tasks = std::mem::take(&mut self.io_tasks);
-        for task in tasks.values() {
-            task.abort();
-        }
-        for (_, task) in tasks {
-            let _ = task.await;
-        }
-    }
-
-    async fn drive_inner(&mut self) -> Result<String> {
-        // The H1 pass runs when the prompt has H1 blocks; an H1-less prompt
-        // goes straight to the walk, so its shared library never pays for a
-        // throwaway section-0 replay.
-        if self.ctx.prompt().h1_blocks().is_empty() {
-            let sections = self.ctx.prompt().sections();
-            if sections.is_empty() {
-                return Ok(GENERIC_COMPLETION.to_owned());
-            }
-            self.start_root_walk(sections, &serde_json::json!({}))?;
-        } else {
-            let h1 = self.start_live_h1()?;
-            self.ready.push_back(h1);
-        }
-        let mut root_result = None;
-        loop {
-            while let Some(id) = self.ready.pop_front() {
-                // Cancellation between steps: the instruction hook covers
-                // running Lua and the select below covers suspension, but a
-                // run whose chains never suspend on I/O would otherwise
-                // finish without ever observing the handle - the legacy
-                // fanout driver's select loop observed it at arm
-                // boundaries.
-                if cancel::is_cancelled() {
-                    return Err(Error::Interrupted);
-                }
-                if let Err(error) = self.step(id, &mut root_result).await {
-                    self.finish(id, Err(error), &mut root_result);
-                }
-                if let Some(result) = root_result.take() {
-                    return result;
-                }
-            }
-            // Every unfinished chain is ready, pending on I/O, or blocked on
-            // a child that transitively bottoms out in a ready or pending
-            // chain, so an empty ready queue with an empty pending table can
-            // only be a driver bug - fail loudly rather than hang.
-            if self.pending.is_empty() {
-                return Err(Error::internal(
-                    "the scheduler stalled with no ready chain and no in-flight request",
-                ));
-            }
-            tokio::select! {
-                biased;
-                // Cancellation while suspended: abort the in-flight leaf
-                // tasks and fail the run. The suspended chains' frames drop
-                // unarmed with the scheduler - the same outcome as the
-                // hook-driven path while running - and each fanout arm's
-                // finalizer drop reports its FANOUT_ARM_CANCELLED terminal
-                // observation, so the exactly-once terminal contract holds
-                // on this path too.
-                () = cancel::wait_cancelled() => {
-                    for handle in self.io_tasks.values() {
-                        handle.abort();
-                    }
-                    return Err(Error::Interrupted);
-                }
-                arrival = self.answers.recv() => {
-                    let Some((request_id, arrival)) = arrival else {
-                        return Err(Error::internal(
-                            "the answer channel cannot close while the scheduler holds its sender",
-                        ));
-                    };
-                    self.io_tasks.remove(&request_id);
-                    let Some(chain_id) = self.pending.remove(&request_id) else {
-                        // A late answer from an I/O task whose chain was
-                        // already aborted (a fatal sibling's fanout abort
-                        // races a task that sent before the abort landed):
-                        // the abort recorded the request id, so the answer
-                        // is moot. Any other unknown id means the driver
-                        // dropped a pending entry early - answer loss that
-                        // must fail loudly, not pass silently.
-                        if self.aborted_requests.remove(&request_id) {
-                            continue;
-                        }
-                        return Err(Error::internal(
-                            "an answer arrived for a request with no pending entry and no recorded abort",
-                        ));
-                    };
-                    // A chat round's completion becomes its answer here, on
-                    // the driver thread: the round's events fire against the
-                    // chain's own reporting handles and the tool calls are
-                    // checked against the scope the chain advertised.
-                    let answer = match arrival {
-                        Arrival::Answer(answer) => answer,
-                        Arrival::Chat(result) => self.accept_chat(chain_id, result)?,
-                    };
-                    match answer {
-                        // A claims-model conflict is fatal: the run ends on
-                        // the spot with the determinism violation rather
-                        // than resuming it into Lua, where an author
-                        // `pcall` could catch it. The suspended chains drop
-                        // unarmed with the scheduler, each fanout arm's
-                        // finalizer reporting its cancelled terminal
-                        // observation, exactly as on the cancellation path.
-                        Answer::Store(Err(error @ Error::Determinism(_))) => return Err(error),
-                        answer => {
-                            self.chains[chain_id.index()].incoming = Some(answer);
-                            self.ready.push_back(chain_id);
-                        }
-                    }
-                }
-            }
-        }
     }
 }
