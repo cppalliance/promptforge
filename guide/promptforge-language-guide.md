@@ -220,9 +220,9 @@ The executor reads the value back when the H1 pass completes, and every later se
 
 ## sys: runtime metadata
 
-Every section receives a `sys` JSON value carrying `when`, `now`, `id`, `section_name`, `execution`, and `section_count`.
+Every section receives a `sys` JSON value carrying `when`, `id`, `section_name`, `execution`, and `section_count`.
 
-The `sys.when` and `sys.now` values are the current UTC time formatted as RFC 3339 strings. The `when` value is stamped once at the walk's start, so every section agrees on when the run began, while `now` is fresh at each read.
+The `sys.when` value is the run's start time as a UTC RFC 3339 string. The host stamps it once when the run begins, so every section agrees on when the run began, and two runs given the same start time read the same value.
 
 The `sys.id` value is a hierarchical id rendered as a dot-separated path: the running chain's id followed by the entry's position in that chain. The main walk is chain `0`, so the H1 pass is `0.0` and the walked sections are `0.1`, `0.2`, and so on; a `call` child or a fanout arm is a child chain of its caller (`0.0`, `0.1`, ...) whose entries nest under it (`0.0.0`, `0.0.1`, ...). Every entry's id is unique within a run, so entering the same section twice yields two distinct ids, and two runs of the same prompt with the same inputs yield the same ids.
 

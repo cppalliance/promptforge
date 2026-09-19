@@ -80,7 +80,7 @@ fn windowed_context(prompt: &Prompt, window: usize, observer: Arc<dyn Observer>)
     scheduler_context_from(
         prompt,
         &TestStore::new(),
-        &RunContext::new(EXECUTION)
+        &test_context(EXECUTION)
             .limits(
                 RunLimits::new().max_fanout_concurrency(
                     NonZeroUsize::new(window).expect("the window is non-zero"),

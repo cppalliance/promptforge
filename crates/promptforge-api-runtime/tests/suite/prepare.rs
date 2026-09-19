@@ -12,9 +12,7 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use promptforge_api_runtime::capabilities::CapabilityRegistry;
-use promptforge_api_runtime::execute::{
-    Environment, RequirementCheck, RunContext, RunErrorKind, RunResult,
-};
+use promptforge_api_runtime::execute::{Environment, RequirementCheck, RunErrorKind, RunResult};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_types::cancel::sync::CancelHandle;
 use promptforge_api_types::capabilities::{
@@ -24,6 +22,8 @@ use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::NullObserver;
 use promptforge_api_types::tools::{Tool, ToolError, ToolId, ToolOutput};
 use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
+
+use super::support::context;
 
 /// A prompt declaring `promptforge/web` as a required capability.
 const DECLARES_REQUIRED: &str = concat!(
@@ -205,7 +205,7 @@ impl Drop for TempDir {
 fn a_missing_required_capability_is_reported() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     let env = Environment::new();
-    let (_ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-missing"));
+    let (_ctx, requirements) = env.prepare(&prompt, context("prepare-missing"));
     assert!(requirements.unmet_requirements.is_empty());
     assert_eq!(
         requirements.missing_required,
@@ -219,7 +219,7 @@ fn an_absent_optional_capability_is_skipped_and_logged() {
     let prompt = parse(DECLARES_OPTIONAL, "declares-optional");
     let env = Environment::new();
     let logs = captured_logs(|| {
-        let (_ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-optional"));
+        let (_ctx, requirements) = env.prepare(&prompt, context("prepare-optional"));
         assert!(requirements.missing_required.is_empty());
         assert!(requirements.is_satisfied());
     });
@@ -237,10 +237,8 @@ fn activation_receives_the_runs_own_services() {
     registry.register(fixture).expect("the fixture registers");
     let env = Environment::new().registry(registry);
     let cancel = CancelHandle::new();
-    let (ctx, requirements) = env.prepare(
-        &prompt,
-        RunContext::new("prepare-services").cancel(cancel.clone()),
-    );
+    let (ctx, requirements) =
+        env.prepare(&prompt, context("prepare-services").cancel(cancel.clone()));
     assert!(requirements.is_satisfied());
     // The host-supplied cancellation handle reached `create` unchanged.
     let activations = activations.lock().expect("the lock is not poisoned");
@@ -277,7 +275,7 @@ fn a_required_activation_failure_is_logged_and_reported() {
         // A present-but-failing required capability leaves the run
         // without something the prompt declared: it is reported like an
         // absent one, and the failure is also a log line.
-        let (_ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-failing"));
+        let (_ctx, requirements) = env.prepare(&prompt, context("prepare-failing"));
         assert_eq!(
             requirements.missing_required,
             [CapabilityId::parse("promptforge/web").expect("the id is valid")]
@@ -300,7 +298,7 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
     let logs = captured_logs(|| {
         // An optional capability that fails to activate is only a log
         // line: the prompt declared it could run without.
-        let (_ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-failing"));
+        let (_ctx, requirements) = env.prepare(&prompt, context("prepare-failing"));
         assert!(requirements.is_satisfied());
     });
     assert!(
@@ -313,8 +311,8 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
 fn two_runs_writing_the_same_store_path_do_not_conflict() {
     let prompt = parse(DECLARES_NOTHING, "declares-nothing");
     let env = Environment::new();
-    let (ctx_a, _) = env.prepare(&prompt, RunContext::new("run-a"));
-    let (ctx_b, _) = env.prepare(&prompt, RunContext::new("run-b"));
+    let (ctx_a, _) = env.prepare(&prompt, context("run-a"));
+    let (ctx_b, _) = env.prepare(&prompt, context("run-b"));
     let access_a = ctx_a
         .vfs_handle()
         .acquire(Origin::new("run-a"))
@@ -343,8 +341,8 @@ fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
         .build();
     let env = Environment::new().base_vfs(base);
     let prompt = parse(DECLARES_NOTHING, "declares-nothing");
-    let (ctx_a, _) = env.prepare(&prompt, RunContext::new("run-a"));
-    let (ctx_b, _) = env.prepare(&prompt, RunContext::new("run-b"));
+    let (ctx_a, _) = env.prepare(&prompt, context("run-a"));
+    let (ctx_b, _) = env.prepare(&prompt, context("run-b"));
     let access_a = ctx_a
         .vfs_handle()
         .acquire(Origin::new("run-a"))
@@ -444,7 +442,7 @@ fn every_declared_role_resolves_to_the_current_model() {
     let prompt = parse(DECLARES_SOFT_ROLES, "declares-soft-roles");
     let env = Environment::new();
     let model = current_model(32_000, ThinkingMode::Never);
-    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill").model(model.clone()));
+    let (ctx, requirements) = env.prepare(&prompt, context("fill").model(model.clone()));
     // Soft keywords document intent and the roles declare no minimum:
     // nothing is reported.
     assert!(requirements.is_satisfied());
@@ -466,7 +464,7 @@ fn a_context_minimum_above_the_current_models_is_reported() {
     // min_context 200000 against the model's 32000.
     let (_ctx, requirements) = env.prepare(
         &prompt,
-        RunContext::new("fill").model(current_model(32_000, ThinkingMode::Always)),
+        context("fill").model(current_model(32_000, ThinkingMode::Always)),
     );
     assert!(!requirements.is_satisfied());
     assert_eq!(requirements.missing_required, []);
@@ -490,7 +488,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
     // only the keyword check fires.
     let (_ctx, requirements) = env.prepare(
         &prompt,
-        RunContext::new("fill").model(current_model(200_000, ThinkingMode::Never)),
+        context("fill").model(current_model(200_000, ThinkingMode::Never)),
     );
     let [unmet] = requirements.unmet_requirements.as_slice() else {
         panic!(
@@ -507,7 +505,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
     // `no-thinking` against a Switchable model.
     let (_ctx, requirements) = env.prepare(
         &prompt,
-        RunContext::new("fill").model(current_model(32_000, ThinkingMode::Switchable)),
+        context("fill").model(current_model(32_000, ThinkingMode::Switchable)),
     );
     let [unmet] = requirements.unmet_requirements.as_slice() else {
         panic!(
@@ -529,7 +527,7 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
         .run(
             &prompt,
             "",
-            RunContext::new("refuse").model(current_model(32_000, ThinkingMode::Never)),
+            context("refuse").model(current_model(32_000, ThinkingMode::Never)),
         )
         .await;
     let RunResult::Failure(error) = result else {
@@ -558,9 +556,7 @@ async fn env_run_refuses_a_missing_required_capability_with_a_notice_naming_it()
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     // No registry: the declared required capability is absent.
     let env = Environment::new();
-    let result = env
-        .run(&prompt, "", RunContext::new("refuse-missing"))
-        .await;
+    let result = env.run(&prompt, "", context("refuse-missing")).await;
     let RunResult::Failure(error) = result else {
         panic!("a prompt missing a required capability is refused: {result:?}");
     };
@@ -582,7 +578,7 @@ async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
         .run(
             &prompt,
             "",
-            RunContext::new("implicit").model(current_model(200_000, ThinkingMode::Always)),
+            context("implicit").model(current_model(200_000, ThinkingMode::Always)),
         )
         .await;
     let RunResult::Ok(text) = result else {
@@ -747,7 +743,7 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
             )))
             .expect("terminal registers");
         let env = Environment::new().registry(registry);
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-conflict"));
+        let (ctx, requirements) = env.prepare(&prompt, context("prepare-conflict"));
         assert!(!requirements.is_satisfied());
         let [conflict] = requirements.conflicts.as_slice() else {
             panic!(
@@ -784,9 +780,7 @@ async fn env_run_refuses_a_conflicting_pair_with_a_notice_naming_both() {
         )))
         .expect("terminal registers");
     let env = Environment::new().registry(registry);
-    let result = env
-        .run(&prompt, "", RunContext::new("refuse-conflict"))
-        .await;
+    let result = env.run(&prompt, "", context("refuse-conflict")).await;
     let RunResult::Failure(error) = result else {
         panic!("a conflicting pair is refused: {result:?}");
     };
@@ -817,7 +811,7 @@ fn a_contributed_tool_outside_the_capabilitys_id_is_rejected_at_assembly() {
         .expect("the fixture registers");
     let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-containment"));
+        let (ctx, requirements) = env.prepare(&prompt, context("prepare-containment"));
         // Containment is enforced at assembly, not reported: the run is
         // satisfiable and the stray tool simply never enters the catalog.
         assert!(requirements.is_satisfied());
@@ -858,7 +852,7 @@ fn the_catalog_assembles_contributed_tools_in_declaration_order() {
     registry.register(Arc::new(web)).expect("web registers");
     registry.register(Arc::new(fs)).expect("fs registers");
     let env = Environment::new().registry(registry);
-    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-order"));
+    let (ctx, requirements) = env.prepare(&prompt, context("prepare-order"));
     assert!(requirements.is_satisfied());
     let ids: Vec<String> = ctx
         .tools()
@@ -931,7 +925,7 @@ fn a_repeated_tool_id_across_contributions_is_rejected_at_assembly() {
         .expect("the fixture registers");
     let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-duplicate"));
+        let (ctx, requirements) = env.prepare(&prompt, context("prepare-duplicate"));
         // The repeat is rejected at assembly, not reported: the first
         // contribution stands and the run is satisfiable.
         assert!(requirements.is_satisfied());
@@ -970,7 +964,7 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
         .expect("the fixture registers");
     let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("prepare-wire-name"));
+        let (ctx, requirements) = env.prepare(&prompt, context("prepare-wire-name"));
         // One bad tool costs only itself: the run is satisfiable and
         // the well-formed tool still assembles.
         assert!(requirements.is_satisfied());
@@ -1043,7 +1037,7 @@ fn web_registry() -> CapabilityRegistry {
 fn an_exact_slot_fills_against_the_assembled_catalog() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     let env = Environment::new().registry(web_registry());
-    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-exact"));
+    let (ctx, requirements) = env.prepare(&prompt, context("fill-exact"));
     assert!(requirements.is_satisfied());
     let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
     let bindings = ctx.tool_bindings();
@@ -1063,7 +1057,7 @@ fn an_exact_slot_whose_capability_is_inactive_is_reported() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
     // No registry and no declaration: the slot's capability is inactive.
     let env = Environment::new();
-    let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-orphan"));
+    let (ctx, requirements) = env.prepare(&prompt, context("fill-orphan"));
     // The exact path's first two segments name its capability.
     assert_eq!(
         requirements.missing_required,
@@ -1089,7 +1083,7 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
         .expect("web registers");
     let env = Environment::new().registry(registry);
     let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, RunContext::new("fill-absent-tool"));
+        let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
         assert!(
             requirements.missing_required.is_empty(),
             "an active capability is never reported missing: {:?}",

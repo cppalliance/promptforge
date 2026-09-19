@@ -162,7 +162,7 @@ async fn user_input_returns_the_operator_text_with_available_true() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(InputRecorder::default());
-    let config = RunContext::new(EXECUTION)
+    let config = test_context(EXECUTION)
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .input_broker(Arc::new(TextBroker("hello operator")));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
@@ -197,7 +197,7 @@ async fn identical_human_text_cannot_spoof_the_unavailable_fallback() {
     // The operator types exactly the fallback sentence: the availability
     // flag still distinguishes it from the unavailable policy's answer.
     let config =
-        RunContext::new(EXECUTION).input_broker(Arc::new(TextBroker(INPUT_UNAVAILABLE_FALLBACK)));
+        test_context(EXECUTION).input_broker(Arc::new(TextBroker(INPUT_UNAVAILABLE_FALLBACK)));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -218,7 +218,7 @@ async fn a_run_without_a_broker_gets_the_unavailable_fallback() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(InputRecorder::default());
-    let config = RunContext::new(EXECUTION).observer(Arc::clone(&recorder) as Arc<dyn Observer>);
+    let config = test_context(EXECUTION).observer(Arc::clone(&recorder) as Arc<dyn Observer>);
     let ctx = input_context(&prompt, ToolSet::default(), &config);
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -249,7 +249,7 @@ async fn an_unavailable_broker_answer_is_the_fallback() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(InputRecorder::default());
-    let config = RunContext::new(EXECUTION)
+    let config = test_context(EXECUTION)
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .input_broker(Arc::new(UnavailableBroker));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
@@ -272,7 +272,7 @@ async fn a_broker_failure_raises_at_the_call_site() {
          return tostring(err)",
     );
     let prompt = parse(&md);
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(FailingBroker));
+    let config = test_context(EXECUTION).input_broker(Arc::new(FailingBroker));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -288,7 +288,7 @@ async fn a_broker_failure_raises_at_the_call_site() {
 async fn an_uncaught_broker_failure_fails_the_run_typed() {
     let md = input_prompt("user_input()\nreturn 'unreachable'");
     let prompt = parse(&md);
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(FailingBroker));
+    let config = test_context(EXECUTION).input_broker(Arc::new(FailingBroker));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -306,7 +306,7 @@ async fn cancellation_interrupts_a_pending_input_wait() {
 
     let md = input_prompt("user_input()\nreturn 'unreachable'");
     let prompt = parse(&md);
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(PendingBroker));
+    let config = test_context(EXECUTION).input_broker(Arc::new(PendingBroker));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
     let mut scheduler = TokioDriver::new(&ctx, None);
     let canceller = scheduler.cancel_handle();
@@ -337,7 +337,7 @@ async fn a_brokered_loop_with_no_prompt_tools_advertises_no_tools_to_the_model()
          return msgs[#msgs].content",
     );
     let prompt = parse(&md);
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(TextBroker("never asked")));
+    let config = test_context(EXECUTION).input_broker(Arc::new(TextBroker("never asked")));
     let ctx = input_context(&prompt, ToolSet::default(), &config);
     let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()

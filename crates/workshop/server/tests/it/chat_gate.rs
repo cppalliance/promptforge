@@ -366,12 +366,16 @@ fn spawn_restored_chat(
         std::num::NonZeroU32::new(200_000).expect("200000 is non-zero"),
         ThinkingMode::Never,
     );
-    let ctx = RunContext::new(session.to_owned())
-        .observer(Arc::clone(&observer))
-        .client(client)
-        .cancel(cancel.clone())
-        .input_broker(broker)
-        .model(model);
+    let ctx = RunContext::new(
+        session.to_owned(),
+        1,
+        promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
+    )
+    .observer(Arc::clone(&observer))
+    .client(client)
+    .cancel(cancel.clone())
+    .input_broker(broker)
+    .model(model);
     let execution = session.to_owned();
     let run = tokio::spawn(async move {
         let result = async {

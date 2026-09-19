@@ -14,7 +14,7 @@ use std::sync::Arc;
 use promptforge_api_types::ids::{ChainId, TaskId};
 
 use crate::execute::engine::section_position;
-use crate::execute::support::{GENERIC_COMPLETION, now_rfc3339_checked};
+use crate::execute::support::GENERIC_COMPLETION;
 use crate::fanout;
 use crate::{Error, Result};
 
@@ -84,7 +84,6 @@ impl Scheduler {
     /// # Errors
     /// Returns [`Error::Lua`] when the final `var` read-back fails or H1
     /// left `argv` as non-JSON data,
-    /// [`Error::TimestampFormat`] when the walk's `when` fails to format,
     /// [`Error::Store`] when the backend refuses the walk's acquisition,
     /// or [`Error::Internal`] when the chain holds no frame.
     pub(super) fn end_live_h1(
@@ -116,11 +115,10 @@ impl Scheduler {
             *root_result = Some(self.settle_owned_tasks(id, Ok(GENERIC_COMPLETION.to_owned())));
             return Ok(());
         }
-        // The H1-to-walk handoff: the walk's context takes its live `when`
-        // and the frozen `argv`; H1's prompt-wide records already landed in
-        // the shared sets the views read.
-        let when = now_rfc3339_checked()?;
-        let walk_ctx = self.ctx.with_walk_state(&when, argv);
+        // The H1-to-walk handoff: the walk's context takes the frozen
+        // `argv`; H1's prompt-wide records already landed in the shared
+        // sets the views read, and `when` is the run's own.
+        let walk_ctx = self.ctx.with_walk_state(argv);
         let root = self.start_chain(
             ChainId::root(),
             counters,

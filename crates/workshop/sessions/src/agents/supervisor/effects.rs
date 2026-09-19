@@ -1,11 +1,13 @@
 //! Execution of reducer-selected supervisor effects.
 
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use promptforge_api_runtime::client::GatewayClient as ModelClient;
 use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
 use promptforge_api_types::cancel::sync::CancelHandle as CancelFlag;
 use promptforge_api_types::observe::Observer;
+use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::wire::StreamDelta;
 
 use workshop_gateway::GatewaySnapshot;
@@ -92,7 +94,10 @@ impl RunFactory {
         self.launch_markdown(run, source, client, environment, gateway)
     }
 
-    /// Builds one unified-runtime run of a Markdown prompt document.
+    /// Builds one unified-runtime run of a Markdown prompt document. The
+    /// run's host-drawn inputs are taken here, at launch: the `ui()`
+    /// snapshot (so a menu or workspace change takes effect on the next
+    /// run), a fresh seed, and the start instant.
     fn launch_markdown(
         &self,
         run: RunId,
@@ -104,7 +109,9 @@ impl RunFactory {
         let parts = MarkdownRunParts {
             session: Arc::clone(&self.session),
             observer: Arc::clone(&self.observer),
-            ui: Arc::clone(&self.ui),
+            ui: (self.ui)(),
+            seed: rand::random(),
+            started_at: now_timestamp(),
             on_delta: Arc::clone(&self.on_delta),
             host: self.host.clone(),
         };
@@ -121,18 +128,23 @@ impl RunFactory {
 struct MarkdownRunParts {
     session: Arc<AgentSession>,
     observer: Arc<dyn Observer>,
-    ui: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
+    /// The `ui()` snapshot taken at launch.
+    ui: serde_json::Value,
+    /// The run's seed, drawn at launch from the OS CSPRNG.
+    seed: u64,
+    /// The launch instant, every section's `sys.when`.
+    started_at: Timestamp,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     host: SessionHost,
 }
 
 /// Runs one Markdown agent prompt on the unified runtime: the session's
-/// wait registry behind the generic input broker, the menu selection
-/// behind `ui().selected_model`, deltas forwarded to the session's
-/// channel. The run prepares against the session's shared environment -
-/// the first-party capabilities the prompt's frontmatter declares - and
-/// the context carries the dropdown's current model resolved at launch,
-/// so a selection change takes effect on the next run.
+/// wait registry behind the generic input broker, the launch-time menu
+/// selection behind `ui().selected_model`, deltas forwarded to the
+/// session's channel. The run prepares against the session's shared
+/// environment - the first-party capabilities the prompt's frontmatter
+/// declares - and the context carries the dropdown's current model
+/// resolved at launch, so a selection change takes effect on the next run.
 async fn run_markdown_agent(
     source: &str,
     parts: MarkdownRunParts,
@@ -145,6 +157,8 @@ async fn run_markdown_agent(
         session,
         observer,
         ui,
+        seed,
+        started_at,
         on_delta,
         host,
     } = parts;
@@ -168,7 +182,7 @@ async fn run_markdown_agent(
         }
     };
     let (cancel, bridge) = bridge_cancel(session.arm_cancel(run));
-    let mut ctx = RunContext::new(session.id.clone())
+    let mut ctx = RunContext::new(session.id.clone(), seed, started_at)
         .observer(observer)
         .client(client)
         .cancel(cancel)
@@ -189,6 +203,18 @@ async fn run_markdown_agent(
             source: Some(Box::new(error)),
         }),
     }
+}
+
+/// The system clock now as the engine's `Timestamp`: the host's stamp for
+/// a run's `started_at`, since the engine reads no clock of its own. A
+/// clock before the epoch or beyond `i64` milliseconds (neither reachable
+/// on a real host) saturates to the epoch rather than refusing the launch.
+fn now_timestamp() -> Timestamp {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+        .map_or(Timestamp::UNIX_EPOCH, Timestamp::from_unix_millis)
 }
 
 /// Bridges the session's awaitable cancel token to the synchronous flag

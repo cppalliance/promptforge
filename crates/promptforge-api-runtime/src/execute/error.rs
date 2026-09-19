@@ -119,7 +119,7 @@ impl RunError {
             | Error::OutOfScopeToolCall { .. }
             | Error::UnboundToolCall { .. }
             | Error::Tool { .. } => RunErrorKind::Tool,
-            Error::Internal { .. } | Error::TimestampFormat(_) => RunErrorKind::Internal,
+            Error::Internal { .. } => RunErrorKind::Internal,
             Error::Store(_) => RunErrorKind::Store,
             Error::Determinism(_) => RunErrorKind::Determinism,
             Error::BindSchema { .. } | Error::ModelRequired { .. } => RunErrorKind::Binding,

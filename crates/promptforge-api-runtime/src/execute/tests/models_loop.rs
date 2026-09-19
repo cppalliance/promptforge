@@ -56,7 +56,7 @@ pub(super) fn loop_context_observed(
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunContext::new(EXECUTION).observer(observer),
+        &test_context(EXECUTION).observer(observer),
     );
     *ctx.model_set()
         .lock()

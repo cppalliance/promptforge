@@ -46,10 +46,12 @@ use crate::execute::{
 /// use promptforge_api_runtime::{Prompt, Run, RunContext, RunResult};
 /// use promptforge_api_types::event::Event;
 /// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::timestamp::Timestamp;
 ///
 /// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
-/// let run = Run::new(Arc::new(prompt), "", RunContext::new("doc-example"));
+/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
+/// let run = Run::new(Arc::new(prompt), "", ctx);
 /// let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));
 /// let RunResult::Ok(text) = result else {
 ///     panic!("the literal run succeeds: {result:?}");

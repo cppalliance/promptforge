@@ -115,7 +115,7 @@ pub(super) fn chat_context(
     tools: ToolSet,
     observer: Arc<dyn Observer>,
 ) -> RunState {
-    let base = RunContext::new(EXECUTION).observer(observer);
+    let base = test_context(EXECUTION).observer(observer);
     let mut ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",

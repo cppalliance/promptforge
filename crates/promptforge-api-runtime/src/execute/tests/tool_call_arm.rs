@@ -62,7 +62,7 @@ impl Observer for ToolRecorder {
 /// pass that would fill them), the given observer, and the raw protocol
 /// shims exposed so a fixture can yield a model-issued call.
 fn tool_context(prompt: &Prompt, tools: ToolSet, observer: Arc<dyn Observer>) -> RunState {
-    let base = RunContext::new(EXECUTION).observer(observer);
+    let base = test_context(EXECUTION).observer(observer);
     let mut ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",

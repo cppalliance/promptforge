@@ -219,6 +219,7 @@ pub(crate) fn task_history(
 /// use promptforge_api_runtime::execute::{RunContext, RunResult, run};
 /// use promptforge_api_runtime::parser::Prompt;
 /// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::timestamp::Timestamp;
 ///
 /// let source = concat!(
 ///     "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
@@ -230,7 +231,8 @@ pub(crate) fn task_history(
 /// );
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
 /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-/// let output = runtime.block_on(run(&prompt, "", RunContext::new("doc-example")));
+/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
+/// let output = runtime.block_on(run(&prompt, "", ctx));
 /// let RunResult::Ok(text) = output else {
 ///     panic!("the doc example run succeeds: {output:?}");
 /// };

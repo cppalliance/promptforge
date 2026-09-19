@@ -8,9 +8,17 @@ use std::sync::{Arc, Mutex};
 use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunResult};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_types::observe::{Observation, Observer};
+use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::tools::Tool;
 use promptforge_store::{StoreError, StoreExt};
 use shared_vfs::{Origin, VfsRef};
+
+/// A [`RunContext`] for the run `name` under the fixed host inputs every
+/// fixture shares: the engine draws no seed and reads no clock of its own,
+/// and no fixture here asserts on the nonce or `sys.when`.
+pub(super) fn context(name: impl Into<String>) -> RunContext {
+    RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
+}
 
 /// One correlated observation: which execution and section emitted it, plus the
 /// rendered event detail the fixtures assert on.
@@ -52,7 +60,7 @@ pub(super) fn prepare_run(
 ) -> (RunContext, VfsRef) {
     let _ = tools;
     let env = Environment::new();
-    let ctx = RunContext::new(opts.execution).observer(opts.observer);
+    let ctx = context(opts.execution).observer(opts.observer);
     let (ctx, requirements) = env.prepare(prompt, ctx);
     assert!(
         requirements.is_satisfied(),
@@ -96,9 +104,7 @@ pub(super) async fn run_unprepared(
     vfs: VfsRef,
     opts: RunOptions,
 ) -> Result<String, RunError> {
-    let ctx = RunContext::new(opts.execution)
-        .observer(opts.observer)
-        .vfs(vfs);
+    let ctx = context(opts.execution).observer(opts.observer).vfs(vfs);
     drive(prompt, args, ctx).await
 }
 

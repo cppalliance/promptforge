@@ -89,7 +89,7 @@ fn model_run(md: &str) -> Run {
     Run::from_state(scheduler_context_from(
         &prompt,
         &TestStore::new(),
-        &RunContext::new(EXECUTION),
+        &test_context(EXECUTION),
     ))
 }
 
@@ -233,7 +233,7 @@ fn the_driver_doc_example_runs_a_literal_prompt_with_no_effect() {
     // nothing, so the performer never runs, and the events open and close
     // with the run's boundaries.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-    let run = Run::new(Arc::new(parse(md)), "", RunContext::new(EXECUTION));
+    let run = Run::new(Arc::new(parse(md)), "", test_context(EXECUTION));
     let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));
     let RunResult::Ok(text) = result else {
         panic!("the literal run succeeds: {result:?}");

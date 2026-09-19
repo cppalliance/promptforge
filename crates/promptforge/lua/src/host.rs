@@ -114,21 +114,23 @@ const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::Serializ
     .serialize_unit_to_null(false);
 
 /// Installs `ui()` as a persistent global valid for the section's whole
-/// lifecycle: each call invokes the host's provider afresh and converts
-/// the snapshot table, JSON nulls reading as nil. The closure captures an
-/// owned `Arc`, so no borrow crosses the install. The Workshop's
-/// Agent-window session is the provider's only consumer; a run without a
-/// provider never installs the global, so `ui` is absent - not stubbed -
-/// in every other context.
+/// lifecycle: each call converts the host's `snapshot` afresh into a new
+/// table, JSON nulls reading as nil, so author code that mutates one
+/// result never sees the mutation on the next call. The snapshot is the
+/// host state as the host captured it at run start; a change on the host
+/// takes effect on the next run. The Workshop's Agent-window session is
+/// the snapshot's only producer; a run without one never installs the
+/// global, so `ui` is absent - not stubbed - in every other context.
+///
+/// The snapshot arrives shared: one run installs it into every section VM
+/// it starts, and the closure serializes through the `Arc`, so no VM holds
+/// its own copy of the JSON tree.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the function or the global cannot be created.
-pub fn install_ui(
-    lua: &Lua,
-    provider: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
-) -> Result<()> {
+pub fn install_ui(lua: &Lua, snapshot: Arc<serde_json::Value>) -> Result<()> {
     let snapshot = lua
-        .create_function(move |lua, ()| lua.to_value_with(&provider(), UI_SNAPSHOT_OPTIONS))
+        .create_function(move |lua, ()| lua.to_value_with(snapshot.as_ref(), UI_SNAPSHOT_OPTIONS))
         .map_err(Error::lua)?;
     lua.globals().raw_set("ui", snapshot).map_err(Error::lua)
 }

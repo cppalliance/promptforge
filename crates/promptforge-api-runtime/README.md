@@ -15,14 +15,17 @@ promptforge-api-runtime = "0.1"
 
 ```rust
 use promptforge_api_runtime::types::observe::NullObserver;
+use promptforge_api_runtime::types::timestamp::Timestamp;
 use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
 
-async fn execute(source: &str) -> Result<String, Box<dyn std::error::Error>> {
+async fn execute(source: &str, seed: u64, started_at: Timestamp) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = Prompt::parse(source, "readme", &NullObserver::default())?;
     // Capability-free agents use the default environment (no registry, empty
-    // catalogs); the store handle defaults to a stock in-memory mount.
+    // catalogs); the store handle defaults to a stock in-memory mount. The
+    // host draws the seed (from a CSPRNG) and stamps the start instant: the
+    // engine reads neither the OS RNG nor the clock.
     let env = Environment::new();
-    match env.run(&prompt, "", RunContext::new("readme")).await {
+    match env.run(&prompt, "", RunContext::new("readme", seed, started_at)).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => Err("the run was cancelled".into()),
         RunResult::Failure(error) => Err(error.into()),

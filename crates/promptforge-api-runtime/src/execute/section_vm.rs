@@ -81,10 +81,11 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's cap on the arms one `fanout` keeps live at once, captured
     /// by the `fanout` shim as its window.
     pub(crate) max_fanout_concurrency: usize,
-    /// The run's host-state snapshot provider, when the host configured
-    /// one: its presence is the Agent-window context, so the section VM
-    /// gains the `ui()` global and the raw-id `models.get` fallback.
-    pub(crate) ui: Option<&'a Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
+    /// The run's host-state snapshot, when the host supplied one: its
+    /// presence is the Agent-window context, so the section VM gains the
+    /// `ui()` global and the raw-id `models.get` fallback. Shared through
+    /// the run's `Arc`, so every section VM serializes the one tree.
+    pub(crate) ui: Option<&'a Arc<serde_json::Value>>,
     /// Test-only: install the raw protocol shims (`models.chat`,
     /// `tools.call_as_model`), so a fixture section can yield one raw
     /// `chat` round or one model-issued `tool_call`.
@@ -132,8 +133,8 @@ where
     };
     vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
     vm.install_host_apis(&setup.observer_arc, setup.section_name)?;
-    if let Some(provider) = setup.ui {
-        crate::lua::install_ui(vm.lua(), Arc::clone(provider))?;
+    if let Some(snapshot) = setup.ui {
+        crate::lua::install_ui(vm.lua(), Arc::clone(snapshot))?;
     }
     if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;

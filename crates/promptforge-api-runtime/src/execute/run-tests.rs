@@ -18,6 +18,16 @@ use crate::input::{InputBroker, InputError, InputOutcome};
 use crate::model::{ModelBinding, ModelId};
 use crate::observe::NullObserver;
 
+/// A context for the run `run-test` under fixed host inputs; nothing here
+/// reads the seed or `sys.when`.
+fn run_context() -> RunContext {
+    RunContext::new(
+        "run-test",
+        1,
+        promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+    )
+}
+
 /// Serializes the record and reads it back: the round trip a run log and
 /// a replay depend on.
 fn round_trip(record: &EffectRecord) -> EffectRecord {
@@ -223,7 +233,7 @@ fn a_run_is_send() {
 fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_dropped() {
     let mut run = run_of(
         "store.write('notes.md', 'kept')\nreturn 'unreachable'",
-        RunContext::new("run-test"),
+        run_context(),
     );
     let (id, effect) = only_effect(run.step());
     assert!(
@@ -258,7 +268,7 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
 fn a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error() {
     let mut run = run_of(
         "return user_input()",
-        RunContext::new("run-test").input_broker(Arc::new(PendingBroker)),
+        run_context().input_broker(Arc::new(PendingBroker)),
     );
     let (id, effect) = only_effect(run.step());
     assert!(matches!(effect, Effect::UserInput { .. }));
@@ -277,7 +287,7 @@ fn a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error() {
 fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer() {
     let mut run = run_of(
         "store.write('notes.md', 'kept')\nreturn 'unreachable'",
-        RunContext::new("run-test"),
+        run_context(),
     );
     let (id, _) = only_effect(run.step());
     run.cancel();
@@ -304,7 +314,7 @@ fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer()
 fn an_answer_for_an_unissued_effect_is_an_internal_error() {
     let mut run = run_of(
         "return user_input()",
-        RunContext::new("run-test").input_broker(Arc::new(PendingBroker)),
+        run_context().input_broker(Arc::new(PendingBroker)),
     );
     let (id, _) = only_effect(run.step());
     run.resume(EffectId(id.0 + 99), EffectAnswer::Timer);
@@ -332,7 +342,7 @@ fn an_answer_for_an_unissued_effect_is_an_internal_error() {
 fn an_answer_of_the_wrong_kind_for_a_pending_effect_fails_loudly() {
     let mut run = run_of(
         "return user_input()",
-        RunContext::new("run-test").input_broker(Arc::new(PendingBroker)),
+        run_context().input_broker(Arc::new(PendingBroker)),
     );
     let (id, _) = only_effect(run.step());
     run.resume(id, EffectAnswer::Timer);
@@ -354,7 +364,7 @@ fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
     let child = parent.child();
     let mut run = run_of(
         "local n = 0\nwhile true do n = n + 1 end",
-        RunContext::new("run-test").cancel(child),
+        run_context().cancel(child),
     );
     // The loop never yields, so only the hook can end it: the parent's
     // cancel reaches the child the run holds, from another thread.
@@ -377,7 +387,7 @@ fn a_context_without_a_host_handle_shares_its_one_flag_with_prepare_and_the_run(
     let prompt = Prompt::parse(source, "run-test", &NullObserver::default())
         .expect("the run test prompt parses");
     // The flag `prepare` hands the capabilities is the context's own.
-    let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, RunContext::new("run-test"));
+    let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, run_context());
     let capabilities_flag = ctx.cancel.clone();
     let mut run = Run::new(Arc::new(prompt), "", ctx);
     assert!(!capabilities_flag.is_cancelled());
@@ -397,7 +407,7 @@ fn a_context_without_a_host_handle_shares_its_one_flag_with_prepare_and_the_run(
 fn a_run_is_decided_once_its_end_is_reported_while_done_is_withheld() {
     let mut run = run_of(
         "store.write('notes.md', 'kept')\nreturn 'unreachable'",
-        RunContext::new("run-test"),
+        run_context(),
     );
     assert!(!run.decided(), "a fresh run is undecided");
     let (id, _) = only_effect(run.step());
@@ -421,7 +431,7 @@ fn a_stillborn_run_reports_its_failure_on_the_first_step() {
     let source = "---\nname: t\ndescription: d\npromptforge: 7\n---\n\n# Run\n\n## Only\n\ndone\n";
     let prompt = Prompt::parse(source, "run-test", &NullObserver::default())
         .expect("the prompt parses whatever version it declares");
-    let mut run = Run::new(Arc::new(prompt), "", RunContext::new("run-test"));
+    let mut run = Run::new(Arc::new(prompt), "", run_context());
     let Step::Done { result, events } = run.step() else {
         panic!("a run that cannot start is done at once");
     };

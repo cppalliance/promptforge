@@ -305,9 +305,13 @@ async fn run_builtin_chat(
         .expect("the embedded chat prompt parses");
     let env = session_environment("http://127.0.0.1:9", "k")
         .expect("a well-shaped gateway root builds the session environment");
-    let mut ctx = RunContext::new("chat-unit")
-        .observer(observer)
-        .model(test_model());
+    let mut ctx = RunContext::new(
+        "chat-unit",
+        1,
+        promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
+    )
+    .observer(observer)
+    .model(test_model());
     if let Some(broker) = broker {
         ctx = ctx.input_broker(broker);
     }
@@ -373,7 +377,13 @@ async fn an_undersized_model_is_refused_before_the_first_turn() {
         NonZeroU32::new(8192).expect("8192 is non-zero"),
         ThinkingMode::Never,
     );
-    let ctx = RunContext::new("chat-unit").observer(observer).model(small);
+    let ctx = RunContext::new(
+        "chat-unit",
+        1,
+        promptforge_api_runtime::types::timestamp::Timestamp::UNIX_EPOCH,
+    )
+    .observer(observer)
+    .model(small);
 
     let RunResult::Failure(error) = env.run(&prompt, "", ctx).await else {
         panic!("an 8192-token model cannot satisfy the chat role");

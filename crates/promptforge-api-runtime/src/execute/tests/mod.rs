@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use super::context::RunState;
 use super::gateway::{GatewaySource, env_client_with_limits};
 use super::scope::prepare_scoped_tools;
-use super::support::{advance_turn, now_rfc3339_checked};
+use super::support::advance_turn;
 use super::*;
 use crate::Result;
 use crate::capabilities::CapabilityRegistry;
@@ -45,6 +45,18 @@ fn fresh_access() -> Arc<Access> {
 }
 
 const EXECUTION: &str = "execute-test";
+
+/// The fixed host inputs every test run shares: a seed and a start instant
+/// a test that does not care about them never has to choose. The tests of
+/// the inputs themselves (`run_inputs`) build their contexts directly.
+const TEST_SEED: u64 = 1;
+const TEST_STARTED_AT: promptforge_api_types::timestamp::Timestamp =
+    promptforge_api_types::timestamp::Timestamp::from_unix_millis(1_700_000_000_000);
+
+/// A [`RunContext`] for the run `name` under the fixed test inputs.
+fn test_context(name: impl Into<String>) -> RunContext {
+    RunContext::new(name, TEST_SEED, TEST_STARTED_AT)
+}
 
 /// F10: compile-time proof that the public execution types are thread-safe.
 ///
@@ -265,7 +277,7 @@ impl TestStore {
 /// model as the current selection, so prepare's trivial fill binds every
 /// declared role to it.
 fn to_context(opts: RunOptions) -> RunContext {
-    let mut ctx = RunContext::new(opts.execution)
+    let mut ctx = test_context(opts.execution)
         .observer(opts.observer)
         .model(test_model_catalog().models()[0].clone());
     if let Some(client) = opts.client {
@@ -343,7 +355,7 @@ async fn run(
         // prompt's declared slots fill against them at prepare.
         env = env.registry(tools_registry(tools));
     }
-    let mut ctx = RunContext::new(opts.execution).observer(opts.observer);
+    let mut ctx = test_context(opts.execution).observer(opts.observer);
     // The host pattern: the context carries the current model, and
     // prepare's trivial fill binds every declared role to it.
     if let Some(model) = test.models.models().first() {
@@ -421,7 +433,7 @@ async fn run_with_context(
     configure: impl FnOnce(RunContext) -> RunContext,
 ) -> std::result::Result<String, RunError> {
     let env = Environment::new();
-    let mut ctx = configure(RunContext::new(EXECUTION)).vfs(TestStore::new().vfs());
+    let mut ctx = configure(test_context(EXECUTION)).vfs(TestStore::new().vfs());
     if ctx.model.is_none()
         && let Some(model) = test.models.models().first()
     {
@@ -1328,26 +1340,35 @@ fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn untrusted_nonce_differs_across_runs() {
-    // The nonce is minted once per run: two runs of the same prompt wrap the
-    // same untrusted tool result under different nonces, so an envelope's tag
-    // stays unguessable from one run to the next.
+async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
+    // The nonce is the run seed's: two runs of the same prompt under
+    // different host-drawn seeds wrap the same untrusted tool result under
+    // different nonces, so an envelope's tag stays unguessable from one run
+    // to the next as long as the host draws each seed afresh. (Under one
+    // seed the two runs agree byte for byte, which `run_inputs` pins.)
     let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         models.default('writer')\n```\n\n\
         ## Only\n\n\
         ```lua\nreturn tools.call('echo', { value = 'hi' })\n```\n";
+    let test = bound_with_tools(md);
     let mut run_nonces = Vec::new();
-    for _ in 0..2 {
-        let out = run(
-            &bound_with_tools(md),
-            "",
-            &[Arc::new(UntrustedEchoTool) as Arc<dyn Tool>],
-            &TestStore::new(),
-            silent(),
-        )
-        .await
-        .unwrap();
+    for seed in [1, 2] {
+        let env = Environment::new().registry(tools_registry(&[
+            Arc::new(UntrustedEchoTool) as Arc<dyn Tool>
+        ]));
+        let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT).observer(silent().observer);
+        if let Some(model) = test.models.models().first() {
+            ctx = ctx.model(model.clone());
+        }
+        let (ctx, requirements) = env.prepare(&test.prompt, ctx);
+        assert!(
+            requirements.is_satisfied(),
+            "the fixture capability satisfies the prompt: {requirements:?}"
+        );
+        let RunResult::Ok(out) = super::run(&test.prompt, "", ctx).await else {
+            panic!("the echo run succeeds");
+        };
         let marker = "<untrusted_input_";
         let start = out.find(marker).expect("the result is guard-wrapped") + marker.len();
         let end = out[start..]
@@ -1427,6 +1448,7 @@ mod models_loop;
 mod models_loop_compactors;
 mod observations;
 mod provenance;
+mod run_inputs;
 mod scheduler;
 mod serial_driver;
 mod task_events;

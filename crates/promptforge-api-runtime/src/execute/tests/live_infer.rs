@@ -313,7 +313,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         .run(
             &prompt,
             "",
-            RunContext::new(EXECUTION)
+            test_context(EXECUTION)
                 .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
                 .model(test_model_catalog().models()[0].clone())
                 .client(gateway_client(gateway.addr()))

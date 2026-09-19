@@ -15,7 +15,6 @@ use crate::Result;
 use crate::execute::context::RunState;
 use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
-use crate::execute::support::{now_rfc3339_checked, sys_json};
 use crate::lua::SectionVm;
 use crate::observe::detail;
 use crate::parser::Section;
@@ -61,7 +60,7 @@ impl SectionContext {
         var: &serde_json::Value,
         seed: TaskSeed,
     ) -> Result<Self> {
-        let mut sys = ctx.sys_json(section_id, task_id, section.name())?;
+        let mut sys = ctx.sys_json(section_id, task_id, section.name());
         // A spawned chain's `sys.index` is the spawn's own value, verbatim;
         // absent otherwise, so a walked section reading `sys.index` raises
         // the sealed-sys unknown-field error exactly as before.
@@ -125,9 +124,9 @@ impl SectionContext {
 
     /// Constructs the frame for the H1 pass - section 0 - through the same
     /// install path as any walked section: the `sys` JSON (`section_id`,
-    /// the root chain's entry 0, under the prompt's title, stamped with
-    /// its own `now` because the walk's `when` does not exist yet), VM
-    /// construction over the run's shared sets, limits, and the shared
+    /// the root chain's entry 0, under the prompt's title, with the run's
+    /// `when` like every section after it), VM construction over the
+    /// run's shared sets, limits, and the shared
     /// setup half (host injection, host APIs, the control surface, the
     /// coroutine shims, the shared replay, the captured alias bindings).
     ///
@@ -148,18 +147,9 @@ impl SectionContext {
         section_id: &str,
     ) -> Result<Self> {
         let title = ctx.prompt().title();
-        let now = now_rfc3339_checked()?;
         // The pass is the root chain, and the root chain is task `0`.
         let root_task = TaskId::from(ChainId::root());
-        let sys = sys_json(
-            &now,
-            &now,
-            section_id,
-            &root_task.to_string(),
-            title,
-            ctx.execution(),
-            ctx.prompt().sections().len(),
-        );
+        let sys = ctx.sys_json(section_id, &root_task, title);
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
             &ctx.tool_set(),

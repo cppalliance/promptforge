@@ -51,15 +51,19 @@
 //! ```no_run
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! use promptforge_api_runtime::types::observe::NullObserver;
+//! use promptforge_api_runtime::types::timestamp::Timestamp;
 //! use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
 //!
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
 //! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
 //!
 //! // Capability-free agents use the default environment: no registry, empty
-//! // catalogs.
+//! // catalogs. The host draws the run's seed and stamps its start: the
+//! // engine reads neither the OS RNG nor the clock.
 //! let env = Environment::new();
-//! let answer = env.run(&prompt, "", RunContext::new("run-example")).await;
+//! let seed: u64 = 0x5eed; // a CSPRNG draw in a real host
+//! let started_at = Timestamp::from_unix_millis(1_700_000_000_000);
+//! let answer = env.run(&prompt, "", RunContext::new("run-example", seed, started_at)).await;
 //! let RunResult::Ok(text) = answer else {
 //!     panic!("the greeter run succeeds: {answer:?}");
 //! };

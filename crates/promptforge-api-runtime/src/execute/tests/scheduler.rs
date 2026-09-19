@@ -59,11 +59,7 @@ pub(super) fn scheduler_context_on(
     store: &TestStore,
     observer: Arc<dyn Observer>,
 ) -> RunState {
-    scheduler_context_from(
-        prompt,
-        store,
-        &RunContext::new(EXECUTION).observer(observer),
-    )
+    scheduler_context_from(prompt, store, &test_context(EXECUTION).observer(observer))
 }
 
 /// Builds the run context from a finished `RunContext` on the given store:
@@ -1356,7 +1352,7 @@ fn h1_context(prompt: &Prompt) -> RunState {
 /// afterward. The context's model bindings are filled the way prepare's
 /// trivial fill does: every declared role bound to the test model.
 fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>) -> RunState {
-    let mut ctx = RunContext::new(EXECUTION).observer(observer);
+    let mut ctx = test_context(EXECUTION).observer(observer);
     for (label, _) in prompt.frontmatter().models().iter() {
         ctx.model_bindings.bind(
             label,
@@ -1589,7 +1585,7 @@ async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
         "",
         &TestStore::new().vfs(),
         shared,
-        &RunContext::new(EXECUTION),
+        &test_context(EXECUTION),
     );
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -2067,7 +2063,7 @@ fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState
     scheduler_context_from(
         prompt,
         &TestStore::new(),
-        &RunContext::new(EXECUTION).limits(limits),
+        &test_context(EXECUTION).limits(limits),
     )
 }
 
@@ -2343,7 +2339,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
         "",
         &TestStore::new().vfs(),
         shared,
-        &RunContext::new(EXECUTION),
+        &test_context(EXECUTION),
     );
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -2393,7 +2389,7 @@ async fn the_shared_replay_sees_the_arm_item() {
         "",
         &TestStore::new().vfs(),
         shared,
-        &RunContext::new(EXECUTION),
+        &test_context(EXECUTION),
     );
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -3220,7 +3216,7 @@ async fn fatal_arm_aborts_queued_siblings() {
     let ctx = scheduler_context_from(
         &prompt,
         &store,
-        &RunContext::new(EXECUTION)
+        &test_context(EXECUTION)
             .limits(
                 RunLimits::new()
                     .max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),

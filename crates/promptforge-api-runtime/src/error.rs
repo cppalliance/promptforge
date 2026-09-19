@@ -455,15 +455,6 @@ pub(crate) enum Error {
     /// identities, and both claim kinds.
     #[error("store determinism violation: {0}")]
     Determinism(String),
-
-    /// Rendering the current time as an RFC 3339 string failed.
-    ///
-    /// Retains the [`time::error::Format`] failure as the private `#[source]`
-    /// cause (execute source-audit discarded-error-002) rather than mapping
-    /// every formatter failure to a source-free [`Error::Internal`], so the
-    /// concrete formatting cause survives.
-    #[error("could not format the current time as RFC 3339")]
-    TimestampFormat(#[source] time::error::Format),
 }
 
 impl Error {
@@ -727,8 +718,7 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::Internal { .. }
             | Error::Input { .. }
             | Error::Store(_)
-            | Error::Determinism(_)
-            | Error::TimestampFormat(_) => ErrorKind::Internal,
+            | Error::Determinism(_) => ErrorKind::Internal,
         }
     }
 

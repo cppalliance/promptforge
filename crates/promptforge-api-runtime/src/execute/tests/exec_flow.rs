@@ -2274,21 +2274,6 @@ fn advance_turn_saturates_and_never_wraps_the_stored_counter() {
     assert_eq!(near.load(Ordering::Relaxed), u32::MAX);
 }
 
-#[test]
-fn now_rfc3339_checked_produces_a_parseable_timestamp() {
-    // F11: timestamp construction is fallible and, on the normal path, yields a
-    // valid RFC 3339 string (never silently coerced to empty).
-    let now = now_rfc3339_checked().expect("formatting the current time must succeed");
-    assert!(!now.is_empty(), "a formatted timestamp is never empty");
-    // RFC 3339 shape: `YYYY-MM-DDThh:mm:ss...` with a `T` date/time separator and
-    // a UTC designator (the formatter renders UTC, so `Z` or a `+00:00` offset).
-    assert!(now.contains('T'), "RFC 3339 has a T separator: {now}");
-    assert!(
-        now.ends_with('Z') || now.contains('+'),
-        "RFC 3339 UTC has a zone designator: {now}"
-    );
-}
-
 #[tokio::test]
 async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     // The defensive fallback in the free `run`: a hand-built VfsRef
@@ -2305,12 +2290,8 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     );
     let test = fixture(md);
     let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
-    let RunResult::Ok(out) = crate::execute::run(
-        &test.prompt,
-        "",
-        RunContext::new(EXECUTION).vfs(vfs.clone()),
-    )
-    .await
+    let RunResult::Ok(out) =
+        crate::execute::run(&test.prompt, "", test_context(EXECUTION).vfs(vfs.clone())).await
     else {
         panic!("a mount-less handle gets the defensive memory-store overlay");
     };
@@ -2341,7 +2322,7 @@ async fn default_environment_runs_a_capability_free_prompt() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
+    let RunResult::Ok(out) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
         panic!("a capability-free prompt runs under the default environment");
     };
     assert_eq!(out, "no capabilities");
@@ -2358,7 +2339,7 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Ok(out) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await else {
+    let RunResult::Ok(out) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
         panic!("the default store handle carries the stock mount");
     };
     assert_eq!(out, "stock");
@@ -2377,8 +2358,7 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     );
     let test = fixture(md);
     let env = Environment::new().registry(tools_registry(&[Arc::new(EchoTool) as Arc<dyn Tool>]));
-    let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
-    else {
+    let RunResult::Failure(error) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
         panic!("advertising an unfilled alias must fail");
     };
     assert!(
@@ -2401,8 +2381,7 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     );
     let test = fixture(md);
     let env = Environment::new();
-    let RunResult::Failure(error) = env.run(&test.prompt, "", RunContext::new(EXECUTION)).await
-    else {
+    let RunResult::Failure(error) = env.run(&test.prompt, "", test_context(EXECUTION)).await else {
         panic!("a models.bind call must fail");
     };
     assert_eq!(

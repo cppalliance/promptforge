@@ -68,7 +68,7 @@ impl InputBroker for TextBroker {
 fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunContext) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
-    let config = RunContext::new(EXECUTION).on_delta(Arc::new(move |delta| {
+    let config = test_context(EXECUTION).on_delta(Arc::new(move |delta| {
         sink.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(delta);
@@ -80,7 +80,7 @@ fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunContext) {
 async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
-    let ctx = effect_context(&prompt, ToolSet::default(), &RunContext::new(EXECUTION));
+    let ctx = effect_context(&prompt, ToolSet::default(), &test_context(EXECUTION));
     let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
@@ -116,7 +116,7 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
          models.loop(msgs)\n\
          return msgs[#msgs].content",
     ));
-    let ctx = effect_context(&prompt, echo_tools(), &RunContext::new(EXECUTION));
+    let ctx = effect_context(&prompt, echo_tools(), &test_context(EXECUTION));
     let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
@@ -150,7 +150,7 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
     let prompt = parse(&loop_prompt("return tools.call('echo', { value = 'hi' })"));
-    let ctx = effect_context(&prompt, echo_tools(), &RunContext::new(EXECUTION));
+    let ctx = effect_context(&prompt, echo_tools(), &test_context(EXECUTION));
     let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the call completes");
@@ -174,7 +174,7 @@ async fn user_input_issues_exactly_one_user_input_effect() {
         "local text, available = user_input()\n\
          return text .. '|' .. tostring(available)",
     ));
-    let config = RunContext::new(EXECUTION).input_broker(Arc::new(TextBroker("typed")));
+    let config = test_context(EXECUTION).input_broker(Arc::new(TextBroker("typed")));
     let ctx = effect_context(&prompt, ToolSet::default(), &config);
     let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
@@ -198,7 +198,7 @@ async fn a_store_operation_issues_exactly_one_store_effect() {
         "store.write('notes.md', 'kept')\n\
          return store.read('notes.md')",
     ));
-    let ctx = effect_context(&prompt, ToolSet::default(), &RunContext::new(EXECUTION));
+    let ctx = effect_context(&prompt, ToolSet::default(), &test_context(EXECUTION));
     let mut scheduler = TokioDriver::new(&ctx, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the store ops complete");

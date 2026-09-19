@@ -18,7 +18,7 @@ Ask the model.\n\n\
 ```lua\nreturn models.infer(prose)\n```\n";
     let prompt =
         Prompt::parse(md, EXECUTION, &NullObserver::default()).expect("fixture must parse");
-    let mut ctx = RunContext::new(EXECUTION).client(gateway_client(addr));
+    let mut ctx = test_context(EXECUTION).client(gateway_client(addr));
     ctx.model_bindings.bind(
         "analyst",
         ModelDescriptor::new(
@@ -562,7 +562,7 @@ async fn run_with_bindings(
     store: &TestStore,
 ) -> Result<String> {
     let prompt = parse(md);
-    let mut ctx = RunContext::new(EXECUTION)
+    let mut ctx = test_context(EXECUTION)
         .client(gateway_client(addr))
         .vfs(store.vfs());
     for (label, model) in bindings {
@@ -729,7 +729,7 @@ async fn models_infer_without_use_or_default_errors() {
 ## Only\n\n\
 ```lua\nreturn models.infer('ping')\n```\n";
     let prompt = parse(md);
-    let mut ctx = RunContext::new(EXECUTION);
+    let mut ctx = test_context(EXECUTION);
     ctx.model_bindings.bind(
         "analyst",
         ModelDescriptor::new(

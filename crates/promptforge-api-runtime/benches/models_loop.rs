@@ -166,10 +166,14 @@ fn models_loop(c: &mut Criterion) {
                 env.run(
                     &prompt,
                     "",
-                    RunContext::new(EXECUTION)
-                        .observer(Arc::new(NullObserver::default()))
-                        .model(bench_catalog(131_072).models()[0].clone())
-                        .client(gateway.client()),
+                    RunContext::new(
+                        EXECUTION,
+                        1,
+                        promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+                    )
+                    .observer(Arc::new(NullObserver::default()))
+                    .model(bench_catalog(131_072).models()[0].clone())
+                    .client(gateway.client()),
                 ),
             );
             assert!(
@@ -202,10 +206,14 @@ fn compactors_fail(c: &mut Criterion) {
                 env.run(
                     &prompt,
                     "",
-                    RunContext::new(EXECUTION)
-                        .observer(Arc::new(NullObserver::default()))
-                        .model(bench_catalog(1).models()[0].clone())
-                        .client(gateway.client()),
+                    RunContext::new(
+                        EXECUTION,
+                        1,
+                        promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+                    )
+                    .observer(Arc::new(NullObserver::default()))
+                    .model(bench_catalog(1).models()[0].clone())
+                    .client(gateway.client()),
                 ),
             );
             let RunResult::Failure(error) = result else {

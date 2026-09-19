@@ -1,9 +1,7 @@
-//! Cross-cutting run helpers: the turn counter, the checked timestamp, and
-//! the shared run constants.
+//! Cross-cutting run helpers: the turn counter, the `sys` JSON, and the
+//! shared run constants.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-
-use crate::{Error, Result};
 
 /// Maximum nested `call()` depth (inclusive of the first call).
 pub(crate) const MAX_CALL_DEPTH: usize = 8;
@@ -29,16 +27,17 @@ pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
 }
 
 /// The `sys` JSON every engine driver builds for its section or arm: the
-/// seven shared fields in one construction. A driver with an extra field
+/// six shared fields in one construction. A driver with an extra field
 /// (`index`, on a fanout arm or a spawned chain) inserts it at its own call
-/// site. `id` is the section entry's hierarchical id (the entering chain's
-/// id extended by its local entry counter), rendered as a dot-separated
-/// path; `taskid` is the id of the nearest enclosing task (the main walk is
-/// task `0`; a `call` child reports its caller's task), the handle a chain
-/// passes to `tasks.*` to speak about itself.
+/// site. `when` is the run's `started_at` rendered as RFC 3339, the same
+/// string in every section because the engine reads no clock; `id` is the
+/// section entry's hierarchical id (the entering chain's id extended by its
+/// local entry counter), rendered as a dot-separated path; `taskid` is the
+/// id of the nearest enclosing task (the main walk is task `0`; a `call`
+/// child reports its caller's task), the handle a chain passes to `tasks.*`
+/// to speak about itself.
 pub(crate) fn sys_json(
     when: &str,
-    now: &str,
     id: &str,
     task_id: &str,
     section_name: &str,
@@ -47,24 +46,10 @@ pub(crate) fn sys_json(
 ) -> serde_json::Value {
     serde_json::json!({
         "when": when,
-        "now": now,
         "id": id,
         "taskid": task_id,
         "section_name": section_name,
         "execution": execution,
         "section_count": section_count,
     })
-}
-
-/// The current UTC time as an RFC 3339 string.
-///
-/// # Errors
-/// Returns [`Error::TimestampFormat`] when the well-known RFC 3339 formatter
-/// fails to render the current time, preserving the concrete
-/// [`time::error::Format`] cause instead of coercing it to an empty timestamp
-/// or a source-free internal error.
-pub(crate) fn now_rfc3339_checked() -> Result<String> {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .map_err(Error::TimestampFormat)
 }

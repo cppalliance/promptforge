@@ -30,7 +30,7 @@ use crate::untrusted::GuardNonce;
 use super::config::{RunContext, RunLimits};
 use super::event_buffer::{Emitter, EventSink};
 use super::section_vm::{SectionVmSetup, VmSeed};
-use super::support::{now_rfc3339_checked, sys_json};
+use super::support::sys_json;
 use bound::{bound_model_set, bound_tool_set, derive_argv};
 
 /// The host's report seams: the observer every run carries and the
@@ -58,8 +58,8 @@ struct HostSinks {
 pub(crate) struct RunState {
     /// The prompt this run executes.
     prompt: Arc<Prompt>,
-    /// The untrusted-envelope nonce, minted once here so every wrap in the
-    /// run shares it.
+    /// The untrusted-envelope nonce, derived once here from the run's seed
+    /// so every wrap in the run shares it.
     nonce: GuardNonce,
     /// The run's VFS handle: carries the store mount backing every
     /// section's Lua `store` table. Chain steps acquire or spawn their
@@ -120,15 +120,15 @@ pub(crate) struct RunState {
     /// The concrete handle behind `models`, shared with every section VM
     /// (H1 included). Readers outside the VM layer go through the view.
     model_set: Arc<Mutex<ModelSet>>,
-    /// The walk's start timestamp, stamped into every section's `sys.when`;
-    /// empty until the walk starts (H1 stamps its own `now`).
+    /// The run's `started_at` rendered as RFC 3339, stamped into every
+    /// section's `sys.when`, the H1 pass included.
     when: Arc<str>,
     /// The run's input broker, when the host configured one; `None` is the
     /// unavailable-fallback policy.
     input: Option<Arc<dyn InputBroker>>,
-    /// The run's host-state snapshot provider; its presence is the
-    /// Agent-window context (the `ui()` global plus raw-id `models.get`).
-    ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
+    /// The run's host-state snapshot; its presence is the Agent-window
+    /// context (the `ui()` global plus raw-id `models.get`).
+    ui: Option<Arc<serde_json::Value>>,
     /// The host's live streaming-delta callback, forwarded by every model
     /// round; `None` drops deltas at the leaf.
     on_delta: Option<Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>>,
@@ -146,8 +146,9 @@ impl RunState {
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// capability-free); `when` starts empty and takes its live value at the
-    /// H1-to-walk handoff.
+    /// capability-free); the nonce derives from `ctx`'s seed and `when`
+    /// renders `ctx`'s `started_at`, so two contexts over the same inputs
+    /// agree on both.
     #[must_use]
     pub(crate) fn new(
         prompt: Arc<Prompt>,
@@ -170,7 +171,7 @@ impl RunState {
         let derived_argv = derive_argv(&prompt, args).map(Arc::from);
         Self {
             prompt,
-            nonce: GuardNonce::fresh(),
+            nonce: GuardNonce::from_seed(ctx.seed),
             vfs: vfs.clone(),
             execution,
             args: Arc::from(args),
@@ -191,9 +192,9 @@ impl RunState {
             tool_set,
             models: model_set.clone(),
             model_set,
-            when: Arc::from(""),
+            when: Arc::from(ctx.started_at.to_rfc3339()),
             input: ctx.input.clone(),
-            ui: ctx.ui.clone(),
+            ui: ctx.ui.clone().map(Arc::new),
             on_delta: ctx.on_delta.clone(),
             #[cfg(test)]
             raw_shims: false,
@@ -367,16 +368,16 @@ impl RunState {
         self.on_delta.as_ref()
     }
 
-    /// The H1-to-walk handoff: the walk's start timestamp and the `argv`
-    /// H1 left behind at the freeze, set on a cheap clone so the context
-    /// H1 saw stays untouched. The tool and model sets
-    /// need no delta: they were built from the prepared bindings at
-    /// construction, and H1's prompt-wide records (`tools.always`,
-    /// `models.default`) landed in the same shared sets the views read.
+    /// The H1-to-walk handoff: the `argv` H1 left behind at the freeze,
+    /// set on a cheap clone so the context H1 saw stays untouched. The
+    /// tool and model sets need no delta: they were built from the
+    /// prepared bindings at construction, and H1's prompt-wide records
+    /// (`tools.always`, `models.default`) landed in the same shared sets
+    /// the views read. `when` needs none either: it is the run's
+    /// `started_at`, the same for the pass and the walk.
     #[must_use]
-    pub(crate) fn with_walk_state(&self, when: &str, argv: Option<serde_json::Value>) -> Self {
+    pub(crate) fn with_walk_state(&self, argv: Option<serde_json::Value>) -> Self {
         let mut ctx = self.clone();
-        ctx.when = Arc::from(when);
         ctx.argv = argv.map(Arc::from);
         ctx
     }
@@ -435,30 +436,23 @@ impl RunState {
         }
     }
 
-    /// The `sys` JSON for one section or arm of this run: a fresh `now`
-    /// timestamp under the walk's `when`, with the driver supplying only the
-    /// section entry's hierarchical id, the entering chain's task id, and
-    /// the section name.
-    ///
-    /// # Errors
-    /// Returns [`Error::TimestampFormat`](crate::Error::TimestampFormat) when
-    /// the current time fails to format.
+    /// The `sys` JSON for one section or arm of this run under the run's
+    /// `when`, with the driver supplying only the section entry's
+    /// hierarchical id, the entering chain's task id, and the section name.
     pub(crate) fn sys_json(
         &self,
         id: &str,
         task_id: &TaskId,
         section_name: &str,
-    ) -> Result<serde_json::Value> {
-        let now = now_rfc3339_checked()?;
-        Ok(sys_json(
+    ) -> serde_json::Value {
+        sys_json(
             &self.when,
-            &now,
             id,
             &task_id.to_string(),
             section_name,
             &self.execution,
             self.section_count(),
-        ))
+        )
     }
 }
 
@@ -489,7 +483,7 @@ impl fmt::Debug for RunState {
             .field("model_set", &self.model_set)
             .field("when", &self.when)
             .field("input", &self.input.is_some())
-            .field("ui", &self.ui.is_some())
+            .field("ui", &self.ui)
             .field("on_delta", &self.on_delta.is_some())
             .finish()
     }

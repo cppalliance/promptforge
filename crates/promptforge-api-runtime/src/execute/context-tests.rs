@@ -16,7 +16,11 @@ fn test_context(prompt: &Prompt) -> RunState {
         "",
         &promptforge_vfs::empty(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunContext::new("run-context-test"),
+        &RunContext::new(
+            "run-context-test",
+            1,
+            promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+        ),
     )
 }
 

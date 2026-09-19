@@ -89,10 +89,12 @@ pub enum Step {
 /// use promptforge_api_runtime::execute::{Run, RunContext, RunResult, Step};
 /// use promptforge_api_runtime::parser::Prompt;
 /// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::timestamp::Timestamp;
 ///
 /// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
-/// let mut run = Run::new(Arc::new(prompt), "", RunContext::new("doc-example"));
+/// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
+/// let mut run = Run::new(Arc::new(prompt), "", ctx);
 /// let Step::Done { result: RunResult::Ok(text), .. } = run.step() else {
 ///     panic!("the literal run is done at once");
 /// };

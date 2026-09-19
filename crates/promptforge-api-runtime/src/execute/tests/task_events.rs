@@ -35,7 +35,7 @@ const OWNER_READS_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n-
 
 /// Drives `md` capability-free on the serial driver.
 fn drive_plain(md: &str) -> (RunResult, Vec<Event>) {
-    let run = Run::new(Arc::new(parse(md)), "", RunContext::new(EXECUTION));
+    let run = Run::new(Arc::new(parse(md)), "", test_context(EXECUTION));
     drive(run, |_, effect| {
         perform_locally(effect, &mut |_| panic!("no model round is issued"))
     })
@@ -124,7 +124,7 @@ fn a_malformed_opts_argument_is_the_calls_error() {
 #[tokio::test(flavor = "current_thread")]
 async fn the_tokio_driver_answers_a_history_read_from_its_own_events() {
     let prompt = parse(OWNER_READS_CHILD);
-    let RunResult::Ok(text) = crate::execute::run(&prompt, "", RunContext::new(EXECUTION)).await
+    let RunResult::Ok(text) = crate::execute::run(&prompt, "", test_context(EXECUTION)).await
     else {
         panic!("the run succeeds through the tokio driver");
     };

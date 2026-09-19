@@ -58,7 +58,7 @@ pub(super) fn model_task_context_with(
     observer: Arc<dyn Observer>,
     broker: Arc<dyn InputBroker>,
 ) -> RunState {
-    let config = RunContext::new(EXECUTION)
+    let config = test_context(EXECUTION)
         .observer(observer)
         .input_broker(broker);
     let ctx = RunState::new(
