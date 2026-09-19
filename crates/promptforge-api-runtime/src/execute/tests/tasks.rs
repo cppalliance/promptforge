@@ -18,7 +18,7 @@ use crate::execute::scheduler::{Scheduler, TaskState};
 /// A recorder that keeps the typed observation, so a payload-carrying
 /// variant (`TaskStarted`) can be matched whole.
 #[derive(Default)]
-struct TaskRecorder(Mutex<Vec<(String, Observation)>>);
+pub(super) struct TaskRecorder(Mutex<Vec<(String, Observation)>>);
 
 impl Observer for TaskRecorder {
     fn observe(&self, _execution: &str, section: &str, event: Observation) {
@@ -30,7 +30,7 @@ impl Observer for TaskRecorder {
 }
 
 impl TaskRecorder {
-    fn records(&self) -> Vec<(String, Observation)> {
+    pub(super) fn records(&self) -> Vec<(String, Observation)> {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")

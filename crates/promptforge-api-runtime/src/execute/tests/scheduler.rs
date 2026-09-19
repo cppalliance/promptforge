@@ -29,7 +29,7 @@ use shared_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, V
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
 /// pre-fill the run's shared set directly.
-fn writer_models() -> ModelSet {
+pub(super) fn writer_models() -> ModelSet {
     ModelSet {
         bindings: vec![ModelBinding::new(
             "writer",
@@ -59,12 +59,28 @@ pub(super) fn scheduler_context_on(
     store: &TestStore,
     observer: Arc<dyn Observer>,
 ) -> RunState {
+    scheduler_context_from(
+        prompt,
+        store,
+        &RunContext::new(EXECUTION).observer(observer),
+    )
+}
+
+/// Builds the run context from a finished `RunContext` on the given store:
+/// the parsed prompt, an empty shared library, and the model set pre-filled.
+/// Every scheduler-side context builder routes through here so a test that
+/// needs an observer, limits, or both composes the `RunContext` itself.
+pub(super) fn scheduler_context_from(
+    prompt: &Prompt,
+    store: &TestStore,
+    run_context: &RunContext,
+) -> RunState {
     let ctx = RunState::new(
         prompt,
         "",
         &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunContext::new(EXECUTION).observer(observer),
+        run_context,
     );
     *ctx.model_set()
         .lock()
@@ -2056,21 +2072,15 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
 /// Builds the run context for a scheduler fanout test with the given
 /// limits, so a window test can narrow the concurrency.
 fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState {
-    let ctx = RunState::new(
+    scheduler_context_from(
         prompt,
-        "",
-        &TestStore::new().vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
+        &TestStore::new(),
         &RunContext::new(EXECUTION).limits(limits),
-    );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = writer_models();
-    ctx
+    )
 }
 
 /// The prompt each gateway request carried, in arrival order.
-fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
+pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
     gateway
         .requests()
         .iter()
@@ -3218,11 +3228,9 @@ async fn fatal_arm_aborts_queued_siblings() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = RunState::new(
+    let ctx = scheduler_context_from(
         &prompt,
-        "",
-        &store.vfs(),
-        LuaProgram::empty().expect("the empty chunk compiles"),
+        &store,
         &RunContext::new(EXECUTION)
             .limits(
                 RunLimits::new()
@@ -3230,9 +3238,6 @@ async fn fatal_arm_aborts_queued_siblings() {
             )
             .observer(recorder.clone()),
     );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = writer_models();
     let error = Scheduler::new(&ctx, None)
         .drive()
         .await
