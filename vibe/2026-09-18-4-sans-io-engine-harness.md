@@ -702,7 +702,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-27>
 
-### Step 27: `prepare_dispatch` split
+### Step 27: `prepare_dispatch` split [completed]
 
 - Component: Run API and engine purity
 - Piece: preparation

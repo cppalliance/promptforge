@@ -134,7 +134,9 @@ pub use coro::{
     install_store_shims,
 };
 #[doc(hidden)]
-pub use dispatch::{ModelReport, ScriptReport, ToolDispatch, dispatch_model_tool, dispatch_tool};
+pub use dispatch::{
+    ModelReport, ScriptReport, ToolDispatch, dispatch_model_tool, dispatch_tool, prepare_dispatch,
+};
 #[doc(hidden)]
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
 #[doc(hidden)]
