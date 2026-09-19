@@ -630,7 +630,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-21>
 
-### Step 21: Checkpoint 2, tasks and fanout complete
+### Step 21: Checkpoint 2, tasks and fanout complete [completed]
 
 - Component: Tasks and fanout
 - Piece: checkpoint
