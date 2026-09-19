@@ -106,10 +106,12 @@ impl Scheduler<'_> {
                     return result;
                 }
             }
-            // Every unfinished chain is ready, pending on I/O, or blocked on
-            // a child that transitively bottoms out in a ready or pending
-            // chain, so an empty ready queue with an empty pending table can
-            // only be a driver bug - fail loudly rather than hang.
+            // Every unfinished chain is ready, pending on I/O, blocked on a
+            // child, or waiting on a task, and a blocked or waiting chain
+            // transitively bottoms out in a ready or pending chain, so an
+            // empty ready queue with an empty pending table can only be a
+            // driver bug (nothing ready, nothing pending, and whatever is
+            // waiting can never be woken) - fail loudly rather than hang.
             if self.pending.is_empty() {
                 return Err(Error::internal(
                     "the scheduler stalled with no ready chain and no in-flight request",

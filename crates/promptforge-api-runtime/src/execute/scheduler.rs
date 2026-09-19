@@ -34,8 +34,8 @@
 //! the request arms, `chat` the one-round `chat` arm and its answer
 //! application, `tool_call` the script and model-issued `tool_call` arm
 //! (the two arms the section-visible `models.loop` shim drives), `tasks`
-//! the task arena and the `spawn` arm, and `joins` the fanout join tables
-//! and arm bookkeeping.
+//! the task arena, the `spawn` arm, and the chain-end rules for tasks, and
+//! `joins` the fanout join tables and arm bookkeeping.
 
 mod chain;
 mod chat;
@@ -184,8 +184,8 @@ struct Chain<'a> {
     )]
     waiting_on: Vec<TaskId>,
     /// Model-task notices not yet delivered into the chain's next model
-    /// round, in arrival order.
-    #[expect(dead_code, reason = "filled by the model-task notices of a later step")]
+    /// round, in arrival order. The H1 hand-off moves them to the walk
+    /// with the pass's tasks; a later step fills and drains them.
     task_notices: Vec<String>,
     /// The latest progress note the chain published through `tasks.note`,
     /// reported by `tasks.status`.
@@ -322,8 +322,10 @@ pub(crate) struct Scheduler<'a> {
     pending: HashMap<RequestId, ChainIndex>,
     /// The task arena: one slot per task the run has started, keyed by the
     /// task's id (its backing chain's id). A slot outlives its chain: it
-    /// holds the terminal state and the undelivered outcome until the
-    /// owner takes the result or ends.
+    /// holds the terminal state and the undelivered outcome at least until
+    /// the owner takes the result or ends, and in fact for the run - the
+    /// arena is append-only like the chain arena, so `status` can report a
+    /// terminal state at any later time.
     tasks: HashMap<TaskId, TaskSlot>,
     /// One join state per live fanout.
     joins: HashMap<FanoutId, JoinState<'a>>,

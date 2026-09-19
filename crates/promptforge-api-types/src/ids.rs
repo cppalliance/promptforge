@@ -18,6 +18,12 @@
 //! [`TaskOrigin`] names the principal that started a task - the prompt's
 //! author through `tasks.spawn`, or the model through its `task` tool -
 //! and rides beside the task's id wherever the task is reported.
+//! [`AbandonReason`] names how a task's owner ended while the task was
+//! still live, for the `abandoned` terminal state.
+//!
+//! Ids order as paths: a chain before its descendants, siblings by index.
+//! The tasks one chain owns are its direct children, so sorting their ids
+//! recovers spawn order.
 
 use std::fmt;
 use std::str::FromStr;
@@ -29,8 +35,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 mod tests;
 
 /// The hierarchical id of one chain: a path of child indices from the root
-/// chain.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// chain. Orders lexicographically as a path: a chain before its
+/// descendants, siblings by child index.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ChainId(Vec<u32>);
 
 impl ChainId {
@@ -129,8 +136,8 @@ impl<'de> Deserialize<'de> for ChainId {
 /// The id of one task: its chain's id. A task and the chain that runs it
 /// are one thing named from two sides, so the two ids are the same path;
 /// the newtype keeps a task-keyed table from accepting an arbitrary chain
-/// by accident.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// by accident. Orders as its chain id does.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TaskId(ChainId);
 
 impl From<ChainId> for TaskId {
@@ -199,4 +206,25 @@ impl TaskOrigin {
             _ => None,
         }
     }
+}
+
+/// Why a live task was abandoned: how its owner chain ended while the task
+/// was still running.
+///
+/// A task ends with its owner. `abandoned` is kept apart from `cancelled`
+/// because "lost its owner" and "was stopped on purpose" are different
+/// facts for the log, the UI, and the model notice; the reason says which
+/// kind of owner end it was, so the notice can say more than "abandoned".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbandonReason {
+    /// The owner ended normally - a scalar return or an exhausted walk -
+    /// without waiting on or cancelling the task. For an author task this
+    /// is the `tasks_live` error; a model task is abandoned quietly.
+    OwnerReturned,
+    /// The owner failed.
+    OwnerFailed,
+    /// The owner was aborted from outside: a fatal sibling's fail-fast,
+    /// or its own owner ending first.
+    OwnerAborted,
 }

@@ -286,7 +286,9 @@ impl Scheduler<'_> {
                             .ok_or(Error::internal("a live chain holds its frame"))?;
                         frame.read_var()?;
                         drop(frame);
-                        *root_result = Some(Ok(value));
+                        // The run ends here, so the pass's live tasks end
+                        // under the chain-end rules as at any chain end.
+                        *root_result = Some(self.settle_owned_tasks(id, Ok(value)));
                         return Ok(());
                     }
                     // H1 does not read the `reply` global back after a

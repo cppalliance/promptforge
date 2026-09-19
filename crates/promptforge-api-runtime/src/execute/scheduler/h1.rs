@@ -4,9 +4,10 @@
 //! short-circuits the run, and a Lua failure is the prompt's failed hard
 //! gate, mapped to [`Error::RequirementsUnmet`]. The pass and the walk
 //! that follows it are the same root chain `0`: the hand-off starts the
-//! walk from the pass's `var` and frozen `argv` and continues the pass's
+//! walk from the pass's `var` and frozen `argv`, continues the pass's
 //! child and entry counters, so the first walked section is `0.1` and a
-//! child the pass started keeps its index.
+//! child the pass started keeps its index, and hands the pass's tasks to
+//! the walk as their owner.
 
 use std::sync::Arc;
 
@@ -113,7 +114,10 @@ impl Scheduler<'_> {
         let counters = chain.counters;
         let sections = self.ctx.prompt().sections();
         if sections.is_empty() {
-            *root_result = Some(Ok(GENERIC_COMPLETION.to_owned()));
+            // No walk follows, so the pass's end is the run's end: a task
+            // the pass spawned and left live ends here under the same
+            // rules as a finishing chain.
+            *root_result = Some(self.settle_owned_tasks(id, Ok(GENERIC_COMPLETION.to_owned())));
             return Ok(());
         }
         // The H1-to-walk handoff: the walk's context takes its live `when`
@@ -133,6 +137,10 @@ impl Scheduler<'_> {
             None,
         )?;
         self.install_root_slots(root)?;
+        // The walk is the pass's continuation, so the tasks the pass
+        // spawned are the walk's from here: it waits on, cancels, or leaks
+        // them exactly as if it had spawned them.
+        self.reassign_tasks(id, root);
         self.ready.push_back(root);
         Ok(())
     }
