@@ -71,36 +71,59 @@ fn an_err_answer_round_trips_and_retains_the_typed_error() {
 }
 
 #[test]
-fn an_ok_fanout_answer_round_trips_as_an_ordered_result_sequence() {
+fn a_when_any_delivery_of_a_failed_member_retains_the_members_typed_error() {
+    // The wait succeeded, so the envelope is `(true, id, false, table)`,
+    // but the member's failure is handed back typed as well: a shim that
+    // re-raises it at once (`fanout` on a fatal arm) lets the driver
+    // substitute the member's own error for the raised table.
     let lua = Lua::new();
-    let results = vec![
-        LuaFanoutResult::success(json!("a"), "text-a"),
-        LuaFanoutResult::exhausted_stub(json!("b"), "stub-b"),
-    ];
-    let (envelope, retained) = Answer::<Error>::Fanout(Ok(results))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, len, first_text, second_ok, second_exhausted, rendered): (
-        bool,
-        i64,
-        String,
-        bool,
-        bool,
-        String,
-    ) = lua
+    let task: TaskId = "0.1".parse().expect("a task id parses");
+    let (envelope, retained) = Answer::<Error>::WhenAny(Ok(TaskDelivery {
+        task,
+        outcome: Err(Error::LuaQuota {
+            resource: "instruction",
+        }),
+    }))
+    .into_envelope(&lua)
+    .expect("the envelope renders");
+    match retained {
+        Some(Error::LuaQuota {
+            resource: "instruction",
+        }) => {}
+        other => panic!("expected the member's retained LuaQuota error, got {other:?}"),
+    }
+    let (ok, id, member_ok, kind, message): (bool, String, bool, String, String) = lua
         .load(
-            "local ok, seq = ...; \
-             return ok, #seq, seq[1].text, seq[2].ok, seq[2].exhausted, tostring(seq[1])",
+            "local ok, id, member_ok, err = ...; \
+             return ok, id, member_ok, err.kind, tostring(err)",
         )
         .call(envelope)
-        .expect("the sequence reads back through Lua");
+        .expect("the delivery reads back through Lua");
+    assert!(ok, "the wait itself succeeded");
+    assert_eq!(id, "0.1");
+    assert!(!member_ok, "the member failed");
+    assert_eq!(kind, "lua");
+    assert_eq!(message, "lua instruction quota exceeded");
+}
+
+#[test]
+fn a_when_any_delivery_of_a_finished_member_retains_nothing() {
+    let lua = Lua::new();
+    let task: TaskId = "0.1".parse().expect("a task id parses");
+    let (envelope, retained) = Answer::<Error>::WhenAny(Ok(TaskDelivery {
+        task,
+        outcome: Ok("done".to_owned()),
+    }))
+    .into_envelope(&lua)
+    .expect("the envelope renders");
+    assert!(retained.is_none(), "a success carries no error to retain");
+    let (ok, member_ok, text): (bool, bool, String) = lua
+        .load("local ok, _, member_ok, text = ...; return ok, member_ok, text")
+        .call(envelope)
+        .expect("the delivery reads back through Lua");
     assert!(ok);
-    assert_eq!(len, 2);
-    assert_eq!(first_text, "text-a");
-    assert!(!second_ok);
-    assert!(second_exhausted);
-    assert_eq!(rendered, "text-a");
+    assert!(member_ok);
+    assert_eq!(text, "done");
 }
 
 #[test]

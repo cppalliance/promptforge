@@ -1,8 +1,8 @@
 //! The chain lifecycle: arena insertion, and the two chain-end paths - a
 //! chain's finish (the frame's teardown boundary, the chain-end rules for
 //! the tasks it owns, and the outcome's delivery to the root, a call
-//! parent, a fanout join, or a task slot) and the abort of a chain with
-//! everything it transitively blocks on or owns.
+//! parent, or a task slot) and the abort of a chain with everything it
+//! transitively blocks on or owns.
 
 use promptforge_api_types::ids::{AbandonReason, ChainId, TaskId};
 
@@ -12,13 +12,12 @@ use crate::execute::support::GENERIC_COMPLETION;
 use crate::parser::Section;
 use crate::{Error, Result};
 
-use super::joins::{ArmState, FanoutId};
 use super::{Chain, ChainIndex, Counters, RequestId, Scheduler};
 
 impl<'a> Scheduler<'a> {
     /// Allocates the next child id under `owner`'s chain: the owner's id
     /// extended by its local child counter, which `call` children and
-    /// spawned arms share, so the ids a chain hands out depend only on
+    /// spawned tasks share, so the ids a chain hands out depend only on
     /// the order of its own dispatches.
     ///
     /// # Errors
@@ -38,17 +37,16 @@ impl<'a> Scheduler<'a> {
     /// fresh chain starts its counters at zero and enters its first
     /// section on its first step, taking entry 0 of its own id; the root
     /// walk continues the counters of the H1 pass it follows. The chain's
-    /// `var` slot seeds from `var` (a call chain's or arm's caller
-    /// snapshot, discarded with the chain). `arm` carries the fanout-arm
-    /// state for an arm chain. The chain's task is its call parent's when
-    /// it has one, else task `0`; a spawned chain's dispatch overwrites it
-    /// with the chain's own id, and an arm's with its caller's.
+    /// `var` slot seeds from `var` (a call chain's or task chain's caller
+    /// snapshot, discarded with the chain). The chain's task is its call
+    /// parent's when it has one, else task `0`; a spawned chain's dispatch
+    /// overwrites it with the chain's own id.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the chain keeps its lineage, counters, context fork, position, parent, var seed, depth, and arm state explicit and linear"
+        reason = "the chain keeps its lineage, counters, context fork, position, parent, var seed, and depth explicit and linear"
     )]
     pub(super) fn start_chain(
         &mut self,
@@ -60,7 +58,6 @@ impl<'a> Scheduler<'a> {
         parent: Option<ChainIndex>,
         var: &serde_json::Value,
         call_depth: usize,
-        arm: Option<ArmState<'a>>,
     ) -> Result<ChainIndex> {
         if self.chains.len() >= self.max_chains {
             return Err(Error::internal("a run's chain count cannot exceed u32"));
@@ -98,7 +95,6 @@ impl<'a> Scheduler<'a> {
             client: None,
             parent,
             advertised: None,
-            arm,
             h1: None,
         });
         Ok(id)
@@ -108,9 +104,8 @@ impl<'a> Scheduler<'a> {
     /// ends mid-section, the chain-end rules for the tasks it owns (a live
     /// author task makes the outcome `tasks_live`; every live task is
     /// abandoned), then the outcome's delivery - the run's result for
-    /// the root chain, the call answer for a child chain, the join
-    /// slot's result for a fanout arm, the task slot's outcome for a
-    /// spawned chain.
+    /// the root chain, the call answer for a child chain, the task slot's
+    /// outcome for a spawned chain.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
     /// walk that ran off its slice's last section, or the chain's failure.
@@ -123,14 +118,13 @@ impl<'a> Scheduler<'a> {
         let chain = &mut self.chains[id.index()];
         let parent = chain.parent;
         let is_task = chain.owner.is_some();
-        let arm = chain.arm.take();
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
         let mut frame = chain.frame.take();
         // Taken now, dropped after the frame: the VM's store closures hold
         // their own Arc clones of the capability, so the identity's claims
-        // release only when both are gone - at chain end, before a fanout
-        // join resumes the parent into its merge. A call chain's slot is a
+        // release only when both are gone - at chain end, before a waiting
+        // owner is woken with the task's result. A call chain's slot is a
         // borrowed clone, so its drop never releases the parent's identity.
         let access = chain.access.take();
         // The live H1 pass never arms completion: SECTION_FINISHED is a
@@ -143,7 +137,7 @@ impl<'a> Scheduler<'a> {
             // A chain ending mid-section (a scalar return) reads its final
             // var back before teardown, exactly as a completed section does
             // at fall-through (the walk rolls it forward; a call chain
-            // or a fanout arm discards its clone), and arms the completion
+            // or a task chain discards its clone), and arms the completion
             // flag so the frame's drop fires SECTION_FINISHED. A failure -
             // the read-back's included - drops the frame unarmed.
             if let Some(frame) = frame.as_mut() {
@@ -156,11 +150,9 @@ impl<'a> Scheduler<'a> {
                 Some(value) => value,
                 // A walk that ran off its slice produced no scalar result:
                 // the top-level chain falls back to the shared generic
-                // completion; a call chain, a fanout arm, or a task chain
-                // to the empty string.
-                None if parent.is_none() && arm.is_none() && !is_task => {
-                    GENERIC_COMPLETION.to_owned()
-                }
+                // completion; a call chain or a task chain to the empty
+                // string.
+                None if parent.is_none() && !is_task => GENERIC_COMPLETION.to_owned(),
                 None => String::new(),
             };
             Ok(text)
@@ -171,10 +163,6 @@ impl<'a> Scheduler<'a> {
         // The chain's tasks end with it: a live author task turns a
         // success into `tasks_live`, and every live task is abandoned.
         let outcome = self.settle_owned_tasks(id, outcome);
-        if let Some(arm) = arm {
-            self.complete_arm(arm, outcome);
-            return;
-        }
         if is_task {
             // A missing slot is a scheduler bug: fail the run loudly rather
             // than lose the task's outcome.
@@ -198,31 +186,15 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Aborts one chain and everything it transitively blocks on or owns -
-    /// its call children, the arms of its nested fanouts, and the tasks it
-    /// spawned (each abandoned as `owner_aborted`, its own subtree aborted
-    /// in turn) - the scheduler port of dropping a spawned arm task: the
-    /// chain leaves the ready queue and the pending table, its in-flight
-    /// leaf I/O task is aborted, and its state drops in the teardown order
-    /// (the suspended coroutine, then the frame unarmed - no
-    /// `SECTION_FINISHED` - then the arm state, whose finalizer drop
-    /// reports `FANOUT_ARM_CANCELLED`). The chain's own task slot, if it
-    /// is a task, is the caller's to settle: the owner's chain end
-    /// abandons it, a cancel arm cancels it.
+    /// its call children and the tasks it spawned (a fanout's arms among
+    /// them; each abandoned as `owner_aborted`, its own subtree aborted in
+    /// turn): the chain leaves the ready queue and the pending table, its
+    /// in-flight leaf I/O task is aborted, and its state drops in the
+    /// teardown order (the suspended coroutine, then the frame unarmed - no
+    /// `SECTION_FINISHED`). The chain's own task slot, if it is a task, is
+    /// the caller's to settle: the owner's chain end abandons it, a cancel
+    /// arm cancels it.
     pub(super) fn abort_subtree(&mut self, id: ChainIndex) {
-        // Nested fanouts this chain parents: their arms abort with it, and
-        // the removed join has no answer to deliver - the parent is dead.
-        let nested: Vec<FanoutId> = self
-            .joins
-            .iter()
-            .filter(|(_, join)| join.parent == id)
-            .map(|(fanout, _)| *fanout)
-            .collect();
-        for fanout in nested {
-            self.joins.remove(&fanout);
-            for arm in self.arm_chains_of(fanout) {
-                self.abort_subtree(arm);
-            }
-        }
         // The arena is u32-bounded at insertion (`start_chain`), so the
         // index conversion cannot fail.
         let children: Vec<ChainIndex> = self
@@ -263,7 +235,6 @@ impl<'a> Scheduler<'a> {
         chain.blocked = None;
         chain.frame = None;
         chain.access = None;
-        chain.arm = None;
     }
 
     /// Drops one in-flight leaf request whose chain is going away: the

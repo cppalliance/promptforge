@@ -553,33 +553,29 @@ impl SectionVm {
         )
     }
 
-    /// Installs `call`, `jump`, `fanout`, and `list_from_section` as
-    /// persistent globals for the section's whole lifecycle.
+    /// Installs `call`, `jump`, and `list_from_section` as persistent
+    /// globals for the section's whole lifecycle.
     ///
     /// Called once by the engine after host injection. The callbacks own
     /// their run context, so the closures stay valid across every chunk this
     /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
     /// clone of the VM's jump slot; the slot is reset before each chunk and
-    /// read after it by the control-run path. The `call` and `fanout`
-    /// closures snapshot this VM's `var` at call time (reading the hidden
-    /// data table through the in-scope `&Lua`) and hand the JSON to their
-    /// callback, so a contained chain or arm seeds from a clone and its
-    /// writes never reach this VM.
+    /// read after it by the control-run path. The `call` closure snapshots
+    /// this VM's `var` at call time (reading the hidden data table through
+    /// the in-scope `&Lua`) and hands the JSON to its callback, so a
+    /// contained chain seeds from a clone and its writes never reach this
+    /// VM.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
     #[cfg(test)]
-    pub(crate) fn install_control_globals<E, F, L>(
+    pub(crate) fn install_control_globals<E, L>(
         &self,
         call_callback: E,
-        fanout_callback: F,
         list_callback: L,
     ) -> Result<()>
     where
         E: Fn(Value, Option<String>, Json) -> std::result::Result<String, Error> + Send + 'static,
-        F: Fn(String, Vec<Json>, Json) -> std::result::Result<Vec<super::LuaFanoutResult>, Error>
-            + Send
-            + 'static,
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
     {
         let globals = self.lua.globals();
@@ -592,17 +588,6 @@ impl SectionVm {
             .map_err(Error::lua)?;
         globals.raw_set("call", call_fn).map_err(Error::lua)?;
         self.install_jump_global(&globals)?;
-        let fanout_fn = self
-            .lua
-            .create_function(move |lua, (worker, collection): (String, Value)| {
-                let items = crate::collection::collection_to_items(lua, &collection)
-                    .map_err(mlua::Error::external)?;
-                let var = var_to_json(lua).map_err(mlua::Error::external)?;
-                let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
-                pack_sequence(lua, replies)
-            })
-            .map_err(Error::lua)?;
-        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)?;
         self.install_list_global(&globals, list_callback)
     }
 
@@ -610,7 +595,7 @@ impl SectionVm {
     /// `list_from_section` as Rust callbacks (neither suspends).
     ///
     /// The suspending calls (`models.infer`, `call`, `fanout`,
-    /// `tools.call`) are the yield shims installed by
+    /// `tools.call`, `tasks.*`) are the yield shims installed by
     /// [`install_coro_shims`](Self::install_coro_shims).
     ///
     /// # Errors
@@ -626,14 +611,20 @@ impl SectionVm {
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `call`,
-    /// `fanout`, `tools.call`). `max_tool_iterations` is the run's resolved
-    /// round cap for the `models.loop` shim a section install adds
-    /// afterward; a VM that never installs the loop shim passes any value.
+    /// `fanout`, `tools.call`, the `tasks` namespace). `max_tool_iterations`
+    /// is the run's resolved round cap for the `models.loop` shim a section
+    /// install adds afterward; a VM that never installs the loop shim
+    /// passes any value. `max_fanout_concurrency` is the run's cap on the
+    /// arms one `fanout` keeps live at once.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
-    pub fn install_coro_shims(&mut self, max_tool_iterations: usize) -> Result<()> {
-        install_shim_prelude(&self.lua, max_tool_iterations)
+    pub fn install_coro_shims(
+        &mut self,
+        max_tool_iterations: usize,
+        max_fanout_concurrency: usize,
+    ) -> Result<()> {
+        install_shim_prelude(&self.lua, max_tool_iterations, max_fanout_concurrency)
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {

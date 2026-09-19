@@ -38,7 +38,7 @@ pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 pub(crate) use mlua::thread::ThreadStatus;
 pub(crate) use mlua::{
     Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue,
-    StdLib, Thread, UserData, UserDataFields, UserDataMethods, Value, VmState,
+    StdLib, Thread, UserData, UserDataMethods, Value, VmState,
 };
 pub(crate) use serde_json::Value as Json;
 
@@ -104,14 +104,13 @@ pub use host::install_ui;
 pub(crate) use host::{install_log, install_store_table, install_untrusted};
 mod tools;
 pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
-mod vm;
-pub(crate) use vm::pack_sequence;
 mod handles;
 mod messages;
 mod program;
 mod projection;
 mod prose;
 mod scope;
+mod vm;
 pub(crate) use handles::resolve_section_target;
 mod models;
 mod protocol;
@@ -122,6 +121,8 @@ mod runtime_events;
 // `LuaProgram` is the documented exception.
 #[doc(hidden)]
 pub use crate::argv::Argv;
+#[doc(hidden)]
+pub use collection::render_item;
 #[doc(hidden)]
 pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
 #[cfg(feature = "test-support")]
@@ -135,9 +136,7 @@ pub use coro::{
 #[doc(hidden)]
 pub use dispatch::{ModelReport, ScriptReport, ToolDispatch, dispatch_model_tool, dispatch_tool};
 #[doc(hidden)]
-pub use handles::{
-    LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolSet, ToolView,
-};
+pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
 #[doc(hidden)]
 pub use host::run_store_op;
 #[doc(hidden)]

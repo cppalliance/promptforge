@@ -14,38 +14,21 @@ use crate::execute::protocol::{Answer, YieldParse};
 use crate::lua::{CoroStep, LuaBlockResult};
 use crate::observe::detail;
 use crate::parser::Block;
-use crate::{Error, Result, cancel};
+use crate::{Error, Result};
 
 use super::{ChainIndex, Scheduler};
 
 impl Scheduler<'_> {
-    /// Runs one ready chain to its next suspension point. An arm chain's
-    /// step runs inside the arm's own cancel scope: the handle is the
-    /// run's, cloned at dispatch, so the scope re-installs the same
-    /// task-local the driver already runs under - the per-arm wiring the
-    /// legacy engine needed a spawn boundary crossing for (PF-CANCEL-002).
-    pub(super) async fn step(
-        &mut self,
-        id: ChainIndex,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        let cancel = self.chains[id.index()]
-            .arm
-            .as_ref()
-            .and_then(|arm| arm.cancel.clone());
-        // The step body never awaits: every dispatch either spawns its leaf
-        // work or answers on the spot. The scope exists so a dispatch arm
-        // that captures the current cancel handle (the `tool_call` arm
-        // hands it to its spawned task) sees the arm's handle.
-        cancel::maybe_scope(cancel, async move { self.step_inner(id, root_result) }).await
-    }
-
     /// Runs one ready chain to its next suspension point: resume a
     /// suspended coroutine with its delivered answer, or advance the walk -
     /// entering the next section, starting the next Lua block's coroutine,
     /// stashing one prose block as the pending Markdown buffer, or falling
-    /// through at a section's end.
-    fn step_inner(
+    /// through at a section's end. The step never awaits: every dispatch
+    /// either spawns its leaf work or answers on the spot, and every chain
+    /// runs under the driver's own cancel scope (a dispatch arm that
+    /// captures the current handle, as the `tool_call` arm does for its
+    /// spawned task, sees the run's).
+    pub(super) fn step(
         &mut self,
         id: ChainIndex,
         root_result: &mut Option<Result<String>>,

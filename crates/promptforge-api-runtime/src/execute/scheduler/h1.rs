@@ -71,7 +71,6 @@ impl Scheduler<'_> {
             client,
             parent: None,
             advertised: None,
-            arm: None,
             h1: Some(self.ctx.prompt().h1_blocks()),
         });
         Ok(id)
@@ -135,7 +134,6 @@ impl Scheduler<'_> {
             None,
             &var,
             0,
-            None,
         )?;
         self.install_root_slots(root)?;
         // The walk is the pass's continuation, so the tasks the pass

@@ -6,7 +6,7 @@ use serde_json::json;
 use super::decode::{add_local_params_schema, collect_tools_add_entries, tool_alias};
 use super::userdata::LuaToolHandle;
 use super::{install_tool_call_counts, install_tools};
-use crate::handles::{LuaFanoutResult, ToolSet};
+use crate::handles::ToolSet;
 use crate::scope::ToolRuntime;
 use crate::{SectionVm, ToolBinding};
 use promptforge_api_types::tools::ToolId;
@@ -20,6 +20,11 @@ fn fresh_access() -> Arc<promptforge_store::Access> {
             .expect("the stock backend acquires"),
     )
 }
+
+/// A userdata that is not a Tool object, for the foreign-userdata rejection.
+struct Foreign;
+
+impl mlua::UserData for Foreign {}
 
 fn echo_handle() -> LuaToolHandle {
     LuaToolHandle::from_binding(
@@ -62,10 +67,8 @@ fn tool_alias_rejects_other_types_and_other_userdata() {
     );
     // A userdata that is not a Tool object takes the same rejection; the
     // borrow failure must not leak mlua's type-mismatch wording.
-    let fanout = lua
-        .create_userdata(LuaFanoutResult::success(json!(1), "text"))
-        .expect("userdata");
-    let other = tool_alias(&Value::UserData(fanout)).expect_err("not a Tool object");
+    let foreign = lua.create_userdata(Foreign).expect("userdata");
+    let other = tool_alias(&Value::UserData(foreign)).expect_err("not a Tool object");
     assert!(
         other
             .to_string()
@@ -196,7 +199,7 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
         .expect("section VM construction cannot fail");
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host injection cannot fail");
-    vm.install_coro_shims(24)
+    vm.install_coro_shims(24, 8)
         .expect("the shim prelude installs");
     let (call_is_function, bare_is_nil): (bool, bool) = vm
         .lua()

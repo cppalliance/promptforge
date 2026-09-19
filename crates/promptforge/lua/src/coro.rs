@@ -1,10 +1,11 @@
 //! The coroutine-protocol shim layer: per-VM Lua yield wrappers for the
 //! suspending host calls.
 //!
-//! Yield cannot cross the C boundary, so `models.infer`, `call`, `fanout`,
-//! and `tools.call` are Lua shims (source in `__impl_coro.lua` beside this
-//! file) that `coroutine.yield` a request table and interpret the two
-//! resume values as the `(ok, result)` envelope; coroutine driving itself
+//! Yield cannot cross the C boundary, so `models.infer`, `call`,
+//! `tools.call`, the `tasks` namespace, and `fanout` are Lua shims (source
+//! in the `__impl_*.lua` files beside this one) that `coroutine.yield` a
+//! request table and interpret the resume values as the `(ok, result)`
+//! envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
 //! pulled in with `include_str!` so chunk line 1 is file line 1, compiled
 //! once through the usual [`LuaProgram`] machinery, and loaded per VM. The
@@ -33,6 +34,15 @@ const TASKS_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_tasks.lua";
 /// cancel, split from the prelude so neither chunk outgrows the file
 /// ceiling. It runs over the prelude's failure helpers.
 const TASKS_SOURCE: &str = include_str!("__impl_tasks.lua");
+
+/// The `fanout` chunk's name, `@`-prefixed as the prelude's is.
+const FANOUT_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_fanout.lua";
+
+/// The `fanout` shim source: Lua over the task protocol (`spawn`,
+/// `when_any`, `cancel`), split from the prelude for the same file-ceiling
+/// reason. It runs over the prelude's failure helpers plus the collection
+/// enumerator, the item renderer, and the run's arm-concurrency cap.
+const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
 
 /// The registry key for the shim's `chat`, stashed by the prelude install so
 /// an agent host can install it as `models.chat`. The registry is host-side
@@ -101,6 +111,13 @@ static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
         LuaProgram::compile_internal(TASKS_SOURCE, TASKS_CHUNK_NAME).map_err(SharedSource::new)
     });
 
+/// The `fanout` program, compiled once and loaded per VM after the prelude,
+/// under the same failure contract.
+static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(FANOUT_SOURCE, FANOUT_CHUNK_NAME).map_err(SharedSource::new)
+    });
+
 /// Installs the yield shims on a VM whose host tables already exist.
 ///
 /// Scheduler-mode VMs load the coroutine standard library for the shim's
@@ -109,16 +126,18 @@ static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// cannot yield directly and a hand-rolled yield fails the driver's strict
 /// validation. The `models`, `tools`, and `compactors` tables are passed
 /// to the shim chunk as arguments, so the chunk never reads a global; the
-/// chunk shims `models.infer` and installs `tools.call`, and the
-/// `call`/`fanout` shims come back for the host to install as globals. The
-/// `tasks` namespace is a second chunk, run over the same `yield` and
+/// chunk shims `models.infer` and installs `tools.call`, and the `call`
+/// shim comes back for the host to install as a global. The `tasks`
+/// namespace is a second chunk, run over the same `yield` and
 /// `var_snapshot` captures plus the prelude's returned failure helpers,
-/// and installed as the `tasks` global. The
-/// `models.loop` shim is stashed in the registry for
-/// [`install_section_loop_shim`], so agent VMs - which run this prelude
-/// too - never receive it. `max_tool_iterations` is the loop's round cap,
-/// the run's resolved value, captured by the chunk so the shim needs no
-/// host call to read it.
+/// and installed as the `tasks` global; `fanout` is a third, run over the
+/// same captures plus the collection enumerator, the item renderer, and
+/// `max_fanout_concurrency` (the run's cap on live arms), and installed
+/// as the `fanout` global. The `models.loop` shim is stashed in the
+/// registry for [`install_section_loop_shim`], so agent VMs - which run
+/// this prelude too - never receive it. `max_tool_iterations` is the
+/// loop's round cap, the run's resolved value, captured by the chunk so
+/// the shim needs no host call to read it.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
@@ -133,7 +152,11 @@ static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
 /// install step fails.
-pub(crate) fn install_shim_prelude(lua: &Lua, max_tool_iterations: usize) -> Result<()> {
+pub(crate) fn install_shim_prelude(
+    lua: &Lua,
+    max_tool_iterations: usize,
+    max_fanout_concurrency: usize,
+) -> Result<()> {
     lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
     let globals = lua.globals();
     let coroutine: Table = globals.raw_get("coroutine").map_err(Error::lua)?;
@@ -185,10 +208,41 @@ pub(crate) fn install_shim_prelude(lua: &Lua, max_tool_iterations: usize) -> Res
         .as_ref()
         .map_err(Error::shared)?
         .load(lua)?
-        .call((yield_fn, var_snapshot, helpers))
+        .call((yield_fn.clone(), var_snapshot.clone(), helpers.clone()))
         .map_err(Error::lua)?;
     globals.raw_set("tasks", tasks).map_err(Error::lua)?;
-    let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
+    // The enumerator answers `(members)` or `(nil, message)` so the shim
+    // raises the message as its own call error, exactly as the other
+    // author-argument failures surface at the call site.
+    let collection_members = lua
+        .create_function(|lua, collection: Value| {
+            match crate::collection::collection_members(lua, &collection) {
+                Ok(members) => Ok((Value::Table(members), Value::Nil)),
+                Err(error) => Ok((
+                    Value::Nil,
+                    Value::String(lua.create_string(error.to_string())?),
+                )),
+            }
+        })
+        .map_err(Error::lua)?;
+    let render_item = lua
+        .create_function(|lua, item: Value| {
+            crate::collection::render_item_value(lua, item).map_err(mlua::Error::external)
+        })
+        .map_err(Error::lua)?;
+    let fanout: Function = FANOUT_PROGRAM
+        .as_ref()
+        .map_err(Error::shared)?
+        .load(lua)?
+        .call((
+            yield_fn,
+            var_snapshot,
+            helpers,
+            max_fanout_concurrency,
+            collection_members,
+            render_item,
+        ))
+        .map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
     let chat: Function = shims.raw_get("chat").map_err(Error::lua)?;
     lua.set_named_registry_value(CHAT_REGISTRY, chat)

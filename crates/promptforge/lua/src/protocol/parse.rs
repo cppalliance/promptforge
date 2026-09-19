@@ -163,10 +163,9 @@ impl Request {
     /// argument fails validation is [`YieldParse::Call`]: the error rides
     /// back as the call's answer so the shim raises it at the call site,
     /// keeping the legacy callback's errors catchable by an author `pcall`.
-    /// Two boundary conversions keep their own byte-identical errors: a
-    /// `call` target that is not a string fails as
-    /// `resolve_section_target` fails, and a fanout collection fails as
-    /// `collection_to_items` fails.
+    /// One boundary conversion keeps its own byte-identical error: a `call`
+    /// or `spawn` target that is not a string fails as
+    /// `resolve_section_target` fails.
     pub fn from_yield(lua: &Lua, yielded: &Value) -> YieldParse {
         let Value::Table(table) = yielded else {
             return YieldParse::Malformed(direct_yield_error());
@@ -189,7 +188,6 @@ impl Request {
             "pending" => classify(parse_pending(table), |error| Answer::Pending(Err(error))),
             "note" => classify(parse_note(table), |error| Answer::Note(Err(error))),
             "cancel" => classify(parse_cancel(table), |error| Answer::Cancel(Err(error))),
-            "fanout" => classify(parse_fanout(lua, table), |error| Answer::Fanout(Err(error))),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
             }),
@@ -277,7 +275,7 @@ fn parse_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, Fi
 /// Parses a `spawn` request: the author-supplied `target` (validated with
 /// the `resolve_section_target` rule, as `call`'s is), the optional
 /// author-supplied `input`, `item`, and `index` seeds, plus the
-/// shim-produced `var` snapshot and `origin`.
+/// shim-produced `var` snapshot, `origin`, and `fanout` mark.
 fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let target = match table.raw_get::<Value>("target") {
         Ok(value) => {
@@ -327,6 +325,13 @@ fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, F
             .ok_or(FieldFailure::Malformed)?,
         Ok(_) | Err(_) => return Err(FieldFailure::Malformed),
     };
+    // Shim-produced as well: the `fanout` shim marks its arms, `tasks.spawn`
+    // leaves the field absent, and any other shape is a hand-built yield.
+    let fanout = match table.raw_get::<Value>("fanout") {
+        Ok(Value::Nil) => false,
+        Ok(Value::Boolean(fanout)) => fanout,
+        Ok(_) | Err(_) => return Err(FieldFailure::Malformed),
+    };
     Ok(Request::Spawn {
         target,
         input,
@@ -334,23 +339,8 @@ fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, F
         index,
         var,
         origin,
+        fanout,
     })
-}
-
-/// Parses a `fanout` request: the author-supplied `worker` heading and
-/// `collection` (converted member-wise while the VM handle is live, keeping
-/// the conversion's byte-identical errors), plus the shim-produced `var`
-/// snapshot.
-fn parse_fanout(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let worker = call_string(table, "worker")?;
-    let items = match table.raw_get::<Value>("collection") {
-        Ok(collection) => {
-            crate::collection::collection_to_items(lua, &collection).map_err(FieldFailure::Call)?
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let var = shim_var(lua, table)?;
-    Ok(Request::Fanout { worker, items, var })
 }
 
 /// Parses a `tools.call` request: the author-supplied `alias` (a string or

@@ -1,23 +1,18 @@
-//! Explicit fanout: map a worker section over a collection of members.
+//! Heading resolution: the exact `(level, name)` address every control
+//! surface resolves through.
 //!
-//! A section's Lua calls `fanout(worker, collection)` to run the worker
-//! template once per collection member. The collection is any Lua table: the
-//! array part (`1..=#t`) iterates in order first, then the hash part in
-//! undefined order. An array member arrives as the arm's `item` value as
-//! itself; a hash member arrives as a pair table (`item.key` / `item.value`).
-//! A list section's pre-parsed items feed in through `list_from_section`:
-//! `fanout("### Worker", list_from_section("### List"))`.
-//!
-//! The scheduler drives the fanout: the call yields a structural request,
-//! and the driver forks one arm chain per member (at most the run's
-//! `max_fanout_concurrency` active at once), joins them, and resumes the
-//! caller with the ordered results. This module carries the pieces that
-//! boundary shares: [`resolve_sibling`] (the exact `(level, name)` heading
-//! resolution every control surface uses) and [`ArmFinalizer`] (the
-//! exactly-once terminal-observation guard every arm chain carries). The
-//! member-wise collection conversion at the protocol boundary lives in the
-//! `promptforge-lua` crate, beside the VM and the coroutine protocol that
-//! consume it.
+//! A section's Lua names other sections by heading string - `call`, `jump`,
+//! `list_from_section`, `tasks.spawn`, and `fanout(worker, collection)`
+//! (which runs the worker template once per collection member: the array
+//! part in order, then the hash part as `{ key, value }` pairs sorted by
+//! key, a list section's pre-parsed items feeding in through
+//! `list_from_section`). The `fanout` shim itself is Lua over the task
+//! protocol (`promptforge-lua`'s `__impl_fanout.lua`): it spawns one task
+//! per member, keeps at most the run's `max_fanout_concurrency` live, and
+//! waits on the live set, so the scheduler holds no fanout state. This
+//! module carries [`resolve_sibling`], the one heading resolution those
+//! surfaces share; the collection enumeration lives in the `promptforge-lua`
+//! crate, beside the VM and the coroutine protocol that consume it.
 
 use crate::parser::Section;
 use crate::{Error, Result};
@@ -99,10 +94,6 @@ pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Resu
     }
     Ok(found)
 }
-
-mod arm;
-
-pub(crate) use arm::ArmFinalizer;
 
 #[cfg(test)]
 mod tests;

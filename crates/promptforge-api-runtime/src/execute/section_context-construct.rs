@@ -1,15 +1,17 @@
-//! The frame's three constructors: one per arrival kind. Each absorbs the
-//! VM construction and setup preamble for its kind of section entry - a
-//! walked section, the live H1 pass (section 0), a fanout arm - and hands
-//! back a live [`SectionContext`] whose `Drop` is the teardown boundary.
-//! The setup half (host injection, host APIs, the control surface, the
-//! shared replay, the captured alias bindings) is shared; only the seed,
-//! the `sys` extras, and the `list_from_section` visible set differ.
+//! The frame's two constructors: one per arrival kind. Each absorbs the VM
+//! construction and setup preamble for its kind of section entry - a
+//! walked section (a spawned task's first entry included, seeded with its
+//! `item` and `sys.index`), the live H1 pass (section 0) - and hands back
+//! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
+//! setup half (host injection, host APIs, the control surface, the shared
+//! replay, the captured alias bindings) is shared; only the seed, the `sys`
+//! extras, and the `list_from_section` visible set differ.
 
 use std::sync::Arc;
 
 use promptforge_api_types::ids::{ChainId, TaskId};
 
+use crate::Result;
 use crate::execute::context::RunState;
 use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
@@ -18,7 +20,6 @@ use crate::lua::SectionVm;
 use crate::observe::detail;
 use crate::parser::Section;
 use crate::store::Access;
-use crate::{Error, Result};
 
 use super::{SectionContext, TaskSeed};
 
@@ -90,7 +91,7 @@ impl SectionContext {
         let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
         // The setup half of the section lifecycle - host injection, host
         // APIs, the control surface, the shared replay, and the captured
-        // alias bindings - is shared with the fanout arm; only the seed, the
+        // alias bindings - is shared with the H1 pass; only the seed, the
         // `sys` extras, and the callback's visible set are the walk's own.
         let setup = ctx.vm_setup(
             &sys,
@@ -196,116 +197,6 @@ impl SectionContext {
             sys,
             var: serde_json::json!({}),
             item: None,
-            counts: None,
-            observer: Arc::clone(ctx.observer()),
-            debug: ctx.debug().cloned(),
-            turns: Arc::clone(ctx.turns()),
-        })
-    }
-
-    /// Constructs the frame for one fanout arm and runs its setup preamble:
-    /// VM construction and limits, the `sys` JSON carrying the arm chain's
-    /// entry id as `id` and its 1-based per-fanout `index`, the control
-    /// surface (the `list_from_section` callback resolved over the worker's
-    /// visible set: its home slice plus its children; plus the yield
-    /// shims), and the shared setup half.
-    ///
-    /// The seed is the fanout's own: the collection `item`, the arm's
-    /// spawned access capability (its claims-model identity), and the
-    /// caller's cloned `var`; `task_id` is the fanout caller's task, which
-    /// the arm reports as its `sys.taskid`. The
-    /// effective reporting handles
-    /// are the fanout's too: the run's own observer and debug sink with the
-    /// fanout's fresh turn counter arrive through the context's fanout fork,
-    /// so the arm's nested `call`/`fanout` chains report through them as
-    /// well.
-    ///
-    /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
-    /// construction failure propagates bare - no VM exists to tear down. A
-    /// limits, `sys`, or setup failure tears the fresh VM down once here:
-    /// the chain owns the run phase's teardown boundary, so the
-    /// construction phase keeps its own and every path tears down exactly
-    /// once.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the arm frame keeps its context, capability, worker, visible set, entry id, task id, index, item, and var seed explicit and linear"
-    )]
-    pub(crate) fn new_fanout_arm(
-        ctx: &RunState,
-        access: &Arc<Access>,
-        worker: &Section,
-        home: &[Section],
-        section_id: &str,
-        task_id: &TaskId,
-        index: usize,
-        item: serde_json::Value,
-        var: &serde_json::Value,
-    ) -> Result<Self> {
-        let mut vm = SectionVm::new_for_section(
-            ctx.nonce(),
-            &ctx.tool_set(),
-            &ctx.model_set(),
-            ctx.execution(),
-            ctx.observer().as_ref(),
-            worker.name(),
-        )?;
-        // The limits install and the `sys` build are the construction
-        // phase's fallible steps once the VM exists; a failure tears the
-        // fresh VM down once here, matching the single teardown the arm's
-        // epilogue owns for the run phase.
-        let sys = match vm
-            .apply_lua_limits(
-                ctx.limits().lua_memory().get(),
-                ctx.limits().lua_logs().get(),
-            )
-            .map_err(Error::from)
-            .and_then(|()| {
-                let mut sys = ctx.sys_json(section_id, task_id, worker.name())?;
-                // The arm's own sys extra: its 1-based position within this
-                // fanout. Absent outside a fanout, so a walked section
-                // reading `sys.index` raises the sealed-sys unknown-field
-                // error; a nested fanout's arms restart at 1.
-                sys["index"] = serde_json::Value::from(index + 1);
-                Ok(sys)
-            }) {
-            Ok(sys) => sys,
-            Err(error) => {
-                vm.teardown(ctx.observer().as_ref(), worker.name());
-                return Err(error);
-            }
-        };
-        let item = Some(item);
-        // The `list_from_section` callback resolves over the worker's
-        // visible set (its home slice plus its children); the suspending
-        // calls are the yield shims the setup half installs.
-        let visible = visible_sections(home, worker);
-        let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
-        // The setup half is shared with the walk; only the seed, the `sys`
-        // extra, and the callback's visible set are the arm's own.
-        let setup = ctx.vm_setup(
-            &sys,
-            VmSeed {
-                var: Some(var),
-                item: item.as_ref(),
-            },
-            access,
-            worker.name(),
-        );
-        // Setup runs on the bare VM so a failure tears it down here: the
-        // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer().as_ref(), worker.name());
-            return Err(error);
-        }
-        Ok(Self {
-            vm: Some(vm),
-            name: worker.name().to_owned(),
-            execution: ctx.execution().to_owned(),
-            completed: false,
-            sys,
-            var: var.clone(),
-            item,
             counts: None,
             observer: Arc::clone(ctx.observer()),
             debug: ctx.debug().cloned(),

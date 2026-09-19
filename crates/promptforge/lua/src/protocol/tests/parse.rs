@@ -1,5 +1,5 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
-//! `call`, `fanout`, `tool_call`, `user_input`, the reserved `mcp`), and
+//! `call`, `spawn`, `tool_call`, `user_input`, the reserved `mcp`), and
 //! the malformed-yield rejections shared by every op.
 
 use super::*;
@@ -72,28 +72,20 @@ fn call_without_input_yields_none() {
 }
 
 #[test]
-fn fanout_parses_and_converts_the_collection_member_wise() {
+fn a_fanout_op_is_no_longer_a_request() {
+    // The fanout shim is Lua over `spawn` and `when_any`; a yield naming
+    // the retired op is a hand-built yield and fails as one.
     let lua = Lua::new();
     let table = request_table(&lua, "fanout");
     table.raw_set("worker", "### Worker").expect("raw_set");
-    let collection = lua.create_table().expect("table creation cannot fail");
-    collection.raw_set(1, "a").expect("raw_set");
-    collection.raw_set(2, 2).expect("raw_set");
-    collection.raw_set("key", true).expect("raw_set");
-    table.raw_set("collection", collection).expect("raw_set");
+    table
+        .raw_set(
+            "collection",
+            lua.create_table().expect("table creation cannot fail"),
+        )
+        .expect("raw_set");
     set_var_snapshot(&lua, &table);
-    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
-    match request {
-        Request::Fanout { worker, items, var } => {
-            assert_eq!(worker, "### Worker");
-            assert_eq!(
-                items,
-                vec![json!("a"), json!(2), json!({ "key": "key", "value": true })]
-            );
-            assert_eq!(var, json!({ "k": 1 }));
-        }
-        other => panic!("expected a fanout request, got {other:?}"),
-    }
+    assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]
@@ -117,6 +109,7 @@ fn spawn_parses_target_seeds_var_and_origin() {
             index,
             var,
             origin,
+            fanout,
         } => {
             assert_eq!(target, "## Child");
             assert_eq!(input.as_deref(), Some("override"));
@@ -124,9 +117,33 @@ fn spawn_parses_target_seeds_var_and_origin() {
             assert_eq!(index, Some(3));
             assert_eq!(var, json!({ "k": 1 }));
             assert_eq!(origin, TaskOrigin::Author);
+            assert!(!fanout, "an absent mark is a plain `tasks.spawn`");
         }
         other => panic!("expected a spawn request, got {other:?}"),
     }
+}
+
+#[test]
+fn spawn_reads_the_fanout_mark_and_rejects_a_non_boolean_one() {
+    // The mark is shim-produced: `true` from the fanout shim, absent from
+    // `tasks.spawn`; any other shape is a hand-built yield.
+    let lua = Lua::new();
+    let table = request_table(&lua, "spawn");
+    table.raw_set("target", "### Worker").expect("raw_set");
+    table.raw_set("origin", "author").expect("raw_set");
+    table.raw_set("fanout", true).expect("raw_set");
+    set_var_snapshot(&lua, &table);
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::Spawn { fanout, .. } => assert!(fanout, "the fanout shim's mark is read"),
+        other => panic!("expected a spawn request, got {other:?}"),
+    }
+
+    let table = request_table(&lua, "spawn");
+    table.raw_set("target", "### Worker").expect("raw_set");
+    table.raw_set("origin", "author").expect("raw_set");
+    table.raw_set("fanout", "yes").expect("raw_set");
+    set_var_snapshot(&lua, &table);
+    assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]
@@ -461,7 +478,7 @@ fn an_infer_with_a_wrong_handle_type_is_the_calls_error() {
     let as_other_userdata = request_table(&lua, "infer");
     as_other_userdata.raw_set("prompt", "hi").expect("raw_set");
     let wrong = lua
-        .create_userdata(LuaFanoutResult::success(json!(1), "x"))
+        .create_userdata(OtherUserData)
         .expect("userdata creation cannot fail on a fresh VM");
     as_other_userdata.raw_set("handle", wrong).expect("raw_set");
     match Request::from_yield(&lua, &Value::Table(as_other_userdata)) {
@@ -490,51 +507,11 @@ fn a_call_with_a_non_string_target_keeps_the_resolve_error() {
 }
 
 #[test]
-fn a_fanout_with_a_non_string_worker_is_the_calls_error() {
-    // The author-facing argument error rides back as the call's answer,
-    // so the shim raises it at the call site (pcall-able), exactly as
-    // the legacy callback's conversion error surfaced.
-    let lua = Lua::new();
-    let table = request_table(&lua, "fanout");
-    table.raw_set("worker", 42).expect("raw_set");
-    let collection = lua.create_table().expect("table creation cannot fail");
-    table.raw_set("collection", collection).expect("raw_set");
-    set_var_snapshot(&lua, &table);
-    match Request::from_yield(&lua, &Value::Table(table)) {
-        YieldParse::Call(Answer::Fanout(Err(Error::Lua(message)))) => {
-            assert_eq!(message, "worker must be a string, got integer");
-        }
-        other => panic!("expected the worker call error, got {other:?}"),
-    }
-}
-
-#[test]
 fn a_request_without_a_var_snapshot_is_rejected() {
     let lua = Lua::new();
     let table = request_table(&lua, "call");
     table.raw_set("target", "## Child").expect("raw_set");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
-}
-
-#[test]
-fn fanout_collection_member_errors_stay_byte_identical() {
-    let lua = Lua::new();
-    let table = request_table(&lua, "fanout");
-    table.raw_set("worker", "### Worker").expect("raw_set");
-    let collection = lua.create_table().expect("table creation cannot fail");
-    let member = lua
-        .create_function(|_, ()| Ok(()))
-        .expect("function creation cannot fail");
-    collection.raw_set(1, member).expect("raw_set");
-    table.raw_set("collection", collection).expect("raw_set");
-    set_var_snapshot(&lua, &table);
-    match Request::from_yield(&lua, &Value::Table(table)) {
-        YieldParse::Call(Answer::Fanout(Err(Error::Lua(message)))) => assert_eq!(
-            message,
-            "fanout collection member at index 1 is a function; members must be data"
-        ),
-        other => panic!("expected the collection member call error, got {other:?}"),
-    }
 }
 
 #[test]

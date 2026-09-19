@@ -30,8 +30,8 @@ pub(crate) fn tool_alias(value: &Value) -> mlua::Result<String> {
     };
     match value {
         Value::String(s) => Ok(s.to_string_lossy()),
-        // A userdata that is not a Tool object (a model handle, a fanout
-        // result) takes the same rejection as any other wrong type.
+        // A userdata that is not a Tool object (a model handle) takes the
+        // same rejection as any other wrong type.
         Value::UserData(ud) => ud
             .borrow::<LuaToolHandle>()
             .map(|handle| handle.name().to_owned())

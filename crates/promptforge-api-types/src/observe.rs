@@ -53,8 +53,8 @@ use crate::ids::{AbandonReason, TaskId, TaskOrigin};
 /// [`Observation::Lua`] carries the one intentionally author-controlled
 /// checkpoint (the Lua `log(message)` callback); [`Observation::Other`] is a
 /// forward-compatible escape hatch. Both own their message, so an observation
-/// crosses a thread boundary (fanout arms report through a channel) without
-/// borrowing the emitting frame.
+/// crosses a thread boundary (a leaf I/O task reports its outcome from the
+/// runtime's pool) without borrowing the emitting frame.
 ///
 /// # Examples
 /// Match the variants a consumer cares about, use [`label`](Observation::label)
@@ -183,39 +183,15 @@ pub enum Observation {
     StoreGlobSucceeded,
     /// A harness-mediated store glob failed.
     StoreGlobFailed,
-    /// A fanout arm began execution.
-    ///
-    /// Every arm emits exactly one [`FanoutArmStarted`](Observation::FanoutArmStarted)
-    /// followed by exactly one terminal event: one of
-    /// [`FanoutArmSucceeded`](Observation::FanoutArmSucceeded),
-    /// [`FanoutArmExhausted`](Observation::FanoutArmExhausted),
-    /// [`FanoutArmFailed`](Observation::FanoutArmFailed), or
-    /// [`FanoutArmCancelled`](Observation::FanoutArmCancelled). The runtime
-    /// enforces this state machine with a drop guard, so an aborted or
-    /// cancelled arm still reports a terminal event.
-    FanoutArmStarted,
-    /// Legacy generic terminal, retained only so an older consumer's match arm
-    /// stays valid. The current runtime never emits it: a finishing arm always
-    /// reports one of the specific terminal variants below (succeeded /
-    /// exhausted / failed / cancelled).
-    FanoutArmFinished,
-    /// Terminal: a fanout arm finished with a normal successful result.
-    FanoutArmSucceeded,
-    /// Terminal: a fanout arm soft-degraded because its tool loop was exhausted.
-    FanoutArmExhausted,
-    /// Terminal: a fanout arm ended with a hard error.
-    FanoutArmFailed,
-    /// Terminal: a fanout arm was cancelled or aborted (Ctrl-C or a sibling's
-    /// hard error) before it could finalize.
-    FanoutArmCancelled,
     /// A section began waiting on operator input through the run's input
     /// broker.
     UserInputWaitStarted,
-    /// A task chain was started by `tasks.spawn` (or, later, the model's
-    /// `task` tool). The payload is the task's spawn seeds: everything a
-    /// host needs to start the same chain again under the same id. The
-    /// seeds are author-supplied data and are untrusted metadata, as the
-    /// module docs say. Reported under the spawning section.
+    /// A task chain was started by `tasks.spawn`, by the `fanout` shim for
+    /// each of its arms, or (later) by the model's `task` tool. The payload
+    /// is the task's spawn seeds: everything a host needs to start the
+    /// same chain again under the same id. The seeds are author-supplied
+    /// data and are untrusted metadata, as the module docs say. Reported
+    /// under the spawning section.
     TaskStarted {
         /// The task's id: its chain's hierarchical id.
         task: TaskId,
@@ -329,12 +305,6 @@ impl Observation {
             Observation::StoreDeleteFailed => "Store delete failed",
             Observation::StoreGlobSucceeded => "Store glob succeeded",
             Observation::StoreGlobFailed => "Store glob failed",
-            Observation::FanoutArmStarted => "Fanout arm started",
-            Observation::FanoutArmFinished => "Fanout arm finished",
-            Observation::FanoutArmSucceeded => "Fanout arm succeeded",
-            Observation::FanoutArmExhausted => "Fanout arm exhausted",
-            Observation::FanoutArmFailed => "Fanout arm failed",
-            Observation::FanoutArmCancelled => "Fanout arm cancelled",
             Observation::UserInputWaitStarted => "User input wait started",
             Observation::TaskStarted { .. } => "Task started",
             Observation::TaskSucceeded { .. } => "Task succeeded",
@@ -420,11 +390,6 @@ pub mod detail {
     pub const STORE_DELETE_FAILED: Observation = Observation::StoreDeleteFailed;
     pub const STORE_GLOB_SUCCEEDED: Observation = Observation::StoreGlobSucceeded;
     pub const STORE_GLOB_FAILED: Observation = Observation::StoreGlobFailed;
-    pub const FANOUT_ARM_STARTED: Observation = Observation::FanoutArmStarted;
-    pub const FANOUT_ARM_SUCCEEDED: Observation = Observation::FanoutArmSucceeded;
-    pub const FANOUT_ARM_EXHAUSTED: Observation = Observation::FanoutArmExhausted;
-    pub const FANOUT_ARM_FAILED: Observation = Observation::FanoutArmFailed;
-    pub const FANOUT_ARM_CANCELLED: Observation = Observation::FanoutArmCancelled;
     pub const USER_INPUT_WAIT_STARTED: Observation = Observation::UserInputWaitStarted;
 }
 

@@ -5,7 +5,7 @@ use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
 
 use crate::compactors::OverflowReason;
-use crate::{Error, LuaFanoutResult, Result, ToolOutputKind};
+use crate::{Error, Result, ToolOutputKind};
 
 /// The outcome of one dispatched store operation: the value the shim
 /// returns to its caller. Mutating ops carry `Unit` (the shim returns
@@ -130,7 +130,10 @@ pub struct UserInputOutcome {
 /// `cancelled` value for a task that was cancelled or abandoned. The
 /// delivery itself succeeded; a wait that fails outright (a task the
 /// caller does not own, a result already delivered) is the outer
-/// [`Answer::WhenAny`] error instead.
+/// [`Answer::WhenAny`] error instead. A delivered failure is also the
+/// envelope's retained typed error, so a shim that re-raises the member's
+/// failure at once (the `fanout` shim's fatal-arm path) hands the driver
+/// the member's own typed error rather than its rendering.
 #[derive(Debug)]
 pub struct TaskDelivery<E> {
     /// The member that ended.
@@ -179,7 +182,7 @@ pub struct TaskStatus {
 /// driver, which retains it against the pending request and substitutes it
 /// when the shim-raised error surfaces as the coroutine's failure. This holds
 /// uniformly for leaf and structural answers: the enum owns the typed error
-/// until the envelope is rendered, so a `Call` or `Fanout` failure
+/// until the envelope is rendered, so a `Call` or `WhenAny` failure
 /// round-trips with its structure intact, never stringified.
 ///
 /// The error type is the driver's: the Lua side produces
@@ -213,8 +216,6 @@ pub enum Answer<E> {
     Note(std::result::Result<(), E>),
     /// The unit outcome of a `cancel` request.
     Cancel(std::result::Result<(), E>),
-    /// The ordered arm results for a `fanout` request, in collection order.
-    Fanout(std::result::Result<Vec<LuaFanoutResult>, E>),
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
     /// [`ChatResult`] does not size every answer the non-chat paths move.
     Chat(std::result::Result<Box<ChatResult>, E>),
@@ -247,7 +248,6 @@ impl<E> Answer<E> {
             Answer::Pending(result) => Answer::Pending(result.map_err(map)),
             Answer::Note(result) => Answer::Note(result.map_err(map)),
             Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
-            Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
             Answer::UserInput(result) => Answer::UserInput(result.map_err(map)),
