@@ -104,6 +104,50 @@ impl RunLog {
         records.reverse();
         Ok(records)
     }
+
+    /// The `Event` payloads of one task, in `task_seq` order: what the
+    /// `TaskEvents` performer hands back to the engine. `last` keeps only
+    /// the final `n`. A task that never logged reads as empty.
+    ///
+    /// # Errors
+    /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
+    /// [`LogError::Corrupt`] when a row does not fit the schema,
+    /// [`LogError::Payload`] when a payload does not parse, and
+    /// [`LogError::Database`] when the engine cannot read.
+    pub async fn events_for_task(
+        &self,
+        run: RunId,
+        task: u64,
+        last: Option<u32>,
+    ) -> Result<Vec<serde_json::Value>, LogError> {
+        let filter = RecordFilter {
+            kind: Some(RecordKind::Event),
+            task: Some(task),
+            last,
+        };
+        let records = self.records(run, filter).await?;
+        Ok(records
+            .into_iter()
+            .map(|stored| stored.record.payload)
+            .collect())
+    }
+
+    /// Every `event` record of `run` in `seq` order, the loop's order:
+    /// what a session view renders and what a reconnecting client replays.
+    ///
+    /// # Errors
+    /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
+    /// [`LogError::Corrupt`] when a row does not fit the schema,
+    /// [`LogError::Payload`] when a payload does not parse, and
+    /// [`LogError::Database`] when the engine cannot read.
+    pub async fn transcript(&self, run: RunId) -> Result<Vec<StoredRecord>, LogError> {
+        let filter = RecordFilter {
+            kind: Some(RecordKind::Event),
+            task: None,
+            last: None,
+        };
+        self.records(run, filter).await
+    }
 }
 
 /// A stored `u32` column, refusing anything outside the type.
