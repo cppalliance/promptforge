@@ -1,8 +1,11 @@
-//! The task-operation request parsers: the `when_any` set, the single-task
+//! The task-operation request parsers: the wait shims' internal `timer`
+//! and its author-supplied seconds, the `when_any` set, the single-task
 //! `ready`, `status`, and `cancel`, the `pending` origin filter, and the
 //! `note` text. The shims resolve a `Task` handle to its bare id before
 //! yielding, so every task field arrives as a path string; an id that does
 //! not parse is the author's argument error, raised at the call site.
+
+use std::time::Duration;
 
 use mlua::Value;
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
@@ -24,6 +27,37 @@ fn parse_task_id(text: &str) -> std::result::Result<TaskId, FieldFailure> {
 /// Reads the author-supplied `task` id off the request table.
 fn call_task(table: &mlua::Table) -> std::result::Result<TaskId, FieldFailure> {
     parse_task_id(&call_string(table, "task")?)
+}
+
+/// Parses a `timer` request: the author-supplied `seconds` (the wait's
+/// `opts.timeout`). The value must be a number that `Duration` can hold -
+/// non-negative, finite, and in range - so the scheduler's sleep never
+/// meets a value it cannot represent; any other shape is the call's
+/// error, raised at the wait's call site before a timer starts.
+pub(super) fn parse_timer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let seconds = match table.raw_get::<Value>("seconds") {
+        Ok(Value::Number(seconds)) => seconds,
+        // Every i64 converts to f64 exactly enough for a duration; a
+        // magnitude past 2^53 loses low bits no sleep can observe.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a duration in seconds needs no more than f64 precision"
+        )]
+        Ok(Value::Integer(seconds)) => seconds as f64,
+        Ok(other) => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "timeout must be a number, got {}",
+                other.type_name()
+            ))));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    if Duration::try_from_secs_f64(seconds).is_err() {
+        return Err(FieldFailure::Call(Error::Lua(format!(
+            "timeout must be a non-negative finite number of seconds, got {seconds}"
+        ))));
+    }
+    Ok(Request::Timer { seconds })
 }
 
 /// Parses a `when_any` request: the shim-built `tasks` sequence of id

@@ -98,3 +98,4 @@ fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
 mod answer;
 mod parse;
 mod parse_chat;
+mod parse_tasks;

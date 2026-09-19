@@ -59,6 +59,18 @@ pub enum Request {
         /// author-supplied: the author shim always says `author`.
         origin: TaskOrigin,
     },
+    /// The wait shims' internal timeout timer: a leaf request whose work
+    /// is one sleep, registered as an effect-backed task slot the caller
+    /// owns and resumed at once with the slot's id, so the shim can wait
+    /// on it beside the members and cancel it when a member wins. Never
+    /// author-visible: the shim yields it for `opts.timeout` and keeps
+    /// the id.
+    Timer {
+        /// `opts.timeout`: how long the timer runs before it fires, in
+        /// seconds. Non-negative, finite, and within `Duration`'s range by
+        /// the parse.
+        seconds: f64,
+    },
     /// `tasks.when_any(set)`: park the chain until the first task in `set`
     /// ends, or resume at once when one already has. The one scheduler
     /// wait primitive: `tasks.when_all` is Lua over it.

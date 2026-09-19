@@ -196,6 +196,9 @@ pub enum Answer<E> {
     /// The started task's id for a `spawn` request, resumed as its path
     /// text; the shim wraps it in the methodless `Task` table.
     Spawn(std::result::Result<TaskId, E>),
+    /// The started timer's task id for a `timer` request, resumed as its
+    /// path text; the wait shim keeps it to wait on and cancel.
+    Timer(std::result::Result<TaskId, E>),
     /// The member delivered for a `when_any` request.
     WhenAny(std::result::Result<TaskDelivery<E>, E>),
     /// Whether the task has ended, for a `ready` request.
@@ -231,6 +234,7 @@ impl<E> Answer<E> {
             Answer::Infer(result) => Answer::Infer(result.map_err(map)),
             Answer::Call(result) => Answer::Call(result.map_err(map)),
             Answer::Spawn(result) => Answer::Spawn(result.map_err(map)),
+            Answer::Timer(result) => Answer::Timer(result.map_err(map)),
             Answer::WhenAny(result) => Answer::WhenAny(match result {
                 Ok(TaskDelivery { task, outcome }) => Ok(TaskDelivery {
                     task,
