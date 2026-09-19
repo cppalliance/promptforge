@@ -37,6 +37,7 @@ gateway-logging = { path = "crates/gateway/logging", version = "0.3.0" }
 shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
 gateway-protocol = { path = "crates/gateway/protocol", version = "0.3.0" }
 gateway-api-discovery = { path = "crates/gateway-api-discovery", version = "0.3.0" }
+harness-api = { path = "crates/harness-api", version = "0.3.0" }
 shared-vfs = { path = "crates/shared-vfs", version = "0.3.0" }
 gateway-routing = { path = "crates/gateway/routing", version = "0.3.0" }
 promptforge-lua = { path = "crates/promptforge/lua", version = "0.3.0" }
