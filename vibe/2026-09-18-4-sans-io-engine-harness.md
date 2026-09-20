@@ -933,7 +933,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-46>
 
-### Step 46: Lifecycle states and `effective_interrupt`
+### Step 46: Lifecycle states and `effective_interrupt` [completed]
 
 - Component: Harness sessions and Workshop migration
 - Piece: supervisor

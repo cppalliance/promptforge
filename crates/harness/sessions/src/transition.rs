@@ -403,6 +403,12 @@ fn changed(state: SupervisorState, effect: SupervisorEffect) -> SupervisorTransi
     SupervisorTransition { state, effect }
 }
 
+#[path = "transition-interrupt.rs"]
+mod interrupt;
+pub use interrupt::{
+    EffectiveInterrupt, Interrupt, SessionState, SyntheticTerminal, effective_interrupt,
+};
+
 #[cfg(test)]
 #[path = "transition-tests.rs"]
 mod tests;
