@@ -1,0 +1,114 @@
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use axum::body::Body;
+use axum::extract::ConnectInfo;
+use axum::http::header::AUTHORIZATION;
+use axum::http::{Method, Request, Response, StatusCode};
+use gateway_config::Config;
+use tower::ServiceExt;
+
+use crate::test_support::app_state;
+use crate::{AppState, build_router};
+
+/// Strict bearer auth (`trust_loopback = false`), so the missing-key
+/// case below is refused from the planted loopback peer.
+fn state() -> AppState {
+    let config = Config::from_toml_str(
+        "config-version = 0\n\
+         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+         trust_loopback = false\n",
+    )
+    .expect("config parses");
+    app_state(config, None)
+}
+
+/// Sends one request to `/shutdown` through the router with the given
+/// bearer key and peer address planted, as the walled route requires.
+async fn send(state: &AppState, method: Method, key: Option<&str>, peer: &str) -> Response<Body> {
+    let mut builder = Request::builder().method(method).uri("/shutdown");
+    if let Some(key) = key {
+        builder = builder.header(AUTHORIZATION, format!("Bearer {key}"));
+    }
+    let mut request = builder.body(Body::empty()).expect("request builds");
+    let peer: SocketAddr = peer.parse().expect("a socket address");
+    request.extensions_mut().insert(ConnectInfo(peer));
+    build_router(state.clone(), None)
+        .oneshot(request)
+        .await
+        .expect("the router is infallible")
+}
+
+/// The tray's status tick reads `is_fired` synchronously to tell a
+/// requested shutdown apart from a serve-loop failure; the method is
+/// gated on the tray backends like its only callers.
+#[test]
+fn fire_sets_the_synchronous_peek() {
+    let signal = super::ShutdownSignal::default();
+    assert!(!signal.is_fired(), "a fresh signal reads unfired");
+    signal.fire();
+    assert!(signal.is_fired(), "fire sets the peek before any wait");
+}
+
+#[tokio::test]
+async fn the_route_answers_202_and_fires_the_signal() {
+    let state = state();
+    let response = send(&state, Method::POST, Some("test-token"), "127.0.0.1:50000").await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    tokio::time::timeout(Duration::from_secs(5), state.shutdown.fired())
+        .await
+        .expect("the route fired the shutdown signal");
+}
+
+#[tokio::test]
+async fn the_route_rejects_a_missing_or_wrong_key_without_firing() {
+    let state = state();
+    for key in [None, Some("wrong")] {
+        let response = send(&state, Method::POST, key, "127.0.0.1:50000").await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "key {key:?}");
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), state.shutdown.fired())
+            .await
+            .is_err(),
+        "a refused request must leave the server up"
+    );
+}
+
+#[tokio::test]
+async fn the_route_rejects_non_post_methods() {
+    let state = state();
+    for method in [Method::GET, Method::PUT, Method::DELETE] {
+        let response = send(
+            &state,
+            method.clone(),
+            Some("test-token"),
+            "127.0.0.1:50000",
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method} must not reach the handler"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_route_refuses_a_lan_peer_even_with_the_key() {
+    let state = state();
+    let response = send(
+        &state,
+        Method::POST,
+        Some("test-token"),
+        "198.51.100.7:44821",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), state.shutdown.fired())
+            .await
+            .is_err(),
+        "a walled-off request must leave the server up"
+    );
+}

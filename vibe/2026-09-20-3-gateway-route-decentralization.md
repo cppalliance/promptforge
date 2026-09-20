@@ -122,7 +122,7 @@ Pure mechanical, no route moves, verified by the existing suite.
 ## Outcome
 
 - Five commits on `vibe3`, rebased onto the finished `vibe2` at `49d645ec`: `4e59eaea` (Step 1), `5d899e80` (Step 2), `bc7d6549` (Step 3), `fd9e8601` (Step 4), `ed471fe1` (Step 5). Step 6 not done, by the criterion above.
-- `build_router` is 50 lines of merges and walls, down from 120 under a `too_many_lines` waiver. `lib.rs` is 500 lines, down from 668. Every route is mounted by its own module behind `routes()`, declared in the registry, and swept by the registry tests against the wall its tier promises.
+- `build_router` is 50 lines of merges and walls, down from 120 under a `too_many_lines` waiver. `lib.rs` is 528 lines, down from 668. Every route is mounted by its own module behind `routes()`, declared in the registry, and swept by the registry tests against the wall its tier promises.
 - Full gate set on the combined tree: `cargo fmt --all --check`; workspace clippy `-D warnings` (excluding the workshop crates); workspace nextest `--all-features` 3,761 passed; workspace doctests passed; workspace rustdoc `-D warnings`; `cargo check -p gateway --no-default-features`; `cargo test -p build-xtask` 101 passed, including the mandatory-marker rule the progress plan's Step 7 added. The workshop crates, `npm test`, and `mdbook build guide` were not run: no file outside `crates/gateway/app` and this plan changed.
 
 ### Second rebase
@@ -135,9 +135,18 @@ Pure mechanical, no route moves, verified by the existing suite.
 
 One silent break the conflicts did not surface: the sweep added a `crate::config_write::error_chain` call in `dialect.rs`, a module Step 2 had renamed to `admin::walled::config`. Caught by `cargo check`, repointed. It leaves the tool-call parser reaching into the walled admin module for a string formatter - see the note below.
 
-### Follow-up worth considering
+### Follow-up, done after the rebase
 
-`error_chain` renders an error's `source()` chain as one line. It lives in `admin/walled/config.rs` because that is where the config-write routes needed it, but it now has three callers outside that module: `admin/walled/config_pending.rs`, `admin/walled/config_apply.rs`, and `dialect.rs`. The last is a relay-path module reaching into the walled admin tier for a formatter that has nothing to do with config or with the wall. `error.rs` is its natural home. Not done here: it is the sweep's call site, not this plan's, and moving it would widen a rebase that was already wider than planned.
+Two tidy-ups the plan did not schedule, each its own commit after the gate above:
+
+- `error_chain` moved from `admin/walled/config.rs` to `error.rs`. It renders an error's `source()` chain as the one line a wire message carries, and two of its five callers sat outside the walled tier (`dialect.rs` on the relay path, and a boot test). Three module docs that still named `tokio::task::spawn_blocking` were repointed at `crate::error::blocking`, which is what they call now.
+- Every route module's tests moved to the kebab sibling convention. The crate states that convention and `admin/open/` followed it, but `admin/walled/` followed it in zero of twelve modules and `cache.rs` did not either - an accident of history, since the 2026-09-17 decomposition converted only the modules it extracted from the crate root, and those were the open-tier ones. Moving this plan's files into one directory made the split visible as a line down the middle of `admin/`. Pure code motion, pinned by the test count: 470 before, 470 after.
+
+### Still open
+
+- The non-route machinery keeps inline test blocks: `runner.rs`, `commands.rs`, `dialect.rs`, `boot.rs`, `error.rs`, `routing.rs`, `main.rs`, `api_error.rs`, `diagnostics.rs`, `relaunch.rs`, `test_support.rs`, `tray/logic.rs`. Out of scope here and unbound by any ceiling; they are what keeps those files large.
+- `auth.rs` is the one file carrying both conventions at once: two `#[path]` siblings and two inline blocks. It is not a route module, so this pass left it alone, but it is the most obvious next candidate.
+- `config_apply-tests.rs` is 701 lines, the largest test sibling in the crate. Splitting it by concern (capture, commit, cancellation, revert) would be the natural follow-on.
 
 ## Constraints
 
