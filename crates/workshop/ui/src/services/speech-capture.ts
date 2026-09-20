@@ -12,12 +12,17 @@ export type SpeechCaptureSuccess =
   | { readonly ok: true; readonly kind: "stopped" }
   | { readonly ok: true; readonly kind: "cleared" };
 
-/** A microphone failure that leaves capture available for another attempt. */
+/**
+ * A microphone failure that leaves capture available for another attempt.
+ * `busy` means another owner token holds the microphone right now; the
+ * caller's own retry succeeds once that owner's take ends.
+ */
 export type SpeechCaptureFailure = {
   readonly ok: false;
   readonly kind:
     | "permission-denied"
     | "device-unavailable"
+    | "busy"
     | "start-failed"
     | "stop-failed"
     | "clear-failed";
@@ -247,15 +252,27 @@ function startFailure(error: unknown): SpeechCaptureFailure {
 /**
  * Owns browser microphone capture without touching the DOM. Audio and every
  * lifecycle failure are values so a view can recover without rebuilding it.
+ *
+ * One service is shared by every dictation surface in a window, so the
+ * microphone has an owner: the opaque token handed to the `start()` that
+ * opened it. Only that token can stop or clear the take; any other token's
+ * start is refused with `busy`, and its stop and clear are no-op successes.
+ * Ownership is held from a successful start through the end of its stop
+ * (the flush still belongs to the owner), then released.
  */
 export class SpeechCaptureService extends Disposable {
   private readonly audio = this._register(new Emitter<ArrayBuffer>());
+  private readonly ownerChange = this._register(new Emitter<symbol | null>());
   private session: SpeechCaptureSession | null = null;
   private phase: "idle" | "starting" | "recording" | "stopping" = "idle";
+  private currentOwner: symbol | null = null;
   private disposed = false;
 
   /** Fires for each owned little-endian mono PCM16 block at 24 kHz. */
   readonly onAudio: Event<ArrayBuffer> = this.audio.event;
+
+  /** Fires with the new owner when the microphone is taken, `null` when released. */
+  readonly onOwnerChange: Event<symbol | null> = this.ownerChange.event;
 
   constructor(private readonly backend: SpeechCaptureBackend = browserBackend()) {
     super();
@@ -266,8 +283,22 @@ export class SpeechCaptureService extends Disposable {
     return this.phase === "recording";
   }
 
-  /** Opens capture, returning a recoverable outcome instead of throwing. */
-  async start(): Promise<SpeechCaptureOutcome> {
+  /** The token whose start opened the live take, or `null` when free. */
+  get owner(): symbol | null {
+    return this.currentOwner;
+  }
+
+  /**
+   * Opens capture for `owner`, returning a recoverable outcome instead of
+   * throwing. `busy` when another owner holds the microphone; the existing
+   * `start-failed` for a same-owner double start or a start while the
+   * graph is still opening or closing, whoever asks: the owner keeps the
+   * flush, but the closing window is a transient, not another window's take.
+   */
+  async start(owner: symbol): Promise<SpeechCaptureOutcome> {
+    if (this.phase === "recording" && this.currentOwner !== owner) {
+      return failure("busy", new Error("speech capture is held by another owner"));
+    }
     if (this.disposed || this.phase !== "idle") {
       return failure("start-failed", new Error("speech capture is already active"));
     }
@@ -280,6 +311,7 @@ export class SpeechCaptureService extends Disposable {
       }
       this.session = session;
       this.phase = "recording";
+      this.setOwner(owner);
       return { ok: true, kind: "started" };
     } catch (error) {
       this.phase = "idle";
@@ -287,10 +319,13 @@ export class SpeechCaptureService extends Disposable {
     }
   }
 
-  /** Flushes and closes capture, returning any close failure as recoverable. */
-  async stop(): Promise<SpeechCaptureOutcome> {
+  /**
+   * Flushes and closes the owner's capture, returning any close failure as
+   * recoverable. A non-owner's stop is a no-op success: the take runs on.
+   */
+  async stop(owner: symbol): Promise<SpeechCaptureOutcome> {
     const session = this.session;
-    if (session === null) {
+    if (session === null || this.currentOwner !== owner) {
       return { ok: true, kind: "stopped" };
     }
     this.phase = "stopping";
@@ -305,11 +340,18 @@ export class SpeechCaptureService extends Disposable {
         this.session = null;
       }
       this.phase = "idle";
+      this.setOwner(null);
     }
   }
 
-  /** Drops carried worklet audio while leaving an active microphone open. */
-  clear(): SpeechCaptureOutcome {
+  /**
+   * Drops carried worklet audio while leaving the owner's microphone open.
+   * A non-owner's clear is a no-op success.
+   */
+  clear(owner: symbol): SpeechCaptureOutcome {
+    if (this.currentOwner !== owner) {
+      return { ok: true, kind: "cleared" };
+    }
     try {
       this.session?.clear();
       return { ok: true, kind: "cleared" };
@@ -326,7 +368,16 @@ export class SpeechCaptureService extends Disposable {
     this.session?.dispose();
     this.session = null;
     this.phase = "idle";
+    this.setOwner(null);
     super.dispose();
+  }
+
+  private setOwner(owner: symbol | null): void {
+    if (this.currentOwner === owner) {
+      return;
+    }
+    this.currentOwner = owner;
+    this.ownerChange.fire(owner);
   }
 }
 

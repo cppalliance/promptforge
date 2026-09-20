@@ -528,7 +528,7 @@ Gates: every commit leaves `npm run typecheck` green in `crates/workshop/ui/` (a
 
 <step-3>
 
-### Step 3: Dictation ownership - SpeechCaptureService tokens and event-driven setupStt
+### Step 3: Dictation ownership - SpeechCaptureService tokens and event-driven setupStt [completed]
 
 - Component: `chatbox-extraction`
 - Piece: dictation ownership

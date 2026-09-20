@@ -1,4 +1,5 @@
-import { DisposableStore, toDisposable } from "../../base/lifecycle";
+import { Emitter } from "../../base/event";
+import { DisposableStore } from "../../base/lifecycle";
 import { RealtimeTranscriptionService } from "../../services/realtime-transcription";
 import {
   SpeechCaptureService,
@@ -9,6 +10,7 @@ import type {
   SttBlocker,
   SttElements,
   SttHandle,
+  SttMicState,
   SttStatus,
 } from "./stt";
 import {
@@ -19,12 +21,17 @@ import {
   type TakeRegistryInput,
 } from "../take/take-registry";
 
+const BUSY_LABEL = "Dictation is active in another window";
+
 function captureFailureLabel(failure: SpeechCaptureFailure): string {
   if (failure.kind === "permission-denied") {
     return "Microphone permission was denied.";
   }
   if (failure.kind === "device-unavailable") {
     return "No microphone is available.";
+  }
+  if (failure.kind === "busy") {
+    return BUSY_LABEL;
   }
   if (failure.kind === "stop-failed") {
     return "Dictation could not finish capturing audio. Try again.";
@@ -33,9 +40,13 @@ function captureFailureLabel(failure: SpeechCaptureFailure): string {
 }
 
 /**
- * Wires push-to-talk UI to production PCM16 capture and the additive Realtime
+ * Wires push-to-talk to production PCM16 capture and the additive Realtime
  * relay. The registry exclusively owns take state; this layer interprets its
- * typed editor, capture, status, and wire effects.
+ * typed editor, capture, status, and wire effects, and publishes the mic
+ * state the host paints. Each instance holds its own owner token for the
+ * shared capture service: it streams only audio it owns, and a press while
+ * another instance owns the microphone is refused with a reason rather
+ * than stealing the take.
  */
 export function setupStt(
   elements: SttElements,
@@ -44,7 +55,8 @@ export function setupStt(
   capture: SpeechCaptureService,
   providedRealtime?: RealtimeTranscriptionService,
 ): SttHandle {
-  const { mic, input } = elements;
+  const { input } = elements;
+  const owner = Symbol("stt-owner");
   const store = new DisposableStore();
   const realtime = providedRealtime ?? store.add(new RealtimeTranscriptionService());
   let registry: TakeRegistry = createTakeRegistry();
@@ -58,18 +70,33 @@ export function setupStt(
   let captureGeneration = realtime.generation;
   let disposed = false;
 
-  function setRecording(recording: boolean): void {
-    mic.classList.toggle("ws-stt-mic--recording", recording);
-    mic.setAttribute("aria-pressed", String(recording));
-    mic.title = recording ? "Stop recording" : "Push to talk";
-    status.setRecording(recording);
+  // Mic state is derived from two sources with fixed precedence: the
+  // registry's recording effect (this surface's take) wins over the capture
+  // service's ownership (another surface's take); otherwise idle.
+  const stateChange = store.add(new Emitter<SttMicState>());
+  let recording = false;
+  const ownedElsewhere = (): boolean => capture.owner !== null && capture.owner !== owner;
+  let state: SttMicState = ownedElsewhere() ? "blocked" : "idle";
+
+  function publishState(): void {
+    const next: SttMicState = recording ? "recording" : ownedElsewhere() ? "blocked" : "idle";
+    if (next !== state) {
+      state = next;
+      stateChange.fire(next);
+    }
+  }
+
+  function setRecording(on: boolean): void {
+    recording = on;
+    status.setRecording(on);
+    publishState();
   }
 
   function releaseCapture(): Promise<SpeechCaptureOutcome> {
     if (pendingCaptureStop !== null) {
       return pendingCaptureStop;
     }
-    const stoppingCapture = capture.stop();
+    const stoppingCapture = capture.stop(owner);
     pendingCaptureStop = stoppingCapture;
     void stoppingCapture.finally(() => {
       if (pendingCaptureStop === stoppingCapture) {
@@ -100,7 +127,7 @@ export function setupStt(
       case "capture":
         switch (effect.command) {
           case "clear":
-            capture.clear();
+            capture.clear(owner);
             return;
           case "stop": {
             const stoppingCapture = releaseCapture();
@@ -211,6 +238,11 @@ export function setupStt(
   );
   store.add(
     capture.onAudio((chunk) => {
+      // The service's audio event is shared by every surface; only the
+      // owner's registry may see the owner's chunks.
+      if (capture.owner !== owner) {
+        return;
+      }
       dispatch({
         type: "capture.audio",
         generation: captureGeneration,
@@ -218,8 +250,15 @@ export function setupStt(
       });
     }),
   );
+  store.add(capture.onOwnerChange(() => publishState()));
 
   async function start(): Promise<void> {
+    // Ownership first: a microphone held by another window is the reason
+    // even when the host's own blocker would also refuse.
+    if (ownedElsewhere()) {
+      status.showLocal(BUSY_LABEL, "info");
+      return;
+    }
     const reason = blocked();
     if (reason !== null) {
       status.showLocal(reason, "info");
@@ -242,7 +281,7 @@ export function setupStt(
     }
     const generation = realtime.generation;
     captureGeneration = generation;
-    const outcome = await capture.start();
+    const outcome = await capture.start(owner);
     if (!outcome.ok) {
       status.showLocal(captureFailureLabel(outcome), "error");
       return;
@@ -272,17 +311,23 @@ export function setupStt(
     dispatch({ type: "user.discard", generation: realtime.generation });
   }
 
-  const onMicClick = (): void => {
+  function press(): void {
+    if (disposed) {
+      return;
+    }
     if (registry.activeTakeId !== null) {
       stop();
     } else {
       void start();
     }
-  };
-  mic.addEventListener("click", onMicClick);
-  store.add(toDisposable(() => mic.removeEventListener("click", onMicClick)));
+  }
 
   return {
+    press,
+    get state(): SttMicState {
+      return state;
+    },
+    onState: stateChange.event,
     discardIfRecording,
     dispose(): void {
       if (disposed) {

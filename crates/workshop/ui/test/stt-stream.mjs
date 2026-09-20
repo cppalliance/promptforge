@@ -143,8 +143,7 @@ class ScriptedSocket {
 }
 
 await assertNoLeaks(lifecycle, async () => {
-  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
-  const mic = dom.window.document.querySelector("button");
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
   const previousEvent = globalThis.Event;
   globalThis.Event = dom.window.Event;
@@ -175,7 +174,7 @@ await assertNoLeaks(lifecycle, async () => {
       },
     };
     const stt = setupStt(
-      { mic, input: textareaSttTarget(textarea) },
+      { input: textareaSttTarget(textarea) },
       status,
       () => null,
       capture,
@@ -185,7 +184,7 @@ await assertNoLeaks(lifecycle, async () => {
     textarea.value = "old target keep";
     textarea.setSelectionRange(4, 10);
     textarea.focus();
-    mic.click();
+    stt.press();
     assert.equal(typeof finishCaptureStart, "function");
     assert.equal(textarea.readOnly, false, "the textarea remains editable during startup");
 
@@ -226,8 +225,7 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
-  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
-  const mic = dom.window.document.querySelector("button");
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
   const previousEvent = globalThis.Event;
   globalThis.Event = dom.window.Event;
@@ -257,14 +255,14 @@ await assertNoLeaks(lifecycle, async () => {
       },
     };
     const stt = setupStt(
-      { mic, input: textareaSttTarget(textarea) },
+      { input: textareaSttTarget(textarea) },
       status,
       () => null,
       capture,
       realtime,
     );
 
-    mic.click();
+    stt.press();
     for (let turn = 0; turn < 4 && !status.recording; turn++) {
       await Promise.resolve();
     }
@@ -299,7 +297,7 @@ await assertNoLeaks(lifecycle, async () => {
       previousLength = textarea.value.length;
     }
 
-    mic.click();
+    stt.press();
     for (
       let turn = 0;
       turn < 4 &&
@@ -336,8 +334,7 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
-  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
-  const mic = dom.window.document.querySelector("button");
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
   const previousEvent = globalThis.Event;
   globalThis.Event = dom.window.Event;
@@ -379,14 +376,14 @@ await assertNoLeaks(lifecycle, async () => {
       },
     };
     const stt = setupStt(
-      { mic, input: textareaSttTarget(textarea) },
+      { input: textareaSttTarget(textarea) },
       status,
       () => null,
       capture,
       realtime,
     );
 
-    mic.click();
+    stt.press();
     for (let turn = 0; turn < 4 && status.recording.at(-1) !== true; turn++) {
       await Promise.resolve();
     }
@@ -483,7 +480,7 @@ await assertNoLeaks(lifecycle, async () => {
     assert.equal(textarea.value, "accepted visible words");
     assert.equal(status.local.length, 1);
 
-    mic.click();
+    stt.press();
     for (
       let turn = 0;
       turn < 4 && status.recording.at(-1) !== true;
@@ -573,8 +570,7 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
-  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
-  const mic = dom.window.document.querySelector("button");
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
   const previousEvent = globalThis.Event;
   globalThis.Event = dom.window.Event;
@@ -616,14 +612,14 @@ await assertNoLeaks(lifecycle, async () => {
       },
     };
     const stt = setupStt(
-      { mic, input: textareaSttTarget(textarea) },
+      { input: textareaSttTarget(textarea) },
       status,
       () => null,
       capture,
       realtime,
     );
 
-    mic.click();
+    stt.press();
     for (let turn = 0; turn < 4 && status.recording.at(-1) !== true; turn++) {
       await Promise.resolve();
     }
@@ -717,8 +713,7 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
-  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
-  const mic = dom.window.document.querySelector("button");
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
   const previousEvent = globalThis.Event;
   globalThis.Event = dom.window.Event;
@@ -758,14 +753,14 @@ await assertNoLeaks(lifecycle, async () => {
       },
     };
     const stt = setupStt(
-      { mic, input: textareaSttTarget(textarea) },
+      { input: textareaSttTarget(textarea) },
       status,
       () => null,
       capture,
       realtime,
     );
 
-    mic.click();
+    stt.press();
     for (let turn = 0; turn < 4 && status.recording.at(-1) !== true; turn++) {
       await Promise.resolve();
     }
@@ -801,8 +796,7 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
-  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
-  const mic = dom.window.document.querySelector("button");
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
   const previousEvent = globalThis.Event;
   globalThis.Event = dom.window.Event;
@@ -839,14 +833,14 @@ await assertNoLeaks(lifecycle, async () => {
       },
     };
     const stt = setupStt(
-      { mic, input: textareaSttTarget(textarea) },
+      { input: textareaSttTarget(textarea) },
       status,
       () => null,
       capture,
       realtime,
     );
 
-    mic.click();
+    stt.press();
     for (
       let turn = 0;
       turn < 4 && trace.at(-1) !== "status.local:Listening...";
@@ -874,6 +868,114 @@ await assertNoLeaks(lifecycle, async () => {
     stt.dispose();
     capture.dispose();
     realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
+
+// Two dictation surfaces over one shared capture service: the first press
+// owns the microphone; the second is refused with a reason, sees `blocked`,
+// receives none of the owner's audio, and returns to `idle` when the
+// owner's take ends.
+await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM(
+    '<!doctype html><textarea id="a"></textarea><textarea id="b"></textarea>',
+  );
+  const textareaA = dom.window.document.querySelector("#a");
+  const textareaB = dom.window.document.querySelector("#b");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    const negotiated = (socket) => {
+      const realtime = new RealtimeTranscriptionService({ socket: () => socket });
+      socket.open();
+      socket.message(server.session_created);
+      socket.message(server.session_updated);
+      return realtime;
+    };
+    const socketA = new ScriptedSocket("/v1/realtime");
+    const socketB = new ScriptedSocket("/v1/realtime");
+    const realtimeA = negotiated(socketA);
+    const realtimeB = negotiated(socketB);
+
+    let emitAudio = null;
+    const capture = new SpeechCaptureService({
+      async open(onAudio) {
+        emitAudio = onAudio;
+        return {
+          clear() {},
+          async stop() {},
+          dispose() {},
+        };
+      },
+    });
+    const makeStatus = () => ({
+      local: [],
+      recording: [],
+      showLocal(label, severity) {
+        this.local.push({ label, severity });
+      },
+      setRecording(recording) {
+        this.recording.push(recording);
+      },
+    });
+    const statusA = makeStatus();
+    const statusB = makeStatus();
+    const sttA = setupStt({ input: textareaSttTarget(textareaA) }, statusA, () => null, capture, realtimeA);
+    const sttB = setupStt({ input: textareaSttTarget(textareaB) }, statusB, () => null, capture, realtimeB);
+    const statesB = [];
+    const subscription = sttB.onState((state) => statesB.push(state));
+    assert.equal(sttA.state, "idle");
+    assert.equal(sttB.state, "idle");
+
+    sttA.press();
+    for (let turn = 0; turn < 4 && statusA.recording.at(-1) !== true; turn++) {
+      await Promise.resolve();
+    }
+    assert.equal(sttA.state, "recording", "the first press owns the microphone");
+    assert.equal(sttB.state, "blocked", "the other surface sees the microphone as taken");
+    assert.deepEqual(statesB, ["blocked"], "onState fires once for the change to blocked");
+
+    sttB.press();
+    for (let turn = 0; turn < 4 && statusB.local.length === 0; turn++) {
+      await Promise.resolve();
+    }
+    assert.deepEqual(
+      statusB.local,
+      [{ label: "Dictation is active in another window", severity: "info" }],
+      "a press on the blocked surface names the other window, not the host blocker",
+    );
+    assert.equal(sttA.state, "recording", "the refused press does not steal the take");
+    assert.equal(statusA.recording.at(-1), true);
+
+    emitAudio(Uint8Array.from([1, 0]).buffer);
+    assert.equal(
+      socketA.sent.filter((event) => event.type === "input_audio_buffer.append").length,
+      1,
+      "the owner streams the shared audio",
+    );
+    assert.equal(
+      socketB.sent.filter((event) => event.type === "input_audio_buffer.append").length,
+      0,
+      "a non-owner drops the owner's audio",
+    );
+    assert.equal(statusB.recording.includes(true), false, "a non-owner never lights its LED");
+
+    sttA.press();
+    for (let turn = 0; turn < 6 && sttB.state !== "idle"; turn++) {
+      await Promise.resolve();
+    }
+    assert.equal(sttA.state, "idle", "stopping the take dims the owner's mic");
+    assert.equal(sttB.state, "idle", "releasing the microphone unblocks the other surface");
+    assert.deepEqual(statesB, ["blocked", "idle"]);
+
+    subscription.dispose();
+    sttA.dispose();
+    sttB.dispose();
+    capture.dispose();
+    realtimeA.dispose();
+    realtimeB.dispose();
   } finally {
     globalThis.Event = previousEvent;
     dom.window.close();

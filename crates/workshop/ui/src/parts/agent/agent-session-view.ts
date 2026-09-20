@@ -263,7 +263,7 @@ export class AgentSessionView extends Disposable {
     // service; isolated views own a fallback for tests and previews.
     const capture = speechCapture ?? new SpeechCaptureService();
     this.stt = this._register(
-      setupStt({ mic: this.mic, input: promptInput }, status, () => {
+      setupStt({ input: promptInput }, status, () => {
         if (this.service.pendingInputToken === null) {
           return "The agent isn't asking for input; the mic opens when it does.";
         }
@@ -273,6 +273,17 @@ export class AgentSessionView extends Disposable {
     if (speechCapture === undefined) {
       this._register(capture);
     }
+    // The bridge between this view's mic element and the handle: the press
+    // goes in, the state comes out and is painted here.
+    this.mic.addEventListener("click", () => this.stt.press());
+    this._register(
+      this.stt.onState((state) => {
+        const recording = state === "recording";
+        this.mic.classList.toggle("ws-stt-mic--recording", recording);
+        this.mic.setAttribute("aria-pressed", String(recording));
+        this.mic.title = recording ? "Stop recording" : "Push to talk";
+      }),
+    );
     this.promptInput = this._register(promptInput);
 
     this.renderFeed();

@@ -37,8 +37,12 @@ export interface SttInputTarget {
   focus(): void;
 }
 
+/**
+ * What dictation is wired to. The mic control is the host's: it calls
+ * `SttHandle.press()` and paints `SttHandle.state`, so dictation touches
+ * no button element of its own.
+ */
 export interface SttElements {
-  mic: HTMLButtonElement;
   input: SttInputTarget;
 }
 
@@ -87,13 +91,31 @@ export interface SttStatus {
 
 /**
  * What blocks starting a take right now, as a user-readable reason, or
- * null when a take may start. Consulted on every mic click: the mic stays
- * visible and clickable even when blocked, so the click can name the
+ * null when a take may start. Consulted on every mic press: the mic stays
+ * visible and clickable even when blocked, so the press can name the
  * blocker on the status bar instead of the control silently disappearing.
+ * Microphone ownership is checked before this blocker runs.
  */
 export type SttBlocker = () => string | null;
 
-/** The per-tab dictation control; dispose() unwires the mic and discards a live take. */
+/**
+ * The mic's state as the host paints it. `recording` is this surface's
+ * live take; `blocked` means another surface over the same capture
+ * service holds the microphone; `idle` otherwise. Local recording wins
+ * when both would hold.
+ */
+export type SttMicState = "idle" | "recording" | "blocked";
+
+/** The per-tab dictation control; dispose() discards a live take. */
 export interface SttHandle extends IDisposable {
+  /**
+   * The mic toggle: starts a take when idle, stops the live one when
+   * recording, and names the blocker on the status bar when refused.
+   */
+  press(): void;
+  /** The current mic state, for seeding the host's control. */
+  readonly state: SttMicState;
+  /** Fires on each change of `state`, never on a repeat. */
+  onState(listener: (state: SttMicState) => void): IDisposable;
   discardIfRecording(): void;
 }
