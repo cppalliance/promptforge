@@ -796,7 +796,7 @@ pub(crate) fn download_client() -> Result<Client> {
         .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
         .timeout(DOWNLOAD_REQUEST_TIMEOUT)
         .build()
-        .map_err(LocalError::HttpClient)
+        .map_err(|source| LocalError::HttpClient(source.into()))
 }
 
 /// Takes the advisory OS lock serializing publishers of `artifact` under

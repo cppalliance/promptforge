@@ -42,4 +42,4 @@ pub use workspace::{
 };
 #[cfg(any(test, feature = "test-fixtures"))]
 pub use workspace_file::create_alien_database_for_test;
-pub use workspace_file::{WindowState, WorkspaceFileError};
+pub use workspace_file::{DatabaseSource, WindowState, WorkspaceFileError};

@@ -116,12 +116,13 @@ async fn build_sheet_with(
             Err(err) => {
                 // Surface the failure cause: the sheet records only
                 // stale/unavailable, so the stderr note is the run report.
-                // `FetchError`'s Display carries provider names, env var
+                // `FetchError`'s chain carries provider names, env var
                 // names, URLs, and reqwest errors only - never key material,
                 // which travels in request headers reqwest does not echo.
                 eprintln!(
-                    "shared-cloud-providers: note: {} fetch failed: {err}",
-                    provider.name
+                    "shared-cloud-providers: note: {} fetch failed: {}",
+                    provider.name,
+                    crate::error_chain(&err)
                 );
                 stale_or_unavailable(&provider, prior)
             }
@@ -634,6 +635,17 @@ mod tests {
         assert!(
             matches!(err, FetchError::Http(_)),
             "expected a transport error, got {err:?}"
+        );
+        // The variant renders only its own message; the stderr note walks
+        // the chain so the transport cause still reaches the run report.
+        let cause = std::error::Error::source(&err)
+            .expect("the Http variant carries its transport cause")
+            .to_string();
+        assert!(!err.to_string().contains(&cause));
+        assert!(
+            crate::error_chain(&err).contains(&cause),
+            "the chain rendering must include the cause: {}",
+            crate::error_chain(&err)
         );
     }
 

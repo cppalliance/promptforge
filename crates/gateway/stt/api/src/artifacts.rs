@@ -141,7 +141,7 @@ pub enum SpeechError {
 
     /// The logical Realtime identity was used by one physical worker.
     #[non_exhaustive]
-    #[error("STT model name {model} is reserved for the logical Realtime model")]
+    #[error("model name {model} is reserved for the logical Realtime model")]
     ReservedModelName {
         /// Physical catalog name that collided with the logical identity.
         model: String,
@@ -149,7 +149,7 @@ pub enum SpeechError {
 
     /// A future role reached a service that does not implement it.
     #[non_exhaustive]
-    #[error("STT model {model} has an unsupported role")]
+    #[error("model {model} has an unsupported role")]
     UnsupportedRole {
         /// Catalog name carrying the unsupported role.
         model: String,

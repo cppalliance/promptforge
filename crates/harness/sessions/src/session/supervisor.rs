@@ -259,7 +259,7 @@ impl Supervisor {
                 RunCompletion::Failed
             }
             Err(failure) => {
-                self.report_failure(&failure.to_string());
+                self.report_failure(&harness_runner::display_chain(&failure));
                 RunCompletion::Failed
             }
         };

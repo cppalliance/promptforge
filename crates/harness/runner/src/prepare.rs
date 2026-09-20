@@ -36,6 +36,7 @@ use promptforge_api_types::timestamp::Timestamp;
 use sha2::{Digest as _, Sha256};
 use shared_vfs::VfsRef;
 
+use crate::display_chain::display_chain;
 use crate::effect_loop::{SharedLog, failed_outcome};
 use crate::performers::{
     ActivatedTools, ChatPerformer, InputPerformer, LogTaskEvents, Performers, TokioTimer, VfsStore,
@@ -112,8 +113,8 @@ pub struct Prepared {
 #[derive(Debug, thiserror::Error)]
 pub enum PrepareError {
     /// The prompt file could not be read; no row is written, since there
-    /// is no prompt to record.
-    #[error("the prompt at {path} could not be read: {source}")]
+    /// is no prompt to record. The read failure is the source.
+    #[error("the prompt at {path} could not be read")]
     Read {
         /// The path that was read.
         path: PathBuf,
@@ -121,8 +122,9 @@ pub enum PrepareError {
         #[source]
         source: io::Error,
     },
-    /// The prompt failed to parse. Its row is closed as failed.
-    #[error("the prompt at {path} failed to parse: {source}")]
+    /// The prompt does not parse. Its row is closed as failed; the parse
+    /// failure is the source.
+    #[error("the prompt at {path} does not parse")]
     Parse {
         /// The path that was parsed.
         path: PathBuf,
@@ -134,10 +136,10 @@ pub enum PrepareError {
     },
     /// The environment cannot satisfy the prompt: a required capability
     /// is missing, two declared capabilities conflict, or the current
-    /// model falls short of a role's requirements. The message is the
-    /// engine's model-readable notice, one line per gap. The run's row is
-    /// closed as failed with that notice.
-    #[error("{error}")]
+    /// model falls short of a role's requirements. The engine's
+    /// model-readable notice, one line per gap, is the source; the run's
+    /// row is closed as failed with that notice.
+    #[error("the environment cannot satisfy the prompt")]
     Refused {
         /// The run's row, closed with this refusal.
         run_id: RunId,
@@ -237,7 +239,7 @@ pub async fn prepare_source(
         Err(source) => {
             let outcome = RunOutcome::Failed {
                 kind: "Parse".to_owned(),
-                message: source.to_string(),
+                message: display_chain(&source),
             };
             close_failed(&log, run_id, outcome).await?;
             return Err(PrepareError::Parse {

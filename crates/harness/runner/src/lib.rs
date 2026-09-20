@@ -33,9 +33,12 @@
 //!   other when it launches a run. `harness-api` re-exports the module.
 
 pub mod cancel;
+mod display_chain;
 pub mod effect_loop;
 pub mod performers;
 pub mod prepare;
 pub mod spawn;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+
+pub use display_chain::display_chain;

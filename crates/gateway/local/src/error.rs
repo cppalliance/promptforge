@@ -5,6 +5,31 @@ use std::path::PathBuf;
 
 use gateway_config::ModelKind;
 
+/// A transport cause behind a [`LocalError`] variant: a crate-owned wrapper
+/// so the public error surface does not name the HTTP client's error type.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct HttpSource(reqwest::Error);
+
+impl From<reqwest::Error> for HttpSource {
+    fn from(source: reqwest::Error) -> Self {
+        HttpSource(source)
+    }
+}
+
+/// A JSON decode cause behind a [`LocalError`] variant: a crate-owned
+/// wrapper so the public error surface does not name the JSON library's
+/// error type.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct JsonSource(serde_json::Error);
+
+impl From<serde_json::Error> for JsonSource {
+    fn from(source: serde_json::Error) -> Self {
+        JsonSource(source)
+    }
+}
+
 /// A failure while downloading, verifying, or launching a local model.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -31,7 +56,7 @@ pub enum LocalError {
 
     /// Building the HTTP client failed.
     #[error("build HTTP client")]
-    HttpClient(#[source] reqwest::Error),
+    HttpClient(#[source] HttpSource),
 
     /// Downloading a URL failed.
     #[error("download `{url}`")]
@@ -40,7 +65,7 @@ pub enum LocalError {
         url: String,
         /// The underlying transport error.
         #[source]
-        source: reqwest::Error,
+        source: HttpSource,
     },
 
     /// Reading the download body failed.
@@ -261,7 +286,7 @@ pub enum LocalError {
     ReadinessClient {
         /// The underlying transport error.
         #[source]
-        source: reqwest::Error,
+        source: HttpSource,
     },
 
     /// Inspecting the child process (`try_wait`) failed.
@@ -372,7 +397,7 @@ pub enum LocalError {
         operation: &'static str,
         /// The underlying transport error.
         #[source]
-        source: reqwest::Error,
+        source: HttpSource,
     },
 
     /// A dialect-probe endpoint returned a non-success status.
@@ -402,7 +427,7 @@ pub enum LocalError {
         operation: &'static str,
         /// The underlying JSON decode error.
         #[source]
-        source: serde_json::Error,
+        source: JsonSource,
     },
 
     /// Resolving the tool dialect from `/props` evidence failed.

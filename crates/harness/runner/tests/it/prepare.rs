@@ -13,6 +13,7 @@ use harness_capabilities::{
     ToolTable,
 };
 use harness_log::{RunLog, RunOutcome};
+use harness_runner::display_chain;
 use harness_runner::effect_loop::{SharedLog, drive_run};
 use harness_runner::performers::{ActivatedTools, ToolPerformer};
 use harness_runner::prepare::{PrepareError, Prepared, Services, prepare_run};
@@ -211,9 +212,9 @@ async fn a_prompt_that_does_not_parse_fails_preparation_and_its_row_closes_as_a_
         row.outcome,
         Some(RunOutcome::Failed {
             kind: "Parse".to_owned(),
-            message: source.to_string(),
+            message: display_chain(&source),
         }),
-        "the row records the parse failure under the Parse kind"
+        "the row records the parse failure and its cause chain under the Parse kind"
     );
 }
 

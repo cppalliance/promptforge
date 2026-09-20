@@ -167,7 +167,7 @@ fn send(client: &Client, url: &str, resume_from: u64) -> Result<Response> {
     }
     request.send().map_err(|source| LocalError::Download {
         url: url.to_owned(),
-        source,
+        source: source.into(),
     })
 }
 
@@ -378,7 +378,7 @@ pub(super) fn download_with_idle(
         .error_for_status()
         .map_err(|source| LocalError::Download {
             url: url.to_owned(),
-            source,
+            source: source.into(),
         })?;
     let total = response
         .content_length()

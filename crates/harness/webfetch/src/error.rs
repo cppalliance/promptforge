@@ -141,7 +141,7 @@ pub(crate) enum FetchError {
     },
 
     /// Reading the response body failed mid-stream.
-    #[error("failed to read the response body from {url}; try again or use a different URL")]
+    #[error("the response body from {url} could not be read; try again or use a different URL")]
     BodyRead {
         /// The URL whose body read failed.
         url: SafeUrl,
@@ -197,7 +197,7 @@ pub(crate) enum FetchError {
     },
 
     /// The target URL returned a non-success HTTP status.
-    #[error("HTTP {status} from {url}; try a different URL")]
+    #[error("{url} answered HTTP {status}; try a different URL")]
     HttpStatus {
         /// The URL (after redirects) that returned the error status.
         url: SafeUrl,

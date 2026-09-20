@@ -343,8 +343,9 @@ impl Bindings {
 /// a fabricated fallback descriptor.
 #[derive(Debug, thiserror::Error)]
 pub enum CurrentModelError {
-    /// The gateway's model catalog could not be fetched.
-    #[error("the model catalog fetch failed: {0}")]
+    /// The gateway's model catalog could not be fetched; the fetch
+    /// failure is the source.
+    #[error("the model catalog could not be fetched")]
     CatalogFetchFailed(#[source] CompletionError),
     /// The selected id is absent from the fetched catalog.
     #[error("the selected model `{0}` is absent from the fetched catalog")]

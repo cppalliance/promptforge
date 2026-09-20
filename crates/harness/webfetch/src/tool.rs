@@ -1250,7 +1250,7 @@ mod tests {
         );
         let result = outcome.text().to_owned();
         assert!(
-            result.contains("failed to read the response body") || result.contains("network error"),
+            result.contains("could not be read") || result.contains("network error"),
             "got: {result}"
         );
     }

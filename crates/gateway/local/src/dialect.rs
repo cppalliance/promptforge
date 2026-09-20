@@ -168,7 +168,10 @@ fn read_probe_json(
 
 /// Decodes probe body bytes as JSON (pure; unit-tested).
 fn decode_probe_json(operation: &'static str, bytes: &[u8]) -> Result<Value, LocalError> {
-    serde_json::from_slice(bytes).map_err(|source| LocalError::DialectDecode { operation, source })
+    serde_json::from_slice(bytes).map_err(|source| LocalError::DialectDecode {
+        operation,
+        source: source.into(),
+    })
 }
 
 /// Fetches `/props` from a ready local llama-server and resolves the tool dialect.
@@ -250,7 +253,7 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
         .build()
         .map_err(|source| LocalError::DialectProbe {
             operation: "build props client",
-            source,
+            source: source.into(),
         })?;
 
     let response = client
@@ -259,7 +262,7 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
         .send()
         .map_err(|source| LocalError::DialectProbe {
             operation: "GET /props",
-            source,
+            source: source.into(),
         })?;
 
     if !response.status().is_success() {
@@ -332,7 +335,7 @@ fn fetch_tool_call_capability(
         .send()
         .map_err(|source| LocalError::DialectProbe {
             operation: "GET /v1/models for tool capability",
-            source,
+            source: source.into(),
         })?;
     if !response.status().is_success() {
         return Err(LocalError::DialectProbeStatus {

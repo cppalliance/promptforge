@@ -406,7 +406,9 @@ impl ServerGuard {
             .connect_timeout(policy.http_timeout)
             .timeout(policy.http_timeout)
             .build()
-            .map_err(|source| LocalError::ReadinessClient { source })?;
+            .map_err(|source| LocalError::ReadinessClient {
+                source: source.into(),
+            })?;
 
         loop {
             if interrupted.load(Ordering::Acquire) {

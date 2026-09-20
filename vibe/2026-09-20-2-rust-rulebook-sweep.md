@@ -350,7 +350,7 @@ Commit: one commit.
 
 <step-4>
 
-### Step 4: Error shapes - Display, foreign types, message style
+### Step 4: Error shapes - Display, foreign types, message style [completed]
 
 - Component: `error-model`
 - Piece: type definitions and renderers (D2)

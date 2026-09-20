@@ -41,6 +41,7 @@ use promptforge_api_types::ids::Provenance;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::display_chain::display_chain;
 use crate::performers::Performers;
 use crate::spawn::{spawn_blocking_tagged, spawn_tagged};
 
@@ -448,12 +449,12 @@ fn outcome_of(result: RunResult) -> RunOutcome {
 }
 
 /// The log's failed outcome for an engine error: `runs.error_kind` is the
-/// kind's debug name and `runs.error_message` the error's text. The one
-/// derivation for a run that failed under the loop and a run preparation
-/// refused, so the two agree in the log.
+/// kind's debug name and `runs.error_message` the error's text with its
+/// cause chain. The one derivation for a run that failed under the loop
+/// and a run preparation refused, so the two agree in the log.
 pub(crate) fn failed_outcome(error: &RunError) -> RunOutcome {
     RunOutcome::Failed {
         kind: format!("{:?}", error.kind()),
-        message: error.to_string(),
+        message: display_chain(error),
     }
 }

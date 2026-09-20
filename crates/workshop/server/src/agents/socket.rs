@@ -27,7 +27,9 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use harness_api::{Delta, DeltaKind, Session, SessionEvent, SessionFailure, WaitError, WaitFrame};
+use harness_api::{
+    Delta, DeltaKind, Session, SessionEvent, SessionFailure, WaitError, WaitFrame, display_chain,
+};
 use promptforge_api_types::event::Event;
 use tokio::sync::broadcast;
 
@@ -36,6 +38,7 @@ use workshop_protocol::{
     ErrorFrame, InputFrame, InputResponse,
 };
 
+use super::LaunchRefusal;
 use super::session::{cross_site_refusal, send_error, send_frame};
 use super::state::SessionsState;
 
@@ -343,7 +346,7 @@ async fn handle_open(
         match agents.launch(agent).await {
             Ok(session) => session,
             Err(refusal) => {
-                send_error(socket, None, refusal.to_string()).await;
+                send_error(socket, None, refusal_text(&refusal)).await;
                 return true;
             }
         }
@@ -359,6 +362,14 @@ async fn handle_open(
         session
     };
     attach(session, attached, subscriptions, socket).await
+}
+
+/// The text of the error frame reporting a refused launch: the refusal
+/// and its cause chain. A refusal's `Display` carries only its own
+/// message, so a run log that cannot open would otherwise reach the
+/// client as the bare "run log database" with the engine's diagnosis gone.
+fn refusal_text(refusal: &LaunchRefusal) -> String {
+    display_chain(refusal)
 }
 
 /// Attaches the socket to `session`: subscribes the four channels
@@ -469,3 +480,7 @@ async fn resend_unresolved(attached: &Attached, socket: &mut WebSocket) -> bool 
     }
     true
 }
+
+#[cfg(test)]
+#[path = "socket-tests.rs"]
+mod tests;

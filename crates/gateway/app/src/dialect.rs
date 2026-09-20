@@ -325,14 +325,15 @@ fn peel_json_tool_calls_fence(input: &str) -> Peel<'_> {
     }
     match parse_openai_tool_calls(raw_calls) {
         Ok(calls) => Peel::Calls(calls, after),
-        Err(rejection) => Peel::Malformed(rejection.to_string()),
+        Err(rejection) => Peel::Malformed(crate::config_write::error_chain(&rejection)),
     }
 }
 
 /// Why one OpenAI `tool_calls` entry was rejected rather than coerced.
 ///
-/// The display text becomes the turn's `gateway_warning` verbatim, so each
-/// variant's message is the exact wire string.
+/// The rendered `source()` chain becomes the turn's `gateway_warning`, so
+/// each variant's message is the exact wire string and a cause-bearing
+/// variant contributes its cause through `source()`, not its message.
 #[derive(Debug, thiserror::Error)]
 enum ToolCallRejection {
     /// The entry was not a JSON object.
@@ -363,9 +364,9 @@ enum ToolCallRejection {
     #[error("tool call name was blank")]
     BlankName,
     /// The function's `arguments` string did not decode as JSON. The decode
-    /// failure is retained as the cause; its text stays in the message
-    /// because the message is the wire warning.
-    #[error("tool call arguments were not valid JSON: {0}")]
+    /// failure is retained as the `source()`; the wire-warning renderer
+    /// walks the chain to include its text.
+    #[error("tool call arguments were not valid JSON")]
     ArgumentsNotJson(#[source] serde_json::Error),
     /// The decoded `arguments` were not a JSON object.
     #[error("tool call arguments did not decode to an object")]
@@ -929,6 +930,30 @@ mod tests {
             parse_content_tool_dialect("```json\n{\"answer\": 42}\n```"),
             ContentParse::NotProtocol
         ));
+    }
+
+    #[test]
+    fn json_tool_calls_fence_malformed_arguments_warning_carries_the_decode_error() {
+        // `arguments` is a string, but not JSON: the fence is recognized as
+        // tool protocol and the wire warning must name the decode failure
+        // from the rejection's source chain, not just the rejection message.
+        let content = "```json\n{\"tool_calls\": [{\"id\": \"c1\", \"type\": \"function\", \"function\": {\"name\": \"search\", \"arguments\": \"{not json\"}}]}\n```";
+        let expected_cause = serde_json::from_str::<Value>("{not json")
+            .expect_err("the fixture arguments must not decode")
+            .to_string();
+        match parse_content_tool_dialect(content) {
+            ContentParse::Malformed(warning) => {
+                assert!(
+                    warning.contains("tool call arguments were not valid JSON"),
+                    "warning must name the rejection: {warning}"
+                );
+                assert!(
+                    warning.contains(&expected_cause),
+                    "warning must carry the decode error {expected_cause:?}: {warning}"
+                );
+            }
+            other => panic!("expected malformed, got {}", variant_name(&other)),
+        }
     }
 
     fn variant_name(parse: &ContentParse) -> &'static str {

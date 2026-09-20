@@ -6,6 +6,18 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// A JSON cause behind a [`SidecarError`] variant: a crate-owned wrapper so
+/// the public error surface does not name the JSON library's error type.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct JsonSource(serde_json::Error);
+
+impl From<serde_json::Error> for JsonSource {
+    fn from(source: serde_json::Error) -> Self {
+        JsonSource(source)
+    }
+}
+
 /// A failure of a gateway-discovery-file or launch-lock operation.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -41,7 +53,7 @@ pub enum SidecarError {
         path: PathBuf,
         /// The underlying JSON error.
         #[source]
-        source: serde_json::Error,
+        source: JsonSource,
     },
 
     /// The gateway discovery file failed validation.
@@ -58,7 +70,7 @@ pub enum SidecarError {
     Serialize {
         /// The underlying JSON error.
         #[source]
-        source: serde_json::Error,
+        source: JsonSource,
     },
 
     /// The atomic write of the gateway discovery file failed.

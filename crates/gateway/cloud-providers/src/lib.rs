@@ -98,9 +98,10 @@ pub enum FetchError {
         /// The provider registry key.
         name: String,
     },
-    /// The HTTP request to the provider failed.
-    #[error("provider request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    /// The HTTP request to the provider failed. The transport cause is
+    /// the `source()`; renderers walk the chain for it.
+    #[error("the provider request did not complete")]
+    Http(#[source] HttpSource),
     /// The previous release's sheet URL answered HTTP 404: the release
     /// does not exist yet.
     #[error("no sheet at `{url}` (HTTP 404)")]
@@ -116,6 +117,34 @@ pub enum FetchError {
         /// The environment variable that would carry the key.
         key_env: &'static str,
     },
+}
+
+impl From<reqwest::Error> for FetchError {
+    fn from(source: reqwest::Error) -> Self {
+        FetchError::Http(HttpSource(source))
+    }
+}
+
+/// The transport cause behind [`FetchError::Http`]: a crate-owned wrapper
+/// so the public error surface does not name the HTTP client's error type.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct HttpSource(reqwest::Error);
+
+/// Render an error and its full `source()` chain as one line, each cause
+/// separated by `; `. A variant's `Display` carries only its own message,
+/// so this is how a person-facing note recovers the transport or decode
+/// text underneath.
+#[must_use]
+pub fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str("; ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
 }
 
 /// Fetch and normalize one provider's model list; the per-provider

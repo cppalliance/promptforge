@@ -460,7 +460,7 @@ pub enum StateError {
     /// composition root itself is broken, so boot fails naming the
     /// absent type instead of panicking later at first use.
     #[non_exhaustive]
-    #[error("compose the subsystem registry: {0}")]
+    #[error("compose the subsystem registry")]
     Composition(#[from] workshop_registry::MissingContribution),
 }
 

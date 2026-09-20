@@ -155,7 +155,11 @@ async fn previous_sheet(
             );
             Ok(PreviousSheet::FirstRun)
         }
-        Err(err) => Err(format!("previous sheet at {url}: {err}").into()),
+        Err(err) => Err(format!(
+            "previous sheet at {url}: {}",
+            gateway_cloud_providers::error_chain(&err)
+        )
+        .into()),
     }
 }
 
@@ -251,6 +255,10 @@ mod tests {
         assert!(
             err.to_string().contains(url.as_str()),
             "the error must name the URL: {err}"
+        );
+        assert!(
+            err.to_string().contains("500"),
+            "the error must carry the transport cause from the source chain: {err}"
         );
     }
 

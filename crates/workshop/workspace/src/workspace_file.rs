@@ -78,7 +78,7 @@ pub enum WorkspaceFileError {
     Database {
         /// The underlying engine failure.
         #[source]
-        source: turso::Error,
+        source: DatabaseSource,
     },
 
     /// The file is not a PromptForge workspace: not a database, or a
@@ -108,9 +108,18 @@ pub enum WorkspaceFileError {
 
 impl From<turso::Error> for WorkspaceFileError {
     fn from(source: turso::Error) -> Self {
-        Self::Database { source }
+        Self::Database {
+            source: DatabaseSource(source),
+        }
     }
 }
+
+/// The database engine's failure as the cause of a
+/// [`WorkspaceFileError::Database`], owned by this crate so the public
+/// error names no engine type.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct DatabaseSource(turso::Error);
 
 /// Everything a workspace file carries between sessions.
 #[derive(Debug, Clone)]
@@ -466,7 +475,7 @@ fn is_not_a_database(error: &WorkspaceFileError) -> bool {
     matches!(
         error,
         WorkspaceFileError::Database {
-            source: turso::Error::NotAdb(_) | turso::Error::Corrupt(_)
+            source: DatabaseSource(turso::Error::NotAdb(_) | turso::Error::Corrupt(_))
         }
     )
 }

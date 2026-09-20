@@ -59,7 +59,7 @@ enum StartupRepr {
     Boot(#[source] crate::boot::BootError),
     #[error("local provisioning error")]
     Provisioning(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("failed to bind the listener")]
+    #[error("bind the listener")]
     Bind(#[source] std::io::Error),
     #[error("gateway thread error")]
     Thread(#[source] std::io::Error),

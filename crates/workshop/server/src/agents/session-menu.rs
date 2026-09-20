@@ -179,7 +179,7 @@ enum SwitchFailure {
     #[error("{0}")]
     Refused(String),
     /// The sidecar refused or never received its shutdown request.
-    #[error("gateway shutdown request failed: {0}")]
+    #[error("the gateway did not accept its shutdown request: {0}")]
     Shutdown(String),
     /// No replacement gateway serving the selection appeared in time.
     #[error("gateway did not return after restart")]

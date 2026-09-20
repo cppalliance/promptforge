@@ -32,16 +32,19 @@ use super::SessionCore;
 /// Why one run produced no outcome of the engine's.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunFailure {
-    /// The client's selected model could not be resolved.
-    #[error("the chat cannot launch: {0}")]
+    /// The client's selected model could not be resolved; the resolution
+    /// failure is the source.
+    #[error("the chat cannot launch")]
     Model(#[source] CurrentModelError),
-    /// The run could not be prepared: the prompt failed to parse, the
-    /// environment cannot satisfy it, or the log refused it.
-    #[error("{0}")]
-    Prepare(#[source] PrepareError),
-    /// The effect loop stopped without an outcome.
-    #[error("{0}")]
-    Drive(#[source] DriveError),
+    /// The run could not be prepared: the prompt does not parse, the
+    /// environment cannot satisfy it, or the log refused it. Renders and
+    /// sources as the preparation error does.
+    #[error(transparent)]
+    Prepare(PrepareError),
+    /// The effect loop stopped without an outcome. Renders and sources as
+    /// the drive error does.
+    #[error(transparent)]
+    Drive(DriveError),
 }
 
 /// What one run needs beyond the session: the frozen bindings the reducer
@@ -155,3 +158,7 @@ async fn replay_recorded(core: &SessionCore, run_id: LogRunId) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "run-tests.rs"]
+mod tests;

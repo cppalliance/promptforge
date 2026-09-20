@@ -127,7 +127,7 @@ pub(crate) enum GatewayError {
     /// Some target-profile local models started while others failed.
     #[cfg(feature = "local")]
     #[non_exhaustive]
-    #[error("profile {profile} started partially; loaded: {loaded:?}; failed: {failed:?}")]
+    #[error("profile {profile} started partially; loaded: {loaded:?}; not started: {failed:?}")]
     PartialStart {
         /// Target profile now active in degraded mode.
         profile: String,

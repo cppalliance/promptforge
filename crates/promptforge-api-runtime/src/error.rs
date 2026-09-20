@@ -261,9 +261,11 @@ pub(crate) enum Error {
     ///
     /// Carries a typed [`crate::subst::SubstitutionError`] with a stable kind,
     /// the byte offset of the offending placeholder, a bounded preview, and any
-    /// preserved serialization source, rather than a flattened string.
-    #[error("{0}")]
-    Substitution(#[source] Box<crate::subst::SubstitutionError>),
+    /// preserved serialization source, rather than a flattened string. The
+    /// substitution error is the whole message and its cause chain, so the
+    /// variant is transparent over it.
+    #[error(transparent)]
+    Substitution(Box<crate::subst::SubstitutionError>),
 
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
@@ -431,7 +433,7 @@ pub(crate) enum Error {
     /// The host's input broker failed a `user_input` request: the wait
     /// ended in failure rather than an answer or the unavailable fallback,
     /// so the call raises this typed error at its Lua call site.
-    #[error("user input failed: {message}")]
+    #[error("user input request was not answered: {message}")]
     Input {
         /// The broker's host-authored, model-safe failure message.
         message: String,
@@ -443,8 +445,9 @@ pub(crate) enum Error {
     /// A run-scoped store operation failed at the virtual filesystem layer,
     /// retaining the concrete [`shared_vfs::VfsError`] as the `#[source]`
     /// cause so a backend failure survives the public wrappers instead of
-    /// being flattened to a string.
-    #[error("store operation failed: {0}")]
+    /// being flattened to a string. The message names only the operation;
+    /// a renderer that wants the backend's diagnosis walks `source()`.
+    #[error("store operation failed")]
     Store(#[source] shared_vfs::VfsError),
 
     /// Two live execution identities claimed one store path: the claims

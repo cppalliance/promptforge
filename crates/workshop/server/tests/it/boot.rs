@@ -28,9 +28,13 @@ fn a_missing_required_contribution_fails_boot_naming_it() {
     let gateway = ResolvedGateway::from_config(&config.gateway);
     let error = state_with_gateway_omitting(&config, &gateway, Omit::Menu)
         .expect_err("boot fails when the menu subsystem never registers");
+    // The composition error renders only its own frame; the absent
+    // contribution is named by its `source()`.
+    let cause = std::error::Error::source(&error)
+        .expect("the composition failure carries the registry's cause");
     assert!(
-        error.to_string().contains("MenuHandles"),
-        "the failure names the missing contribution: {error}"
+        cause.to_string().contains("MenuHandles"),
+        "the failure's cause names the missing contribution: {error}: {cause}"
     );
 }
 

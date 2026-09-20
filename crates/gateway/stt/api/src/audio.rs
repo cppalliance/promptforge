@@ -19,7 +19,7 @@ pub(super) enum AudioError {
     InvalidBase64(#[source] base64::DecodeError),
     #[error("decoded audio exceeds the {max_bytes} byte append limit")]
     AppendTooLarge { max_bytes: usize },
-    #[error("PCM16 audio ended with an incomplete sample")]
+    #[error("audio ended with an incomplete PCM16 sample")]
     IncompletePcm16Sample,
     #[error("audio buffer exceeds {maximum_seconds} seconds")]
     BufferTooLong { maximum_seconds: usize },

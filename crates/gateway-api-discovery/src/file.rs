@@ -105,7 +105,7 @@ impl GatewayDiscoveryFile {
         let file: GatewayDiscoveryFile =
             serde_json::from_str(&raw).map_err(|source| SidecarError::Parse {
                 path: path.clone(),
-                source,
+                source: source.into(),
             })?;
         if let Some(reason) = file.validation_error() {
             return Err(SidecarError::Invalid {
@@ -140,8 +140,9 @@ impl GatewayDiscoveryFile {
             path: run_dir.to_owned(),
             source,
         })?;
-        let bytes =
-            serde_json::to_vec_pretty(self).map_err(|source| SidecarError::Serialize { source })?;
+        let bytes = serde_json::to_vec_pretty(self).map_err(|source| SidecarError::Serialize {
+            source: source.into(),
+        })?;
         write_atomic_owner_only(&path, &bytes)
             .map_err(|source| SidecarError::Write { path, source })
     }
