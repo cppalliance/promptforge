@@ -7,7 +7,7 @@
 //!
 //! Docs: <https://www.alibabacloud.com/help/en/model-studio>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
@@ -292,24 +292,27 @@ mod tests {
 
     #[test]
     fn name_patterns_infer_the_kind() {
-        let table: &[(&str, gateway_api::ModelKind)] = &[
-            ("qwen3-tts-flash", gateway_api::ModelKind::Speech),
+        let table: &[(&str, gateway_api_types::ModelKind)] = &[
+            ("qwen3-tts-flash", gateway_api_types::ModelKind::Speech),
             (
                 "qwen3-asr-flash-realtime",
-                gateway_api::ModelKind::Transcription,
+                gateway_api_types::ModelKind::Transcription,
             ),
             (
                 "qwen-audio-3.0-asr-flash",
-                gateway_api::ModelKind::Transcription,
+                gateway_api_types::ModelKind::Transcription,
             ),
-            ("qwen-image-2.0", gateway_api::ModelKind::Image),
-            ("wan2.7-image", gateway_api::ModelKind::Image),
-            ("z-image-turbo", gateway_api::ModelKind::Image),
-            ("text-embedding-v4", gateway_api::ModelKind::Embedding),
-            ("qwen3.7-text-embedding", gateway_api::ModelKind::Embedding),
-            ("qwen3-max", gateway_api::ModelKind::Chat),
-            ("qwen-vl-ocr-2025-11-20", gateway_api::ModelKind::Chat),
-            ("qwen-mt-flash", gateway_api::ModelKind::Chat),
+            ("qwen-image-2.0", gateway_api_types::ModelKind::Image),
+            ("wan2.7-image", gateway_api_types::ModelKind::Image),
+            ("z-image-turbo", gateway_api_types::ModelKind::Image),
+            ("text-embedding-v4", gateway_api_types::ModelKind::Embedding),
+            (
+                "qwen3.7-text-embedding",
+                gateway_api_types::ModelKind::Embedding,
+            ),
+            ("qwen3-max", gateway_api_types::ModelKind::Chat),
+            ("qwen-vl-ocr-2025-11-20", gateway_api_types::ModelKind::Chat),
+            ("qwen-mt-flash", gateway_api_types::ModelKind::Chat),
         ];
         for &(id, kind) in table {
             assert_eq!(kind_of(id), kind, "{id}");
@@ -331,7 +334,7 @@ mod tests {
         let entry = normalize_model(&page.data[0]);
         assert_eq!(
             entry.kind,
-            gateway_api::ModelKind::Speech,
+            gateway_api_types::ModelKind::Speech,
             "the compatible-mode endpoint reports no kind; the name rule supplies it"
         );
     }
@@ -344,7 +347,7 @@ mod tests {
         );
         assert_eq!(PROVIDER.env_vars.len(), 1);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

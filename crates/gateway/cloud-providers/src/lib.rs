@@ -6,7 +6,7 @@
 //! file. The crate does double duty: a library linked into the Gateway, and
 //! a binary the aggregation workflow compiles and runs.
 
-use gateway_api::{EnvRole, ModelEntry, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, Tier};
 
 pub mod providers;
 mod sheet;
@@ -197,7 +197,7 @@ pub async fn fetch_models(
 mod tests {
     use std::collections::BTreeSet;
 
-    use gateway_api::{ModelEntry, Tier};
+    use gateway_api_types::{ModelEntry, Tier};
 
     use super::{FetchError, Provider, fetch_models, providers};
 

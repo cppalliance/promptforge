@@ -5,7 +5,7 @@
 //!
 //! Docs: <https://developers.openai.com/api/reference>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};

@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::header::AUTHORIZATION;
 use axum::http::{Method, Request, StatusCode};
-use gateway_api::{ModelEntry, ModelKind, ProviderSlice, SliceStatus, Thinking, Tier};
+use gateway_api_types::{ModelEntry, ModelKind, ProviderSlice, SliceStatus, Thinking, Tier};
 use gateway_config::Config;
 use gateway_protocol::http_util::MAX_JSON_BODY;
 use tokio::sync::Notify;

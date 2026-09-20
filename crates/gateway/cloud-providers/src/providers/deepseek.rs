@@ -5,7 +5,7 @@
 //!
 //! Docs: <https://api-docs.deepseek.com>
 
-use gateway_api::{EnvRole, ModelEntry, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};

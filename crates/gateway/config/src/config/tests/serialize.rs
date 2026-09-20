@@ -239,7 +239,7 @@ fn enums_round_trip_with_their_toml_spellings() {
 
 #[test]
 fn capabilities_round_trip_through_json() {
-    // `Capabilities` is `#[non_exhaustive]` in `gateway-api`, so the
+    // `Capabilities` is `#[non_exhaustive]` in `gateway-api-types`, so the
     // fixture is built from JSON rather than a struct literal.
     let json = serde_json::json!({
         "max_output": 4096,

@@ -6,7 +6,7 @@
 //!
 //! Docs: <https://docs.anthropic.com/en/api/models-list>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Thinking, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Thinking, Tier};
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};

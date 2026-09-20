@@ -10,7 +10,7 @@
 //!
 //! Docs: <https://docs.mistral.ai/api/endpoint/models>
 
-use gateway_api::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::{Date, Month, OffsetDateTime};
@@ -244,7 +244,7 @@ mod tests {
             entry.display_name, "Mistral Large 3",
             "the card's name is the display name"
         );
-        assert_eq!(entry.kind, gateway_api::ModelKind::Chat);
+        assert_eq!(entry.kind, gateway_api_types::ModelKind::Chat);
         assert_eq!(
             entry.released_at,
             Date::from_calendar_date(2026, Month::January, 1).ok(),
@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(entry.id, "codestral-latest");
         assert_eq!(
             entry.kind,
-            gateway_api::ModelKind::Chat,
+            gateway_api_types::ModelKind::Chat,
             "completion_fim has no sheet field; the kind stays chat"
         );
         assert!(!entry.tool_calling);
@@ -341,18 +341,30 @@ mod tests {
 
     #[test]
     fn name_patterns_infer_the_kind() {
-        let table: &[(&str, gateway_api::ModelKind)] = &[
-            ("voxtral-mini-tts-latest", gateway_api::ModelKind::Speech),
-            ("voxtral-mini-tts-2603", gateway_api::ModelKind::Speech),
+        let table: &[(&str, gateway_api_types::ModelKind)] = &[
+            (
+                "voxtral-mini-tts-latest",
+                gateway_api_types::ModelKind::Speech,
+            ),
+            (
+                "voxtral-mini-tts-2603",
+                gateway_api_types::ModelKind::Speech,
+            ),
             (
                 "voxtral-mini-transcribe-realtime-2602",
-                gateway_api::ModelKind::Transcription,
+                gateway_api_types::ModelKind::Transcription,
             ),
-            ("mistral-embed", gateway_api::ModelKind::Embedding),
-            ("codestral-embed-2505", gateway_api::ModelKind::Embedding),
-            ("mistral-ocr-latest", gateway_api::ModelKind::Classifier),
-            ("mistral-small-latest", gateway_api::ModelKind::Chat),
-            ("codestral-latest", gateway_api::ModelKind::Chat),
+            ("mistral-embed", gateway_api_types::ModelKind::Embedding),
+            (
+                "codestral-embed-2505",
+                gateway_api_types::ModelKind::Embedding,
+            ),
+            (
+                "mistral-ocr-latest",
+                gateway_api_types::ModelKind::Classifier,
+            ),
+            ("mistral-small-latest", gateway_api_types::ModelKind::Chat),
+            ("codestral-latest", gateway_api_types::ModelKind::Chat),
         ];
         for &(id, kind) in table {
             assert_eq!(kind_of(id), kind, "{id}");
@@ -375,7 +387,7 @@ mod tests {
         let entry = normalize_model(&page.data[0]);
         assert_eq!(
             entry.kind,
-            gateway_api::ModelKind::Speech,
+            gateway_api_types::ModelKind::Speech,
             "the wire card carries no kind; the name rule supplies it"
         );
     }
@@ -385,7 +397,7 @@ mod tests {
         assert_eq!(PROVIDER.openai_base_url, Some("https://api.mistral.ai/v1"));
         assert_eq!(PROVIDER.env_vars.len(), 1);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

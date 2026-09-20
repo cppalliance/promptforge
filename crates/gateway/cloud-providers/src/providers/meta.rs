@@ -6,7 +6,7 @@
 //!
 //! Docs: <https://ai.developer.meta.com/docs>
 
-use gateway_api::{EnvRole, ModelEntry, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};

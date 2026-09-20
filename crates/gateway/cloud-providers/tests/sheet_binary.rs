@@ -8,7 +8,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use gateway_api::{Sheet, SliceStatus};
+use gateway_api_types::{Sheet, SliceStatus};
 use gateway_cloud_providers::providers;
 
 /// The binary under test, built by Cargo alongside the integration test.

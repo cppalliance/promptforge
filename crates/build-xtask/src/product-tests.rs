@@ -252,10 +252,10 @@ fn a_workshop_crate_depending_on_the_public_gateway_pair_passes() {
         root.path(),
         "workshop-server",
         "workshop-server",
-        "[dependencies]\ngateway-api = { path = \"../gateway-api\" }\n\
+        "[dependencies]\ngateway-api-types = { path = \"../gateway-api-types\" }\n\
          gateway-api-discovery = { path = \"../gateway-api-discovery\" }\n",
     );
-    write_crate(root.path(), "gateway-api", "gateway-api", "");
+    write_crate(root.path(), "gateway-api-types", "gateway-api-types", "");
     write_crate(
         root.path(),
         "gateway-api-discovery",
@@ -278,14 +278,14 @@ fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
         "harness-runner",
         "[dependencies]\npromptforge-api-runtime = { path = \"../../promptforge-api-runtime\" }\n\
          promptforge-api-types = { path = \"../../promptforge-api-types\" }\n\
-         gateway-api = { path = \"../../gateway-api\" }\n\
+         gateway-api-types = { path = \"../../gateway-api-types\" }\n\
          gateway-api-discovery = { path = \"../../gateway-api-discovery\" }\n\
          shared-vfs = { path = \"../../shared-vfs\" }\n",
     );
     for name in [
         "promptforge-api-runtime",
         "promptforge-api-types",
-        "gateway-api",
+        "gateway-api-types",
         "gateway-api-discovery",
         "shared-vfs",
     ] {
@@ -331,7 +331,7 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("harness-models depends on gateway-routing:")
-            && violations[0].contains("gateway-api")
+            && violations[0].contains("gateway-api-types")
             && violations[0].contains("gateway-api-discovery"),
         "the violation names the harness crate and the public pair: {violations:?}"
     );

@@ -63,9 +63,6 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p gateway-whisper-ffi --lib
 
-      - name: Check product dependency boundaries
-        run: cargo test -p gateway-stt --test it architecture
-
       - name: Clippy
         run: cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings
 

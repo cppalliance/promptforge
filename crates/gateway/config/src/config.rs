@@ -20,9 +20,9 @@ pub use companion::{
 };
 pub(crate) use imp::reject_profiles_directory;
 pub(crate) use interpolate::interpolate_value;
-// The canonical home of the model-metadata types is `gateway-api`;
+// The canonical home of the model-metadata types is `gateway-api-types`;
 // these re-exports keep the old paths compiling unchanged.
-pub use gateway_api::{Capabilities, ModelKind, ThinkingMode};
+pub use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};
 use stt::RawSttPipelineConfig;
 pub use stt::{
     RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttPipelineConfig, SttRole,

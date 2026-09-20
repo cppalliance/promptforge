@@ -5,7 +5,7 @@
 //! only the envelope, the single-request fetch, and the conservative base
 //! entry every dialect entry starts from.
 
-use gateway_api::{ModelEntry, ModelKind, Thinking};
+use gateway_api_types::{ModelEntry, ModelKind, Thinking};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use time::OffsetDateTime;

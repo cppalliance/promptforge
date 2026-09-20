@@ -11,7 +11,7 @@
 //!
 //! Docs: <https://cloud.baidu.com/doc/qianfan-api/s/Dmba8k71y>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Pricing, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Pricing, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
@@ -420,7 +420,7 @@ mod tests {
         );
         assert_eq!(PROVIDER.env_vars.len(), 1);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

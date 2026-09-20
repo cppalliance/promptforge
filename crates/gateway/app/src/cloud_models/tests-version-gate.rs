@@ -4,7 +4,7 @@
 
 use axum::http::Method;
 use axum::http::StatusCode;
-use gateway_api::ACCEPTED_SHEET_SCHEMA_VERSION;
+use gateway_api_types::ACCEPTED_SHEET_SCHEMA_VERSION;
 use time::OffsetDateTime;
 
 use super::*;

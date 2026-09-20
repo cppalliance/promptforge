@@ -6,7 +6,7 @@
 //!
 //! Docs: <https://platform.moonshot.ai/docs>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
@@ -259,12 +259,12 @@ mod tests {
 
     #[test]
     fn name_patterns_infer_the_kind() {
-        let table: &[(&str, gateway_api::ModelKind)] = &[
-            ("kimi-k2.6", gateway_api::ModelKind::Chat),
-            ("moonshot-v1-8k", gateway_api::ModelKind::Chat),
-            ("kimi-tts-1", gateway_api::ModelKind::Speech),
-            ("kimi-asr-1", gateway_api::ModelKind::Transcription),
-            ("kimi-image-1", gateway_api::ModelKind::Image),
+        let table: &[(&str, gateway_api_types::ModelKind)] = &[
+            ("kimi-k2.6", gateway_api_types::ModelKind::Chat),
+            ("moonshot-v1-8k", gateway_api_types::ModelKind::Chat),
+            ("kimi-tts-1", gateway_api_types::ModelKind::Speech),
+            ("kimi-asr-1", gateway_api_types::ModelKind::Transcription),
+            ("kimi-image-1", gateway_api_types::ModelKind::Image),
         ];
         for &(id, kind) in table {
             assert_eq!(kind_of(id), kind, "{id}");
@@ -288,7 +288,7 @@ mod tests {
         );
         assert_eq!(
             entries[0].kind,
-            gateway_api::ModelKind::Speech,
+            gateway_api_types::ModelKind::Speech,
             "the endpoint reports no kind; the name rule supplies it"
         );
     }
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(PROVIDER.openai_base_url, Some("https://api.moonshot.ai/v1"));
         assert_eq!(PROVIDER.env_vars.len(), 1);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

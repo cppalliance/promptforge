@@ -14,7 +14,7 @@
 //!
 //! Docs: <https://learn.microsoft.com/en-us/rest/api/speechtotext/models/list-base-models>
 
-use gateway_api::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};
@@ -422,10 +422,13 @@ mod tests {
         assert_eq!(PROVIDER.openai_base_url, None);
         assert_eq!(PROVIDER.env_vars.len(), 2);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
         assert_eq!(PROVIDER.env_vars[1].name, REGION_ENV);
-        assert_eq!(PROVIDER.env_vars[1].role, gateway_api::EnvRole::Config);
+        assert_eq!(
+            PROVIDER.env_vars[1].role,
+            gateway_api_types::EnvRole::Config
+        );
         assert_eq!(PROVIDER.env_vars[1].default, None);
     }
 

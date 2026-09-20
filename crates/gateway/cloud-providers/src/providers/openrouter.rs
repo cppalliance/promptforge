@@ -10,7 +10,7 @@
 //!
 //! Docs: <https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties>
 
-use gateway_api::{Deprecation, ModelEntry, Pricing, Tier};
+use gateway_api_types::{Deprecation, ModelEntry, Pricing, Tier};
 use serde::Deserialize;
 use time::{Date, Month};
 
@@ -174,7 +174,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 
 #[cfg(test)]
 mod tests {
-    use gateway_api::ModelKind;
+    use gateway_api_types::ModelKind;
     use time::{Date, Month};
 
     use super::*;

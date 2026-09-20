@@ -3,7 +3,7 @@
 //! is in the same list. Anthropic's rules live in this sibling module so
 //! the provider file stays under the workspace's 500-line ceiling.
 
-use gateway_api::ModelEntry;
+use gateway_api_types::ModelEntry;
 
 use crate::taxonomy::{SnapshotStyle, collapse_variants, strip_snapshot};
 
@@ -28,7 +28,7 @@ pub(crate) fn apply(entries: &mut [ModelEntry]) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use gateway_api::ModelEntry;
+    use gateway_api_types::ModelEntry;
 
     use super::apply;
 

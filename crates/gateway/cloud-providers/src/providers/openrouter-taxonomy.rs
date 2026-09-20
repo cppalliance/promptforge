@@ -5,7 +5,7 @@
 //! this sibling module so the provider file stays under the workspace's
 //! 500-line ceiling.
 
-use gateway_api::{ModelEntry, ModelKind};
+use gateway_api_types::{ModelEntry, ModelKind};
 
 use crate::taxonomy::{collapse_variants, sku_suffix, vendor_prefix};
 
@@ -45,7 +45,7 @@ pub(crate) fn apply(entries: &mut [ModelEntry]) {
 mod tests {
     use std::collections::BTreeMap;
 
-    use gateway_api::{ModelEntry, ModelKind};
+    use gateway_api_types::{ModelEntry, ModelKind};
 
     use super::{apply, model_kind};
 

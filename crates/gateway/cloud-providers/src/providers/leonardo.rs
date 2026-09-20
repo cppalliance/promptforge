@@ -9,7 +9,7 @@
 //!
 //! Docs: <https://docs.leonardo.ai/v1.0/reference/listplatformmodels>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::base_entry;
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(PROVIDER.openai_base_url, None);
         assert_eq!(PROVIDER.env_vars.len(), 1);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

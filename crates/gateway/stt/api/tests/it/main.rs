@@ -5,8 +5,6 @@
 mod common;
 
 #[cfg(not(miri))]
-mod architecture;
-#[cfg(not(miri))]
 mod batch;
 #[cfg(not(miri))]
 mod generation;

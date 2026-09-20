@@ -6,7 +6,7 @@
 //!
 //! Docs: <https://ai.google.dev/api/models>
 
-use gateway_api::{EnvRole, ModelEntry, ModelKind, Thinking, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, ModelKind, Thinking, Tier};
 use serde::Deserialize;
 
 use crate::{EnvVarSpec, FetchError, Provider};

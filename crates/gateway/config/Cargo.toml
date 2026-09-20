@@ -16,7 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 serde.workspace = true
 # JSON rendering of the resolved config for `Config::to_json`.
 serde_json.workspace = true
-gateway-api.workspace = true
+gateway-api-types.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 url.workspace = true

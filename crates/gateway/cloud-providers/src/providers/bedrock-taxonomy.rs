@@ -4,7 +4,7 @@
 //! Bedrock's rules live in this sibling module so the provider file
 //! stays under the workspace's 500-line ceiling.
 
-use gateway_api::ModelEntry;
+use gateway_api_types::ModelEntry;
 
 /// The entry's family: the vendor segment before the first dot
 /// (`amazon`, `anthropic`, `meta`, ...), and the whole id otherwise.
@@ -22,7 +22,7 @@ pub(crate) fn apply(entries: &mut [ModelEntry]) {
 
 #[cfg(test)]
 mod tests {
-    use gateway_api::ModelEntry;
+    use gateway_api_types::ModelEntry;
 
     use super::apply;
 

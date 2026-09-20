@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub use gateway_api::ModelInfo;
+pub use gateway_api_types::ModelInfo;
 
 /// An incoming chat completions request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -592,7 +592,7 @@ pub struct ModelsResponse {
 
 #[cfg(test)]
 mod tests {
-    use gateway_api::{Capabilities, ModelKind, ThinkingMode};
+    use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};
 
     use super::*;
 

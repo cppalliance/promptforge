@@ -8,7 +8,7 @@
 //!
 //! Docs: <https://build.nvidia.com/llms.txt>
 
-use gateway_api::{ModelEntry, Tier};
+use gateway_api_types::{ModelEntry, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{ListResponse, base_entry};
@@ -121,7 +121,7 @@ mod tests {
             entry.display_name, "meta/llama-3.1-8b-instruct",
             "the id doubles as the display name"
         );
-        assert_eq!(entry.kind, gateway_api::ModelKind::Chat);
+        assert_eq!(entry.kind, gateway_api_types::ModelKind::Chat);
         assert_eq!(entry.context_window, None, "IDs-only providers omit limits");
         assert_eq!(entry.max_output, None);
         assert!(!entry.images && !entry.tool_calling && !entry.thinking.supported);

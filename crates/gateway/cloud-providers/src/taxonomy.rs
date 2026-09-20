@@ -4,7 +4,7 @@
 //! primitives apply, and the family rule itself, stay private to each
 //! provider file.
 
-use gateway_api::ModelEntry;
+use gateway_api_types::ModelEntry;
 
 /// The snapshot-suffix styles observed across provider catalogs. Every
 /// style is fixed-width and hand-parsed; there is no regex dependency.
@@ -152,7 +152,7 @@ pub(crate) fn collapse_variants(
 
 #[cfg(test)]
 pub(crate) mod fixture {
-    use gateway_api::{ModelEntry, ModelKind, Thinking};
+    use gateway_api_types::{ModelEntry, ModelKind, Thinking};
     use serde::Deserialize;
 
     /// A trimmed sheet excerpt: one provider's models reduced to ids.

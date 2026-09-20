@@ -7,7 +7,7 @@
 //!
 //! Docs: <https://platform.minimax.io/docs/api-reference/models/openai/list-models>
 
-use gateway_api::{EnvRole, ModelEntry, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};
@@ -136,7 +136,7 @@ mod tests {
         let entry = &entries[0];
         assert_eq!(entry.id, "MiniMax-M3");
         assert_eq!(entry.display_name, "MiniMax-M3");
-        assert_eq!(entry.kind, gateway_api::ModelKind::Chat);
+        assert_eq!(entry.kind, gateway_api_types::ModelKind::Chat);
         assert_eq!(entry.context_window, None, "IDs-only providers omit limits");
         assert_eq!(entry.max_output, None);
         assert!(!entry.images && !entry.tool_calling && !entry.thinking.supported);
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(PROVIDER.openai_base_url, Some("https://api.minimax.io/v1"));
         assert_eq!(PROVIDER.env_vars.len(), 1);
         assert_eq!(PROVIDER.env_vars[0].name, KEY_ENV);
-        assert_eq!(PROVIDER.env_vars[0].role, gateway_api::EnvRole::Key);
+        assert_eq!(PROVIDER.env_vars[0].role, gateway_api_types::EnvRole::Key);
         assert_eq!(PROVIDER.env_vars[0].default, None);
     }
 }

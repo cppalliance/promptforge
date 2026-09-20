@@ -1957,8 +1957,8 @@ dependencies = [
  "embed-resource",
  "futures-util",
  "gateway",
- "gateway-api",
  "gateway-api-discovery",
+ "gateway-api-types",
  "gateway-config",
  "gateway-config-ui",
  "gateway-local",
@@ -2003,16 +2003,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-api"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "time",
- "workspace-hack",
-]
-
-[[package]]
 name = "gateway-api-discovery"
 version = "0.3.0"
 dependencies = [
@@ -2026,12 +2016,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-api-types"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "time",
+ "workspace-hack",
+]
+
+[[package]]
 name = "gateway-cloud-providers"
 version = "0.3.0"
 dependencies = [
  "dotenvy",
  "futures-util",
- "gateway-api",
+ "gateway-api-types",
  "hmac",
  "reqwest",
  "serde",
@@ -2047,7 +2047,7 @@ dependencies = [
 name = "gateway-config"
 version = "0.3.0"
 dependencies = [
- "gateway-api",
+ "gateway-api-types",
  "reqwest",
  "serde",
  "serde_json",
@@ -2117,7 +2117,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
- "gateway-api",
+ "gateway-api-types",
  "gateway-config",
  "reqwest",
  "serde",

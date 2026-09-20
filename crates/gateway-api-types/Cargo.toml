@@ -1,12 +1,12 @@
 [package]
-name = "gateway-api"
+name = "gateway-api-types"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge shared gateway vocabulary: the provider model sheet schema"
+description = "PromptForge gateway wire vocabulary: the provider model sheet schema, the model metadata types, and the progress snapshot"
 keywords = ["prompt", "llm", "gateway", "models"]
 categories = ["rust-patterns"]
 documentation = "https://cppalliance.github.io/promptforge/"

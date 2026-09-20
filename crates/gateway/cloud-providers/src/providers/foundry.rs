@@ -25,7 +25,7 @@
 //! from live responses on 2026-09-15. A request naming an unknown
 //! filter field gets the valid ones back in the error body.
 
-use gateway_api::{ModelEntry, Tier};
+use gateway_api_types::{ModelEntry, Tier};
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};
@@ -228,7 +228,7 @@ fn parse_wire_date(value: &str) -> Option<Date> {
 
 #[cfg(test)]
 mod tests {
-    use gateway_api::ModelKind;
+    use gateway_api_types::ModelKind;
     use time::Month;
 
     use super::*;

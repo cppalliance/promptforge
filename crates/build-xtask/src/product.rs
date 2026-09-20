@@ -9,7 +9,7 @@
 //! - `gateway`/`gateway-*` crates must not depend on promptforge,
 //!   workshop, or harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
-//!   except the family's public pair (`gateway-api`,
+//!   except the family's public pair (`gateway-api-types`,
 //!   `gateway-api-discovery`), and may depend on `harness-*` only through
 //!   `harness-api`.
 //! - `harness-*` crates must not depend on workshop crates, and may depend
@@ -107,7 +107,7 @@ const SERVER: &str = "workshop-server";
 const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge-api-runtime", "promptforge-api-types"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
-const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api", "gateway-api-discovery"];
+const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
 /// The harness family's door: the only harness crate workshop crates may
 /// name, and the one outside crate permitted into `crates/harness/`.
 const HARNESS_DOOR: &str = "harness-api";
@@ -171,7 +171,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             Some("harness crates must not depend on workshop crates")
         }
         (Family::Harness, Family::Gateway) if !public_gateway => Some(
-            "harness crates may depend on gateway-* only through gateway-api and gateway-api-discovery",
+            "harness crates may depend on gateway-* only through gateway-api-types and gateway-api-discovery",
         ),
         (
             Family::Shared,

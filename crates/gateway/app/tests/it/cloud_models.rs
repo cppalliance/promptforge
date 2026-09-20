@@ -17,7 +17,7 @@ use std::time::Duration;
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
-use gateway_api::{
+use gateway_api_types::{
     EnvRole, EnvVar, ModelEntry, ModelKind, ProviderSlice, Sheet, SliceStatus, Thinking, Tier,
 };
 use serde_json::Value;

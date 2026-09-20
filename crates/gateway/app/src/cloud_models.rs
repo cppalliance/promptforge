@@ -1,6 +1,6 @@
 //! The cloud provider model sheet cache and its admin routes.
 //!
-//! The published provider sheet (the gateway-api [`Sheet`]) is a
+//! The published provider sheet (the gateway-api-types [`Sheet`]) is a
 //! release artifact of the promptforge-cloud-providers repository. At
 //! launch, after the async boot completes and off the serving path, the
 //! gateway loads `<profile>/cloud-provider-models.json` from disk when
@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use axum::Json;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
-use gateway_api::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
+use gateway_api_types::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
 use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
 use time::OffsetDateTime;
 

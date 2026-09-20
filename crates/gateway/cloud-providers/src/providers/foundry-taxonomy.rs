@@ -4,7 +4,7 @@
 //! rules live in this sibling module so the provider file stays under
 //! the workspace's 500-line ceiling.
 
-use gateway_api::{Deprecation, ModelEntry, ModelKind};
+use gateway_api_types::{Deprecation, ModelEntry, ModelKind};
 use time::Date;
 
 /// The lifecycle labels that mean a model is on its way out. Every

@@ -69,7 +69,7 @@ fn the_engine_crate_set_is_the_two_root_crates_plus_every_container_member() {
     write_crate(root.path(), "promptforge/lua", "", "pub struct Vm;\n");
     write_crate(root.path(), "promptforge/store", "", "pub struct Store;\n");
     write_crate(root.path(), "harness/runner", "", "pub struct Runner;\n");
-    write_crate(root.path(), "gateway-api", "", "pub struct Api;\n");
+    write_crate(root.path(), "gateway-api-types", "", "pub struct Api;\n");
     let mut names: Vec<String> = engine_crates(root.path())
         .iter()
         .map(|dir| {

@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use gateway_api::{
+use gateway_api_types::{
     ACCEPTED_SHEET_SCHEMA_VERSION, EnvVar, ModelEntry, ProviderSlice, Sheet, SliceStatus, Tier,
 };
 use time::OffsetDateTime;
@@ -209,7 +209,7 @@ fn static_slice(provider: &Provider) -> ProviderSlice {
 
 #[cfg(test)]
 mod tests {
-    use gateway_api::{EnvRole, ModelKind, Thinking};
+    use gateway_api_types::{EnvRole, ModelKind, Thinking};
     use time::format_description::well_known::Rfc3339;
 
     use super::*;
@@ -295,7 +295,7 @@ mod tests {
         let sheet = build_sheet_with(&registry, None, &keys, &fetch, &client).await;
         assert_eq!(
             sheet.schema_version,
-            gateway_api::ACCEPTED_SHEET_SCHEMA_VERSION,
+            gateway_api_types::ACCEPTED_SHEET_SCHEMA_VERSION,
             "the writer must emit the schema version the gateway reader accepts"
         );
     }

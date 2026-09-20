@@ -27,7 +27,7 @@ base64 = "0.22"
 bytes = "1"
 promptforge-api-runtime = { path = "crates/promptforge-api-runtime", version = "0.3.0" }
 promptforge-api-types = { path = "crates/promptforge-api-types", version = "0.3.0" }
-gateway-api = { path = "crates/gateway-api", version = "0.3.0" }
+gateway-api-types = { path = "crates/gateway-api-types", version = "0.3.0" }
 gateway-cloud-providers = { path = "crates/gateway/cloud-providers", version = "0.3.0" }
 gateway = { path = "crates/gateway/app", version = "0.3.0" }
 gateway-config = { path = "crates/gateway/config", version = "0.3.0" }

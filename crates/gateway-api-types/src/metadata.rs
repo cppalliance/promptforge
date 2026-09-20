@@ -123,7 +123,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.max_output = Some(4096);
     /// assert_eq!(capabilities.max_output(), Some(4096));
     /// ```
@@ -137,7 +137,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.default_temperature = Some(0.7);
     /// assert_eq!(capabilities.default_temperature(), Some(0.7));
     /// ```
@@ -150,7 +150,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.images = true;
     /// assert!(capabilities.images());
     /// ```
@@ -163,7 +163,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.parallel_tool_calls = true;
     /// assert!(capabilities.parallel_tool_calls());
     /// ```
@@ -177,7 +177,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.effort_levels = vec!["low".to_owned(), "high".to_owned()];
     /// assert_eq!(capabilities.effort_levels(), ["low", "high"]);
     /// ```
@@ -190,7 +190,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.default_effort = Some("low".to_owned());
     /// assert_eq!(capabilities.default_effort(), Some("low"));
     /// ```
@@ -204,7 +204,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.adaptive_thinking = true;
     /// assert!(capabilities.adaptive_thinking());
     /// ```
@@ -218,7 +218,7 @@ impl Capabilities {
     ///
     /// # Examples
     /// ```
-    /// let mut capabilities = gateway_api::Capabilities::default();
+    /// let mut capabilities = gateway_api_types::Capabilities::default();
     /// capabilities.voices = vec!["alloy".to_owned(), "nova".to_owned()];
     /// assert_eq!(capabilities.voices(), ["alloy", "nova"]);
     /// ```

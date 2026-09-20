@@ -6,7 +6,7 @@
 //!
 //! Docs: <https://docs.x.ai>
 
-use gateway_api::{EnvRole, ModelEntry, Pricing, Tier};
+use gateway_api_types::{EnvRole, ModelEntry, Pricing, Tier};
 use serde::Deserialize;
 
 use crate::providers::openai_shape::{base_entry, fetch_list};

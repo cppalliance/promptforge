@@ -13,7 +13,7 @@
 //!
 //! Docs: <https://docs.aws.amazon.com/bedrock/latest/APIReference/API_ListFoundationModels.html>
 
-use gateway_api::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
+use gateway_api_types::{Deprecation, EnvRole, ModelEntry, ModelKind, Tier};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
@@ -350,12 +350,16 @@ mod tests {
             PROVIDER.openai_base_url, None,
             "SigV4 and the Converse API are not OpenAI-shaped"
         );
-        let vars: &[(&str, gateway_api::EnvRole, Option<&str>)] = &[
-            ("AWS_ACCESS_KEY_ID", gateway_api::EnvRole::Key, None),
-            ("AWS_SECRET_ACCESS_KEY", gateway_api::EnvRole::Key, None),
+        let vars: &[(&str, gateway_api_types::EnvRole, Option<&str>)] = &[
+            ("AWS_ACCESS_KEY_ID", gateway_api_types::EnvRole::Key, None),
+            (
+                "AWS_SECRET_ACCESS_KEY",
+                gateway_api_types::EnvRole::Key,
+                None,
+            ),
             (
                 "AWS_REGION",
-                gateway_api::EnvRole::Config,
+                gateway_api_types::EnvRole::Config,
                 Some("us-east-1"),
             ),
         ];

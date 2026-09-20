@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use gateway_api::Sheet;
+use gateway_api_types::Sheet;
 
 /// Environment variable carrying the previous release's sheet URL.
 const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
