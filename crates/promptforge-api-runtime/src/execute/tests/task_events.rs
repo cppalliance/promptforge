@@ -41,7 +41,8 @@ fn drive_plain(md: &str) -> (RunResult, Vec<Event>) {
     })
 }
 
-fn text_of(result: RunResult) -> String {
+/// The text of a run that succeeded; panics on any other outcome.
+pub(super) fn text_of(result: RunResult) -> String {
     match result {
         RunResult::Ok(text) => text,
         other => panic!("the run succeeds: {other:?}"),
@@ -162,7 +163,7 @@ fn owner_prompt(tail: &str) -> String {
 
 /// Drives `md` with the model played by `rounds`, one canned answer per
 /// `chat` round in order.
-fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
+pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
     let prompt = parse(md);
     let state = model_task_context_with(
         &prompt,

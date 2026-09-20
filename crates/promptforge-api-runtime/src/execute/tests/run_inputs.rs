@@ -8,6 +8,7 @@
 use promptforge_api_types::replay::Flags;
 use promptforge_api_types::timestamp::Timestamp;
 
+use super::task_events::text_of;
 use super::*;
 use crate::execute::run::Run;
 use crate::test_support::drive;
@@ -25,13 +26,6 @@ fn run_seeded(md: &str, seed: u64) -> RunResult {
         panic!("no effect is issued: {effect:?}")
     });
     result
-}
-
-fn text_of(result: RunResult) -> String {
-    match result {
-        RunResult::Ok(text) => text,
-        other => panic!("the run succeeds: {other:?}"),
-    }
 }
 
 /// The nonce between `<untrusted_input_` and `>` in a wrapped envelope.

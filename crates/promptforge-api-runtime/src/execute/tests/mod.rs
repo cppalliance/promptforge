@@ -1509,6 +1509,7 @@ mod model_task_answers;
 mod model_task_awaits;
 mod model_task_ids_and_scope;
 mod model_task_notices;
+mod model_task_trust;
 mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;

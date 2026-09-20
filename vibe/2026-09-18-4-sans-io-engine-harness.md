@@ -995,7 +995,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-51>
 
-### Step 51: Checkpoint 5, `workshop-sessions` deleted
+### Step 51: Checkpoint 5, `workshop-sessions` deleted [completed]
 
 - Component: Harness sessions and Workshop migration
 - Piece: checkpoint
