@@ -1,6 +1,6 @@
 # PromptForge
 
-Multi-crate Rust workspace for the PromptForge pipeline runtime, inference gateway, and Workshop desktop product.
+Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that hosts it, the inference gateway, and the Workshop desktop product.
 
 ## Principles
 

@@ -983,7 +983,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-50>
 
-### Step 50: Documentation and the Papergate note
+### Step 50: Documentation and the Papergate note [completed]
 
 - Component: Harness sessions and Workshop migration
 - Piece: docs
