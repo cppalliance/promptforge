@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
-use super::{Emitter, EventSink};
+use super::{DebugMode, Emitter, EventSink};
 use crate::event::{Event, lifecycle};
 use crate::ids::{AbandonReason, ChainId, Provenance, TaskId, TaskOrigin};
+use crate::tools::OutputTrust;
 
 fn root() -> TaskId {
     TaskId::from(ChainId::root())
 }
 
 fn emitter(sink: &EventSink, task: TaskId) -> Emitter {
-    Emitter::new(sink.clone(), task, Arc::from("run-1"), false)
+    Emitter::new(sink.clone(), task, Arc::from("run-1"), DebugMode::Off)
 }
 
 #[test]
@@ -148,7 +149,7 @@ fn payload_variants_cross_field_for_field() {
 fn content_reports_land_in_the_buffer_in_order() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
-    walk.tool_result("Chat", 3, "call_1", "echo", "out", true);
+    walk.tool_result("Chat", 3, "call_1", "echo", "out", OutputTrust::Trusted);
     walk.user_input("Chat", "typed");
     let events = sink.take();
     assert!(matches!(
@@ -161,9 +162,40 @@ fn content_reports_land_in_the_buffer_in_order() {
 }
 
 #[test]
+fn an_untrusted_tool_result_reports_the_event_with_trusted_false() {
+    let sink = EventSink::default();
+    let walk = emitter(&sink, root());
+    walk.tool_result(
+        "Chat",
+        2,
+        "call_9",
+        "fetch",
+        "<html>",
+        OutputTrust::Untrusted,
+    );
+    assert_eq!(
+        sink.take(),
+        vec![Event::ToolResult {
+            execution: "run-1".to_owned(),
+            section: "Chat".to_owned(),
+            provenance: Provenance {
+                task: root(),
+                seq: 0
+            },
+            turn: 2,
+            tool_call_id: "call_9".to_owned(),
+            alias: "fetch".to_owned(),
+            content: "<html>".to_owned(),
+            trusted: false,
+        }],
+        "an untrusted marking lands on the wire as `trusted: false`"
+    );
+}
+
+#[test]
 fn the_root_emitter_reports_under_task_zero_with_its_execution() {
     let sink = EventSink::default();
-    let emitter = Emitter::root(sink.clone(), "parse-1", true);
+    let emitter = Emitter::root(sink.clone(), "parse-1", DebugMode::On);
     assert!(emitter.captures_debug());
     assert_eq!(emitter.execution(), "parse-1");
     assert_eq!(emitter.task(), &root());

@@ -7,6 +7,7 @@ use std::sync::Arc;
 #[path = "config-limits.rs"]
 mod limits;
 
+use promptforge_api_types::emitter::DebugMode;
 use promptforge_api_types::replay::Flags;
 use promptforge_api_types::timestamp::Timestamp;
 
@@ -76,7 +77,7 @@ pub struct RunContext {
     /// bodies already travel in the `Chat` effect and its answer, so a host
     /// that logs effects has them, and the events are for a host that
     /// wants the pair in the event stream too.
-    pub(crate) report_debug: bool,
+    pub(crate) report_debug: DebugMode,
     /// The run's cancel flag: minted once at construction, replaced by
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
@@ -140,7 +141,7 @@ impl RunContext {
             started_at,
             provenance_start: 0,
             depth: 0,
-            report_debug: false,
+            report_debug: DebugMode::Off,
             cancel: CancelHandle::new(),
             limits: RunLimits::new(),
             ui: None,
@@ -157,11 +158,11 @@ impl RunContext {
 
     /// Sets whether the run reports each model round's raw request and
     /// response bodies as `Request` and `Response` events. The default
-    /// (`false`) reports neither; a host that wants the pair in the event
-    /// stream (a debug capture) turns it on.
+    /// ([`DebugMode::Off`]) reports neither; a host that wants the pair in
+    /// the event stream (a debug capture) passes [`DebugMode::On`].
     #[must_use]
-    pub fn report_debug(mut self, report: bool) -> RunContext {
-        self.report_debug = report;
+    pub fn report_debug(mut self, mode: DebugMode) -> RunContext {
+        self.report_debug = mode;
         self
     }
 
@@ -365,7 +366,7 @@ impl RunContext {
         mut self,
         debug: Arc<dyn crate::test_support::recording::DebugCapture>,
     ) -> RunContext {
-        self.report_debug = true;
+        self.report_debug = DebugMode::On;
         self.test_host = self.test_host.debug(debug);
         self
     }

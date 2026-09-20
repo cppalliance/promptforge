@@ -29,6 +29,7 @@ use crate::lua::{ScriptReport, SectionVm, ToolCallCounts, current_tool_bindings}
 use crate::{Error, Result};
 use promptforge_api_types::emitter::Emitter;
 use promptforge_api_types::event::lifecycle;
+use promptforge_api_types::tools::OutputTrust;
 
 use super::builtins::is_task_builtin;
 use super::dispatch::unbound_tool_call;
@@ -107,7 +108,7 @@ fn answer_local_tool(
         call_id.unwrap_or(""),
         alias,
         &text,
-        true,
+        OutputTrust::Trusted,
     );
     Ok(ToolCallOutcome::Plain(text))
 }

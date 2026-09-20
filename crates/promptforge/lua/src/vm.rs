@@ -50,11 +50,11 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// # Examples
 /// ```text
 /// use promptforge_lua::SectionVm;
-/// use promptforge_api_types::emitter::{Emitter, EventSink};
+/// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 /// use promptforge_api_types::untrusted::GuardNonce;
 ///
 /// let nonce = GuardNonce::from_seed(1);
-/// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+/// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
 /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
 /// vm.teardown(&emitter, "Example");
 /// # Ok::<(), promptforge_lua::Error>(())
@@ -230,11 +230,11 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{Emitter, EventSink};
+    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
@@ -432,11 +432,11 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{Emitter, EventSink};
+    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
     ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
@@ -782,11 +782,11 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{Emitter, EventSink};
+    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
     ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
@@ -995,11 +995,11 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{Emitter, EventSink};
+    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), promptforge_lua::Error>(())

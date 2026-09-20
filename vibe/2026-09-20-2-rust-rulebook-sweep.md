@@ -330,7 +330,7 @@ Commit: one commit.
 
 <step-3>
 
-### Step 3: Typed enums for the emitter's debug and trusted flags
+### Step 3: Typed enums for the emitter's debug and trusted flags [completed]
 
 - Component: `emitter-flags`
 - Piece: engine emitter (D5)

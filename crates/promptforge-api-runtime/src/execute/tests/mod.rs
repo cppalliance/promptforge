@@ -363,7 +363,7 @@ async fn run(
         host = host.client(client);
     }
     if let Some(debug) = opts.debug {
-        ctx = ctx.report_debug(true);
+        ctx = ctx.report_debug(promptforge_api_types::emitter::DebugMode::On);
         host = host.debug(debug);
     }
     match crate::test_support::run_with_host(&env, &test.prompt, args, ctx, host).await {

@@ -16,7 +16,7 @@
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 
-use promptforge_api_types::emitter::{Emitter, EventSink};
+use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_api_types::event::{Event, lifecycle};
 
 pub use promptforge_lua::LuaProgram;
@@ -552,7 +552,7 @@ impl Prompt {
         execution: &str,
     ) -> (std::result::Result<Prompt, ParseError>, Vec<Event>) {
         let sink = EventSink::default();
-        let emitter = Emitter::root(sink.clone(), execution, false);
+        let emitter = Emitter::root(sink.clone(), execution, DebugMode::Off);
         emitter.report("Prompt", lifecycle::PARSE_STARTED);
         let result = Self::parse_inner(input, &emitter);
         emitter.report(

@@ -18,7 +18,7 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_api_types::emitter::{Emitter, EventSink};
+use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_api_types::untrusted::GuardNonce;
 use promptforge_lua::{
     LuaProgram, MessageContent, MessageRecord, MessageRole, SectionVm, ToolCallRecord, ToolSet,
@@ -32,7 +32,7 @@ const SECTION: &str = "Bench";
 /// An emitter over a sink nobody drains: the bench measures the VM, not
 /// the reports.
 fn emitter() -> Emitter {
-    Emitter::root(EventSink::default(), "bench", false)
+    Emitter::root(EventSink::default(), "bench", DebugMode::Off)
 }
 
 /// A section VM with host values injected, so the `messages` namespace is

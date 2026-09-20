@@ -1,7 +1,9 @@
 //! Tests for the shared tool-dispatch body: the fixture tools and recorder
 //! every dispatch test uses, and the synchronous `prepare_dispatch` tests.
 
-use promptforge_api_types::tools::{ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge_api_types::tools::{
+    OutputTrust, ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput,
+};
 use serde_json::json;
 
 use super::*;
@@ -60,7 +62,11 @@ fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
         nonce.wrap("canned output"),
         "an untrusted canned output is nonce-wrapped byte for byte"
     );
-    assert!(!outcome.trusted(), "the untrusted marking survives");
+    assert_eq!(
+        outcome.trust(),
+        OutputTrust::Untrusted,
+        "the untrusted marking survives"
+    );
     assert_eq!(
         counts.get("echo").expect("the counts read"),
         Some(1),
@@ -131,7 +137,11 @@ fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id(
         &model_report("call_1"),
     )
     .expect("a model-issued call never fails for the tool's own failure");
-    assert!(!outcome.trusted(), "the failure text is untrusted");
+    assert_eq!(
+        outcome.trust(),
+        OutputTrust::Untrusted,
+        "the failure text is untrusted"
+    );
     assert_eq!(
         outcome.content(),
         nonce.wrap("the tool's own backend failed"),

@@ -30,10 +30,27 @@ use crate::event::Event;
 use crate::event::lifecycle::Lifecycle;
 use crate::ids::{ChainId, Provenance, TaskId};
 use crate::metrics::{CallMetrics, ToolCallEvent};
+use crate::tools::OutputTrust;
 
 #[cfg(test)]
 #[path = "emitter-tests.rs"]
 mod tests;
+
+/// Whether a run captures each model round's raw request and response
+/// bodies as `Request` and `Response` events.
+///
+/// Off by default: the bodies already travel in the `Chat` effect and its
+/// answer, so a host that logs effects has them; a host that wants the
+/// pair in the event stream too turns it on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DebugMode {
+    /// The model rounds emit no `Request` or `Response` events and never
+    /// clone a body.
+    #[default]
+    Off,
+    /// Every model round emits its raw request and response bodies.
+    On,
+}
 
 /// The run's event buffer: the events not yet drained, plus one sequence
 /// counter per task the run has reported under.
@@ -64,11 +81,11 @@ impl EventBuffer {
 ///
 /// # Examples
 /// ```
-/// use promptforge_api_types::emitter::{Emitter, EventSink};
+/// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 /// use promptforge_api_types::event::{Event, lifecycle};
 ///
 /// let sink = EventSink::default();
-/// let emitter = Emitter::root(sink.clone(), "run-1", false);
+/// let emitter = Emitter::root(sink.clone(), "run-1", DebugMode::Off);
 /// emitter.report("Gather", lifecycle::SECTION_STARTED);
 /// let events = sink.take();
 /// assert!(matches!(events.as_slice(), [Event::SectionStarted { section, .. }] if section == "Gather"));
@@ -147,15 +164,15 @@ pub struct Emitter {
     /// The caller-chosen run identifier every event carries.
     execution: Arc<str>,
     /// Whether the host asked for raw request/response capture: the model
-    /// rounds emit `Request` and `Response` only when set, so a run that
-    /// did not opt in never clones a body.
-    debug: bool,
+    /// rounds emit `Request` and `Response` only when [`DebugMode::On`],
+    /// so a run that did not opt in never clones a body.
+    debug: DebugMode,
 }
 
 impl Emitter {
     /// Builds the emitter for `task` over `sink`.
     #[must_use]
-    pub fn new(sink: EventSink, task: TaskId, execution: Arc<str>, debug: bool) -> Self {
+    pub fn new(sink: EventSink, task: TaskId, execution: Arc<str>, debug: DebugMode) -> Self {
         Self {
             sink,
             task,
@@ -167,7 +184,7 @@ impl Emitter {
     /// The root task's emitter over `sink`: the main walk is task `0`,
     /// and so is a prompt's parse, which happens before any run exists.
     #[must_use]
-    pub fn root(sink: EventSink, execution: &str, debug: bool) -> Self {
+    pub fn root(sink: EventSink, execution: &str, debug: DebugMode) -> Self {
         Self::new(
             sink,
             TaskId::from(ChainId::root()),
@@ -203,7 +220,7 @@ impl Emitter {
     /// Whether the run captures raw model-turn bodies.
     #[must_use]
     pub fn captures_debug(&self) -> bool {
-        self.debug
+        self.debug == DebugMode::On
     }
 
     /// Stamps one issued effect: this task's next provenance, drawn from
@@ -295,7 +312,9 @@ impl Emitter {
         });
     }
 
-    /// Reports the result of one dispatched tool call.
+    /// Reports the result of one dispatched tool call. The event carries
+    /// `trust` as its `trusted` flag: `true` only for
+    /// [`OutputTrust::Trusted`].
     pub fn tool_result(
         &self,
         section: &str,
@@ -303,8 +322,9 @@ impl Emitter {
         tool_call_id: &str,
         alias: &str,
         content: &str,
-        trusted: bool,
+        trust: OutputTrust,
     ) {
+        let trusted = trust == OutputTrust::Trusted;
         self.emit(section, |execution, section, provenance| {
             Event::ToolResult {
                 execution,

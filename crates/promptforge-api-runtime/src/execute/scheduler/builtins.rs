@@ -35,6 +35,7 @@ use std::fmt::Write as _;
 use std::sync::atomic::Ordering;
 
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
+use promptforge_api_types::tools::OutputTrust;
 use serde_json::Value;
 
 use crate::execute::protocol::{Answer, TaskStatus, ToolCallOutcome};
@@ -125,8 +126,8 @@ pub(super) struct BuiltinAnswer {
     pub(super) ok: bool,
     /// Whether `text` is the engine's own (every answer but a history
     /// read's, whose events carry model, tool, and user text and arrive
-    /// nonce-wrapped).
-    pub(super) trusted: bool,
+    /// nonce-wrapped as [`OutputTrust::Untrusted`]).
+    pub(super) trust: OutputTrust,
     pub(super) started: Option<ChainIndex>,
 }
 
@@ -135,7 +136,7 @@ impl BuiltinAnswer {
         Self {
             text,
             ok: true,
-            trusted: true,
+            trust: OutputTrust::Trusted,
             started: None,
         }
     }
@@ -146,7 +147,7 @@ impl BuiltinAnswer {
         Self {
             text,
             ok: true,
-            trusted: false,
+            trust: OutputTrust::Untrusted,
             started: None,
         }
     }
@@ -155,7 +156,7 @@ impl BuiltinAnswer {
         Self {
             text,
             ok: false,
-            trusted: true,
+            trust: OutputTrust::Trusted,
             started: None,
         }
     }
@@ -287,7 +288,7 @@ impl Scheduler {
             call_id,
             name,
             &answer.text,
-            answer.trusted,
+            answer.trust,
         );
         Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(answer.text)))
     }
@@ -345,7 +346,7 @@ impl Scheduler {
             Ok((task, child)) => Ok(BuiltinAnswer {
                 text: format!("Task id={task} started"),
                 ok: true,
-                trusted: true,
+                trust: OutputTrust::Trusted,
                 started: Some(child),
             }),
             Err(error) => Ok(BuiltinAnswer::refused(format!("task: {error}"))),

@@ -130,7 +130,7 @@ pub fn null_emitter() -> promptforge_api_types::emitter::Emitter {
     promptforge_api_types::emitter::Emitter::root(
         promptforge_api_types::emitter::EventSink::default(),
         "test",
-        false,
+        promptforge_api_types::emitter::DebugMode::Off,
     )
 }
 

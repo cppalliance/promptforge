@@ -53,11 +53,11 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// ```
 /// use std::num::NonZeroU32;
 ///
-/// use promptforge_api_types::emitter::{Emitter, EventSink};
+/// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 /// use promptforge_lua::LuaProgram;
 ///
 /// let sink = EventSink::default();
-/// let emitter = Emitter::root(sink.clone(), "doc", false);
+/// let emitter = Emitter::root(sink.clone(), "doc", DebugMode::Off);
 /// let program = LuaProgram::compile(
 ///     "return 1",
 ///     "section `Only` prologue",
@@ -104,10 +104,10 @@ impl LuaProgram {
     /// use std::num::NonZeroU32;
     ///
     /// use mlua::Lua;
-    /// use promptforge_api_types::emitter::{Emitter, EventSink};
+    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_lua::LuaProgram;
     ///
-    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let program = LuaProgram::compile(
     ///     "return 40 + 2",
     ///     "example prologue",

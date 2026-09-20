@@ -9,7 +9,7 @@
 
 use std::sync::Mutex;
 
-use promptforge_api_types::emitter::{Emitter, EventSink};
+use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_api_types::event::Event;
 
 /// One event folded to what a suite compares: a payload-free boundary by
@@ -124,7 +124,7 @@ impl Recorder {
     /// A recorder whose emitter reports under `execution`.
     pub(crate) fn for_execution(execution: &str) -> Self {
         let sink = EventSink::default();
-        let emitter = Emitter::root(sink.clone(), execution, false);
+        let emitter = Emitter::root(sink.clone(), execution, DebugMode::Off);
         Self {
             sink,
             emitter,
@@ -140,7 +140,7 @@ impl Recorder {
     /// A second emitter over the same sink reporting under another
     /// execution id, for a test that interleaves runs.
     pub(crate) fn emitter_for(&self, execution: &str) -> Emitter {
-        Emitter::root(self.sink.clone(), execution, false)
+        Emitter::root(self.sink.clone(), execution, DebugMode::Off)
     }
 
     /// Every event reported so far, in order.
@@ -212,5 +212,5 @@ impl Recorder {
 /// An emitter whose events nobody reads: the silent stand-in a test passes
 /// where it has nothing to assert about the boundaries.
 pub(crate) fn null_emitter() -> Emitter {
-    Emitter::root(EventSink::default(), "lua-test", false)
+    Emitter::root(EventSink::default(), "lua-test", DebugMode::Off)
 }

@@ -57,7 +57,7 @@ pub struct ModelReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolDispatch {
     content: String,
-    trusted: bool,
+    trust: OutputTrust,
 }
 
 impl ToolDispatch {
@@ -68,10 +68,12 @@ impl ToolDispatch {
         &self.content
     }
 
-    /// Whether the tool declared its output trusted.
+    /// The trust marking the content carries: [`OutputTrust::Trusted`]
+    /// for verbatim output, [`OutputTrust::Untrusted`] for the
+    /// nonce-wrapped envelope.
     #[must_use]
-    pub fn trusted(&self) -> bool {
-        self.trusted
+    pub fn trust(&self) -> OutputTrust {
+        self.trust
     }
 
     /// Dissolves the outcome into its content.
@@ -129,17 +131,17 @@ pub fn prepare_dispatch(
     // byte-identical envelope and KV-cache prefixes stay shared across
     // rounds and fanout arms; the `<`-escaping is what actually blocks a
     // forged close tag, so the reuse costs nothing.
-    let (content, trusted) = match output.trust() {
-        OutputTrust::Trusted => (output.text().to_owned(), true),
+    let (content, trust) = match output.trust() {
+        OutputTrust::Trusted => (output.text().to_owned(), OutputTrust::Trusted),
         // `OutputTrust` is `#[non_exhaustive]` in the contract crate: an
         // unknown future variant takes the safe path and is nonce-wrapped
         // as untrusted.
-        _ => (nonce.wrap(output.text()), false),
+        _ => (nonce.wrap(output.text()), OutputTrust::Untrusted),
     };
     if let Some(report) = script {
-        emitter.tool_result(section, report.turn, "", binding.alias(), &content, trusted);
+        emitter.tool_result(section, report.turn, "", binding.alias(), &content, trust);
     }
-    Ok(ToolDispatch { content, trusted })
+    Ok(ToolDispatch { content, trust })
 }
 
 /// Applies the model-issued dispatch rules to one bound tool call's answer:
@@ -171,7 +173,7 @@ pub fn prepare_model_dispatch(
             Ok(outcome) => outcome,
             Err(Error::Tool { message, .. }) => ToolDispatch {
                 content: nonce.wrap(&message),
-                trusted: false,
+                trust: OutputTrust::Untrusted,
             },
             Err(error) => return Err(error),
         };
@@ -181,7 +183,7 @@ pub fn prepare_model_dispatch(
         &report.call_id,
         binding.alias(),
         &outcome.content,
-        outcome.trusted,
+        outcome.trust,
     );
     Ok(outcome)
 }
