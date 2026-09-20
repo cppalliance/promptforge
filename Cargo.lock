@@ -2637,11 +2637,16 @@ dependencies = [
 name = "harness-runner"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
+ "harness-capabilities",
  "harness-log",
  "promptforge-api-runtime",
  "promptforge-api-types",
+ "rand 0.9.5",
  "serde_json",
+ "sha2 0.11.0",
  "shared-vfs",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

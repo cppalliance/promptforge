@@ -1,4 +1,6 @@
-//! harness-runner - the harness effect loop: steps an engine `Run`,
+//! harness-runner - the harness effect loop: prepares an engine `Run`
+//! from a prompt file (drawing the host inputs the engine refuses to draw
+//! itself, activating capabilities, opening the run's row), steps it,
 //! performs each effect on tokio through one performer per effect kind,
 //! feeds the answers back, records every event, effect, and answer in the
 //! run log, and owns cancellation.
@@ -27,6 +29,7 @@
 
 pub mod effect_loop;
 pub mod performers;
+pub mod prepare;
 pub mod spawn;
 #[cfg(feature = "test-support")]
 pub mod test_support;

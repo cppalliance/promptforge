@@ -33,6 +33,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use harness_log::{LogError, Record, RecordKind, RunId, RunLog, RunOutcome};
+use promptforge_api_runtime::execute::RunError;
 use promptforge_api_runtime::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
 use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::event::Event;
@@ -440,9 +441,17 @@ fn outcome_of(result: RunResult) -> RunOutcome {
     match result {
         RunResult::Ok(final_text) => RunOutcome::Completed { final_text },
         RunResult::Cancelled => RunOutcome::Cancelled,
-        RunResult::Failure(error) => RunOutcome::Failed {
-            kind: format!("{:?}", error.kind()),
-            message: error.to_string(),
-        },
+        RunResult::Failure(error) => failed_outcome(&error),
+    }
+}
+
+/// The log's failed outcome for an engine error: `runs.error_kind` is the
+/// kind's debug name and `runs.error_message` the error's text. The one
+/// derivation for a run that failed under the loop and a run preparation
+/// refused, so the two agree in the log.
+pub(crate) fn failed_outcome(error: &RunError) -> RunOutcome {
+    RunOutcome::Failed {
+        kind: format!("{:?}", error.kind()),
+        message: error.to_string(),
     }
 }

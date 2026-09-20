@@ -15,11 +15,12 @@
 //! into it. The store performer is synchronous: the VFS is synchronous by
 //! design, and the loop runs the call on tokio's blocking pool.
 //!
-//! The runner supplies three performers itself - [`TokioTimer`],
-//! [`VfsStore`], and [`LogTaskEvents`] - because each is machinery it
-//! already holds. The chat, tool, and input performers live with what
-//! they reach: the gateway client, the activated capabilities, and the
-//! session's input wait.
+//! The runner supplies four performers itself - [`TokioTimer`],
+//! [`VfsStore`], [`LogTaskEvents`], and [`ActivatedTools`] - because each
+//! is machinery it already holds: tokio's timer wheel, the engine's store
+//! operation, the run log, and the tool table run preparation activated.
+//! The chat and input performers live with what they reach: the gateway
+//! client and the session's input wait.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -38,8 +39,11 @@ use shared_vfs::Access;
 
 #[path = "performers-host.rs"]
 mod host;
+#[path = "performers-tools.rs"]
+mod tools;
 
 pub use host::{LogTaskEvents, TokioTimer, VfsStore};
+pub use tools::ActivatedTools;
 
 /// A boxed, sendable, owning future: what an asynchronous performer
 /// returns and the loop spawns.

@@ -896,7 +896,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-43>
 
-### Step 43: Run preparation and the tool performer
+### Step 43: Run preparation and the tool performer [completed]
 
 - Component: Harness runner
 - Piece: preparation
