@@ -542,7 +542,7 @@ Gates: every commit leaves `npm run typecheck` green in `crates/workshop/ui/` (a
 
 <step-4>
 
-### Step 4: ChatBox class and view composition
+### Step 4: ChatBox class and view composition [completed]
 
 - Component: `chatbox-extraction`
 - Piece: ChatBox class and view rewire

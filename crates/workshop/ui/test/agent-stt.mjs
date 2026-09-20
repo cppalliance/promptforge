@@ -1,9 +1,13 @@
-// Dictation on the agent session input (src/parts/agent/agent-session-view.ts
-// mounting src/parts/stt/stt.ts), driven through the real AgentSessionService
-// over a scripted wire, canonical Realtime events, production capture,
-// and a recording status sink in jsdom. It pins local gating and status,
-// replacement snapshots, authoritative completion, overlapping items,
-// clear, second take, recoverable failure, and disposal.
+// Dictation on the agent session's chat box (src/parts/agent/agent-session-view.ts
+// hosting src/parts/chatbox/chat-box.ts and mounting src/parts/stt/stt.ts),
+// driven through the real AgentSessionService over a scripted wire,
+// canonical Realtime events, production capture, and a recording status
+// sink in jsdom. The mic button is the box's: its click reaches
+// setupStt's press() through the box's mic-press event, and dictation's
+// state comes back as the box's mic prop. It pins local gating and
+// status, replacement snapshots, authoritative completion, overlapping
+// items, clear, second take, recoverable failure, disposal, and - over
+// one shared capture service with two views - microphone exclusivity.
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -78,6 +82,7 @@ const bundle = await esbuild.build({
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { Emitter } from "./src/base/event.ts";
       export { AgentSessionService } from "./src/services/agent-session.ts";
+      export { SpeechCaptureService } from "./src/services/speech-capture.ts";
       export { AgentSessionView } from "./src/parts/agent/agent-session-view.ts";
     `,
     resolveDir: path.join(testDir, ".."),
@@ -291,9 +296,8 @@ globalThis.WebSocket = FakeWebSocket;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-agent-stt-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, Emitter, AgentSessionService, AgentSessionView } = await import(
-  pathToFileURL(bundlePath).href
-);
+const { lifecycle, Emitter, AgentSessionService, AgentSessionView, SpeechCaptureService } =
+  await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -347,22 +351,8 @@ function makeWire() {
   };
 }
 
-// Mounts a view over a fresh service and negotiated Realtime socket.
-async function harness() {
-  const status = {
-    local: [],
-    recording: false,
-    showLocal(label, severity) {
-      this.local.push({ label, severity });
-    },
-    setRecording(on) {
-      this.recording = on;
-    },
-  };
-  const wire = makeWire();
-  const service = new AgentSessionService(wire);
-  const view = new AgentSessionView(service, status);
-  window.document.body.appendChild(view.element);
+// Negotiates the newest Realtime socket the view opened.
+async function negotiateLatestRealtime() {
   await waitFor(() =>
     sockets.some(
       (socket) =>
@@ -377,15 +367,40 @@ async function harness() {
   realtime.message(
     canonicalMessage("hypothesis_negotiation", "server", "session.updated"),
   );
+  return realtime;
+}
+
+function makeStatus() {
+  return {
+    local: [],
+    recording: false,
+    showLocal(label, severity) {
+      this.local.push({ label, severity });
+    },
+    setRecording(on) {
+      this.recording = on;
+    },
+  };
+}
+
+// Mounts a view over a fresh service and negotiated Realtime socket.
+async function harness(speechCapture) {
+  const status = makeStatus();
+  const wire = makeWire();
+  const service = new AgentSessionService(wire);
+  const view = new AgentSessionView(service, status, undefined, speechCapture);
+  window.document.body.appendChild(view.element);
+  const realtime = await negotiateLatestRealtime();
   const mic = view.element.querySelector(".ws-agent-session__mic");
-  // The ProseMirror prompt box: content and selection are driven through
-  // the component (the DOM alone sets neither). The pending-wait gate
-  // and a take's read-only both show on the editor's contenteditable
+  // The chat box: content and selection are driven through the component
+  // (the DOM alone sets neither on a ProseMirror editor). The pending-wait
+  // gate and a take's read-only both show on the editor's contenteditable
   // attribute; the take alone marks the frame with ws-stt-input--recording.
-  const input = view.promptInput;
+  const input = view.chatBox;
+  const frame = view.element.querySelector(".ws-prompt-input");
   const editorEl = view.element.querySelector(".ws-prompt-input__editor");
   const editable = () => editorEl.getAttribute("contenteditable") === "true";
-  const recording = () => input.element.classList.contains("ws-stt-input--recording");
+  const recording = () => frame.classList.contains("ws-stt-input--recording");
   const send = view.element.querySelector(".ws-agent-session__send");
   // Clicks the mic and waits for the take's Realtime socket to open and
   // send "start"; null when no take began within the wait.
@@ -401,7 +416,21 @@ async function harness() {
     service.dispose();
     view.element.remove();
   };
-  return { wire, service, view, status, mic, input, editorEl, editable, recording, send, startTake, dispose };
+  return {
+    wire,
+    service,
+    view,
+    status,
+    realtime,
+    mic,
+    input,
+    editorEl,
+    editable,
+    recording,
+    send,
+    startTake,
+    dispose,
+  };
 }
 
 await assertNoLeaks(lifecycle, async () => {
@@ -639,7 +668,14 @@ await assertNoLeaks(lifecycle, async () => {
       dispose();
       return;
     }
-    check("a live take lights the recording LED and presses the mic", status.recording && mic.getAttribute("aria-pressed") === "true");
+    check(
+      "a live take lights the recording LED and presses the mic",
+      status.recording &&
+        mic.getAttribute("aria-pressed") === "true" &&
+        mic.getAttribute("data-mic") === "recording" &&
+        mic.classList.contains("ws-stt-mic--recording") &&
+        mic.title === "Stop recording",
+    );
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     check(
       "the interim lands in the pinned input",
@@ -648,6 +684,12 @@ await assertNoLeaks(lifecycle, async () => {
 
     wire.fire.inputCancelled("tok1");
     check("a cancelled wait dims the recording LED", !status.recording);
+    check(
+      "a cancelled wait releases the mic button to idle",
+      mic.getAttribute("data-mic") === "idle" &&
+        mic.getAttribute("aria-pressed") === "false" &&
+        mic.title === "Push to talk",
+    );
     check("a cancelled wait keeps the reusable Realtime socket open", !socket.closed);
     check(
       "a cancelled wait lifts the take lock and drops the interim",
@@ -1438,6 +1480,111 @@ await assertNoLeaks(lifecycle, async () => {
     second.message(producerCompletion("reused_item", "fresh final"));
     check("the second socket completion remains authoritative", input.getText() === "fresh final");
     dispose();
+  }
+
+  // --- Two views over one capture service: the microphone has one owner ----
+
+  {
+    // A scripted capture backend shared by both views, so the test can
+    // push one audio chunk and see which registry streams it.
+    let emitAudio = null;
+    const capture = new SpeechCaptureService({
+      async open(onAudio) {
+        emitAudio = onAudio;
+        return {
+          clear() {},
+          async stop() {},
+          dispose() {},
+        };
+      },
+    });
+    const a = await harness(capture);
+    const b = await harness(capture);
+    a.wire.fire.inputRequired("wait-a");
+    b.wire.fire.inputRequired("wait-b");
+    check(
+      "both mics start idle over a free microphone",
+      a.mic.getAttribute("data-mic") === "idle" && b.mic.getAttribute("data-mic") === "idle",
+    );
+
+    // startTake returns the newest Realtime socket, which is b's here;
+    // each view's own negotiated socket is what its take speaks on.
+    const socketA = a.realtime;
+    if ((await a.startTake()) === null) {
+      failures.push("two views: the first view's take did not start");
+      a.dispose();
+      b.dispose();
+      capture.dispose();
+      return;
+    }
+    check("the first press owns the microphone", a.mic.getAttribute("data-mic") === "recording");
+    check(
+      "the other view's mic reads blocked while the first records",
+      b.mic.getAttribute("data-mic") === "blocked" &&
+        b.mic.getAttribute("aria-pressed") === "false" &&
+        !b.mic.classList.contains("ws-stt-mic--recording") &&
+        b.mic.disabled === false,
+    );
+    socketA.message({ type: "interim", committed: "owner text", tentative: "" });
+    check("the owner's interim lands in the owner's box", a.input.getText() === "owner text");
+
+    b.mic.click();
+    await waitFor(() => b.status.local.length > 0);
+    check(
+      "a press on the blocked view names the other window on its status bar",
+      isDeepStrictEqual(b.status.local.at(-1), {
+        label: "Dictation is active in another window",
+        severity: "info",
+      }),
+    );
+    check(
+      "the refused press does not steal the take",
+      a.status.recording &&
+        a.mic.getAttribute("data-mic") === "recording" &&
+        b.mic.getAttribute("data-mic") === "blocked" &&
+        !b.status.recording,
+    );
+    check(
+      "the refused press did not discard the owner's take",
+      a.input.getText() === "owner text" &&
+        a.recording() &&
+        !socketA.sent.some((event) => event.type === "input_audio_buffer.clear"),
+    );
+    check("the blocked view opened no take of its own", !b.recording() && b.input.getText() === "");
+
+    emitAudio(Uint8Array.from([1, 0, 2, 0]).buffer);
+    check(
+      "the owner streams the shared audio",
+      socketA.sent.some((event) => event.type === "input_audio_buffer.append"),
+    );
+    check(
+      "the blocked view processed none of the owner's audio",
+      !b.realtime.sent.some((event) => event.type === "input_audio_buffer.append"),
+    );
+
+    // The owner stops: capture is released and the other mic reopens.
+    a.mic.click();
+    await waitFor(() => b.mic.getAttribute("data-mic") === "idle");
+    check(
+      "ending the owner's take returns the other mic to idle",
+      b.mic.getAttribute("data-mic") === "idle" && a.mic.getAttribute("data-mic") === "idle",
+    );
+    socketA.message({ type: "final", text: "owner text" });
+    check("the owner's final still lands after the release", a.input.getText() === "owner text" && a.editable());
+
+    const startedB = await b.startTake();
+    check(
+      "the freed microphone opens for the other view",
+      startedB === b.realtime && b.mic.getAttribute("data-mic") === "recording",
+    );
+    check("the first view now reads blocked", a.mic.getAttribute("data-mic") === "blocked");
+    b.wire.fire.inputCancelled("wait-b");
+    await waitFor(() => a.mic.getAttribute("data-mic") === "idle");
+    check("a discarded take frees the microphone for the first view again", a.mic.getAttribute("data-mic") === "idle");
+
+    a.dispose();
+    b.dispose();
+    capture.dispose();
   }
 });
 

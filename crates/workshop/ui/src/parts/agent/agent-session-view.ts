@@ -8,14 +8,18 @@
 // renderMarkdown, whose DOMPurify pass is the last step before the DOM;
 // user text, tool output, and errors land through textContent.
 //
-// Dictation mounts on the same input: a push-to-talk mic beside the
-// send button drives stt.ts, which splices the transcript into the box
-// at the cursor. The mic stays visible and clickable whatever the state,
-// so a click while blocked names the blocker on the status bar instead of
-// the control silently disappearing. A take follows
-// the wait it dictates into: when the pinned wait dies - spent by a send,
-// cancelled by the server, or reset by a new session - the live take is
-// discarded, because a take that cannot be sent is a trap.
+// The composer is the ChatBox component: this view is its host. It maps
+// service state to the box's props (editable follows the pinned wait,
+// the send action follows the wait and the model selection, the mic
+// follows dictation's state) and routes the box's events back - `send`
+// answers the wait, `mic-press` drives stt.ts, which splices the
+// transcript into the box at the cursor. The mic stays visible and
+// clickable whatever the state, so a click while blocked names the
+// blocker on the status bar instead of the control silently
+// disappearing. A take follows the wait it dictates into: when the
+// pinned wait dies - spent by a send, cancelled by the server, or reset
+// by a new session - the live take is discarded, because a take that
+// cannot be sent is a trap.
 
 import "./agent-session.css";
 
@@ -26,17 +30,19 @@ import type {
   TranscriptItem,
 } from "../../services/agent-session";
 import type { ModelService } from "../../services/model-service";
+import { getServiceOrNull } from "../../services/service-registry";
 import { SpeechCaptureService } from "../../services/speech-capture";
+import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
 import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
-import { PromptInput } from "../chatbox/chat-box";
+import { ChatBox } from "../chatbox/chat-box";
+import type { ChatBoxEvent, ChatBoxProps } from "../chatbox/types";
 import { ToolCallCard } from "./tool-call-card";
 import {
   setupStt,
   type SttHandle,
   type SttStatus,
 } from "../stt/stt";
-import { ICON_MIC, ICON_SEND } from "../shared/icons";
 
 /** One painted feed row, kept for the identity diff. */
 interface RenderedRow {
@@ -169,25 +175,24 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
 }
 
 /**
- * The session surface: the transcript feed over the toolbar and the
- * input bar. The toolbar (mode chip, model picker, context ring) mounts
- * only when the composition root threads a ModelService through; a view
- * built without one mounts none. The input enables only while a wait is
- * pinned; a configured model service gates submission until its current
- * selection is non-empty. Submitting answers the wait through the service
- * and clears the box on a successful send. The status sink receives
- * dictation's local messages, selection blockers, and recording LED state.
+ * The session surface: the transcript feed over the chat box. The
+ * toolbar (mode chip, model picker, context ring) mounts into the box's
+ * controls slot only when the composition root threads a ModelService
+ * through; a view built without one mounts none. The box is editable
+ * only while a wait is pinned; a configured model service marks the send
+ * action blocked until its current selection is non-empty. A send
+ * answers the wait through the service and clears the box on success.
+ * The status sink receives dictation's local messages, selection
+ * blockers, and recording LED state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
   /**
-   * The prompt box under the feed. Exposed so tests can drive content
-   * and selection - the DOM alone sets neither on a ProseMirror editor.
+   * The chat box under the feed. Exposed so tests can drive content and
+   * selection - the DOM alone sets neither on a ProseMirror editor.
    */
-  readonly promptInput: PromptInput;
+  readonly chatBox: ChatBox;
   private readonly feed: HTMLOListElement;
-  private readonly mic: HTMLButtonElement;
-  private readonly send: HTMLButtonElement;
   private readonly stt: SttHandle;
   private rendered: RenderedRow[] = [];
 
@@ -209,37 +214,27 @@ export class AgentSessionView extends Disposable {
     this.feed.setAttribute("aria-live", "polite");
     this.feed.setAttribute("aria-atomic", "false");
 
-    const bar = document.createElement("div");
-    bar.className = "ws-agent-session__bar";
-    this.mic = document.createElement("button");
-    this.mic.type = "button";
-    this.mic.className = "ws-agent-session__mic ws-stt-mic";
-    this.mic.title = "Push to talk";
-    this.mic.setAttribute("aria-label", "Push to talk");
-    this.mic.setAttribute("aria-pressed", "false");
-    // A static lucide string, not data: the only markup this view writes.
-    this.mic.innerHTML = ICON_MIC;
-    this.send = document.createElement("button");
-    this.send.type = "button";
-    this.send.className = "ws-agent-session__send";
-    this.send.setAttribute("aria-label", "Send");
-    this.send.innerHTML = ICON_SEND;
-    this.send.addEventListener("click", () => this.submit());
-    const promptInput = new PromptInput({
+    // The box is composed from what the host resolves: the toolbar for
+    // its controls slot and the text-control registrar; the box itself
+    // touches no registry.
+    const boxProps: {
+      -readonly [K in keyof ChatBoxProps]: ChatBoxProps[K];
+    } = {
       placeholder: "Plan, Build, / for skills, @ for context",
       ariaLabel: "Message",
-      onSubmit: () => this.submit(),
-    });
+      mic: "idle",
+    };
     if (modelService !== undefined) {
-      const toolbar = this._register(new AgentToolbar(modelService));
-      toolbar.element.append(this.mic, this.send);
-      bar.append(promptInput.element, toolbar.element);
-    } else {
-      bar.append(promptInput.element, this.mic, this.send);
+      boxProps.controls = this._register(new AgentToolbar(modelService)).element;
     }
+    const textControls = getServiceOrNull(TEXT_CONTROL_SERVICE);
+    if (textControls !== null) {
+      boxProps.textControls = textControls.register.bind(textControls);
+    }
+    const chatBox = new ChatBox(boxProps, (event) => this.onChatBoxEvent(event));
     const outer = document.createElement("div");
     outer.className = "ws-agent-session__outer";
-    outer.appendChild(bar);
+    outer.appendChild(chatBox.element);
     this.element.append(this.feed, outer);
 
     // Element-owned listeners die with the elements; only service
@@ -257,13 +252,13 @@ export class AgentSessionView extends Disposable {
       this._register(this.modelService.onDidChangeCurrent(() => this.renderInputState()));
     }
 
-    // The dictation control over the mic and input. Registered before the
-    // prompt input so disposal discards a live take while the editor
-    // still stands. Production injects the composition root's capture
-    // service; isolated views own a fallback for tests and previews.
+    // The dictation control over the box. Registered before the box so
+    // disposal discards a live take while the editor still stands.
+    // Production injects the composition root's capture service; isolated
+    // views own a fallback for tests and previews.
     const capture = speechCapture ?? new SpeechCaptureService();
     this.stt = this._register(
-      setupStt({ input: promptInput }, status, () => {
+      setupStt({ input: chatBox }, status, () => {
         if (this.service.pendingInputToken === null) {
           return "The agent isn't asking for input; the mic opens when it does.";
         }
@@ -273,21 +268,37 @@ export class AgentSessionView extends Disposable {
     if (speechCapture === undefined) {
       this._register(capture);
     }
-    // The bridge between this view's mic element and the handle: the press
-    // goes in, the state comes out and is painted here.
-    this.mic.addEventListener("click", () => this.stt.press());
-    this._register(
-      this.stt.onState((state) => {
-        const recording = state === "recording";
-        this.mic.classList.toggle("ws-stt-mic--recording", recording);
-        this.mic.setAttribute("aria-pressed", String(recording));
-        this.mic.title = recording ? "Stop recording" : "Push to talk";
-      }),
-    );
-    this.promptInput = this._register(promptInput);
+    // Dictation's state is the box's mic prop: seeded once the handle
+    // exists (the box had to come first, the handle needs it as its
+    // target), then driven by every change.
+    chatBox.update({ mic: this.stt.state });
+    this._register(this.stt.onState((state) => chatBox.update({ mic: state })));
+    this.chatBox = this._register(chatBox);
 
     this.renderFeed();
     this.renderInputState();
+  }
+
+  /** The box's events: a send answers the wait, a mic press drives dictation. */
+  private onChatBoxEvent(event: ChatBoxEvent): void {
+    switch (event.type) {
+      case "send":
+        this.submit();
+        return;
+      case "mic-press":
+        this.stt.press();
+        return;
+      case "command":
+      case "stop":
+      case "cancel":
+      case "mic-release":
+        // Not produced by the box in this configuration; reserved.
+        return;
+      default: {
+        const exhaustive: never = event;
+        return exhaustive;
+      }
+    }
   }
 
   /**
@@ -326,15 +337,22 @@ export class AgentSessionView extends Disposable {
     this.feed.scrollTop = this.feed.scrollHeight;
   }
 
-  /** Pins the input to the pending wait: editable only while one is open. */
+  /**
+   * Pins the box to the pending wait: editable only while one is open,
+   * the send action idle without one, and blocked (still clickable, so
+   * the press can say why) while a configured model service has no
+   * selection.
+   */
   private renderInputState(): void {
     const pinned = this.service.pendingInputToken !== null;
-    this.promptInput.setEditable(pinned);
-    this.send.disabled = !pinned;
-    this.send.setAttribute(
-      "aria-disabled",
-      String(pinned && this.modelService !== undefined && this.modelService.current === ""),
-    );
+    this.chatBox.update({
+      editable: pinned,
+      action: pinned
+        ? this.modelService === undefined || this.modelService.current !== ""
+          ? "send"
+          : "send-blocked"
+        : "idle",
+    });
   }
 
   /**
@@ -346,7 +364,7 @@ export class AgentSessionView extends Disposable {
    * discarded rather than landing in a box that already sent.
    */
   private submit(): void {
-    const text = this.promptInput.getText();
+    const text = this.chatBox.getText();
     if (text === "" || this.service.pendingInputToken === null) {
       return;
     }
@@ -358,7 +376,7 @@ export class AgentSessionView extends Disposable {
     // pre-take text, and the send carries what was showing.
     this.stt.discardIfRecording();
     if (this.service.respond(text)) {
-      this.promptInput.clear();
+      this.chatBox.clear();
     }
   }
 }

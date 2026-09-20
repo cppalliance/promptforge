@@ -35,12 +35,15 @@ try {
   const css = await readFile(path.join(outDir, manifest["app.css"]), "utf8");
 
   // One marker class per lazy feature directory: a class that only that
-  // directory's colocated stylesheet defines.
+  // directory's colocated stylesheet defines. The chat box is reached
+  // through the agent directory's lazy import; its mic rules (the former
+  // stt marker) live in chatbox/chat-box.css, and stt/stt.css defines no
+  // class of its own today.
   const markers = {
     agent: "ws-agent-session",
+    chatbox: "ws-stt-mic--recording",
     editor: "ws-editor-panel",
     gateway: "ws-gateway-config-panel",
-    stt: "ws-stt-mic",
     run: "ws-run-panel",
   };
 

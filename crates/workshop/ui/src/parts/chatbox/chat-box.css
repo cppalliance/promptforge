@@ -1,10 +1,45 @@
-/* PromptInput (src/parts/chatbox/chat-box.ts): the framed rich-text prompt box.
-   The ws-agent-session card carries the frame; the inner ProseMirror
-   contenteditable carries the type and the JS-driven height, clamped
-   between the min/max tokens. */
+/* ChatBox (src/parts/chatbox/chat-box.ts): the bar, the framed rich-text
+   prompt box, and the box's mic and send buttons. The bar is the card;
+   the frame sits in it; the inner ProseMirror contenteditable carries the
+   type and the JS-driven height, clamped between the min/max tokens. */
+
+.ws-agent-session__bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-2-5) var(--space-1-5);
+  background: var(--prompt-input-bg);
+  border: var(--ws-border-width) solid var(--prompt-input-border);
+  border-radius: var(--agent-card-radius);
+  overflow: hidden;
+}
+
+.ws-agent-session__bar:focus-within {
+  border-color: var(--prompt-input-border-focus);
+}
+
+/* The prompt box owns the row's remaining width. */
+.ws-agent-session__bar > .ws-prompt-input {
+  flex: 1;
+  min-inline-size: 0;
+}
 
 .ws-prompt-input {
   transition: border-color var(--duration-fast) var(--ease-out-cubic);
+}
+
+/* The attachments strip above the text: empty in this plan, so it costs
+   no height until the paste feature fills it. */
+.ws-prompt-input__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-block-end: var(--space-1);
+}
+
+.ws-prompt-input__attachments:empty {
+  display: none;
 }
 
 .ws-prompt-input__editor {
@@ -42,6 +77,81 @@
   pointer-events: none;
   color: var(--input-placeholder);
   opacity: 0.5;
+}
+
+/* The send button: the accent control on the bar. */
+.ws-agent-session__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: var(--height-xs);
+  block-size: var(--height-xs);
+  padding: 0;
+  color: var(--cursor-editor);
+  background: var(--cursor-icon-secondary);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.ws-agent-session__send:focus-visible {
+  outline: none;
+  background: var(--cursor-icon-primary);
+}
+
+.ws-agent-session__send:disabled {
+  background: var(--border-subtle);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+/* The push-to-talk mic: an icon button the size of the send button, in
+   the raised tone so the accent stays on Send. The recording rules below
+   paint the fill over it; rule order is load-bearing - they tie the
+   hover-glow rule on specificity and must stay after it. */
+.ws-agent-session__mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: var(--height-base);
+  min-block-size: var(--height-base);
+  padding: 0;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.ws-agent-session__mic:hover {
+  opacity: 0.8;
+}
+
+.ws-agent-session__mic:focus-visible {
+  outline: none;
+  opacity: 0.8;
+}
+
+.ws-stt-mic {
+  flex: none;
+}
+
+/* Recording mic: a steady danger fill with a matching ring and bloom. The
+   ring and bloom keep recording visible without changing normal hover. */
+.ws-stt-mic--recording {
+  color: var(--on-danger);
+  background: var(--danger);
+  border-radius: 50%;
+  box-shadow: var(--ws-stt-mic-shadow);
+}
+
+.ws-stt-mic--recording:hover:not(:disabled) {
+  color: var(--on-danger);
+  background: var(--danger);
+  border-radius: 50%;
+  box-shadow: var(--ws-stt-mic-shadow-recording);
 }
 
 /* MentionChip (src/parts/chatbox/mention-chip.ts): the inline pill for an

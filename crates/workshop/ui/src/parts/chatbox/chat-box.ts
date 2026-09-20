@@ -1,11 +1,18 @@
-// The prompt input: a Tiptap/ProseMirror editor framed as the chat box.
-// The schema is deliberately minimal - paragraphs, text, and hard breaks
-// - so what the operator types is plain text with newlines; richer nodes
-// (mention chips) join as extensions on top of this base. Enter submits
-// through the onSubmit callback; an Enter that commits an IME
-// composition never submits; Shift+Enter inserts a hard break. The box
-// grows with its content: every edit re-measures scrollHeight and clamps
-// it between the skin's min/max height tokens.
+// The chat box: a Tiptap/ProseMirror editor framed on a bar with its mic
+// and send buttons. The schema is deliberately minimal - paragraphs,
+// text, and hard breaks - so what the operator types is plain text with
+// newlines; richer nodes (mention chips) join as extensions on top of
+// this base. Enter emits `send`; an Enter that commits an IME composition
+// never does; Shift+Enter inserts a hard break. The box grows with its
+// content: every edit re-measures scrollHeight and clamps it between the
+// skin's min/max height tokens.
+//
+// The component is isolated: props in (every one defaulted), events out
+// through one sink, an imperative handle for the host and for dictation.
+// It reaches no service registry - the text-control registrar is
+// injected - and imports nothing from the host layers. Every prop-driven
+// state is mirrored onto the DOM as a data attribute beside the classes
+// the skin already relies on.
 
 import "./chat-box.css";
 
@@ -13,11 +20,18 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { StarterKit } from "@tiptap/starter-kit";
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { getServiceOrNull } from "../../services/service-registry";
-import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
-import type { SttInputTarget, SttInsertionContext } from "../stt/stt";
-import { MentionChip, MentionSuggestionPluginKey } from "./mention-chip";
+import { Disposable, type IDisposable, toDisposable } from "../../base/lifecycle";
+import { ICON_MIC, ICON_SEND } from "../shared/icons";
+import { renderChip } from "./chip-view";
+import { type ChipNodeAttrs, chipFromAttrs, MentionChip, MentionSuggestionPluginKey } from "./mention-chip";
+import type {
+  ChatBoxDynamicProps,
+  ChatBoxEventSink,
+  ChatBoxHandle,
+  ChatBoxProps,
+  ChipRef,
+  SerializedDraft,
+} from "./types";
 
 // The fallbacks mirror the token defaults in shared-ui/tokens.css; they
 // apply when the skin is absent (tests) or the token is deleted.
@@ -49,52 +63,109 @@ function readPixelToken(element: HTMLElement, token: string, fallback: number): 
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-/** Construction options for {@link PromptInput}. */
-export interface PromptInputOptions {
-  /**
-   * Placeholder text while the editor is empty. A function is
-   * re-evaluated on every state update, so a host can name the current
-   * gate (a pending wait opening and closing) without rebuilding the
-   * editor.
-   */
-  readonly placeholder?: string | (() => string);
-  /** Accessible label on the editable region. */
-  readonly ariaLabel?: string;
-  /** Initial content, parsed as HTML (`<p>` per paragraph). */
-  readonly content?: string;
-  /** Called on a submitting Enter - never on Shift+Enter or mid-composition. */
-  readonly onSubmit?: () => void;
+/** The resolved dynamic props: what `update()` drives and `props` reads back. */
+type ResolvedDynamicProps = {
+  -readonly [K in keyof ChatBoxDynamicProps]-?: ChatBoxDynamicProps[K];
+};
+
+/** The mic button's title per state; blocked reads as idle because the press is what names the blocker. */
+function micTitle(mic: ResolvedDynamicProps["mic"]): string {
+  return mic === "recording" ? "Stop recording" : "Push to talk";
 }
 
 /**
- * The framed rich-text prompt box. Disposable: dispose() destroys the
- * editor, which empties and unwires the ProseMirror DOM.
+ * The chat box: the bar (`ws-agent-session__bar`) holding the framed
+ * editor, an optional host-owned controls element, and the box's own mic
+ * and send buttons. Disposable: dispose() destroys the editor, releases
+ * the text-control registration, and takes its buttons back out of the
+ * controls element it was handed.
  *
- * Implements {@link SttInputTarget}: dictation splices the transcript in
- * through insertionContext/replaceRange and holds the box with setReadOnly.
- * The target's offsets are ProseMirror positions.
+ * The handle is a structural superset of dictation's input target:
+ * dictation splices the transcript in through insertionContext and
+ * replaceRange and holds the box with setReadOnly. Offsets are
+ * ProseMirror positions.
  */
-export class PromptInput extends Disposable implements SttInputTarget {
-  /** The framed container; append it where the input belongs. */
+export class ChatBox extends Disposable implements ChatBoxHandle {
+  /** The bar; append it where the composer belongs. */
   readonly element: HTMLDivElement;
 
+  private readonly frame: HTMLDivElement;
+  private readonly strip: HTMLDivElement;
+  private readonly mic: HTMLButtonElement;
+  private readonly send: HTMLButtonElement;
   private readonly editor: Editor;
+  private readonly onEvent: ChatBoxEventSink;
+  private readonly variant: NonNullable<ChatBoxProps["variant"]>;
+  private readonly dynamic: ResolvedDynamicProps;
+  private attachments: ChipRef[] = [];
 
-  // Two locks, one property: the pending-wait gate (setEditable) and a
-  // dictation take (setReadOnly) both map onto contenteditable, because
-  // ProseMirror has no separate readOnly. Each side keeps its own flag
-  // so one lock lifting never reopens the other - a take that outlives
-  // its wait must not leave the box editable against the dead wait.
-  private gateEditable = true;
+  // Two locks, one property: the pending-wait gate (the editable prop)
+  // and a dictation take (setReadOnly) both map onto contenteditable,
+  // because ProseMirror has no separate readOnly. Each side keeps its own
+  // flag so one lock lifting never reopens the other - a take that
+  // outlives its wait must not leave the box editable against the dead
+  // wait.
   private takeReadOnly = false;
 
-  constructor(options: PromptInputOptions = {}) {
+  constructor(props: ChatBoxProps = {}, onEvent: ChatBoxEventSink = () => {}) {
     super();
+    this.onEvent = onEvent;
+    this.variant = props.variant ?? "expanded";
+    this.dynamic = {
+      editable: props.editable ?? true,
+      action: props.action ?? "send",
+      mic: props.mic ?? "idle",
+    };
+
     this.element = document.createElement("div");
-    this.element.className = "ws-prompt-input";
+    this.element.className = "ws-agent-session__bar";
+    this.element.dataset["variant"] = this.variant;
+
+    this.frame = document.createElement("div");
+    this.frame.className = "ws-prompt-input";
+    // The strip goes in before the editor mounts, so the ProseMirror
+    // content element lands after it: attachments above the text.
+    this.strip = document.createElement("div");
+    this.strip.className = "ws-prompt-input__attachments";
+    this.frame.appendChild(this.strip);
+
+    this.mic = document.createElement("button");
+    this.mic.type = "button";
+    this.mic.className = "ws-agent-session__mic ws-stt-mic";
+    this.mic.setAttribute("aria-label", "Push to talk");
+    // Static lucide strings, not data: the only markup this box writes.
+    this.mic.innerHTML = ICON_MIC;
+    this.mic.addEventListener("click", () => this.onEvent({ type: "mic-press" }));
+    this.send = document.createElement("button");
+    this.send.type = "button";
+    this.send.className = "ws-agent-session__send";
+    this.send.setAttribute("aria-label", "Send");
+    this.send.innerHTML = ICON_SEND;
+    this.send.addEventListener("click", () => this.emitAction());
+
+    // Two bar shapes, one owner: with a controls element the buttons
+    // trail the host's toolbar; without one they sit on the bar. The
+    // buttons are the box's in both cases.
+    if (props.controls !== undefined) {
+      props.controls.append(this.mic, this.send);
+      this.element.append(this.frame, props.controls);
+      const controls = props.controls;
+      this._register(
+        toDisposable(() => {
+          if (this.mic.parentElement === controls) {
+            this.mic.remove();
+          }
+          if (this.send.parentElement === controls) {
+            this.send.remove();
+          }
+        }),
+      );
+    } else {
+      this.element.append(this.frame, this.mic, this.send);
+    }
 
     this.editor = new Editor({
-      element: this.element,
+      element: this.frame,
       extensions: [
         // Plain-text schema: everything in StarterKit is off except the
         // document scaffolding (document, paragraph, text, gapcursor),
@@ -122,7 +193,7 @@ export class PromptInput extends Disposable implements SttInputTarget {
           underline: false,
         }),
         Placeholder.configure({
-          placeholder: options.placeholder ?? "Plan, Build, / for skills, @ for context",
+          placeholder: props.placeholder ?? "",
           // The gated (non-editable) box still carries its placeholder,
           // same as a disabled textarea: the gate's "the agent is
           // working" message IS the non-editable state.
@@ -132,12 +203,13 @@ export class PromptInput extends Disposable implements SttInputTarget {
         // popup wired into the extension's suggestion seam.
         MentionChip,
       ],
-      content: options.content ?? "",
+      content: props.content ?? "",
+      editable: this.dynamic.editable,
       editorProps: {
         attributes: {
           class: "ws-prompt-input__editor",
           role: "textbox",
-          "aria-label": options.ariaLabel ?? "Message",
+          "aria-label": props.ariaLabel ?? "Message",
           "aria-multiline": "true",
         },
         handleKeyDown: (view, event) => {
@@ -158,7 +230,7 @@ export class PromptInput extends Disposable implements SttInputTarget {
           if (MentionSuggestionPluginKey.getState(view.state)?.active === true) {
             return false;
           }
-          options.onSubmit?.();
+          this.emitAction();
           return true;
         },
       },
@@ -172,13 +244,13 @@ export class PromptInput extends Disposable implements SttInputTarget {
     // read-only - yet an Enter there is still a send, carrying what the
     // box shows. Listen at the frame for exactly that case; the editable
     // case belongs to the editorProps handler.
-    this.element.addEventListener("keydown", (event) => {
+    this.frame.addEventListener("keydown", (event) => {
       if (this.editor.isEditable) {
         return;
       }
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
-        options.onSubmit?.();
+        this.emitAction();
       }
     });
     this._register(
@@ -186,37 +258,130 @@ export class PromptInput extends Disposable implements SttInputTarget {
         this.editor.destroy();
       }),
     );
-    // The prompt is its own text-control adapter: the Edit menu's
+    // The box is its own text-control adapter: the Edit menu's
     // undo/redo/select-all route here whenever the box holds focus. The
-    // adapter registers only when the history plugin is present -
-    // without it the commands would no-op, and the native execCommand
-    // fallback is the better path. canUndo/canRedo read the history
-    // depth so an empty stack falls back instead of swallowing the
-    // command.
+    // adapter registers only when the host supplied a registrar and the
+    // history plugin is present - without it the commands would no-op,
+    // and the native execCommand fallback is the better path.
+    // canUndo/canRedo read the history depth so an empty stack falls back
+    // instead of swallowing the command.
     const hasHistory = this.editor.extensionManager.extensions.some(
       (extension) => extension.name === "undoRedo",
     );
-    const textControls = hasHistory ? getServiceOrNull(TEXT_CONTROL_SERVICE) : null;
-    if (textControls !== null) {
-      this._register(
-        textControls.register(this.element, {
-          kind: "prosemirror",
-          undo: () => {
-            this.editor.commands.undo();
-          },
-          redo: () => {
-            this.editor.commands.redo();
-          },
-          selectAll: () => {
-            this.editor.commands.selectAll();
-          },
-          canUndo: () => undoDepth(this.editor.state) > 0,
-          canRedo: () => redoDepth(this.editor.state) > 0,
-        }),
-      );
+    if (hasHistory && props.textControls !== undefined) {
+      const registration: IDisposable = props.textControls(this.frame, {
+        kind: "prosemirror",
+        undo: () => {
+          this.editor.commands.undo();
+        },
+        redo: () => {
+          this.editor.commands.redo();
+        },
+        selectAll: () => {
+          this.editor.commands.selectAll();
+        },
+        canUndo: () => undoDepth(this.editor.state) > 0,
+        canRedo: () => redoDepth(this.editor.state) > 0,
+      });
+      this._register(registration);
     }
+    this.renderEditable();
+    this.renderAction();
+    this.renderMic();
     const initialMeasure = window.requestAnimationFrame(() => this.syncHeight());
     this._register(toDisposable(() => window.cancelAnimationFrame(initialMeasure)));
+  }
+
+  /** The resolved dynamic props plus the variant, defaults applied. */
+  get props(): Readonly<ResolvedDynamicProps & Pick<ChatBoxProps, "variant">> {
+    return { ...this.dynamic, variant: this.variant };
+  }
+
+  /**
+   * Merges a partial set of dynamic props and re-renders only what
+   * changed: an unchanged value touches no DOM. Construction-only props
+   * are not accepted here by type.
+   */
+  update(props: Partial<ChatBoxDynamicProps>): void {
+    if (props.editable !== undefined && props.editable !== this.dynamic.editable) {
+      this.dynamic.editable = props.editable;
+      this.renderEditable();
+    }
+    if (props.action !== undefined && props.action !== this.dynamic.action) {
+      this.dynamic.action = props.action;
+      this.renderAction();
+    }
+    if (props.mic !== undefined && props.mic !== this.dynamic.mic) {
+      this.dynamic.mic = props.mic;
+      this.renderMic();
+    }
+  }
+
+  /**
+   * The send button's press and the submitting Enter share this path:
+   * `idle` is silent, `stop` emits `stop`, and both send states emit
+   * `send` - `send-blocked` included, so the host can name the blocker.
+   */
+  private emitAction(): void {
+    switch (this.dynamic.action) {
+      case "idle":
+        return;
+      case "stop":
+        this.onEvent({ type: "stop" });
+        return;
+      case "send":
+      case "send-blocked":
+        this.onEvent({
+          type: "send",
+          text: this.getText(),
+          mentions: this.mentions(),
+          attachments: [...this.attachments],
+        });
+        return;
+      default: {
+        const exhaustive: never = this.dynamic.action;
+        return exhaustive;
+      }
+    }
+  }
+
+  /** The pills in the document, in order, as the chips they were inserted from. */
+  private mentions(): ChipRef[] {
+    const chips: ChipRef[] = [];
+    this.editor.state.doc.descendants((node) => {
+      if (node.type.name === "mentionNode") {
+        // The schema's own attribute definitions are the only writers,
+        // so the open record narrows to what the extension declares.
+        chips.push(chipFromAttrs(node.attrs as ChipNodeAttrs));
+      }
+      return true;
+    });
+    return chips;
+  }
+
+  /** Applies both locks to the editor and mirrors the effective state onto the frame. */
+  private renderEditable(): void {
+    const effective = this.dynamic.editable && !this.takeReadOnly;
+    if (this.editor.isEditable !== effective) {
+      this.editor.setEditable(effective);
+    }
+    this.frame.dataset["editable"] = String(effective);
+  }
+
+  private renderAction(): void {
+    const action = this.dynamic.action;
+    this.send.dataset["action"] = action;
+    this.send.disabled = action === "idle";
+    this.send.setAttribute("aria-disabled", String(action === "send-blocked"));
+  }
+
+  private renderMic(): void {
+    const mic = this.dynamic.mic;
+    const recording = mic === "recording";
+    this.mic.dataset["mic"] = mic;
+    this.mic.classList.toggle("ws-stt-mic--recording", recording);
+    this.mic.setAttribute("aria-pressed", String(recording));
+    this.mic.title = micTitle(mic);
   }
 
   /** The prompt as plain text: paragraphs and hard breaks as single newlines. */
@@ -247,7 +412,7 @@ export class PromptInput extends Disposable implements SttInputTarget {
   }
 
   /** Captures the ProseMirror selection and its target-owned insertion policy. */
-  insertionContext(): SttInsertionContext {
+  insertionContext(): ReturnType<ChatBoxHandle["insertionContext"]> {
     const { from, to } = this.editor.state.selection;
     const document = this.editor.state.doc;
     return {
@@ -297,13 +462,13 @@ export class PromptInput extends Disposable implements SttInputTarget {
 
   /**
    * The dictation take's lock: non-editable plus the recording ring on
-   * the frame (`.ws-stt-input--recording`). Composes with the
-   * gate through the two flag fields.
+   * the frame (`.ws-stt-input--recording`). Composes with the editable
+   * prop through the two flag fields.
    */
   setReadOnly(readOnly: boolean): void {
     this.takeReadOnly = readOnly;
-    this.applyEditable();
-    this.element.classList.toggle("ws-stt-input--recording", readOnly);
+    this.renderEditable();
+    this.frame.classList.toggle("ws-stt-input--recording", readOnly);
   }
 
   /** Focuses the editor; a landed dictation final calls it. */
@@ -311,17 +476,47 @@ export class PromptInput extends Disposable implements SttInputTarget {
     this.editor.commands.focus();
   }
 
-  /**
-   * Gates editing. ProseMirror has no `disabled`; a non-editable editor
-   * is the equivalent, and the pending-input wait maps onto it.
-   */
-  setEditable(editable: boolean): void {
-    this.gateEditable = editable;
-    this.applyEditable();
+  /** Inserts a pill for `chip` at the cursor, followed by one space. */
+  insertMention(chip: ChipRef): void {
+    this.editor
+      .chain()
+      .insertContent([
+        {
+          type: "mentionNode",
+          attrs: {
+            id: chip.id,
+            label: chip.label,
+            mentionSuggestionChar: "@",
+            kind: chip.kind ?? null,
+            icon: chip.icon ?? null,
+            preview: chip.preview ?? null,
+            tone: chip.tone ?? null,
+            data: chip.data,
+          },
+        },
+        { type: "text", text: " " },
+      ])
+      .run();
   }
 
-  private applyEditable(): void {
-    this.editor.setEditable(this.gateEditable && !this.takeReadOnly);
+  /** The persisted form: the document plus the strip's attachments. */
+  serialize(): SerializedDraft {
+    return { v: 1, doc: this.editor.getJSON(), attachments: [...this.attachments] };
+  }
+
+  /**
+   * Replaces the box with a serialized draft. A draft whose version is
+   * missing or unknown is rejected and the box stands unchanged.
+   */
+  restore(draft: SerializedDraft): void {
+    // Persisted data is only typed as far as the reader trusts it.
+    const version: unknown = draft.v;
+    if (version !== 1) {
+      return;
+    }
+    this.editor.commands.setContent(draft.doc);
+    this.attachments = [...draft.attachments];
+    this.strip.replaceChildren(...this.attachments.map((chip) => renderChip(chip)));
   }
 
   /**

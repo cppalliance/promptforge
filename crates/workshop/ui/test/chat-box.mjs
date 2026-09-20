@@ -1,19 +1,29 @@
 // The chat box (src/parts/chatbox/chat-box.ts) in jsdom: a Tiptap/
-// ProseMirror editor framed as the chat box. Covers: the editor mounts
-// inside the framed container with an accessible editable region; the
-// placeholder decorates the empty paragraph and lifts once content
-// lands; Enter submits through onSubmit while an IME-composition Enter
-// and Shift+Enter do not (Shift+Enter inserts a hard break); the box
-// height tracks content clamped between the min/max tokens (jsdom
-// reports scrollHeight 0, so the test stubs it to drive the clamp, and
-// pins the exported clamp directly); getText returns paragraphs and
-// breaks as single newlines; clear empties; setEditable toggles
-// contenteditable; the box registers a prosemirror text-control adapter
-// whose canUndo/canRedo track the history plugin's depth; dispose
-// destroys the editor. The static renderer (src/parts/chatbox/chat-box-view.ts):
-// renderDraft turns a SerializedDraft with text, one inline pill, and one
-// attachment into the expected read-only DOM. Runs under the shared
-// leak check: a PromptInput that is never disposed fails.
+// ProseMirror editor framed as the chat box, with its mic and send
+// buttons on the bar. Covers: the editor mounts inside the framed
+// container with an accessible editable region; the placeholder
+// decorates the empty paragraph and lifts once content lands; Enter
+// emits `send` while an IME-composition Enter and Shift+Enter do not
+// (Shift+Enter inserts a hard break); the box height tracks content
+// clamped between the min/max tokens (jsdom reports scrollHeight 0, so
+// the test stubs it to drive the clamp, and pins the exported clamp
+// directly); getText returns paragraphs and breaks as single newlines;
+// clear empties; update({ editable }) toggles contenteditable; the box
+// registers a prosemirror text-control adapter through the injected
+// registrar whose canUndo/canRedo track the history plugin's depth;
+// dispose destroys the editor. The contract: defaults, data-* state
+// mirrors (variant, editable, action, mic), the send button's three
+// states, the mic button's rendering per state, the controls slot, the
+// attachments strip, update() as a DOM no-op for unchanged props, and
+// the `send` event's mentions. The handle's persistence surface:
+// insertMention places a pill plus one trailing space at the cursor;
+// serialize/restore round-trips text, pills, and each pill's payload
+// byte-for-byte and paints attachments into the strip; restore with a
+// missing or unknown `v` leaves the box unchanged. The static renderer
+// (src/parts/chatbox/chat-box-view.ts): renderDraft turns a
+// SerializedDraft with text, one inline pill, and one attachment into
+// the expected read-only DOM. Runs under the shared leak check: a
+// ChatBox that is never disposed fails.
 // Run: node test/chat-box.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -29,7 +39,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { PromptInput, clampPromptInputHeight } from "./src/parts/chatbox/chat-box.ts";
+      export { ChatBox, clampPromptInputHeight } from "./src/parts/chatbox/chat-box.ts";
       export { renderDraft } from "./src/parts/chatbox/chat-box-view.ts";
       export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
       export { getService } from "./src/services/service-registry.ts";
@@ -76,7 +86,7 @@ dom.window.Range.prototype.getBoundingClientRect = () => zeroRect;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-chat-box-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, PromptInput, clampPromptInputHeight, renderDraft, TEXT_CONTROL_SERVICE, getService } =
+const { lifecycle, ChatBox, clampPromptInputHeight, renderDraft, TEXT_CONTROL_SERVICE, getService } =
   await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -99,15 +109,40 @@ function editorElement(input) {
   return input.element.querySelector(".ws-prompt-input__editor");
 }
 
+function frameElement(input) {
+  return input.element.querySelector(".ws-prompt-input");
+}
+
+function micButton(input) {
+  return input.element.querySelector(".ws-agent-session__mic");
+}
+
+function sendButton(input) {
+  return input.element.querySelector(".ws-agent-session__send");
+}
+
+// A sink that records every event and counts the sends, standing in for
+// the onSubmit callback the box used to take.
+function recordingSink() {
+  const events = [];
+  const sink = (event) => {
+    events.push(event);
+  };
+  sink.events = events;
+  sink.sends = () => events.filter((event) => event.type === "send").length;
+  return sink;
+}
+
 await assertNoLeaks(lifecycle, async () => {
   // --- Mount ----------------------------------------------------------------
 
   {
-    const input = new PromptInput();
+    const input = new ChatBox();
     const editor = editorElement(input);
     check(
-      "the editor mounts a ProseMirror region inside the framed container",
-      input.element.classList.contains("ws-prompt-input") &&
+      "the editor mounts a ProseMirror region inside the framed container on the bar",
+      input.element.classList.contains("ws-agent-session__bar") &&
+        frameElement(input) !== null &&
         editor !== null &&
         editor.classList.contains("ProseMirror"),
     );
@@ -124,7 +159,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Placeholder ------------------------------------------------------------
 
   {
-    const input = new PromptInput({ placeholder: "Message the agent" });
+    const input = new ChatBox({ placeholder: "Message the agent" });
     const empty = editorElement(input).querySelector("p");
     check(
       "the empty paragraph carries the placeholder decoration",
@@ -132,7 +167,7 @@ await assertNoLeaks(lifecycle, async () => {
         empty.classList.contains("is-editor-empty") &&
         empty.getAttribute("data-placeholder") === "Message the agent",
     );
-    const filled = new PromptInput({ content: "<p>hello</p>" });
+    const filled = new ChatBox({ content: "<p>hello</p>" });
     const paragraph = editorElement(filled).querySelector("p");
     check(
       "content lifts the placeholder decoration",
@@ -145,16 +180,19 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Submit -----------------------------------------------------------------
 
   {
-    let submitted = 0;
-    const input = new PromptInput({
-      content: "<p>hello</p>",
-      onSubmit: () => {
-        submitted++;
-      },
-    });
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>hello</p>" }, sink);
     const editor = editorElement(input);
     pressEnter(editor);
-    check("Enter submits", submitted === 1);
+    check("Enter emits send", sink.sends() === 1);
+    check(
+      "the send event carries the text untrimmed with no mentions and no attachments",
+      sink.events[0]?.text === "hello" &&
+        Array.isArray(sink.events[0]?.mentions) &&
+        sink.events[0].mentions.length === 0 &&
+        Array.isArray(sink.events[0]?.attachments) &&
+        sink.events[0].attachments.length === 0,
+    );
     check(
       "a submitting Enter leaves the text untouched",
       input.getText() === "hello",
@@ -163,13 +201,8 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    let submitted = 0;
-    const input = new PromptInput({
-      content: "<p>hello</p>",
-      onSubmit: () => {
-        submitted++;
-      },
-    });
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>hello</p>" }, sink);
     const editor = editorElement(input);
     // A full composition session: ProseMirror tracks composing state
     // from compositionstart, so the committing Enter is inert end to end.
@@ -177,7 +210,7 @@ await assertNoLeaks(lifecycle, async () => {
     pressEnter(editor, { isComposing: true });
     check(
       "an Enter committing an IME composition does not submit",
-      submitted === 0,
+      sink.sends() === 0,
     );
     check(
       "an Enter committing an IME composition leaves the text untouched",
@@ -189,7 +222,7 @@ await assertNoLeaks(lifecycle, async () => {
     pressEnter(editor, { isComposing: true });
     check(
       "an Enter flagged isComposing without a tracked session still does not submit",
-      submitted === 0,
+      sink.sends() === 0,
     );
     check(
       "an Enter flagged isComposing is claimed, not split into a paragraph",
@@ -199,16 +232,11 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    let submitted = 0;
-    const input = new PromptInput({
-      content: "<p>hello</p>",
-      onSubmit: () => {
-        submitted++;
-      },
-    });
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>hello</p>" }, sink);
     const editor = editorElement(input);
     pressEnter(editor, { shiftKey: true });
-    check("Shift+Enter does not submit", submitted === 0);
+    check("Shift+Enter does not submit", sink.sends() === 0);
     check(
       "Shift+Enter inserts a hard break",
       editor.querySelector("br:not(.ProseMirror-trailingBreak)") !== null &&
@@ -233,7 +261,7 @@ await assertNoLeaks(lifecycle, async () => {
   );
 
   {
-    const input = new PromptInput({ content: "<p>hello</p>" });
+    const input = new ChatBox({ content: "<p>hello</p>" });
     const editor = editorElement(input);
     let measured = 150;
     // jsdom reports scrollHeight 0; the stub stands in for layout.
@@ -270,7 +298,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Text extraction -----------------------------------------------------------
 
   {
-    const input = new PromptInput({ content: "<p>first</p><p>second</p>" });
+    const input = new ChatBox({ content: "<p>first</p><p>second</p>" });
     check(
       "getText joins paragraphs with single newlines",
       input.getText() === "first\nsecond",
@@ -283,16 +311,16 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Editable gate ---------------------------------------------------------------
 
   {
-    const input = new PromptInput();
+    const input = new ChatBox();
     const editor = editorElement(input);
-    input.setEditable(false);
+    input.update({ editable: false });
     check(
-      "setEditable(false) lifts contenteditable",
+      "update({ editable: false }) lifts contenteditable",
       editor.getAttribute("contenteditable") === "false",
     );
-    input.setEditable(true);
+    input.update({ editable: true });
     check(
-      "setEditable(true) restores contenteditable",
+      "update({ editable: true }) restores contenteditable",
       editor.getAttribute("contenteditable") === "true",
     );
     input.dispose();
@@ -301,7 +329,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- The dictation target seam (SttInputTarget) ----------------------------
 
   {
-    const input = new PromptInput();
+    const input = new ChatBox();
     input.setText("ab");
     check("setText loads plain text", input.getText() === "ab");
     input.setSelection(2, 2);
@@ -332,7 +360,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const input = new PromptInput();
+    const input = new ChatBox();
     input.setText("First test alpha");
     const append = input.insertionContext();
     check(
@@ -368,7 +396,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Newlines cross the target seam ---------------------------------------------
 
   {
-    const input = new PromptInput();
+    const input = new ChatBox();
     input.setText("a\n\nb");
     check(
       "setText writes an empty paragraph for an empty line",
@@ -401,23 +429,24 @@ await assertNoLeaks(lifecycle, async () => {
   // --- The two locks compose on one contenteditable -----------------------------
 
   {
-    const input = new PromptInput();
+    const input = new ChatBox();
     const editor = editorElement(input);
+    const frame = frameElement(input);
     input.setReadOnly(true);
     check(
       "setReadOnly locks the editor and marks the frame",
       editor.getAttribute("contenteditable") === "false" &&
-        input.element.classList.contains("ws-stt-input--recording"),
+        frame.classList.contains("ws-stt-input--recording"),
     );
-    input.setEditable(false);
+    input.update({ editable: false });
     input.setReadOnly(false);
     check(
       "lifting the take lock under a closed gate stays non-editable",
       editor.getAttribute("contenteditable") === "false" &&
-        !input.element.classList.contains("ws-stt-input--recording"),
+        !frame.classList.contains("ws-stt-input--recording"),
     );
     input.setReadOnly(true);
-    input.setEditable(true);
+    input.update({ editable: true });
     check(
       "the gate reopening under a live take lock stays non-editable",
       editor.getAttribute("contenteditable") === "false",
@@ -433,18 +462,13 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Enter submits while read-only --------------------------------------------
 
   {
-    let submitted = 0;
-    const input = new PromptInput({
-      content: "<p>hello</p>",
-      onSubmit: () => {
-        submitted++;
-      },
-    });
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>hello</p>" }, sink);
     input.setReadOnly(true);
     pressEnter(editorElement(input));
     check(
-      "Enter submits while the box is read-only (a live take)",
-      submitted === 1,
+      "Enter emits send while the box is read-only (a live take)",
+      sink.sends() === 1,
     );
     check(
       "the read-only submitting Enter leaves the text untouched",
@@ -457,13 +481,13 @@ await assertNoLeaks(lifecycle, async () => {
 
   {
     let label = "first";
-    const input = new PromptInput({ placeholder: () => label });
+    const input = new ChatBox({ placeholder: () => label });
     check(
       "a function placeholder is evaluated for the decoration",
       editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "first",
     );
     label = "second";
-    input.setEditable(false);
+    input.update({ editable: false });
     check(
       "the placeholder re-evaluates on the gate flip",
       editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "second",
@@ -479,14 +503,14 @@ await assertNoLeaks(lifecycle, async () => {
 
   {
     const textControls = getService(TEXT_CONTROL_SERVICE);
-    const input = new PromptInput();
+    const input = new ChatBox({ textControls: textControls.register.bind(textControls) });
     document.body.appendChild(input.element);
     input.focus();
     // Tiptap defers the DOM focus to the next animation frame.
     await new Promise((resolve) => globalThis.requestAnimationFrame(resolve));
     const active = textControls.active;
     check(
-      "the prompt registers a prosemirror text-control adapter",
+      "the prompt registers a prosemirror text-control adapter through the injected registrar",
       active !== null && active.kind === "prosemirror",
     );
     check(
@@ -505,10 +529,24 @@ await assertNoLeaks(lifecycle, async () => {
     input.element.remove();
   }
 
+  {
+    const textControls = getService(TEXT_CONTROL_SERVICE);
+    const input = new ChatBox();
+    document.body.appendChild(input.element);
+    input.focus();
+    await new Promise((resolve) => globalThis.requestAnimationFrame(resolve));
+    check(
+      "a box built without a registrar makes no service-registry registration",
+      textControls.active === null,
+    );
+    input.dispose();
+    input.element.remove();
+  }
+
   // --- Dispose -----------------------------------------------------------------------
 
   {
-    const input = new PromptInput({ content: "<p>hello</p>" });
+    const input = new ChatBox({ content: "<p>hello</p>" });
     document.body.appendChild(input.element);
     check(
       "a live editor renders its paragraph",
@@ -520,6 +558,450 @@ await assertNoLeaks(lifecycle, async () => {
       editorElement(input) === null,
     );
     input.element.remove();
+  }
+
+  // --- The contract: defaults and data-* state mirrors ---------------------------
+
+  {
+    const input = new ChatBox();
+    const frame = frameElement(input);
+    const mic = micButton(input);
+    const send = sendButton(input);
+    check(
+      "props read back the defaults",
+      input.props.editable === true &&
+        input.props.action === "send" &&
+        input.props.mic === "idle" &&
+        input.props.variant === "expanded",
+    );
+    check(
+      "the root carries data-variant=expanded with the prop absent",
+      input.element.getAttribute("data-variant") === "expanded",
+    );
+    check(
+      "the frame mirrors the default editable state",
+      frame.getAttribute("data-editable") === "true" &&
+        editorElement(input).getAttribute("contenteditable") === "true",
+    );
+    check(
+      "the editable region carries the default accessible name",
+      editorElement(input).getAttribute("aria-label") === "Message",
+    );
+    check(
+      "the default placeholder is empty",
+      editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "",
+    );
+    check(
+      "the send button defaults to send: enabled, not aria-disabled",
+      send !== null &&
+        send.getAttribute("data-action") === "send" &&
+        send.disabled === false &&
+        send.getAttribute("aria-disabled") === "false" &&
+        send.getAttribute("aria-label") === "Send" &&
+        send.querySelector("svg") !== null,
+    );
+    check(
+      "the mic button defaults to idle with its accessible name and icon",
+      mic !== null &&
+        mic.getAttribute("data-mic") === "idle" &&
+        mic.type === "button" &&
+        mic.classList.contains("ws-stt-mic") &&
+        mic.getAttribute("aria-label") === "Push to talk" &&
+        mic.getAttribute("aria-pressed") === "false" &&
+        mic.title === "Push to talk" &&
+        mic.querySelector("svg") !== null,
+    );
+    const strip = frame.querySelector(".ws-prompt-input__attachments");
+    check(
+      "an empty attachments strip sits inside the frame before the editor",
+      strip !== null &&
+        strip.childElementCount === 0 &&
+        strip.parentElement === frame &&
+        strip.nextElementSibling === editorElement(input),
+    );
+    check(
+      "without controls the mic and send sit on the bar after the frame",
+      mic.parentElement === input.element &&
+        send.parentElement === input.element &&
+        frame.nextElementSibling === mic &&
+        mic.nextElementSibling === send,
+    );
+    input.dispose();
+  }
+
+  {
+    const input = new ChatBox({ variant: "expanded", ariaLabel: "Ask" });
+    check(
+      "an explicit variant and aria label render",
+      input.element.getAttribute("data-variant") === "expanded" &&
+        editorElement(input).getAttribute("aria-label") === "Ask",
+    );
+    input.dispose();
+  }
+
+  // --- data-editable is the effective state of both locks ------------------------
+
+  {
+    const input = new ChatBox();
+    const frame = frameElement(input);
+    const states = [frame.getAttribute("data-editable")];
+    input.setReadOnly(true);
+    states.push(frame.getAttribute("data-editable"));
+    input.setReadOnly(false);
+    states.push(frame.getAttribute("data-editable"));
+    check(
+      "data-editable reads true, false, true across a take lock",
+      states.join(",") === "true,false,true",
+    );
+    input.update({ editable: false });
+    check(
+      "data-editable reads false under a closed gate",
+      frame.getAttribute("data-editable") === "false" && input.props.editable === false,
+    );
+    input.setReadOnly(true);
+    input.update({ editable: true });
+    check(
+      "data-editable stays false while a take lock outlives the gate",
+      frame.getAttribute("data-editable") === "false" && input.props.editable === true,
+    );
+    input.dispose();
+  }
+
+  // --- The send button's states follow update() ---------------------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>draft</p>" }, sink);
+    const send = sendButton(input);
+    const editor = editorElement(input);
+    send.click();
+    check("a click on the send button emits send", sink.sends() === 1);
+
+    input.update({ action: "send-blocked" });
+    check(
+      "send-blocked renders aria-disabled but stays clickable",
+      send.getAttribute("data-action") === "send-blocked" &&
+        send.disabled === false &&
+        send.getAttribute("aria-disabled") === "true" &&
+        input.props.action === "send-blocked",
+    );
+    send.click();
+    check("a click while send-blocked still emits send", sink.sends() === 2);
+    pressEnter(editor);
+    check("Enter while send-blocked still emits send", sink.sends() === 3);
+
+    input.update({ action: "idle" });
+    check(
+      "idle disables the send button",
+      send.getAttribute("data-action") === "idle" &&
+        send.disabled === true &&
+        send.getAttribute("aria-disabled") === "false",
+    );
+    send.click();
+    pressEnter(editor);
+    check("idle is silent: neither a click nor Enter emits", sink.sends() === 3);
+
+    input.update({ action: "send" });
+    check(
+      "returning to send re-enables the button",
+      send.getAttribute("data-action") === "send" && send.disabled === false,
+    );
+    pressEnter(editor);
+    check("Enter after returning to send emits again", sink.sends() === 4);
+    input.dispose();
+  }
+
+  // --- The mic button renders its state and emits mic-press ---------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox({}, sink);
+    const mic = micButton(input);
+    mic.click();
+    check(
+      "a click on the mic emits mic-press",
+      sink.events.length === 1 && sink.events[0].type === "mic-press",
+    );
+    input.update({ mic: "recording" });
+    check(
+      "recording presses the mic, paints the recording class, and swaps the title",
+      mic.getAttribute("data-mic") === "recording" &&
+        mic.getAttribute("aria-pressed") === "true" &&
+        mic.classList.contains("ws-stt-mic--recording") &&
+        mic.title === "Stop recording" &&
+        input.props.mic === "recording",
+    );
+    mic.click();
+    check("a click while recording still emits mic-press", sink.events.length === 2);
+    input.update({ mic: "blocked" });
+    check(
+      "blocked releases the pressed state and the recording class",
+      mic.getAttribute("data-mic") === "blocked" &&
+        mic.getAttribute("aria-pressed") === "false" &&
+        !mic.classList.contains("ws-stt-mic--recording") &&
+        mic.title === "Push to talk" &&
+        mic.disabled === false,
+    );
+    mic.click();
+    check("a click while blocked still emits mic-press so the host can name the blocker", sink.events.length === 3);
+    input.update({ mic: "idle" });
+    check(
+      "idle restores the default rendering",
+      mic.getAttribute("data-mic") === "idle" &&
+        mic.getAttribute("aria-pressed") === "false" &&
+        mic.title === "Push to talk",
+    );
+    input.dispose();
+  }
+
+  // --- The controls slot ------------------------------------------------------------
+
+  {
+    const controls = document.createElement("div");
+    controls.className = "host-toolbar";
+    const existing = document.createElement("span");
+    controls.appendChild(existing);
+    const input = new ChatBox({ controls });
+    const frame = frameElement(input);
+    const mic = micButton(input);
+    const send = sendButton(input);
+    check(
+      "the controls element sits on the bar after the frame",
+      controls.parentElement === input.element && frame.nextElementSibling === controls,
+    );
+    check(
+      "with controls the mic and send are its last two children, after the host's own",
+      controls.children.length === 3 &&
+        controls.children[0] === existing &&
+        controls.children[1] === mic &&
+        controls.children[2] === send &&
+        input.element.querySelector(":scope > .ws-agent-session__mic") === null,
+    );
+    input.dispose();
+    check(
+      "dispose removes the box's buttons from the controls element and leaves the host's",
+      controls.children.length === 1 && controls.children[0] === existing,
+    );
+  }
+
+  // --- update() with unchanged props touches no DOM ----------------------------------
+
+  {
+    const input = new ChatBox({ mic: "recording", action: "send-blocked", editable: false });
+    document.body.appendChild(input.element);
+    const observer = new dom.window.MutationObserver(() => {});
+    observer.observe(input.element, {
+      attributes: true,
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    input.update({ mic: "recording", action: "send-blocked", editable: false });
+    input.update({});
+    check(
+      "an update with unchanged values mutates nothing",
+      observer.takeRecords().length === 0,
+    );
+    input.update({ mic: "idle" });
+    const changed = observer.takeRecords();
+    check(
+      "an update with one changed value mutates only the mic button",
+      changed.length > 0 && changed.every((record) => record.target === micButton(input)),
+    );
+    observer.disconnect();
+    input.dispose();
+    input.element.remove();
+  }
+
+  // --- send carries the pills present ------------------------------------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox(
+      {
+        content:
+          '<p>see <span data-type="mentionNode" data-id="src/main.ts" data-label="main.ts" data-kind="file" data-payload=\'{"path":"src/main.ts"}\'></span> and <span data-type="mentionNode" data-id="README.md" data-label="README.md"></span></p>',
+      },
+      sink,
+    );
+    sendButton(input).click();
+    const event = sink.events[0];
+    check(
+      "send lists one ChipRef per pill in document order with the stored subset",
+      event?.type === "send" &&
+        event.mentions.length === 2 &&
+        event.mentions[0].id === "src/main.ts" &&
+        event.mentions[0].label === "main.ts" &&
+        event.mentions[0].kind === "file" &&
+        JSON.stringify(event.mentions[0].data) === '{"path":"src/main.ts"}' &&
+        event.mentions[0].description === undefined &&
+        event.mentions[0].group === undefined &&
+        event.mentions[1].id === "README.md" &&
+        event.mentions[1].kind === undefined &&
+        event.mentions[1].data === null,
+    );
+    check(
+      "send's attachments are empty while the strip is empty",
+      event?.attachments.length === 0,
+    );
+    check(
+      "send's text renders each pill through the editor's text serializer",
+      typeof event?.text === "string" && event.text.startsWith("see "),
+    );
+    input.dispose();
+  }
+
+  // --- insertMention places a pill at the cursor ----------------------------------
+
+  {
+    const sink = recordingSink();
+    const input = new ChatBox({ content: "<p>see</p>" }, sink);
+    // ProseMirror positions: paragraph opens at 0, "see" spans 1..4.
+    input.setSelection(4, 4);
+    const chip = { id: "src/main.ts", label: "main.ts", kind: "file", data: { path: "src/main.ts" } };
+    input.insertMention(chip);
+    const pill = editorElement(input).querySelector(".ws-mention-chip");
+    check(
+      "insertMention renders one pill through the NodeView at the cursor",
+      pill !== null &&
+        pill.getAttribute("data-id") === "src/main.ts" &&
+        pill.getAttribute("data-kind") === "file" &&
+        pill.querySelector(".ws-mention-chip__label")?.textContent === "main.ts",
+    );
+    const inline = input.serialize().doc.content?.[0]?.content ?? [];
+    check(
+      "the pill follows the text and is followed by exactly one space",
+      inline.length === 3 &&
+        inline[0]?.type === "text" &&
+        inline[0].text === "see" &&
+        inline[1]?.type === "mentionNode" &&
+        inline[2]?.type === "text" &&
+        inline[2].text === " ",
+    );
+    const after = input.insertionContext().range;
+    check(
+      "the cursor lands after the trailing space (text + node + space)",
+      after.start === 6 && after.end === 6,
+    );
+    sendButton(input).click();
+    const event = sink.events[0];
+    check(
+      "a send after insertMention lists the inserted chip with its payload intact",
+      event?.type === "send" &&
+        event.mentions.length === 1 &&
+        event.mentions[0].id === "src/main.ts" &&
+        event.mentions[0].kind === "file" &&
+        JSON.stringify(event.mentions[0].data) === JSON.stringify(chip.data),
+    );
+    input.setSelection(1, 1);
+    input.insertMention({ id: "README.md", label: "README.md", data: null });
+    const front = input.serialize().doc.content?.[0]?.content ?? [];
+    check(
+      "insertMention at the paragraph start places the pill before the text",
+      front[0]?.type === "mentionNode" &&
+        front[0].attrs?.id === "README.md" &&
+        front[1]?.type === "text" &&
+        front[1].text === " see",
+    );
+    input.dispose();
+  }
+
+  // --- serialize / restore round-trip -------------------------------------------------
+
+  {
+    const source = new ChatBox({
+      content:
+        '<p>look at <span data-type="mentionNode" data-id="src/main.ts" data-label="main.ts" data-kind="file" data-payload=\'{"path":"src/main.ts","nested":[1,{"k":"v"}]}\'></span> first</p><p>then</p>',
+    });
+    const draft = source.serialize();
+    check(
+      "serialize carries v: 1, the ProseMirror JSON document, and empty attachments",
+      draft.v === 1 &&
+        draft.doc.type === "doc" &&
+        Array.isArray(draft.attachments) &&
+        draft.attachments.length === 0,
+    );
+    const attachment = { id: "img-1", label: "shot.png", kind: "image", data: { fileId: 7 } };
+    const withStrip = { ...draft, attachments: [attachment] };
+
+    const sink = recordingSink();
+    const target = new ChatBox({}, sink);
+    const frame = frameElement(target);
+    target.restore(withStrip);
+    check("restore reproduces the text", target.getText() === source.getText());
+    const restored = target.serialize();
+    check(
+      "serialize after restore reproduces the document byte-for-byte",
+      JSON.stringify(restored.doc) === JSON.stringify(draft.doc),
+    );
+    const pillNode = restored.doc.content?.[0]?.content?.find((node) => node.type === "mentionNode");
+    check(
+      "the pill's opaque payload survives the round-trip byte-for-byte",
+      pillNode !== undefined &&
+        JSON.stringify(pillNode.attrs?.data) === '{"path":"src/main.ts","nested":[1,{"k":"v"}]}',
+    );
+    check(
+      "restore paints the pill in the editor",
+      editorElement(target).querySelector(".ws-mention-chip[data-id='src/main.ts']") !== null,
+    );
+    const strip = frame.querySelector(".ws-prompt-input__attachments");
+    check(
+      "restore paints one chip per attachment into the strip",
+      strip.childElementCount === 1 &&
+        strip.firstElementChild?.classList.contains("ws-mention-chip") === true &&
+        strip.firstElementChild?.getAttribute("data-kind") === "image" &&
+        strip.querySelector(".ws-mention-chip__label")?.textContent === "shot.png",
+    );
+    check(
+      "serialize after restore returns the attachments as a copy",
+      JSON.stringify(restored.attachments) === JSON.stringify([attachment]) &&
+        restored.attachments !== withStrip.attachments,
+    );
+    sendButton(target).click();
+    check(
+      "send after restore carries the restored pill and attachments",
+      sink.events[0]?.type === "send" &&
+        sink.events[0].mentions.length === 1 &&
+        sink.events[0].mentions[0].id === "src/main.ts" &&
+        JSON.stringify(sink.events[0].attachments) === JSON.stringify([attachment]),
+    );
+    target.restore({ v: 1, doc: { type: "doc", content: [] }, attachments: [] });
+    check(
+      "restoring an empty draft clears the text and the strip",
+      target.getText() === "" && strip.childElementCount === 0,
+    );
+    source.dispose();
+    target.dispose();
+  }
+
+  // --- restore rejects an unknown or missing version -----------------------------------
+
+  {
+    const input = new ChatBox({ content: "<p>keep me</p>" });
+    const strip = frameElement(input).querySelector(".ws-prompt-input__attachments");
+    const before = JSON.stringify(input.serialize());
+    const foreign = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "replaced" }] }] };
+    const attachment = { id: "img-1", label: "shot.png", kind: "image", data: null };
+    input.restore({ v: 2, doc: foreign, attachments: [attachment] });
+    check(
+      "restore with an unknown version leaves the text, the strip, and the serialized form unchanged",
+      input.getText() === "keep me" &&
+        strip.childElementCount === 0 &&
+        JSON.stringify(input.serialize()) === before,
+    );
+    input.restore({ doc: foreign, attachments: [attachment] });
+    check(
+      "restore with a missing version leaves the box unchanged",
+      input.getText() === "keep me" &&
+        strip.childElementCount === 0 &&
+        JSON.stringify(input.serialize()) === before,
+    );
+    input.restore({ v: "1", doc: foreign, attachments: [attachment] });
+    check(
+      "restore with a string version is not coerced to 1",
+      input.getText() === "keep me" && strip.childElementCount === 0,
+    );
+    input.dispose();
   }
 
   // --- The static renderer (chat-box-view.ts) ----------------------------------------
@@ -602,9 +1084,9 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 if (failures.length > 0) {
-  console.error(`ws-prompt-input: ${failures.length} failure(s)`);
+  console.error(`chat-box: ${failures.length} failure(s)`);
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
-console.log("ws-prompt-input: all assertions passed");
+console.log("chat-box: all assertions passed");
 process.exit(0);

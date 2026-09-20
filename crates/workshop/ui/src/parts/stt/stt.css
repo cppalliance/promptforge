@@ -1,29 +1,7 @@
 /* Styles for stt.ts, which imports this file; esbuild bundles it into
-   dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css.
-   The host form (agent-session.css) sizes and colors the mic button under
-   its own class; these rules add only what recording changes, and win
-   over the host's tie-specificity rules because agent-session-view.ts
-   imports its own stylesheet before stt.ts. Rule order within this file
-   is load-bearing too: the recording rules tie the hover-glow rule on
-   specificity and must stay after it. */
-
-.ws-stt-mic {
-  flex: none;
-}
-
-/* Recording mic: a steady danger fill with a matching ring and bloom. The
-   ring and bloom keep recording visible without changing normal hover. */
-.ws-stt-mic--recording {
-  color: var(--on-danger);
-  background: var(--danger);
-  border-radius: 50%;
-  box-shadow: var(--ws-stt-mic-shadow);
-}
-
-.ws-stt-mic--recording:hover:not(:disabled) {
-  color: var(--on-danger);
-  background: var(--danger);
-  border-radius: 50%;
-  box-shadow: var(--ws-stt-mic-shadow-recording);
-}
-
+   dist/app.css. The mic button and its recording fill belong to the chat
+   box (chatbox/chat-box.css), which paints them from its mic prop. The
+   .ws-stt-input--recording mark that a take leaves on its target carries
+   no rule of its own today: the chat box frame's border tracks
+   :focus-within, and a textarea target (textareaSttTarget) is unstyled.
+   Dictation currently defines no classes here. */

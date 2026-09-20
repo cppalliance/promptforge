@@ -13,8 +13,8 @@
 // mention node and closes the popup; clicking a row does the same;
 // Escape dismisses the session and it stays dismissed while typing;
 // destroying the editor mid-session removes the popup; inside
-// PromptInput, Enter with the popup open selects instead of submitting.
-// Runs under the shared leak check: a popup or PromptInput that is
+// ChatBox, Enter with the popup open selects instead of submitting.
+// Runs under the shared leak check: a popup or ChatBox that is
 // never disposed fails.
 // Run: node test/typeahead-popup.mjs
 import { writeFile } from "node:fs/promises";
@@ -31,7 +31,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { PromptInput } from "./src/parts/chatbox/chat-box.ts";
+      export { ChatBox } from "./src/parts/chatbox/chat-box.ts";
       export { MentionChip } from "./src/parts/chatbox/mention-chip.ts";
       export { mentionTypeaheadItems } from "./src/parts/chatbox/typeahead-popup.ts";
       export { Editor } from "@tiptap/core";
@@ -78,7 +78,7 @@ dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect(
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-typeahead-popup-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, PromptInput, MentionChip, mentionTypeaheadItems, Editor, StarterKit } =
+const { lifecycle, ChatBox, MentionChip, mentionTypeaheadItems, Editor, StarterKit } =
   await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -343,19 +343,19 @@ await assertNoLeaks(lifecycle, async () => {
     element.remove();
   }
 
-  // --- PromptInput integration --------------------------------------------------------------
+  // --- ChatBox integration --------------------------------------------------------------
 
   {
     let submitted = 0;
-    const input = new PromptInput({
-      onSubmit: () => {
+    const input = new ChatBox({}, (event) => {
+      if (event.type === "send") {
         submitted++;
-      },
+      }
     });
     document.body.appendChild(input.element);
     const editorDom = input.element.querySelector(".ws-prompt-input__editor");
     // Tiptap stamps the Editor instance on the view DOM (dom.editor);
-    // the test drives commands through it because PromptInput does not
+    // the test drives commands through it because ChatBox does not
     // expose its editor.
     const editor = editorDom.editor;
     editor.commands.focus();

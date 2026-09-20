@@ -142,10 +142,10 @@ function harness() {
   const view = new AgentSessionView(service, silentStatus);
   window.document.body.appendChild(view.element);
   const rows = () => [...view.element.querySelectorAll(".ws-agent-item")];
-  // The ProseMirror prompt box: content and selection are driven through
-  // the component (the DOM alone sets neither), and the pending-wait
-  // gate shows on the editor's contenteditable attribute.
-  const input = view.promptInput;
+  // The chat box: content and selection are driven through the component
+  // (the DOM alone sets neither on a ProseMirror editor), and the
+  // pending-wait gate shows on the editor's contenteditable attribute.
+  const input = view.chatBox;
   const editorEl = view.element.querySelector(".ws-prompt-input__editor");
   const editable = () => editorEl.getAttribute("contenteditable") === "true";
   const send = view.element.querySelector(".ws-agent-session__send");
@@ -401,14 +401,22 @@ await assertNoLeaks(lifecycle, () => {
     const service = new AgentSessionService(wire);
     const view = new AgentSessionView(service, status, modelService);
     window.document.body.appendChild(view.element);
-    const input = view.promptInput;
+    const input = view.chatBox;
     const editorEl = view.element.querySelector(".ws-prompt-input__editor");
     const send = view.element.querySelector(".ws-agent-session__send");
+    check(
+      "with no wait the send action is idle whatever the model state",
+      send.getAttribute("data-action") === "idle" && send.disabled === true,
+    );
     wire.fire.inputRequired("model-gated");
     input.setText("keep this draft");
     check(
       "the send control exposes the absent-selection gate",
       send.getAttribute("aria-disabled") === "true",
+    );
+    check(
+      "the absent selection maps to the send-blocked action, still clickable",
+      send.getAttribute("data-action") === "send-blocked" && send.disabled === false,
     );
 
     send.click();
@@ -441,7 +449,7 @@ await assertNoLeaks(lifecycle, () => {
     modelService.applySelected("alpha");
     check(
       "selection arrival immediately lifts the send control gate",
-      send.getAttribute("aria-disabled") === "false",
+      send.getAttribute("aria-disabled") === "false" && send.getAttribute("data-action") === "send",
     );
     send.click();
     check(
@@ -507,6 +515,13 @@ await assertNoLeaks(lifecycle, () => {
         bar !== null &&
         toolbar.parentElement === bar &&
         toolbar.previousElementSibling?.classList.contains("ws-prompt-input") === true,
+    );
+    check(
+      "the box's mic and send trail the toolbar's own controls, as before the extraction",
+      toolbar?.lastElementChild?.classList.contains("ws-agent-session__send") === true &&
+        toolbar?.lastElementChild?.previousElementSibling?.classList.contains("ws-agent-session__mic") === true &&
+        toolbar?.querySelector(".ws-token-ring") !== null &&
+        bar?.querySelector(":scope > .ws-agent-session__mic") === null,
     );
     check(
       "the toolbar composes the mode chip, the model picker, and the context ring",

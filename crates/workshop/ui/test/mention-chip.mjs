@@ -6,7 +6,7 @@
 // attributes; the label falls back to the
 // id when no label is set; the chip is non-editable; the remove button
 // deletes the node and leaves the surrounding text intact; getJSON
-// serializes the node with type "mentionNode"; PromptInput registers the
+// serializes the node with type "mentionNode"; ChatBox registers the
 // extension, so chips render and remove inside the real input. The chip
 // model: a pill inserted with a kind carries data-kind and one without
 // carries none; kind, icon, preview, tone, and data survive getJSON, are
@@ -14,7 +14,7 @@
 // from that JSON; data round-trips byte-for-byte; parsing the pill's
 // rendered HTML (copy and paste) restores data-payload; renderChip
 // (src/parts/chatbox/chip-view.ts) draws the same pill standalone. Runs
-// under the shared leak check: a PromptInput that is never disposed
+// under the shared leak check: a ChatBox that is never disposed
 // fails.
 // Run: node test/mention-chip.mjs
 import { writeFile } from "node:fs/promises";
@@ -31,7 +31,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { PromptInput } from "./src/parts/chatbox/chat-box.ts";
+      export { ChatBox } from "./src/parts/chatbox/chat-box.ts";
       export { MentionChip } from "./src/parts/chatbox/mention-chip.ts";
       export { renderChip } from "./src/parts/chatbox/chip-view.ts";
       export { Editor } from "@tiptap/core";
@@ -64,7 +64,7 @@ globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-mention-chip-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, PromptInput, MentionChip, renderChip, Editor, StarterKit } = await import(
+const { lifecycle, ChatBox, MentionChip, renderChip, Editor, StarterKit } = await import(
   pathToFileURL(bundlePath).href
 );
 
@@ -73,7 +73,7 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// A bare editor over the same extensions PromptInput uses, so the chip
+// A bare editor over the same extensions ChatBox uses, so the chip
 // mechanics are pinned directly against the extension.
 function createEditor() {
   const element = document.createElement("div");
@@ -210,20 +210,20 @@ await assertNoLeaks(lifecycle, () => {
     editor.destroy();
   }
 
-  // --- PromptInput registration -------------------------------------------------
+  // --- ChatBox registration -------------------------------------------------
 
   {
-    const input = new PromptInput({
+    const input = new ChatBox({
       content:
         '<p>look at <span data-type="mentionNode" data-id="README.md" data-label="README.md"></span> please</p>',
     });
     check(
-      "PromptInput renders a mention node as a pill",
+      "ChatBox renders a mention node as a pill",
       input.element.querySelector(".ws-mention-chip") !== null,
     );
     input.element.querySelector(".ws-mention-chip__remove")?.click();
     check(
-      "the remove button deletes the chip inside PromptInput",
+      "the remove button deletes the chip inside ChatBox",
       input.element.querySelector(".ws-mention-chip") === null,
     );
     input.dispose();

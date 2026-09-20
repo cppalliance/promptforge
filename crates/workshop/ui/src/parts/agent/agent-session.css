@@ -212,6 +212,8 @@
 
 /* --- The input affordance ------------------------------------------------ */
 
+/* The card the chat box sits in. The bar itself, its frame, and its mic
+   and send buttons are the chat box's (chatbox/chat-box.css). */
 .ws-agent-session__outer {
   flex: none;
   padding-inline: var(--agent-outer-padding);
@@ -220,80 +222,4 @@
   max-inline-size: var(--agent-max-width);
   margin-inline: auto;
   box-sizing: border-box;
-}
-
-.ws-agent-session__bar {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-1-5);
-  padding: var(--space-2) var(--space-2-5) var(--space-1-5);
-  background: var(--prompt-input-bg);
-  border: var(--ws-border-width) solid var(--prompt-input-border);
-  border-radius: var(--agent-card-radius);
-  overflow: hidden;
-}
-
-.ws-agent-session__bar:focus-within {
-  border-color: var(--prompt-input-border-focus);
-}
-
-/* The prompt box owns the row's remaining width; its frame and type
-   styles live in chatbox/chat-box.css. */
-.ws-agent-session__bar > .ws-prompt-input {
-  flex: 1;
-  min-inline-size: 0;
-}
-
-.ws-agent-session__send {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  inline-size: var(--height-xs);
-  block-size: var(--height-xs);
-  padding: 0;
-  color: var(--cursor-editor);
-  background: var(--cursor-icon-secondary);
-  border: none;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-}
-
-.ws-agent-session__send:focus-visible {
-  outline: none;
-  background: var(--cursor-icon-primary);
-}
-
-.ws-agent-session__send:disabled {
-  background: var(--border-subtle);
-  color: var(--text-tertiary);
-  cursor: default;
-}
-
-/* The push-to-talk mic: an icon button the size of the send button, in
-   the raised tone so the accent stays on Send. stt.css paints the
-   hover glow and the recording fill over it. */
-.ws-agent-session__mic {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: var(--height-base);
-  min-block-size: var(--height-base);
-  padding: 0;
-  color: var(--text-muted);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  opacity: 0.5;
-}
-
-.ws-agent-session__mic:hover {
-  opacity: 0.8;
-}
-
-.ws-agent-session__mic:focus-visible {
-  outline: none;
-  opacity: 0.8;
 }
