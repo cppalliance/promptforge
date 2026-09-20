@@ -107,7 +107,7 @@ async fn a_status_update_reaches_the_sink_at_info_severity() {
         StatusBarUpdate {
             label: "Connected to gateway".to_string(),
             description: "the probe answered".to_string(),
-            progress: None,
+            busy: false,
             severity: Severity::Info,
             activity: Activity::General,
         }
@@ -130,7 +130,7 @@ async fn a_failure_reaches_the_sink_at_error_severity() {
         StatusBarUpdate {
             label: "Connection lost".to_string(),
             description: "the gateway hung up".to_string(),
-            progress: None,
+            busy: false,
             severity: Severity::Error,
             activity: Activity::General,
         }
@@ -155,7 +155,7 @@ async fn an_activity_pulse_reaches_the_sink_at_debug_severity() {
         StatusBarUpdate {
             label: "Streaming response...".to_string(),
             description: "a gateway response chunk".to_string(),
-            progress: None,
+            busy: false,
             severity: Severity::Debug,
             activity: Activity::Generating,
         }
@@ -163,15 +163,11 @@ async fn an_activity_pulse_reaches_the_sink_at_debug_severity() {
 }
 
 #[tokio::test]
-async fn progress_reaches_the_sink_with_its_current_and_total_counts() {
+async fn busy_reaches_the_sink_as_an_info_frame_with_the_busy_flag_set() {
     let mut recording = wired();
-    recording.push.push_progress(
-        "Downloading model",
-        "ggml-large-v3.bin",
-        5,
-        12,
-        Activity::General,
-    );
+    recording
+        .push
+        .push_busy("Downloading model", "ggml-large-v3.bin", Activity::General);
     let update = recording
         .status_rx
         .recv()
@@ -182,10 +178,7 @@ async fn progress_reaches_the_sink_with_its_current_and_total_counts() {
         StatusBarUpdate {
             label: "Downloading model".to_string(),
             description: "ggml-large-v3.bin".to_string(),
-            progress: Some(Progress {
-                current: 5,
-                total: 12,
-            }),
+            busy: true,
             severity: Severity::Info,
             activity: Activity::General,
         }
@@ -206,7 +199,7 @@ async fn idle_reaches_the_sink_as_the_resting_update() {
         StatusBarUpdate {
             label: "Ready".to_string(),
             description: "idle".to_string(),
-            progress: None,
+            busy: false,
             severity: Severity::Info,
             activity: Activity::General,
         }
@@ -259,7 +252,7 @@ fn intents_on_empty_slots_are_no_ops() {
     push.push_status_update("label", "description", Activity::General);
     push.push_failure("label", "description", Activity::General);
     push.push_activity("label", "description", Activity::General);
-    push.push_progress("label", "description", 1, 2, Activity::General);
+    push.push_busy("label", "description", Activity::General);
     push.push_idle();
     push.push_models_catalog(Vec::new());
     let menu = push.menu();

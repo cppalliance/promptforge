@@ -13,8 +13,10 @@ pub struct StatusBarUpdate {
     pub label: String,
     /// Longer text shown as the bar's tooltip.
     pub description: String,
-    /// Determinate progress, when the activity can report it.
-    pub progress: Option<Progress>,
+    /// Whether work is in flight: the status bar shows its indeterminate
+    /// barberpole while this is set. The text in `label` says what the
+    /// work is; there is no fraction on the wire.
+    pub busy: bool,
     /// How loudly the update speaks; the UI ignores `Debug` updates.
     pub severity: Severity,
     /// Which subsystem is active, driving the bar's activity indicator.
@@ -30,15 +32,6 @@ impl StatusBarUpdate {
             update: self,
         }
     }
-}
-
-/// A determinate progress report for the status bar's progress slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct Progress {
-    /// Units completed so far.
-    pub current: u64,
-    /// Units expected in total.
-    pub total: u64,
 }
 
 /// How loudly a status update speaks.

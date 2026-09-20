@@ -51,7 +51,7 @@ fn update(label: &str) -> StatusBarUpdate {
     StatusBarUpdate {
         label: label.to_string(),
         description: String::new(),
-        progress: None,
+        busy: false,
         severity: Severity::Info,
         activity: Activity::General,
     }

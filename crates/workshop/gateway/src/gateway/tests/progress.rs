@@ -8,21 +8,21 @@ use super::*;
 
 use futures_util::StreamExt as _;
 
-use shared_progress::{EventState, ProgressEvent};
+use gateway_api_types::Progress;
 
 use crate::gateway::progress::MAX_EVENT_BLOCK;
 
-/// Serializes a wire-format progress event by hand, so the tests pin
-/// the JSON shape the gateway emits rather than the progress crate's
-/// constructors.
-fn event_json(state: &serde_json::Value) -> String {
-    serde_json::json!({
-        "operation": 7,
-        "path": "local-models/ggml/download",
-        "label": "Download",
-        "state": state,
-    })
-    .to_string()
+/// Serializes a wire-format progress snapshot by hand, so the tests pin
+/// the JSON shape the gateway emits rather than the types crate's
+/// serializer.
+fn snapshot_json(busy: bool, text: &str) -> String {
+    serde_json::json!({"busy": busy, "text": text}).to_string()
+}
+
+/// The decoded snapshot as a `(busy, text)` pair.
+fn decoded(item: &Result<Progress, GatewayError>) -> (bool, String) {
+    let snapshot = item.as_ref().expect("every item decodes");
+    (snapshot.busy, snapshot.text.clone())
 }
 
 /// A mock `GET /admin/progress` that requires the bearer token and
@@ -54,7 +54,7 @@ fn mock_progress(body: String) -> axum::Router {
 }
 
 /// Subscribes against `app` and collects the whole event stream.
-async fn collect_events(app: axum::Router) -> Vec<Result<ProgressEvent, GatewayError>> {
+async fn collect_events(app: axum::Router) -> Vec<Result<Progress, GatewayError>> {
     let base_url = serve(app).await;
     let client = GatewayClient::new(&base_url, "tok").expect("client builds in tests");
     let events = client
@@ -65,27 +65,50 @@ async fn collect_events(app: axum::Router) -> Vec<Result<ProgressEvent, GatewayE
 }
 
 #[tokio::test]
-async fn subscribe_progress_decodes_events_and_skips_heartbeat_comments() {
-    let begun = event_json(&serde_json::json!({"Begun": {"weight": 2.0}}));
-    let updated = event_json(&serde_json::json!({"Updated": {"fraction": 0.5}}));
-    let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+async fn subscribe_progress_decodes_snapshots_and_skips_heartbeat_comments() {
+    let begun = snapshot_json(true, "Downloading qwen3-8b.gguf");
+    let updated = snapshot_json(true, "Downloading qwen3-8b.gguf 45%");
+    let idle = snapshot_json(false, "");
     let body = format!(
-        ": heartbeat\n\ndata: {begun}\n\ndata: {updated}\n\n: heartbeat\n\ndata: {finished}\n\n"
+        ": heartbeat\n\ndata: {begun}\n\ndata: {updated}\n\n: heartbeat\n\ndata: {idle}\n\n"
     );
 
     let events = collect_events(mock_progress(body)).await;
 
-    let states: Vec<EventState> = events
-        .iter()
-        .map(|item| item.as_ref().expect("every item decodes").state)
-        .collect();
+    let snapshots: Vec<(bool, String)> = events.iter().map(decoded).collect();
     assert_eq!(
-        states,
+        snapshots,
         vec![
-            EventState::Begun { weight: 2.0 },
-            EventState::Updated { fraction: 0.5 },
-            EventState::Finished { ok: true },
-        ]
+            (true, "Downloading qwen3-8b.gguf".to_owned()),
+            (true, "Downloading qwen3-8b.gguf 45%".to_owned()),
+            (false, String::new()),
+        ],
+        "each data block decodes to one busy/text snapshot in arrival order"
+    );
+}
+
+#[tokio::test]
+async fn subscribe_progress_refuses_the_old_operation_event_shape_as_malformed() {
+    // A gateway still emitting the retired weighted-tree events is a
+    // version skew the decoder reports, never renders.
+    let stale = serde_json::json!({
+        "operation": 7,
+        "path": "local-models/ggml/download",
+        "label": "Download",
+        "state": {"Updated": {"fraction": 0.5}},
+    })
+    .to_string();
+    let body = format!("data: {stale}\n\n");
+
+    let events = collect_events(mock_progress(body)).await;
+
+    assert_eq!(events.len(), 1, "one item per data block");
+    let error = events[0]
+        .as_ref()
+        .expect_err("a payload without busy and text is not a snapshot");
+    assert!(
+        matches!(error, GatewayError::Malformed { .. }),
+        "the stale shape is a malformed error, got {error}"
     );
 }
 
@@ -106,8 +129,8 @@ async fn subscribe_progress_classifies_a_non_success_status() {
 
 #[tokio::test]
 async fn subscribe_progress_yields_one_error_per_bad_event_and_continues() {
-    let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
-    let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+    let begun = snapshot_json(true, "Loading profile");
+    let finished = snapshot_json(false, "");
     let body = format!("data: {begun}\n\ndata: {{not json\n\ndata: {finished}\n\n");
 
     let events = collect_events(mock_progress(body)).await;
@@ -129,7 +152,7 @@ async fn subscribe_progress_yields_one_error_per_bad_event_and_continues() {
 
 #[tokio::test]
 async fn subscribe_progress_reassembles_an_event_split_across_chunks() {
-    let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+    let begun = snapshot_json(true, "Loading profile");
     let wire = format!("data: {begun}\n\n");
     let (head, tail) = wire.split_at(wire.len() / 2);
     let (head, tail) = (head.to_owned(), tail.to_owned());
@@ -162,7 +185,7 @@ async fn subscribe_progress_yields_one_error_on_a_mid_stream_read_failure_then_e
     // The server promises a large body, delivers one complete event, then
     // drops the connection: the read failure must surface as one error
     // item that ends the stream, not as a hang or a silent close.
-    let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+    let begun = snapshot_json(true, "Loading profile");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -222,22 +245,16 @@ async fn subscribe_progress_bounds_an_event_block_that_never_terminates() {
 async fn subscribe_progress_decodes_crlf_terminated_blocks() {
     // A peer that terminates its lines with CRLF still dispatches: the
     // blank-line terminator is `\r\n\r\n`, which contains no `\n\n`.
-    let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
-    let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+    let begun = snapshot_json(true, "Loading profile");
+    let finished = snapshot_json(false, "");
     let body = format!("data: {begun}\r\n\r\ndata: {finished}\r\n\r\n");
 
     let events = collect_events(mock_progress(body)).await;
 
-    let states: Vec<EventState> = events
-        .iter()
-        .map(|item| item.as_ref().expect("every item decodes").state)
-        .collect();
+    let snapshots: Vec<(bool, String)> = events.iter().map(decoded).collect();
     assert_eq!(
-        states,
-        vec![
-            EventState::Begun { weight: 1.0 },
-            EventState::Finished { ok: true },
-        ]
+        snapshots,
+        vec![(true, "Loading profile".to_owned()), (false, String::new())]
     );
 }
 
@@ -245,8 +262,8 @@ async fn subscribe_progress_decodes_crlf_terminated_blocks() {
 async fn subscribe_progress_discards_an_incomplete_trailing_block() {
     // The body ends mid-block: only blank-line-terminated blocks
     // dispatch, so the partial event is dropped and the stream ends.
-    let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
-    let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+    let begun = snapshot_json(true, "Loading profile");
+    let finished = snapshot_json(false, "");
     let body = format!("data: {begun}\n\ndata: {finished}");
 
     let events = collect_events(mock_progress(body)).await;

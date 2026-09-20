@@ -14,7 +14,7 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite;
 
 use workshop_server::fixtures::{
-    Activity, Progress, ReconnectBackoff, Severity, StatusBarUpdate, spawn_heartbeat,
+    Activity, ReconnectBackoff, Severity, StatusBarUpdate, spawn_heartbeat,
 };
 
 use crate::common::{JsonSocket, TestServer, spawn_gateway};
@@ -47,7 +47,7 @@ async fn a_new_connection_receives_the_current_status_as_its_first_frame() {
             "type": "status",
             "label": "Gateway unreachable",
             "description": "the gateway does not answer its health probe",
-            "progress": null,
+            "busy": false,
             "severity": "info",
             "activity": "general",
         }),
@@ -75,10 +75,7 @@ async fn status_updates_reach_connected_sessions_as_status_frames() {
     state.status().emit(StatusBarUpdate {
         label: "Downloading model".to_string(),
         description: "ggml-large-v3.bin".to_string(),
-        progress: Some(Progress {
-            current: 1,
-            total: 2,
-        }),
+        busy: true,
         severity: Severity::Info,
         activity: Activity::Generating,
     });
@@ -90,11 +87,11 @@ async fn status_updates_reach_connected_sessions_as_status_frames() {
             "type": "status",
             "label": "Downloading model",
             "description": "ggml-large-v3.bin",
-            "progress": {"current": 1, "total": 2},
+            "busy": true,
             "severity": "info",
             "activity": "generating",
         }),
-        "the update arrives as one status frame"
+        "the update arrives as one status frame carrying the busy flag"
     );
     socket.close(None).await.expect("close the socket");
 }
@@ -140,10 +137,7 @@ async fn a_new_session_receives_the_retained_status_and_catalog_snapshots() {
     state.status().emit(StatusBarUpdate {
         label: "Downloading model".to_string(),
         description: "ggml-large-v3.bin".to_string(),
-        progress: Some(Progress {
-            current: 1,
-            total: 2,
-        }),
+        busy: true,
         severity: Severity::Info,
         activity: Activity::Generating,
     });
@@ -163,7 +157,7 @@ async fn a_new_session_receives_the_retained_status_and_catalog_snapshots() {
             "type": "status",
             "label": "Downloading model",
             "description": "ggml-large-v3.bin",
-            "progress": {"current": 1, "total": 2},
+            "busy": true,
             "severity": "info",
             "activity": "generating",
         }),

@@ -144,5 +144,5 @@ pub use catalog::{CatalogFrame, CatalogPush, is_chat_capable};
 pub use error::{ErrorEnvelope, ErrorFrame};
 pub use input::{InputFrame, InputResponse};
 pub use menu::SwitchProfileFrame;
-pub use status::{Activity, Progress, Severity, StatusBarUpdate, StatusFrame};
+pub use status::{Activity, Severity, StatusBarUpdate, StatusFrame};
 pub use workbench::{WorkbenchFrame, WorkbenchSnapshot};

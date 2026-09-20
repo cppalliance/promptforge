@@ -386,7 +386,7 @@ Each step runs only the focused tests listed in it. The full gate set runs once,
 
 <step-3>
 
-### Step 3: Workshop consumes the Progress wire type
+### Step 3: Workshop consumes the Progress wire type [completed]
 
 - Component: workshop
 - Piece: Rust and TypeScript halves, one binary

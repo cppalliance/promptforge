@@ -64,7 +64,7 @@ pub use workshop_gateway::{
     gateway, gateway_binding, gateway_progress, heartbeat, observer, resolve,
 };
 pub use workshop_menu::{catalog, menu};
-pub use workshop_status::{progress, status};
+pub use workshop_status::status;
 
 /// The intent-named push facade over the registry's producer sink slots:
 /// business code reports what happened and never chooses a severity or

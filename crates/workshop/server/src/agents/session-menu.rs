@@ -1,7 +1,7 @@
 //! The socket side of the Model menu: `select_model` and
 //! `switch_profile` frame handling, plus the profile-selection task that
 //! persists the selection on the gateway, restarts a supervised sidecar
-//! to load it, and drives the steps into status-bar progress. The menu
+//! to load it, and holds the status bar busy until it settles. The menu
 //! state and bus live in the menu subsystem (`workshop-menu`); this
 //! module is only the session's orchestration of them.
 
@@ -93,10 +93,9 @@ pub(super) async fn start_switch(
     });
 }
 
-/// How many steps the selection ladder reports, in execution order:
-/// selecting the profile, restarting the gateway, loading models. A
-/// selection that needs no restart stops after the first.
-const SWITCH_STEPS: u64 = 3;
+/// The status-bar text while a selection runs; the bar stays busy under
+/// it until the switch settles with its own terminal frame.
+const SWITCHING_LABEL: &str = "Switching profile...";
 
 /// How often the ladder re-reads the published gateway generation while
 /// waiting for the relaunched sidecar.
@@ -109,6 +108,10 @@ const REPLACEMENT_POLL: Duration = Duration::from_millis(250);
 /// must be restarted by hand to load settles deferred, the running
 /// profile unchanged; a failure restores the truthful pre-switch state
 /// and reports itself.
+///
+/// The status bar goes busy once, here at the start; every settled arm
+/// ends with a non-busy frame (idle, the deferred notice, or the
+/// failure), so no separate idle push is needed.
 async fn run_switch(
     state: &SessionsState,
     snapshot: Arc<GatewaySnapshot>,
@@ -116,7 +119,12 @@ async fn run_switch(
     menu: &MenuBus,
     name: Option<&str>,
 ) {
-    match drive_switch(state, &snapshot, push, name).await {
+    push.push_busy(
+        SWITCHING_LABEL,
+        format!("switching to {}", describe(name)),
+        Activity::General,
+    );
+    match drive_switch(state, &snapshot, name).await {
         Ok(Settled::Serving(client)) => {
             // The settled snapshot reads a fresh catalog and profile list
             // from the gateway that now serves the selection.
@@ -202,10 +210,8 @@ impl SwitchFailure {
 async fn drive_switch(
     state: &SessionsState,
     snapshot: &Arc<GatewaySnapshot>,
-    push: &Push,
     name: Option<&str>,
 ) -> Result<Settled, SwitchFailure> {
-    push_step(push, name, "Selecting profile...", 1);
     let outcome = match snapshot.client().switch_profile(name).await {
         Ok(SwitchResponse::Selected(outcome)) => outcome,
         Ok(SwitchResponse::Buffered(refusal)) => {
@@ -227,7 +233,6 @@ async fn drive_switch(
         return Ok(Settled::RestartRequired);
     }
     let generation = snapshot.generation();
-    push_step(push, name, "Restarting gateway...", 2);
     // The shutdown request is blocking I/O against the sidecar; the
     // supervisor relaunches the sibling once the process exits.
     let shutdown = Arc::clone(snapshot);
@@ -240,7 +245,6 @@ async fn drive_switch(
     // relaunched sidecar binds a fresh port and key, published as a new
     // generation by the supervisor.
     let replacement = await_replacement(state, generation, name).await?;
-    push_step(push, name, "Loading models...", 3);
     Ok(Settled::Serving(replacement.client().clone()))
 }
 
@@ -286,18 +290,6 @@ async fn served_profile(client: &GatewayClient) -> Option<Option<String>> {
         return Some(None);
     }
     profile.as_str().map(|name| Some(name.to_owned()))
-}
-
-/// Pushes step `current` of [`SWITCH_STEPS`] as determinate status-bar
-/// progress under `label`.
-fn push_step(push: &Push, name: Option<&str>, label: &str, current: u64) {
-    push.push_progress(
-        label,
-        format!("switching to {}", describe(name)),
-        current,
-        SWITCH_STEPS,
-        Activity::General,
-    );
 }
 
 /// The notice for a selection a LAN gateway persisted but must be

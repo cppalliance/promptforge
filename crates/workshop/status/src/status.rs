@@ -18,7 +18,7 @@
 
 use tokio::sync::broadcast;
 
-use workshop_protocol::{Activity, Progress, Severity, StatusBarUpdate};
+use workshop_protocol::{Activity, Severity, StatusBarUpdate};
 use workshop_support::RetainedBus;
 
 /// Ring capacity of the status bus. Covers a startup burst plus an agent
@@ -63,7 +63,7 @@ impl StatusBus {
         self.bus.send(update);
     }
 
-    /// Broadcasts one progress-free update at the given severity.
+    /// Broadcasts one non-busy update at the given severity.
     pub fn report(
         &self,
         label: impl Into<String>,
@@ -74,7 +74,7 @@ impl StatusBus {
         self.emit(StatusBarUpdate {
             label: label.into(),
             description: description.into(),
-            progress: None,
+            busy: false,
             severity,
             activity,
         });
@@ -88,24 +88,6 @@ impl StatusBus {
         activity: Activity,
     ) {
         self.report(label, description, Severity::Info, activity);
-    }
-
-    /// Broadcasts a user-visible update carrying determinate progress,
-    /// which the status bar renders as its progress bar.
-    pub fn progress(
-        &self,
-        label: impl Into<String>,
-        description: impl Into<String>,
-        progress: Progress,
-        activity: Activity,
-    ) {
-        self.emit(StatusBarUpdate {
-            label: label.into(),
-            description: description.into(),
-            progress: Some(progress),
-            severity: Severity::Info,
-            activity,
-        });
     }
 
     /// Broadcasts an internal instrumentation pulse the UI does not

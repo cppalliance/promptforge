@@ -1,7 +1,7 @@
 //! workshop-status - the status-bar subsystem: a broadcast bus carrying
-//! status updates from every subsystem to every connected `/ws` session,
-//! and the renderer task that turns the process progress hub's snapshots
-//! into the status bar's progress indicator.
+//! status updates from every subsystem to every connected `/ws` session.
+//! Work in flight reaches the bar as a busy frame pushed by whichever
+//! subsystem owns the work; this crate holds no progress machinery.
 //!
 //! ## Invariants
 //!
@@ -22,7 +22,6 @@
 pub mod status;
 
 pub mod handles;
-pub mod progress;
 
-pub use handles::{register, register_tasks};
+pub use handles::register;
 pub use status::StatusBus;

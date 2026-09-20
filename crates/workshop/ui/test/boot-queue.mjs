@@ -82,7 +82,7 @@ function statusFrame(label) {
     description: "",
     severity: "info",
     activity: null,
-    progress: null,
+    busy: false,
   };
 }
 

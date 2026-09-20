@@ -408,7 +408,7 @@ export async function bootWorkbench(name, run, options = {}) {
         description: "",
         severity: "info",
         activity: "general",
-        progress: null,
+        busy: false,
         ...overrides,
       }),
     });

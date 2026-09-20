@@ -5,8 +5,8 @@
 
 use workshop_protocol::{
     Activity, AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, AgentSessionFrame, AgentsFrame,
-    CatalogPush, ErrorEnvelope, ErrorFrame, InputFrame, InputResponse, Progress, Severity,
-    StatusBarUpdate, SwitchProfileFrame, WorkbenchSnapshot,
+    CatalogPush, ErrorEnvelope, ErrorFrame, InputFrame, InputResponse, Severity, StatusBarUpdate,
+    SwitchProfileFrame, WorkbenchSnapshot,
 };
 
 /// Builds a minimal update with the given label.
@@ -14,7 +14,7 @@ fn stub(label: impl Into<String>) -> StatusBarUpdate {
     StatusBarUpdate {
         label: label.into(),
         description: String::new(),
-        progress: None,
+        busy: false,
         severity: Severity::Info,
         activity: Activity::General,
     }
@@ -29,7 +29,7 @@ fn a_status_update_serializes_as_a_status_frame() {
             "type": "status",
             "label": "Ready",
             "description": "",
-            "progress": null,
+            "busy": false,
             "severity": "info",
             "activity": "general",
         }),
@@ -38,20 +38,22 @@ fn a_status_update_serializes_as_a_status_frame() {
 }
 
 #[test]
-fn progress_and_the_remaining_variants_serialize() {
+fn busy_and_the_remaining_variants_serialize() {
     let update = StatusBarUpdate {
-        progress: Some(Progress {
-            current: 1,
-            total: 2,
-        }),
+        busy: true,
         severity: Severity::Error,
         activity: Activity::Thinking,
         ..stub("Working")
     };
     let frame = serde_json::to_value(update.frame()).expect("the frame serializes");
     assert_eq!(
-        frame["progress"],
-        serde_json::json!({"current": 1, "total": 2})
+        frame["busy"],
+        serde_json::json!(true),
+        "the busy flag rides the frame as a plain boolean, never a progress object"
+    );
+    assert!(
+        frame.get("progress").is_none(),
+        "the determinate progress object is gone from the wire"
     );
     assert_eq!(frame["severity"], "error");
     assert_eq!(frame["activity"], "thinking");

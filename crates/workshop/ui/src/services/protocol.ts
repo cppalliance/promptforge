@@ -18,7 +18,11 @@ export interface StatusFrame {
   description: string;
   severity: "info" | "debug" | "error";
   activity: "general" | "thinking" | "generating";
-  progress: { current: number; total: number } | null;
+  /**
+   * Whether work is in flight: the status bar shows its barberpole while
+   * set. The label says what the work is; there is no fraction on the wire.
+   */
+  busy: boolean;
 }
 
 /** One entry of the gateway's model catalog, as fetched or pushed. */

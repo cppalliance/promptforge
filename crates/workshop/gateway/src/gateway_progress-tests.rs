@@ -1,19 +1,38 @@
-//! Gateway progress feed tests: events land on the hub, malformed events are skipped, and
-//! the subscriber resubscribes without duplicating state.
-
-// Fractions are fixed-point millionths, so equality comparisons are exact
-// (the shared-progress remote.rs test precedent).
-#![expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+//! Subscriber tests against a mock `GET /admin/progress`: snapshots
+//! reach the status bar as busy frames under the anti-flicker policy,
+//! a malformed snapshot is skipped, a closed stream resubscribes after
+//! the delay, an unreachable gateway holds no subscription, and a
+//! reconnect rests the bar and resubscribes once. A lost subscription
+//! rests the bar under the presenter's minimum-visible hold, which the
+//! loop keeps ticking between subscriptions. The presenter's timing
+//! rules are pinned separately with explicit instants; here the policy
+//! runs at millisecond scale so the mock round trips stay fast.
 
 use super::*;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use tokio::sync::broadcast;
 
-use shared_progress::OperationSnapshot;
+use workshop_protocol::StatusBarUpdate;
+use workshop_registry::{Registration, Registry, StatusSink, StatusSinkAdapter};
+
+/// The anti-flicker policy the mock-gateway tests run under: short
+/// enough that a test waits milliseconds, long enough that a snapshot
+/// still has to outlive the show delay to reach the bar.
+const FAST_POLICY: Policy = Policy {
+    show_delay: Duration::from_millis(40),
+    min_visible: Duration::from_millis(20),
+};
+
+/// The production resubscribe delay is seconds; the tests inject this.
+const FAST_TIMING: Timing = Timing {
+    resubscribe_delay: Duration::from_millis(50),
+    policy: FAST_POLICY,
+};
 
 /// Binds `app` as a mock gateway on a free loopback port and returns its
 /// base URL.
@@ -35,6 +54,62 @@ fn binding(base_url: &str) -> GatewayBinding {
     GatewayBinding::new(base_url, "").expect("the test binding builds")
 }
 
+/// A recording status sink behind a [`Push`]: every frame the subscriber
+/// pushes lands in `frames`, in order.
+struct Recorder {
+    push: Push,
+    frames: Arc<Mutex<Vec<StatusBarUpdate>>>,
+    _guard: Registration,
+}
+
+fn recorder() -> Recorder {
+    let registry = Registry::new();
+    let frames: Arc<Mutex<Vec<StatusBarUpdate>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&frames);
+    let guard =
+        registry.register_sink::<dyn StatusSink>(Arc::new(StatusSinkAdapter::new(move |update| {
+            sink.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(update);
+        })));
+    Recorder {
+        push: registry.push(),
+        frames,
+        _guard: guard,
+    }
+}
+
+impl Recorder {
+    /// The `(label, busy)` of every frame pushed so far.
+    fn pushed(&self) -> Vec<(String, bool)> {
+        self.frames
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|update| (update.label.clone(), update.busy))
+            .collect()
+    }
+
+    /// Polls until `accept` holds over the pushed frames, within a
+    /// generous deadline (the heartbeat tests' snapshot_where pattern).
+    async fn frames_where(
+        &self,
+        accept: impl Fn(&[(String, bool)]) -> bool,
+    ) -> Vec<(String, bool)> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let pushed = self.pushed();
+                if accept(&pushed) {
+                    return pushed;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("matching frames arrive within the deadline")
+    }
+}
+
 /// A mock `GET /admin/progress`: every payload published to the feed
 /// streams to every connected subscriber as an SSE `data:` frame, and
 /// `connections` counts how often the endpoint was hit. The receiver
@@ -43,14 +118,14 @@ fn binding(base_url: &str) -> GatewayBinding {
 /// ends every live stream, so a test can drive the resubscribe path.
 struct MockProgress {
     connections: AtomicUsize,
-    feeds: std::sync::Mutex<broadcast::Sender<String>>,
+    feeds: Mutex<broadcast::Sender<String>>,
 }
 
 impl MockProgress {
     fn new() -> Self {
         Self {
             connections: AtomicUsize::new(0),
-            feeds: std::sync::Mutex::new(broadcast::channel(16).0),
+            feeds: Mutex::new(broadcast::channel(16).0),
         }
     }
 
@@ -60,8 +135,13 @@ impl MockProgress {
             .with_state(self)
     }
 
-    /// Publishes one payload to every connected subscriber.
-    fn send(&self, payload: String) {
+    /// Publishes one snapshot to every connected subscriber.
+    fn send(&self, busy: bool, text: &str) {
+        self.send_raw(serde_json::json!({"busy": busy, "text": text}).to_string());
+    }
+
+    /// Publishes one raw payload to every connected subscriber.
+    fn send_raw(&self, payload: String) {
         self.feeds
             .lock()
             .expect("the feed lock is not poisoned")
@@ -104,38 +184,6 @@ async fn serve_feed(State(mock): State<Arc<MockProgress>>) -> Response {
         .into_response()
 }
 
-/// Serializes a wire-format progress event by hand, so the tests pin
-/// the JSON shape the gateway emits rather than the progress crate's
-/// constructors (the gateway-client test pattern).
-fn event_json(path: &str, state: &serde_json::Value) -> String {
-    serde_json::json!({
-        "operation": 7,
-        "path": path,
-        "label": path,
-        "state": state,
-    })
-    .to_string()
-}
-
-/// Polls the hub's snapshot until `accept` holds, within a generous
-/// deadline (the heartbeat tests' snapshot_where pattern).
-async fn snapshot_where(
-    hub: &ProgressHub,
-    accept: impl Fn(&[OperationSnapshot]) -> bool,
-) -> Vec<OperationSnapshot> {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let snapshot = hub.snapshot();
-            if accept(&snapshot) {
-                return snapshot;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("a matching snapshot arrives within the deadline")
-}
-
 /// Polls the mock's connection count until it reaches `n`.
 async fn wait_for_connections(mock: &MockProgress, n: usize) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -148,104 +196,118 @@ async fn wait_for_connections(mock: &MockProgress, n: usize) {
 }
 
 #[tokio::test]
-async fn events_from_the_gateway_feed_a_remote_operation_on_the_hub() {
+async fn a_busy_snapshot_reaches_the_status_bar_as_a_busy_frame_with_the_gateway_text() {
     let mock = Arc::new(MockProgress::new());
     let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
-    let hub = Arc::new(ProgressHub::new());
+    let recorder = recorder();
     // The flag starts optimistic, so the subscriber connects at once.
-    let subscriber = spawn(binding(&base_url), Arc::clone(&hub), GatewayHealth::new());
-
-    wait_for_connections(&mock, 1).await;
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Begun": {"weight": 1.0}}),
-    ));
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Updated": {"fraction": 0.5}}),
-    ));
-
-    let snapshot = snapshot_where(&hub, |s| {
-        s.len() == 1 && s[0].nodes.iter().any(|n| n.fraction == 0.5)
-    })
-    .await;
-    assert_eq!(snapshot[0].nodes[0].path, "download");
-    assert_eq!(snapshot[0].nodes[0].label, "download");
-    subscriber.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_malformed_event_is_skipped_and_the_stream_continues() {
-    let mock = Arc::new(MockProgress::new());
-    let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
-    let hub = Arc::new(ProgressHub::new());
-    let subscriber = spawn(binding(&base_url), Arc::clone(&hub), GatewayHealth::new());
-
-    wait_for_connections(&mock, 1).await;
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Begun": {"weight": 1.0}}),
-    ));
-    // One undecodable `data:` block between two valid events: the
-    // subscriber warns and continues rather than dropping the stream.
-    mock.send("{not valid json".to_owned());
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Updated": {"fraction": 0.5}}),
-    ));
-
-    let snapshot = snapshot_where(&hub, |s| {
-        s.len() == 1 && s[0].nodes.iter().any(|n| n.fraction == 0.5)
-    })
-    .await;
-    assert_eq!(
-        snapshot[0].nodes[0].path, "download",
-        "the event after the malformed one still lands on the hub"
-    );
-    subscriber.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_stream_that_ends_while_reachable_resubscribes_after_the_delay() {
-    let mock = Arc::new(MockProgress::new());
-    let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
-    let hub = Arc::new(ProgressHub::new());
-    let delay = Duration::from_millis(50);
-    let subscriber = spawn_with_delay(
+    let subscriber = spawn_with_timing(
         binding(&base_url),
-        Arc::clone(&hub),
+        recorder.push.clone(),
         GatewayHealth::new(),
-        delay,
+        FAST_TIMING,
     );
 
     wait_for_connections(&mock, 1).await;
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Begun": {"weight": 1.0}}),
-    ));
-    snapshot_where(&hub, |s| s.len() == 1).await;
+    mock.send(true, "Downloading qwen3-8b.gguf 45%");
 
-    // The stream ends while the gateway still reads reachable: the
-    // import detaches, and a fresh subscription follows the delay.
+    let pushed = recorder.frames_where(|frames| !frames.is_empty()).await;
+    assert_eq!(
+        pushed,
+        [("Downloading qwen3-8b.gguf 45%".to_owned(), true)],
+        "the gateway's text is the bar's label and the frame is busy"
+    );
+
+    mock.send(false, "");
+    let pushed = recorder.frames_where(|frames| frames.len() == 2).await;
+    assert_eq!(
+        pushed[1],
+        ("Ready".to_owned(), false),
+        "the idle snapshot rests the bar once the minimum visible time passes"
+    );
+    subscriber.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_malformed_snapshot_is_skipped_and_the_stream_continues() {
+    let mock = Arc::new(MockProgress::new());
+    let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
+    let recorder = recorder();
+    let subscriber = spawn_with_timing(
+        binding(&base_url),
+        recorder.push.clone(),
+        GatewayHealth::new(),
+        FAST_TIMING,
+    );
+
+    wait_for_connections(&mock, 1).await;
+    // One undecodable `data:` block ahead of a valid snapshot: the
+    // subscriber warns and continues rather than dropping the stream.
+    mock.send_raw("{not valid json".to_owned());
+    mock.send(true, "Loading profile");
+
+    let pushed = recorder.frames_where(|frames| !frames.is_empty()).await;
+    assert_eq!(
+        pushed,
+        [("Loading profile".to_owned(), true)],
+        "the snapshot after the malformed one still reaches the bar"
+    );
+    assert_eq!(
+        mock.connections.load(Ordering::Relaxed),
+        1,
+        "a malformed snapshot never drops the subscription"
+    );
+    subscriber.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_stream_that_ends_while_reachable_rests_the_bar_and_resubscribes_after_the_delay() {
+    let mock = Arc::new(MockProgress::new());
+    let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
+    let recorder = recorder();
+    let subscriber = spawn_with_timing(
+        binding(&base_url),
+        recorder.push.clone(),
+        GatewayHealth::new(),
+        FAST_TIMING,
+    );
+
+    wait_for_connections(&mock, 1).await;
+    mock.send(true, "Downloading");
+    recorder.frames_where(|frames| frames.len() == 1).await;
+
+    // The stream ends while the gateway still reads reachable: the bar
+    // rests once its minimum visible time lapses, which falls inside the
+    // resubscribe wait, and a fresh subscription follows the delay.
     let closed = std::time::Instant::now();
     mock.close();
-    snapshot_where(&hub, <[OperationSnapshot]>::is_empty).await;
+    let pushed = recorder.frames_where(|frames| frames.len() == 2).await;
+    assert_eq!(
+        pushed[1],
+        ("Ready".to_owned(), false),
+        "a lost subscription rests the bar: its progress is stale"
+    );
     wait_for_connections(&mock, 2).await;
     assert!(
-        closed.elapsed() >= delay,
+        closed.elapsed() >= FAST_TIMING.resubscribe_delay,
         "the resubscribe waits out the delay rather than spinning"
     );
     subscriber.shutdown().await;
 }
 
 #[tokio::test]
-async fn an_unreachable_gateway_holds_no_subscription_and_no_remote_state() {
+async fn an_unreachable_gateway_holds_no_subscription_and_pushes_nothing() {
     let mock = Arc::new(MockProgress::new());
     let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
-    let hub = Arc::new(ProgressHub::new());
+    let recorder = recorder();
     let health = GatewayHealth::new();
     health.publish(false);
-    let subscriber = spawn(binding(&base_url), Arc::clone(&hub), health.clone());
+    let subscriber = spawn_with_timing(
+        binding(&base_url),
+        recorder.push.clone(),
+        health.clone(),
+        FAST_TIMING,
+    );
 
     let quiet = tokio::time::timeout(Duration::from_millis(200), async {
         wait_for_connections(&mock, 1).await;
@@ -255,7 +317,10 @@ async fn an_unreachable_gateway_holds_no_subscription_and_no_remote_state() {
         quiet.is_err(),
         "an unreachable gateway must not be subscribed"
     );
-    assert!(hub.snapshot().is_empty());
+    assert!(
+        recorder.pushed().is_empty(),
+        "a subscriber that never connected pushes nothing"
+    );
 
     health.publish(true);
     wait_for_connections(&mock, 1).await;
@@ -263,50 +328,48 @@ async fn an_unreachable_gateway_holds_no_subscription_and_no_remote_state() {
 }
 
 #[tokio::test]
-async fn a_reconnect_resubscribes_without_duplicating_state() {
+async fn a_reconnect_rests_the_bar_and_resubscribes_once() {
     let mock = Arc::new(MockProgress::new());
     let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
-    let hub = Arc::new(ProgressHub::new());
+    let recorder = recorder();
     let health = GatewayHealth::new();
-    let subscriber = spawn(binding(&base_url), Arc::clone(&hub), health.clone());
+    let subscriber = spawn_with_timing(
+        binding(&base_url),
+        recorder.push.clone(),
+        health.clone(),
+        FAST_TIMING,
+    );
 
     wait_for_connections(&mock, 1).await;
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Begun": {"weight": 1.0}}),
-    ));
-    let first = snapshot_where(&hub, |s| s.len() == 1).await;
+    mock.send(true, "Downloading");
+    recorder.frames_where(|frames| frames.len() == 1).await;
 
     health.publish(false);
-    snapshot_where(&hub, <[OperationSnapshot]>::is_empty).await;
+    let pushed = recorder.frames_where(|frames| frames.len() == 2).await;
+    assert_eq!(
+        pushed[1],
+        ("Ready".to_owned(), false),
+        "an unreachable verdict rests the bar"
+    );
 
     health.publish(true);
     wait_for_connections(&mock, 2).await;
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Begun": {"weight": 1.0}}),
-    ));
-    mock.send(event_json(
-        "download",
-        &serde_json::json!({"Updated": {"fraction": 0.5}}),
-    ));
-    let reconnected = snapshot_where(&hub, |s| {
-        s.len() == 1 && s[0].nodes.iter().any(|n| n.fraction == 0.5)
-    })
-    .await;
+    mock.send(true, "Starting models");
+    let pushed = recorder.frames_where(|frames| frames.len() == 3).await;
     assert_eq!(
-        reconnected.len(),
-        1,
-        "the reconnect replaces the import, never stacks a second one"
+        pushed[2],
+        ("Starting models".to_owned(), true),
+        "the fresh subscription's snapshots reach the bar"
     );
-    assert_ne!(
-        first[0].operation, reconnected[0].operation,
-        "the resubscription attaches a fresh import under a new local id"
+    assert_eq!(
+        mock.connections.load(Ordering::Relaxed),
+        2,
+        "the reconnect resubscribes exactly once"
     );
     subscriber.shutdown().await;
 }
 
-#[path = "gateway_progress-tests-lifecycle.rs"]
-mod lifecycle;
+#[path = "gateway_progress-tests-presenter.rs"]
+mod presenter;
 #[path = "gateway_progress-tests-recovery.rs"]
 mod recovery;

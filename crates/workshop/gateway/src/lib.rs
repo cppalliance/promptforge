@@ -16,6 +16,9 @@
 //! - A bearer key is never written to logs or `Debug` output.
 //! - User-visible reporting flows through the registry's push facade, so
 //!   this crate never names another subsystem's bus.
+//! - The gateway's progress reaches this crate as the public wire type
+//!   `gateway_api_types::Progress` alone: no progress machinery is
+//!   shared with the gateway family.
 
 pub mod gateway;
 pub mod gateway_binding;
@@ -28,7 +31,7 @@ pub mod resolve;
 pub mod test_gateway;
 
 pub use gateway::{
-    CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, ProgressEventStream,
+    CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, ProgressStream,
     SsePayloadStream, SwitchOutcome, SwitchResponse,
 };
 pub use gateway_binding::{

@@ -8481,11 +8481,11 @@ dependencies = [
  "axum",
  "futures-util",
  "gateway-api-discovery",
+ "gateway-api-types",
  "promptforge-api-types",
  "reqwest",
  "serde",
  "serde_json",
- "shared-progress",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -8552,7 +8552,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shared-loopback",
- "shared-progress",
  "socket2",
  "tempfile",
  "thiserror 2.0.19",
@@ -8587,7 +8586,6 @@ dependencies = [
 name = "workshop-status"
 version = "0.0.0"
 dependencies = [
- "shared-progress",
  "tokio",
  "workshop-protocol",
  "workshop-registry",

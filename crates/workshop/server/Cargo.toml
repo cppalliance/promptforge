@@ -29,7 +29,6 @@ rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shared-loopback.workspace = true
-shared-progress.workspace = true
 gateway-api-discovery.workspace = true
 socket2.workspace = true
 thiserror.workspace = true

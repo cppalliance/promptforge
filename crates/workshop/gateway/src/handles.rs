@@ -5,8 +5,6 @@
 
 use std::sync::Arc;
 
-use shared_progress::ProgressHub;
-
 use workshop_registry::{BackgroundTaskAdapter, Registration, Registry, ShutdownHandle};
 use workshop_support::ReconnectBackoff;
 
@@ -51,14 +49,14 @@ pub fn register(registry: &Registry, handles: GatewayHandles) -> Registration {
 }
 
 /// Registers the gateway subsystem's background tasks: the
-/// reachability heartbeat and the gateway progress subscriber. The
-/// tasks spawn when the shell starts serving and stop inside the
-/// graceful-shutdown signal. The returned guards keep the registrations
-/// alive; the composition root holds them for the process lifetime.
+/// reachability heartbeat and the gateway progress subscriber, both
+/// reporting through the registry's push facade. The tasks spawn when
+/// the shell starts serving and stop inside the graceful-shutdown
+/// signal. The returned guards keep the registrations alive; the
+/// composition root holds them for the process lifetime.
 pub fn register_tasks(
     registry: &Registry,
     handles: &GatewayHandles,
-    progress: Arc<ProgressHub>,
     backoff: ReconnectBackoff,
 ) -> (Registration, Registration) {
     let heartbeat = registry.register_task(Arc::new(BackgroundTaskAdapter::new({
@@ -77,11 +75,11 @@ pub fn register_tasks(
         }
     })));
     let subscriber = registry.register_task(Arc::new(BackgroundTaskAdapter::new({
+        let registry = registry.clone();
         let binding = handles.binding().clone();
         let health = handles.health().clone();
         move || {
-            let task =
-                gateway_progress::spawn(binding.clone(), Arc::clone(&progress), health.clone());
+            let task = gateway_progress::spawn(binding.clone(), registry.push(), health.clone());
             ShutdownHandle::new(move || task.shutdown())
         }
     })));

@@ -8,7 +8,7 @@ pub use crate::heartbeat::{GatewayHealth, Heartbeat};
 pub use crate::menu::{MenuBus, MenuRefusal};
 pub use crate::push::Push;
 pub use crate::status::StatusBus;
-pub use workshop_protocol::{Activity, Progress, Severity, StatusBarUpdate};
+pub use workshop_protocol::{Activity, Severity, StatusBarUpdate};
 pub use workshop_support::ReconnectBackoff;
 
 #[cfg(feature = "test-fixtures")]

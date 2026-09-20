@@ -75,27 +75,33 @@ fn profile_routes(active: Option<&'static str>) -> Router {
         .route("/v1/models", get(mock_models))
 }
 
-/// The `(label, current, total)` of every progress status frame in
-/// `frames`, in order.
-fn progress_ladder(frames: &[serde_json::Value]) -> Vec<(String, u64, u64)> {
+/// The `(label, description)` of every busy status frame in `frames`, in
+/// order: the frames that hold the status bar's barberpole up.
+fn busy_frames(frames: &[serde_json::Value]) -> Vec<(String, String)> {
     frames
         .iter()
-        .filter(|frame| frame["type"] == "status" && !frame["progress"].is_null())
+        .filter(|frame| frame["type"] == "status" && frame["busy"] == true)
         .map(|frame| {
             (
                 frame["label"]
                     .as_str()
-                    .expect("a progress frame carries a label")
+                    .expect("a busy frame carries a label")
                     .to_string(),
-                frame["progress"]["current"]
-                    .as_u64()
-                    .expect("current is an integer"),
-                frame["progress"]["total"]
-                    .as_u64()
-                    .expect("total is an integer"),
+                frame["description"]
+                    .as_str()
+                    .expect("a busy frame carries a description")
+                    .to_string(),
             )
         })
         .collect()
+}
+
+/// The one busy frame a switch to `name` pushes at its start.
+fn switching(name: &str) -> (String, String) {
+    (
+        "Switching profile...".to_string(),
+        format!("switching to {name}"),
+    )
 }
 
 #[tokio::test]
@@ -193,9 +199,9 @@ async fn a_selection_served_without_a_restart_completes_after_one_step() {
         "the pending snapshot marks the switch in flight: {pending}"
     );
     assert_eq!(
-        progress_ladder(&frames),
-        [("Selecting profile...".to_string(), 1, 3)],
-        "a selection the gateway already serves climbs no restart steps"
+        busy_frames(&frames),
+        [switching("\"beta\"")],
+        "the switch holds the bar busy once, from its start until it settles"
     );
     assert_eq!(
         received

@@ -26,7 +26,7 @@ use workshop_server::{
 use crate::common::spawn_gateway;
 
 use super::super::{frames_until, spawn_session_server};
-use super::{profile_routes, progress_ladder, recording_switch};
+use super::{busy_frames, profile_routes, recording_switch, switching};
 
 /// The bearer the sidecar fixture expects and the workshop presents.
 const SIDECAR_KEY: &str = "sidecar-key";
@@ -197,14 +197,13 @@ async fn a_sidecar_restart_climbs_the_ladder_and_refreshes_through_the_replaceme
         .send(tungstenite::Message::Text(switch.into()))
         .await
         .expect("the switch frame is sent");
+    // The pending snapshot and the busy frame both precede the shutdown;
+    // the shutdown observation below is the sync point for the restart.
     let mut frames = frames_until(&mut socket, |frame| {
-        frame["type"] == "status" && frame["label"] == "Restarting gateway..."
+        frame["type"] == "workbench" && frame["switching"] == "beta"
     })
     .await;
-    let pending = frames
-        .iter()
-        .find(|frame| frame["type"] == "workbench" && frame["switching"] == "beta")
-        .expect("the pending snapshot was pushed before the restart step");
+    let pending = frames.last().expect("the pending snapshot was pushed");
     assert_eq!(
         pending["switch_in_flight"], true,
         "the switch is marked in flight while the ladder climbs: {pending}"
@@ -235,13 +234,9 @@ async fn a_sidecar_restart_climbs_the_ladder_and_refreshes_through_the_replaceme
         .await,
     );
     assert_eq!(
-        progress_ladder(&frames),
-        [
-            ("Selecting profile...".to_string(), 1, 3),
-            ("Restarting gateway...".to_string(), 2, 3),
-            ("Loading models...".to_string(), 3, 3),
-        ],
-        "the three steps arrive as determinate progress, in order"
+        busy_frames(&frames),
+        [switching("\"beta\"")],
+        "one busy frame holds the bar up across the whole restart ladder"
     );
     let catalog = frames
         .iter()
@@ -294,7 +289,7 @@ async fn a_replacement_that_never_appears_fails_within_the_bound() {
         .await
         .expect("the switch frame is sent");
     frames_until(&mut socket, |frame| {
-        frame["type"] == "status" && frame["label"] == "Restarting gateway..."
+        frame["type"] == "status" && frame["busy"] == true
     })
     .await;
     let (_gateway, shutdown_hit) = observe_shutdown(gateway).await;
@@ -363,9 +358,13 @@ async fn a_lan_gateway_that_needs_a_restart_settles_with_the_notice() {
     );
     assert_eq!(notice["severity"], "info", "the notice is not a failure");
     assert_eq!(
-        progress_ladder(&frames),
-        [("Selecting profile...".to_string(), 1, 3)],
-        "no restart step runs against a LAN gateway"
+        busy_frames(&frames),
+        [switching("\"beta\"")],
+        "the bar goes busy once and the deferred notice ends it"
+    );
+    assert_eq!(
+        notice["busy"], false,
+        "the notice is the non-busy frame that rests the bar"
     );
     assert_eq!(
         received.lock().expect("the recorder lock is healthy").len(),

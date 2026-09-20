@@ -1,7 +1,7 @@
 // The recording LED and activity LED stand in one indicators group beside
-// the barberpole, never behind it: a progress frame shows the barberpole
+// the barberpole, never behind it: a busy frame shows the barberpole
 // and leaves the group and both LEDs visible, the barberpole precedes the
-// group in DOM order, and clearing progress hides the barberpole alone.
+// group in DOM order, and a non-busy frame hides the barberpole alone.
 // Run: node test/barberpole-beside-indicators.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
@@ -30,23 +30,23 @@ await bootWorkbench("the barberpole shows beside the recording and activity LEDs
     label: "Downloading model",
     description: "1 of 2",
     activity: "general",
-    progress: { current: 1, total: 2 },
+    busy: true,
   });
   if (barberpoleEl.hidden) {
-    failures.push("a progress frame did not reveal the barberpole");
+    failures.push("a busy frame did not reveal the barberpole");
   }
   if (indicatorsEl.hidden) {
-    failures.push("a progress frame hid the recording and activity LED group");
+    failures.push("a busy frame hid the recording and activity LED group");
   }
   if (recEl.hidden || ledEl.hidden) {
-    failures.push("a progress frame hid an LED individually");
+    failures.push("a busy frame hid an LED individually");
   }
 
   emitStatus({ label: "Download complete", description: "ready" });
   if (!barberpoleEl.hidden) {
-    failures.push("clearing progress did not hide the barberpole");
+    failures.push("a non-busy frame did not hide the barberpole");
   }
   if (indicatorsEl.hidden) {
-    failures.push("clearing progress hid the recording and activity LED group");
+    failures.push("a non-busy frame hid the recording and activity LED group");
   }
 });

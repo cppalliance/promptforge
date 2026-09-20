@@ -22,7 +22,6 @@ use std::sync::Arc;
 use axum::Router;
 
 use harness_api::Harness;
-use shared_progress::ProgressHub;
 
 use workshop_gateway::GatewayHandles;
 use workshop_menu::MenuHandles;
@@ -358,7 +357,6 @@ fn compose(
         gateway.identity().cloned(),
     )
     .map_err(StateError::Gateway)?;
-    let progress = Arc::new(ProgressHub::new());
     let backoff = ReconnectBackoff::new();
     let health = GatewayHealth::new();
     let gateway_handles = GatewayHandles::new(gateway_binding, health.clone());
@@ -371,16 +369,8 @@ fn compose(
     // The background tasks register beside the state handles; the shell
     // spawns them from the registry's task vector when it starts
     // serving.
-    registrations.hold(workshop_status::register_tasks(
-        &registry,
-        Arc::clone(&progress),
-    ));
-    let (heartbeat, subscriber) = workshop_gateway::register_tasks(
-        &registry,
-        &gateway_handles,
-        Arc::clone(&progress),
-        backoff.clone(),
-    );
+    let (heartbeat, subscriber) =
+        workshop_gateway::register_tasks(&registry, &gateway_handles, backoff.clone());
     registrations.hold(heartbeat);
     registrations.hold(subscriber);
     // The workspace remembers its last-used file in the state directory;

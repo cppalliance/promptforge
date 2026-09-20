@@ -87,9 +87,7 @@ export class StatusBar extends Disposable {
       tooltip: frame.description,
       error: frame.severity === "error",
     });
-    // Interim: the frame still carries a fraction; only its presence
-    // drives the barberpole until the protocol's busy flag lands.
-    this.shell.setBusy(frame.progress !== null);
+    this.shell.setBusy(frame.busy);
   }
 
   /**

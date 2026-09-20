@@ -1,18 +1,19 @@
 //! The `GET /admin/progress` subscription: a long-lived SSE stream of
-//! [`ProgressEvent`]s, decoded block-by-block under a hard size bound.
+//! [`Progress`] snapshots, decoded block-by-block under a hard size
+//! bound.
 //!
 //! Unlike the switch and cache streams, a progress subscription never
-//! terminates on its own and carries events the workshop imports into
-//! the progress hub verbatim, so the decode keeps the stricter posture
-//! the subscriber always had: only blank-line-terminated blocks
-//! dispatch (an incomplete trailing block is discarded), and a block
-//! that grows past `MAX_EVENT_BLOCK` without its terminator is
-//! refused rather than buffered unbounded.
+//! terminates on its own and carries snapshots the workshop renders
+//! verbatim, so the decode keeps the stricter posture the subscriber
+//! always had: only blank-line-terminated blocks dispatch (an incomplete
+//! trailing block is discarded), and a block that grows past
+//! `MAX_EVENT_BLOCK` without its terminator is refused rather than
+//! buffered unbounded.
 
 use std::pin::Pin;
 
 use futures_util::Stream;
-use shared_progress::ProgressEvent;
+use gateway_api_types::Progress;
 
 use super::GatewayError;
 
@@ -25,25 +26,23 @@ pub(crate) const MAX_EVENT_BLOCK: usize = 1024 * 1024;
 /// The largest error body kept for a subscription diagnostic, in bytes.
 const MAX_ERROR_BODY: usize = 2000;
 
-/// A stream of decoded [`ProgressEvent`]s from the gateway, in arrival
-/// order.
+/// A stream of decoded [`Progress`] snapshots from the gateway, in
+/// arrival order.
 ///
 /// A `data:` block that does not decode is yielded as one error item
 /// without ending the stream; a read failure or an event block oversized
 /// beyond `MAX_EVENT_BLOCK` is yielded as one error item that ends the
 /// stream. The stream ends when the gateway closes the body; whether to
 /// resubscribe is the caller's decision.
-pub type ProgressEventStream =
-    Pin<Box<dyn Stream<Item = Result<ProgressEvent, GatewayError>> + Send>>;
+pub type ProgressStream = Pin<Box<dyn Stream<Item = Result<Progress, GatewayError>> + Send>>;
 
-/// Turns an answered `GET /admin/progress` request into the event stream.
+/// Turns an answered `GET /admin/progress` request into the snapshot
+/// stream.
 ///
 /// The endpoint answers only an event stream on success, so a
 /// non-success status is [`GatewayError::Status`] carrying a bounded,
 /// control-escaped body rather than a relayed response.
-pub(super) async fn subscribe(
-    response: reqwest::Response,
-) -> Result<ProgressEventStream, GatewayError> {
+pub(super) async fn subscribe(response: reqwest::Response) -> Result<ProgressStream, GatewayError> {
     let status = response.status();
     if !status.is_success() {
         return Err(GatewayError::Status {
@@ -87,7 +86,7 @@ async fn error_body(mut response: reqwest::Response) -> Result<String, GatewayEr
     Ok(escaped)
 }
 
-/// Decodes an SSE body into a progress-event stream: chunks are buffered
+/// Decodes an SSE body into a snapshot stream: chunks are buffered
 /// until a blank line terminates an event block (LF or CRLF line endings
 /// alike), comment-only blocks (heartbeats) are skipped, and an
 /// undecodable block becomes one error item rather than killing the
@@ -96,7 +95,7 @@ async fn error_body(mut response: reqwest::Response) -> Result<String, GatewayEr
 /// [`MAX_EVENT_BLOCK`] without a terminator is refused as one error
 /// item, after which the stream ends, so a peer cannot buffer the client
 /// unbounded.
-fn decode(response: reqwest::Response) -> ProgressEventStream {
+fn decode(response: reqwest::Response) -> ProgressStream {
     let events = futures_util::stream::unfold(
         (response, Vec::new(), false),
         |(mut response, mut buffer, mut failed)| async move {
@@ -137,10 +136,10 @@ fn decode(response: reqwest::Response) -> ProgressEventStream {
     Box::pin(events)
 }
 
-/// Pops the next decodable event out of `buffer`, or `None` when no
+/// Pops the next decodable snapshot out of `buffer`, or `None` when no
 /// complete block is buffered yet. Comment-only blocks (heartbeats) are
 /// consumed and skipped.
-fn next_buffered_event(buffer: &mut Vec<u8>) -> Option<Result<ProgressEvent, GatewayError>> {
+fn next_buffered_event(buffer: &mut Vec<u8>) -> Option<Result<Progress, GatewayError>> {
     loop {
         let end = block_end(buffer)?;
         let block: Vec<u8> = buffer.drain(..end).collect();
@@ -167,7 +166,7 @@ fn block_end(buffer: &[u8]) -> Option<usize> {
 /// Decodes one SSE event block: `data:` lines join into the payload,
 /// comment lines and unrecognized fields are ignored, and a block with
 /// no payload (a heartbeat) yields `None`.
-fn parse_event_block(block: &[u8]) -> Option<Result<ProgressEvent, GatewayError>> {
+fn parse_event_block(block: &[u8]) -> Option<Result<Progress, GatewayError>> {
     let mut data: Vec<u8> = Vec::new();
     for line in block.split(|byte| *byte == b'\n') {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
@@ -183,7 +182,7 @@ fn parse_event_block(block: &[u8]) -> Option<Result<ProgressEvent, GatewayError>
     }
     Some(
         serde_json::from_slice(&data).map_err(|source| GatewayError::Malformed {
-            message: "progress event was not valid JSON".to_owned(),
+            message: "progress snapshot was not a valid {busy, text} JSON object".to_owned(),
             source: Some(Box::new(source)),
         }),
     )

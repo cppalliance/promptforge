@@ -3,8 +3,8 @@
 //! bus payload (SiYuan's `PushReloadFiletree` pattern).
 //!
 //! Producers hold a [`Push`] and speak in intents - a status update, a
-//! failure, an activity pulse, determinate progress, idle, a fresh model
-//! catalog; workbench producers drive the Model-menu mutators through
+//! failure, an activity pulse, busy, idle, a fresh model catalog;
+//! workbench producers drive the Model-menu mutators through
 //! [`Push::menu`], and every mutation publishes its own snapshot. What
 //! each intent becomes on the wire is decided here and in
 //! `workshop-protocol`, nowhere else. The sinks stay the transport:
@@ -14,7 +14,7 @@
 //! Every intent degrades to a no-op while its sink slot is empty, so a
 //! producer spawned before its subsystem registers never fails.
 
-use workshop_protocol::{Activity, Progress, Severity, StatusBarUpdate};
+use workshop_protocol::{Activity, Severity, StatusBarUpdate};
 
 use crate::Registry;
 use crate::traits::{CatalogSink, MenuSink, StatusSink};
@@ -38,14 +38,14 @@ impl Push {
     }
 
     /// Pushes a user-visible status update: a `{"type":"status",...}`
-    /// `StatusFrame` at info severity with no progress.
+    /// `StatusFrame` at info severity, not busy.
     pub fn push_status_update(
         &self,
         label: impl Into<String>,
         description: impl Into<String>,
         activity: Activity,
     ) {
-        self.emit(label, description, None, Severity::Info, activity);
+        self.emit(label, description, false, Severity::Info, activity);
     }
 
     /// Pushes a failure the user should see: a `{"type":"status",...}`
@@ -56,7 +56,7 @@ impl Push {
         description: impl Into<String>,
         activity: Activity,
     ) {
-        self.emit(label, description, None, Severity::Error, activity);
+        self.emit(label, description, false, Severity::Error, activity);
     }
 
     /// Pushes an activity pulse the UI does not display as text: a
@@ -68,28 +68,21 @@ impl Push {
         description: impl Into<String>,
         activity: Activity,
     ) {
-        self.emit(label, description, None, Severity::Debug, activity);
+        self.emit(label, description, false, Severity::Debug, activity);
     }
 
-    /// Pushes determinate progress - `current` of `total` units done: a
-    /// `{"type":"status",...}` `StatusFrame` at [`Severity::Info`]
-    /// carrying a [`Progress`], which the status bar renders as its
-    /// progress bar.
-    pub fn push_progress(
+    /// Pushes work in flight: a `{"type":"status",...}` `StatusFrame`
+    /// at [`Severity::Info`] with `busy` set, which the status bar
+    /// renders as its text plus the indeterminate barberpole. The work
+    /// ends with any later non-busy frame - [`Push::push_idle`], a
+    /// status update, or a failure.
+    pub fn push_busy(
         &self,
         label: impl Into<String>,
         description: impl Into<String>,
-        current: u64,
-        total: u64,
         activity: Activity,
     ) {
-        self.emit(
-            label,
-            description,
-            Some(Progress { current, total }),
-            Severity::Info,
-            activity,
-        );
+        self.emit(label, description, true, Severity::Info, activity);
     }
 
     /// Pushes the status bar back to its resting state: the
@@ -128,7 +121,7 @@ impl Push {
         &self,
         label: impl Into<String>,
         description: impl Into<String>,
-        progress: Option<Progress>,
+        busy: bool,
         severity: Severity,
         activity: Activity,
     ) {
@@ -138,7 +131,7 @@ impl Push {
         status.emit(StatusBarUpdate {
             label: label.into(),
             description: description.into(),
-            progress,
+            busy,
             severity,
             activity,
         });

@@ -10,7 +10,7 @@ fn retained(label: &str) -> StatusBarUpdate {
     StatusBarUpdate {
         label: label.to_owned(),
         description: String::new(),
-        progress: None,
+        busy: false,
         severity: Severity::Info,
         activity: Activity::General,
     }
@@ -50,16 +50,13 @@ fn a_join_replays_a_retained_frame_carrying_real_work() {
     let working = Some(StatusBarUpdate {
         label: "Downloading model".to_owned(),
         description: "ggml-large-v3.bin".to_owned(),
-        progress: Some(workshop_protocol::Progress {
-            current: 1,
-            total: 2,
-        }),
+        busy: true,
         severity: Severity::Info,
         activity: Activity::General,
     });
     let update = join_status(working, &health).expect("the work frame replays as-is");
     assert_eq!(update.label, "Downloading model");
-    assert!(update.progress.is_some());
+    assert!(update.busy, "the busy flag survives the join recompute");
 }
 
 #[test]

@@ -8,7 +8,7 @@ The desktop app (at `shell/`): hosts the workshop server in-process and opens th
 
 ## workshop-server
 
-The workshop HTTP server: serves the workshop API to the desktop shell, loopback-only, with the embedded SPA. The shell hosts it in-process, and it composes every subsystem through the registry. It also holds the sessions subsystem itself: the `/ws` workbench socket, the `/agents/ws` agent-session socket, and the `/v1/models` catalog relay, with agent sessions run in the harness through `harness-api` (the shell constructs the `Harness` at boot, registers it, and pushes the gateway binding, chat catalog, and host snapshot into it as data). Depends on all eight sibling subsystems plus harness-api, promptforge-api-types, shared-loopback, shared-progress, and gateway-api-discovery; build-ui is its build dependency.
+The workshop HTTP server: serves the workshop API to the desktop shell, loopback-only, with the embedded SPA. The shell hosts it in-process, and it composes every subsystem through the registry. It also holds the sessions subsystem itself: the `/ws` workbench socket, the `/agents/ws` agent-session socket, and the `/v1/models` catalog relay, with agent sessions run in the harness through `harness-api` (the shell constructs the `Harness` at boot, registers it, and pushes the gateway binding, chat catalog, and host snapshot into it as data). Depends on all eight sibling subsystems plus harness-api, promptforge-api-types, shared-loopback, and gateway-api-discovery; build-ui is its build dependency.
 
 ## workshop-server-api
 
@@ -16,7 +16,7 @@ The shell's view of the server: re-exports only, so server internals never resol
 
 ## workshop-gateway
 
-The gateway client: bearer-auth HTTP, endpoint binding and discovery, heartbeat, the progress subscriber, and the run event log. The server's subsystems reach the gateway through it. Depends on workshop-protocol, workshop-registry, workshop-support, promptforge-api-types, shared-progress, and gateway-api-discovery.
+The gateway client: bearer-auth HTTP, endpoint binding and discovery, heartbeat, the progress subscriber (which decodes the gateway's `Progress` snapshots and drives the status bar's busy frames), and the run event log. The server's subsystems reach the gateway through it. Depends on workshop-protocol, workshop-registry, workshop-support, promptforge-api-types, gateway-api-types, and gateway-api-discovery.
 
 ## workshop-menu
 
@@ -32,7 +32,7 @@ The sealed proxy slots subsystems self-register into, so the composition root ne
 
 ## workshop-status
 
-The status-bar broadcast bus and the progress renderer driven by the process progress hub. The server mounts it as the status subsystem. Depends on workshop-protocol, workshop-registry, workshop-support, and shared-progress.
+The status-bar broadcast bus. The server mounts it as the status subsystem. Depends on workshop-protocol, workshop-registry, and workshop-support.
 
 ## workshop-support
 

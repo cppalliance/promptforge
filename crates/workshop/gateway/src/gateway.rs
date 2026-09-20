@@ -19,7 +19,7 @@ pub use events::{
     CacheEvent, CacheResponse, ForwardedResponse, GatewayResponse, SsePayloadStream, SwitchOutcome,
     SwitchResponse,
 };
-pub use progress::ProgressEventStream;
+pub use progress::ProgressStream;
 pub use socket::GatewayRealtimeSocket;
 use sse::{is_event_stream, payload_stream, read};
 
@@ -406,7 +406,7 @@ impl GatewayClient {
     /// [`GatewayError::Status`] on a non-success status, and
     /// [`GatewayError::ReadBody`] when that answer's body cannot be
     /// read.
-    pub async fn subscribe_progress(&self) -> Result<ProgressEventStream, GatewayError> {
+    pub async fn subscribe_progress(&self) -> Result<ProgressStream, GatewayError> {
         let request = self.authorize(self.http.get(format!("{}/admin/progress", self.base_url)));
         let response = self.send_bounded(request).await?;
         progress::subscribe(response).await

@@ -203,7 +203,7 @@ const generatingFrame = {
   description: "",
   severity: "info",
   activity: "generating",
-  progress: null,
+  busy: false,
 };
 statusBar.render(generatingFrame);
 check(
@@ -332,7 +332,7 @@ const statusFrame = {
   description: "",
   severity: "info",
   activity: null,
-  progress: null,
+  busy: false,
 };
 fakeSockets[0].message(statusFrame);
 check(

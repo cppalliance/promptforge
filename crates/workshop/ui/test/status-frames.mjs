@@ -1,10 +1,10 @@
 // Status frames render into the status bar. Text and tooltip: info and
 // error frames set the bar text and description tooltip, error frames style
 // the text and the styling clears on the next info frame, and debug frames
-// are internal instrumentation that must not touch either. Busy: a
-// non-null progress shows the barberpole beside the recording+activity LED
-// indicators group, which stays visible; a null progress hides the
-// barberpole; debug frames never disturb it.
+// are internal instrumentation that must not touch either. Busy: a busy
+// frame shows the barberpole beside the recording+activity LED indicators
+// group, which stays visible; a non-busy frame hides the barberpole; debug
+// frames never disturb it.
 // Run: node test/status-frames.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
@@ -50,9 +50,9 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
     label: "Downloading model",
     description: "1 of 4",
     activity: "general",
-    progress: { current: 1, total: 4 },
+    busy: true,
   });
-  if (barberpoleEl.hidden) failures.push("a progress frame did not reveal the barberpole");
+  if (barberpoleEl.hidden) failures.push("a busy frame did not reveal the barberpole");
   if (indicatorsEl.hidden) {
     failures.push("the recording and activity LED group hid while the barberpole is showing");
   }
@@ -60,15 +60,15 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
     label: "Downloading model",
     description: "2 of 4",
     activity: "general",
-    progress: { current: 2, total: 4 },
+    busy: true,
   });
   emitStatus({ label: "per-delta pulse", severity: "debug", activity: "generating" });
   if (barberpoleEl.hidden) {
     failures.push("a debug frame disturbed the barberpole");
   }
   emitStatus({ label: "Download complete", description: "ready" });
-  if (!barberpoleEl.hidden) failures.push("a null-progress frame did not hide the barberpole");
+  if (!barberpoleEl.hidden) failures.push("a non-busy frame did not hide the barberpole");
   if (indicatorsEl.hidden) {
-    failures.push("the recording and activity LED group hid when progress cleared");
+    failures.push("the recording and activity LED group hid when busy cleared");
   }
 });

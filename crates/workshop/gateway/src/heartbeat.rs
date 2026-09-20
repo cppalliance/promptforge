@@ -78,7 +78,7 @@ pub fn join_status(
         } else {
             UNREACHABLE_DESCRIPTION.to_owned()
         },
-        progress: None,
+        busy: false,
         severity: Severity::Info,
         activity: Activity::General,
     })

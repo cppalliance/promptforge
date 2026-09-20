@@ -6,10 +6,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop status subsystem: the status-bar broadcast bus and the progress renderer that drives the bar's indicator from the process progress hub"
+description = "Workshop status subsystem: the status-bar broadcast bus every /ws session forwards from"
 
 [dependencies]
-shared-progress.workspace = true
 tokio.workspace = true
 workshop-protocol.workspace = true
 workshop-registry.workspace = true
