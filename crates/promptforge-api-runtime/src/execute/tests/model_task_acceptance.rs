@@ -21,7 +21,7 @@ use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
 use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::scheduler::TaskState;
+use crate::execute::scheduler::test_hooks::TaskState;
 
 /// A broker delay that orders one child's end against another's. The
 /// scripted rounds between them complete in milliseconds on the loopback

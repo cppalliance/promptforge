@@ -59,7 +59,7 @@ impl UserStateStore {
 
     /// Every allow-listed key with its stored value, `None` when never
     /// saved.
-    pub async fn get_all(&self) -> BTreeMap<&'static str, Option<Value>> {
+    pub async fn all(&self) -> BTreeMap<&'static str, Option<Value>> {
         let state = self.state.lock().await;
         USER_STATE_KEYS
             .iter()

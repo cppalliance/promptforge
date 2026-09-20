@@ -44,7 +44,7 @@ pub fn routes(store: Arc<UserStateStore>) -> axum::Router {
 /// allow-listed name, `null` where nothing has been put.
 pub(crate) async fn get_state(State(store): State<Arc<UserStateStore>>) -> Response {
     let document: serde_json::Map<String, Value> = store
-        .get_all()
+        .all()
         .await
         .into_iter()
         .map(|(key, value)| (key.to_owned(), value.unwrap_or(Value::Null)))

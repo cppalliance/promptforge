@@ -35,7 +35,7 @@ fn all_null() -> BTreeMap<&'static str, Option<Value>> {
 async fn a_missing_file_yields_all_null_and_creates_nothing() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let store = UserStateStore::new(dir.path());
-    assert_eq!(store.get_all().await, all_null());
+    assert_eq!(store.all().await, all_null());
     assert!(
         dir_names(dir.path()).is_empty(),
         "construction alone writes no file"
@@ -57,7 +57,7 @@ async fn a_put_round_trips_through_a_fresh_store() {
             .expect("an allow-listed value under the cap is stored");
     }
     let reborn = UserStateStore::new(dir.path());
-    let state = reborn.get_all().await;
+    let state = reborn.all().await;
     assert_eq!(state["zoom"], Some(json!(1.25)));
     assert_eq!(state["recent_files"], Some(json!(["C:/a.md", "C:/b.md"])));
     assert_eq!(
@@ -77,7 +77,7 @@ async fn a_corrupt_file_yields_all_null_and_the_next_put_replaces_it() {
     std::fs::write(&path, "not json {").expect("write fixture");
     let store = UserStateStore::new(dir.path());
     assert_eq!(
-        store.get_all().await,
+        store.all().await,
         all_null(),
         "corrupt state degrades to no state, never to a failure"
     );
@@ -100,7 +100,7 @@ async fn a_non_object_document_yields_all_null() {
     std::fs::write(dir.path().join(USER_STATE_FILE), "[1, 2, 3]").expect("write fixture");
     let store = UserStateStore::new(dir.path());
     assert_eq!(
-        store.get_all().await,
+        store.all().await,
         all_null(),
         "valid JSON of the wrong shape is corrupt state"
     );
@@ -157,7 +157,7 @@ async fn a_disallowed_key_is_refused_without_a_write() {
         "a refused put creates no file"
     );
     assert_eq!(
-        store.get_all().await,
+        store.all().await,
         all_null(),
         "a refused put stores nothing"
     );
@@ -185,7 +185,7 @@ async fn an_over_cap_value_is_refused_without_a_write() {
         "a refused put creates no file"
     );
     assert_eq!(
-        store.get_all().await,
+        store.all().await,
         all_null(),
         "a refused put stores nothing"
     );
@@ -201,7 +201,7 @@ async fn a_value_exactly_at_the_cap_is_accepted() {
         .put("zoom", at_cap.clone())
         .await
         .expect("a value at the cap is under the limit, not over it");
-    assert_eq!(store.get_all().await["zoom"], Some(at_cap));
+    assert_eq!(store.all().await["zoom"], Some(at_cap));
 }
 
 #[tokio::test]
@@ -220,7 +220,7 @@ async fn an_unwritable_state_dir_reports_io_and_keeps_the_value_in_memory() {
         "the write failure is reported as I/O: {error:?}"
     );
     assert_eq!(
-        store.get_all().await["zoom"],
+        store.all().await["zoom"],
         Some(json!(1)),
         "the in-memory state is the source of truth; a failed persist is degradation"
     );
@@ -232,7 +232,7 @@ async fn unknown_keys_in_the_file_are_preserved_but_not_served() {
     let path = dir.path().join(USER_STATE_FILE);
     std::fs::write(&path, r#"{"zoom": 3, "future_key": true}"#).expect("write fixture");
     let store = UserStateStore::new(dir.path());
-    let state = store.get_all().await;
+    let state = store.all().await;
     assert_eq!(state["zoom"], Some(json!(3)));
     assert_eq!(
         state.len(),

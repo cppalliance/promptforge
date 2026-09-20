@@ -117,9 +117,10 @@ pub enum SliceStatus {
 /// One normalized model entry. Future additive fields carry
 /// `#[serde(default)]`; the schema version bump is reserved for removals
 /// and renames.
-// The modality and capability booleans are the sheet schema itself; a
-// builder or sub-struct would only obscure the wire shape.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the modality and capability booleans are the sheet schema itself; a builder or sub-struct would only obscure the wire shape"
+)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntry {
     /// The upstream slug.

@@ -3828,7 +3828,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
             trusted: true,
         }),
     );
-    binding.0.output_kind = crate::lua::ToolOutputKind::Structured;
+    binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
     let out = TokioDriver::new(&ctx, None)
         .drive()
@@ -3853,7 +3853,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
             trusted: true,
         }),
     );
-    binding.0.output_kind = crate::lua::ToolOutputKind::Structured;
+    binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
     let error = TokioDriver::new(&ctx, None)
         .drive()
@@ -3890,7 +3890,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
             trusted: false,
         }),
     );
-    binding.0.output_kind = crate::lua::ToolOutputKind::Structured;
+    binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
     arm_tool_set(&ctx, vec![binding]);
     let error = TokioDriver::new(&ctx, None)
         .drive()

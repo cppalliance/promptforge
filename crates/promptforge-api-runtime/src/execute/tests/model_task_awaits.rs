@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
 use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::execute::scheduler::TaskState;
+use crate::execute::scheduler::test_hooks::TaskState;
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {

@@ -432,7 +432,7 @@ Commit: one commit.
 
 <step-8>
 
-### Step 8: Lint suppressions, test plumbing, doc examples
+### Step 8: Lint suppressions, test plumbing, doc examples [completed]
 
 - Component: `layout-lint-hygiene`
 - Piece: lint hygiene (D4b)

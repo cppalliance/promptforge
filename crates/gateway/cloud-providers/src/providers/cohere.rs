@@ -115,9 +115,11 @@ fn model_kind(endpoints: &[String]) -> ModelKind {
 }
 
 /// Normalize one wire model into a sheet entry.
-// The wire reports context_length as a double; the sheet field is a
-// whole-token count.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the wire reports context_length as a double; the sheet field is a whole-token count"
+)]
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.name, None);
     let endpoints = model.endpoints.as_deref().unwrap_or_default();

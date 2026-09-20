@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::scheduler::scheduler_context_on;
 use super::waits::{WaitRecorder, task, tasks_prompt};
 use super::*;
-use crate::execute::scheduler::TaskState;
+use crate::execute::scheduler::test_hooks::TaskState;
 
 /// The gateway reply a slow child parks on: long enough that a short
 /// timeout wins, short enough that the test then waits it out.

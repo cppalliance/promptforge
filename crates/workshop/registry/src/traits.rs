@@ -56,6 +56,7 @@ pub struct ShutdownHandle {
 
 impl ShutdownHandle {
     /// Wraps a closure yielding the task's stop-and-await future.
+    #[must_use]
     pub fn new<F, Fut>(stop: F) -> Self
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -136,6 +137,7 @@ where
     L: Fn() -> Option<StatusBarUpdate> + Send + Sync,
 {
     /// Builds the adapter from the bus's subscribe and latest closures.
+    #[must_use]
     pub fn new(subscribe: S, latest: L) -> Self {
         Self { subscribe, latest }
     }
@@ -181,6 +183,7 @@ where
     E: Fn(StatusBarUpdate) + Send + Sync,
 {
     /// Builds the adapter from the bus's emit closure.
+    #[must_use]
     pub fn new(emit: E) -> Self {
         Self { emit }
     }
@@ -214,6 +217,7 @@ where
     P: Fn(Vec<serde_json::Value>) + Send + Sync,
 {
     /// Builds the adapter from the bus's publish closure.
+    #[must_use]
     pub fn new(publish: P) -> Self {
         Self { publish }
     }
@@ -258,6 +262,7 @@ where
     F: Fn() -> Vec<PathBuf> + Send + Sync,
 {
     /// Builds the adapter from the workspace's granted-roots closure.
+    #[must_use]
     pub fn new(roots: F) -> Self {
         Self { roots }
     }
@@ -293,6 +298,7 @@ where
     F: Fn() -> Router + Send + Sync,
 {
     /// Builds the adapter from the subsystem's router constructor.
+    #[must_use]
     pub fn new(build: F) -> Self {
         Self { build }
     }
@@ -328,6 +334,7 @@ where
     F: Fn() -> ShutdownHandle + Send + Sync,
 {
     /// Builds the adapter from the subsystem's spawn closure.
+    #[must_use]
     pub fn new(spawn: F) -> Self {
         Self { spawn }
     }
@@ -368,6 +375,7 @@ where
 {
     /// Builds the adapter from the menu bus's mutator closures, in the
     /// [`MenuSink`] trait's method order.
+    #[must_use]
     pub fn new(reachable: R, profiles: P, restore: S, reconcile: C) -> Self {
         Self {
             reachable,

@@ -23,6 +23,7 @@ pub struct CommandRequest {
 
 impl CommandRequest {
     /// Creates a request for `program` with no arguments.
+    #[must_use]
     pub fn new(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),

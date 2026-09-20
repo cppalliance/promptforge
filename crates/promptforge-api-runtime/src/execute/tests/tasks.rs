@@ -13,7 +13,7 @@ use promptforge_api_types::ids::{AbandonReason, TaskId, TaskOrigin};
 
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::execute::scheduler::TaskState;
+use crate::execute::scheduler::test_hooks::TaskState;
 
 /// A recorder that keeps the typed observation, so a payload-carrying
 /// variant (`TaskStarted`) can be matched whole.

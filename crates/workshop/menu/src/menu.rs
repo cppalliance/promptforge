@@ -181,6 +181,7 @@ impl MenuBus {
     /// loading the per-profile model memory from `state_dir` when one is
     /// given. A missing, unreadable, or corrupt memory file means "no
     /// memory yet": logged and tolerated (zone two), never fatal.
+    #[must_use]
     pub fn new(catalog: CatalogBus, state_dir: Option<&Path>) -> Self {
         let memory_path = state_dir.map(|dir| dir.join(WORKSHOP_STATE_FILE));
         let last_selected = memory_path.as_deref().map(load_memory).unwrap_or_default();

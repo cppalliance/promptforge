@@ -30,7 +30,10 @@ pub type Tag = (EffectId, Provenance);
 /// # Panics
 ///
 /// Panics when called outside a tokio runtime, as `tokio::spawn` does.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this wrapper is the harness's permitted caller of tokio::spawn"
+)]
 pub fn spawn_tagged<F>(tag: Tag, fut: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
@@ -57,7 +60,10 @@ where
 /// # Panics
 ///
 /// Panics when called outside a tokio runtime, as `tokio::spawn` does.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this wrapper is the harness's permitted caller of tokio::spawn"
+)]
 pub fn spawn_session<F>(session: &str, fut: F) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
@@ -78,7 +84,10 @@ where
 ///
 /// Panics when called outside a tokio runtime, as
 /// `tokio::task::spawn_blocking` does.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this wrapper is the harness's permitted caller of tokio::task::spawn_blocking"
+)]
 pub fn spawn_blocking_tagged<F, R>(tag: Tag, f: F) -> JoinHandle<R>
 where
     F: FnOnce() -> R + Send + 'static,
@@ -110,7 +119,10 @@ where
 ///
 /// Panics when called outside a tokio runtime, as
 /// `tokio::task::spawn_blocking` does.
-#[allow(clippy::disallowed_methods)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this wrapper is the harness's permitted caller of tokio::task::spawn_blocking"
+)]
 pub fn spawn_blocking_launch<F, R>(agent: &str, f: F) -> JoinHandle<R>
 where
     F: FnOnce() -> R + Send + 'static,

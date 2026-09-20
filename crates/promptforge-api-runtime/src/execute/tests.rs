@@ -21,7 +21,7 @@ use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
-use crate::store::{Access, StoreError, StoreExt, VfsRef};
+use crate::store::{Access, StoreError, VfsRef};
 use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
@@ -30,7 +30,9 @@ use crate::test_support::{RunHost, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
+use promptforge_lua::ToolOutputKind;
 use promptforge_model_client::model::ModelCatalog;
+use promptforge_store::StoreExt;
 
 /// A fresh stock handle's access capability, for tests that inject host
 /// values into a standalone VM.
@@ -1237,7 +1239,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             id: ToolId::parse("tests/tools/echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
             schema: EchoTool.parameters_schema(),
-            output_kind: crate::lua::ToolOutputKind::Plain,
+            output_kind: ToolOutputKind::Plain,
             conflicts: Vec::new(),
         }],
         Vec::new(),

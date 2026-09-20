@@ -11,8 +11,6 @@
 //! The implementation lives in the `promptforge-lua` crate and is re-exported
 //! here unchanged, so existing `promptforge_api_runtime::lua::*` paths keep working.
 
-#[cfg(test)]
-pub(crate) use promptforge_lua::ToolOutputKind;
 // The store operation behind `execute::perform_store_op`, the door a
 // host's store performer answers a `Store` effect through.
 pub(crate) use promptforge_lua::run_store_op;

@@ -5,7 +5,8 @@
 
 use promptforge_api_types::ids::TaskId;
 
-use super::{Scheduler, TaskState};
+use super::Scheduler;
+pub(crate) use super::tasks::TaskState;
 
 impl Scheduler {
     /// Shrinks the chain-count bound so a test can drive the

@@ -825,12 +825,12 @@ struct Ready {
 ///
 /// let options = ServeOptions::new(
 ///     Some(PathBuf::from("/etc/promptforge/gateway.toml")),
-///     ProfileName::parse("dev").unwrap(),
+///     ProfileName::parse("dev")?,
 /// );
 /// let gateway = spawn(&options)?;
 /// println!("serving on {}", gateway.url());
 /// gateway.shutdown()?;
-/// # Ok::<(), gateway::StartupError>(())
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
     let browser = options.browser;

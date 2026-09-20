@@ -21,6 +21,4 @@
 
 pub(crate) use promptforge_store::Store;
 pub(crate) use promptforge_store::StoreError;
-#[cfg(test)]
-pub(crate) use promptforge_store::StoreExt;
 pub(crate) use shared_vfs::{Access, VfsRef};

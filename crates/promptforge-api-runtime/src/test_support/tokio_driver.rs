@@ -402,7 +402,7 @@ impl<'a> TokioDriver<'a> {
     pub(crate) fn task_state_for_test(
         &mut self,
         task: &promptforge_api_types::ids::TaskId,
-    ) -> Option<crate::execute::scheduler::TaskState> {
+    ) -> Option<crate::execute::scheduler::test_hooks::TaskState> {
         self.scheduler_for_test().task_state_for_test(task)
     }
 

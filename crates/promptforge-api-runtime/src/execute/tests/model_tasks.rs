@@ -12,7 +12,7 @@ use promptforge_api_types::ids::{AbandonReason, TaskId, TaskOrigin};
 use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;
-use crate::execute::scheduler::TaskState;
+use crate::execute::scheduler::test_hooks::TaskState;
 use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
 use crate::test_support::TestBroker;

@@ -71,7 +71,7 @@ mod step;
 mod task_events;
 mod tasks;
 #[cfg(test)]
-mod test_hooks;
+pub(crate) mod test_hooks;
 mod timer;
 mod tool_call;
 mod waits;
@@ -97,8 +97,6 @@ use super::section_context::{SectionContext, TaskSeed};
 use await_tasks::AwaitTasks;
 use pending::{Continuation, Pending, ToolCallContinuation};
 use tasks::TaskSlot;
-#[cfg(test)]
-pub(crate) use tasks::TaskState;
 
 /// Where a sibling slice sits in the prompt tree: the index of each
 /// ancestor section from the top level down to the slice's parent. The

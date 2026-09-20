@@ -32,7 +32,10 @@ pub(super) fn host_of(url: &str) -> &str {
 /// Sign a GET request per AWS Signature Version 4, returning the
 /// `Authorization` header value. `query` is the canonical query string
 /// (name-sorted, URI-encoded); the Bedrock list endpoint takes none.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the eight inputs are the SigV4 canonical request fields; a struct would restate them once more"
+)]
 pub(super) fn sign_get(
     host: &str,
     path: &str,

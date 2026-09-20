@@ -178,6 +178,7 @@ impl fmt::Debug for VfsRef {
 
 impl VfsRef {
     /// Returns a handle over `backend` with the [`AllowAll`] policy.
+    #[must_use]
     pub fn new(backend: impl Vfs + 'static) -> VfsRef {
         Self::with_policy(backend, AllowAll)
     }
@@ -186,6 +187,7 @@ impl VfsRef {
     /// operation. The policy is dynamic through shared state: the host
     /// holds the same `Arc` and changes behavior mid-run, and the next
     /// operation sees it.
+    #[must_use]
     pub fn with_policy(
         backend: impl Vfs + 'static,
         policy: impl Policy + Sync + 'static,

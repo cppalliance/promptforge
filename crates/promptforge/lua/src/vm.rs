@@ -48,7 +48,7 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// the same explicit observed teardown boundary as later lifecycle failures.
 ///
 /// # Examples
-/// ```text
+/// ```no_run
 /// use promptforge_lua::SectionVm;
 /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
 /// use promptforge_api_types::untrusted::GuardNonce;
@@ -57,7 +57,7 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
 /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
 /// vm.teardown(&emitter, "Example");
-/// # Ok::<(), promptforge_lua::Error>(())
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
 pub struct SectionVm {
@@ -228,7 +228,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     ///
     /// # Examples
-    /// ```text
+    /// ```no_run
     /// use promptforge_lua::SectionVm;
     /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
@@ -237,7 +237,7 @@ impl SectionVm {
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), promptforge_lua::Error>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn new(nonce: &GuardNonce, emitter: &Emitter, section: &str) -> Result<Self> {
         let lua = Lua::new_with(
@@ -430,7 +430,7 @@ impl SectionVm {
     /// values were already injected.
     ///
     /// # Examples
-    /// ```text
+    /// ```no_run
     /// use promptforge_lua::SectionVm;
     /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
@@ -439,13 +439,12 @@ impl SectionVm {
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
-    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
-    ///         .expect("the stock backend acquires"),
+    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))?,
     /// );
     /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &access)?;
     /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), promptforge_lua::Error>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn inject_host(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
         self.inject_host_with_var(args, sys, access, None, Argv::Frozen(None))
@@ -780,7 +779,7 @@ impl SectionVm {
     /// cannot be represented as JSON.
     ///
     /// # Examples
-    /// ```text
+    /// ```no_run
     /// use promptforge_lua::SectionVm;
     /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
@@ -789,14 +788,13 @@ impl SectionVm {
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
-    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
-    ///         .expect("the stock backend acquires"),
+    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))?,
     /// );
     /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &access)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), promptforge_lua::Error>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn var(&self) -> Result<Json> {
         if !self.host_injected {
@@ -993,7 +991,7 @@ impl SectionVm {
     /// retained by the VM.
     ///
     /// # Examples
-    /// ```text
+    /// ```no_run
     /// use promptforge_lua::SectionVm;
     /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
@@ -1002,7 +1000,7 @@ impl SectionVm {
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.teardown(&emitter, "Example");
-    /// # Ok::<(), promptforge_lua::Error>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn teardown(self, emitter: &Emitter, section: &str) {
         emitter.report(section, lifecycle::LUA_TEARDOWN_STARTED);

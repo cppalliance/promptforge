@@ -8,7 +8,6 @@
 //! owns GGUF domain knowledge.
 
 #[cfg(feature = "local")]
-#[cfg(feature = "local")]
 use axum::Json;
 #[cfg(feature = "local")]
 use axum::extract::rejection::QueryRejection;

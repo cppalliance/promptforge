@@ -13,7 +13,7 @@ use promptforge_api_types::ids::TaskId;
 
 use super::scheduler::{GateObserver, StoreGate, gated_store, scheduler_context_on};
 use super::*;
-use crate::execute::scheduler::TaskState;
+use crate::execute::scheduler::test_hooks::TaskState;
 
 /// A recorder that keeps the typed observation, so a payload-carrying
 /// variant can be matched whole. Shared with the timeout suite, which
