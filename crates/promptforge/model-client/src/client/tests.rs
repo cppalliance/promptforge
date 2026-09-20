@@ -1,3 +1,5 @@
+//! Tests for the wire message constructors and tool schema validation.
+
 use serde_json::Value;
 
 use super::*;

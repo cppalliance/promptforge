@@ -1,3 +1,5 @@
+//! Tests that the std-only RFC 3339 formatter agrees with the `time` crate.
+
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 

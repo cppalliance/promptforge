@@ -1,3 +1,5 @@
+//! Tests for section walk control flow: `call`, `jump`, `fanout`, `list_from_section`, and `var`.
+
 use super::run;
 use super::*;
 use crate::test_support::synthetic_section;

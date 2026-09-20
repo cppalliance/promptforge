@@ -1,3 +1,5 @@
+//! Compiled Lua chunks: bytecode compilation with debug info and chunk-line to prompt-line mapping.
+
 use super::{Emitter, Error, Function, Lua, LuaOptions, NonZeroU32, Result, StdLib, lifecycle};
 
 /// Identifies whether temporary compiler setup or chunk compilation failed.

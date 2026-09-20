@@ -57,7 +57,7 @@ pub(crate) struct TurnContext<'a> {
     pub(crate) reasoning_content: Option<String>,
 }
 
-/// Extract and shape-validate the first choice's per-turn context.
+/// Extracts and shape-validates the first choice's per-turn context.
 ///
 /// # Errors
 /// Returns [`Error::MalformedResponse`] when `choices` is missing or not a
@@ -181,7 +181,7 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
     ))
 }
 
-/// Parse the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
+/// Parses the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
 ///
 /// Each call must be an object with a nonblank string `id`, an object
 /// `function` carrying a nonblank string `name`, and an `arguments` field that

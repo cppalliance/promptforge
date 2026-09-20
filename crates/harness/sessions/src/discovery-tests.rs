@@ -1,3 +1,5 @@
+//! Tests for agent discovery in the agents directory and the built-in chat fallback.
+
 use super::*;
 
 #[test]

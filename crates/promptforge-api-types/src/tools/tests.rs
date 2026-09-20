@@ -1,3 +1,5 @@
+//! Tests for `ToolId`, `ToolDescriptor`, `ToolCatalog`, and tool output trust.
+
 use serde_json::json;
 
 use super::{ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolId};

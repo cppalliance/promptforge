@@ -1,3 +1,5 @@
+//! Tests for `RunContext` construction, forking, and task sequence seeding.
+
 use super::*;
 
 fn test_prompt() -> Prompt {

@@ -1,3 +1,5 @@
+//! Tests for `ChainId`, `TaskId`, `TaskOrigin`, and `Provenance` rendering, parsing, and ordering.
+
 use super::{ChainId, Provenance, TaskId, TaskOrigin};
 
 #[test]

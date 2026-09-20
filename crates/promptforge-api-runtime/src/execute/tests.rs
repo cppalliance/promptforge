@@ -121,7 +121,7 @@ impl TestPrompt {
     }
 }
 
-/// Build the tool-free parsed form consumed by the complete lifecycle path.
+/// Builds the tool-free parsed form consumed by the complete lifecycle path.
 fn fixture(md: &str) -> TestPrompt {
     TestPrompt {
         prompt: parse(md),
@@ -324,7 +324,7 @@ fn gatewayed_with_debug(addr: SocketAddr, capture: Arc<dyn DebugCapture>) -> Run
     }
 }
 
-/// Parse `md` and run it offline with empty `args`, no tools, and a fresh
+/// Parses `md` and runs it offline with empty `args`, no tools, and a fresh
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.
 async fn run_offline(md: &str) -> Result<String> {
@@ -545,7 +545,7 @@ impl Recorder {
     }
 }
 
-/// Run `md` offline under a fresh recorder and return the result together
+/// Runs `md` offline under a fresh recorder and returns the result together
 /// with every complete correlated record the recorder saw.
 async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)>) {
     let recorder = Arc::new(Recorder::default());
@@ -565,7 +565,7 @@ async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)
     (result, recorder.records())
 }
 
-/// Discard only the execution field when an older ordering regression is
+/// Discards only the execution field when an older ordering regression is
 /// intentionally about section and detail rather than correlation.
 fn events(records: &[(String, String, String)]) -> Vec<(String, String)> {
     records

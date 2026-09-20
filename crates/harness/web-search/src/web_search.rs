@@ -81,7 +81,7 @@ impl fmt::Debug for WebSearch {
 }
 
 impl WebSearch {
-    /// Construct a `WebSearch` bound to a validated gateway API root and a
+    /// Constructs a `WebSearch` bound to a validated gateway API root and a
     /// non-empty bearer token.
     ///
     /// The root is parsed and normalized at construction and an empty token is
@@ -110,7 +110,7 @@ impl WebSearch {
         Self::with_timeout(base_url, token, REQUEST_TIMEOUT)
     }
 
-    /// Construct a `WebSearch` with an explicit request deadline.
+    /// Constructs a `WebSearch` with an explicit request deadline.
     ///
     /// Shared by [`WebSearch::new`] (default deadline) and tests (short deadline
     /// against a stalling mock), so the timeout is always injected rather than
@@ -200,7 +200,7 @@ struct SearchRequest {
     /// Only keep results from these hostnames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     include_domains: Option<Vec<String>>,
-    /// Drop results from these hostnames.
+    /// Drops results from these hostnames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     exclude_domains: Option<Vec<String>>,
 }

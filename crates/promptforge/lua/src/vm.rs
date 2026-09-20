@@ -1,3 +1,5 @@
+//! The per-section Lua VM: construction, host injection, coroutine stepping, and chunk execution.
+
 use super::{
     Access, Arc, Argv, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
     DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, Function, GuardNonce, InstructionBudget,
@@ -1273,7 +1275,7 @@ pub(crate) struct LuaOutcome {
     pub(crate) var: Json,
 }
 
-/// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
+/// Runs a section's Lua chunk with `args` and `sys` exposed, a writable `var`
 /// table available, and a `store` table backed by `store`, returning the
 /// chunk's return value and the final `var`. Harness-mediated store operations
 /// report safe outcomes through `emitter` under `section`.

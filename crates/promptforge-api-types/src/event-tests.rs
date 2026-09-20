@@ -1,3 +1,5 @@
+//! Tests for `Event` serde round trips and coordinate exposure.
+
 use serde_json::json;
 
 use super::Event;

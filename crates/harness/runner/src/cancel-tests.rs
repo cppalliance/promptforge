@@ -1,3 +1,5 @@
+//! Tests for the runner's cancel handle, scopes, and parent-to-child propagation.
+
 use super::*;
 use std::time::Duration;
 use tokio::sync::oneshot;

@@ -1,3 +1,5 @@
+//! Tests for `CancelHandle`: idempotence, parent-to-child propagation, and waker behavior.
+
 use std::future::Future;
 use std::pin::pin;
 use std::sync::atomic::{AtomicUsize, Ordering};

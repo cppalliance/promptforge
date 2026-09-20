@@ -1,3 +1,5 @@
+//! Tests for the `models` namespace: `use`, `default`, `get`, and the model runtime selection.
+
 use super::{ModelRuntime, install_models};
 use mlua::Lua;
 use promptforge_model_client::model::ModelBinding;

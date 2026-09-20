@@ -144,7 +144,7 @@ pub trait Tool: Send + Sync {
         .structured(self.structured_output())
     }
 
-    /// Execute the tool with the given JSON arguments and return its output.
+    /// Executes the tool with the given JSON arguments and returns its output.
     ///
     /// The returned [`ToolOutput`] carries its own
     /// [`OutputTrust`](promptforge_api_types::tools::OutputTrust), so trust

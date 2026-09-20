@@ -36,7 +36,7 @@ pub struct Message {
 }
 
 impl Message {
-    /// Construct a `user` message.
+    /// Constructs a `user` message.
     ///
     /// # Examples
     ///
@@ -57,7 +57,7 @@ impl Message {
         }
     }
 
-    /// Construct a `tool` message carrying the result of a tool call.
+    /// Constructs a `tool` message carrying the result of a tool call.
     ///
     /// `tool_call_id` must match the `id` of the [`ToolCall`] this answers.
     #[must_use]
@@ -70,7 +70,7 @@ impl Message {
         }
     }
 
-    /// Construct a plain `assistant` text turn (no `tool_calls` field).
+    /// Constructs a plain `assistant` text turn (no `tool_calls` field).
     #[must_use]
     pub fn assistant(content: impl Into<String>) -> Message {
         Message {
@@ -107,7 +107,7 @@ impl Message {
         }
     }
 
-    /// Construct the `assistant` turn that requested tool calls.
+    /// Constructs the `assistant` turn that requested tool calls.
     ///
     /// `raw_tool_calls` is the backend's `tool_calls` array echoed back
     /// verbatim so the conversation history matches what the model emitted.

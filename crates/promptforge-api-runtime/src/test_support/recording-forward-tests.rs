@@ -1,3 +1,5 @@
+//! Tests for the recording emitter's forwarding of event groups to their seams.
+
 use std::sync::Mutex;
 
 use promptforge_api_types::ids::{ChainId, Provenance, TaskId};

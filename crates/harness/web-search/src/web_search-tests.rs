@@ -1,3 +1,5 @@
+//! Tests for the `WebSearch` tool: descriptor, argument validation, transport, and body bounds.
+
 use super::{
     MAX_COUNT, MAX_DOMAINS, MAX_ERROR_BODY, MAX_QUERY_LEN, MAX_RESPONSE_BODY, MAX_STRING_LEN,
     WebSearch,

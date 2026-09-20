@@ -19,9 +19,9 @@ use promptforge_api_types::tools::ToolErrorKind;
 /// the call with the given [`ToolErrorKind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Disposition {
-    /// Return the model-facing text as untrusted tool output.
+    /// Returns the model-facing text as untrusted tool output.
     SoftOutput,
-    /// Abort the call with this error kind.
+    /// Aborts the call with this error kind.
     Hard(ToolErrorKind),
 }
 

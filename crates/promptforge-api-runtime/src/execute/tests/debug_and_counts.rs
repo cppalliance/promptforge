@@ -1,3 +1,5 @@
+//! Tests for debug capture delivery and the `tools.calls` counters.
+
 use super::run;
 use super::*;
 

@@ -256,7 +256,7 @@ pub(crate) struct Heading {
     pub(crate) span: Range<usize>,
 }
 
-/// Split a file into its YAML frontmatter, its markdown body, and the
+/// Splits a file into its YAML frontmatter, its markdown body, and the
 /// number of lines consumed by the frontmatter block (both `---` delimiters
 /// and everything between them).
 ///
@@ -340,7 +340,7 @@ pub(crate) fn newlines_before(text: &str, byte_offset: usize) -> Result<u32> {
         .map_err(|_| Error::Internal("parser: newline count exceeded u32 range"))
 }
 
-/// Convert a `HeadingLevel` to its numeric level.
+/// Converts a `HeadingLevel` to its numeric level.
 fn level_num(level: HeadingLevel) -> u8 {
     match level {
         HeadingLevel::H1 => 1,
@@ -352,7 +352,7 @@ fn level_num(level: HeadingLevel) -> u8 {
     }
 }
 
-/// Walk the markdown body and collect every heading with the content that
+/// Walks the markdown body and collects every heading with the content that
 /// follows it, up to the next heading of any level.
 pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
     // First pass: find each heading's level, title, and source byte range.

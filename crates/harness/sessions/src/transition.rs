@@ -92,7 +92,7 @@ pub enum PreserveReason {
 /// Event-log handling for a launched replacement run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistoryEffect {
-    /// Reuse the session's retained event log.
+    /// Reuses the session's retained event log.
     Preserve,
 }
 
@@ -123,15 +123,15 @@ pub enum CloseReason {
 /// One typed action selected by the transition model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SupervisorEffect {
-    /// Await a named condition.
+    /// Awaits a named condition.
     Wait(WaitFor),
-    /// Cancel the current run with provenance.
+    /// Cancels the current run with provenance.
     Cancel(CancelOrigin),
-    /// Keep the named ownership unchanged.
+    /// Keeps the named ownership unchanged.
     Preserve(PreserveReason),
-    /// Launch a replacement over retained history.
+    /// Launches a replacement over retained history.
     Relaunch(RelaunchEffect),
-    /// End supervision.
+    /// Ends supervision.
     Close(CloseReason),
 }
 

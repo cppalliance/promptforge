@@ -89,7 +89,7 @@ enum ListLine<'a> {
     NotAMarker,
 }
 
-/// Classify one already-trimmed, nonblank line as a list marker.
+/// Classifies one already-trimmed, nonblank line as a list marker.
 fn classify_list_line(trimmed: &str) -> ListLine<'_> {
     // Unordered: `- item` / `* item`, or a bare `-` / `*`.
     if let Some(rest) = trimmed

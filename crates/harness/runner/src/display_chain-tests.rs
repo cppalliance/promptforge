@@ -1,3 +1,5 @@
+//! Tests for `display_chain` rendering of an error and its causes.
+
 use super::display_chain;
 
 /// A leaf cause with its own text.

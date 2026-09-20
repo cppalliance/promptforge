@@ -1,3 +1,5 @@
+//! Tests for section model selection, `reply`, `sys.model`, and the prologue and epilog phases.
+
 use super::run;
 use super::*;
 
@@ -540,7 +542,7 @@ async fn reply_substitution_is_an_unknown_global_error() {
 
 // --- models.get / models.infer with a leading handle ---
 
-/// Run a parsed prompt against a scripted gateway with no external tools.
+/// Runs a parsed prompt against a scripted gateway with no external tools.
 async fn run_with_gateway(
     test: &TestPrompt,
     addr: SocketAddr,

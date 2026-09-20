@@ -174,7 +174,7 @@ pub(crate) mod lua_quota {
 }
 
 impl Error {
-    /// Wrap an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
+    /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
     /// `#[source]` cause (F4) rather than flattening it to a string.
     pub(crate) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
@@ -194,7 +194,7 @@ impl Error {
         }
     }
 
-    /// Wrap a tool failure as [`Error::Tool`], preserving the tool's own
+    /// Wraps a tool failure as [`Error::Tool`], preserving the tool's own
     /// error as the `#[source]` cause rather than discarding it.
     pub(crate) fn tool(source: promptforge_api_types::tools::ToolError) -> Error {
         Error::Tool {

@@ -1,3 +1,5 @@
+//! The sealed `sys` table and the guarded `var` proxy that sandboxed author code reads and writes.
+
 use super::{Error, Json, Lua, LuaSerdeExt, ModelBinding, Result, Value};
 
 /// The registry key holding the `var` proxy's hidden data table.

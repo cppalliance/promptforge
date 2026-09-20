@@ -1,3 +1,5 @@
+//! Tests for resolving a fanout worker heading among sibling sections.
+
 use super::*;
 
 #[test]

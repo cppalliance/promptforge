@@ -1,3 +1,5 @@
+//! Tests for the `messages.new()` builders and their parse through the protocol.
+
 use mlua::{Lua, LuaSerdeExt, Value};
 use promptforge_api_types::untrusted::GuardNonce;
 use serde_json::json;

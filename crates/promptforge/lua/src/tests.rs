@@ -1,3 +1,5 @@
+//! Crate-wide tests for section VMs: sandboxing, logging, tool scoping, store operations, `var`, and `argv`.
+
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -137,7 +139,7 @@ fn test_nonce() -> GuardNonce {
     GuardNonce::from_seed(0x6c75_6174_6573)
 }
 
-/// Run a chunk against a caller-supplied access, so a test can inspect the
+/// Runs a chunk against a caller-supplied access, so a test can inspect the
 /// store through the same identity after the chunk has run.
 fn run_with(source: &str, access: &Arc<Access>) -> Result<LuaOutcome> {
     run_chunk(

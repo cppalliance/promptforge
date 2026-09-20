@@ -168,7 +168,7 @@ pub(crate) struct Sources<'a> {
     pub(crate) globals: &'a dyn Fn(&str) -> Result<Option<Value>>,
 }
 
-/// Resolve every `{{ path }}` in `prose` against the [`Sources`].
+/// Resolves every `{{ path }}` in `prose` against the [`Sources`].
 ///
 /// This function receives prose only and does not transform either compiled
 /// Lua phase.
@@ -269,7 +269,7 @@ fn bare_global_root(
         })
 }
 
-/// Resolve a single `{{ }}` path to its rendered string.
+/// Resolves a single `{{ }}` path to its rendered string.
 fn resolve(path: &str, offset: usize, sources: &Sources<'_>) -> SubstResult<String> {
     if path == "args" {
         return Ok(sources.args.to_string());
@@ -382,7 +382,7 @@ fn path_preview(path: &str) -> String {
     out
 }
 
-/// Render a resolved JSON value as its substituted string.
+/// Renders a resolved JSON value as its substituted string.
 fn render(value: &Value, path: &str, offset: usize) -> SubstResult<String> {
     if let Some(rendered) = render_scalar(value) {
         return Ok(rendered);

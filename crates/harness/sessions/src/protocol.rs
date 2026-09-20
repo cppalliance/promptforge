@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct SessionId(String);
 
 impl SessionId {
-    /// Wrap an already-minted id.
+    /// Wraps an already-minted id.
     #[must_use]
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())

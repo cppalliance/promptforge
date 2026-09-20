@@ -1,3 +1,5 @@
+//! Crate-wide parser tests: frontmatter, headings, fences, lists, breaks, and line mapping.
+
 use promptforge_api_types::event::Event;
 
 use super::list::parse_bullet_items;

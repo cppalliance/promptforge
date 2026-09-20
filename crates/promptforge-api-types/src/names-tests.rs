@@ -1,3 +1,5 @@
+//! Tests for `GlobalName` parsing and its rejection kinds.
+
 use super::{GlobalName, GlobalNameErrorKind};
 
 fn kind_of(input: &str) -> GlobalNameErrorKind {

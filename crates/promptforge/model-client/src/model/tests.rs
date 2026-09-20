@@ -1,3 +1,5 @@
+//! Tests for model bindings and invocation identity.
+
 use std::num::NonZeroU32;
 
 use super::*;

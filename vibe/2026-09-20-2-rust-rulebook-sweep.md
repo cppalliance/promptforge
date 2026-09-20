@@ -523,7 +523,7 @@ Commit: one commit.
 
 <step-12>
 
-### Step 12: Documentation prose - promptforge and harness families
+### Step 12: Documentation prose - promptforge and harness families [completed]
 
 - Component: `docs-prose`
 - Piece: promptforge and harness crates (D7, group 2)

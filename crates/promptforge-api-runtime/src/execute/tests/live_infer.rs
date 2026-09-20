@@ -1,3 +1,5 @@
+//! Tests for live `models.infer` against a scripted gateway, including H1 chunks and shared libraries.
+
 use super::*;
 
 #[tokio::test(flavor = "multi_thread")]

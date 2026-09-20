@@ -114,7 +114,7 @@ pub(crate) struct RunState {
     /// The run's host-state snapshot; its presence is the Agent-window
     /// context (the `ui()` global plus raw-id `models.get`).
     ui: Option<Arc<serde_json::Value>>,
-    /// Test-only: install the raw protocol shims (`models.chat`,
+    /// Test-only: installs the raw protocol shims (`models.chat`,
     /// `tools.call_as_model`) in every section VM, so a fixture section
     /// can yield one raw `chat` round or one model-issued `tool_call` at
     /// the scheduler's dispatch arms without going through a loop shim.

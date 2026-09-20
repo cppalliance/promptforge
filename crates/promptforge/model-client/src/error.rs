@@ -134,7 +134,7 @@ pub enum Error {
 }
 
 impl Error {
-    /// Wrap a transport-layer error, hiding its concrete type from the API.
+    /// Wraps a transport-layer error, hiding its concrete type from the API.
     ///
     /// A transport that knows the failure was a timeout wraps it in
     /// [`Timeout`] first, so [`CompletionError::is_timeout`] can say so

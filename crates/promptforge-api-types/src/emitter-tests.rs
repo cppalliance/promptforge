@@ -1,3 +1,5 @@
+//! Tests for `Emitter` sequencing, lifecycle reports, and payload events.
+
 use std::sync::Arc;
 
 use super::{DebugMode, Emitter, EventSink};

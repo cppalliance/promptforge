@@ -1,3 +1,5 @@
+//! Per-VM tool runtime state: call counts, the task allowlist, and the scoped tool set a section sees.
+
 use super::{Arc, BTreeMap, Error, Mutex, Result};
 
 /// Shared per-VM tool-call counts, seeded at 0 for every alias the installer

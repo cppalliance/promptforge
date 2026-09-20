@@ -96,7 +96,7 @@ impl fmt::Debug for GatewayClient {
 }
 
 impl GatewayClient {
-    /// Build a client from a validated [`GatewayEndpoint`] and a redacted
+    /// Builds a client from a validated [`GatewayEndpoint`] and a redacted
     /// [`SecretString`] bearer key (used by tests and by
     /// [`GatewayClient::from_env`]).
     ///
@@ -130,7 +130,7 @@ impl GatewayClient {
         }
     }
 
-    /// Build a client that presents no bearer key.
+    /// Builds a client that presents no bearer key.
     ///
     /// Every request goes out without an `Authorization` header. This fits a
     /// gateway on the same machine, which trusts keyless loopback callers by
@@ -161,7 +161,7 @@ impl GatewayClient {
         }
     }
 
-    /// Build a client that cannot read gateway configuration or send HTTP.
+    /// Builds a client that cannot read gateway configuration or send HTTP.
     ///
     /// Hosts use this explicit sentinel for hermetic execution paths. Any
     /// attempted model call fails with a `Disabled`-kind [`CompletionError`].
@@ -259,7 +259,7 @@ impl GatewayClient {
         .map_err(CompletionError::from)
     }
 
-    /// Send a list of messages and return the model's accumulated outcome.
+    /// Sends a list of messages and returns the model's accumulated outcome.
     ///
     /// The one completion method, always streaming: the request asks for SSE
     /// with `stream_options.include_usage`, deltas are accumulated into the

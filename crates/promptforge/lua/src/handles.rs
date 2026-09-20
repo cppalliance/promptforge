@@ -1,3 +1,5 @@
+//! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua.
+
 use promptforge_api_types::capabilities::CapabilityId;
 use promptforge_api_types::tools::ToolDescriptor;
 

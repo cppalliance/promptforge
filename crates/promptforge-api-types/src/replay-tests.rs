@@ -1,3 +1,5 @@
+//! Tests for replay `Flags` and `ReplayError` rendering.
+
 use super::{Flags, ReplayError};
 
 #[test]

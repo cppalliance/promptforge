@@ -1,3 +1,5 @@
+//! Tests for capped body reads and SSE completion-stream reassembly.
+
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::future::Future;

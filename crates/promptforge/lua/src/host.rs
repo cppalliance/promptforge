@@ -1,3 +1,5 @@
+//! Host callbacks installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
+
 use promptforge_api_types::event::lifecycle::Lifecycle;
 
 use super::{
@@ -197,7 +199,7 @@ fn read_store_numbered(
     read_store_bounded(store, path, start, end, true)
 }
 
-/// Expose an always-on `store` table whose methods (`write`, `append`,
+/// Exposes an always-on `store` table whose methods (`write`, `append`,
 /// `read`, `read_numbered`, `str_replace`, `delete`,
 /// `glob`, `exists`) are backed by the [`Store`] facade over the caller's
 /// VFS access capability.

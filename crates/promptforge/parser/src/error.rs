@@ -189,7 +189,7 @@ struct Classification {
     column: Option<u32>,
 }
 
-/// Classify a substrate error into its stable kind and location fields.
+/// Classifies a substrate error into its stable kind and location fields.
 fn classify_parse_error(inner: &Error) -> Classification {
     const NONE: Classification = Classification {
         kind: ParseErrorKind::Structure,

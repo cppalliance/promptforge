@@ -1,3 +1,5 @@
+//! Tests for the `tools` namespace installers, alias decoding, and the local params schema.
+
 use mlua::{Lua, Value, Variadic};
 use promptforge_api_types::untrusted::GuardNonce;
 use serde_json::json;

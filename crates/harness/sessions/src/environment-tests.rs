@@ -1,3 +1,5 @@
+//! Tests for gateway binding changes rebuilding the environment's registry and client.
+
 use super::*;
 
 fn binding(generation: u64) -> GatewayBinding {

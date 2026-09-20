@@ -11,7 +11,7 @@ use crate::fence::{exact_shared_openings, split_h1};
 use crate::{Error, ParseError, ParseErrorKind, Prompt, Result};
 
 impl Prompt {
-    /// Parse a prompt file's full source text into a [`Prompt`], returning
+    /// Parses a prompt file's full source text into a [`Prompt`], returning
     /// the parse-time events beside the outcome.
     ///
     /// The events are the parse lifecycle (`ParseStarted`, then

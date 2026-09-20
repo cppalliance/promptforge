@@ -1,3 +1,5 @@
+//! Tests for resolving a section's model binding through the VM and shared model set.
+
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 

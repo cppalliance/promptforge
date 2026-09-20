@@ -20,7 +20,7 @@ use tracing::Instrument;
 /// provenance the engine stamped on that effect.
 pub type Tag = (EffectId, Provenance);
 
-/// Spawn `fut` on the tokio runtime inside a span tagged `tag`.
+/// Spawns `fut` on the tokio runtime inside a span tagged `tag`.
 ///
 /// The span is named `spawn` and carries the effect id under `effect`,
 /// the task path under `task`, and the task-local sequence under `seq`.
@@ -49,7 +49,7 @@ where
     tokio::spawn(fut.instrument(span))
 }
 
-/// Spawn a session's supervisor `fut` inside a span named `session` that
+/// Spawns a session's supervisor `fut` inside a span named `session` that
 /// carries the session id under `session`.
 ///
 /// A supervisor performs no effect, so it has no [`Tag`]; it is the one
@@ -73,7 +73,7 @@ where
     tokio::spawn(fut.instrument(span))
 }
 
-/// Run `f` on tokio's blocking pool inside a span tagged `tag`.
+/// Runs `f` on tokio's blocking pool inside a span tagged `tag`.
 ///
 /// The span is named `spawn_blocking` and carries the same fields as
 /// [`spawn_tagged`]'s; it is entered for the whole of `f`. The closure
@@ -106,7 +106,7 @@ where
     })
 }
 
-/// Run `f`, a launch's filesystem work, on tokio's blocking pool inside
+/// Runs `f`, a launch's filesystem work, on tokio's blocking pool inside
 /// a span named `launch` that carries the agent name under `agent`.
 ///
 /// A launch walks the agents directory and reads the agent's source

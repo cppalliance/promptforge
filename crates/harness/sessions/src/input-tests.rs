@@ -1,3 +1,5 @@
+//! Tests for the input wait registry, its tokens, and the operator input broker.
+
 use super::*;
 
 use std::sync::Arc;

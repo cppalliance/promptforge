@@ -1,3 +1,5 @@
+//! Tests for the observation event sequence a run reports across its lifecycle.
+
 use promptforge_api_types::event::Event;
 
 use super::run;

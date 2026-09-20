@@ -33,14 +33,14 @@ impl Scheduler {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
-            /// Resume the suspended coroutine with its delivered answer.
+            /// Resumes the suspended coroutine with its delivered answer.
             Resume(Thread, Answer<Error>),
             /// The chain is between sections: enter the next section, or
             /// end the chain when the slice is exhausted.
             EnterSection,
-            /// Start the current Lua block as a fresh coroutine.
+            /// Starts the current Lua block as a fresh coroutine.
             StartLua,
-            /// Stash the current prose block as the pending Markdown buffer
+            /// Stashes the current prose block as the pending Markdown buffer
             /// the next Lua fence consumes.
             StashProse,
             /// The section's blocks are exhausted: fall through.

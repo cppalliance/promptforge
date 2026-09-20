@@ -85,7 +85,7 @@ pub(crate) struct SectionVmSetup<'a> {
     /// `ui()` global and the raw-id `models.get` fallback. Shared through
     /// the run's `Arc`, so every section VM serializes the one tree.
     pub(crate) ui: Option<&'a Arc<serde_json::Value>>,
-    /// Test-only: install the raw protocol shims (`models.chat`,
+    /// Test-only: installs the raw protocol shims (`models.chat`,
     /// `tools.call_as_model`), so a fixture section can yield one raw
     /// `chat` round or one model-issued `tool_call`.
     #[cfg(test)]

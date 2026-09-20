@@ -1,3 +1,5 @@
+//! Sandbox hardening for section VMs: global removal, the instruction-budget hook, and scalar return rendering.
+
 use std::sync::OnceLock;
 
 use promptforge_api_types::cancel::CancelHandle;
@@ -7,7 +9,7 @@ use super::{
     Result, Thread, Value, VmState,
 };
 
-/// Remove code-loading, direct output, and reflection globals the base library
+/// Removes code-loading, direct output, and reflection globals the base library
 /// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are
 /// never loaded.
 ///
@@ -154,7 +156,7 @@ fn budget_hook(
     }
 }
 
-/// Install the every-Nth-instruction hook that keeps a block cancellable.
+/// Installs the every-Nth-instruction hook that keeps a block cancellable.
 ///
 /// The hook covers the main state only; coroutines need
 /// [`InstructionBudget::install_on_thread`] with the returned counter.
@@ -171,7 +173,7 @@ pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<InstructionBudget>
     Ok(budget)
 }
 
-/// Render a returned Lua scalar as the section's result string. Tables and other
+/// Renders a returned Lua scalar as the section's result string. Tables and other
 /// non-scalar returns are deferred to a later commit.
 pub(crate) fn value_to_string(value: &Value) -> Result<String> {
     match value {

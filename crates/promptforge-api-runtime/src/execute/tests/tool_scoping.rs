@@ -1,3 +1,5 @@
+//! Tests for model-visible tool scoping through `tools.always` and `tools.add`.
+
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;

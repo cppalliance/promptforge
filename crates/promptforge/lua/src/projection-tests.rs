@@ -1,3 +1,5 @@
+//! Tests for projecting Lua message records onto the wire conversation shape.
+
 use mlua::{Lua, Value};
 use serde_json::json;
 

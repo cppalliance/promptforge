@@ -1,3 +1,5 @@
+//! Tests for the streaming accumulator and the SSE data-line scanner.
+
 use serde_json::Value;
 
 use super::*;

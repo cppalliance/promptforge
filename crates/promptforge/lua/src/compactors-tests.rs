@@ -1,3 +1,5 @@
+//! Tests for the `compactors` namespace, the context-window precheck, and provider overflow detection.
+
 use mlua::Lua;
 use promptforge_model_client::client::Message;
 use serde_json::{Value, json};

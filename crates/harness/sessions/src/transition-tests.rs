@@ -1,3 +1,5 @@
+//! Tests for the supervisor transition table across catalog, cancel, and close events.
+
 use super::*;
 
 const RUN_1: RunId = RunId(1);
