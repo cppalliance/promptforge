@@ -479,7 +479,7 @@ Commit: one commit.
 
 <step-10>
 
-### Step 10: Paused time in deterministic async tests
+### Step 10: Paused time in deterministic async tests [completed]
 
 - Component: `paused-time`
 - Piece: in-process tests and the workspace clock (D8)

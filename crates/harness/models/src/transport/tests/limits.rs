@@ -109,8 +109,7 @@ async fn a_request_past_the_timeout_is_a_timeout_transport_failure() {
     // never answers within it fails as Transport, and the timeout survives
     // the type erasure so `is_timeout` holds.
     async fn stall() -> (axum::http::StatusCode, String) {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        (axum::http::StatusCode::OK, String::new())
+        std::future::pending().await
     }
     let app = Router::new().route("/v1/chat/completions", post(stall));
     let client = client_for(app).await.with_request_limits(
@@ -146,7 +145,10 @@ async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
             let header = "HTTP/1.1 500 Internal Server Error\r\n\
                  Content-Length: 1000000\r\n\r\nabc";
             let _ = sock.write_all(header.as_bytes()).await;
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            // The stall never ends on its own: the client's read timeout
+            // is what ends the test, and the runtime's teardown drops
+            // the socket.
+            std::future::pending::<()>().await;
         }
     });
     let response = reqwest::Client::new()

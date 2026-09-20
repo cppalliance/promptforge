@@ -5,9 +5,9 @@
 
 use super::*;
 
-use crate::workspace_file::{
-    GrantRow, WorkspaceContents, WorkspaceFile, empty_ui_state, now_rfc3339,
-};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use crate::workspace_file::{GrantRow, WorkspaceContents, WorkspaceFile, empty_ui_state};
 
 /// Opens the file at `path` directly, bypassing any `Workspace`, and
 /// returns the grant rows it holds in file order.
@@ -20,12 +20,21 @@ async fn file_rows(path: &Path) -> Vec<GrantRow> {
     contents.grants
 }
 
-/// Blocks until the clock has moved past `stamp`, so the next grant's
-/// `added_at` (whole seconds) differs from the one that produced it.
-async fn wait_past(stamp: &str) {
-    while now_rfc3339() == stamp {
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
+/// The ticks handed out by [`ticking_clock`] so far, shared by every
+/// test in the process: each grant reads the next one, so two grants in
+/// one test never share a stamp however the tests interleave.
+static TICKS: AtomicU32 = AtomicU32::new(0);
+
+/// A clock that moves one second per reading, so consecutive grants get
+/// distinct `added_at` stamps without waiting for the wall clock.
+fn ticking_clock() -> String {
+    let tick = TICKS.fetch_add(1, Ordering::SeqCst);
+    format!("2026-09-16T10:{:02}:{:02}Z", (tick / 60) % 60, tick % 60)
+}
+
+/// An ephemeral workspace whose grant times come from [`ticking_clock`].
+fn ticking_workspace() -> Workspace {
+    Workspace::new().with_clock_for_test(ticking_clock)
 }
 
 /// Grants `z` then `a` (reverse canonical order, so order-by-path and
@@ -39,9 +48,8 @@ async fn grant_z_then_a(
         .grant_and_persist(z.path())
         .await
         .expect("grant z lands");
-    // z's `added_at` is the second the grant ran, which is at or before
-    // this sample; waiting past the sample moves a's time past z's.
-    wait_past(&now_rfc3339()).await;
+    // The workspace's clock ticks once per grant, so a's time is one
+    // second past z's without waiting on the wall clock.
     let a_root = workspace
         .grant_and_persist(a.path())
         .await
@@ -89,7 +97,7 @@ async fn save_as_from_a_file_backed_workspace_keeps_grant_order_and_times() {
     let first_path = files.path().join("first.pfwork");
     let second_path = files.path().join("second.pfwork");
     let (_home, z, a) = z_and_a();
-    let workspace = Workspace::new();
+    let workspace = ticking_workspace();
     workspace
         .save_as(&first_path)
         .await
@@ -114,7 +122,7 @@ async fn save_as_from_an_ephemeral_workspace_keeps_grant_order_and_times() {
     let files = tempfile::TempDir::new().expect("tempdir");
     let path = files.path().join("fresh.pfwork");
     let (_home, z, a) = z_and_a();
-    let workspace = Workspace::new();
+    let workspace = ticking_workspace();
 
     let (z_root, a_root) = grant_z_then_a(&workspace, &z, &a).await;
     assert!(

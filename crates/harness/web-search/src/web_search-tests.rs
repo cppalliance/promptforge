@@ -392,8 +392,7 @@ async fn transport_failure_is_transport_kind() {
 #[tokio::test]
 async fn stalling_gateway_times_out_as_transport() {
     async fn web_search() -> Json<Value> {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        Json(serde_json::json!({ "results": [] }))
+        std::future::pending().await
     }
     let mock = MockServer::spawn(Router::new().route("/tools/web_search", post(web_search))).await;
     let tool = WebSearch::with_timeout(&mock.url(), "tok", Duration::from_millis(200))

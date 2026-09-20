@@ -143,11 +143,15 @@ pub(crate) struct GrantMeta {
 /// grant set is the confinement source of truth; the backing file, when
 /// present, is its persistent mirror and is swapped at runtime by open,
 /// save-as, and duplicate, each recorded in the last-workspace pointer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Workspace {
     /// The granted roots, in canonical form, each with its grant order
     /// and time. Read-hot: its own lock.
     grants: Arc<RwLock<BTreeMap<PathBuf, GrantMeta>>>,
+    /// The clock a new grant's `added_at` reads: the wall clock in
+    /// production, a scripted one in tests that need distinct stamps
+    /// without waiting a second between grants.
+    now: fn() -> String,
     /// The backing workspace file; `None` while the workspace is
     /// ephemeral.
     backing: Arc<RwLock<Option<Backing>>>,
@@ -173,11 +177,34 @@ pub struct Workspace {
     pointer: Option<pointer::LastWorkspacePointer>,
 }
 
+impl Default for Workspace {
+    fn default() -> Self {
+        Self {
+            grants: Arc::default(),
+            now: now_rfc3339,
+            backing: Arc::default(),
+            ui_state_puts: Arc::default(),
+            switches: Arc::default(),
+            closed: Arc::default(),
+            pointer: None,
+        }
+    }
+}
+
 impl Workspace {
     /// Creates an ephemeral workspace with no grants and no file.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The same workspace reading grant times from `now` instead of the
+    /// wall clock, so a test can give consecutive grants distinct stamps.
+    #[cfg(test)]
+    #[must_use]
+    fn with_clock_for_test(mut self, now: fn() -> String) -> Self {
+        self.now = now;
+        self
     }
 
     /// Registers `path` as a granted root in memory only: a directory
@@ -223,7 +250,7 @@ impl Workspace {
             .entry(root.clone())
             .or_insert_with(|| GrantMeta {
                 position,
-                added_at: now_rfc3339(),
+                added_at: (self.now)(),
             })
             .clone();
         Ok((root, meta))

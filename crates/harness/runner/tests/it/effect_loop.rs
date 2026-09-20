@@ -197,6 +197,8 @@ fn answers(records: &[StoredRecord]) -> Vec<&StoredRecord> {
 
 /// Waits until `flag` is raised, or fails after a bounded wait: an
 /// aborted task is torn down by the runtime after the abort, not at it.
+/// Under paused time each sleep is a yield that lets the teardown run
+/// and then advances the clock, so the wait costs no wall time.
 async fn await_raised(flag: &AtomicBool, what: &str) {
     for _ in 0..200 {
         if flag.load(Ordering::SeqCst) {
@@ -302,7 +304,7 @@ async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
     assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_refused_log_write_returns_the_log_error_and_aborts_the_parked_performers() {
     let (log, run_id) = begun_log().await;
     let timer_dropped = Arc::new(AtomicBool::new(false));

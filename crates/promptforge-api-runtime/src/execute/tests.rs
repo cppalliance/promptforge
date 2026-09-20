@@ -1297,8 +1297,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     vm.teardown(&null_emitter(), "Precedence");
 }
 
-/// A tool whose call blocks far longer than the test's cancel deadline, so the
-/// test can prove the tool-call loop honors cancellation mid-call.
+/// A tool whose call never completes, so the test can prove the tool-call
+/// loop honors cancellation mid-call rather than waiting the call out.
 struct SlowTool;
 
 #[async_trait::async_trait]
@@ -1329,8 +1329,7 @@ impl TestTool for SlowTool {
     }
 
     async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        Ok(ToolOutput::trusted("done"))
+        std::future::pending().await
     }
 }
 

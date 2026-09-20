@@ -3686,8 +3686,8 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
     assert_eq!(out, "echoed: hi|1");
 }
 
-/// A tool that signals its start and then sleeps far past every deadline,
-/// so the cancellation test fires only once the dispatch is in flight.
+/// A tool that signals its start and then never completes, so the
+/// cancellation test fires only once the dispatch is in flight.
 struct SignallingSlowTool {
     started: Arc<AtomicUsize>,
 }
@@ -3723,8 +3723,7 @@ impl TestTool for SignallingSlowTool {
         _args: serde_json::Value,
     ) -> std::result::Result<crate::tools::ToolOutput, crate::tools::ToolError> {
         self.started.fetch_add(1, Ordering::SeqCst);
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        Ok(crate::tools::ToolOutput::trusted("too late"))
+        std::future::pending().await
     }
 }
 
