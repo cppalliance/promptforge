@@ -14,7 +14,7 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Write one crate under `<root>/crates/<dir>/` with the given manifest
+/// Writes one crate under `<root>/crates/<dir>/` with the given manifest
 /// body (after `[package]`) and `src/lib.rs` text.
 fn write_crate(root: &Path, dir: &str, manifest: &str, lib: &str) {
     let crate_dir = root.join("crates").join(dir);

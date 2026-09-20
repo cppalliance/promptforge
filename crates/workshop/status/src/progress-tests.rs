@@ -1,3 +1,5 @@
+//! Progress-to-status-bar tests: show delay, minimum visible hold, and detach polling.
+
 use super::*;
 
 use tokio::sync::broadcast;

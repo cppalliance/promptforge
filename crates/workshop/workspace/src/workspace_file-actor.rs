@@ -55,33 +55,33 @@ pub(crate) const COMMAND_QUEUE_DEPTH: usize = 32;
 /// actor ignores.
 #[derive(Debug)]
 pub(crate) enum Command {
-    /// Read everything the file holds.
+    /// Reads everything the file holds.
     Contents {
         /// Where the contents go.
         reply: oneshot::Sender<Result<WorkspaceContents, WorkspaceFileError>>,
     },
-    /// Insert or replace one grant; the file assigns its `position`.
+    /// Inserts or replaces one grant; the file assigns its `position`.
     AddGrant {
         /// The grant to persist.
         row: GrantRow,
         /// Fires once the row is written.
         reply: Ack,
     },
-    /// Delete the grant at `path`; the survivors keep their positions.
+    /// Deletes the grant at `path`; the survivors keep their positions.
     RemoveGrant {
         /// The canonical root to forget.
         path: PathBuf,
         /// Fires once the row is gone.
         reply: Ack,
     },
-    /// Insert or replace the saved window geometry.
+    /// Inserts or replaces the saved window geometry.
     PutWindowState {
         /// The geometry to persist.
         state: WindowState,
         /// Fires once the value is written.
         reply: Ack,
     },
-    /// Insert or replace one opaque ui-state value. The key is already
+    /// Inserts or replaces one opaque ui-state value. The key is already
     /// allow-listed and the text already validated by the handle.
     PutUiState {
         /// The allow-listed kv key.
@@ -91,7 +91,7 @@ pub(crate) enum Command {
         /// Fires once the row is written.
         reply: Ack,
     },
-    /// Fold the WAL into the main file, then copy the main file to
+    /// Folds the WAL into the main file, then copies the main file to
     /// `destination`, all on the actor so no write lands in between and
     /// no checkpoint runs during the copy.
     Snapshot {
@@ -100,7 +100,7 @@ pub(crate) enum Command {
         /// Fires once the copy is on disk.
         reply: Ack,
     },
-    /// Stop the loop and close the connection; the reply fires once the
+    /// Stops the loop and closes the connection; the reply fires once the
     /// connection is dropped, so a caller can reopen the file safely.
     Shutdown {
         /// Fires after the connection closes.

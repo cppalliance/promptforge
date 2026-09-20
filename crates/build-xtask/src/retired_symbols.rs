@@ -49,7 +49,7 @@ impl fmt::Display for Hit {
     }
 }
 
-/// Scan every live `.rs` file under `source_root` for the `seeds`, sorted
+/// Scans every live `.rs` file under `source_root` for the `seeds`, sorted
 /// by file then line. An absent or unreadable root yields no hits, and an
 /// unreadable file is skipped (see the module docs for why that is safe).
 #[must_use]
@@ -137,7 +137,7 @@ fn identifiers(line: &str) -> impl Iterator<Item = &str> {
         .filter(|token| !token.is_empty())
 }
 
-/// Replace every character in `start..end` with a space, keeping newlines
+/// Replaces every character in `start..end` with a space, keeping newlines
 /// so line numbers survive.
 fn blank(code: &mut [char], start: usize, end: usize) {
     let end = end.min(code.len());
@@ -148,7 +148,7 @@ fn blank(code: &mut [char], start: usize, end: usize) {
     }
 }
 
-/// Mask comments (line, doc, and nested block) and literals (strings, raw
+/// Masks comments (line, doc, and nested block) and literals (strings, raw
 /// strings, byte and C strings, chars) in place.
 fn mask_comments_and_literals(code: &mut [char]) {
     let mut i = 0;

@@ -1,3 +1,5 @@
+//! Gateway config proxy tests: the allowlist rule, forwarding with the bearer key, and refusals.
+
 use super::*;
 
 use axum::body::Body;

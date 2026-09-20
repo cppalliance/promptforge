@@ -1,3 +1,5 @@
+//! Heartbeat startup convergence: the initial connect retries until catalog and profiles are ready.
+
 use super::*;
 
 /// Startup state whose health is continuously true while its catalog

@@ -543,7 +543,7 @@ Commit: one commit.
 
 <step-13>
 
-### Step 13: Documentation prose - workshop, shared, build; full verification
+### Step 13: Documentation prose - workshop, shared, build; full verification [completed]
 
 - Component: `docs-prose`
 - Piece: remaining crates (D7, group 3) and the F12 gate

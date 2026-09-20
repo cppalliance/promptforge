@@ -1,3 +1,5 @@
+//! Server lifecycle tests: readiness, graceful shutdown under held connections, and port release.
+
 use super::*;
 
 use std::path::Path;

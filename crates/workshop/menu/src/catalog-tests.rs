@@ -1,3 +1,5 @@
+//! Catalog bus tests: publishing without subscribers, snapshot retention, and lagged receivers.
+
 use super::*;
 
 #[tokio::test]

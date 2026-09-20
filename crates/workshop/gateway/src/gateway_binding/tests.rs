@@ -1,3 +1,5 @@
+//! Gateway binding tests: capability replacement publishes one coherent snapshot and a new identity.
+
 use super::*;
 
 mod atomic;

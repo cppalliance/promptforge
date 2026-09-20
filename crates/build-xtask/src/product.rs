@@ -50,7 +50,7 @@ enum Family {
     Unaffiliated,
 }
 
-/// Classify a package name into its product family.
+/// Classifies a package name into its product family.
 fn family(package: &str) -> Family {
     if package.starts_with("promptforge-") {
         Family::Promptforge
@@ -77,7 +77,7 @@ struct CrateInfo {
     deps: Vec<String>,
 }
 
-/// Check every workspace manifest against the product-boundary matrix.
+/// Checks every workspace manifest against the product-boundary matrix.
 #[must_use]
 pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
     let (crates, mut violations) = workspace_crates(root);
@@ -257,7 +257,7 @@ fn workspace_crates(root: &Path) -> (Vec<CrateInfo>, Vec<String>) {
     (crates, violations)
 }
 
-/// Walk one directory level: crates are read, manifestless containers are
+/// Walks one directory level: crates are read, manifestless containers are
 /// descended into.
 fn walk_crates(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: &mut Vec<String>) {
     let entries = match fs::read_dir(dir) {
@@ -293,7 +293,7 @@ fn walk_crates(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations:
     }
 }
 
-/// Read one crate's manifest into `crates`; failures land in `violations`.
+/// Reads one crate's manifest into `crates`; failures land in `violations`.
 fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: &mut Vec<String>) {
     let manifest_path = dir.join("Cargo.toml");
     let text = match fs::read_to_string(&manifest_path) {

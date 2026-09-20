@@ -1,3 +1,5 @@
+//! Shell-facing surface tests: every re-export is named and the fixtures feature forwards the seams.
+
 use super::*;
 
 /// The unqualified type name of `T`, so the assertions read as the

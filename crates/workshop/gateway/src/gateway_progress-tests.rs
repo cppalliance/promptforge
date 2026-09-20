@@ -1,3 +1,6 @@
+//! Gateway progress feed tests: events land on the hub, malformed events are skipped, and
+//! the subscriber resubscribes without duplicating state.
+
 // Fractions are fixed-point millionths, so equality comparisons are exact
 // (the shared-progress remote.rs test precedent).
 #![expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]

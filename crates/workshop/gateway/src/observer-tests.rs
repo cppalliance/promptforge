@@ -1,3 +1,5 @@
+//! Workshop observer tests: concurrent appends, consistent reads, and poisoned-lock recovery.
+
 use std::sync::Arc;
 
 use promptforge_api_types::ids::{ChainId, Provenance, TaskId};

@@ -1,3 +1,5 @@
+//! Workspace tests: grants, confinement, tokens, tree listings, and revocation.
+
 use super::*;
 
 #[path = "workspace-tests-backing.rs"]

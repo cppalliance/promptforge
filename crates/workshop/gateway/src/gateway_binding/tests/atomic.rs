@@ -1,3 +1,5 @@
+//! Binding atomicity: synchronized reads never observe a torn replacement snapshot.
+
 use super::*;
 
 use std::sync::Arc;

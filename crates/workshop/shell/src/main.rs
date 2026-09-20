@@ -1,9 +1,3 @@
-// Release builds are a GUI app: no console window when launched from the
-// installer. Debug builds keep the console so the eprintln diagnostics show.
-// The tradeoff: in release those diagnostics (boot errors) have nowhere to
-// print.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
 //! Hosts the workshop server in-process on a loopback listener with an
@@ -18,6 +12,12 @@
 //! and keeps running; the window menu's quit item is the one gesture
 //! that also stops a local gateway. Development against the standalone
 //! `workshop-server` binary flow is unchanged.
+
+// Release builds are a GUI app: no console window when launched from the
+// installer. Debug builds keep the console so the eprintln diagnostics show.
+// The tradeoff: in release those diagnostics (boot errors) have nowhere to
+// print.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // The only unsafe module in the crate: the WebView2 COM surface that
 // reads real OS paths out of dropped File objects and grants the

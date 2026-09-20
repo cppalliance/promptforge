@@ -1,3 +1,5 @@
+//! Workspace file tests: database open and create, schema refusals, and half-written cleanup.
+
 use std::fs;
 use std::path::PathBuf;
 

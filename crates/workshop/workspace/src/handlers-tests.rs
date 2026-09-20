@@ -1,3 +1,5 @@
+//! Workspace handler tests: percent-decoding before validation, traversal refusals, and revokes.
+
 use super::*;
 
 use axum::body::Body;

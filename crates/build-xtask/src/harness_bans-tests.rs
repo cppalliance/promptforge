@@ -20,7 +20,7 @@ fn door(root: &Path) -> std::path::PathBuf {
     root.join("crates").join("harness-api")
 }
 
-/// Write a crate directory with a manifest and, when given, a `clippy.toml`.
+/// Writes a crate directory with a manifest and, when given, a `clippy.toml`.
 fn write_crate(dir: &Path, clippy: Option<&str>) {
     std::fs::create_dir_all(dir).expect("the crate directory creates");
     std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"fixture\"\n")

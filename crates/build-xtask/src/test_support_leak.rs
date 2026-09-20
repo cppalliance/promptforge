@@ -38,7 +38,7 @@ const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
 /// The feature no non-dev table may enable on an engine crate.
 const GUARDED_FEATURE: &str = crate::engine_deps::EXEMPTING_FEATURE;
 
-/// Scan the workspace for non-dev dependency tables, and `[features]`
+/// Scans the workspace for non-dev dependency tables, and `[features]`
 /// values, that enable an engine crate's `test-support` feature.
 #[must_use]
 pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
@@ -90,7 +90,7 @@ pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Report every `[features]` value that enables the guarded feature on an
+/// Reports every `[features]` value that enables the guarded feature on an
 /// engine crate through a dependency-feature reference.
 fn scan_features(
     manifest_path: &Path,
@@ -154,7 +154,7 @@ fn resolve_package<'a>(
         .unwrap_or(key)
 }
 
-/// Report every entry in `table` that names an engine crate and lists the
+/// Reports every entry in `table` that names an engine crate and lists the
 /// guarded feature.
 fn scan_table(
     manifest: &Path,
@@ -204,7 +204,7 @@ fn engine_package_names(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Read and parse one manifest, or `None` when it cannot be read or parsed.
+/// Reads and parses one manifest, or `None` when it cannot be read or parsed.
 fn parse_manifest(path: &Path) -> Option<toml::Value> {
     fs::read_to_string(path)
         .ok()

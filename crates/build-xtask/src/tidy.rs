@@ -33,7 +33,7 @@ const MAX_FILE_LINES: usize = 500;
 /// outside those families are left alone.
 const INVARIANT_MARKER: &str = "//! ## Invariants";
 
-/// Run every check and return all violations.
+/// Runs every check and returns all violations.
 #[must_use]
 pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     let mut violations = tier_dependency_violations(root);
@@ -76,7 +76,7 @@ fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
     root.join("crates").join("workshop").join(short)
 }
 
-/// Check that tiered `workshop-*` crates depend only on lower tiers.
+/// Checks that tiered `workshop-*` crates depend only on lower tiers.
 ///
 /// Every tiered crate has landed, so a missing manifest is a violation,
 /// not a crate to skip.
@@ -120,7 +120,7 @@ pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Collect the `workshop-*` dependency names of every kind (normal, dev,
+/// Collects the `workshop-*` dependency names of every kind (normal, dev,
 /// build, and target-specific) declared in a manifest.
 fn workshop_dependencies(manifest: &toml::Value) -> Vec<String> {
     let mut names = Vec::new();
@@ -143,7 +143,7 @@ fn collect_workshop_deps(table: &toml::map::Map<String, toml::Value>, names: &mu
     }
 }
 
-/// Check the 500-line file ceiling on every crate participating in the
+/// Checks the 500-line file ceiling on every crate participating in the
 /// decomposed architecture (its `lib.rs` or `main.rs` carries the invariant
 /// marker).
 #[must_use]
@@ -166,7 +166,7 @@ pub(crate) fn file_ceiling_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Check that every participating crate inherits `[lints] workspace = true`
+/// Checks that every participating crate inherits `[lints] workspace = true`
 /// (which carries `unreachable_pub`) and that the workspace root sets it.
 #[must_use]
 pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
@@ -335,7 +335,7 @@ mod tests {
         }
     }
 
-    /// Write a crate under `crates/<dir>/` with the given `lib.rs` docs and
+    /// Writes a crate under `crates/<dir>/` with the given `lib.rs` docs and
     /// one source file of `lines` lines.
     fn write_marked_crate(root: &Path, dir: &str, lib_docs: &str, lines: usize) {
         let src = root.join("crates").join(dir).join("src");

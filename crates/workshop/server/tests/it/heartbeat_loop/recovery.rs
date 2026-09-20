@@ -1,3 +1,5 @@
+//! Heartbeat recovery: a replaced endpoint wakes the heartbeat and refreshes with its new key.
+
 use super::*;
 
 /// Catalog route that accepts only the replacement sidecar bearer.

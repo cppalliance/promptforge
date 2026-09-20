@@ -1,3 +1,5 @@
+//! Asset route tests: content types, cache headers, hashed bundles, and chunk-path confinement.
+
 use axum::body::Body;
 use axum::http::{Request, Response, StatusCode, header};
 use tower::ServiceExt;

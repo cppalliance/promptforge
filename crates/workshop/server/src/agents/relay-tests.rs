@@ -1,3 +1,5 @@
+//! Catalog relay tests: gateway responses pass through byte for byte and outages become 502.
+
 use super::*;
 
 use axum::Router;

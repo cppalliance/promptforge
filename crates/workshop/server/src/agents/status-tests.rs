@@ -1,3 +1,5 @@
+//! Agent status tests: which session events push a status frame and reset the backoff.
+
 use std::time::Duration;
 
 use promptforge_api_types::ids::{ChainId, Provenance, TaskId};

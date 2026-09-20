@@ -66,7 +66,7 @@ pub(crate) fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
     }
 }
 
-/// Run the manifest guard over every engine crate.
+/// Runs the manifest guard over every engine crate.
 #[must_use]
 pub(crate) fn engine_manifest_violations(root: &Path) -> Vec<String> {
     engine_crates(root)
@@ -76,7 +76,7 @@ pub(crate) fn engine_manifest_violations(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Run the retired-symbol scan over every engine crate's live source. The
+/// Runs the retired-symbol scan over every engine crate's live source. The
 /// scan takes the whole crate directory, so `build.rs`, `benches/`, and
 /// `examples/` are covered too; it skips `tests/` and test support itself.
 #[must_use]

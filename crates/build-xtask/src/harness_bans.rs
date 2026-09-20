@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 /// The methods every harness `clippy.toml` must disallow.
 const BANNED: [&str; 2] = ["tokio::spawn", "tokio::task::spawn_blocking"];
 
-/// Check every crate under `container` and, when it exists, the `door`
+/// Checks every crate under `container` and, when it exists, the `door`
 /// crate directory for a complete clippy ban list.
 #[must_use]
 pub(crate) fn harness_clippy_bans(container: &Path, door: &Path) -> Vec<String> {

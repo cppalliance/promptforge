@@ -1,3 +1,5 @@
+//! Host binding tests: the host snapshot serves the selection and the granted roots.
+
 use std::sync::Arc;
 
 use workshop_menu::MenuBus;

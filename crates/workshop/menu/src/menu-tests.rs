@@ -1,3 +1,5 @@
+//! Menu bus tests: model selection, profile switches, refusals, and the published snapshots.
+
 use super::*;
 
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};

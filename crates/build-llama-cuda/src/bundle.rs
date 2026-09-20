@@ -33,7 +33,7 @@ pub struct BuildRequest {
     /// CMake build tree lives under it in `work/` and is not part of the
     /// published output.
     pub out: PathBuf,
-    /// Run the `--list-devices` smoke check after the build. Needs a GPU;
+    /// Runs the `--list-devices` smoke check after the build. Needs a GPU;
     /// the GitHub build computer has none, so the workflow passes
     /// `--no-smoke` and the self-hosted smoke job covers the GPU check.
     pub smoke: bool,

@@ -1,3 +1,5 @@
+//! Gateway config recovery: the origin and config proxy follow one replacement snapshot.
+
 use super::*;
 
 #[tokio::test]

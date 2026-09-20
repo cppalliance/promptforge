@@ -51,7 +51,7 @@ fn main() {
     }
 }
 
-/// Run the full assembly over `guide/`: landing pages, SUMMARY.md, exports,
+/// Runs the full assembly over `guide/`: landing pages, SUMMARY.md, exports,
 /// and the link check.
 fn assemble(guide: &Path) -> Result<(), AssembleError> {
     let src = guide.join("src");
@@ -83,7 +83,7 @@ fn assemble(guide: &Path) -> Result<(), AssembleError> {
     Ok(())
 }
 
-/// Reject guide text that presents the removed legacy STT section as usable.
+/// Rejects guide text that presents the removed legacy STT section as usable.
 fn check_removed_workshop_stt_claims(src: &Path) -> Result<(), AssembleError> {
     for (set, _) in SETS {
         let set_dir = src.join(set);
@@ -106,7 +106,7 @@ fn check_removed_workshop_stt_claims(src: &Path) -> Result<(), AssembleError> {
     Ok(())
 }
 
-/// List a set directory's chapter files in reading order, reading each
+/// Lists a set directory's chapter files in reading order, reading each
 /// chapter's title from its first H1 heading.
 fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
     if !set_dir.is_dir() {
@@ -153,7 +153,7 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
     Ok(chapters)
 }
 
-/// Render a part landing page: the part title and its chapter list.
+/// Renders a part landing page: the part title and its chapter list.
 fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     let mut out = format!("# {part_title}\n");
     for chapter in chapters {
@@ -163,7 +163,7 @@ fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     out
 }
 
-/// Render SUMMARY.md: the introduction, then the parts in audience order
+/// Renders SUMMARY.md: the introduction, then the parts in audience order
 /// with every chapter linked.
 fn render_summary(parts: &[(&str, &str, Vec<Chapter>)]) -> String {
     let mut out = String::from("# Summary\n\n- [Introduction](introduction.md)\n");
@@ -176,7 +176,7 @@ fn render_summary(parts: &[(&str, &str, Vec<Chapter>)]) -> String {
     out
 }
 
-/// Render a set's single-file export: the chapters concatenated in reading
+/// Renders a set's single-file export: the chapters concatenated in reading
 /// order.
 fn render_export(
     part_title: &str,
@@ -195,7 +195,7 @@ fn render_export(
     Ok(out)
 }
 
-/// Verify that every relative link target in SUMMARY.md resolves to a file
+/// Verifies that every relative link target in SUMMARY.md resolves to a file
 /// under `src/`.
 fn check_links(summary: &str, src: &Path) -> Result<(), AssembleError> {
     for line in summary.lines() {
@@ -216,13 +216,13 @@ fn check_links(summary: &str, src: &Path) -> Result<(), AssembleError> {
     Ok(())
 }
 
-/// Write a file, creating no directories and failing loudly on error.
+/// Writes a file, creating no directories and failing loudly on error.
 fn write_file(path: &Path, content: &str) -> Result<(), AssembleError> {
     fs::write(path, content)
         .map_err(|e| AssembleError(format!("cannot write {}: {e}", path.display())))
 }
 
-/// Walk up from this crate's manifest dir to find the workspace root.
+/// Walks up from this crate's manifest dir to find the workspace root.
 fn workspace_root() -> PathBuf {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
@@ -244,7 +244,7 @@ fn workspace_root() -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Build a fake guide tree with two sets and return its root.
+    /// Builds a fake guide tree with two sets and returns its root.
     fn fake_guide() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let src = dir.path().join("src");

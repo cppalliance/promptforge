@@ -1,3 +1,5 @@
+//! App state tests: boot-time workspace reopening, auth headers, defaults, and route refusals.
+
 use super::*;
 
 use axum::http::{HeaderMap, header};

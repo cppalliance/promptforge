@@ -1,3 +1,5 @@
+//! Workspace error tests: wire-code mapping, the JSON envelope, and debug-only source chains.
+
 use super::*;
 
 /// Collects a response body already buffered in memory.

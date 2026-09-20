@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::*;
 
-/// Write one manifest into a fresh temporary directory and return its path
+/// Writes one manifest into a fresh temporary directory and returns its path
 /// beside the directory guard that keeps it alive.
 fn manifest(text: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::TempDir::new().expect("tempdir");

@@ -37,7 +37,7 @@ pub const CONFIG_UI_STATIC_FILES: &[&str] = &[
 pub struct UiBuild {
     /// Files to copy next to the bundle, relative to the ui folder.
     pub static_files: &'static [&'static str],
-    /// Bake the crate version into the bundle as the `__APP_VERSION__`
+    /// Bakes the crate version into the bundle as the `__APP_VERSION__`
     /// define.
     pub define_app_version: bool,
     /// Code-split the bundle: dynamic imports become lazily loaded chunks

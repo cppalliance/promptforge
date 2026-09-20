@@ -78,7 +78,7 @@ impl fmt::Display for Violation {
     }
 }
 
-/// Scan one engine manifest for forbidden dependencies. A manifest that
+/// Scans one engine manifest for forbidden dependencies. A manifest that
 /// cannot be read or parsed yields one [`Violation::Unreadable`].
 #[must_use]
 pub(crate) fn forbidden_engine_dependencies(manifest: &Path) -> Vec<Violation> {

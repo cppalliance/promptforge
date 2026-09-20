@@ -1,3 +1,5 @@
+//! Binding publication: cancellation wakes contenders and close is a permanent linearization point.
+
 use super::*;
 
 use std::sync::atomic::{AtomicBool, Ordering};

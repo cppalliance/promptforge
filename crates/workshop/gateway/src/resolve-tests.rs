@@ -1,3 +1,5 @@
+//! Gateway resolution tests: discovery file versus explicit config, stale files, and probe failures.
+
 use super::*;
 
 use std::io::{Read, Write as _};

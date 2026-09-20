@@ -1,3 +1,5 @@
+//! Progress subscription recovery: an endpoint replacement moves the subscription at once.
+
 use super::*;
 
 #[tokio::test]

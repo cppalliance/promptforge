@@ -1,3 +1,5 @@
+//! Binding shutdown authority: which identity a quit targets and who may post the shutdown.
+
 use super::*;
 
 use std::{sync::mpsc, time::Duration};

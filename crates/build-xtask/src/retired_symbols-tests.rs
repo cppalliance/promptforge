@@ -7,7 +7,7 @@ use super::*;
 
 const SEEDS: [&str; 2] = ["Observer", "GatewaySource"];
 
-/// Write a source tree of `(relative path, contents)` pairs into a fresh
+/// Writes a source tree of `(relative path, contents)` pairs into a fresh
 /// temporary directory.
 fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::TempDir::new().expect("tempdir");

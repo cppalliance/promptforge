@@ -1,3 +1,5 @@
+//! Progress subscription lifecycle: a multi-stage operation detaches only when it finishes.
+
 use super::*;
 
 fn operation_event_json(operation: u64, path: &str, state: &serde_json::Value) -> String {
