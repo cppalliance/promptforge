@@ -573,7 +573,9 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     }
     this.editor.commands.setContent(draft.doc);
     this.attachments = [...draft.attachments];
-    this.strip.replaceChildren(...this.attachments.map((chip) => renderChip(chip)));
+    this.strip.replaceChildren(
+      ...this.attachments.map((chip) => renderChip(chip, { removable: false })),
+    );
   }
 
   /**

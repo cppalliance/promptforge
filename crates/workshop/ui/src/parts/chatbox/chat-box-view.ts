@@ -12,11 +12,9 @@ import { renderChip } from "./chip-view";
 import { type ChipNodeAttrs, chipFromAttrs } from "./mention-chip";
 import type { ChipRef, SerializedDraft } from "./types";
 
-/** A pill for read-only display: the remove button has nothing to remove. */
+/** A pill for read-only display: no remove button, there is nothing to remove. */
 function renderStaticChip(chip: ChipRef): HTMLElement {
-  const pill = renderChip(chip);
-  pill.querySelector(".ws-mention-chip__remove")?.remove();
-  return pill;
+  return renderChip(chip, { removable: false });
 }
 
 /** Appends one inline node's rendering to `paragraph`; unknown node types render nothing. */

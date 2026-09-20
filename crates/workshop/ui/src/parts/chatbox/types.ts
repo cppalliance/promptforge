@@ -104,9 +104,16 @@ export interface ChatBoxProps {
   readonly controls?: HTMLElement;
   /** The `@` provider; default: the built-in three-item stub. */
   readonly mentionSource?: ChipSource;
-  /** The `/` provider; default: `async () => []`. */
+  /**
+   * The `/` provider; default: `async () => []`. Reserved: declared but
+   * not read in this release; a typed `/` stays text.
+   */
   readonly commandSource?: ChipSource;
-  /** Turns pasted files into attachment chips; absent: ProseMirror's default paste. */
+  /**
+   * Turns pasted files into attachment chips; absent: ProseMirror's
+   * default paste. Reserved: declared but not read in this release;
+   * paste is ProseMirror's default.
+   */
   readonly onPasteFiles?: (files: File[]) => Promise<ChipRef[]>;
   /** The host's text-control registrar; replaces the service-registry lookup. */
   readonly textControls?: TextControlRegistrar;

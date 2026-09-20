@@ -1014,6 +1014,10 @@ await assertNoLeaks(lifecycle, async () => {
         strip.querySelector(".ws-mention-chip__label")?.textContent === "shot.png",
     );
     check(
+      "the restored strip pill carries no remove button",
+      strip.querySelector(".ws-mention-chip__remove") === null,
+    );
+    check(
       "serialize after restore returns the attachments as a copy",
       JSON.stringify(restored.attachments) === JSON.stringify([attachment]) &&
         restored.attachments !== withStrip.attachments,
