@@ -132,7 +132,7 @@ impl From<reqwest::Error> for FetchError {
 #[error(transparent)]
 pub struct HttpSource(reqwest::Error);
 
-/// Render an error and its full `source()` chain as one line, each cause
+/// Renders an error and its full `source()` chain as one line, each cause
 /// separated by `; `. A variant's `Display` carries only its own message,
 /// so this is how a person-facing note recovers the transport or decode
 /// text underneath.
@@ -148,7 +148,7 @@ pub fn error_chain(error: &dyn std::error::Error) -> String {
     text
 }
 
-/// Fetch and normalize one provider's model list; the per-provider
+/// Fetches and normalizes one provider's model list; the per-provider
 /// variance lives behind this seam. The client is injected by the
 /// caller (the Gateway's bounded client, or the binary's own).
 ///
@@ -201,7 +201,7 @@ mod tests {
 
     use super::{FetchError, Provider, fetch_models, providers};
 
-    /// Apply one provider's private taxonomy rules to a list of
+    /// Applies one provider's private taxonomy rules to a list of
     /// entries, by registry name. The production path applies the rules
     /// inside each provider's fetch; this dispatch lets the registry
     /// tests apply them to fixture entries.

@@ -1,3 +1,5 @@
+//! Tests for the batch transcription endpoint and its response formats.
+
 use super::*;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};

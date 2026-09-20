@@ -19,7 +19,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Whole-request timeout for outbound calls.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Build a reqwest client with bounded connect and whole-request timeouts.
+/// Builds a reqwest client with bounded connect and whole-request timeouts.
 #[must_use]
 pub fn bounded_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -29,7 +29,7 @@ pub fn bounded_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// Build a reqwest client with only a connect timeout for long-lived streams.
+/// Builds a reqwest client with only a connect timeout for long-lived streams.
 ///
 /// reqwest's whole-request `.timeout()` covers the entire body read, so it
 /// would kill any SSE stream that outlives it. The streaming path therefore
@@ -47,7 +47,7 @@ pub fn streaming_client() -> reqwest::Client {
 /// idle middlebox drop surfaces instead of hanging the stream forever.
 const AUDIO_TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 
-/// Build a reqwest client for long-lived binary audio streams.
+/// Builds a reqwest client for long-lived binary audio streams.
 ///
 /// Like [`streaming_client`] there is no whole-request timeout, which would
 /// kill any stream that outlives it, and TCP keepalive keeps middleboxes
@@ -65,7 +65,7 @@ pub fn audio_streaming_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// Read at most `cap` bytes from `response`, stopping early once the cap is hit.
+/// Reads at most `cap` bytes from `response`, stopping early once the cap is hit.
 ///
 /// The body is streamed chunk by chunk so an oversized or stalled response never
 /// allocates beyond `cap`. Returns a lossy UTF-8 string of the bytes read.
@@ -91,7 +91,7 @@ pub async fn read_body_capped(response: reqwest::Response, cap: usize) -> String
     String::from_utf8_lossy(&buffer).into_owned()
 }
 
-/// Read at most `cap` bytes from `response`, propagating a transport error if a
+/// Reads at most `cap` bytes from `response`, propagating a transport error if a
 /// chunk read fails.
 ///
 /// Unlike [`read_body_capped`], this surfaces the read result explicitly so a

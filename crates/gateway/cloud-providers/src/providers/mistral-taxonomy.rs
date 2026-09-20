@@ -34,7 +34,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family, then collapse `-YYMM` snapshot suffixes
+/// Sets every entry's family, then collapses `-YYMM` snapshot suffixes
 /// onto their canonical entries.
 pub(crate) fn apply(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

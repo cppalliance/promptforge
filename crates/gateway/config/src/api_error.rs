@@ -46,7 +46,7 @@ pub enum ConfigErrorKind {
 }
 
 impl ConfigError {
-    /// Classify this failure without matching a private representation.
+    /// Classifies this failure without matching a private representation.
     #[must_use]
     pub fn kind(&self) -> ConfigErrorKind {
         match self.0 {

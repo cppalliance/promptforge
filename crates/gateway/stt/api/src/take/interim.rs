@@ -1,3 +1,5 @@
+//! Interim transcript snapshot split into finalized, agreed, and tentative parts.
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct InterimSnapshot {
     transcript: String,

@@ -503,7 +503,7 @@ Commit: one commit (production clock change ships with the rewritten test).
 
 <step-11>
 
-### Step 11: Documentation prose - gateway family
+### Step 11: Documentation prose - gateway family [completed]
 
 - Component: `docs-prose`
 - Piece: gateway crates (D7, group 1)

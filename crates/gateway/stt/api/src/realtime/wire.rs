@@ -1,3 +1,5 @@
+//! Wire module root for the realtime client and server event protocol.
+
 mod client;
 mod server;
 mod vocabulary;

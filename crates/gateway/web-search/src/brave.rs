@@ -85,7 +85,7 @@ pub(crate) struct BraveSearchParams<'a> {
     pub(crate) safesearch: Option<&'a str>,
 }
 
-/// Compute the Brave over-fetch count from a clamped requested count.
+/// Computes the Brave over-fetch count from a clamped requested count.
 ///
 /// `brave_count = min(max_count, requested_count.saturating_mul(3).max(requested_count))`
 #[must_use]
@@ -95,12 +95,12 @@ pub(crate) fn brave_overfetch_count(requested_count: u8, max_count: u8) -> u8 {
     over.min(max_count)
 }
 
-/// Prefix Brave upstream errors with `web_search: `.
+/// Prefixes Brave upstream errors with `web_search: `.
 pub(crate) fn prefix_web_search_upstream(err: ProtocolError) -> ProtocolError {
     prefix_protocol(err)
 }
 
-/// Prefix the protocol-level Brave upstream errors with `web_search: `.
+/// Prefixes the protocol-level Brave upstream errors with `web_search: `.
 fn prefix_protocol(err: ProtocolError) -> ProtocolError {
     match err {
         ProtocolError::UpstreamStatus { status, body, .. } => ProtocolError::upstream_status(
@@ -140,7 +140,7 @@ impl std::error::Error for WebSearchUpstream {
     }
 }
 
-/// Build Brave `/web/search` query pairs from [`BraveSearchParams`].
+/// Builds Brave `/web/search` query pairs from [`BraveSearchParams`].
 ///
 /// Always includes `extra_snippets=true`. Optional knobs are omitted when `None`.
 #[must_use]
@@ -165,7 +165,7 @@ pub(crate) fn brave_search_query(params: &BraveSearchParams<'_>) -> Vec<(&'stati
     query
 }
 
-/// Call the Brave Search API and map `web.results` to [`SearchResult`] values.
+/// Calls the Brave Search API and maps `web.results` to [`SearchResult`] values.
 ///
 /// Always sends `extra_snippets=true`. Optional knobs are omitted when `None`.
 ///

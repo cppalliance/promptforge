@@ -35,7 +35,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/v1/models";
 
-/// Fetch and normalize ElevenLabs' model list in a single request.
+/// Fetches and normalizes ElevenLabs' model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -78,7 +78,7 @@ struct WireLanguage {
     language_id: String,
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.model_id, None);
     if let Some(name) = &model.name {
@@ -117,7 +117,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family. ElevenLabs' catalog carries no snapshot
+/// Sets every entry's family. ElevenLabs' catalog carries no snapshot
 /// suffixes, so there is no collapse pass.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

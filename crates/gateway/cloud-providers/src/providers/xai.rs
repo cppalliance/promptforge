@@ -38,7 +38,7 @@ const MODELS_PATH: &str = "/v1/models";
 /// factor of 100, cents to dollars another.
 const CENTS_PER_100M_TO_USD_PER_MTOK: f64 = 10_000.0;
 
-/// Fetch and normalize xAI's model list in a single request.
+/// Fetches and normalizes xAI's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -69,7 +69,7 @@ struct WireModel {
     completion_text_token_price: Option<f64>,
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.id, model.created);
     entry.context_window = model.context_length;
@@ -77,7 +77,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     entry
 }
 
-/// Convert a wire price (USD cents per 100M tokens) to USD per million
+/// Converts a wire price (USD cents per 100M tokens) to USD per million
 /// tokens.
 fn usd_per_mtok(cents_per_100m: f64) -> f64 {
     cents_per_100m / CENTS_PER_100M_TO_USD_PER_MTOK
@@ -112,7 +112,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family, then collapse `-MMDD` snapshot suffixes
+/// Sets every entry's family, then collapses `-MMDD` snapshot suffixes
 /// onto their canonical entries. Ids carrying the date as an infix
 /// (`grok-4.20-0309-reasoning`) are not suffixes and stay canonical.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {

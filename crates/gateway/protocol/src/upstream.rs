@@ -67,8 +67,8 @@ impl std::fmt::Debug for StreamedAudio {
 /// A backend the gateway can forward a chat completion to.
 #[async_trait]
 pub trait Upstream: Send + Sync {
-    /// Forward `req` to the backend, substituting `upstream_model` for the
-    /// caller's model name, and return the response.
+    /// Forwards `req` to the backend, substituting `upstream_model` for the
+    /// caller's model name, and returns the response.
     ///
     /// # Errors
     /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
@@ -81,8 +81,8 @@ pub trait Upstream: Send + Sync {
         upstream_model: &str,
     ) -> Result<ChatResponse, ProtocolError>;
 
-    /// Forward an embeddings `req` to the backend, substituting
-    /// `upstream_model` for the caller's model name, and return the response.
+    /// Forwards an embeddings `req` to the backend, substituting
+    /// `upstream_model` for the caller's model name, and returns the response.
     ///
     /// The default is [`ProtocolError::ModelUnavailable`]: upstreams without an
     /// embeddings implementation (a local chat server, for example) decline
@@ -102,8 +102,8 @@ pub trait Upstream: Send + Sync {
         Err(ProtocolError::ModelUnavailable(req.model))
     }
 
-    /// Forward a rerank `req` to the backend, substituting `upstream_model`
-    /// for the caller's model name, and return the response.
+    /// Forwards a rerank `req` to the backend, substituting `upstream_model`
+    /// for the caller's model name, and returns the response.
     ///
     /// The default is [`ProtocolError::ModelUnavailable`]: upstreams without a
     /// rerank implementation (a local chat server, for example) decline the
@@ -123,8 +123,8 @@ pub trait Upstream: Send + Sync {
         Err(ProtocolError::ModelUnavailable(req.model))
     }
 
-    /// Open a streaming chat completion for `req`, substituting
-    /// `upstream_model` for the caller's model name, and return the chunk
+    /// Opens a streaming chat completion for `req`, substituting
+    /// `upstream_model` for the caller's model name, and returns the chunk
     /// stream.
     ///
     /// The stream is boxed because the trait is used as `Arc<dyn Upstream>`:
@@ -153,8 +153,8 @@ pub trait Upstream: Send + Sync {
         Err(ProtocolError::ModelUnavailable(req.model))
     }
 
-    /// Forward a speech synthesis `req` to the backend, substituting
-    /// `upstream_model` for the caller's model name, and return the audio
+    /// Forwards a speech synthesis `req` to the backend, substituting
+    /// `upstream_model` for the caller's model name, and returns the audio
     /// stream.
     ///
     /// The default is [`ProtocolError::ModelUnavailable`]: upstreams without a
@@ -175,8 +175,8 @@ pub trait Upstream: Send + Sync {
         Err(ProtocolError::ModelUnavailable(req.model))
     }
 
-    /// Explicitly release any owned resources (for example a child process) and
-    /// disable further recovery, surfacing any teardown failure.
+    /// Explicitly releases any owned resources (for example a child process) and
+    /// disables further recovery, surfacing any teardown failure.
     ///
     /// The default is a no-op for stateless upstreams. The supervised local
     /// upstream cancels any in-flight recovery, kills its `llama-server` child,
@@ -213,7 +213,7 @@ pub struct OpenAiUpstream {
 }
 
 impl OpenAiUpstream {
-    /// Build an upstream for `base_url` (a trailing slash is trimmed).
+    /// Builds an upstream for `base_url` (a trailing slash is trimmed).
     #[must_use]
     pub fn new(base_url: &str, api_key: Secret) -> OpenAiUpstream {
         OpenAiUpstream {
@@ -225,7 +225,7 @@ impl OpenAiUpstream {
         }
     }
 
-    /// Build an upstream with a caller-supplied HTTP client (test seam for
+    /// Builds an upstream with a caller-supplied HTTP client (test seam for
     /// exercising request deadlines against a stalled server).
     #[cfg(test)]
     pub(crate) fn with_client(
@@ -308,7 +308,7 @@ impl OpenAiUpstream {
     }
 }
 
-/// Parse an upstream SSE byte stream into validated [`ChatChunk`]s.
+/// Parses an upstream SSE byte stream into validated [`ChatChunk`]s.
 ///
 /// Each `data:` line carries one JSON chunk; blank lines, comments, and the
 /// `event:`/`id:`/`retry:` fields are skipped, and the terminal `[DONE]`
@@ -846,7 +846,7 @@ mod tests {
         }
     }
 
-    /// Install a WARN-level subscriber writing to a fresh capture buffer for
+    /// Installs a WARN-level subscriber writing to a fresh capture buffer for
     /// the current thread (tokio's current-thread test runtime keeps every
     /// poll on this thread, so the parser's warnings land in the buffer).
     fn capture_warnings() -> (LogBuffer, tracing::subscriber::DefaultGuard) {

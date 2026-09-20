@@ -1,3 +1,5 @@
+//! Constructors building server events from session and item outcomes.
+
 use super::{
     ConversationItem, DurationUsage, EffectiveSession, InputAudioContent, ServerEvent, WireError,
 };

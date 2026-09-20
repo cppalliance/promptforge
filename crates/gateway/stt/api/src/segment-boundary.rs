@@ -1,3 +1,5 @@
+//! Segment boundary outcomes describing decode ranges and forced overlaps.
+
 use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

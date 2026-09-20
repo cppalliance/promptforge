@@ -35,7 +35,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/models";
 
-/// Fetch and normalize Qwen's model list in a single request.
+/// Fetches and normalizes Qwen's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -61,7 +61,7 @@ struct WireModel {
     created: Option<i64>,
 }
 
-/// Normalize one wire model: the compatible-mode endpoint is IDs-only,
+/// Normalizes one wire model: the compatible-mode endpoint is IDs-only,
 /// so the entry is the conservative base plus the name-based kind.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.id, model.created);
@@ -127,7 +127,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family, then collapse dated snapshots onto their
+/// Sets every entry's family, then collapses dated snapshots onto their
 /// canonical entries. DashScope uses `-YYYY-MM-DD`, `-MMDD`, and
 /// `-YYMM` suffixes; the four-digit ambiguity resolves as month-day
 /// first, then year-month.

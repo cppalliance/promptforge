@@ -1,3 +1,5 @@
+//! Final range outcome types and completion assembly for a take.
+
 use std::ops::Range;
 
 use crate::segment::ForcedBoundary;

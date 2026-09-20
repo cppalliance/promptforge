@@ -43,7 +43,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// lineup grows.
 const PAGE_LIMIT: u32 = 1000;
 
-/// Fetch and normalize Anthropic's model list, following the cursor until
+/// Fetches and normalizes Anthropic's model list, following the cursor until
 /// the final page.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -177,7 +177,7 @@ fn effort_levels(effort: Option<&WireEffort>) -> Vec<String> {
     .collect()
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let caps = model.capabilities.as_ref();
     let capability = |pick: fn(&WireCapabilities) -> &Option<Support>| {
@@ -228,7 +228,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     }
 }
 
-/// Parse the release date. The endpoint substitutes the epoch when the
+/// Parses the release date. The endpoint substitutes the epoch when the
 /// release date is unknown; that sentinel normalizes to `None`, as does
 /// an unparseable value.
 fn parse_release_date(created_at: &str) -> Option<Date> {

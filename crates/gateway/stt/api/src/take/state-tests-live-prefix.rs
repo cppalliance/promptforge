@@ -1,3 +1,5 @@
+//! Tests for live-prefix snapshots of pending forced take text.
+
 use super::super::TakeState;
 use crate::segment::ForcedBoundary;
 use crate::take::final_outcome::FinalRangeOutcome;

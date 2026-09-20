@@ -19,7 +19,7 @@ pub(crate) struct ListResponse<M> {
     pub data: Vec<M>,
 }
 
-/// Fetch the whole list in one request; the dialect has no pagination.
+/// Fetches the whole list in one request; the dialect has no pagination.
 pub(crate) async fn fetch_list<M: DeserializeOwned>(
     client: &reqwest::Client,
     url: &str,

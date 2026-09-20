@@ -1,3 +1,5 @@
+//! Characterization tests for the realtime protocol JSON fixture files.
+
 #![expect(
     clippy::expect_used,
     clippy::too_many_lines,

@@ -71,7 +71,7 @@ pub const PROVIDER: Provider = Provider {
     ],
 };
 
-/// Fetch and normalize Bedrock's foundation-model list with a
+/// Fetches and normalizes Bedrock's foundation-model list with a
 /// SigV4-signed request; the secret key and region are private env reads.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -178,7 +178,7 @@ struct WireLifecycle {
     status: String,
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.model_id, None);
     if let Some(name) = &model.model_name {

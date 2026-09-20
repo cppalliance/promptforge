@@ -33,7 +33,7 @@ pub(crate) struct WebSearchSettings {
 }
 
 impl WebSearchSettings {
-    /// Build settings from the tool configuration.
+    /// Builds settings from the tool configuration.
     #[must_use]
     pub(crate) fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
         WebSearchSettings {
@@ -62,7 +62,7 @@ pub struct WebSearchState {
 }
 
 impl WebSearchState {
-    /// Build web-search state from its configuration.
+    /// Builds web-search state from its configuration.
     #[must_use]
     pub fn new(cfg: &WebSearchConfig) -> WebSearchState {
         // v0 supports only the Brave provider; the query path below is
@@ -142,7 +142,7 @@ pub struct SearchResult {
 /// Maximum query length kept, in Unicode scalar values (TOOLS-004).
 const MAX_QUERY_CHARS: usize = 512;
 
-/// Trim Unicode whitespace from `query`, reject empty values, and cap length.
+/// Trims Unicode whitespace from `query`, rejects empty values, and caps length.
 ///
 /// # Errors
 /// Returns [`WebSearchError::MalformedRequest`] with
@@ -159,7 +159,7 @@ fn trim_web_search_query(query: &str) -> Result<String, WebSearchError> {
     Ok(trimmed.chars().take(MAX_QUERY_CHARS).collect())
 }
 
-/// Validate and canonicalize caller-supplied domain filters (WSP-006).
+/// Validates and canonicalizes caller-supplied domain filters (WSP-006).
 ///
 /// Each entry must be a bare hostname/domain, not a URL: non-empty, ASCII, no
 /// scheme, path, port, or whitespace, and standard label syntax. A malformed
@@ -178,7 +178,7 @@ fn validate_domain_filters(field: &str, domains: &[String]) -> Result<Vec<String
         .collect()
 }
 
-/// Validate one caller-supplied domain filter entry (WSP-006).
+/// Validates one caller-supplied domain filter entry (WSP-006).
 fn validate_domain_filter(field: &str, raw: &str) -> Result<String, WebSearchError> {
     let domain = raw.trim();
     let malformed =
@@ -219,14 +219,14 @@ fn is_valid_domain_syntax(domain: &str) -> bool {
     labels >= 1
 }
 
-/// Clamp the requested count into `1..=max_count`.
+/// Clamps the requested count into `1..=max_count`.
 #[must_use]
 fn clamp_count(requested: u8, max_count: u8) -> u8 {
     let max_count = max_count.max(1);
     requested.clamp(1, max_count)
 }
 
-/// Reject malformed request-supplied provider knobs at the boundary (TOOLS-004).
+/// Rejects malformed request-supplied provider knobs at the boundary (TOOLS-004).
 ///
 /// Empty/absent knobs are omitted downstream and need no validation; the config
 /// defaults are already validated at load. This validates only caller-supplied,
@@ -296,17 +296,17 @@ fn is_alpha_code(value: &str, min: usize, max: usize) -> bool {
     len >= min && len <= max && value.chars().all(|c| c.is_ascii_alphabetic())
 }
 
-/// Resolve an optional string knob: `Some` and non-empty after trim, else `None`.
+/// Resolves an optional string knob: `Some` and non-empty after trim, else `None`.
 fn non_empty_opt(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// Resolve freshness: request value, else non-empty settings default, else omit.
+/// Resolves freshness: request value, else non-empty settings default, else omit.
 fn resolve_freshness<'a>(request: Option<&'a str>, default_freshness: &'a str) -> Option<&'a str> {
     non_empty_opt(request).or_else(|| non_empty_opt(Some(default_freshness)))
 }
 
-/// Resolve safesearch: request value, else non-empty settings default, else omit.
+/// Resolves safesearch: request value, else non-empty settings default, else omit.
 fn resolve_safesearch<'a>(
     request: Option<&'a str>,
     default_safesearch: &'a str,
@@ -315,7 +315,7 @@ fn resolve_safesearch<'a>(
 }
 
 impl WebSearchState {
-    /// Run a web search against the configured provider and post-process the
+    /// Runs a web search against the configured provider and post-processes the
     /// results.
     ///
     /// The query is trimmed and capped, the closed-vocabulary knobs are

@@ -15,7 +15,7 @@ fn family_of(id: &str) -> String {
     rest.split('-').next().unwrap_or(rest).to_owned()
 }
 
-/// Set every entry's family, then collapse `-YYYYMMDD` snapshots onto
+/// Sets every entry's family, then collapses `-YYYYMMDD` snapshots onto
 /// their canonical entries.
 pub(crate) fn apply(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

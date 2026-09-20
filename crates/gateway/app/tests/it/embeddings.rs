@@ -88,7 +88,7 @@ async fn slow_embeddings_backend() -> (SocketAddr, UnboundedReceiver<ReleaseTx>)
     (spawn_backend(router).await, receiver)
 }
 
-/// Start a gateway serving one remote embedding model. With
+/// Starts a gateway serving one remote embedding model. With
 /// `max_concurrency`, the endpoint is bound to a dominion pool capped at that
 /// many in-flight requests; without it the endpoint is an unlimited
 /// pass-through.

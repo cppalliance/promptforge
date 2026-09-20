@@ -98,7 +98,7 @@ fn kind_from_outputs(output_modalities: &[String]) -> ModelKind {
     }
 }
 
-/// Fill the family for entries that carry no publisher - including the
+/// Fills the family for entries that carry no publisher - including the
 /// id-only entries the registry's taxonomy tests build - so every entry
 /// leaves the fetch with one. Normalization sets the publisher family
 /// from the card; there is no snapshot collapse, because catalog slugs

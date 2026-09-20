@@ -1,3 +1,5 @@
+//! Uncommitted realtime input holding buffered audio and its sealed commit form.
+
 use std::sync::Arc;
 
 use crate::audio::{AudioBuffer, AudioError};

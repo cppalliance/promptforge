@@ -1,3 +1,5 @@
+//! WebSocket route driving the realtime transcription session loop.
+
 use std::time::Duration;
 
 #[cfg(feature = "test-fixtures")]

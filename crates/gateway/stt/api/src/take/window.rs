@@ -1,3 +1,5 @@
+//! Whole-window interim state that merges hypotheses with the live prefix.
+
 use std::ops::Range;
 
 use super::agreement::{equivalent_token, matching_token_prefix_end, token_spans};

@@ -1,3 +1,5 @@
+//! Tests for llama-server launch arguments, readiness polling, and child process lifecycle.
+
 use std::collections::VecDeque;
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};

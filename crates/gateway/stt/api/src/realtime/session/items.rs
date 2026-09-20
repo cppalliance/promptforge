@@ -1,3 +1,5 @@
+//! Session commit handling and committed item result plumbing.
+
 #[cfg(feature = "test-fixtures")]
 use std::future::Future;
 #[cfg(feature = "test-fixtures")]

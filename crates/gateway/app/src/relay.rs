@@ -137,7 +137,7 @@ pub(crate) async fn chat_completions(
     Ok(Json(response).into_response())
 }
 
-/// Re-emit a validated upstream chunk stream as an SSE response, holding the
+/// Re-emits a validated upstream chunk stream as an SSE response, holding the
 /// dominion queue permit for the stream's lifetime.
 ///
 /// The relay is typed: each upstream chunk is validated and re-serialized per

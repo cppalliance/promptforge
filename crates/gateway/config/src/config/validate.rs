@@ -20,7 +20,7 @@ use crate::error::ConfigError;
 use crate::profile::ProfileName;
 
 impl Config {
-    /// Advertise `images = true` for every local model with a multimodal
+    /// Advertises `images = true` for every local model with a multimodal
     /// projector.
     ///
     /// A configured `[local_model.multimodal_projector]` makes the child
@@ -40,7 +40,7 @@ impl Config {
         }
     }
 
-    /// Check names are unique, references resolve, URLs parse, and closed
+    /// Checks names are unique, references resolve, URLs parse, and closed
     /// vocabularies hold.
     ///
     /// # Errors
@@ -76,7 +76,7 @@ impl Config {
         Ok(())
     }
 
-    /// Validate `[tools.web_search]` bounds, URL, and closed knobs at load so
+    /// Validates `[tools.web_search]` bounds, URL, and closed knobs at load so
     /// downstream code never has to clamp or re-parse operator input (CFG-006).
     fn validate_tools(&self) -> Result<(), ConfigError> {
         let Some(web_search) = self.web_search_config() else {
@@ -684,7 +684,7 @@ impl Config {
     }
 }
 
-/// Validate the capability metadata of one model entry.
+/// Validates the capability metadata of one model entry.
 ///
 /// `default_effort` requires a non-empty `effort_levels` and must name a
 /// listed level; the effort knobs are meaningless on a model that never
@@ -739,7 +739,7 @@ fn validate_capabilities(
     Ok(())
 }
 
-/// Reject chat-only fields on a non-chat model kind and the speech-only
+/// Rejects chat-only fields on a non-chat model kind and the speech-only
 /// `voices` list on a non-speech kind.
 ///
 /// `thinking` and the capability effort knobs (`effort_levels`,
@@ -785,7 +785,7 @@ fn validate_kind_scope(
     Ok(())
 }
 
-/// Parse `raw` and require an `http`/`https` scheme with a non-empty host.
+/// Parses `raw` and requires an `http`/`https` scheme with a non-empty host.
 ///
 /// This is the single URL gate for operator-supplied origins: a value that
 /// passes here is a real, absolute HTTP(S) URL, so adapters can join a path

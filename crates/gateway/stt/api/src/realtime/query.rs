@@ -1,3 +1,5 @@
+//! Validation of the realtime WebSocket upgrade query string.
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(super) enum QueryError {
     MissingIntent,

@@ -1,3 +1,5 @@
+//! Tests for config JSON round-tripping, key naming, and secret redaction.
+
 use super::super::*;
 
 /// A fixture exercising every config struct, every enum spelling, and all

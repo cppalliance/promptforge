@@ -1,3 +1,5 @@
+//! Final-decode pipeline that sequences closed segments into a take completion.
+
 use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;

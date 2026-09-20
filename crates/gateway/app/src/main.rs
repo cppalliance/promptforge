@@ -267,7 +267,7 @@ fn init_logging_for_state(state_dir: Option<PathBuf>) -> Option<LogRuntime> {
 #[path = "main-logging-tests.rs"]
 mod logging_tests;
 
-/// Log the error and its full `source()` chain through the subscriber, so
+/// Logs the error and its full `source()` chain through the subscriber, so
 /// the fatal outcome lands in the drained queue.
 fn log_error_chain(error: &dyn std::error::Error) {
     tracing::error!("error: {error}");
@@ -278,7 +278,7 @@ fn log_error_chain(error: &dyn std::error::Error) {
     }
 }
 
-/// Print the error and its full `source()` chain to stderr: the fallback
+/// Prints the error and its full `source()` chain to stderr: the fallback
 /// when the logger itself never started.
 fn print_error_chain(error: &dyn std::error::Error) {
     eprintln!("error: {error}");
@@ -305,7 +305,7 @@ enum ParseError {
 enum Command {
     /// Serve (the default and only serving mode).
     Serve,
-    /// Print the diagnostics report and exit.
+    /// Prints the diagnostics report and exits.
     Diagnostics,
 }
 
@@ -328,7 +328,7 @@ struct Invocation {
     print_url: bool,
 }
 
-/// Parse the command line into a typed [`Invocation`].
+/// Parses the command line into a typed [`Invocation`].
 ///
 /// The bare invocation serves; there are no subcommands. Uses `OsString`
 /// operands so non-UTF-8 config paths survive. The config path

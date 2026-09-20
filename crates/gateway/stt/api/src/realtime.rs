@@ -1,3 +1,5 @@
+//! Realtime transcription module root re-exporting the session, registry, and route surface.
+
 mod input;
 mod item;
 mod query;

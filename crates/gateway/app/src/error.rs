@@ -300,7 +300,7 @@ impl From<gateway_web_search::WebSearchError> for GatewayError {
 }
 
 impl GatewayError {
-    /// Wrap a body-decode failure as a protocol error (not a transport error),
+    /// Wraps a body-decode failure as a protocol error (not a transport error),
     /// preserving the cause via `source()`. See [`ProtocolError::upstream_protocol`].
     #[must_use]
     pub(crate) fn upstream_protocol(
@@ -309,7 +309,7 @@ impl GatewayError {
         GatewayError::Protocol(ProtocolError::upstream_protocol(source))
     }
 
-    /// Wrap a command failure (the boot load, an apply, an unload) at
+    /// Wraps a command failure (the boot load, an apply, an unload) at
     /// `stage`, preserving the cause.
     #[must_use]
     pub(crate) fn switch_failed(
@@ -322,14 +322,14 @@ impl GatewayError {
         }
     }
 
-    /// Wrap a cache-operation failure, preserving the cause.
+    /// Wraps a cache-operation failure, preserving the cause.
     #[cfg(feature = "local")]
     #[must_use]
     pub(crate) fn cache(source: impl std::error::Error + Send + Sync + 'static) -> GatewayError {
         GatewayError::Cache(Box::new(source))
     }
 
-    /// Wrap a model-info read or parse failure, preserving the cause.
+    /// Wraps a model-info read or parse failure, preserving the cause.
     #[cfg(feature = "local")]
     #[must_use]
     pub(crate) fn model_info(
@@ -338,7 +338,7 @@ impl GatewayError {
         GatewayError::ModelInfo(Box::new(source))
     }
 
-    /// Wrap a system-metrics sampling failure, preserving the cause.
+    /// Wraps a system-metrics sampling failure, preserving the cause.
     #[must_use]
     pub(crate) fn system_metrics(
         source: impl std::error::Error + Send + Sync + 'static,

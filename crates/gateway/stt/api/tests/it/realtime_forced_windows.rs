@@ -1,3 +1,5 @@
+//! Integration tests for forced final windows across hour-long realtime sessions.
+
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;

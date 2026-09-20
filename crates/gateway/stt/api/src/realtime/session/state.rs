@@ -1,3 +1,5 @@
+//! Session state struct, error type, and interim task definitions.
+
 use crate::audio::AudioError;
 use crate::generation::GenerationLease;
 use crate::realtime::input::UncommittedInput;

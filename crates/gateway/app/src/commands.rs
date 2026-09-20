@@ -51,8 +51,8 @@ pub(crate) enum Command {
         /// Cancellation token, checked at chunk and phase boundaries.
         token: CancellationToken,
     },
-    /// Apply the staged configuration: promote the captured shadows and
-    /// swap the remote routing table to the snapshot's config in one live
+    /// Applies the staged configuration: promotes the captured shadows and
+    /// swaps the remote routing table to the snapshot's config in one live
     /// write, leaving the local runtime as it is. Nothing touches a real
     /// file before that commit, so a failed or cancelled apply leaves every
     /// shadow staged for a retry.
@@ -70,7 +70,7 @@ pub(crate) enum Command {
         /// the apply lock at the commit.
         token: CancellationToken,
     },
-    /// Download and verify one model into the artifact store. Spawning it
+    /// Downloads and verifies one model into the artifact store. Spawning it
     /// into the routing table needs the model's full configuration, which
     /// this command does not carry; that arrives with the command's first
     /// producer.
@@ -89,7 +89,7 @@ pub(crate) enum Command {
         /// Cancellation token, checked at chunk and phase boundaries.
         token: CancellationToken,
     },
-    /// Stop one local model's `llama-server` child and drop it from the
+    /// Stops one local model's `llama-server` child and drops it from the
     /// routing table. Not debounced: unloads are fast and order-independent.
     #[cfg_attr(
         not(test),
@@ -631,7 +631,7 @@ impl CommandQueue {
 /// one critical section so a shutdown cannot slip between the pop and the
 /// activation.
 enum BeginNext {
-    /// Run this command; it is installed as the active entry.
+    /// Runs this command; it is installed as the active entry.
     Run(u64, Command, ProgressTree),
     /// The deque is empty; park until notified.
     Wait,

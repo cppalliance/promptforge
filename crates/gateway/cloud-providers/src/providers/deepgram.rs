@@ -36,7 +36,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/v1/models";
 
-/// Fetch and normalize Deepgram's model list in a single request.
+/// Fetches and normalizes Deepgram's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -91,7 +91,7 @@ struct WireTts {
     languages: Vec<String>,
 }
 
-/// Split one payload into STT and TTS entries with distinct kinds, one
+/// Splits one payload into STT and TTS entries with distinct kinds, one
 /// entry per distinct canonical name: the wire repeats each model once
 /// per language, so rows group by id and their languages collect in
 /// first-seen order.
@@ -114,7 +114,7 @@ fn normalize_list(response: &ListResponse) -> Vec<ModelEntry> {
     entries
 }
 
-/// Merge one row into the grouped list: the first row for an id pushes
+/// Merges one row into the grouped list: the first row for an id pushes
 /// the entry; later rows for the same id contribute only the languages
 /// the entry does not already carry.
 fn absorb(
@@ -156,7 +156,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family. Deepgram's catalog carries no snapshot
+/// Sets every entry's family. Deepgram's catalog carries no snapshot
 /// suffixes, so there is no collapse pass.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

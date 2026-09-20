@@ -676,7 +676,7 @@ impl LocalRuntime {
         Some(model)
     }
 
-    /// Explicitly terminate every owned `llama-server` child and disable respawn,
+    /// Explicitly terminates every owned `llama-server` child and disables respawn,
     /// returning the first teardown failure after attempting *all* children.
     ///
     /// Dropping the runtime does not guarantee child termination, because the
@@ -725,7 +725,7 @@ struct LocalAdmission {
     queue: DominionQueue,
 }
 
-/// Resolve a local model's admission wiring.
+/// Resolves a local model's admission wiring.
 ///
 /// The `--parallel` value is `LocalModelConfig::parallel` (default 1). A
 /// model without a `dominion` gets a per-model queue limited to that same

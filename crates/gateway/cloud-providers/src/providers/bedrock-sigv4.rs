@@ -29,7 +29,7 @@ pub(super) fn host_of(url: &str) -> &str {
     after_scheme.split('/').next().unwrap_or(after_scheme)
 }
 
-/// Sign a GET request per AWS Signature Version 4, returning the
+/// Signs a GET request per AWS Signature Version 4, returning the
 /// `Authorization` header value. `query` is the canonical query string
 /// (name-sorted, URI-encoded); the Bedrock list endpoint takes none.
 #[expect(
@@ -92,7 +92,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 mod tests {
     use super::sign_get;
 
-    /// Sign with the AWS SigV4 test-suite credentials, host, and date.
+    /// Signs with the AWS SigV4 test-suite credentials, host, and date.
     fn sign_vector(path: &str, query: &str) -> String {
         sign_get(
             "example.amazonaws.com",

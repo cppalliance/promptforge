@@ -1,3 +1,5 @@
+//! Budgeted retention of rolling PCM audio for a take.
+
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

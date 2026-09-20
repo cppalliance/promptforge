@@ -1,3 +1,5 @@
+//! Tests for the retained PCM budget and rolling buffer accounting.
+
 use super::{RetainedPcm, RetainedPcmBudget, RollingPcm};
 
 #[test]

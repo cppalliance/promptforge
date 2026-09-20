@@ -162,7 +162,7 @@ impl Config {
         })
     }
 
-    /// Interpolate, parse, and validate a configuration from a TOML string.
+    /// Interpolates, parses, and validates a configuration from a TOML string.
     ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) for a malformed or unresolved
@@ -237,7 +237,7 @@ impl Config {
         Ok(selected)
     }
 
-    /// Parse, interpolate, and validate, returning the internal error type.
+    /// Parses, interpolates, and validates, returning the internal error type.
     pub(crate) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
         Self::parse_toml_at(raw, None)
     }

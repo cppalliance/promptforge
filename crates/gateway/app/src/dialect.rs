@@ -25,8 +25,8 @@ use crate::wire::{ChatChunk, ChatChunkChoice, ChatRequest, ChatResponse};
 /// The `tool_dialect` config value selecting this dialect.
 pub(crate) use gateway_routing::GEMMA3_TOOL_CODE;
 
-/// Translate an outgoing request for the emulated dialect: strip the tool
-/// surface the backend cannot honor and prepend the tool-code system guide.
+/// Translates an outgoing request for the emulated dialect: strips the tool
+/// surface the backend cannot honor and prepends the tool-code system guide.
 ///
 /// Mutation is atomic: the guide is fully rendered before anything is
 /// removed, so a preparation failure leaves the request unmodified.
@@ -59,7 +59,7 @@ pub(crate) fn prepare_request(request: &mut ChatRequest) -> Result<(), GatewayEr
     Ok(())
 }
 
-/// Parse each choice's message content for tool fences and rewrite the
+/// Parses each choice's message content for tool fences and rewrites the
 /// response in place: well-formed fences become wire `tool_calls` with a
 /// `tool_calls` finish reason; a malformed fence empties the content and
 /// attaches a `gateway_warning`, logged at warn; ordinary prose is untouched.
@@ -108,7 +108,7 @@ pub(crate) fn apply_response(response: &mut ChatResponse, model: &str) {
     }
 }
 
-/// Re-emit a dialect-rewritten buffered response as a synthetic chunk
+/// Re-emits a dialect-rewritten buffered response as a synthetic chunk
 /// stream, so the emulated dialect serves `stream: true` callers.
 ///
 /// The tool-code fence can only be parsed from the whole reply, so the
@@ -179,7 +179,7 @@ struct ParsedCall {
 }
 
 impl ParsedCall {
-    /// Render as an OpenAI `tool_calls` entry: `function.arguments` is the
+    /// Renders as an OpenAI `tool_calls` entry: `function.arguments` is the
     /// arguments object JSON-encoded into a string, as the wire shape requires.
     fn to_wire(&self) -> Value {
         serde_json::json!({
@@ -207,7 +207,7 @@ enum ContentParse {
     Malformed(String),
 }
 
-/// Classify model content as prose, tool calls, or malformed protocol.
+/// Classifies model content as prose, tool calls, or malformed protocol.
 ///
 /// The content is protocol only when it begins with a recognized tool fence;
 /// prose that merely mentions a fence later stays text. Once protocol intent is
@@ -269,7 +269,7 @@ enum Peel<'a> {
     NotAFence,
 }
 
-/// Peel one leading ` ```tool_code ` fence into Python-style `name(k=v)` calls.
+/// Peels one leading ` ```tool_code ` fence into Python-style `name(k=v)` calls.
 ///
 /// `next_id` is a run-wide monotonic counter used to mint each call's synthetic
 /// id; it is advanced once per parsed call so ids stay unique across fences.
@@ -300,7 +300,7 @@ fn peel_tool_code_fence<'a>(input: &'a str, next_id: &mut usize) -> Peel<'a> {
     Peel::Calls(calls, after)
 }
 
-/// Peel one leading ` ```json ` / ` ``` ` fence that holds OpenAI `tool_calls`.
+/// Peels one leading ` ```json ` / ` ``` ` fence that holds OpenAI `tool_calls`.
 ///
 /// A code fence is only tool protocol when its body decodes to a JSON object
 /// carrying a non-empty `tool_calls` array; anything else is an ordinary data
@@ -376,7 +376,7 @@ enum ToolCallRejection {
     ArgumentsMissing,
 }
 
-/// Parse the OpenAI `message.tool_calls` array into [`ParsedCall`]s.
+/// Parses the OpenAI `message.tool_calls` array into [`ParsedCall`]s.
 ///
 /// Each call must be an object with a nonblank string `id`, a `type` of
 /// `"function"`, an object `function` carrying a nonblank string `name`, and
@@ -453,7 +453,7 @@ fn strip_fence_open<'a>(input: &'a str, language: &str) -> Option<&'a str> {
     Some(rest)
 }
 
-/// Split `input` at the first standalone closing fence line (a line whose
+/// Splits `input` at the first standalone closing fence line (a line whose
 /// trimmed content is exactly ```` ``` ````), returning the body before it and
 /// the text after it.
 ///
@@ -508,7 +508,7 @@ fn is_identifier(s: &str) -> bool {
     chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
-/// Parse one `name(args)` call line into a [`ParsedCall`].
+/// Parses one `name(args)` call line into a [`ParsedCall`].
 ///
 /// The name must be an identifier, the arguments live between the first `(` and
 /// the final `)`, and the `)` must end the non-whitespace input so trailing text
@@ -538,7 +538,7 @@ fn parse_tool_code_call(line: &str, index: usize) -> Option<ParsedCall> {
     })
 }
 
-/// Parse the argument list into a JSON object.
+/// Parses the argument list into a JSON object.
 ///
 /// Arguments are either all keyword (`key=<json>`) or all positional
 /// (`<json>`); mixing the two forms is rejected, as is a duplicate keyword key.
@@ -653,7 +653,7 @@ fn top_level_assignment(part: &str) -> Option<usize> {
         .flatten()
 }
 
-/// Decode one argument token as a complete JSON value.
+/// Decodes one argument token as a complete JSON value.
 ///
 /// Strings decode their escapes, and null, numbers, booleans, arrays, and
 /// objects parse to the same [`Value`] the wire renderer emits. A bare word, an
@@ -666,7 +666,7 @@ fn parse_json_value(token: &str) -> Option<Value> {
     serde_json::from_str::<Value>(token).ok()
 }
 
-/// Map positional `tool_code` args onto schema-ish parameter names.
+/// Maps positional `tool_code` args onto schema-ish parameter names.
 ///
 /// Gemma IT frequently emits `search("...")` / `fetch("https://...")` instead
 /// of keyword form. Keep this table aligned with shipped tool aliases.
@@ -743,7 +743,7 @@ fn render_signature(function: &Value, name: &str) -> String {
     }
 }
 
-/// Render a system guide from OpenAI-shaped `tools`, or `None` when the list is
+/// Renders a system guide from OpenAI-shaped `tools`, or `None` when the list is
 /// empty or lists no usable tool.
 fn render_tool_guide(list: &[Value]) -> Option<String> {
     if list.is_empty() {

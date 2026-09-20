@@ -137,7 +137,7 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    /// Assemble the serving shell instantly: the routing table over every
+    /// Assembles the serving shell instantly: the routing table over every
     /// `[[model]]`, no local runtime, no provisioning. The selected
     /// profile's local models arrive when the command queue's boot
     /// `LoadProfile` merges them into the live table; until then an
@@ -239,7 +239,7 @@ impl Gateway {
         true
     }
 
-    /// Assemble from a validated config. Provisions and starts local models.
+    /// Assembles from a validated config. Provisions and starts local models.
     ///
     /// The boot selection is fixed for the process lifetime; a later switch
     /// persists a new selection and reports that a restart is needed.
@@ -420,7 +420,7 @@ impl Gateway {
         self.state.live.read().await.local.diagnostics()
     }
 
-    /// Serve on a caller-owned listener until `shutdown` completes or
+    /// Serves on a caller-owned listener until `shutdown` completes or
     /// `POST /shutdown` fires the route's own signal, whichever comes
     /// first; both drive the same graceful drain.
     ///
@@ -1109,7 +1109,7 @@ async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
     }
 }
 
-/// Load config, provision local children, bind, and serve until Ctrl-C.
+/// Loads config, provisions local children, binds, and serves until Ctrl-C.
 ///
 /// A thin wrapper over [`spawn`]: the gateway runs on its own thread, a
 /// Ctrl-C handler signals its graceful shutdown, and this call blocks until
@@ -1313,7 +1313,7 @@ fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
     )
 }
 
-/// Load an env file into the process environment, skipping missing files.
+/// Loads an env file into the process environment, skipping missing files.
 /// dotenvy never overrides variables that are already set. A malformed or
 /// unreadable file is ignored: any variable it failed to set surfaces at
 /// interpolation as an unresolved-`${VAR}` error naming the variable.

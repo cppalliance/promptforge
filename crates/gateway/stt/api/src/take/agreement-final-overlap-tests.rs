@@ -1,3 +1,5 @@
+//! Tests for range-guided suffix-prefix alignment of overlapping final windows.
+
 use super::*;
 
 #[test]

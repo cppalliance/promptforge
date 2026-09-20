@@ -1,3 +1,5 @@
+//! Tests that blocked scripted decodes release after return or cancellation.
+
 use super::*;
 
 fn start_decode(

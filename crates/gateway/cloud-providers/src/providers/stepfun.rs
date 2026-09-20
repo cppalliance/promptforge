@@ -36,7 +36,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/models";
 
-/// Fetch and normalize StepFun's model list in a single request.
+/// Fetches and normalizes StepFun's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -62,7 +62,7 @@ struct WireModel {
     created: Option<i64>,
 }
 
-/// Normalize one wire model: the endpoint is IDs-only, so the entry is
+/// Normalizes one wire model: the endpoint is IDs-only, so the entry is
 /// the conservative base.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, model.created)
@@ -83,7 +83,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family.
+/// Sets every entry's family.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);

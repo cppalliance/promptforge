@@ -1,3 +1,5 @@
+//! Fixture-driven tests for realtime wire parsing and serialization.
+
 use std::collections::HashSet;
 
 use serde_json::Value;

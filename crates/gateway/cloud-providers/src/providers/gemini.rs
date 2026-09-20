@@ -34,7 +34,7 @@ pub const PROVIDER: Provider = Provider {
 /// in one page today and pagination only engages as the lineup grows.
 const PAGE_SIZE: u32 = 1000;
 
-/// Fetch and normalize Gemini's model list, following `nextPageToken`
+/// Fetches and normalizes Gemini's model list, following `nextPageToken`
 /// until the final page.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -150,7 +150,7 @@ fn family_of(id: &str) -> String {
     id.split('-').next().unwrap_or(id).to_owned()
 }
 
-/// Set every entry's family, then collapse `-MM-YYYY` preview snapshots
+/// Sets every entry's family, then collapses `-MM-YYYY` preview snapshots
 /// onto their canonical entries.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
@@ -161,7 +161,7 @@ pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     });
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let methods = &model.supported_generation_methods;
     let generates = methods.iter().any(|m| m == "generateContent");

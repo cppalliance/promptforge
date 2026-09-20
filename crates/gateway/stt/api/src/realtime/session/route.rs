@@ -1,3 +1,5 @@
+//! Session-side server event emission and interim decode scheduling.
+
 use super::{Session, SessionError};
 use crate::realtime::result_mailbox::{ItemResult, SESSION_RESULT_CAPACITY};
 use crate::realtime::session::state::InterimTaskOutput;

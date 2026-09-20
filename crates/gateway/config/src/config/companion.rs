@@ -198,7 +198,7 @@ impl SpeculativeConfig {
         self.draft_max
     }
 
-    /// Check the companion source rules for the model named `model_name`.
+    /// Checks the companion source rules for the model named `model_name`.
     pub(crate) fn validate(&self, model_name: &str) -> Result<(), ConfigError> {
         validate_artifact_source(
             &format!("local_model {model_name}"),
@@ -269,7 +269,7 @@ impl MultimodalProjectorConfig {
         self.sha256.as_deref()
     }
 
-    /// Check the companion source rules for the model named `model_name`.
+    /// Checks the companion source rules for the model named `model_name`.
     pub(crate) fn validate(&self, model_name: &str) -> Result<(), ConfigError> {
         validate_artifact_source(
             &format!("local_model {model_name}"),

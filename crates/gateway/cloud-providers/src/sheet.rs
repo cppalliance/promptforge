@@ -19,9 +19,9 @@ use crate::{FetchError, Provider};
 /// failure that triggers last-known-good propagation.
 type BoxFetch = Pin<Box<dyn Future<Output = Result<Vec<ModelEntry>, FetchError>> + Send>>;
 
-/// Build the complete sheet: fetch every provider, propagate
-/// last-known-good slices from `previous` for failed fetches, emit
-/// static slices for Niche providers, and assemble the envelope.
+/// Builds the complete sheet: fetches every provider, propagates
+/// last-known-good slices from `previous` for failed fetches, emits
+/// static slices for Niche providers, and assembles the envelope.
 ///
 /// A failed fetch never fails the build: a provider with a previous
 /// slice is copied verbatim with `status` rewritten to `stale`, and a
@@ -54,7 +54,7 @@ pub async fn build_sheet(
     .await
 }
 
-/// Download and parse the current sheet from the release artifact.
+/// Downloads and parses the current sheet from the release artifact.
 ///
 /// # Errors
 ///
@@ -136,7 +136,7 @@ async fn build_sheet_with(
     }
 }
 
-/// Propagate a failed fetch: the previous slice verbatim with `status`
+/// Propagates a failed fetch: the previous slice verbatim with `status`
 /// rewritten to `stale`, or `unavailable` with an empty model list when
 /// there is nothing to propagate.
 fn stale_or_unavailable(provider: &Provider, prior: Option<ProviderSlice>) -> ProviderSlice {
@@ -157,7 +157,7 @@ fn stale_or_unavailable(provider: &Provider, prior: Option<ProviderSlice>) -> Pr
     }
 }
 
-/// Convert the descriptor's const-friendly env var specs into the
+/// Converts the descriptor's const-friendly env var specs into the
 /// schema's owned form for the slice.
 fn env_vars(provider: &Provider) -> Vec<EnvVar> {
     provider

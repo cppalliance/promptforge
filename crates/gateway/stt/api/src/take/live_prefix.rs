@@ -1,3 +1,5 @@
+//! Snapshot of the finalized live prefix and any pending forced text.
+
 use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

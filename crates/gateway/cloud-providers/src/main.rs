@@ -39,7 +39,7 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Resolve the operator's home directory, mirroring the ART-009
+/// Resolves the operator's home directory, mirroring the ART-009
 /// convention (`USERPROFILE` on Windows, `HOME` otherwise) rather than
 /// importing `gateway-local`, which would pull the local-inference
 /// stack into this thin sheet-building binary.
@@ -51,7 +51,7 @@ fn home_dir() -> Option<PathBuf> {
     home.filter(|home| !home.is_empty()).map(PathBuf::from)
 }
 
-/// Load operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
+/// Loads operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
 /// overriding the process environment so local runs need no exported keys.
 ///
 /// A missing file or unresolvable home earns a stderr note and a
@@ -104,7 +104,7 @@ fn default_output() -> String {
     dir.join(DEFAULT_OUTPUT_NAME).to_string_lossy().into_owned()
 }
 
-/// Build the sheet and write it to the output path, returning the path.
+/// Builds the sheet and writes it to the output path, returning the path.
 async fn run() -> Result<String, Box<dyn std::error::Error>> {
     let output = std::env::args().nth(1).unwrap_or_else(default_output);
     let client = reqwest::Client::builder()
@@ -136,7 +136,7 @@ enum PreviousSheet {
     Fetched(Sheet),
 }
 
-/// Resolve the previous release's sheet. An unset URL and an HTTP 404
+/// Resolves the previous release's sheet. An unset URL and an HTTP 404
 /// both mean first run; any other failure - transport error, non-404
 /// non-success status, unparseable body - is fatal, since silently
 /// losing history would demote every slice to `unavailable`.
@@ -167,7 +167,7 @@ async fn previous_sheet(
 mod tests {
     use super::*;
 
-    /// Serve one HTTP response with `status` carrying `body`, returning
+    /// Serves one HTTP response with `status` carrying `body`, returning
     /// the URL to request.
     fn serve_once(status: &'static str, body: &'static str) -> String {
         use std::io::{Read as _, Write as _};

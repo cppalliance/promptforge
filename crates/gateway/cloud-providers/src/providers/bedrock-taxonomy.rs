@@ -13,7 +13,7 @@ fn family_of(id: &str) -> String {
         .map_or_else(|| id.to_owned(), |(vendor, _)| vendor.to_owned())
 }
 
-/// Set every entry's family.
+/// Sets every entry's family.
 pub(crate) fn apply(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);

@@ -27,7 +27,7 @@ fn digits(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Parse a digit run already validated by [`digits`].
+/// Parses a digit run already validated by [`digits`].
 fn number(text: &str) -> u32 {
     text.bytes()
         .fold(0u32, |acc, b| acc * 10 + u32::from(b - b'0'))
@@ -57,7 +57,7 @@ pub(crate) fn is_version_token_o(token: &str) -> bool {
     is_version_token(token.strip_suffix('o').unwrap_or(token))
 }
 
-/// Split a snapshot suffix of the given style off `id`, returning the
+/// Splits a snapshot suffix of the given style off `id`, returning the
 /// base id and the suffix text without its leading dash. Returns `None`
 /// when the trailing bytes are not a well-formed date in the style - a
 /// wrong width, non-digit bytes, or impossible month or day numbers. A
@@ -106,7 +106,7 @@ pub(crate) fn strip_snapshot(id: &str, style: SnapshotStyle) -> Option<(&str, &s
     valid.then_some((base, suffix))
 }
 
-/// Split a `vendor/model` id into its vendor prefix and model id, on the
+/// Splits a `vendor/model` id into its vendor prefix and model id, on the
 /// first slash. Returns `None` when there is no slash or either side is
 /// empty.
 pub(crate) fn vendor_prefix(id: &str) -> Option<(&str, &str)> {
@@ -114,7 +114,7 @@ pub(crate) fn vendor_prefix(id: &str) -> Option<(&str, &str)> {
     (!vendor.is_empty() && !model.is_empty()).then_some((vendor, model))
 }
 
-/// Split a `:free`/`:batch`-style SKU suffix off `id`, on the last colon,
+/// Splits a `:free`/`:batch`-style SKU suffix off `id`, on the last colon,
 /// returning the base id and the SKU text. Returns `None` when there is
 /// no colon or either side is empty.
 pub(crate) fn sku_suffix(id: &str) -> Option<(&str, &str)> {

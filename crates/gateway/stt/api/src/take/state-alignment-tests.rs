@@ -1,3 +1,5 @@
+//! Tests reconciling captured forced-window outputs into one take completion.
+
 use super::TakeState;
 use crate::segment::ForcedBoundary;
 use crate::take::final_outcome::FinalRangeOutcome;

@@ -1,3 +1,5 @@
+//! Shared helpers for scripted scenario cleanup tests.
+
 use std::sync::Arc;
 
 use super::*;

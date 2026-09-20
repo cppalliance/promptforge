@@ -131,9 +131,9 @@ enum WaitOutcome {
 pub(crate) enum ServeMode {
     /// Chat completions; no extra flag.
     Chat,
-    /// Pass `--embeddings` so the child serves embedding requests.
+    /// Passes `--embeddings` so the child serves embedding requests.
     Embeddings,
-    /// Pass `--reranking` so the child serves rerank requests.
+    /// Passes `--reranking` so the child serves rerank requests.
     Reranking,
 }
 

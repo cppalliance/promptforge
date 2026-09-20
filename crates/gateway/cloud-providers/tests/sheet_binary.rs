@@ -63,7 +63,7 @@ const PREVIOUS_SHEET_JSON: &str = r#"{
   }
 }"#;
 
-/// Serve one HTTP response with `status` carrying `body`, returning the
+/// Serves one HTTP response with `status` carrying `body`, returning the
 /// URL to request.
 fn serve_once(status: &'static str, body: &'static str) -> String {
     let Ok(listener) = TcpListener::bind("127.0.0.1:0") else {
@@ -122,7 +122,7 @@ fn empty_home(test: &str) -> PathBuf {
     home
 }
 
-/// Run the binary with every provider key stripped from the environment,
+/// Runs the binary with every provider key stripped from the environment,
 /// so no host credential can turn a fixture run into a live fetch.
 /// Keyless providers (no `key_env`) have no credential to strip: they
 /// still fetch live, so their slice status depends on egress and the
@@ -147,7 +147,7 @@ fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
     output
 }
 
-/// Read the emitted sheet, failing with the binary's stderr when the
+/// Reads the emitted sheet, failing with the binary's stderr when the
 /// run itself failed.
 fn read_output(output: &PathBuf, result: &Output) -> Sheet {
     assert!(

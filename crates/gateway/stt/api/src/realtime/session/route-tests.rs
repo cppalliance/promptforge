@@ -1,3 +1,5 @@
+//! Tests for sample-to-millisecond conversion at the u64 boundary.
+
 use super::sample_millis;
 
 #[test]

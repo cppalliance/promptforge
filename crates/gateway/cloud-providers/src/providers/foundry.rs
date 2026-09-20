@@ -61,7 +61,7 @@ const PAGE_SIZE: u32 = 100;
 /// opposed to a mirrored registry entry that is merely listed.
 const HOSTED_OFFER: &str = "standard-paygo";
 
-/// Fetch and normalize Foundry's catalog, following the continuation
+/// Fetches and normalizes Foundry's catalog, following the continuation
 /// token until the final page; the endpoint is keyless, so no
 /// credential is read or sent.
 pub(crate) async fn fetch(
@@ -172,7 +172,7 @@ struct WireDeprecation {
     inference_retirement_date: Option<String>,
 }
 
-/// Normalize one wire card into a sheet entry. The catalog reports no
+/// Normalizes one wire card into a sheet entry. The catalog reports no
 /// pricing, so that field stays empty.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.name, None);
@@ -218,7 +218,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     entry
 }
 
-/// Parse a wire timestamp into a calendar date; an unparseable value
+/// Parses a wire timestamp into a calendar date; an unparseable value
 /// keeps no date.
 fn parse_wire_date(value: &str) -> Option<Date> {
     OffsetDateTime::parse(value, &Rfc3339)

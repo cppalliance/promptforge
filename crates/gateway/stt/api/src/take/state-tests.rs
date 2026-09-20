@@ -1,3 +1,5 @@
+//! Tests for take state finalization, failures, and snapshot consistency.
+
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;

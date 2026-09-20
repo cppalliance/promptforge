@@ -37,7 +37,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/platformModels";
 
-/// Fetch and normalize Leonardo's platform model list in a single
+/// Fetches and normalizes Leonardo's platform model list in a single
 /// request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -77,7 +77,7 @@ struct WireModel {
     name: Option<String>,
 }
 
-/// Normalize one wire model: every platform model is image generation,
+/// Normalizes one wire model: every platform model is image generation,
 /// so the entry is the conservative base with the image kind.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.id, None);
@@ -88,7 +88,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     entry
 }
 
-/// Set every entry's family: platform model ids are UUIDs, so the
+/// Sets every entry's family: platform model ids are UUIDs, so the
 /// display name - the catalog's only stable label - is the family,
 /// falling back to the id when the wire reports no name. There is no
 /// snapshot collapse.

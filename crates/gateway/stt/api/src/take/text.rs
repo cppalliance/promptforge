@@ -1,3 +1,5 @@
+//! Space-separated transcript appending helper.
+
 pub(super) fn append_transcript(text: &mut String, piece: &str) {
     if piece.is_empty() {
         return;

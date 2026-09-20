@@ -146,7 +146,7 @@ async fn status_speech_backend(status: StatusCode, body: &'static str) -> Socket
     .await
 }
 
-/// Start a gateway serving one remote speech model. `voices` renders the
+/// Starts a gateway serving one remote speech model. `voices` renders the
 /// catalog list (`Some(&[])` renders an explicit empty list, `None` omits
 /// the field). With `pool`, the endpoint binds to a dominion capped at that
 /// many in-flight requests with the given waiting depth and policy;
@@ -841,7 +841,7 @@ async fn models_catalog_shows_the_speech_kind_and_voices() {
     gateway.shutdown().await;
 }
 
-/// Start a gateway whose catalog is the given `[[model]]` TOML fragments,
+/// Starts a gateway whose catalog is the given `[[model]]` TOML fragments,
 /// all resolving to one fake backend. The voices route never calls an
 /// upstream; the backend exists only to satisfy config validation.
 async fn catalog_gateway(backend: SocketAddr, models: &str) -> TestServer {

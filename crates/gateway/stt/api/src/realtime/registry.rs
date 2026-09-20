@@ -1,3 +1,5 @@
+//! Bounded registry admitting realtime sessions and retiring their tasks.
+
 #[cfg(feature = "test-fixtures")]
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};

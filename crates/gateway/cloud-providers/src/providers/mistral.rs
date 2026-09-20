@@ -43,7 +43,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/v1/models";
 
-/// Fetch and normalize Mistral's model list in a single request.
+/// Fetches and normalizes Mistral's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -86,7 +86,7 @@ struct WireCapabilities {
     vision: Option<bool>,
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.id, model.created);
     if let Some(name) = &model.name {
@@ -112,7 +112,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     entry
 }
 
-/// Parse the deprecation timestamp: RFC 3339 first, then a bare
+/// Parses the deprecation timestamp: RFC 3339 first, then a bare
 /// `YYYY-MM-DD` calendar date; an unparseable value keeps the status
 /// with no date.
 fn parse_deprecation_date(value: &str) -> Option<Date> {

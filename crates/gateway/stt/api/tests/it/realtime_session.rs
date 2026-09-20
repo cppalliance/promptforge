@@ -1,3 +1,5 @@
+//! Integration tests for realtime session lifecycle, commits, and cancellation.
+
 use std::future::{Future, pending};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};

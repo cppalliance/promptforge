@@ -368,7 +368,7 @@ pub(crate) fn utc_now_iso() -> String {
     format_unix_utc(secs)
 }
 
-/// Format a Unix timestamp (seconds since 1970-01-01 UTC) as `YYYY-MM-DDThh:mm:ssZ`.
+/// Formats a Unix timestamp (seconds since 1970-01-01 UTC) as `YYYY-MM-DDThh:mm:ssZ`.
 ///
 /// Uses Howard Hinnant's days-to-civil algorithm; valid for all dates at or
 /// after the Unix epoch.

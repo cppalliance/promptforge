@@ -1,3 +1,5 @@
+//! Tests that blocked scripted construction times out and releases cleanly.
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;

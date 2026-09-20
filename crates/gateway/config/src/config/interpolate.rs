@@ -7,7 +7,7 @@
 
 use crate::error::ConfigError;
 
-/// Expand `${VAR}` from the environment; `$$` is a literal `$`.
+/// Expands `${VAR}` from the environment; `$$` is a literal `$`.
 ///
 /// # Errors
 /// Returns [`ConfigError::Interpolation`] on an unclosed `${...}` and
@@ -51,7 +51,7 @@ pub(crate) fn interpolate(input: &str) -> Result<String, ConfigError> {
     Ok(out)
 }
 
-/// Recursively interpolate `${VAR}` in every string leaf of a TOML value,
+/// Recursively interpolates `${VAR}` in every string leaf of a TOML value,
 /// leaving keys, comments (already stripped by the parser), and non-string
 /// scalars untouched. (CFG-007)
 pub(crate) fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {

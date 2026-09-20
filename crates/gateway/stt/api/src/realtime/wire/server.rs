@@ -1,3 +1,5 @@
+//! Server-to-client wire types for the realtime transcription protocol.
+
 #[cfg(test)]
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};

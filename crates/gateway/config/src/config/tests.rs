@@ -1,3 +1,5 @@
+//! Tests for config parsing, field defaults, and variable interpolation.
+
 use super::interpolate::interpolate;
 use super::*;
 

@@ -38,7 +38,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/v1/models";
 
-/// Fetch and normalize Soniox's model list in a single request.
+/// Fetches and normalizes Soniox's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -85,7 +85,7 @@ struct WireLanguage {
     code: String,
 }
 
-/// Normalize one wire model: every Soniox model is speech-to-text, so
+/// Normalizes one wire model: every Soniox model is speech-to-text, so
 /// the entry is the conservative base with the transcription kind and
 /// the wire's language codes.
 fn normalize_model(model: &WireModel) -> ModelEntry {
@@ -116,7 +116,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family. Soniox's catalog carries no snapshot
+/// Sets every entry's family. Soniox's catalog carries no snapshot
 /// suffixes, so there is no collapse pass.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

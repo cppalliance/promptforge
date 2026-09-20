@@ -1,3 +1,5 @@
+//! Base64 PCM16 audio buffering, resampling, and commit validation for realtime input.
+
 use base64::Engine as _;
 
 const INPUT_SAMPLE_RATE: u64 = 24_000;

@@ -1,3 +1,5 @@
+//! Parsing of client JSON events into typed realtime commands.
+
 use serde_json::{Map, Value};
 
 use super::vocabulary::{

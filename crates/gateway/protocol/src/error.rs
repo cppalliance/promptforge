@@ -55,7 +55,7 @@ pub enum ProtocolError {
 }
 
 impl ProtocolError {
-    /// Wrap a reqwest failure, classifying it by where the request died.
+    /// Wraps a reqwest failure, classifying it by where the request died.
     ///
     /// A connect failure (`err.is_connect()`) means the request never left
     /// the gateway and is classified [`ProtocolError::UpstreamConnect`];
@@ -70,7 +70,7 @@ impl ProtocolError {
         }
     }
 
-    /// Wrap an already-classified mid-flight transport failure, preserving
+    /// Wraps an already-classified mid-flight transport failure, preserving
     /// the cause via `source()`.
     ///
     /// The caller asserts the request may have reached the provider; for a
@@ -81,14 +81,14 @@ impl ProtocolError {
         ProtocolError::UpstreamTransport(Box::new(source))
     }
 
-    /// Wrap an already-classified connect failure, preserving the cause via
+    /// Wraps an already-classified connect failure, preserving the cause via
     /// `source()`.
     #[must_use]
     pub fn connect(source: impl std::error::Error + Send + Sync + 'static) -> ProtocolError {
         ProtocolError::UpstreamConnect(Box::new(source))
     }
 
-    /// Wrap a body-decode failure as a protocol error (not a transport error),
+    /// Wraps a body-decode failure as a protocol error (not a transport error),
     /// preserving the cause via `source()`.
     #[must_use]
     pub fn upstream_protocol(
@@ -97,7 +97,7 @@ impl ProtocolError {
         ProtocolError::UpstreamProtocol(Box::new(source))
     }
 
-    /// Build a non-success-status failure from the upstream's status and
+    /// Builds a non-success-status failure from the upstream's status and
     /// truncated body.
     #[must_use]
     pub fn upstream_status(status: u16, body: String) -> ProtocolError {
@@ -169,7 +169,7 @@ pub enum ShutdownError {
 }
 
 impl ShutdownError {
-    /// Wrap a teardown failure, preserving the cause via `source()`.
+    /// Wraps a teardown failure, preserving the cause via `source()`.
     #[must_use]
     pub fn teardown(source: impl std::error::Error + Send + Sync + 'static) -> ShutdownError {
         ShutdownError::Teardown(Box::new(source))

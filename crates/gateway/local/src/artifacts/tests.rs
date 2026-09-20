@@ -1,3 +1,5 @@
+//! Tests for artifact digests, archive extraction safety, publication, and cache confinement.
+
 use std::io::{self, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};

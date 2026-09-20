@@ -1,3 +1,5 @@
+//! Tests for the cloud model sheet cache, its refresh downloads, and the route that serves it.
+
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -47,7 +47,7 @@ impl Routing {
         }
     }
 
-    /// Build a routing table directly from resolved models. Intended for tests
+    /// Builds a routing table directly from resolved models. Intended for tests
     /// and for [`Routing::from_config`]. Order of `models` is the catalog order.
     ///
     /// # Errors
@@ -76,7 +76,7 @@ impl Routing {
         &self.models
     }
 
-    /// Build a routing table from a validated [`Config`], constructing one
+    /// Builds a routing table from a validated [`Config`], constructing one
     /// upstream per endpoint and one shared [`DominionQueue`] per dominion.
     ///
     /// Every endpoint bound to a dominion clones that dominion's queue, so
@@ -174,7 +174,7 @@ impl Routing {
         Ok(self)
     }
 
-    /// Resolve a model name to its routing entry.
+    /// Resolves a model name to its routing entry.
     ///
     /// # Errors
     /// Returns [`GatewayError::UnknownModel`] when no `[[model]]` matches.
@@ -186,7 +186,7 @@ impl Routing {
     }
 }
 
-/// Guard that a resolved model serves the workload its route handles, so a
+/// Guards that a resolved model serves the workload its route handles, so a
 /// request never reaches a backend wired for a different kind of work.
 ///
 /// # Errors

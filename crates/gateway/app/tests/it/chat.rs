@@ -792,7 +792,7 @@ fn sse_line(model: &str, content: &str) -> String {
     )
 }
 
-/// Read a response body to completion, bounded by the phase timeout.
+/// Reads a response body to completion, bounded by the phase timeout.
 async fn text_within(response: reqwest::Response) -> String {
     tokio::time::timeout(PHASE_TIMEOUT, response.text())
         .await

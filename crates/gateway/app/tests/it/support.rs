@@ -332,7 +332,7 @@ pub(crate) fn wait_for_connection(
     }
 }
 
-/// Spawn a plain axum backend on an ephemeral port and return its address.
+/// Spawns a plain axum backend on an ephemeral port and returns its address.
 pub(crate) async fn spawn_backend(router: Router) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -478,7 +478,7 @@ endpoints = ["fake"]
     Config::from_toml_str(&toml).unwrap()
 }
 
-/// Start the gateway wired to the fake backend.
+/// Starts the gateway wired to the fake backend.
 pub(crate) async fn gateway_for(backend: SocketAddr) -> TestServer {
     let gateway =
         Gateway::from_config(&gateway_config(backend), ProfilesContext::default()).unwrap();
@@ -504,7 +504,7 @@ pub(crate) async fn fake_brave() -> SocketAddr {
     spawn_backend(Router::new().route("/web/search", axum::routing::get(search))).await
 }
 
-/// Start a gateway wired to a fake Brave backend for the web-search tool.
+/// Starts a gateway wired to a fake Brave backend for the web-search tool.
 #[cfg(feature = "web-search")]
 pub(crate) async fn gateway_with_web_search(brave: SocketAddr) -> TestServer {
     let toml = format!(

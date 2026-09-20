@@ -67,7 +67,7 @@ enum StartupRepr {
 }
 
 impl StartupError {
-    /// Classify this failure without matching a private representation.
+    /// Classifies this failure without matching a private representation.
     #[must_use]
     pub fn kind(&self) -> StartupErrorKind {
         match self.0 {

@@ -1,3 +1,5 @@
+//! Token-level agreement helpers shared by take reconciliation and windowing.
+
 #[path = "agreement-final-overlap.rs"]
 mod final_overlap;
 #[path = "agreement-projection.rs"]

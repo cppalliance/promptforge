@@ -58,7 +58,7 @@ impl ChatRequest {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
     const RESERVED: [&'static str; 3] = ["model", "messages", "stream"];
 
-    /// Validate the request shape at the trust boundary, without coercion.
+    /// Validates the request shape at the trust boundary, without coercion.
     ///
     /// Rejects an empty model, an empty `messages` array, any message that is
     /// not a minimally-shaped chat message (an object with a supported string
@@ -90,7 +90,7 @@ impl ChatRequest {
     }
 }
 
-/// Validate one chat message's minimal shape without reconstructing it (WIRE-001).
+/// Validates one chat message's minimal shape without reconstructing it (WIRE-001).
 ///
 /// A message must be a JSON object with a supported string `role` and must carry
 /// either `content` (any shape: string, array, or null) or a tool/function call.
@@ -130,7 +130,7 @@ impl ChatResponse {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
     const RESERVED: [&'static str; 2] = ["model", "choices"];
 
-    /// Validate the upstream response shape, treating structural failure as an
+    /// Validates the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
     /// Each choice must be a minimally-shaped object: an `index` plus one of the
@@ -155,7 +155,7 @@ impl ChatResponse {
     }
 }
 
-/// Validate one response choice's minimal shape (WIRE-002).
+/// Validates one response choice's minimal shape (WIRE-002).
 ///
 /// A choice must be a JSON object carrying an `index` and one of the supported
 /// payload fields (`message` for non-streaming, `delta` for streaming, or the
@@ -196,7 +196,7 @@ pub struct ChatChunk {
 }
 
 impl ChatChunk {
-    /// Validate one upstream chunk's minimal shape before it is relayed.
+    /// Validates one upstream chunk's minimal shape before it is relayed.
     ///
     /// A chunk must carry at least one choice; each choice's `index` and
     /// `delta` are required typed fields, so deserialization has already
@@ -262,7 +262,7 @@ impl EmbeddingRequest {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
     const RESERVED: [&'static str; 3] = ["model", "input", "encoding_format"];
 
-    /// Validate the request shape at the trust boundary, without coercion.
+    /// Validates the request shape at the trust boundary, without coercion.
     ///
     /// Rejects an empty model, an empty input batch, and any reserved key
     /// smuggled into the flattened `rest` map (WIRE-001/003). Everything else
@@ -306,7 +306,7 @@ impl EmbeddingResponse {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
     const RESERVED: [&'static str; 2] = ["model", "data"];
 
-    /// Validate the upstream response shape, treating structural failure as an
+    /// Validates the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
     /// Each entry must be a minimally-shaped object carrying an `embedding`
@@ -441,7 +441,7 @@ impl SpeechRequest {
         "stream_format",
     ];
 
-    /// Validate the request shape at the trust boundary, without coercion.
+    /// Validates the request shape at the trust boundary, without coercion.
     ///
     /// Rejects an empty model, an empty or over-cap `input`, an out-of-range
     /// `speed`, and any reserved key smuggled into the flattened `rest` map
@@ -501,7 +501,7 @@ impl RerankRequest {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
     const RESERVED: [&'static str; 4] = ["model", "query", "documents", "top_n"];
 
-    /// Validate the request shape at the trust boundary, without coercion.
+    /// Validates the request shape at the trust boundary, without coercion.
     ///
     /// Rejects an empty model, an empty query, an empty document set, and any
     /// reserved key smuggled into the flattened `rest` map (WIRE-001/003).
@@ -548,7 +548,7 @@ impl RerankResponse {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
     const RESERVED: [&'static str; 2] = ["model", "results"];
 
-    /// Validate the upstream response shape, treating structural failure as an
+    /// Validates the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
     /// Each result must be a minimally-shaped object carrying an `index` and a

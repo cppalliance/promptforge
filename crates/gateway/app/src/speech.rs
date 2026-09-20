@@ -135,7 +135,7 @@ const SPEECH_RELAY_DOWNSTREAM_BLOCKED: Duration = Duration::from_millis(400);
 /// downstream.
 const SPEECH_RELAY_CHANNEL_CAPACITY: usize = 4;
 
-/// Re-emit an upstream audio byte stream as the response body, holding the
+/// Re-emits an upstream audio byte stream as the response body, holding the
 /// dominion queue permit for the stream's lifetime.
 ///
 /// The relay is untyped on purpose: audio frames are opaque bytes, so the

@@ -32,7 +32,7 @@ pub(crate) fn model_kind(output_modalities: &[String]) -> ModelKind {
     ModelKind::Chat
 }
 
-/// Set every entry's family, then collapse `:free`/`:batch` SKU
+/// Sets every entry's family, then collapses `:free`/`:batch` SKU
 /// suffixes onto their canonical entries.
 pub(crate) fn apply(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

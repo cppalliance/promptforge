@@ -27,7 +27,7 @@ use crate::error::GatewayError;
 /// per-request timeout replaces the bounded client's wider default.
 const HF_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Cap response body at 1 MiB: large model-card READMEs with embedded
+/// Caps response body at 1 MiB: large model-card READMEs with embedded
 /// base64 images can exceed 10 MiB, and the gateway only shows the text.
 const MAX_README_BODY: usize = 1024 * 1024;
 

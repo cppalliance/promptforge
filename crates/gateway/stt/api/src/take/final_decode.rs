@@ -1,3 +1,5 @@
+//! Decodes natural and forced final windows and records their outcomes.
+
 use std::future::Future;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};

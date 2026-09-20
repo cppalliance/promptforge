@@ -1,3 +1,5 @@
+//! Tests for the config schema version, hard-break detection, and profile selection.
+
 use std::fs;
 
 use tempfile::TempDir;

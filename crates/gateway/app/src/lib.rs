@@ -386,7 +386,7 @@ impl AppState {
         }
     }
 
-    /// Build full runtime state for `Gateway` and integration tests.
+    /// Builds full runtime state for `Gateway` and integration tests.
     #[must_use]
     #[expect(
         clippy::too_many_arguments,
@@ -491,7 +491,7 @@ impl AppState {
     }
 }
 
-/// Build the gateway's axum router.
+/// Builds the gateway's axum router.
 ///
 /// `bound` is the socket the server actually bound. When it is loopback,
 /// the whole surface is wrapped in the shared host-authority wall

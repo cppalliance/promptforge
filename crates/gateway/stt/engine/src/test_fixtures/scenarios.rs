@@ -1,3 +1,5 @@
+//! Scripted decoder and model factory fixtures with parking controls.
+
 use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};

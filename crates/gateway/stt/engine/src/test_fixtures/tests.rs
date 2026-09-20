@@ -1,3 +1,5 @@
+//! Tests for the scripted engine fixtures and their thread affinity.
+
 use super::*;
 use crate::{DecodeRequest, EnginePolicy, SttEngine};
 

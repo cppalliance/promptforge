@@ -21,8 +21,8 @@ pub(crate) const MAX_EXTRA_SNIPPETS: usize = 8;
 /// Max characters kept for a result `age` after sanitisation (WSP-001).
 pub(crate) const AGE_MAX_CHARS: usize = 64;
 
-/// Sanitize free text: drop most controls, collapse whitespace, trim, decode a
-/// fixed entity set, then cap by Unicode scalar count.
+/// Sanitizes free text: drops most controls, collapses whitespace, trims, decodes a
+/// fixed entity set, then caps by Unicode scalar count.
 #[must_use]
 pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
     // Bound the work up front (WSP-002): entity decoding and the final cap can
@@ -44,7 +44,7 @@ pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
     truncate_chars(&decoded, max_chars)
 }
 
-/// Drop known tracking query parameters from `url`. Removes a trailing empty `?`.
+/// Drops known tracking query parameters from `url`. Removes a trailing empty `?`.
 ///
 /// Params removed when the name equals `fbclid`, `gclid`, `mc_cid`, `mc_eid`,
 /// or starts with `utm_`. Does not truncate: an over-length URL is dropped by
@@ -81,7 +81,7 @@ pub(crate) fn strip_tracking_params(url: &str) -> String {
     out
 }
 
-/// Extract the hostname from `url` without a URL crate.
+/// Extracts the hostname from `url` without a URL crate.
 ///
 /// Handles optional scheme, `userinfo@`, and strips a trailing port. Returns
 /// lowercase host text, or `None` when no host can be parsed.
@@ -155,7 +155,7 @@ pub(crate) fn site_name_from_host(host: &str) -> String {
         .to_string()
 }
 
-/// Apply include then exclude domain filters.
+/// Applies include then exclude domain filters.
 ///
 /// Empty `include_domains` means no include filter. Empty `exclude_domains`
 /// means no exclude filter. A hostname matches a listed domain when they are
@@ -192,7 +192,7 @@ pub(crate) fn filter_domains(
         .collect()
 }
 
-/// Keep results in order while each host group stays under `max_per_host`,
+/// Keeps results in order while each host group stays under `max_per_host`,
 /// stopping once `count` results are kept.
 ///
 /// Host groups use full hostname, lowercase, with one leading `www.` stripped.
@@ -224,7 +224,7 @@ pub(crate) fn diversify_hosts(
     kept
 }
 
-/// Run the full post-process pipeline on mapped Brave hits.
+/// Runs the full post-process pipeline on mapped Brave hits.
 ///
 /// Steps: sanitize title/description, optional tracking strip + URL cap,
 /// set `site_name`, include then exclude domain filters, diversify hosts.

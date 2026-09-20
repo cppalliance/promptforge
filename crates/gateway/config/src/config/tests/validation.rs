@@ -1,3 +1,5 @@
+//! Tests for the config validation rules that reject malformed or legacy sections.
+
 use super::super::*;
 use super::SAMPLE;
 

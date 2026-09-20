@@ -38,7 +38,7 @@ pub const PROVIDER: Provider = Provider {
 /// lineup grows.
 const PAGE_SIZE: u32 = 1000;
 
-/// Fetch and normalize Cohere's model list, following `next_page_token`
+/// Fetches and normalizes Cohere's model list, following `next_page_token`
 /// until the final page.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -114,7 +114,7 @@ fn model_kind(endpoints: &[String]) -> ModelKind {
     }
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -156,7 +156,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Set every entry's family, then collapse `-MM-YYYY` snapshot suffixes
+/// Sets every entry's family, then collapses `-MM-YYYY` snapshot suffixes
 /// onto their canonical entries.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

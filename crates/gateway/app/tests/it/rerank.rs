@@ -60,7 +60,7 @@ async fn recording_rerank_backend() -> (SocketAddr, Recorder) {
     (spawn_backend(router).await, recorder)
 }
 
-/// Start a gateway serving one remote classifier model.
+/// Starts a gateway serving one remote classifier model.
 async fn rerank_gateway(backend: SocketAddr) -> TestServer {
     let toml = format!(
         r#"

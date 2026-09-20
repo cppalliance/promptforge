@@ -1,3 +1,5 @@
+//! Bounded token alignment that locates where consecutive final windows overlap.
+
 use std::cmp::Ordering;
 use std::ops::{Range, RangeInclusive};
 

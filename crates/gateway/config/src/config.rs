@@ -74,7 +74,7 @@ fn default_max_queue() -> usize {
 pub struct Secret(String);
 
 impl Secret {
-    /// Wrap a plaintext secret.
+    /// Wraps a plaintext secret.
     ///
     /// Used by config deserialization and by the gateway's adapters that mint
     /// an ephemeral loopback credential.
@@ -96,7 +96,7 @@ impl Secret {
     }
 }
 
-/// Deserialize a [`Secret`] field from a bare TOML string without exposing a
+/// Deserializes a [`Secret`] field from a bare TOML string without exposing a
 /// public `Deserialize` impl on the redacting type.
 fn de_secret<'de, D>(deserializer: D) -> Result<Secret, D::Error>
 where
@@ -106,7 +106,7 @@ where
     Ok(Secret::new(raw))
 }
 
-/// Serialize a [`Secret`] field as `"***"`: a serialized configuration never
+/// Serializes a [`Secret`] field as `"***"`: a serialized configuration never
 /// carries credential material, and a reader treats the marker as "keep the
 /// existing value" on write.
 pub(crate) fn ser_redacted<S>(_: &Secret, serializer: S) -> Result<S::Ok, S::Error>
@@ -293,10 +293,10 @@ pub enum DominionKind {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum QueuePolicy {
-    /// Wait for a slot up to `max_queue` waiting requests, then reject.
+    /// Waits for a slot up to `max_queue` waiting requests, then rejects.
     #[default]
     Queue,
-    /// Reject immediately when no concurrency slot is free (fail-fast).
+    /// Rejects immediately when no concurrency slot is free (fail-fast).
     Reject,
 }
 
@@ -339,7 +339,7 @@ pub struct DominionConfig {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum LlamaBackend {
-    /// Pick from the host's GPUs: a Blackwell (compute capability 12.x) gets
+    /// Picks from the host's GPUs: a Blackwell (compute capability 12.x) gets
     /// the PromptForge CUDA build, any other NVIDIA GPU gets the upstream
     /// CUDA build, and anything else gets Vulkan.
     #[default]
@@ -420,7 +420,7 @@ pub struct LocalModelConfig {
     /// GPU layers offloaded (`-ngl`). Defaults to 99.
     #[serde(default = "default_gpu_layers")]
     gpu_layers: u32,
-    /// Enable flash attention (`--flash-attn on`). Defaults to true.
+    /// Enables flash attention (`--flash-attn on`). Defaults to true.
     #[serde(default = "default_true")]
     flash_attention: bool,
     /// KV cache type for K. Defaults to `q8_0`.

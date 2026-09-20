@@ -199,7 +199,7 @@ impl CloudModels {
             self.spawn_download().started()
         }
     }
-    /// Force a re-download regardless of cache age and await its
+    /// Forces a re-download regardless of cache age and awaits its
     /// outcome: the fresh sheet on success, the download's error on
     /// failure. A refresh asked during an in-flight download joins it
     /// and awaits the same result instead of starting a second one.
@@ -242,7 +242,7 @@ impl CloudModels {
         self.lock().last_error.clone()
     }
 
-    /// Spawn the one background download, or report why none started.
+    /// Spawns the one background download, or reports why none started.
     fn spawn_download(&self) -> Download {
         let mut inner = self.lock();
         self.spawn_download_locked(&mut inner)
@@ -285,7 +285,7 @@ impl CloudModels {
     }
 }
 
-/// Fetch the sheet and persist it, returning the sheet only after the
+/// Fetches the sheet and persists it, returning the sheet only after the
 /// cache write lands: the in-memory copy never runs ahead of the disk.
 ///
 /// The body read is capped at [`MAX_JSON_BODY`] like every other gateway
@@ -351,7 +351,7 @@ async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, GatewayErr
     Ok(sheet)
 }
 
-/// Read and parse the cache file, gating on the accepted schema version.
+/// Reads and parses the cache file, gating on the accepted schema version.
 fn read_cache(path: &Path) -> CacheRead {
     match std::fs::read(path) {
         Ok(bytes) => match serde_json::from_slice::<Sheet>(&bytes) {
@@ -366,7 +366,7 @@ fn read_cache(path: &Path) -> CacheRead {
     }
 }
 
-/// Write `bytes` to `path` by temp-file-plus-rename, so a crash mid-write
+/// Writes `bytes` to `path` by temp-file-plus-rename, so a crash mid-write
 /// never leaves a truncated cache behind.
 fn write_cache_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {

@@ -29,7 +29,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/models";
 
-/// Fetch and normalize NVIDIA's model list in a single request; the
+/// Fetches and normalizes NVIDIA's model list in a single request; the
 /// endpoint is keyless, so no credential is read or sent.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -57,13 +57,13 @@ struct WireModel {
     id: String,
 }
 
-/// Normalize one wire model: the endpoint is IDs-only, so the entry is
+/// Normalizes one wire model: the endpoint is IDs-only, so the entry is
 /// the conservative base with no release date.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, None)
 }
 
-/// Set every entry's family to the vendor prefix of its
+/// Sets every entry's family to the vendor prefix of its
 /// `vendor/model` id (`meta`, `nvidia`, `google`, ...), and to the
 /// whole id when there is no slash. There is no snapshot or SKU
 /// collapse: the catalog carries neither.

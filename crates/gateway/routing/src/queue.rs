@@ -40,12 +40,12 @@ impl ClientId {
     /// The fallback bucket for absent or invalid ids.
     pub const DEFAULT: &'static str = "default";
 
-    /// Parse an optional header string into a bounded [`ClientId`].
+    /// Parses an optional header string into a bounded [`ClientId`].
     pub fn from_header(value: Option<&str>) -> ClientId {
         value.map_or_else(|| ClientId(Self::DEFAULT.to_owned()), Self::parse)
     }
 
-    /// Parse a raw string into a bounded [`ClientId`], falling back to `default`.
+    /// Parses a raw string into a bounded [`ClientId`], falling back to `default`.
     #[must_use]
     pub fn parse(raw: &str) -> ClientId {
         let trimmed = raw.trim();
@@ -237,7 +237,7 @@ impl DominionQueue {
         }
     }
 
-    /// Acquire a concurrency permit for `client_key`.
+    /// Acquires a concurrency permit for `client_key`.
     ///
     /// When the queue is unlimited, returns a no-op permit immediately. When
     /// limited, the policy decides what a full in-flight set means: `Queue`
@@ -322,7 +322,7 @@ impl DominionQueue {
     }
 }
 
-/// Build one shared [`DominionQueue`] per configured dominion.
+/// Builds one shared [`DominionQueue`] per configured dominion.
 ///
 /// Cloning a returned queue clones the Arc-backed limit, so everything bound
 /// to the same dominion competes for one pool of slots. Remote endpoints
@@ -436,7 +436,7 @@ impl LimitedQueue {
 /// from minting many labels to win a larger share of round-robin turns (Q-001).
 const MAX_DISTINCT_CLIENTS: usize = 32;
 
-/// Enqueue a waiter under its fair-scheduling bucket, returning the *effective*
+/// Enqueues a waiter under its fair-scheduling bucket, returning the *effective*
 /// bucket key actually used (which may be `default` when the distinct-client cap
 /// is reached).
 fn enqueue_fair(state: &mut WaitState, client_key: &str, waiter: Waiter) -> String {

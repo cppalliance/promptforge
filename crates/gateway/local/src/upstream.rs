@@ -82,7 +82,7 @@ impl LocalUpstream {
         }
     }
 
-    /// Terminate the owned child and permanently disable respawn, returning any
+    /// Terminates the owned child and permanently disables respawn, returning any
     /// teardown failure to the caller.
     ///
     /// Called at profile-switch teardown so the old child is freed
@@ -332,7 +332,7 @@ impl LocalUpstream {
         Ok(gateway_protocol::upstream::sse_chunks(response, requested))
     }
 
-    /// Run the dead-child recovery after a transport failure.
+    /// Runs the dead-child recovery after a transport failure.
     ///
     /// Recovery runs on a plain OS thread so reqwest::blocking readiness (used
     /// by [`ServerGuard::respawn`]) never nests a Tokio runtime inside the

@@ -1,8 +1,10 @@
+//! Tests for the dominion queue admission, capacity policies, and fair scheduling.
+
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// Deterministically wait until exactly `n` requests are enqueued as waiters,
+/// Deterministically waits until exactly `n` requests are enqueued as waiters,
 /// yielding to the runtime so spawned admits can register (no sleeps).
 async fn await_waiters(queue: &DominionQueue, n: usize) {
     while queue.waiter_count() != n {

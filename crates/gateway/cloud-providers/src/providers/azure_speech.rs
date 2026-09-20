@@ -55,7 +55,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/speechtotext/v3.2/models/base";
 
-/// Fetch and normalize Azure Speech's base-model list, following
+/// Fetches and normalizes Azure Speech's base-model list, following
 /// `@nextLink` until the final page.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -156,7 +156,7 @@ struct WireDeprecationDates {
     transcription: Option<String>,
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let id = model.self_url.rsplit('/').next().unwrap_or(&model.self_url);
     let mut entry = base_entry(id, None);
@@ -183,7 +183,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     entry
 }
 
-/// Parse a wire timestamp into a calendar date; an unparseable value
+/// Parses a wire timestamp into a calendar date; an unparseable value
 /// keeps no date.
 fn parse_wire_date(value: &str) -> Option<Date> {
     OffsetDateTime::parse(value, &Rfc3339)
@@ -191,7 +191,7 @@ fn parse_wire_date(value: &str) -> Option<Date> {
         .map(OffsetDateTime::date)
 }
 
-/// Set every entry's family: the catalog is per-locale base models, so
+/// Sets every entry's family: the catalog is per-locale base models, so
 /// the locale is the family; a model with no locale is its own family
 /// (its id is a UUID). There is no snapshot collapse - the ids carry no
 /// suffixes.

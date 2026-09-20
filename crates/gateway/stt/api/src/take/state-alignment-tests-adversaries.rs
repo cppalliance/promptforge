@@ -1,3 +1,5 @@
+//! Adversarial tests for projected-prefix reconciliation of weak forced overlaps.
+
 use std::sync::Arc;
 
 use super::{FinalRangeOutcome, ForcedBoundary, TakeState};

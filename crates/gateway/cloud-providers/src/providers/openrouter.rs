@@ -35,7 +35,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/api/v1/models";
 
-/// Fetch and normalize OpenRouter's model list in a single request; the
+/// Fetches and normalizes OpenRouter's model list in a single request; the
 /// endpoint is keyless, so no credential is read or sent.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
@@ -106,7 +106,7 @@ fn price_per_mtok(per_token: &str) -> Option<f64> {
         .map(|price| price * 1_000_000.0)
 }
 
-/// Parse the `YYYY-MM-DD` expiration date; an unparseable value keeps
+/// Parses the `YYYY-MM-DD` expiration date; an unparseable value keeps
 /// the status with no date.
 fn parse_expiration_date(value: &str) -> Option<Date> {
     let mut parts = value.split('-');
@@ -120,7 +120,7 @@ fn parse_expiration_date(value: &str) -> Option<Date> {
     Date::from_calendar_date(year, Month::try_from(month).ok()?, day).ok()
 }
 
-/// Normalize one wire model into a sheet entry.
+/// Normalizes one wire model into a sheet entry.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.id, model.created);
     if let Some(name) = &model.name {

@@ -1,3 +1,5 @@
+//! Committed realtime items and their finalization task bookkeeping.
+
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;

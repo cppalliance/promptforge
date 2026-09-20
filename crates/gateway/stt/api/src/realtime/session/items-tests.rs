@@ -1,3 +1,5 @@
+//! Tests for committed item finalization and PCM budget retention.
+
 use std::time::Duration;
 
 use base64::Engine as _;

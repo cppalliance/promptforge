@@ -1,3 +1,5 @@
+//! Realtime session lifecycle for input appends, clears, and interim epochs.
+
 use super::input::{InputSnapshot, UncommittedInput};
 use super::item::CommittedItem;
 use super::registry::SessionRegistration;

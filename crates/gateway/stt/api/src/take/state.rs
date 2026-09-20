@@ -1,3 +1,5 @@
+//! Shared take state tracking finalized text, failures, and final outcomes.
+
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use gateway_stt_engine::TranscribeError;

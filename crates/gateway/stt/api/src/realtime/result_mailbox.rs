@@ -1,3 +1,5 @@
+//! Per-item result mailbox buffering interim and terminal transcription outcomes.
+
 use std::collections::{HashMap, VecDeque};
 
 use crate::take::TakeFailure;

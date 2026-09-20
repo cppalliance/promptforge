@@ -1,3 +1,5 @@
+//! Projects an audio-proportional prefix cut of a previous final transcript.
+
 use std::ops::Range;
 
 use super::final_overlap::MAX_FINAL_TRANSCRIPT_BYTES;

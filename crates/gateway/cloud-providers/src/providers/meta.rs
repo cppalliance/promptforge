@@ -34,7 +34,7 @@ pub const PROVIDER: Provider = Provider {
 /// The list path under the base URL.
 const MODELS_PATH: &str = "/models";
 
-/// Fetch and normalize Meta's model list in a single request.
+/// Fetches and normalizes Meta's model list in a single request.
 pub(crate) async fn fetch(
     client: &reqwest::Client,
     base_url: &str,
@@ -60,7 +60,7 @@ struct WireModel {
     created: Option<i64>,
 }
 
-/// Normalize one wire model: the response schema is not fully enumerated,
+/// Normalizes one wire model: the response schema is not fully enumerated,
 /// so the entry is the conservative base.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     base_entry(&model.id, model.created)
@@ -80,7 +80,7 @@ fn family_of(id: &str) -> String {
     format!("{first}-{second}")
 }
 
-/// Set every entry's family.
+/// Sets every entry's family.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = family_of(&entry.id);

@@ -1,3 +1,5 @@
+//! Tests for shadow config files, pending saves, and atomic profile state writes.
+
 use super::*;
 
 const CONFIG: &str = r#"

@@ -1,3 +1,5 @@
+//! Tests for whole-window interim emission against live-prefix snapshots.
+
 use super::WholeWindowState;
 use crate::take::live_prefix::LivePrefixSnapshot;
 

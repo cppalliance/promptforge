@@ -1,3 +1,5 @@
+//! Tests for production logging that redact protected values and honor the process lease.
+
 #[cfg(feature = "stt")]
 use std::path::PathBuf;
 #[cfg(feature = "stt")]
