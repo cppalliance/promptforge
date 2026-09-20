@@ -2,6 +2,7 @@
 //! the bearer on the wire, the streamed round, and the bounds.
 
 use harness_runner::spawn::spawn_tagged;
+pub(crate) use harness_runner::test_support::mock_tag;
 use promptforge_api_runtime::model::{ClientError as Error, CompletionOptions};
 use serde_json::Value;
 
@@ -13,10 +14,10 @@ mod streaming;
 
 /// Serves `app` on a loopback port and returns a keyed client pointed at
 /// its `/v1` root.
-async fn client_for(app: axum::Router) -> GatewayClient {
+pub(crate) async fn client_for(app: axum::Router) -> GatewayClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged("mock-gateway", async move {
+    spawn_tagged(mock_tag(), async move {
         axum::serve(listener, app).await.unwrap();
     });
     GatewayClient::new(
@@ -26,7 +27,7 @@ async fn client_for(app: axum::Router) -> GatewayClient {
 }
 
 /// Renders `events` as SSE `data:` lines closed by the `[DONE]` sentinel.
-fn sse_body(events: &[Value]) -> String {
+pub(crate) fn sse_body(events: &[Value]) -> String {
     let mut body = String::new();
     for event in events {
         body.push_str("data: ");
@@ -39,7 +40,7 @@ fn sse_body(events: &[Value]) -> String {
 
 /// A client pointed at a mock gateway that answers every completion with
 /// the given SSE body.
-async fn sse_client(body: String) -> GatewayClient {
+pub(crate) async fn sse_client(body: String) -> GatewayClient {
     use axum::Router;
     use axum::routing::post;
 
@@ -59,7 +60,7 @@ async fn sse_client(body: String) -> GatewayClient {
 }
 
 /// One streamed chunk carrying a content fragment.
-fn content_chunk(text: &str) -> Value {
+pub(crate) fn content_chunk(text: &str) -> Value {
     serde_json::json!({
         "model": "qwen3-30b",
         "choices": [{ "index": 0, "delta": { "content": text }, "finish_reason": null }]
@@ -93,7 +94,7 @@ async fn spawn_raw_gateway(status: axum::http::StatusCode, body: &'static str) -
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged("mock-raw-gateway", async move {
+    spawn_tagged(mock_tag(), async move {
         axum::serve(listener, app).await.unwrap();
     });
     format!("http://{addr}/v1")

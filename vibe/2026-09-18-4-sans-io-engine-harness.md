@@ -884,7 +884,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-42>
 
-### Step 42: Chat, timer, store, and task-events performers
+### Step 42: Chat, timer, store, and task-events performers [completed]
 
 - Component: Harness runner
 - Piece: performers

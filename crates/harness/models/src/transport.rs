@@ -376,4 +376,4 @@ pub(crate) fn from_env_with(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

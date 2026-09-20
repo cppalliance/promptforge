@@ -26,8 +26,9 @@ workspace-hack.workspace = true
 [dev-dependencies]
 axum.workspace = true
 # The tests spawn their mock gateways through the harness's instrumented
-# spawn wrapper, never `tokio::spawn` (see clippy.toml).
-harness-runner.workspace = true
+# spawn wrapper, never `tokio::spawn` (see clippy.toml), under the tag
+# fixture `test-support` provides.
+harness-runner = { workspace = true, features = ["test-support"] }
 # `io-util` is the `AsyncReadExt`/`AsyncWriteExt` the raw TCP mock frames its
 # truncated response with.
 tokio = { workspace = true, features = ["io-util"] }

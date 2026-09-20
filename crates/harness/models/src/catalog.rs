@@ -246,7 +246,7 @@ mod tests {
     async fn spawn_models(app: axum::Router) -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        spawn_tagged("mock-models", async move {
+        spawn_tagged(crate::transport::tests::mock_tag(), async move {
             axum::serve(listener, app).await.unwrap();
         });
         addr
@@ -408,7 +408,7 @@ mod tests {
         // as its `#[source]`, not display text.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        spawn_tagged("mock-truncating-models", async move {
+        spawn_tagged(crate::transport::tests::mock_tag(), async move {
             if let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
                 let _ = sock.read(&mut buf).await;

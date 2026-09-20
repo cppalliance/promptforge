@@ -422,6 +422,7 @@ mod tests {
     use flate2::write::GzEncoder;
     use harness_capabilities::Tool;
     use harness_runner::spawn::spawn_tagged;
+    use harness_runner::test_support::mock_tag;
     use promptforge_api_types::tools::{ToolErrorKind, ToolId};
 
     use super::WebFetch;
@@ -713,7 +714,7 @@ mod tests {
             .route("/plainbig", get(plainbig_route))
             .route("/plainbroken", get(plain_broken_route))
             .with_state(state);
-        spawn_tagged("mock-loopback-server", async move {
+        spawn_tagged(mock_tag(), async move {
             axum::serve(listener, app)
                 .await
                 .expect("the loopback server must serve");
@@ -789,7 +790,7 @@ mod tests {
             .route("/redir-record", get(redirect_to_record))
             .route("/slow", get(hang))
             .with_state(state);
-        spawn_tagged("mock-recording-server", async move {
+        spawn_tagged(mock_tag(), async move {
             axum::serve(listener, app)
                 .await
                 .expect("the loopback recording server must serve");
@@ -933,7 +934,7 @@ mod tests {
                 }),
             )
             .with_state(redir_state);
-        spawn_tagged("mock-redirect-server", async move {
+        spawn_tagged(mock_tag(), async move {
             axum::serve(redir_listener, app)
                 .await
                 .expect("the redirect server must serve");

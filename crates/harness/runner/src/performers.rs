@@ -14,6 +14,12 @@
 //! spawns as its own task, so a performer must move what its future needs
 //! into it. The store performer is synchronous: the VFS is synchronous by
 //! design, and the loop runs the call on tokio's blocking pool.
+//!
+//! The runner supplies three performers itself - [`TokioTimer`],
+//! [`VfsStore`], and [`LogTaskEvents`] - because each is machinery it
+//! already holds. The chat, tool, and input performers live with what
+//! they reach: the gateway client, the activated capabilities, and the
+//! session's input wait.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -29,6 +35,11 @@ use promptforge_api_types::ids::TaskId;
 use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::Value;
 use shared_vfs::Access;
+
+#[path = "performers-host.rs"]
+mod host;
+
+pub use host::{LogTaskEvents, TokioTimer, VfsStore};
 
 /// A boxed, sendable, owning future: what an asynchronous performer
 /// returns and the loop spawns.

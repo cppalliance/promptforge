@@ -139,7 +139,7 @@ async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
     // The server answers a 500 with a large promised body, then stalls.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged("mock-stalling-body", async move {
+    spawn_tagged(mock_tag(), async move {
         if let Ok((mut sock, _)) = listener.accept().await {
             let mut buf = [0u8; 1024];
             let _ = sock.read(&mut buf).await;

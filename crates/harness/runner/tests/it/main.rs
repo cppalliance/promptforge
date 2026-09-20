@@ -1,5 +1,6 @@
 //! Integration tests for `harness-runner`: the effect loop against fake
-//! performers and an in-memory log, and the tagged spawn wrappers.
+//! performers and an in-memory log, the runner's own performers under the
+//! loop, and the tagged spawn wrappers.
 #![expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -7,5 +8,6 @@
 )]
 
 mod effect_loop;
+mod performers;
 mod spawn;
 mod support;

@@ -23,5 +23,10 @@ tokio.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true
 
+[features]
+# Fixtures for other harness crates' tests (`test_support::mock_tag`);
+# nothing here reaches the harness proper.
+test-support = []
+
 [lints]
 workspace = true

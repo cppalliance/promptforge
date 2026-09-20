@@ -13,6 +13,9 @@ categories = ["development-tools", "web-programming::http-client"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+# The performer trait the chat performer implements, and (in tests) the
+# harness's one instrumented spawn wrapper the mock gateways run under.
+harness-runner.workspace = true
 # The engine door: the chat vocabulary (Message, ToolSchema, Completion,
 # CompletionError) this transport exchanges with a Run's Chat effect, and
 # the SSE reassembly the streamed body is folded through.
@@ -26,14 +29,16 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# The delta channel: `sync` for the sender a chat performer streams to.
+# Nothing here spawns; the runner does.
+tokio = { workspace = true, features = ["sync"] }
 url.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-# The mock gateways the transport tests serve are spawned through the
-# harness's one instrumented wrapper.
-harness-runner.workspace = true
+# The tag fixture the mock gateways are spawned under.
+harness-runner = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["io-util"] }
 
 [lints]

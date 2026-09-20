@@ -31,8 +31,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 # The tests spawn their mock servers through the harness's instrumented
-# spawn wrapper, never `tokio::spawn` (see clippy.toml).
-harness-runner.workspace = true
+# spawn wrapper, never `tokio::spawn` (see clippy.toml), under the tag
+# fixture `test-support` provides.
+harness-runner = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
 axum.workspace = true
 flate2.workspace = true

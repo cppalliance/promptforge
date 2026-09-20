@@ -119,6 +119,26 @@ pub use run::{
 pub use promptforge_lua::{StoreOp, StoreOutcome};
 pub use promptforge_store::StoreError;
 
+/// Performs one store operation through `access`: the work behind an
+/// [`Effect::Store`], for a host's store performer. The engine's own
+/// store facade runs the operation, so a host answers a store effect
+/// exactly as the engine's test drivers do; `access` is used as given,
+/// and nothing here derives, widens, or retains store scope from it.
+///
+/// Synchronous, because the VFS is synchronous by design; a host runs it
+/// off its async executor.
+///
+/// # Errors
+/// Returns the store's own failure for the operation (path validation,
+/// not-found, anchor, range, write-race, or backend failure), which the
+/// engine raises at the author's call site when the answer is resumed.
+pub fn perform_store_op(
+    access: &shared_vfs::Access,
+    op: StoreOp,
+) -> std::result::Result<StoreOutcome, StoreError> {
+    crate::lua::run_store_op(&crate::store::Store::new(access), op)
+}
+
 /// What the run produced. Domain outcomes (including "the prompt
 /// declined") are values, not thrown errors: the variant is for code, the
 /// payload is for humans and models. A host reads it out of

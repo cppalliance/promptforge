@@ -4,6 +4,7 @@ use super::{
 };
 use harness_capabilities::Tool;
 use harness_runner::spawn::spawn_tagged;
+use harness_runner::test_support::mock_tag;
 use promptforge_api_types::tools::{OutputTrust, ToolErrorKind, ToolId};
 
 use std::net::SocketAddr;
@@ -27,7 +28,7 @@ impl MockServer {
     async fn spawn(router: Router) -> MockServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = spawn_tagged("mock-search-gateway", async move {
+        let handle = spawn_tagged(mock_tag(), async move {
             let _ = axum::serve(listener, router).await;
         });
         MockServer { addr, handle }
@@ -500,7 +501,7 @@ async fn oversized_error_body_is_bounded_and_sanitized() {
 async fn error_body_read_failure_is_preserved_as_source() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let handle = spawn_tagged("mock-truncating-gateway", async move {
+    let handle = spawn_tagged(mock_tag(), async move {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
         if let Ok((mut socket, _)) = listener.accept().await {
             let mut buf = [0u8; 1024];

@@ -14,7 +14,9 @@
 //! for host-side concerns (the Workshop dropdown and its selection
 //! resolution). The client holds only the gateway's URL and the shared
 //! key; the vendor credential lives in the gateway, so no host ever sees
-//! it.
+//! it. [`GatewayChatPerformer`] is the client as the effect loop performs
+//! a `Chat` effect through it: one round per effect, with a section's own
+//! round streaming its deltas to a [`DeltaSink`] the session drains.
 //!
 //! This is a Gateway model client, not a universal transport: it speaks
 //! the one protocol the gateway serves. Everything it exchanges is the
@@ -39,9 +41,11 @@
 
 mod catalog;
 mod config;
+mod performer;
 mod transport;
 
 pub use catalog::fetch_model_catalog;
 pub use config::{GatewayEndpoint, SecretError, SecretString};
+pub use performer::{DeltaSink, GatewayChatPerformer};
 pub use promptforge_api_runtime::model::{CompletionError, CompletionErrorKind};
 pub use transport::GatewayClient;

@@ -28,3 +28,5 @@
 pub mod effect_loop;
 pub mod performers;
 pub mod spawn;
+#[cfg(feature = "test-support")]
+pub mod test_support;
