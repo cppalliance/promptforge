@@ -25,14 +25,23 @@ export interface EndpointStatus {
   provisioning: boolean;
 }
 
+/**
+ * The gateway's live activity, from `GET /admin/status` and each
+ * `GET /admin/progress` frame: a busy flag and the newest activity's text.
+ */
+export interface Progress {
+  /** Whether any activity is live; the UIs show a barberpole while set. */
+  busy: boolean;
+  /** The newest live activity's text, e.g. `Downloading qwen 45%`; empty idle. */
+  text: string;
+}
+
 /** The command queue readout from `GET /admin/status`. */
 export interface QueueStatus {
   /** The running command, or null when the worker is idle. */
   active: {
     /** The command's display name, for example `load-profile: main`. */
     name: string;
-    /** The command's progress fraction, 0..1. */
-    fraction: number;
     /** When the worker started the command, in Unix epoch seconds. */
     started_at: number;
   } | null;
@@ -55,6 +64,8 @@ export interface GatewayStatus {
   config_generation: string;
   /** Declared VRAM total of the active local and STT models, in GiB. */
   vram_gb: number;
+  /** The hub's current activity snapshot. */
+  progress: Progress;
   /** The command queue's active and pending commands. */
   queue: QueueStatus;
   /** One readiness entry per capability endpoint the gateway can serve. */
@@ -443,12 +454,12 @@ export class GatewayApi {
       config_generation:
         typeof data["config_generation"] === "string" ? data["config_generation"] : "",
       vram_gb: numberOrZero(data["vram_gb"]),
+      progress: parseProgress(data["progress"]),
       queue: {
         active:
           active !== null && typeof active["name"] === "string"
             ? {
                 name: active["name"],
-                fraction: numberOrZero(active["fraction"]),
                 started_at: numberOrZero(active["started_at"]),
               }
             : null,
@@ -831,11 +842,12 @@ export class GatewayApi {
 
   /**
    * Subscribes to the `GET /admin/progress` SSE stream, invoking
-   * `onEvent` with each parsed progress event. Returns the unsubscribe
-   * function. A transport failure ends the subscription quietly; a 401
-   * flows through the shared unauthorized path.
+   * `onEvent` with each parsed {@link Progress} snapshot: the current one
+   * first, then one per change. Returns the unsubscribe function. A
+   * transport failure ends the subscription quietly; a 401 flows through
+   * the shared unauthorized path.
    */
-  subscribeProgress(onEvent: (event: unknown) => void): () => void {
+  subscribeProgress(onEvent: (event: Progress) => void): () => void {
     const controller = new AbortController();
     void (async () => {
       let response: Response;
@@ -851,7 +863,7 @@ export class GatewayApi {
       try {
         for await (const payload of ssePayloads(response.body)) {
           try {
-            onEvent(JSON.parse(payload));
+            onEvent(parseProgress(JSON.parse(payload)));
           } catch {
             // A malformed event is dropped; the stream carries on.
           }
@@ -1156,6 +1168,18 @@ function stringRecord(value: unknown): Record<string, string> {
       (entry): entry is [string, string] => typeof entry[1] === "string",
     ),
   );
+}
+
+/**
+ * Reads a `Progress` snapshot off an external value; anything malformed
+ * reads as idle, so a stale bar clears rather than sticks.
+ */
+function parseProgress(value: unknown): Progress {
+  const record = optionalRecord(value);
+  return {
+    busy: record?.["busy"] === true,
+    text: typeof record?.["text"] === "string" ? record["text"] : "",
+  };
 }
 
 /** Reads a finite external number, defaulting malformed values to zero. */

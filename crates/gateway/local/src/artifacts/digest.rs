@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 
+use super::download::PercentText;
 use super::{INSTALL_MARKER, Result};
 use crate::error::LocalError;
 
@@ -56,23 +57,30 @@ pub(super) fn file_digest(path: &Path) -> Result<String> {
     file_digest_with_progress(path, None)
 }
 
-/// [`file_digest`] variant that reports bytes read into `progress`, when given.
+/// [`file_digest`] variant that formats `"Verifying {file} {pct}%"` into
+/// `activity`, when given, as the hash pass reads.
 ///
 /// # Errors
 /// Returns [`LocalError::Io`] when the file cannot be opened, inspected, or read.
 pub(super) fn file_digest_with_progress(
     path: &Path,
-    progress: Option<&ProgressHandle>,
+    activity: Option<&Activity>,
 ) -> Result<String> {
     let file = File::open(path).map_err(|source| LocalError::Io {
         operation: "open cached artifact",
         path: path.to_owned(),
         source,
     })?;
-    let total = progress
-        .map(|_| {
+    let reporter = activity
+        .map(|activity| {
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let text = PercentText::new("Verifying", name);
+            activity.set_text(text.label());
             file.metadata()
-                .map(|metadata| metadata.len())
+                .map(|metadata| (activity, text, metadata.len()))
                 .map_err(|source| LocalError::Io {
                     operation: "inspect cached artifact",
                     path: path.to_owned(),
@@ -95,8 +103,8 @@ pub(super) fn file_digest_with_progress(
         }
         hasher.update(&buffer[..count]);
         read = read.saturating_add(count as u64);
-        if let (Some(handle), Some(total)) = (progress, total) {
-            handle.set_units(read, total);
+        if let Some((activity, text, total)) = &reporter {
+            text.report(activity, read, *total);
         }
     }
     Ok(hex_digest(hasher))

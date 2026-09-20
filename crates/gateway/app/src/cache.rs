@@ -3,16 +3,15 @@
 //!
 //! The store is blocking filesystem plus a reqwest-blocking client, so every
 //! store operation runs inside `tokio::task::spawn_blocking` and never blocks
-//! the executor (Amendment D). Each download attaches a small operation tree
-//! to the process progress hub and reports bytes into its leaf; the SSE
-//! response is a filtered view of the hub's events for that operation, with
-//! intermediate samples lossy under backpressure, while the terminal
-//! ready/error event is produced from the download task's join result and is
-//! therefore never lost.
+//! the executor (Amendment D). Each download begins an activity on the
+//! process hub, whose text carries `"Downloading {name} {pct}%"` for the
+//! status consumers, and keeps its own byte counts on a `watch` channel the
+//! SSE response reads: intermediate samples coalesce under backpressure,
+//! while the terminal ready/error event is produced from the download task's
+//! join result and is therefore never lost.
 
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
@@ -21,15 +20,16 @@ use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHandle};
+use shared_progress::Activity;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
 use crate::local::artifacts::{
-    DownloadProgress, TreeProgress, filename_from_url, parse_expected_digest,
+    DownloadProgress, PercentText, filename_from_url, parse_expected_digest,
 };
 use crate::local::cache::{BlobCache, CacheEntry, CachedBlob};
 use crate::local::{LocalError, resolve_cache_root};
@@ -131,22 +131,21 @@ pub(crate) async fn post_cache(
         .into_response());
     }
 
-    // Subscribe before the tree attaches so no event of this download is
-    // missed; the response filters the hub stream to this download's
-    // operation.
-    let rx = state.hub.subscribe();
-    let tree = state.hub.operation();
-    let operation = tree.operation();
-    let progress = Arc::new(ChannelProgress::new(tree.register(&label, 1.0)));
-    let reporter = Arc::clone(&progress);
+    // The download's activity is owned by the reporter, which the blocking
+    // task holds until the download ends: its drop ends the activity.
+    let progress = Arc::new(ChannelProgress::new(state.hub.begin(&label), &label));
+    let rx = progress.subscribe();
+    tracing::info!(source = %source, "cache download started");
     let join = tokio::task::spawn_blocking(move || {
-        let result = cache.download_to_cache(&source, expected.as_deref(), reporter.as_ref());
-        // The tree's Drop detaches it from the hub: the download's operation
-        // leaves snapshots and the event stream when the download ends.
-        drop(tree);
+        let result = cache.download_to_cache(&source, expected.as_deref(), progress.as_ref());
+        match &result {
+            Ok(blob) => tracing::info!(path = %blob.path.display(), "cache download finished"),
+            Err(error) => tracing::warn!(%error, "cache download failed"),
+        }
+        drop(progress);
         result
     });
-    Ok(sse_response(rx, operation, progress, join))
+    Ok(sse_response(rx, join))
 }
 
 /// `DELETE /v1/cache/{sha256}`: removes the blob and sidecar for a digest.
@@ -177,127 +176,123 @@ pub(crate) async fn delete_cache(
     })))
 }
 
-/// [`DownloadProgress`] for one cache download: reports byte counts into the
-/// download's tree leaf and keeps the raw counts alongside, because the
-/// tree's events carry fractions while the SSE payload carries bytes.
+/// The byte counts of one cache download, as the SSE payload carries them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Sample {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+/// [`DownloadProgress`] for one cache download: publishes the raw byte
+/// counts on a `watch` channel for the SSE response and formats
+/// `"Downloading {name} {pct}%"` into the download's activity for the
+/// status consumers. Owns the activity, so its drop ends it.
 struct ChannelProgress {
-    leaf: TreeProgress,
-    downloaded: AtomicU64,
-    total: Mutex<Option<u64>>,
+    activity: Activity,
+    text: PercentText,
+    samples: watch::Sender<Sample>,
 }
 
 impl ChannelProgress {
-    fn new(handle: ProgressHandle) -> Self {
+    fn new(activity: Activity, name: &str) -> Self {
+        let text = PercentText::new("Downloading", name);
+        activity.set_text(text.label());
+        let (samples, _rx) = watch::channel(Sample::default());
         Self {
-            leaf: TreeProgress::new(handle),
-            downloaded: AtomicU64::new(0),
-            total: Mutex::new(None),
+            activity,
+            text,
+            samples,
         }
     }
 
-    /// The current `(downloaded, total)` counts for the SSE payload.
+    /// A receiver over the byte samples. `watch::Sender::subscribe` marks
+    /// the current sample seen, so the SSE stream never opens with the
+    /// zero-byte sample the channel was created with.
+    fn subscribe(&self) -> watch::Receiver<Sample> {
+        self.samples.subscribe()
+    }
+
+    /// The current `(downloaded, total)` counts, as the SSE payload reads
+    /// them off the receiver.
+    #[cfg(test)]
     fn sample(&self) -> (u64, Option<u64>) {
-        // The guarded value is plain data with no panic path; a poisoned lock
-        // (only possible if a panic landed mid-store) recovers the value.
-        (
-            self.downloaded.load(Ordering::Relaxed),
-            *self.total.lock().unwrap_or_else(PoisonError::into_inner),
-        )
+        let sample = *self.samples.borrow();
+        (sample.downloaded, sample.total)
     }
 }
 
 impl DownloadProgress for ChannelProgress {
     fn set_len(&self, total: Option<u64>) {
-        *self.total.lock().unwrap_or_else(PoisonError::into_inner) = total;
-        self.leaf.set_len(total);
+        self.samples.send_modify(|sample| sample.total = total);
     }
 
     fn inc(&self, n: u64) {
-        self.downloaded.fetch_add(n, Ordering::Relaxed);
-        self.leaf.inc(n);
-    }
-
-    fn finish(&self) {
-        self.leaf.finish();
-    }
-
-    fn abandon(&self) {
-        self.leaf.abandon();
+        let mut published = Sample::default();
+        self.samples.send_modify(|sample| {
+            sample.downloaded = sample.downloaded.saturating_add(n);
+            published = *sample;
+        });
+        if let Some(total) = published.total
+            && total > 0
+        {
+            self.text
+                .report(&self.activity, published.downloaded, total);
+        }
     }
 }
 
-/// Builds the SSE response: the hub's event stream filtered to this
-/// download's operation, each `Updated` re-emitted as the
+/// Builds the SSE response: each byte-count change re-emitted as the
 /// `{"status": "downloading", ...}` event the route has always carried, then
 /// the terminal event from the download task's join result, so the outcome
-/// can never be lost to broadcast lag.
+/// can never be lost.
 ///
-/// The download task emits every event before it returns, so once the join
-/// handle resolves the remaining events are already queued on the receiver
-/// and the latest sample is drained ahead of the terminal event. A client
-/// disconnect drops the response body and the receiver; the blocking
-/// download itself runs to completion (its staging cleanup still applies)
-/// and a later POST for the same source then hits the cache.
+/// The download task publishes every sample before it returns, so once the
+/// join handle resolves the latest sample is already on the receiver and is
+/// drained ahead of the terminal event. A client disconnect drops the
+/// response body and the receiver; the blocking download itself runs to
+/// completion (its staging cleanup still applies) and a later POST for the
+/// same source then hits the cache.
 fn sse_response(
-    rx: tokio::sync::broadcast::Receiver<ProgressEvent>,
-    operation: OperationId,
-    progress: Arc<ChannelProgress>,
+    rx: watch::Receiver<Sample>,
     join: JoinHandle<Result<CachedBlob, LocalError>>,
 ) -> Response {
     let stream = futures_util::stream::unfold(
-        (rx, join, std::collections::VecDeque::new(), false),
-        move |(mut rx, mut join, mut pending, mut done)| {
-            let progress = Arc::clone(&progress);
-            async move {
-                loop {
-                    if let Some(line) = pending.pop_front() {
-                        return Some((Ok::<_, Infallible>(line), (rx, join, pending, done)));
-                    }
-                    if done {
-                        return None;
-                    }
-                    let result = loop {
-                        tokio::select! {
-                            received = rx.recv() => match received {
-                                Ok(event) => {
-                                    if event.operation == operation
-                                        && matches!(event.state, EventState::Updated { .. })
-                                    {
-                                        return Some((
-                                            Ok(downloading_line(&progress)),
-                                            (rx, join, pending, done),
-                                        ));
-                                    }
-                                }
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                    tracing::debug!(skipped, "cache progress subscriber lagged; events dropped");
-                                }
-                                // The hub lives in `AppState` for the process
-                                // lifetime, so its sender never closes first; the
-                                // join result still carries the outcome if it did.
-                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                    break (&mut join).await;
-                                }
-                            },
-                            result = &mut join => break result,
-                        }
-                    };
-                    // Samples are lossy, so only the latest queued one is
-                    // worth emitting ahead of the terminal event.
-                    let mut updated = false;
-                    while let Ok(event) = rx.try_recv() {
-                        if event.operation == operation
-                            && matches!(event.state, EventState::Updated { .. })
-                        {
-                            updated = true;
-                        }
-                    }
-                    if updated {
-                        pending.push_back(downloading_line(&progress));
-                    }
-                    done = true;
-                    pending.push_back(terminal_line(result));
+        (rx, join, std::collections::VecDeque::new(), false, None),
+        |(mut rx, mut join, mut pending, mut done, mut emitted)| async move {
+            loop {
+                if let Some(line) = pending.pop_front() {
+                    return Some((
+                        Ok::<_, Infallible>(line),
+                        (rx, join, pending, done, emitted),
+                    ));
                 }
+                if done {
+                    return None;
+                }
+                let result = tokio::select! {
+                    changed = rx.changed() => match changed {
+                        Ok(()) => {
+                            let sample = *rx.borrow_and_update();
+                            emitted = Some(sample);
+                            return Some((
+                                Ok(downloading_line(sample)),
+                                (rx, join, pending, done, emitted),
+                            ));
+                        }
+                        // The reporter dropped with the download task;
+                        // the join result carries the outcome.
+                        Err(_) => (&mut join).await,
+                    },
+                    result = &mut join => result,
+                };
+                // Samples coalesce, so only the latest one, when it was not
+                // yet emitted, is worth sending ahead of the terminal event.
+                let latest = *rx.borrow_and_update();
+                if emitted != Some(latest) && latest != Sample::default() {
+                    pending.push_back(downloading_line(latest));
+                }
+                done = true;
+                pending.push_back(terminal_line(result));
             }
         },
     );
@@ -308,9 +303,12 @@ fn sse_response(
     response
 }
 
-/// Maps the reporter's counters to the route's downloading event.
-fn downloading_line(progress: &ChannelProgress) -> String {
-    let (bytes, total) = progress.sample();
+/// Maps a byte sample to the route's downloading event.
+fn downloading_line(sample: Sample) -> String {
+    let Sample {
+        downloaded: bytes,
+        total,
+    } = sample;
     format!(
         "data: {}\n\n",
         serde_json::json!({
@@ -342,9 +340,6 @@ fn terminal_line(result: Result<Result<CachedBlob, LocalError>, tokio::task::Joi
 
 #[cfg(test)]
 mod tests {
-    // Fractions are fixed-point millionths, so equality comparisons are exact.
-    #![expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-
     use futures_util::StreamExt as _;
     use shared_progress::ProgressHub;
 
@@ -383,19 +378,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_downloads_tree_appears_in_hub_snapshots_and_detaches_at_completion() {
-        let body = b"tree-visibility-fixture";
+    async fn a_download_drives_the_hub_text_and_ends_its_activity_at_completion() {
+        let body = b"activity-visibility-fixture";
         let url = fake_file_server(body).await;
         let temp = tempfile::TempDir::new().expect("tempdir");
         let root = temp.path().to_path_buf();
         let hub = Arc::new(ProgressHub::new());
 
-        let tree = hub.operation();
-        let progress = Arc::new(ChannelProgress::new(tree.register("model.bin", 1.0)));
-        let snapshot = hub.snapshot();
-        assert_eq!(snapshot.len(), 1, "the download's tree is attached");
-        assert_eq!(snapshot[0].nodes[0].label, "model.bin");
-        assert_eq!(snapshot[0].nodes[0].fraction, 0.0);
+        let progress = Arc::new(ChannelProgress::new(hub.begin("model.bin"), "model.bin"));
+        assert_eq!(
+            hub.current(),
+            gateway_api_types::Progress {
+                busy: true,
+                text: "Downloading model.bin".to_owned(),
+            },
+            "the reporter names the download before any byte arrives"
+        );
 
         // The blocking reqwest client inside `BlobCache` cannot be built or
         // dropped in async context, so the whole store lifecycle runs on the
@@ -408,45 +406,42 @@ mod tests {
         .await
         .expect("the download task joins")
         .expect("the download succeeds");
-        let snapshot = hub.snapshot();
         assert_eq!(
-            snapshot[0].nodes[0].fraction, 1.0,
-            "finish drives the leaf to 1.0"
+            hub.current().text,
+            "Downloading model.bin 100%",
+            "the last byte drives the text to its final whole percent"
         );
         assert_eq!(
             progress.sample(),
-            (body.len() as u64, Some(body.len() as u64))
+            (body.len() as u64, Some(body.len() as u64)),
+            "the byte counts stay alongside the text for the SSE payload"
         );
 
         drop(progress);
-        drop(tree);
         assert!(
-            hub.snapshot().is_empty(),
-            "the tree detaches from the hub at completion"
+            !hub.current().busy,
+            "the reporter's drop ends the download's activity"
         );
     }
 
     #[tokio::test]
-    async fn the_sse_stream_derives_from_tree_events_and_ends_with_the_join_result() {
-        let body = b"sse-tree-derived-fixture";
+    async fn the_sse_stream_derives_from_byte_samples_and_ends_with_the_join_result() {
+        let body = b"sse-sample-derived-fixture";
         let url = fake_file_server(body).await;
         let temp = tempfile::TempDir::new().expect("tempdir");
         let root = temp.path().to_path_buf();
         let hub = Arc::new(ProgressHub::new());
 
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let progress = Arc::new(ChannelProgress::new(tree.register("model.bin", 1.0)));
-        let reporter = Arc::clone(&progress);
+        let progress = Arc::new(ChannelProgress::new(hub.begin("model.bin"), "model.bin"));
+        let rx = progress.subscribe();
         let join = tokio::task::spawn_blocking(move || {
             let cache = BlobCache::new(root).expect("the cache opens");
-            let result = cache.download_to_cache(&url, None, reporter.as_ref());
-            drop(tree);
+            let result = cache.download_to_cache(&url, None, progress.as_ref());
+            drop(progress);
             result
         });
 
-        let text = body_text(sse_response(rx, operation, progress, join)).await;
+        let text = body_text(sse_response(rx, join)).await;
         let events: Vec<serde_json::Value> = text
             .split("\n\n")
             .filter(|block| !block.trim().is_empty())
@@ -475,46 +470,54 @@ mod tests {
             "the final sample carries every byte: {text}"
         );
         assert_eq!(last["total"], body.len() as u64);
+        assert!(
+            !hub.current().busy,
+            "the finished download released its activity"
+        );
     }
 
     #[tokio::test]
-    async fn the_sse_stream_survives_broadcast_lag_and_ends_with_the_join_result() {
-        let body = b"sse-lag-fixture";
+    async fn the_sse_stream_emits_the_latest_sample_when_the_reporter_dropped_before_the_first_poll()
+     {
+        // The download completes (and the reporter drops) before the
+        // stream is polled at all: the watch's closed channel must not
+        // hide the final byte sample, which precedes the terminal event.
+        let body = b"sse-late-poll-fixture";
         let url = fake_file_server(body).await;
         let temp = tempfile::TempDir::new().expect("tempdir");
         let root = temp.path().to_path_buf();
         let hub = Arc::new(ProgressHub::new());
 
-        let rx = hub.subscribe();
-        let tree = hub.operation();
-        let operation = tree.operation();
-        let progress = Arc::new(ChannelProgress::new(tree.register("model.bin", 1.0)));
-
-        // Overflow the hub's 1024-event ring before the stream's first poll,
-        // so the receiver lags: the Lagged arm must drop the skipped events
-        // and carry on rather than ending the stream.
-        let noise = hub.operation();
-        let _noise_leaves: Vec<_> = (0..1100)
-            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
-            .collect();
-
-        let reporter = Arc::clone(&progress);
-        let join = tokio::task::spawn_blocking(move || {
+        let progress = Arc::new(ChannelProgress::new(hub.begin("model.bin"), "model.bin"));
+        let rx = progress.subscribe();
+        let result = tokio::task::spawn_blocking(move || {
             let cache = BlobCache::new(root).expect("the cache opens");
-            let result = cache.download_to_cache(&url, None, reporter.as_ref());
-            drop(tree);
+            let result = cache.download_to_cache(&url, None, progress.as_ref());
+            drop(progress);
             result
-        });
+        })
+        .await
+        .expect("the download task joins");
+        let join = tokio::task::spawn_blocking(move || result);
 
-        let text = body_text(sse_response(rx, operation, progress, join)).await;
-        let terminal = text
+        let text = body_text(sse_response(rx, join)).await;
+        let blocks: Vec<&str> = text
             .split("\n\n")
             .filter(|block| !block.trim().is_empty())
-            .last()
-            .expect("the stream has events");
+            .collect();
+        assert_eq!(
+            blocks.len(),
+            2,
+            "one final sample, then the terminal: {text}"
+        );
         assert!(
-            terminal.contains("\"status\":\"ready\""),
-            "the download stream still ends with the join result's terminal event: {terminal}"
+            blocks[0].contains("\"status\":\"downloading\"")
+                && blocks[0].contains(&format!("\"bytes\":{}", body.len())),
+            "the latest sample is emitted even though the channel closed: {text}"
+        );
+        assert!(
+            blocks[1].contains("\"status\":\"ready\""),
+            "the stream still ends with the join result's terminal event: {text}"
         );
     }
 }

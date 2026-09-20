@@ -1,66 +1,43 @@
 // Full-screen apply overlay [Adapted: Unsloth]: a dimmed layer centering
-// a card that lists the gateway's progress stages, each with a spinner
-// while active, a check when passed, and an error mark when the apply
-// dies in it. Stages come from the `GET /admin/progress` hub
-// stream through `observe`: a `Begun` leaf whose label is a known stage
-// opens that stage. While a stage runs, a `<stage>/<model>/download`
-// leaf drives a detail row under the active stage - "Downloading
-// <model>" with the shared inline progress bar set by the leaf's
-// `Updated` fractions, "Verifying <model>" once the download leaf
-// finishes, "Starting <model>" when the `<model>/ready` leaf begins -
-// cleared when the stage ends. The card carries a Cancel button (the
-// overlay hides the status bar's own cancel control) that fires the
-// caller's cancel hook once. The terminal event closes the overlay -
-// instantly on success, after a short hold on failure so the failed
-// stage is seen (the toast carries the message onward).
+// a card that shows the gateway's live activity while an apply runs - a
+// spinner beside the `Progress` text the `GET /admin/progress` stream
+// carries ("Downloading qwen 45%", "Applying configuration"), fed
+// through `observe` - a check once the apply passed, and an error mark
+// when it died. The card carries a Cancel button (the overlay hides the
+// status bar's own cancel control) that fires the caller's cancel hook
+// once. The terminal event closes the overlay - instantly on success,
+// after a short hold on failure so the failed state is seen (the toast
+// carries the message onward).
 
 import { Check, X, createElement as lucideElement } from "lucide";
 
-import { createProgressBar, type ProgressBar } from "shared-ui/progress";
 import { scheduleTimeout } from "shared-ui/toast";
 
-import { isRecord } from "../services/json";
+import type { Progress } from "../services/gateway-api";
 
 /** How long a failed overlay stays up before removing itself. */
 const ERROR_HOLD_MS = 1500;
 
 /**
- * The stage leaves the gateway registers on its progress tree, with
- * their display labels (the same wording the workshop's status bar
- * uses): the boot load's three stages, which run once per process and
- * skip the download when the profile names no local model, and the one
- * `applying-config` leaf a config apply registers while it swaps remote
- * routing. A given operation lights a subset of these rows. Unknown
- * stages begun through `beginStage` are appended as they arrive, so a
- * gateway that grows stages never breaks the overlay; `observe` only
- * maps these four.
+ * What the activity row says before the gateway reports anything: the
+ * apply request is in flight but its command has not begun (it may be
+ * queued behind the boot load) or the stream has not delivered yet.
  */
-const KNOWN_STAGES: ReadonlyArray<readonly [id: string, label: string]> = [
-  ["loading-profile", "Loading profile"],
-  ["downloading-models", "Downloading models"],
-  ["starting-models", "Starting models"],
-  ["applying-config", "Applying configuration"],
-];
+const WAITING_TEXT = "Waiting for the gateway";
 
 /** The overlay controller handed to the composition root. */
 export interface ApplyOverlay {
-  /** Mounts the overlay with the known stages listed as pending. */
+  /** Mounts the overlay with the activity row waiting. */
   open(title: string): void;
-  /** Marks `stage` active; the previously active stage becomes done. */
-  beginStage(stage: string): void;
   /**
-   * Feeds one raw `GET /admin/progress` event. A hub `ProgressEvent`
-   * whose `state` is `Begun` and whose `label` is a known stage begins
-   * that stage. A `Begun` whose `path` is `<stage>/<model>/download`
-   * opens the detail row under the active stage, the leaf's `Updated`
-   * fractions set its bar, the leaf's `Finished` flips the row to the
-   * verifying label, and a `<stage>/<model>/ready` `Begun` flips it to
-   * the starting label. Every other shape is ignored.
+   * Feeds one `GET /admin/progress` snapshot. A busy snapshot puts its
+   * text in the activity row; an idle one shows the waiting text, since
+   * the apply the card covers has not settled yet.
    */
-  observe(event: unknown): void;
-  /** Terminal success: marks every begun stage done and closes. */
+  observe(progress: Progress): void;
+  /** Terminal success: marks the activity done and closes. */
   finish(): void;
-  /** Terminal failure: marks the active stage failed, then closes. */
+  /** Terminal failure: marks the activity failed, then closes. */
   fail(message: string): void;
 }
 
@@ -80,31 +57,17 @@ export function createApplyOverlay(
   options: ApplyOverlayOptions = {},
 ): ApplyOverlay {
   let element: HTMLElement | null = null;
-  let list: HTMLElement | null = null;
-  let active: HTMLElement | null = null;
+  let row: HTMLElement | null = null;
+  let label: HTMLElement | null = null;
   let cancel: HTMLButtonElement | null = null;
   let restoreFocus: HTMLElement | null = null;
-  let detail: {
-    row: HTMLElement;
-    text: HTMLElement;
-    bar: ProgressBar;
-    percent: HTMLElement;
-  } | null = null;
-  let downloadPath: string | null = null;
-
-  const clearDetail = () => {
-    detail?.row.remove();
-    detail = null;
-    downloadPath = null;
-  };
 
   const close = () => {
     element?.remove();
     element = null;
-    list = null;
-    active = null;
+    row = null;
+    label = null;
     cancel = null;
-    clearDetail();
     // Hand focus back to where it was when the overlay took it.
     if (restoreFocus?.isConnected) {
       restoreFocus.focus();
@@ -112,7 +75,10 @@ export function createApplyOverlay(
     restoreFocus = null;
   };
 
-  const setState = (row: HTMLElement, state: "active" | "done" | "failed") => {
+  const setState = (state: "active" | "done" | "failed") => {
+    if (!row) {
+      return;
+    }
     row.classList.remove("is-active", "is-done", "is-failed");
     row.classList.add(`is-${state}`);
     const icon = row.querySelector(".stage-icon");
@@ -127,86 +93,6 @@ export function createApplyOverlay(
       icon.replaceChildren(iconSvg(Check), visuallyHidden("done"));
     } else {
       icon.replaceChildren(iconSvg(X), visuallyHidden("failed"));
-    }
-  };
-
-  const stageRow = (stage: string, label: string): HTMLElement => {
-    const row = document.createElement("li");
-    row.className = "stage";
-    row.dataset["stage"] = stage;
-    const icon = document.createElement("span");
-    icon.className = "stage-icon";
-    const text = document.createElement("span");
-    text.className = "stage-label";
-    text.textContent = label;
-    row.append(icon, text);
-    return row;
-  };
-
-  const beginStage = (stage: string): void => {
-    if (!list) {
-      return;
-    }
-    if (active) {
-      setState(active, "done");
-      // A stage change retires the download/verify/start detail row.
-      clearDetail();
-    }
-    let row = list.querySelector<HTMLElement>(`[data-stage="${stage}"]`);
-    if (!row) {
-      row = stageRow(stage, stage);
-      list.append(row);
-    }
-    setState(row, "active");
-    active = row;
-  };
-
-  /**
-   * Shows the detail row under the active stage with `label`, creating
-   * it on first use and updating it in place afterwards, so a flood of
-   * coalesced `Updated` frames never re-creates nodes.
-   */
-  const showDetail = (label: string): void => {
-    if (!active) {
-      return;
-    }
-    if (!detail) {
-      const row = document.createElement("li");
-      row.className = "stage-detail";
-      const text = document.createElement("span");
-      text.className = "stage-detail-label";
-      const bar = createProgressBar("Model download progress");
-      const percent = document.createElement("span");
-      percent.className = "stage-detail-percent";
-      row.append(text, bar.element, percent);
-      detail = { row, text, bar, percent };
-    }
-    detail.text.textContent = label;
-    active.after(detail.row);
-  };
-
-  /** Handles a `Begun` frame for a non-stage leaf of a known stage. */
-  const observeLeafBegun = (path: string): void => {
-    const leaf = splitLeafPath(path);
-    if (!leaf || !KNOWN_STAGES.some(([id]) => id === leaf.stage)) {
-      return;
-    }
-    if (leaf.leaf === "download") {
-      // The most recent download leaf wins: a switch that stages
-      // several models shows one row at a time.
-      downloadPath = path;
-      showDetail(`Downloading ${leaf.model}`);
-      if (detail) {
-        detail.bar.setFraction(0);
-        detail.percent.textContent = "0%";
-      }
-    } else if (leaf.leaf === "ready") {
-      downloadPath = null;
-      showDetail(`Starting ${leaf.model}`);
-      if (detail) {
-        detail.bar.setFraction(null);
-        detail.percent.textContent = "";
-      }
     }
   };
 
@@ -232,9 +118,9 @@ export function createApplyOverlay(
       element.className = "overlay apply-overlay";
       const card = document.createElement("section");
       card.className = "modal";
-      // A non-dismissable progress dialog: it announces its stage
-      // changes politely and holds focus while the switch runs, so
-      // the keyboard never lands on the dimmed chrome behind it.
+      // A non-dismissable progress dialog: it announces its activity
+      // changes politely and holds focus while the apply runs, so the
+      // keyboard never lands on the dimmed chrome behind it.
       card.setAttribute("role", "alertdialog");
       card.setAttribute("aria-modal", "true");
       card.setAttribute("aria-live", "polite");
@@ -243,11 +129,18 @@ export function createApplyOverlay(
       heading.id = "apply-overlay-title";
       heading.textContent = title;
       card.setAttribute("aria-labelledby", heading.id);
-      list = document.createElement("ul");
+      const list = document.createElement("ul");
       list.className = "stage-list";
-      for (const [stage, label] of KNOWN_STAGES) {
-        list.append(stageRow(stage, label));
-      }
+      row = document.createElement("li");
+      row.className = "stage";
+      const icon = document.createElement("span");
+      icon.className = "stage-icon";
+      label = document.createElement("span");
+      label.className = "stage-label";
+      label.textContent = WAITING_TEXT;
+      row.append(icon, label);
+      list.append(row);
+      setState("active");
       card.append(heading, list);
       if (options.onCancel) {
         const actions = document.createElement("div");
@@ -264,57 +157,16 @@ export function createApplyOverlay(
       card.focus();
     },
 
-    beginStage,
-
-    observe(event: unknown): void {
-      // serde's externally tagged `EventState`: `{"Begun":{"weight":..}}`.
-      if (!isRecord(event) || !isRecord(event["state"])) {
+    observe(progress: Progress): void {
+      if (!label) {
         return;
       }
-      const state = event["state"];
-      if ("Begun" in state) {
-        const label = event["label"];
-        if (typeof label === "string" && KNOWN_STAGES.some(([id]) => id === label)) {
-          beginStage(label);
-          return;
-        }
-        if (typeof event["path"] === "string") {
-          observeLeafBegun(event["path"]);
-        }
-        return;
-      }
-      // `Updated` and `Finished` move only the tracked download leaf's
-      // row; frames for any other path change nothing.
-      const path = event["path"];
-      if (typeof path !== "string" || path !== downloadPath || !detail) {
-        return;
-      }
-      if ("Updated" in state) {
-        const updated = state["Updated"];
-        const fraction = isRecord(updated) ? updated["fraction"] : null;
-        if (typeof fraction !== "number") {
-          return;
-        }
-        const clamped = Math.min(Math.max(fraction, 0), 1);
-        detail.bar.setFraction(clamped);
-        detail.percent.textContent = `${Math.round(clamped * 100)}%`;
-      } else if ("Finished" in state) {
-        // The verify leaf runs next; the `ready` leaf's `Begun` flips
-        // the row to the starting label.
-        downloadPath = null;
-        const model = splitLeafPath(path)?.model;
-        if (model) {
-          detail.text.textContent = `Verifying ${model}`;
-        }
-        detail.bar.setFraction(null);
-        detail.percent.textContent = "";
-      }
+      // Updated in place: a flood of snapshots never re-creates nodes.
+      label.textContent = progress.busy && progress.text !== "" ? progress.text : WAITING_TEXT;
     },
 
     finish(): void {
-      if (active) {
-        setState(active, "done");
-      }
+      setState("done");
       close();
     },
 
@@ -322,9 +174,7 @@ export function createApplyOverlay(
       if (!element) {
         return;
       }
-      if (active) {
-        setState(active, "failed");
-      }
+      setState("failed");
       // The operation is over; a cancel during the hold has no target.
       if (cancel) {
         cancel.disabled = true;
@@ -336,28 +186,6 @@ export function createApplyOverlay(
       scheduleTimeout(close, ERROR_HOLD_MS);
     },
   };
-}
-
-/**
- * Splits a hub leaf path such as `downloading-models/glm-4-9b/download`
- * into its stage prefix, model name, and leaf name: the stage is the
- * first segment, the leaf the last, and the model everything between,
- * so a model name that itself contains a slash (the config validates
- * only that it is non-empty) still displays in full. Returns null for
- * anything shallower, so unknown path shapes are ignored.
- */
-function splitLeafPath(path: string): { stage: string; model: string; leaf: string } | null {
-  const segments = path.split("/");
-  if (segments.length < 3) {
-    return null;
-  }
-  const stage = segments[0] ?? "";
-  const model = segments.slice(1, -1).join("/");
-  const leaf = segments[segments.length - 1] ?? "";
-  if (!stage || !model || !leaf) {
-    return null;
-  }
-  return { stage, model, leaf };
 }
 
 /** Renders a lucide icon as a decorative inline SVG. */

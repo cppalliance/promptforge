@@ -187,7 +187,7 @@ impl Gateway {
     }
 
     /// [`new`](Self::new) over a caller-provided progress hub, so the
-    /// serving lifecycle's renderer watches the boot command's progress.
+    /// serving lifecycle's status consumers see the boot command's progress.
     pub(crate) fn new_with_hub(
         config: &Config,
         profiles: ProfilesContext,
@@ -288,26 +288,21 @@ impl Gateway {
     }
 
     /// [`from_config`](Self::from_config) over a caller-provided progress
-    /// hub, so the serving lifecycle's renderer thread can watch startup
+    /// hub, so the serving lifecycle's status consumers can watch startup
     /// provisioning.
     pub(crate) fn from_config_with_hub(
         config: &Config,
         profiles: ProfilesContext,
         hub: Arc<shared_progress::ProgressHub>,
     ) -> Result<Gateway, StartupError> {
-        // Startup provisioning is the hub's first operation tree: it lives
-        // for the provisioning call and detaches when the tree drops.
+        // Startup provisioning is the hub's first activity: it lives for the
+        // provisioning call and ends when the guard drops.
         #[cfg(feature = "local")]
         let local = {
-            let tree = hub.operation();
-            let progress = tree.register("startup", 1.0);
+            let activity = hub.begin("Starting local models");
             let started =
-                LocalRuntime::start(config, Some(&progress)).map_err(StartupError::provisioning);
-            match &started {
-                Ok(_) => progress.complete(),
-                Err(_) => progress.fail(),
-            }
-            drop(tree);
+                LocalRuntime::start(config, Some(&activity)).map_err(StartupError::provisioning);
+            drop(activity);
             started?
         };
         // A headless build cannot honor a config declaring local models;
@@ -320,22 +315,17 @@ impl Gateway {
         }
         #[cfg(feature = "stt")]
         let speech = {
-            let tree = hub.operation();
-            let progress = tree.register("startup-stt", 1.0);
+            let activity = Arc::new(hub.begin("Loading speech"));
             let service = gateway_stt::SpeechService::new();
             let started = service
                 .load_initial(
                     config,
-                    Some(&progress),
+                    Some(&activity),
                     &tokio_util::sync::CancellationToken::new(),
                 )
                 .map(|()| service)
                 .map_err(StartupError::provisioning);
-            match &started {
-                Ok(_) => progress.complete(),
-                Err(_) => progress.fail(),
-            }
-            drop(tree);
+            drop(activity);
             started?
         };
         #[cfg(not(feature = "stt"))]
@@ -933,10 +923,8 @@ fn serve_thread(
         }
     };
     let bind = config.bind_addr();
+    // Producers own their own log lines; the hub feeds the UIs only.
     let hub = Arc::new(shared_progress::ProgressHub::new());
-    // The renderer starts before serving so the boot command's downloads
-    // log; it is a plain thread, and its Drop stops it on every exit path.
-    let _renderer = crate::render::Renderer::start(&hub);
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

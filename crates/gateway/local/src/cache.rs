@@ -264,17 +264,10 @@ impl BlobCache {
         // A failed transfer keeps the staged partial for resume. The blob
         // cache routes carry no cancellation token, so the transfer runs to
         // its own end.
-        let actual = match download_with_progress(&self.client, source, &staging, progress, None) {
-            Ok(actual) => actual,
-            Err(error) => {
-                progress.abandon();
-                return Err(error);
-            }
-        };
+        let actual = download_with_progress(&self.client, source, &staging, progress, None)?;
         if let Some(expected) = expected.as_deref()
             && actual != expected
         {
-            progress.abandon();
             return Err(LocalError::DigestMismatch {
                 name: filename_from_url(source)?,
                 expected: expected.to_owned(),
@@ -304,7 +297,6 @@ impl BlobCache {
             source: io::Error::other(source_err),
         })?;
         write_synced(&meta_path(&destination), &meta_json)?;
-        progress.finish();
         Ok(CachedBlob {
             path: destination,
             sha256: actual,
@@ -622,8 +614,6 @@ mod tests {
     struct RecordingProgress {
         total: Mutex<Option<u64>>,
         bytes: AtomicU64,
-        finished: AtomicU64,
-        abandoned: AtomicU64,
     }
 
     impl RecordingProgress {
@@ -631,8 +621,6 @@ mod tests {
             Self {
                 total: Mutex::new(None),
                 bytes: AtomicU64::new(0),
-                finished: AtomicU64::new(0),
-                abandoned: AtomicU64::new(0),
             }
         }
     }
@@ -644,14 +632,6 @@ mod tests {
 
         fn inc(&self, n: u64) {
             self.bytes.fetch_add(n, Ordering::Relaxed);
-        }
-
-        fn finish(&self) {
-            self.finished.fetch_add(1, Ordering::Relaxed);
-        }
-
-        fn abandon(&self) {
-            self.abandoned.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -672,7 +652,6 @@ mod tests {
         assert_eq!(blob.size_bytes, body.len() as u64);
         assert_eq!(fs::read(&blob.path).expect("read blob"), body);
         assert_eq!(server.requests(), 1);
-        assert_eq!(progress.finished.load(Ordering::Relaxed), 1);
         assert_eq!(progress.bytes.load(Ordering::Relaxed), body.len() as u64);
         assert_eq!(
             *progress.total.lock().expect("total"),
@@ -701,7 +680,11 @@ mod tests {
             .download_to_cache(&url, Some(&"0".repeat(64)), &progress)
             .expect_err("digest mismatch");
         assert!(matches!(error, LocalError::DigestMismatch { .. }));
-        assert_eq!(progress.abandoned.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            progress.bytes.load(Ordering::Relaxed),
+            body.len() as u64,
+            "the whole body streamed before the digest gate rejected it"
+        );
 
         let destination = cache.destination(&url).expect("destination");
         assert!(!destination.exists(), "mismatched blob must not publish");

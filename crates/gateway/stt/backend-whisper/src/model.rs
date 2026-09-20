@@ -9,7 +9,7 @@ use gateway_stt_engine::{
 use gateway_whisper_ffi::{
     FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState,
 };
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 
 use crate::WhisperConfig;
 use crate::prompt::{GLOSSARY_TOKEN_BUDGET, final_prompt, fit_glossary, sanitize_prompt};
@@ -61,7 +61,7 @@ impl WhisperModelFactory {
 
 impl ModelFactory for WhisperModelFactory {
     fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-        let (path, progress_name) = match mode {
+        let (path, role) = match mode {
             DecodeMode::Interim => (&self.config.interim_model, "interim"),
             DecodeMode::Final => {
                 let Some(path) = &self.config.final_model else {
@@ -71,12 +71,8 @@ impl ModelFactory for WhisperModelFactory {
             }
             _ => return Ok(None),
         };
-        let progress = self
-            .config
-            .progress
-            .as_ref()
-            .map(|handle| handle.child(progress_name, 1.0));
-        WhisperDecoder::load(&self.library, path, progress.as_ref())
+        let progress = self.config.live_progress();
+        WhisperDecoder::load(&self.library, path, role, progress.as_deref())
             .map(|decoder| Some(Box::new(decoder) as Box<dyn Decoder>))
     }
 }
@@ -91,19 +87,18 @@ impl WhisperDecoder {
     fn load(
         library: &WhisperLibrary,
         path: &Path,
-        progress: Option<&ProgressHandle>,
+        role: &str,
+        progress: Option<&Activity>,
     ) -> Result<Self, TranscribeError> {
-        let prewarm_leaf = progress.map(|handle| handle.child("prewarm", 1.0));
-        prewarm(path, prewarm_leaf.as_ref())?;
-        let init_leaf = progress.map(|handle| handle.child("init", 1.0));
+        prewarm(path, role, progress)?;
+        if let Some(activity) = progress {
+            activity.set_text(format!("Initializing {role} speech model"));
+        }
         let context =
             WhisperContext::new(library, path).map_err(|source| load_model_error(path, source))?;
         let state = context
             .create_state()
             .map_err(|source| load_model_error(path, source))?;
-        if let Some(leaf) = &init_leaf {
-            leaf.complete();
-        }
         Ok(Self { context, state })
     }
 }
@@ -164,13 +159,20 @@ fn inference_error(source: impl std::error::Error + Send + Sync + 'static) -> Tr
     TranscribeError::inference(source)
 }
 
-fn prewarm(path: &Path, progress: Option<&ProgressHandle>) -> Result<(), TranscribeError> {
+/// Reads the model file once so the page cache is warm before the context
+/// loads it, writing `"Reading {role} speech model {pct}%"` into `progress`
+/// on each whole-percent change.
+fn prewarm(path: &Path, role: &str, progress: Option<&Activity>) -> Result<(), TranscribeError> {
     let total = std::fs::metadata(path)
         .map_err(|source| load_model_error(path, source))?
         .len();
     let mut file = std::fs::File::open(path).map_err(|source| load_model_error(path, source))?;
     let mut buffer = vec![0u8; PREWARM_CHUNK];
     let mut done = 0u64;
+    let mut last_percent = None;
+    if let Some(activity) = progress {
+        activity.set_text(format!("Reading {role} speech model"));
+    }
     loop {
         let read = file
             .read(&mut buffer)
@@ -179,12 +181,15 @@ fn prewarm(path: &Path, progress: Option<&ProgressHandle>) -> Result<(), Transcr
             break;
         }
         done += read as u64;
-        if let Some(leaf) = progress {
-            leaf.set_units(done, total);
+        if let Some(activity) = progress
+            && total > 0
+        {
+            let percent = (done.saturating_mul(100) / total).min(100);
+            if last_percent != Some(percent) {
+                last_percent = Some(percent);
+                activity.set_text(format!("Reading {role} speech model {percent}%"));
+            }
         }
-    }
-    if let Some(leaf) = progress {
-        leaf.complete();
     }
     Ok(())
 }
@@ -232,21 +237,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prewarm_of_a_plain_file_completes_progress() {
+    fn prewarm_of_a_plain_file_writes_the_read_percent() {
         let directory = tempfile::tempdir().expect("temporary model directory");
         let path = directory.path().join("model.bin");
         std::fs::write(&path, vec![0u8; 1024]).expect("fake model writes");
-        let hub = Arc::new(ProgressHub::new());
-        let tree = hub.operation();
-        let leaf = tree.register("prewarm", 1.0);
-        prewarm(&path, Some(&leaf)).expect("prewarm reads the model");
-        assert!((leaf.fraction() - 1.0).abs() < f64::EPSILON);
+        let hub = ProgressHub::new();
+        let activity = hub.begin("loading-speech");
+        prewarm(&path, "interim", Some(&activity)).expect("prewarm reads the model");
+        assert_eq!(hub.current().text, "Reading interim speech model 100%");
+    }
+
+    #[test]
+    fn a_config_whose_load_activity_ended_yields_no_progress_to_a_decoder_build() {
+        // `create` resolves its activity through `live_progress`: while the
+        // load's guard is alive the decoder build writes into it, and once
+        // the guard dropped the same config yields nothing and the hub is
+        // idle. `WhisperLibrary` needs the packaged runtime, so the resolve
+        // step is exercised here and the full build in the native tests.
+        let hub = ProgressHub::new();
+        let activity = Arc::new(hub.begin("loading-speech"));
+        let config = WhisperConfig::new(
+            "unused-library".into(),
+            "unused-interim.bin".into(),
+            None,
+            Some(Arc::downgrade(&activity)),
+        );
+        let live = config
+            .live_progress()
+            .expect("a live guard resolves to its activity");
+        live.set_text("Reading interim speech model");
+        assert_eq!(hub.current().text, "Reading interim speech model");
+        drop(live);
+
+        drop(activity);
+        assert!(!hub.current().busy, "the load's guard ended the activity");
+        assert!(
+            config.live_progress().is_none(),
+            "the config's weak handle cannot revive the ended activity"
+        );
+    }
+
+    #[test]
+    fn a_config_without_progress_yields_none() {
+        let config = WhisperConfig::new("unused-library".into(), "unused.bin".into(), None, None);
+        assert!(config.live_progress().is_none());
     }
 
     #[test]
     fn prewarm_failure_is_a_model_error_naming_the_path() {
         let path = Path::new("definitely-missing-prewarm-model.bin");
-        let error = prewarm(path, None).expect_err("missing model must fail");
+        let error = prewarm(path, "interim", None).expect_err("missing model must fail");
         assert!(matches!(error, TranscribeError::LoadModel { .. }));
         assert!(
             error

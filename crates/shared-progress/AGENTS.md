@@ -1,10 +1,8 @@
 # shared-progress
 
-This crate owns runtime-agnostic progress vocabulary and delivery semantics.
+This crate owns the gateway's live-activity hub: a busy flag and one line of producer-owned text, published as `gateway_api_types::Progress` over a `watch` channel.
 
-- This crate stays at the bottom of the workspace graph with no PromptForge product dependencies.
-- Hosts own forwarding tasks. This crate does not spawn work or block a runtime.
-- Producers report through `ProgressHandle`; renderers consume hub events or snapshots. Producers never format output or create a parallel progress channel.
-- Intermediate events are lossy (coalesced at the source, droppable under receiver lag); terminal `Finished` events are never coalesced. Consumers detect completion only from `Finished`, never from a fraction reaching 1.0.
-- Weights are proportional to expected time, not bytes or unit counts: a leaf's byte total is how it computes its own fraction, never its weight.
-- Serialization changes are additive so existing wire vocabulary remains valid.
+- Depends on `gateway-api-types` (the wire type), `tokio` `sync`, and nothing else in the workspace. Hosts own forwarding tasks; this crate does not spawn work, block a runtime, or log.
+- Producers call `ProgressHub::begin(text)` and hold the returned `Activity` for the work's lifetime, updating it with `set_text` and dropping it on every exit path. Failure is not a progress state: the producer logs it and returns the error.
+- The snapshot is `busy = any activity live`, `text = the newest live activity's text`. The `watch` channel keeps only the latest snapshot; there is no replay, no event history, and no fractions, weights, or hierarchy. A producer that wants a percentage formats it into the text.
+- Activity text is user-visible in every status consumer; a producer never places a credential in it.

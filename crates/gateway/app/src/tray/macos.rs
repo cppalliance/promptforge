@@ -387,16 +387,9 @@ fn tick(tray: &mut Tray) {
         return;
     }
     tray.phase = logic::next_phase(poll);
-    let command = handle.tray_state().commands.active_command();
+    let busy = handle.tray_state().tray_busy_text();
     if let Some((models, vram_gb)) = handle.tray_state().tray_model_status() {
-        let label = logic::status_label(
-            tray.phase,
-            command
-                .as_ref()
-                .map(|active| (active.name.as_str(), active.progress)),
-            models,
-            vram_gb,
-        );
+        let label = logic::status_label(tray.phase, busy.as_deref(), models, vram_gb);
         if label != tray.label {
             tray.status_item.set_text(&label);
             if let Some(icon) = tray.icon.as_ref()

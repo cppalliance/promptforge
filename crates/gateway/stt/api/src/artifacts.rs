@@ -1,10 +1,11 @@
 //! Verified speech artifacts and facade error vocabulary.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 
 use gateway_config::{Config, SttRole};
 use gateway_local::artifacts::ArtifactStore;
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 
 use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 
@@ -23,7 +24,10 @@ pub(crate) struct PreparedGeneration {
     pub(crate) guidance: Vec<String>,
     pub(crate) window_seconds: u64,
     pub(crate) interval_ms: u64,
-    pub(crate) progress: Option<ProgressHandle>,
+    /// The load's activity, weakly held: the model factory this becomes
+    /// lives for the process, while the activity ends with the load, so a
+    /// later decoder rebuild finds nothing to report into.
+    pub(crate) progress: Option<Weak<Activity>>,
 }
 
 #[derive(Debug, Default)]
@@ -34,7 +38,7 @@ struct ProvisionedModels {
 
 pub(crate) fn prepare(
     config: &Config,
-    progress: Option<&ProgressHandle>,
+    progress: Option<&Arc<Activity>>,
 ) -> Result<PreparedSpeech, SpeechError> {
     if config.stt_models().is_empty() {
         return Ok(PreparedSpeech { generation: None });
@@ -52,11 +56,14 @@ pub(crate) fn prepare(
     let cache = gateway_local::resolve_cache_root(config.local().cache_dir())
         .map_err(SpeechError::Store)?;
     let store = ArtifactStore::new(cache).map_err(SpeechError::Store)?;
-    let library_progress = progress.map(|handle| handle.child("whisper-library", 1.0));
+    let activity = progress.map(Arc::as_ref);
+    if let Some(activity) = activity {
+        activity.set_text("Provisioning whisper library");
+    }
     let library = store
-        .provision_whisper_library(library_progress.as_ref())
+        .provision_whisper_library(activity)
         .map_err(SpeechError::WhisperLibrary)?;
-    let models = provision_models(config, &store, progress)?;
+    let models = provision_models(config, &store, activity)?;
     let Some((interim_name, interim_model)) = models.interim else {
         return Err(SpeechError::MissingInterim);
     };
@@ -78,7 +85,7 @@ pub(crate) fn prepare(
             guidance: capture.vocabulary().to_vec(),
             window_seconds: capture.window_seconds(),
             interval_ms: capture.interval_ms(),
-            progress: progress.map(|handle| handle.child("engine", 1.0)),
+            progress: progress.map(Arc::downgrade),
         }),
     })
 }
@@ -86,13 +93,12 @@ pub(crate) fn prepare(
 fn provision_models(
     config: &Config,
     store: &ArtifactStore,
-    progress: Option<&ProgressHandle>,
+    activity: Option<&Activity>,
 ) -> Result<ProvisionedModels, SpeechError> {
     let mut provisioned = ProvisionedModels::default();
     for model in config.stt_models() {
-        let model_progress = progress.map(|handle| handle.child(model.name(), 4.0));
         let path = store
-            .ensure_model_with_progress(model.source(), model.sha256(), model_progress.as_ref())
+            .ensure_model_with_progress(model.source(), model.sha256(), activity)
             .map_err(|source| SpeechError::Artifact {
                 model: model.name().to_owned(),
                 source,

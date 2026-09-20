@@ -60,8 +60,7 @@ gateway-api-types.workspace = true
 # bind, in every build, so the workshop can discover a running gateway.
 gateway-api-discovery.workspace = true
 gateway-routing.workspace = true
-# The serde feature wires the progress event stream onto HTTP.
-shared-progress = { workspace = true, features = ["serde"] }
+shared-progress.workspace = true
 # Optional: gateway-hosted speech-to-text (engine lifecycle, the
 # `/v1/audio/transcriptions` route), behind the default-on `stt` feature.
 gateway-stt = { workspace = true, optional = true }

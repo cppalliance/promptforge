@@ -17,7 +17,7 @@ use gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingM
 use gateway_protocol::ShutdownError;
 use gateway_routing::queue::DominionQueue;
 use gateway_routing::{Endpoint, Model, dominion_queues};
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, ArtifactStore, ProvisionedServer, ServerSelection};
@@ -207,18 +207,14 @@ impl LocalRuntime {
     /// When the config declares no `[[local_model]]`, returns an empty runtime
     /// without downloading anything.
     ///
-    /// `progress` is the parent leaf for startup provisioning, when the caller
-    /// runs an operation tree: the pinned server stages once under a
-    /// `llama-server` child (download/verify/extract leaves), and each local
-    /// model gets its own subtree (download/verify leaves from provisioning
-    /// plus an indeterminate `ready` leaf the spawn poll completes).
+    /// `progress` is the caller's live activity, when it runs one: the
+    /// pinned server's download, verify, and extract stages, each model's
+    /// download and verify, and `"Starting {model}"` before each spawn are
+    /// written into its text.
     ///
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
-    pub fn start(
-        config: &Config,
-        progress: Option<&ProgressHandle>,
-    ) -> Result<LocalRuntime, LocalError> {
+    pub fn start(config: &Config, progress: Option<&Activity>) -> Result<LocalRuntime, LocalError> {
         let outcome = start_impl(
             config,
             progress,
@@ -255,7 +251,7 @@ impl LocalRuntime {
     /// ```
     pub fn start_partial(
         config: &Config,
-        progress: Option<&ProgressHandle>,
+        progress: Option<&Activity>,
     ) -> Result<LocalStartOutcome, LocalError> {
         start_impl(
             config,
@@ -286,7 +282,7 @@ impl LocalRuntime {
     /// token fires.
     pub fn start_partial_with_cancellation(
         config: &Config,
-        progress: Option<&ProgressHandle>,
+        progress: Option<&Activity>,
         token: &CancellationToken,
         interrupted: &Arc<AtomicBool>,
     ) -> Result<LocalStartOutcome, LocalError> {
@@ -314,8 +310,8 @@ impl LocalRuntime {
     /// Per-model provisioning failures are collected and returned, not
     /// fatal: the start over the same config reports them again as its own
     /// per-model failures, so the models that did provision still start.
-    /// `progress`, when given, gains the same `llama-server` and per-model
-    /// download/verify subtrees the start would register.
+    /// `progress`, when given, receives the same `llama-server` and
+    /// per-model download and verify text the start would write.
     ///
     /// # Errors
     /// Returns [`LocalError`] when the shared `llama-server` provisioning
@@ -324,7 +320,7 @@ impl LocalRuntime {
     /// models.
     pub fn provision_artifacts_with_cancellation(
         config: &Config,
-        progress: Option<&ProgressHandle>,
+        progress: Option<&Activity>,
         token: &CancellationToken,
     ) -> Result<Vec<LocalStartFailure>, LocalError> {
         provision_artifacts_impl(config, progress, token, |store, selection, server| {
@@ -338,12 +334,12 @@ impl LocalRuntime {
 /// a mock layout exactly as [`start_impl`] is driven.
 fn provision_artifacts_impl(
     config: &Config,
-    progress: Option<&ProgressHandle>,
+    progress: Option<&Activity>,
     token: &CancellationToken,
     provision: impl FnOnce(
         &ArtifactStore,
         &ServerSelection<'_>,
-        Option<&ProgressHandle>,
+        Option<&Activity>,
     ) -> Result<ProvisionedServer, LocalError>,
 ) -> Result<Vec<LocalStartFailure>, LocalError> {
     if config.local_models().is_empty() {
@@ -375,12 +371,11 @@ fn provision_artifacts_impl(
         if token.is_cancelled() {
             return Err(LocalError::Cancelled);
         }
-        let model_tree = progress.map(|handle| handle.child(local_model.name(), 3.0));
         let provisioned = store
             .ensure_model_with_cancellation(
                 local_model.source(),
                 local_model.sha256(),
-                model_tree.as_ref(),
+                progress,
                 Some(token),
             )
             .and_then(|_path| provision_companion_paths(&store, local_model, Some(token)));
@@ -408,11 +403,11 @@ enum StartPolicy {
 /// variable, or the managed backend download).
 fn provision_server(
     config: &Config,
-    progress: Option<&ProgressHandle>,
+    progress: Option<&Activity>,
     provision: impl FnOnce(
         &ArtifactStore,
         &ServerSelection<'_>,
-        Option<&ProgressHandle>,
+        Option<&Activity>,
     ) -> Result<ProvisionedServer, LocalError>,
 ) -> Result<(ArtifactStore, ProvisionedServer), LocalError> {
     let cache_root = resolve_cache_root(config.local().cache_dir())?;
@@ -422,8 +417,10 @@ fn provision_server(
         server_path: config.local().llama_server_path(),
         backend: config.local().llama_backend(),
     };
-    let server_tree = progress.map(|handle| handle.child("llama-server", 1.0));
-    let server = provision(&store, &selection, server_tree.as_ref())?;
+    if let Some(activity) = progress {
+        activity.set_text("Provisioning llama-server");
+    }
+    let server = provision(&store, &selection, progress)?;
     tracing::info!(path = %server.executable.display(), "provisioned llama-server");
     Ok((store, server))
 }
@@ -439,21 +436,15 @@ fn provision_server(
 )]
 fn start_impl(
     config: &Config,
-    progress: Option<&ProgressHandle>,
+    progress: Option<&Activity>,
     interrupted: &Arc<AtomicBool>,
     token: Option<&CancellationToken>,
     provision: impl FnOnce(
         &ArtifactStore,
         &ServerSelection<'_>,
-        Option<&ProgressHandle>,
+        Option<&Activity>,
     ) -> Result<ProvisionedServer, LocalError>,
-    spawn: impl Fn(
-        &Path,
-        &Path,
-        &LaunchOptions,
-        &AtomicBool,
-        Option<&ProgressHandle>,
-    ) -> Result<ServerGuard, LocalError>,
+    spawn: impl Fn(&Path, &Path, &LaunchOptions, &AtomicBool) -> Result<ServerGuard, LocalError>,
     policy: StartPolicy,
 ) -> Result<LocalStartOutcome, LocalError> {
     let cache_dir = config.local().cache_dir().map(str::to_owned);
@@ -510,12 +501,11 @@ fn start_impl(
         if token.is_some_and(CancellationToken::is_cancelled) {
             return Err(LocalError::Cancelled);
         }
-        let model_tree = progress.map(|handle| handle.child(local_model.name(), 3.0));
         let started = (|| {
             let model_path = store.ensure_model_with_cancellation(
                 local_model.source(),
                 local_model.sha256(),
-                model_tree.as_ref(),
+                progress,
                 token,
             )?;
             tracing::info!(
@@ -534,13 +524,14 @@ fn start_impl(
             if token.is_some_and(CancellationToken::is_cancelled) {
                 return Err(LocalError::Cancelled);
             }
-            let ready = model_tree.as_ref().map(|tree| tree.child("ready", 2.0));
+            if let Some(activity) = progress {
+                activity.set_text(format!("Starting {}", local_model.name()));
+            }
             let guard = spawn(
                 &server.executable,
                 &model_path,
                 &options,
                 interrupted.as_ref(),
-                ready.as_ref(),
             )?;
             let endpoint_id = format!("local-{}", local_model.name());
             // A non-chat child has no chat completions to dialect-match: like a
@@ -1179,9 +1170,9 @@ context = 4096
     }
 
     #[test]
-    fn start_with_no_local_models_registers_no_leaves() {
-        // An empty `[[local_model]]` set is a no-op start: the parent leaf
-        // gains no children at all.
+    fn start_with_no_local_models_writes_no_activity_text() {
+        // An empty `[[local_model]]` set is a no-op start: the caller's
+        // activity text is left exactly as it was.
         let config = Config::from_toml_str(
             r#"
 config-version = 0
@@ -1205,28 +1196,20 @@ endpoints = ["e"]
 "#,
         )
         .expect("config");
-        let hub = Arc::new(shared_progress::ProgressHub::new());
-        let tree = hub.operation();
-        let parent = tree.register("local-models", 1.0);
-        let runtime = LocalRuntime::start(&config, Some(&parent)).expect("empty local runtime");
+        let hub = shared_progress::ProgressHub::new();
+        let activity = hub.begin("local-models");
+        let runtime = LocalRuntime::start(&config, Some(&activity)).expect("empty local runtime");
         assert_eq!(runtime.child_count(), 0);
-        let snapshot = hub.snapshot();
-        let paths: Vec<&str> = snapshot[0]
-            .nodes
-            .iter()
-            .map(|node| node.path.as_str())
-            .collect();
-        assert_eq!(paths, ["local-models"]);
+        assert_eq!(hub.current().text, "local-models");
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-    fn start_over_a_mock_layout_registers_the_expected_subtree_shape() {
+    fn start_over_a_mock_layout_writes_the_starting_text_before_the_spawn() {
         use crate::testsupport::hex_sha256;
 
         // The mock layout provisions for real - a path source with a true pin
         // - but has no `llama-server` binary to spawn, so the start fails at
-        // launch, after the subtree shape is registered.
+        // launch, after the activity text reached the spawn stage.
         let temp = tempfile::TempDir::new().expect("tempdir");
         let model_file = temp.path().join("mock.gguf");
         std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
@@ -1255,26 +1238,30 @@ context = 512
         ))
         .expect("config");
 
-        let hub = Arc::new(shared_progress::ProgressHub::new());
-        let tree = hub.operation();
-        let parent = tree.register("local-models", 1.0);
+        let hub = shared_progress::ProgressHub::new();
+        let activity = hub.begin("local-models");
+        let seen = std::sync::Mutex::new(Vec::new());
 
         let error = start_impl(
             &config,
-            Some(&parent),
+            Some(&activity),
             &startup_interrupt_flag(),
             None,
             |_store, _selection, server| {
-                // An already-staged server has no download/verify/extract work.
-                if let Some(handle) = server {
-                    handle.complete();
-                }
+                // An already-staged server has no download/verify/extract
+                // work; the runtime named the stage before calling in.
+                seen.lock()
+                    .expect("seen lock")
+                    .push(server.map(|_| hub.current().text));
                 Ok(ProvisionedServer {
                     executable: PathBuf::from("mock-llama-server"),
                     path_prefix: Vec::new(),
                 })
             },
-            |_, _, _, _, _| {
+            |_, _, _, _| {
+                seen.lock()
+                    .expect("seen lock")
+                    .push(Some(hub.current().text));
                 Err(LocalError::EarlyExit {
                     status: "the mock layout has no llama-server to spawn".to_owned(),
                 })
@@ -1284,26 +1271,18 @@ context = 512
         .expect_err("the mock layout cannot launch a real child");
         assert!(matches!(error, LocalError::EarlyExit { .. }));
 
-        let snapshot = hub.snapshot();
-        assert_eq!(snapshot.len(), 1);
-        let nodes = &snapshot[0].nodes;
-        let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
         assert_eq!(
-            paths,
+            seen.lock().expect("seen lock").as_slice(),
             [
-                "local-models",
-                "local-models/llama-server",
-                "local-models/mock",
-                "local-models/mock/download",
-                "local-models/mock/verify",
-                "local-models/mock/ready",
-            ]
+                Some("Provisioning llama-server".to_owned()),
+                Some("Starting mock".to_owned()),
+            ],
+            "the server stage is named before provisioning and the model before its spawn"
         );
-        // The path source needed no download and the pin ran a real hash
-        // pass; the readiness poll never ran.
-        assert_eq!(nodes[3].fraction, 1.0);
-        assert_eq!(nodes[4].fraction, 1.0);
-        assert_eq!(nodes[5].fraction, 0.0);
+        assert!(
+            hub.current().busy,
+            "the caller's activity is still live after a failed start"
+        );
     }
 
     #[test]
@@ -1311,11 +1290,10 @@ context = 512
         use crate::testsupport::hex_sha256;
 
         // The artifact step provisions for real - the pinned path source is
-        // hashed and its verification marker written - registers the same
-        // download/verify subtree the start would, and never reaches a
-        // spawn: no `ready` leaf exists. A model whose source is missing is
-        // collected as a per-model failure, not a fatal one, so the model
-        // that did provision is not held back.
+        // hashed and its verification marker written - and never reaches a
+        // spawn. A model whose source is missing is collected as a per-model
+        // failure, not a fatal one, so the model that did provision is not
+        // held back.
         let temp = tempfile::TempDir::new().expect("tempdir");
         let model_file = temp.path().join("mock.gguf");
         std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
@@ -1350,17 +1328,13 @@ context = 512
         ))
         .expect("config");
 
-        let hub = Arc::new(shared_progress::ProgressHub::new());
-        let tree = hub.operation();
-        let parent = tree.register("downloading-models", 1.0);
+        let hub = shared_progress::ProgressHub::new();
+        let activity = hub.begin("downloading-models");
         let failures = provision_artifacts_impl(
             &config,
-            Some(&parent),
+            Some(&activity),
             &CancellationToken::new(),
-            |_store, _selection, server| {
-                if let Some(handle) = server {
-                    handle.complete();
-                }
+            |_store, _selection, _server| {
                 Ok(ProvisionedServer {
                     executable: PathBuf::from("mock-llama-server"),
                     path_prefix: Vec::new(),
@@ -1389,25 +1363,10 @@ context = 512
                 .is_file(),
             "the pinned blob is verified into the cache, so the start finds it"
         );
-        let snapshot = hub.snapshot();
-        let paths: Vec<&str> = snapshot[0]
-            .nodes
-            .iter()
-            .map(|node| node.path.as_str())
-            .collect();
         assert_eq!(
-            paths,
-            [
-                "downloading-models",
-                "downloading-models/llama-server",
-                "downloading-models/mock",
-                "downloading-models/mock/download",
-                "downloading-models/mock/verify",
-                "downloading-models/absent",
-                "downloading-models/absent/download",
-                "downloading-models/absent/verify",
-            ],
-            "the artifact step registers no `ready` leaf: nothing spawns"
+            hub.current().text,
+            "Verifying mock.gguf 100%",
+            "the last stage the artifact step wrote is the pinned model's hash pass: nothing spawns"
         );
     }
 
@@ -1670,7 +1629,7 @@ context = 4096
                     path_prefix: Vec::new(),
                 })
             },
-            |_, _, _, _, _| panic!("a refused model never spawns"),
+            |_, _, _, _| panic!("a refused model never spawns"),
             StartPolicy::KeepReady,
         )
         .expect("a per-model refusal is not fatal under the partial policy");
@@ -1753,7 +1712,7 @@ context = 4096
                     path_prefix: Vec::new(),
                 })
             },
-            |_, _, _, _, _| {
+            |_, _, _, _| {
                 spawns.fetch_add(1, Ordering::Relaxed);
                 Err(LocalError::EarlyExit {
                     status: "the mock layout has no llama-server to spawn".to_owned(),

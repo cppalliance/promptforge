@@ -552,10 +552,11 @@ function redactSecrets(view) {
  * report. When `key` is set, gateway requests without that
  * bearer answer 401; absolute (hub) URLs are exempt. Every call is
  * recorded in `calls`; the mutable config state is exposed as `state`.
- * The queue surface: `/admin/status` returns `queue`, `endpoints`, and
- * `vram_gb` from `state` (mutate them to drive the status bar), and the
- * cancel routes record into `state.cancelActiveCalls` and
- * `state.cancelPendingCalls`. The cloud sheet surface: `GET
+ * The queue surface: `/admin/status` returns `progress`, `queue`,
+ * `endpoints`, and `vram_gb` from `state` (mutate them to drive the
+ * status bar), and the cancel routes record into
+ * `state.cancelActiveCalls` and `state.cancelPendingCalls`. The cloud
+ * sheet surface: `GET
  * /admin/cloud-models` returns `cloudModels` (unstubbed: the route
  * 404s, putting the sheet store in its error state without polling;
  * `onCloudModels` overrides the reply entirely, for staged
@@ -588,6 +589,7 @@ export function gatewayStub({
   cloudModels,
   onCloudModels,
   env,
+  progress,
   queue,
   endpoints,
   vramGb,
@@ -612,6 +614,8 @@ export function gatewayStub({
     switchCalls: [],
     /** Process-lifetime config generation returned by admin status. */
     configGeneration,
+    /** The live activity snapshot returned by admin status. */
+    progress: progress ?? { busy: false, text: "" },
     /** The command queue readout returned by admin status. */
     queue: queue ?? { active: null, pending: [] },
     /** The endpoint readiness entries returned by admin status. */
@@ -710,6 +714,7 @@ export function gatewayStub({
         models,
         config_generation: state.configGeneration,
         vram_gb: state.vramGb,
+        progress: state.progress,
         queue: state.queue,
         endpoints: state.endpoints,
       });

@@ -1,10 +1,9 @@
 //! Cloneable host facade for speech lifecycle, facts, and routes.
 
-#[cfg(feature = "test-fixtures")]
 use std::sync::Arc;
 
 use gateway_config::Config;
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::SpeechError;
@@ -63,6 +62,9 @@ impl SpeechService {
     /// The facade starts empty and publishes at most one runtime. The attempt
     /// is spent whether it publishes, fails, or is cancelled: speech remains
     /// unavailable until process restart, and every later call is rejected.
+    /// `progress`, when given, receives the provisioning and model-load
+    /// stages as text; the backend keeps only a weak reference, so the
+    /// activity ends with the caller's guard.
     ///
     /// # Errors
     /// Returns a typed store, download, verification, configuration, backend,
@@ -72,7 +74,7 @@ impl SpeechService {
     pub fn load_initial(
         &self,
         config: &Config,
-        progress: Option<&ProgressHandle>,
+        progress: Option<&Arc<Activity>>,
         cancel: &CancellationToken,
     ) -> Result<(), SpeechError> {
         #[cfg(feature = "test-fixtures")]

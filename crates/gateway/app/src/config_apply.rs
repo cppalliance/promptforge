@@ -17,8 +17,8 @@
 //! in flight, then deletes every shadow and touches nothing else. Saves, the
 //! capture step, the commit, and revert serialize on one mutex, so apply only
 //! captures combinations the latest save validated whole. Both routes reply
-//! with plain JSON; the reload's one `applying-config` stage streams to
-//! `GET /admin/progress` subscribers.
+//! with plain JSON; the reload's `"Applying configuration"` text reaches
+//! `GET /admin/progress` subscribers through the command's activity.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use axum::extract::State;
 use gateway_config::{Config, ProfileSelection, load_pending_config, shadow_path, write_atomic};
 #[cfg(feature = "web-search")]
 use gateway_web_search::WebSearchState;
-use shared_progress::ProgressTree;
+use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
@@ -57,7 +57,7 @@ const RESTART_SECTIONS: [&str; 6] = [
 ///
 /// The reply is plain JSON - `{"applied": [...], "reloaded": bool,
 /// "restart_required": bool}` - not SSE: the reload runs as a command on
-/// the queue, so its `applying-config` stage streams to
+/// the queue, so its `"Applying configuration"` text reaches
 /// `GET /admin/progress` subscribers, and the response carries the outcome.
 /// `applied` names the promoted real files relative to the config root,
 /// sorted. `reloaded` is true when a config shadow applied successfully.
@@ -311,8 +311,9 @@ fn delete_all_shadows(config_path: &Path) -> Result<Vec<String>, GatewayError> {
     Ok(reverted)
 }
 
-/// The `ApplyConfig` command body: one `applying-config` leaf that swaps
-/// the remote routing table live and promotes the captured shadows.
+/// The `ApplyConfig` command body: under the `"Applying configuration"`
+/// text, swaps the remote routing table live and promotes the captured
+/// shadows. The activity drops with the return on every path.
 ///
 /// Any failure under a fired token reports as the cancellation it is, so
 /// the route's reply can promise the shadows are still staged.
@@ -320,23 +321,14 @@ pub(crate) async fn apply_config(
     state: &AppState,
     snapshot: ApplySnapshot,
     token: CancellationToken,
-    tree: ProgressTree,
+    activity: Activity,
 ) -> Outcome {
     let ApplySnapshot { config, files, .. } = snapshot;
-    let applying = tree.register("applying-config", 1.0);
+    activity.set_text("Applying configuration");
     match apply_snapshot(state, *config, files, &token).await {
-        Ok(summary) => {
-            applying.complete();
-            Ok(summary)
-        }
-        Err(_) if token.is_cancelled() => {
-            applying.fail();
-            Err(apply_cancelled())
-        }
-        Err(error) => {
-            applying.fail();
-            Err(error)
-        }
+        Ok(summary) => Ok(summary),
+        Err(_) if token.is_cancelled() => Err(apply_cancelled()),
+        Err(error) => Err(error),
     }
 }
 
@@ -412,8 +404,6 @@ mod tests {
     use gateway_config::{
         Config, ProfileName, ProfileSelection, profile_state_path, shadow_path, write_shadow,
     };
-    use shared_progress::{EventState, ProgressEvent};
-    use tokio::sync::broadcast;
     use tokio_util::sync::CancellationToken;
 
     use super::{ApplyPlan, capture_apply};
@@ -564,18 +554,6 @@ models = []
         state.live.read().await.routing.model(name).is_ok()
     }
 
-    /// How many times the hub saw `label` begin: each apply opens exactly one
-    /// `applying-config` leaf and each switch one `loading-profile` leaf.
-    fn stages_begun(events: &mut broadcast::Receiver<ProgressEvent>, label: &str) -> usize {
-        let mut count = 0;
-        while let Ok(event) = events.try_recv() {
-            if event.label == label && matches!(event.state, EventState::Begun { .. }) {
-                count += 1;
-            }
-        }
-        count
-    }
-
     /// Asserts the apply reply is the cancellation envelope the config UI
     /// keys on.
     async fn assert_apply_cancelled(response: reqwest::Response) {
@@ -634,7 +612,6 @@ models = []
                     .expect("the running child routes"),
             );
         }
-        let mut events = state.hub.subscribe();
         stage_gamma(&config_path);
 
         let response = post(addr, "admin/config-apply").await;
@@ -664,11 +641,10 @@ models = []
         );
         let served = get_json(addr, "admin/config").await;
         assert_eq!(served["model"][2]["name"], "gamma-model");
-        assert_eq!(stages_begun(&mut events, "applying-config"), 1);
-        assert_eq!(
-            stages_begun(&mut events, "loading-profile"),
-            0,
-            "no switch runs for an apply"
+        assert!(
+            !state.hub.current().busy,
+            "the settled apply released its activity: {:?}",
+            state.hub.current()
         );
     }
 
@@ -772,7 +748,6 @@ models = []
         let original_config = std::fs::read_to_string(&config_path).expect("read config");
         write_shadow(&config_path, "not valid TOML [[[").expect("stage tampered shadow");
         let (addr, state) = serve_fixture(config, paths).await;
-        let mut events = state.hub.subscribe();
 
         let response = post(addr, "admin/config-apply").await;
 
@@ -788,9 +763,8 @@ models = []
             shadow_path(&config_path).is_file(),
             "the rejected shadow remains available for correction or revert"
         );
-        assert_eq!(
-            stages_begun(&mut events, "applying-config"),
-            0,
+        assert!(
+            !state.hub.current().busy,
             "the parse failure replies before any command exists"
         );
         assert!(state.commands.active_command().is_none());
@@ -803,7 +777,6 @@ models = []
         let env_path = paths.config_path.with_extension("env");
         write_shadow(&env_path, "HF_TOKEN=pending\n").expect("stage env shadow");
         let (addr, state) = serve_fixture(config, paths).await;
-        let mut events = state.hub.subscribe();
 
         let response = post(addr, "admin/config-apply").await;
 
@@ -820,9 +793,8 @@ models = []
             !shadow_path(&env_path).exists(),
             "the promoted shadow is retired"
         );
-        assert_eq!(
-            stages_begun(&mut events, "applying-config"),
-            0,
+        assert!(
+            !state.hub.current().busy && state.commands.active_command().is_none(),
             "the no-reload path promotes inline without a command"
         );
     }
@@ -925,11 +897,15 @@ models = []
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();
         let (addr, state, park) = serve_parked_fixture(config, paths).await;
-        let mut events = state.hub.subscribe();
         stage_gamma(&config_path);
 
         let first = tokio::spawn(post(addr, "admin/config-apply"));
         park.entered().await;
+        assert_eq!(
+            state.hub.current().text,
+            "Applying configuration",
+            "the parked apply holds the command's activity with its stage text"
+        );
         let second = tokio::spawn(post(addr, "admin/config-apply"));
         wait_until("the second apply to attach to the first", || {
             state.commands.active_waiters() == 2
@@ -955,10 +931,9 @@ models = []
         );
         assert_eq!(first["reloaded"], true);
         assert_eq!(second["reloaded"], true);
-        assert_eq!(
-            stages_begun(&mut events, "applying-config"),
-            1,
-            "the attached duplicate never runs a second reload"
+        assert!(
+            !state.hub.current().busy,
+            "the one command settled and released its activity"
         );
         assert!(!shadow_path(&config_path).exists());
         assert!(routes(&state, "gamma-model").await);

@@ -27,7 +27,8 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
 /// Current profile name, loaded model names, the local models the boot
 /// load is still spawning, process config generation, the profile's model
 /// allowlist (its local and speech-to-text members), the declared VRAM
-/// total, the command queue's active and pending commands, and one
+/// total, the hub's current [`Progress`](gateway_api_types::Progress)
+/// snapshot, the command queue's active and pending commands, and one
 /// readiness entry per capability endpoint the gateway can serve.
 pub(crate) async fn admin_status(
     State(state): State<AppState>,
@@ -35,6 +36,7 @@ pub(crate) async fn admin_status(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let active = state.commands.active_command();
     let pending = state.commands.pending_commands();
+    let progress = state.hub.current();
     let live = state.live.read().await;
     let models: Vec<&str> = live
         .routing
@@ -84,10 +86,10 @@ pub(crate) async fn admin_status(
         "model_allowlist": live.model_allowlist,
         "local_children": local_children,
         "vram_gb": vram_gb,
+        "progress": progress,
         "queue": {
             "active": active.map(|status| serde_json::json!({
                 "name": status.name,
-                "fraction": status.progress,
                 "started_at": instant_epoch_seconds(status.started_at),
             })),
             "pending": pending

@@ -121,7 +121,6 @@ mod models;
 mod orphans;
 mod relaunch;
 mod relay;
-mod render;
 mod reveal;
 mod routing;
 mod runner;
@@ -280,8 +279,9 @@ pub(crate) struct AppState {
     /// half-promotes one, and no pending read observes a half-written
     /// selection. Held for those short steps only, never across a download.
     apply: Arc<tokio::sync::Mutex<()>>,
-    /// The process-lifetime progress broker: operations attach trees for
-    /// their own lifetimes, and `GET /admin/progress` streams its events.
+    /// The process-lifetime activity hub: commands and startup stages begin
+    /// activities for their own lifetimes, `GET /admin/progress` streams its
+    /// snapshots, and `GET /admin/status` and the tray read the current one.
     hub: Arc<ProgressHub>,
     /// The command queue: the boot load, config applies, and unloads run
     /// as serialized, cancellable commands; the tray and routes read its
@@ -488,6 +488,14 @@ impl AppState {
     pub(crate) fn tray_model_status(&self) -> Option<(usize, f64)> {
         let live = self.live.try_read().ok()?;
         Some(live.model_status())
+    }
+
+    /// The hub's current activity text for the tray's status line: `Some`
+    /// while any activity is live, `None` when the gateway is idle.
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    pub(crate) fn tray_busy_text(&self) -> Option<String> {
+        let progress = self.hub.current();
+        progress.busy.then_some(progress.text)
     }
 }
 

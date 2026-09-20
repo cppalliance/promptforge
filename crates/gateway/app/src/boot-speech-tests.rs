@@ -376,7 +376,6 @@ async fn a_failed_boot_speech_load_leaves_the_gateway_serving_without_speech() {
 
     // A later switch persists its selection without a speech stage and
     // without retrying the spent initial load.
-    let mut events = state.hub.subscribe();
     let switching = reqwest::Client::new()
         .post(format!("http://{addr}/admin/switch-profile"))
         .bearer_auth("test-token")
@@ -386,8 +385,9 @@ async fn a_failed_boot_speech_load_leaves_the_gateway_serving_without_speech() {
         .expect("the switch request sends");
     assert_eq!(switching.status(), reqwest::StatusCode::OK);
     assert!(
-        !begun_stages_any(&mut events).contains(&"loading-speech".to_owned()),
-        "a switch emits no speech stage"
+        !state.hub.current().busy,
+        "a switch runs no command, so no speech stage begins: {:?}",
+        state.hub.current()
     );
     assert!(!state.speech.status().ready());
 
@@ -617,7 +617,6 @@ async fn an_apply_persisting_speech_changes_leaves_boot_speech_untouched() {
         .expect("the save sends");
     assert_eq!(save.status(), reqwest::StatusCode::OK);
 
-    let mut events = state.hub.subscribe();
     let apply = reqwest::Client::new()
         .post(format!("http://{addr}/admin/config-apply"))
         .bearer_auth("test-token")
@@ -650,24 +649,12 @@ async fn an_apply_persisting_speech_changes_leaves_boot_speech_untouched() {
     let statuses = state.commands.active_command();
     assert!(statuses.is_none(), "the apply command settled");
     assert!(
-        !begun_stages_any(&mut events).contains(&"loading-speech".to_owned()),
-        "the apply emits no speech stage"
+        !state.hub.current().busy,
+        "the settled apply left no activity behind: {:?}",
+        state.hub.current()
     );
 
     state.commands.shutdown();
     worker.await.expect("the worker exits on shutdown");
     state.speech.shutdown();
-}
-
-/// Labels of every begun progress event, across operations.
-fn begun_stages_any(
-    events: &mut tokio::sync::broadcast::Receiver<shared_progress::ProgressEvent>,
-) -> Vec<String> {
-    let mut labels = Vec::new();
-    while let Ok(event) = events.try_recv() {
-        if matches!(event.state, shared_progress::EventState::Begun { .. }) {
-            labels.push(event.label.clone());
-        }
-    }
-    labels
 }

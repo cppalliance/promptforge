@@ -233,8 +233,11 @@ pub(crate) fn parking_executor() -> Arc<crate::commands::Executor> {
 
     use crate::commands::Outcome;
 
-    Arc::new(|_state, command, _tree| {
+    Arc::new(|_state, command, activity| {
         Box::pin(async move {
+            // The activity lives as long as the parked body, as a real
+            // command's would, so the hub reads busy while it waits.
+            let _activity = activity;
             let label = command.label();
             let Some(token) = command.token() else {
                 return Ok(label);

@@ -7,12 +7,12 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 use gateway_stt_engine::test_fixtures::native::require_fixture;
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
-use shared_progress::{ProgressHandle, ProgressHub};
+use shared_progress::{Activity, ProgressHub};
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
 const UNPROMPTED_CLIP_TRANSCRIPT: &str = "country can do for you.";
@@ -55,7 +55,7 @@ fn engine_with_progress(
     library: PathBuf,
     interim: PathBuf,
     final_model: Option<PathBuf>,
-    progress: Option<ProgressHandle>,
+    progress: Option<Weak<Activity>>,
 ) -> SttEngine {
     let config = WhisperConfig::new(library, interim, final_model, progress);
     let factory = WhisperModelFactory::new(config).expect("packaged runtime loads");
@@ -268,7 +268,7 @@ async fn final_decode_is_absent_without_a_final_model() {
 
 #[tokio::test]
 #[ignore = "requires packaged whisper and model fixtures"]
-async fn configured_model_branches_finish_prewarm_and_init_progress() {
+async fn configured_model_branches_write_their_load_text_then_release_the_activity() {
     let _guard = NATIVE_TEST.lock().await;
     let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
     let model = require_fixture(
@@ -276,35 +276,25 @@ async fn configured_model_branches_finish_prewarm_and_init_progress() {
         &fixture_dir(),
         "ggml-tiny.en.bin",
     );
-    let hub = Arc::new(ProgressHub::new());
-    let tree = hub.operation();
-    let models = tree.register("models", 1.0);
+    let hub = ProgressHub::new();
+    let activity = Arc::new(hub.begin("loading-speech"));
 
-    let engine = engine_with_progress(library, model.clone(), Some(model), Some(models));
+    let engine = engine_with_progress(
+        library,
+        model.clone(),
+        Some(model),
+        Some(Arc::downgrade(&activity)),
+    );
     assert!(engine.has_final_pass(), "the final branch is configured");
+    let text = hub.current().text;
+    assert!(
+        text.starts_with("Initializing ") && text.ends_with(" speech model"),
+        "the last stage written is a branch's context initialization: {text:?}"
+    );
 
-    let snapshot = hub.snapshot();
-    let nodes = &snapshot[0].nodes;
-    for branch in ["interim", "final"] {
-        let branch_path = format!("models/{branch}");
-        assert!(
-            nodes.iter().any(|node| node.path == branch_path),
-            "{branch} model progress branch is present: {nodes:?}"
-        );
-        for stage in ["prewarm", "init"] {
-            let path = format!("{branch_path}/{stage}");
-            let node = nodes
-                .iter()
-                .find(|node| node.path == path)
-                .unwrap_or_else(|| panic!("{path} progress is present: {nodes:?}"));
-            assert!(
-                node.finished && node.ok,
-                "{path} reaches a successful terminal state: {node:?}"
-            );
-            assert!(
-                (node.fraction - 1.0).abs() < f64::EPSILON,
-                "{path} completes all work: {node:?}"
-            );
-        }
-    }
+    // The factory holds the activity weakly: the load's guard alone keeps
+    // the hub busy, and dropping it leaves the factory nothing to write to.
+    drop(activity);
+    assert!(!hub.current().busy, "the load's guard ended the activity");
+    drop(engine);
 }

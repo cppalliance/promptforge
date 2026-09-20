@@ -443,18 +443,18 @@ function mountLiveShell(
     });
   void store.load();
   // The live progress stream: while an apply is in flight, the hub's
-  // events feed the overlay, which maps stage leaves itself. The
-  // `applying` guard suffices because the boot load runs once per
-  // process and an Apply queues behind it, so during an Apply the only
-  // stage emitter the overlay can see is the Apply. Subscribing at boot
-  // keeps the shell an independent subscriber whether or not the
+  // snapshots feed the overlay's activity row. The `applying` guard
+  // suffices because the boot load runs once per process and an Apply
+  // queues behind it, so during an Apply the text the overlay shows is
+  // the Apply's own (or the boot load it waits behind). Subscribing at
+  // boot keeps the shell an independent subscriber whether or not the
   // workshop is connected. Panel mode never subscribes: the workshop
   // already consumes the same stream and owns all progress display.
   const stopProgress =
     bridge === null
-      ? api.subscribeProgress((event) => {
+      ? api.subscribeProgress((progress) => {
           if (applying) {
-            overlay.observe(event);
+            overlay.observe(progress);
           }
         })
       : () => undefined;

@@ -41,16 +41,16 @@ pub(crate) fn next_phase(poll: Poll) -> TrayPhase {
 }
 
 /// The status label at the top of the menu, also used as the tooltip.
-/// While the gateway serves, the label reads the command queue: an active
-/// command reports its name and rounded percent ("Running - load-profile:
-/// main (34%)"); an idle queue reports the loaded models, e.g. "Running -
-/// 2 models, 4.1 GB", with the VRAM total omitted when no local or STT
-/// model declares any. The icon tints stay phase-driven by the serve
-/// poll (grayed Starting, steady Running, red Error): the queue says
-/// nothing about a stopped gateway, so the phase machine keeps the icon.
+/// While the gateway serves, the label reads the activity hub: a busy hub
+/// reports its text ("Running - Downloading qwen 34%"); an idle hub
+/// reports the loaded models, e.g. "Running - 2 models, 4.1 GB", with the
+/// VRAM total omitted when no local or STT model declares any. The icon
+/// tints stay phase-driven by the serve poll (grayed Starting, steady
+/// Running, red Error): the hub says nothing about a stopped gateway, so
+/// the phase machine keeps the icon.
 pub(crate) fn status_label(
     phase: TrayPhase,
-    active: Option<(&str, f64)>,
+    busy_text: Option<&str>,
     models: usize,
     vram_gb: f64,
 ) -> String {
@@ -58,9 +58,8 @@ pub(crate) fn status_label(
         TrayPhase::Starting => "Starting".to_owned(),
         TrayPhase::Error => "Error - serving stopped".to_owned(),
         TrayPhase::Running => {
-            if let Some((label, fraction)) = active {
-                let percent = fraction.clamp(0.0, 1.0) * 100.0;
-                return format!("Running - {label} ({percent:.0}%)");
+            if let Some(text) = busy_text {
+                return format!("Running - {text}");
             }
             let models = match models {
                 1 => "1 model".to_owned(),
@@ -494,54 +493,29 @@ mod tests {
     }
 
     #[test]
-    fn an_active_command_drives_the_label_with_its_rounded_percent() {
+    fn a_busy_hub_drives_the_label_with_its_text() {
         assert_eq!(
-            status_label(
-                TrayPhase::Running,
-                Some(("load-profile: main", 0.34)),
-                0,
-                0.0
-            ),
-            "Running - load-profile: main (34%)"
+            status_label(TrayPhase::Running, Some("Downloading qwen 34%"), 0, 0.0),
+            "Running - Downloading qwen 34%"
         );
         assert_eq!(
-            status_label(
-                TrayPhase::Running,
-                Some(("provision-model: whisper-base-en", 0.996)),
-                2,
-                4.1
-            ),
-            "Running - provision-model: whisper-base-en (100%)",
-            "the command report outranks the model count, and the percent rounds"
-        );
-        assert_eq!(
-            status_label(
-                TrayPhase::Running,
-                Some(("load-profile: main", 1.7)),
-                0,
-                0.0
-            ),
-            "Running - load-profile: main (100%)",
-            "an over-1.0 fraction clamps rather than printing nonsense"
+            status_label(TrayPhase::Running, Some("load-profile: main"), 2, 4.1),
+            "Running - load-profile: main",
+            "the activity text outranks the model count and carries no percent of its own"
         );
     }
 
     #[test]
-    fn the_starting_and_error_phases_ignore_the_queue() {
+    fn the_starting_and_error_phases_ignore_the_hub() {
         assert_eq!(
-            status_label(
-                TrayPhase::Starting,
-                Some(("load-profile: main", 0.5)),
-                0,
-                0.0
-            ),
+            status_label(TrayPhase::Starting, Some("load-profile: main"), 0, 0.0),
             "Starting",
-            "no poll has reported yet, so the queue readout waits"
+            "no poll has reported yet, so the activity readout waits"
         );
         assert_eq!(
-            status_label(TrayPhase::Error, Some(("load-profile: main", 0.5)), 3, 2.0),
+            status_label(TrayPhase::Error, Some("load-profile: main"), 3, 2.0),
             "Error - serving stopped",
-            "a stopped gateway reports the error, not a stale command"
+            "a stopped gateway reports the error, not a stale activity"
         );
     }
 

@@ -9,15 +9,16 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use shared_progress::{EventState, ProgressHub};
+use shared_progress::ProgressHub;
 use tokio_util::sync::CancellationToken;
 
 use super::archive::{extract_archive, extract_archive_with_progress, safe_archive_path};
 use super::assets::ArchiveRef;
 use super::confine::source_marker_path;
 use super::digest::file_digest;
-use super::download::{hub_bearer_token, is_huggingface_https};
-use super::progress::{DownloadProgress, TreeProgress};
+use super::download::{
+    ActivityProgress, DownloadProgress, PercentText, hub_bearer_token, is_huggingface_https,
+};
 use super::verified::write_marker;
 use super::verified::{VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress};
 use super::*;
@@ -629,8 +630,6 @@ fn validate_cache_path_rejects_symlink_component() {
 struct RecordingProgress {
     total: Mutex<Option<u64>>,
     bytes: AtomicU64,
-    finished: AtomicU64,
-    abandoned: AtomicU64,
 }
 
 impl RecordingProgress {
@@ -638,8 +637,6 @@ impl RecordingProgress {
         Self {
             total: Mutex::new(None),
             bytes: AtomicU64::new(0),
-            finished: AtomicU64::new(0),
-            abandoned: AtomicU64::new(0),
         }
     }
 }
@@ -651,14 +648,6 @@ impl DownloadProgress for RecordingProgress {
 
     fn inc(&self, n: u64) {
         self.bytes.fetch_add(n, Ordering::Relaxed);
-    }
-
-    fn finish(&self) {
-        self.finished.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn abandon(&self) {
-        self.abandoned.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -698,8 +687,6 @@ fn download_with_progress_reports_content_length_and_bytes() {
         Some(body.len() as u64)
     );
     assert_eq!(progress.bytes.load(Ordering::Relaxed), body.len() as u64);
-    progress.finish();
-    assert_eq!(progress.finished.load(Ordering::Relaxed), 1);
 }
 
 /// Seeds an interrupted download: `partial` bytes at `dest` plus the
@@ -1309,17 +1296,16 @@ fn second_verification_hits_marker_without_rehash() {
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn ensure_model_with_progress_reports_download_and_verify_leaves() {
-    // A URL source flows through `ensure_blob`: the download leaf rides the
-    // transfer, and the verify leaf completes on the inline pin check.
+fn ensure_model_with_progress_writes_the_download_text_and_a_cache_hit_writes_nothing() {
+    // A URL source flows through `ensure_blob`: the transfer writes its
+    // percent into the activity, and the pin check rides the inline digest,
+    // so no verify text follows the download.
     let body = b"model-bytes";
     let server = FakeServer::new(body);
     let temp = TempDir::new().expect("tempdir");
     let store = ArtifactStore::new(temp.path()).expect("store");
-    let hub = Arc::new(ProgressHub::new());
-    let tree = hub.operation();
-    let model = tree.register("model", 1.0);
+    let hub = ProgressHub::new();
+    let model = hub.begin("model");
     let url = server.url("model.gguf");
     let pin = hex_sha256(body);
 
@@ -1327,50 +1313,32 @@ fn ensure_model_with_progress_reports_download_and_verify_leaves() {
         .ensure_model_with_progress(&url, Some(&pin), Some(&model))
         .expect("ensure model");
     assert_eq!(std::fs::read(&path).expect("read model"), body);
-    let snapshot = hub.snapshot();
-    let nodes = &snapshot[0].nodes;
-    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
-    assert_eq!(paths, ["model", "model/download", "model/verify"]);
-    assert!(
-        nodes.iter().all(|node| node.fraction == 1.0),
-        "both stages complete after a pinned download: {nodes:?}"
+    assert_eq!(
+        hub.current().text,
+        "Downloading model.gguf 100%",
+        "the pinned download ends at its last whole percent"
     );
 
-    // A warm-cache repeat under a fresh subtree: the marker hit completes
-    // verify without a hash pass, and the download leaf completes with no
-    // transfer at all.
-    let cached = tree.register("cached", 1.0);
+    // A warm-cache repeat under a fresh activity: the marker hit runs no
+    // hash pass and no transfer, so the activity text is untouched.
+    let cached = hub.begin("cached");
     store
         .ensure_model_with_progress(&url, Some(&pin), Some(&cached))
         .expect("ensure model from cache");
-    let snapshot = hub.snapshot();
-    let nodes = &snapshot[0].nodes;
-    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
     assert_eq!(
-        paths,
-        [
-            "model",
-            "model/download",
-            "model/verify",
-            "cached",
-            "cached/download",
-            "cached/verify",
-        ]
-    );
-    assert!(
-        nodes.iter().all(|node| node.fraction == 1.0),
-        "a cache hit completes both stages without work: {nodes:?}"
+        hub.current().text,
+        "cached",
+        "a cache hit writes no stage text"
     );
     assert_eq!(server.requests(), 1, "the cache hit re-downloads nothing");
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn ensure_blob_mismatch_repair_finishes_the_verify_leaf_exactly_once() {
+fn ensure_blob_mismatch_repair_hashes_then_downloads() {
     // A cached blob whose content no longer matches the pin is repaired by
-    // re-downloading: the first hash pass finishes the verify leaf, and the
-    // pin recheck against the fresh download's inline digest must not emit
-    // the leaf's terminal event a second time.
+    // re-downloading: the hash pass names the verify stage, then the fresh
+    // transfer names the download, and the pin recheck against the inline
+    // digest adds no second verify text.
     let body = b"repaired-blob-bytes";
     let server = FakeServer::new(body);
     let temp = TempDir::new().expect("tempdir");
@@ -1380,12 +1348,8 @@ fn ensure_blob_mismatch_repair_finishes_the_verify_leaf_exactly_once() {
         .expect("mkdir downloads");
     std::fs::write(&destination, b"stale-bytes").expect("write stale blob");
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let blob = tree.register("blob", 1.0);
-    let download = blob.child("download", 4.0);
-    let verify = blob.child("verify", 1.0);
+    let hub = ProgressHub::new();
+    let blob = hub.begin("blob");
     let url = server.url("model.gguf");
     let pin = hex_sha256(body);
     let asset = FileAsset {
@@ -1395,27 +1359,19 @@ fn ensure_blob_mismatch_repair_finishes_the_verify_leaf_exactly_once() {
     };
 
     store
-        .ensure_blob_with_progress(asset, &destination, Some(&download), Some(&verify), None)
+        .ensure_blob_with_progress(asset, &destination, Some(&blob), None)
         .expect("mismatch repair re-downloads");
     assert_eq!(std::fs::read(&destination).expect("read blob"), body);
-    assert_eq!(download.fraction(), 1.0);
-    assert_eq!(verify.fraction(), 1.0);
     assert_eq!(server.requests(), 1, "the repair downloads once");
-
-    let mut verify_finished = 0;
-    while let Ok(event) = rx.try_recv() {
-        if event.path == "blob/verify" && matches!(event.state, EventState::Finished { .. }) {
-            verify_finished += 1;
-        }
-    }
     assert_eq!(
-        verify_finished, 1,
-        "the pin recheck after repair must not re-emit the terminal event"
+        hub.current().text,
+        "Downloading model.gguf 100%",
+        "the transfer is the last stage; no verify text follows the inline pin check"
     );
 }
 
 #[test]
-fn extract_failure_fails_the_leaf() {
+fn extract_failure_leaves_the_extracting_text_and_propagates() {
     use zip::write::SimpleFileOptions;
 
     let dir = TempDir::new().expect("tempdir");
@@ -1432,38 +1388,29 @@ fn extract_failure_fails_the_leaf() {
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).expect("mkdir dest");
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let leaf = tree.register("extract", 1.0);
+    let hub = ProgressHub::new();
+    let activity = hub.begin("extract");
 
-    let result = extract_archive_with_progress(&archive, &dest, ArchiveKind::Zip, Some(&leaf));
+    let result = extract_archive_with_progress(&archive, &dest, ArchiveKind::Zip, Some(&activity));
     assert!(matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })));
-
-    let mut failed = false;
-    while let Ok(event) = rx.try_recv() {
-        if let EventState::Finished { ok } = event.state {
-            failed = !ok;
-        }
-    }
-    assert!(
-        failed,
-        "an extraction error ends the leaf with a failure terminal"
+    assert_eq!(
+        hub.current().text,
+        "Extracting evil.zip",
+        "the stage was named before the unsafe entry stopped it; the error carries the failure"
     );
 }
 
 #[test]
-fn ensure_model_with_progress_fails_the_verify_leaf_on_a_bad_pin() {
+fn ensure_model_with_progress_rejects_a_bad_pin_before_any_stage_text() {
     // A path source whose pin cannot be parsed returns before any verify
-    // work; the registered verify leaf still owes its terminal event.
+    // work, so the activity text never moves.
     let dir = TempDir::new().expect("tempdir");
     let model = dir.path().join("model.gguf");
     std::fs::write(&model, b"model-bytes").expect("write model");
     let store = ArtifactStore::new(dir.path().join("cache")).expect("store");
 
-    let hub = Arc::new(ProgressHub::new());
-    let tree = hub.operation();
-    let parent = tree.register("model", 1.0);
+    let hub = ProgressHub::new();
+    let parent = hub.begin("model");
 
     let result = store.ensure_model_with_progress(
         model.to_str().expect("utf8 path"),
@@ -1471,32 +1418,14 @@ fn ensure_model_with_progress_fails_the_verify_leaf_on_a_bad_pin() {
         Some(&parent),
     );
     assert!(matches!(result, Err(LocalError::InvalidDigest { .. })));
-
-    let nodes = &hub.snapshot()[0].nodes;
-    let download = nodes
-        .iter()
-        .find(|node| node.path == "model/download")
-        .expect("download leaf");
-    let verify = nodes
-        .iter()
-        .find(|node| node.path == "model/verify")
-        .expect("verify leaf");
-    assert!(
-        download.finished && download.ok,
-        "a path source completes the download leaf: {download:?}"
-    );
-    assert!(
-        verify.finished && !verify.ok,
-        "the unparseable pin fails the verify leaf: {verify:?}"
-    );
+    assert_eq!(hub.current().text, "model");
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
+fn provision_server_writes_no_stage_text_on_a_warm_cache() {
     // A warm cache - the archive blob with a current verified marker and a
-    // valid install tree - runs no download, hash, or extraction, but every
-    // stage leaf still reaches its terminal event.
+    // valid install tree - runs no download, hash, or extraction, so no
+    // stage names reach the activity.
     // An explicit backend keeps the test deterministic on GPU machines:
     // provisioning must not probe nvidia-smi.
     let asset = server_asset(
@@ -1533,9 +1462,8 @@ fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
     marker_text.push('\n');
     std::fs::write(install.join(INSTALL_MARKER), marker_text).expect("write install marker");
 
-    let hub = Arc::new(ProgressHub::new());
-    let tree = hub.operation();
-    let server = tree.register("llama-server", 1.0);
+    let hub = ProgressHub::new();
+    let server = hub.begin("llama-server");
 
     let provisioned = store
         .provision_llama_server_with_progress(
@@ -1548,27 +1476,15 @@ fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
         .expect("warm-cache provision");
     assert_eq!(provisioned.executable, install.join(asset.executable_name));
     assert!(provisioned.path_prefix.is_empty());
-
-    let snapshot = hub.snapshot();
-    let nodes = &snapshot[0].nodes;
-    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
     assert_eq!(
-        paths,
-        [
-            "llama-server",
-            "llama-server/download",
-            "llama-server/verify",
-            "llama-server/extract",
-        ]
-    );
-    assert!(
-        nodes.iter().all(|node| node.fraction == 1.0),
-        "a valid install completes every stage without work: {nodes:?}"
+        hub.current().text,
+        "llama-server",
+        "a valid install runs no stage and names none: {:?}",
+        hub.current()
     );
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
 fn provision_whisper_library_reuses_a_verified_install() {
     let asset =
         whisper_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host whisper asset");
@@ -1597,28 +1513,16 @@ fn provision_whisper_library_reuses_a_verified_install() {
     )
     .expect("write install marker");
 
-    let hub = Arc::new(ProgressHub::new());
-    let tree = hub.operation();
-    let whisper = tree.register("whisper-library", 1.0);
+    let hub = ProgressHub::new();
+    let whisper = hub.begin("whisper-library");
     let provisioned = store
         .provision_whisper_library(Some(&whisper))
         .expect("warm-cache provision");
     assert_eq!(provisioned, install.join(asset.library_name));
-
-    let nodes = &hub.snapshot()[0].nodes;
-    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
     assert_eq!(
-        paths,
-        [
-            "whisper-library",
-            "whisper-library/download",
-            "whisper-library/verify",
-            "whisper-library/extract",
-        ]
-    );
-    assert!(
-        nodes.iter().all(|node| node.fraction == 1.0),
-        "a verified whisper install completes every stage: {nodes:?}"
+        hub.current().text,
+        "whisper-library",
+        "a verified whisper install runs no stage and names none"
     );
 }
 
@@ -1670,135 +1574,118 @@ fn a_missing_llama_server_path_is_an_error() {
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn tree_progress_drives_handle_fraction_per_byte() {
-    let hub = Arc::new(ProgressHub::new());
-    let tree = hub.operation();
-    let leaf = tree.register("download", 1.0);
-    let progress = TreeProgress::new(leaf.clone());
+fn percent_text_republishes_on_whole_percent_changes_only() {
+    let hub = ProgressHub::new();
+    let mut rx = hub.subscribe();
+    let activity = hub.begin("download");
+    let text = PercentText::new("Downloading", "m.gguf");
+    assert_eq!(text.label(), "Downloading m.gguf");
 
-    progress.set_len(Some(200));
-    progress.inc(50);
-    assert_eq!(leaf.fraction(), 0.25);
-    progress.inc(150);
-    assert_eq!(leaf.fraction(), 1.0);
-    progress.finish();
-    assert_eq!(leaf.fraction(), 1.0);
+    text.report(&activity, 50, 200);
+    assert_eq!(hub.current().text, "Downloading m.gguf 25%");
+    rx.mark_unchanged();
+    // Sub-percent movement changes nothing and wakes no subscriber.
+    text.report(&activity, 51, 200);
+    assert!(
+        !rx.has_changed().expect("the hub is alive"),
+        "a move inside one percent republishes nothing"
+    );
+    text.report(&activity, 200, 200);
+    assert_eq!(hub.current().text, "Downloading m.gguf 100%");
+    // Past-the-end counts clamp rather than printing nonsense.
+    text.report(&activity, 300, 200);
+    assert_eq!(hub.current().text, "Downloading m.gguf 100%");
 
-    // Without a Content-Length the leaf stays indeterminate until finish.
-    let unknown = tree.register("unknown-length", 1.0);
-    let progress = TreeProgress::new(unknown.clone());
-    progress.set_len(None);
-    progress.inc(10);
-    assert_eq!(unknown.fraction(), 0.0);
-    progress.finish();
-    assert_eq!(unknown.fraction(), 1.0);
-
-    // Abandon completes the leaf: the handle vocabulary has no failure
-    // terminal, so the owner carries failure through its own exit path.
-    let abandoned = tree.register("abandoned", 1.0);
-    let progress = TreeProgress::new(abandoned.clone());
-    progress.set_len(Some(100));
-    progress.inc(40);
-    progress.abandon();
-    assert_eq!(abandoned.fraction(), 1.0);
+    // Without a total the bare label is published once.
+    let unknown = PercentText::new("Downloading", "unknown.bin");
+    unknown.report(&activity, 10, 0);
+    assert_eq!(hub.current().text, "Downloading unknown.bin");
+    rx.mark_unchanged();
+    unknown.report(&activity, 20, 0);
+    assert!(
+        !rx.has_changed().expect("the hub is alive"),
+        "an unknown length republishes the bare label only once"
+    );
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn verify_blob_reports_bytes_read_during_hash() {
-    // Two full 64 KiB read chunks: 0.5 after the first, 1.0 after the second.
+fn download_without_a_content_length_keeps_the_bare_text() {
+    // A `DownloadProgress` fed no length never sees a percent: the text
+    // stays at the stage name set when the transfer began.
+    let hub = ProgressHub::new();
+    let activity = hub.begin("download");
+    let progress = ActivityProgress::new(&activity, "blob.bin");
+    assert_eq!(hub.current().text, "Downloading blob.bin");
+    progress.set_len(None);
+    progress.inc(10);
+    assert_eq!(hub.current().text, "Downloading blob.bin");
+    progress.set_len(Some(100));
+    progress.inc(40);
+    assert_eq!(
+        hub.current().text,
+        "Downloading blob.bin 50%",
+        "the first length makes every byte so far count"
+    );
+}
+
+#[test]
+fn verify_blob_writes_the_hash_pass_percent() {
+    // Two full 64 KiB read chunks: 50% after the first, 100% after the second.
     let body = vec![0xAB_u8; 128 * 1024];
     let (dir, blob, digest, marker) = pinned_blob_fixture(&body);
     let root = dir.path().join("cache");
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let leaf = tree.register("verify", 1.0);
+    let hub = ProgressHub::new();
+    let activity = hub.begin("verify");
 
     let outcome =
-        verify_blob_with_progress(&root, &blob, &digest, &marker, Some(&leaf)).expect("verify");
+        verify_blob_with_progress(&root, &blob, &digest, &marker, Some(&activity)).expect("verify");
     assert_eq!(outcome, VerifyOutcome::Hashed);
-    assert_eq!(leaf.fraction(), 1.0);
-
-    let mut updates = Vec::new();
-    let mut finished = false;
-    while let Ok(event) = rx.try_recv() {
-        match event.state {
-            EventState::Updated { fraction } => updates.push(fraction),
-            EventState::Finished { ok } => finished = ok,
-            _ => {}
-        }
-    }
-    assert_eq!(updates, vec![0.5, 1.0]);
-    assert!(finished, "the hash pass ends with a terminal event");
+    assert_eq!(hub.current().text, "Verifying m.gguf 100%");
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn verify_blob_marker_hit_completes_the_leaf_without_updates() {
+fn verify_blob_marker_hit_writes_no_text() {
     let body = b"blob-bytes";
     let (dir, blob, digest, marker) = pinned_blob_fixture(body);
     let root = dir.path().join("cache");
     let first = verify_blob(&root, &blob, &digest, &marker).expect("first verify");
     assert_eq!(first, VerifyOutcome::Hashed);
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let leaf = tree.register("verify", 1.0);
+    let hub = ProgressHub::new();
+    let activity = hub.begin("verify");
 
     let outcome =
-        verify_blob_with_progress(&root, &blob, &digest, &marker, Some(&leaf)).expect("verify");
+        verify_blob_with_progress(&root, &blob, &digest, &marker, Some(&activity)).expect("verify");
     assert_eq!(outcome, VerifyOutcome::MarkerHit);
-    assert_eq!(leaf.fraction(), 1.0);
-
-    let mut updates = 0;
-    let mut finished = false;
-    while let Ok(event) = rx.try_recv() {
-        match event.state {
-            EventState::Updated { .. } => updates += 1,
-            EventState::Finished { ok } => finished = ok,
-            _ => {}
-        }
-    }
-    assert_eq!(updates, 0, "a marker hit reads nothing and reports nothing");
-    assert!(finished, "a marker hit still ends with a terminal event");
+    assert_eq!(
+        hub.current().text,
+        "verify",
+        "a marker hit reads nothing and names no stage"
+    );
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn verify_blob_completes_the_leaf_before_a_digest_mismatch() {
+fn verify_blob_names_the_hash_pass_before_a_digest_mismatch() {
     let body = b"blob-bytes";
     let (dir, blob, _digest, marker) = pinned_blob_fixture(body);
     let root = dir.path().join("cache");
     let wrong = hex_sha256(b"other-bytes");
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let leaf = tree.register("verify", 1.0);
+    let hub = ProgressHub::new();
+    let activity = hub.begin("verify");
 
-    let result = verify_blob_with_progress(&root, &blob, &wrong, &marker, Some(&leaf));
+    let result = verify_blob_with_progress(&root, &blob, &wrong, &marker, Some(&activity));
     assert!(matches!(result, Err(LocalError::DigestMismatch { .. })));
-    assert_eq!(leaf.fraction(), 1.0);
-
-    let mut finished = false;
-    while let Ok(event) = rx.try_recv() {
-        if let EventState::Finished { ok } = event.state {
-            finished = ok;
-        }
-    }
-    assert!(
-        finished,
-        "the hash pass ends with a terminal event even on mismatch"
+    assert_eq!(
+        hub.current().text,
+        "Verifying m.gguf 100%",
+        "the hash pass ran to its end; the mismatch error carries the failure"
     );
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn extract_zip_reports_entry_counts() {
+fn extract_zip_writes_the_entry_percent() {
     use zip::write::SimpleFileOptions;
 
     let dir = TempDir::new().expect("tempdir");
@@ -1817,30 +1704,16 @@ fn extract_zip_reports_entry_counts() {
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).expect("mkdir dest");
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let leaf = tree.register("extract", 1.0);
+    let hub = ProgressHub::new();
+    let activity = hub.begin("extract");
 
-    extract_archive_with_progress(&archive, &dest, ArchiveKind::Zip, Some(&leaf)).expect("extract");
-    assert_eq!(leaf.fraction(), 1.0);
-
-    let mut updates = Vec::new();
-    let mut finished = false;
-    while let Ok(event) = rx.try_recv() {
-        match event.state {
-            EventState::Updated { fraction } => updates.push(fraction),
-            EventState::Finished { ok } => finished = ok,
-            _ => {}
-        }
-    }
-    assert_eq!(updates, vec![0.25, 0.5, 0.75, 1.0]);
-    assert!(finished, "extraction ends with a terminal event");
+    extract_archive_with_progress(&archive, &dest, ArchiveKind::Zip, Some(&activity))
+        .expect("extract");
+    assert_eq!(hub.current().text, "Extracting bundle.zip 100%");
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn extract_tar_gz_reports_entry_counts() {
+fn extract_tar_gz_writes_the_entry_percent() {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
@@ -1867,26 +1740,12 @@ fn extract_tar_gz_reports_entry_counts() {
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).expect("mkdir dest");
 
-    let hub = Arc::new(ProgressHub::new());
-    let mut rx = hub.subscribe();
-    let tree = hub.operation();
-    let leaf = tree.register("extract", 1.0);
+    let hub = ProgressHub::new();
+    let activity = hub.begin("extract");
 
-    extract_archive_with_progress(&archive, &dest, ArchiveKind::TarGz, Some(&leaf))
+    extract_archive_with_progress(&archive, &dest, ArchiveKind::TarGz, Some(&activity))
         .expect("extract");
-    assert_eq!(leaf.fraction(), 1.0);
-
-    let mut updates = Vec::new();
-    let mut finished = false;
-    while let Ok(event) = rx.try_recv() {
-        match event.state {
-            EventState::Updated { fraction } => updates.push(fraction),
-            EventState::Finished { ok } => finished = ok,
-            _ => {}
-        }
-    }
-    assert_eq!(updates, vec![0.5, 1.0]);
-    assert!(finished, "extraction ends with a terminal event");
+    assert_eq!(hub.current().text, "Extracting bundle.tar.gz 100%");
 }
 
 #[test]

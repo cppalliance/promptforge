@@ -14,10 +14,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use gateway_config::Secret;
-use shared_progress::ProgressHandle;
-
 use crate::error::LocalError;
+use gateway_config::Secret;
 use support::{
     ChildSpawner, SharedCapture, capture_reader, display_invocation, free_port,
     listener_is_present, new_capture, random_identity, readiness_belongs_to, server_args,
@@ -200,10 +198,6 @@ pub(crate) struct ServerGuard {
 impl ServerGuard {
     /// Starts `llama-server` with `options` and verifies authenticated model identity.
     ///
-    /// `ready` is the indeterminate readiness leaf for this spawn: the bounded
-    /// poll reports no fractions, so the leaf only gets `complete()` when
-    /// authenticated readiness succeeds.
-    ///
     /// # Errors
     /// Returns a [`LocalError`] when spawn, readiness, or identity checks fail.
     pub(crate) fn start(
@@ -211,7 +205,6 @@ impl ServerGuard {
         model: &Path,
         options: &LaunchOptions,
         interrupted: &AtomicBool,
-        ready: Option<&ProgressHandle>,
     ) -> Result<Self> {
         let mut select_port = free_port;
         let mut make_identity = random_identity;
@@ -220,7 +213,6 @@ impl ServerGuard {
             model,
             options,
             interrupted,
-            ready,
             PRODUCTION_POLICY,
             &mut select_port,
             &mut make_identity,
@@ -237,7 +229,6 @@ impl ServerGuard {
         model: &Path,
         options: &LaunchOptions,
         interrupted: &AtomicBool,
-        ready: Option<&ProgressHandle>,
         policy: StartupPolicy,
         select_port: &mut dyn FnMut() -> Result<u16>,
         make_identity: &mut dyn FnMut() -> AttemptIdentity,
@@ -282,12 +273,7 @@ impl ServerGuard {
             guard.start_capture()?;
 
             match guard.wait_until_ready(interrupted, policy) {
-                Ok(WaitOutcome::Ready) => {
-                    if let Some(handle) = ready {
-                        handle.complete();
-                    }
-                    return Ok(guard);
-                }
+                Ok(WaitOutcome::Ready) => return Ok(guard),
                 Ok(WaitOutcome::PortCollision(status)) => {
                     collisions.push(format!(
                         "attempt {attempt} on port {port}: child exited with {status}\n{}\n{}",

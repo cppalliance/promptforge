@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gateway_config::{Config, ProfileName};
-use shared_progress::ProgressTree;
+use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
@@ -49,6 +49,11 @@ pub(crate) const STT_RUNTIME_UNAVAILABLE: &str =
 /// The `LoadProfile` body: loads `name`'s local members into the live
 /// runtime, then makes the process's one guarded STT load.
 ///
+/// The command's activity is shared with the blocking stages, each of
+/// which writes its own text (`"Loading profile"`, the artifact store's
+/// download and verify lines, `"Starting {model}"`, the speech load's
+/// stages); the guard drops with this function's return on every path.
+///
 /// Returns the profile name on success. A partial start (some children
 /// ready, others failed) commits the ready children and reports the rest
 /// through [`GatewayError::PartialStart`]; only a fully or partially
@@ -59,15 +64,12 @@ pub(crate) const STT_RUNTIME_UNAVAILABLE: &str =
 pub(crate) async fn run(
     state: &AppState,
     name: ProfileName,
-    tree: ProgressTree,
+    activity: Activity,
     token: &CancellationToken,
 ) -> Result<String, GatewayError> {
     let label = format!("load-profile: {name}");
-    // The speech stage registers first (registration emits the stage's
-    // begun event) and reports nothing until the local load has settled.
-    #[cfg(feature = "stt")]
-    let speech = tree.register("loading-speech", 5.0);
-    let result = match load_local(state, &name, &tree, token).await {
+    let activity = Arc::new(activity);
+    let result = match load_local(state, &name, &activity, token).await {
         Ok(()) => Ok(name.to_string()),
         Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label.clone())),
         Err(error) => Err(error),
@@ -81,9 +83,12 @@ pub(crate) async fn run(
             Err(_) => false,
         };
         if published {
-            load_speech(state, speech, token, &label).await?;
+            load_speech(state, &activity, token, &label).await?;
         } else {
-            speech.fail();
+            tracing::warn!(
+                profile = %name,
+                "the local load did not publish; the speech load is skipped"
+            );
         }
     }
     #[cfg(not(feature = "stt"))]
@@ -95,13 +100,13 @@ pub(crate) async fn run(
 async fn load_local(
     state: &AppState,
     name: &ProfileName,
-    tree: &ProgressTree,
+    activity: &Arc<Activity>,
     token: &CancellationToken,
 ) -> Result<(), GatewayError> {
     if token.is_cancelled() {
         return Err(cancelled(name));
     }
-    let config = prepare(state, name, tree).await?;
+    let config = prepare(state, name, activity).await?;
     #[cfg(not(feature = "local"))]
     {
         // `prepare` refused any local member, so there is nothing to load.
@@ -115,14 +120,14 @@ async fn load_local(
         }
         #[cfg(test)]
         state.park_at(crate::park::Phase::Download).await;
-        download_artifacts(&config, tree, token).await?;
+        download_artifacts(&config, activity, token).await?;
         if token.is_cancelled() {
             return Err(cancelled(name));
         }
         publish_loading(state, &config).await;
         #[cfg(test)]
         state.park_at(crate::park::Phase::Spawn).await;
-        let (runtime, failures) = match spawn_children(&config, tree, token).await {
+        let (runtime, failures) = match spawn_children(&config, activity, token).await {
             Ok(outcome) => outcome,
             Err(error) => {
                 state.live.write().await.loading.clear();
@@ -134,32 +139,27 @@ async fn load_local(
 }
 
 /// Resolves the profile's members from the live catalog under the
-/// `loading-profile` leaf, refusing members this build cannot run.
+/// `"Loading profile"` text, refusing members this build cannot run.
 async fn prepare(
     state: &AppState,
     name: &ProfileName,
-    tree: &ProgressTree,
+    activity: &Activity,
 ) -> Result<Config, GatewayError> {
-    let loading = tree.register("loading-profile", 1.0);
+    activity.set_text("Loading profile");
+    tracing::info!(profile = %name, "loading profile");
     let catalog = Arc::clone(&state.live.read().await.config);
     if !catalog
         .profiles()
         .iter()
         .any(|profile| profile.name() == name.as_str())
     {
-        loading.fail();
         return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
-    let config = match catalog.select_profile(Some(name)) {
-        Ok(config) => config,
-        Err(error) => {
-            loading.fail();
-            return Err(GatewayError::switch_failed("select-profile", error));
-        }
-    };
+    let config = catalog
+        .select_profile(Some(name))
+        .map_err(|error| GatewayError::switch_failed("select-profile", error))?;
     #[cfg(not(feature = "local"))]
     if !config.local_models().is_empty() {
-        loading.fail();
         return Err(GatewayError::switch_failed(
             "start-local",
             std::io::Error::other(LOCAL_MODELS_UNSUPPORTED),
@@ -167,13 +167,11 @@ async fn prepare(
     }
     #[cfg(not(feature = "stt"))]
     if !config.stt_models().is_empty() {
-        loading.fail();
         return Err(GatewayError::switch_failed(
             "start-stt",
             std::io::Error::other(STT_RUNTIME_UNAVAILABLE),
         ));
     }
-    loading.complete();
     Ok(config)
 }
 
@@ -188,22 +186,19 @@ fn cancelled(name: &ProfileName) -> GatewayError {
 #[cfg(feature = "local")]
 async fn download_artifacts(
     config: &Config,
-    tree: &ProgressTree,
+    activity: &Arc<Activity>,
     token: &CancellationToken,
 ) -> Result<(), GatewayError> {
-    let downloading = tree.register("downloading-models", 5.0);
+    activity.set_text("Downloading models");
+    tracing::info!("downloading local model artifacts");
     let config = config.clone();
-    let progress = downloading.clone();
+    let progress = Arc::clone(activity);
     let worker_token = token.clone();
     let result = tokio::task::spawn_blocking(move || {
         LocalRuntime::provision_artifacts_with_cancellation(&config, Some(&progress), &worker_token)
     })
     .await;
     match result {
-        Ok(Ok(failures)) if failures.is_empty() => {
-            downloading.complete();
-            Ok(())
-        }
         Ok(Ok(failures)) => {
             for failure in &failures {
                 tracing::warn!(
@@ -212,17 +207,13 @@ async fn download_artifacts(
                     "local model artifact did not provision; the start reports it"
                 );
             }
-            downloading.fail();
+            if failures.is_empty() {
+                tracing::info!("local model artifacts are in the cache");
+            }
             Ok(())
         }
-        Ok(Err(error)) => {
-            downloading.fail();
-            Err(GatewayError::switch_failed("download-models", error))
-        }
-        Err(error) => {
-            downloading.fail();
-            Err(GatewayError::switch_failed("download-models-task", error))
-        }
+        Ok(Err(error)) => Err(GatewayError::switch_failed("download-models", error)),
+        Err(error) => Err(GatewayError::switch_failed("download-models-task", error)),
     }
 }
 
@@ -246,12 +237,13 @@ async fn publish_loading(state: &AppState, config: &Config) {
 #[cfg(feature = "local")]
 async fn spawn_children(
     config: &Config,
-    tree: &ProgressTree,
+    activity: &Arc<Activity>,
     token: &CancellationToken,
 ) -> Result<(LocalRuntime, Vec<crate::local::LocalStartFailure>), GatewayError> {
-    let starting = tree.register("starting-models", 5.0);
+    activity.set_text("Starting models");
+    tracing::info!("starting local models");
     let start_config = config.clone();
-    let start_progress = starting.clone();
+    let start_progress = Arc::clone(activity);
     let start_token = token.clone();
     let interrupted = Arc::new(AtomicBool::new(false));
     let worker_interrupted = Arc::clone(&interrupted);
@@ -278,17 +270,14 @@ async fn spawn_children(
     bridge.abort();
     let outcome = match started {
         Ok(Ok(Ok(outcome))) => outcome,
-        Ok(Ok(Err(error))) => {
-            starting.fail();
-            return Err(GatewayError::switch_failed("start-local", error));
-        }
-        Ok(Err(join)) => {
-            starting.fail();
-            return Err(GatewayError::switch_failed("start-local-task", join));
-        }
+        Ok(Ok(Err(error))) => return Err(GatewayError::switch_failed("start-local", error)),
+        Ok(Err(join)) => return Err(GatewayError::switch_failed("start-local-task", join)),
         Err(_) => {
             interrupted.store(true, Ordering::Release);
-            starting.fail();
+            tracing::error!(
+                deadline = ?SPAWN_TIMEOUT,
+                "local model startup exceeded the boot deadline; interrupting it"
+            );
             return Err(GatewayError::switch_failed(
                 "start-local-timeout",
                 std::io::Error::new(
@@ -299,10 +288,12 @@ async fn spawn_children(
         }
     };
     let (runtime, failures) = outcome.into_parts();
-    if failures.is_empty() {
-        starting.complete();
-    } else {
-        starting.fail();
+    for failure in &failures {
+        tracing::warn!(
+            model = failure.model(),
+            error = %failure.error(),
+            "local model did not start"
+        );
     }
     Ok((runtime, failures))
 }
@@ -353,13 +344,15 @@ async fn commit(
 #[cfg(feature = "stt")]
 async fn load_speech(
     state: &AppState,
-    loading: shared_progress::ProgressHandle,
+    activity: &Arc<Activity>,
     token: &CancellationToken,
     label: &str,
 ) -> Result<(), GatewayError> {
+    activity.set_text("Loading speech");
+    tracing::info!("loading the speech runtime");
     let service = state.speech.clone();
     let config = state.live.read().await.config.as_ref().clone();
-    let progress = loading.clone();
+    let progress = Arc::clone(activity);
     let worker_token = token.clone();
     let result = tokio::task::spawn_blocking(move || {
         service.load_initial(&config, Some(&progress), &worker_token)
@@ -367,21 +360,12 @@ async fn load_speech(
     .await;
     match result {
         Ok(Ok(())) => {
-            loading.complete();
+            tracing::info!("speech runtime loaded");
             Ok(())
         }
-        Ok(Err(_)) if token.is_cancelled() => {
-            loading.fail();
-            Err(GatewayError::CommandCancelled(label.to_owned()))
-        }
-        Ok(Err(error)) => {
-            loading.fail();
-            Err(GatewayError::switch_failed("load-speech", error))
-        }
-        Err(join) => {
-            loading.fail();
-            Err(GatewayError::switch_failed("load-speech-task", join))
-        }
+        Ok(Err(_)) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label.to_owned())),
+        Ok(Err(error)) => Err(GatewayError::switch_failed("load-speech", error)),
+        Err(join) => Err(GatewayError::switch_failed("load-speech-task", join)),
     }
 }
 

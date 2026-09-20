@@ -167,20 +167,11 @@ async fn tick(tray: &ksni::Handle<SniTray>, handle: &GatewayHandle) -> Tick {
         return Tick::Quit;
     }
     let phase = logic::next_phase(poll);
-    let command = handle.tray_state().commands.active_command();
+    let busy = handle.tray_state().tray_busy_text();
     let label = handle
         .tray_state()
         .tray_model_status()
-        .map(|(models, vram_gb)| {
-            logic::status_label(
-                phase,
-                command
-                    .as_ref()
-                    .map(|active| (active.name.as_str(), active.progress)),
-                models,
-                vram_gb,
-            )
-        });
+        .map(|(models, vram_gb)| logic::status_label(phase, busy.as_deref(), models, vram_gb));
     let updated = tray
         .update(|tray| {
             tray.phase = phase;

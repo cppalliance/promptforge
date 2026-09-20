@@ -1,12 +1,10 @@
 // Pins the apply overlay against the gateway's real progress wire: the
-// `GET /admin/progress` stream carries raw hub `ProgressEvent` JSON
-// (`state` is serde's externally tagged `EventState`), so a `Begun`
-// leaf labelled with a switch stage lights that stage and nothing else
-// does; a `<stage>/<model>/download` leaf drives a detail row under the
-// active stage (name, integer percent, verify and start labels) until
-// the stage ends; the card's Cancel posts the active-command cancel
-// once, stays disabled (also once the apply settles), a refused cancel
-// toasts on its own without closing the card, and the apply route's
+// `GET /admin/progress` stream carries `Progress` snapshots
+// (`{"busy": bool, "text": string}`), so a busy snapshot's text becomes
+// the card's activity row, updated in place, and an idle one shows the
+// waiting text; the card's Cancel posts the active-command cancel once,
+// stays disabled (also once the apply settles), a refused cancel toasts
+// on its own without closing the card, and the apply route's
 // `apply_cancelled` refusal words the toast as a cancellation rather
 // than a failure.
 import assert from "node:assert/strict";
@@ -23,14 +21,9 @@ import {
 
 const CANCELLED_TOAST = "Apply cancelled - your pending changes are still staged";
 
-/** A hub `ProgressEvent` frame as `event_line` in the gateway serializes it. */
-function hubEvent(label, state) {
-  return { operation: 7, path: label, label, state };
-}
-
-/** A hub frame for a leaf path whose label differs from the path. */
-function leafEvent(path, state) {
-  return { operation: 7, path, label: path.split("/").at(-1), state };
+/** A `Progress` snapshot frame as the gateway's `snapshot_line` serializes it. */
+function snapshot(busy, text) {
+  return { busy, text };
 }
 
 /**
@@ -71,153 +64,54 @@ async function bootApplying({ cancelReply } = {}) {
   return { root, stub, progress, overlay, settleApply };
 }
 
-/** The `data-stage` ids of every row carrying the `is-active` class. */
-function activeStages(overlay) {
-  return [...overlay.querySelectorAll(".stage.is-active")].map((row) => row.dataset.stage);
-}
-
-test("a hub Begun event labelled with a switch stage lights that stage; other frames change nothing", async () => {
+test("a busy snapshot's text drives the activity row in place; an idle one shows the waiting text", async () => {
   const { overlay, progress, settleApply } = await bootApplying();
-  assert.deepEqual(activeStages(overlay), [], "no stage is active before the gateway reports one");
-  assert.deepEqual(
-    [...overlay.querySelectorAll(".stage")].map((row) => row.dataset.stage),
-    ["loading-profile", "downloading-models", "starting-models", "applying-config"],
-    "the card lists the boot-load stages and the apply leaf, nothing else",
-  );
+  const rows = [...overlay.querySelectorAll(".stage")];
+  assert.equal(rows.length, 1, "the card carries one activity row");
+  const row = rows[0];
+  const label = row.querySelector(".stage-label");
+  assert.ok(row.classList.contains("is-active"), "the row is active from the opening");
+  assert.ok(row.querySelector(".spinner"), "the active row shows the spinner");
+  assert.equal(label.textContent, "Waiting for the gateway", "nothing reported yet");
 
-  // The download stage the boot load registers while a profile's
-  // weights stage into the cache lights like the others.
-  progress.push(hubEvent("downloading-models", { Begun: { weight: 5.0 } }));
+  // The stream opens with the current snapshot: idle while the apply
+  // command waits to start.
+  progress.push(snapshot(false, ""));
   await settle();
-  const downloading = overlay.querySelector('.stage[data-stage="downloading-models"]');
-  assert.deepEqual(activeStages(overlay), ["downloading-models"], "the download stage is active");
-  assert.ok(downloading.querySelector(".spinner"), "the active download stage shows the spinner");
+  assert.equal(label.textContent, "Waiting for the gateway", "an idle snapshot keeps waiting");
 
-  progress.push(hubEvent("applying-config", { Begun: { weight: 2.0 } }));
+  progress.push(snapshot(true, "load-profile: main"));
   await settle();
-  const applying = overlay.querySelector('.stage[data-stage="applying-config"]');
-  assert.deepEqual(activeStages(overlay), ["applying-config"], "the Begun stage is active");
-  assert.ok(applying.querySelector(".spinner"), "the active stage shows the spinner");
-  assert.ok(downloading.classList.contains("is-done"), "the earlier stage is marked done");
+  assert.equal(label.textContent, "load-profile: main", "a busy snapshot's text is the row");
 
-  // A non-Begun frame for a stage and a Begun frame for a non-stage leaf
-  // (a model download) leave the stage list exactly as it was.
-  progress.push(hubEvent("starting-models", { Updated: { fraction: 0.5 } }));
-  progress.push(hubEvent("downloading-models/qwen/download", { Begun: { weight: 1.0 } }));
-  progress.push(hubEvent("starting-models", { Finished: { ok: true } }));
+  progress.push(snapshot(true, "Downloading glm-4-9b 42%"));
+  progress.push(snapshot(true, "Downloading glm-4-9b 43%"));
+  progress.push(snapshot(true, "Applying configuration"));
+  await settle();
+  assert.equal(label.textContent, "Applying configuration", "the newest text wins");
+  assert.equal(overlay.querySelector(".stage-label"), label, "the label node is updated in place");
+  assert.equal(overlay.querySelectorAll(".stage").length, 1, "no row was appended");
+  assert.ok(row.querySelector(".spinner"), "the spinner stays while the apply runs");
+
+  // A frame that is not a snapshot reads as idle and never throws.
   progress.push({ stage: "starting-models" });
-  // A Begun frame for a stage label the card does not map is ignored.
-  progress.push(hubEvent("unmapped-stage", { Begun: { weight: 2.0 } }));
   await settle();
-  assert.deepEqual(activeStages(overlay), ["applying-config"], "only the Begun stage is active");
-  assert.equal(overlay.querySelectorAll(".stage").length, 4, "no row was appended");
-  assert.equal(overlay.querySelector('.stage[data-stage="unmapped-stage"]'), null);
-  assert.ok(applying.querySelector(".spinner"), "the spinner is still on the Begun stage");
+  assert.equal(label.textContent, "Waiting for the gateway", "a malformed frame reads as idle");
 
   settleApply(jsonResponse({ applied: ["gateway.toml"], reloaded: true, restart_required: false }));
   await settle();
   progress.end();
 });
 
-test("a download leaf drives the detail row through percent, verify, and start; the stage end clears it", async () => {
+test("a busy snapshot with empty text shows the waiting text rather than a blank row", async () => {
   const { overlay, progress, settleApply } = await bootApplying();
-  progress.push(hubEvent("downloading-models", { Begun: { weight: 5.0 } }));
+  progress.push(snapshot(true, "Downloading qwen 10%"));
   await settle();
-  assert.equal(overlay.querySelector(".stage-detail"), null, "no detail row before a download leaf");
-
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Begun: { weight: 1.0 } }));
+  const label = overlay.querySelector(".stage-label");
+  assert.equal(label.textContent, "Downloading qwen 10%");
+  progress.push(snapshot(true, ""));
   await settle();
-  const detail = overlay.querySelector(".stage-detail");
-  assert.ok(detail, "the download Begun shows the detail row");
-  assert.equal(
-    detail.querySelector(".stage-detail-label").textContent,
-    "Downloading glm-4-9b",
-    "the row names the model",
-  );
-  const bar = detail.querySelector(".progress");
-  assert.ok(bar, "the row carries the shared inline progress bar");
-  const activeRow = overlay.querySelector('.stage[data-stage="downloading-models"]');
-  assert.equal(activeRow.nextElementSibling, detail, "the row sits under the active stage");
-
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Updated: { fraction: 0.42 } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-percent").textContent, "42%");
-  assert.equal(bar.getAttribute("aria-valuenow"), "42", "the bar reports the integer percent");
-
-  // A fraction outside 0..1 clamps instead of overflowing the bar.
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Updated: { fraction: 1.7 } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-percent").textContent, "100%");
-  assert.equal(bar.getAttribute("aria-valuenow"), "100");
-
-  // A frame flood updates the existing nodes; nothing is re-created.
-  assert.equal(detail.querySelector(".progress"), bar, "the bar node is updated in place");
-  assert.equal(overlay.querySelector(".stage-detail"), detail, "the row node is updated in place");
-
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Finished: { ok: true } }));
-  await settle();
-  assert.equal(
-    detail.querySelector(".stage-detail-label").textContent,
-    "Verifying glm-4-9b",
-    "the finished download flips the row to verifying",
-  );
-
-  progress.push(hubEvent("starting-models", { Begun: { weight: 5.0 } }));
-  await settle();
-  assert.equal(overlay.querySelector(".stage-detail"), null, "the stage change clears the row");
-
-  progress.push(leafEvent("starting-models/glm-4-9b/ready", { Begun: { weight: 2.0 } }));
-  await settle();
-  assert.equal(
-    overlay.querySelector(".stage-detail-label")?.textContent,
-    "Starting glm-4-9b",
-    "the ready leaf flips the row to starting",
-  );
-
-  settleApply(jsonResponse({ applied: ["gateway.toml"], reloaded: true, restart_required: false }));
-  await settle();
-  progress.end();
-});
-
-test("only the most recent download leaf drives the row; unrelated paths change nothing", async () => {
-  const { overlay, progress, settleApply } = await bootApplying();
-  progress.push(hubEvent("downloading-models", { Begun: { weight: 5.0 } }));
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Begun: { weight: 1.0 } }));
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Updated: { fraction: 0.42 } }));
-  await settle();
-  const detail = overlay.querySelector(".stage-detail");
-  assert.equal(detail.querySelector(".stage-detail-percent").textContent, "42%");
-
-  // Frames for other leaves of the same model and for paths outside the
-  // known stages leave the row exactly as it was.
-  progress.push(leafEvent("downloading-models/glm-4-9b/verify", { Updated: { fraction: 0.9 } }));
-  progress.push(leafEvent("local-models/qwen/download", { Begun: { weight: 1.0 } }));
-  progress.push(leafEvent("download", { Updated: { fraction: 0.9 } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-label").textContent, "Downloading glm-4-9b");
-  assert.equal(detail.querySelector(".stage-detail-percent").textContent, "42%");
-
-  // A second model's download Begun wins the row and resets the bar.
-  progress.push(leafEvent("downloading-models/qwen/download", { Begun: { weight: 1.0 } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-label").textContent, "Downloading qwen");
-  assert.equal(detail.querySelector(".stage-detail-percent").textContent, "0%");
-
-  // The earlier leaf's frames no longer drive the bar.
-  progress.push(leafEvent("downloading-models/glm-4-9b/download", { Updated: { fraction: 0.9 } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-percent").textContent, "0%");
-
-  // A model name containing a slash (the config validates only that it
-  // is non-empty) displays in full: the stage is the first segment, the
-  // leaf the last, the model everything between.
-  progress.push(leafEvent("downloading-models/org/model/download", { Begun: { weight: 1.0 } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-label").textContent, "Downloading org/model");
-  progress.push(leafEvent("downloading-models/org/model/download", { Finished: { ok: true } }));
-  await settle();
-  assert.equal(detail.querySelector(".stage-detail-label").textContent, "Verifying org/model");
-
+  assert.equal(label.textContent, "Waiting for the gateway", "an empty text never blanks the row");
   settleApply(jsonResponse({ applied: ["gateway.toml"], reloaded: true, restart_required: false }));
   await settle();
   progress.end();

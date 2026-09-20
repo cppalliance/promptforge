@@ -27,50 +27,66 @@ fn name(profile: &str) -> ProfileName {
 #[tokio::test]
 async fn a_remote_only_profile_loads_without_touching_the_routing_table() {
     let state = state();
-    let tree = state.hub.operation();
+    let activity = std::sync::Arc::new(state.hub.begin("load-profile"));
     let token = CancellationToken::new();
 
-    let outcome = super::load_local(&state, &name("remote"), &tree, &token).await;
+    let outcome = super::load_local(&state, &name("remote"), &activity, &token).await;
 
     assert!(outcome.is_ok(), "nothing local to load: {outcome:?}");
     let live = state.live.read().await;
     assert!(live.routing.model("alpha-model").is_ok());
     assert!(live.routing.model("alpha-local").is_err());
     assert!(live.loading.is_empty());
+    assert_eq!(
+        state.hub.current().text,
+        "Loading profile",
+        "the profile stage is the only text a remote-only load writes"
+    );
 }
 
-/// A name the catalog does not define fails the `loading-profile` leaf
-/// and changes nothing.
+/// A name the catalog does not define fails under the `"Loading profile"`
+/// text and changes nothing.
 #[tokio::test]
 async fn an_undefined_profile_is_profile_not_found() {
     let state = state();
-    let tree = state.hub.operation();
+    let activity = std::sync::Arc::new(state.hub.begin("load-profile"));
     let token = CancellationToken::new();
 
-    let outcome = super::load_local(&state, &name("ghost"), &tree, &token).await;
+    let outcome = super::load_local(&state, &name("ghost"), &activity, &token).await;
 
     assert!(
         matches!(&outcome, Err(GatewayError::ProfileNotFound(missing)) if missing == "ghost"),
         "the miss names the profile: {outcome:?}"
     );
     assert!(state.live.read().await.loading.is_empty());
+    assert_eq!(state.hub.current().text, "Loading profile");
 }
 
-/// A token fired before the load begins stops it before any leaf.
+/// A token fired before the load begins stops it before any stage text.
 #[tokio::test]
 async fn a_pre_cancelled_load_changes_nothing() {
     let state = state();
-    let tree = state.hub.operation();
+    let activity = std::sync::Arc::new(state.hub.begin("load-profile"));
     let token = CancellationToken::new();
     token.cancel();
 
-    let outcome = super::load_local(&state, &name("alpha"), &tree, &token).await;
+    let outcome = super::load_local(&state, &name("alpha"), &activity, &token).await;
 
     assert!(
         matches!(outcome, Err(GatewayError::CommandCancelled(_))),
         "a fired token is explicit: {outcome:?}"
     );
     assert!(state.live.read().await.loading.is_empty());
+    assert_eq!(
+        state.hub.current().text,
+        "load-profile",
+        "the token check precedes the first stage, so no stage text is written"
+    );
+    drop(activity);
+    assert!(
+        !state.hub.current().busy,
+        "the command's guard ends the activity"
+    );
 }
 
 /// The commit routes the ready children beside the remote models,

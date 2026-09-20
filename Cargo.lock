@@ -5934,10 +5934,8 @@ dependencies = [
 name = "shared-progress"
 version = "0.3.0"
 dependencies = [
- "serde",
- "serde_json",
+ "gateway-api-types",
  "tokio",
- "tracing",
  "workspace-hack",
 ]
 

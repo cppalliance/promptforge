@@ -407,7 +407,7 @@ Each step runs only the focused tests listed in it. The full gate set runs once,
 
 <step-4>
 
-### Step 4: Rewrite the progress machinery and migrate every gateway producer
+### Step 4: Rewrite the progress machinery and migrate every gateway producer [completed]
 
 - Component: gateway-progress
 - Piece: in-place rewrite; machinery (`ProgressHub`, `Activity`) and consumers (producers, endpoints, tray, config UI) built jointly

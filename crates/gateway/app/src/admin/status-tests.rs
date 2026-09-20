@@ -89,6 +89,11 @@ async fn the_status_response_carries_the_queue_and_endpoint_shape() {
     assert_eq!(body["queue"]["active"], serde_json::Value::Null);
     assert_eq!(body["queue"]["pending"], serde_json::json!([]));
     assert_eq!(
+        body["progress"],
+        serde_json::json!({ "busy": false, "text": "" }),
+        "an idle gateway carries the idle Progress snapshot at the top level: {body}"
+    );
+    assert_eq!(
         body["loading_models"],
         serde_json::json!([]),
         "with no switch running, nothing is loading: {body}"
@@ -156,12 +161,17 @@ async fn the_status_response_reports_the_active_and_pending_commands() {
         "the active command is named: {body}"
     );
     assert!(
-        body["queue"]["active"]["fraction"].is_number(),
-        "the active command carries its progress fraction: {body}"
+        body["queue"]["active"].get("fraction").is_none(),
+        "the active command carries no fraction: {body}"
     );
     assert!(
         body["queue"]["active"]["started_at"].is_u64(),
         "the active command carries its start time as epoch seconds: {body}"
+    );
+    assert_eq!(
+        body["progress"],
+        serde_json::json!({ "busy": true, "text": "load-profile: main" }),
+        "the running command's activity is the top-level progress object: {body}"
     );
     let pending_entries = body["queue"]["pending"]
         .as_array()

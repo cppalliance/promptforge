@@ -289,8 +289,9 @@
 		background: var(--accent-subtle);
 	}
 
-	/* Apply overlay stages: pending rows muted, the active row carries
-	   the spinner, done rows the check, a failed row the error mark. */
+	/* Apply overlay activity: the one row carries the spinner and the
+	   gateway's activity text while the apply runs, the check once it
+	   finished, the error mark when it failed. */
 	.stage-list {
 		display: flex;
 		flex-direction: column;
@@ -318,23 +319,6 @@
 		justify-content: center;
 		width: 1rem;
 		height: 1rem;
-	}
-	/* The active stage's detail row: the model download/verify/start
-	   label, the shared inline progress bar, and its integer percent. */
-	.stage-detail {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding-inline-start: 1.5rem;
-		color: var(--text-secondary);
-	}
-	.stage-detail .progress {
-		flex: 1;
-	}
-	.stage-detail-percent {
-		min-width: 4ch;
-		text-align: end;
-		font-variant-numeric: tabular-nums;
 	}
 	.spinner {
 		width: 14px;

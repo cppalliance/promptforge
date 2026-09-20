@@ -5,9 +5,11 @@
 //! worker task draining a shared pending deque FIFO, so downloads never
 //! fight each other for bandwidth and the listener stays live while they
 //! run.
-//! Each command reports into its own [`ProgressTree`] on the process hub and
-//! carries a [`CancellationToken`] the worker honors at chunk and phase
-//! boundaries. The in-process status ([`CommandQueue::active_command`] and
+//! The worker begins one [`Activity`] on the process hub per command it
+//! runs, labelled with the command's name, and hands it to the body, which
+//! writes its stages into the text; every command carries a
+//! [`CancellationToken`] the worker honors at chunk and phase boundaries.
+//! The in-process status ([`CommandQueue::active_command`] and
 //! [`CommandQueue::pending_commands`]) feeds the tray and the admin routes.
 
 use std::collections::VecDeque;
@@ -17,7 +19,7 @@ use std::time::Instant;
 
 use futures_util::future::BoxFuture;
 use gateway_config::ProfileName;
-use shared_progress::{OperationId, ProgressHub, ProgressTree};
+use shared_progress::{Activity, ProgressHub};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
@@ -162,13 +164,11 @@ struct PendingEntry {
     key: Option<DebounceKey>,
     label: String,
     queued_at: Instant,
-    tree: ProgressTree,
     waiters: Vec<oneshot::Sender<SharedOutcome>>,
 }
 
 impl PendingEntry {
-    /// Settles every waiter and drops the tree, detaching the never-started
-    /// operation from the hub.
+    /// Settles every waiter of a command that never started.
     fn settle(self, outcome: Outcome) {
         let outcome = Arc::new(outcome);
         for waiter in self.waiters {
@@ -183,7 +183,6 @@ struct ActiveEntry {
     id: u64,
     key: Option<DebounceKey>,
     label: String,
-    operation: OperationId,
     started_at: Instant,
     token: Option<CancellationToken>,
     waiters: Vec<oneshot::Sender<SharedOutcome>>,
@@ -217,13 +216,13 @@ impl std::fmt::Debug for ExecutorOverride {
     }
 }
 
-/// A point-in-time readout of the running command.
+/// A point-in-time readout of the running command. What the command is
+/// doing right now is the hub's [`Progress`](gateway_api_types::Progress)
+/// text, not part of this readout.
 #[derive(Debug, Clone)]
 pub(crate) struct CommandStatus {
     /// The command's display name, for example `load-profile: main`.
     pub(crate) name: String,
-    /// The command operation tree's weighted fraction, `0.0..=1.0`.
-    pub(crate) progress: f64,
     /// When the worker started the command.
     pub(crate) started_at: Instant,
 }
@@ -237,27 +236,31 @@ pub(crate) struct CommandSummary {
     pub(crate) queued_at: Instant,
 }
 
-/// What an enqueue returns: the operation the command reports under, and
-/// the receiver for its settled outcome. A command dropped by the debounce
+/// What an enqueue returns: the queue entry the command runs as, and the
+/// receiver for its settled outcome. A command dropped by the debounce
 /// attaches both to the command it duplicated.
 #[derive(Debug)]
 pub(crate) struct Enqueued {
-    /// The progress operation the command reports under.
+    /// The queue entry the command runs as; a debounced duplicate shares
+    /// the entry it attached to.
     #[cfg_attr(
         not(test),
         expect(
             dead_code,
-            reason = "read only by tests: no route streams a command's stages, and the first producer that needs the operation id lifts this"
+            reason = "read only by tests, which pin the debounce attaching a duplicate to the entry it duplicated"
         )
     )]
-    pub(crate) operation: OperationId,
+    pub(crate) entry: u64,
     /// Resolves when the command settles.
     pub(crate) outcome: oneshot::Receiver<SharedOutcome>,
 }
 
-/// The body the worker runs for one command; swappable in tests.
+/// The body the worker runs for one command; swappable in tests. The
+/// activity is the command's own, labelled with its name and live until the
+/// body returns: the body writes its stages into the text or begins nested
+/// activities on the hub.
 pub(crate) type Executor =
-    dyn Fn(AppState, Command, ProgressTree) -> BoxFuture<'static, Outcome> + Send + Sync;
+    dyn Fn(AppState, Command, Activity) -> BoxFuture<'static, Outcome> + Send + Sync;
 
 /// The gateway's command queue: one shared pending deque, one worker task,
 /// and the in-process status the tray and routes read.
@@ -314,16 +317,14 @@ impl CommandQueue {
         let mut state = self.lock();
         if state.closed {
             // The queue is shut down: the command never runs, so settle its
-            // waiter immediately. The operation id filters nothing; the
-            // tree detaches at once.
-            let tree = self.hub.operation();
-            let operation = tree.operation();
-            drop(tree);
+            // waiter immediately under an entry id nothing else shares.
+            let entry = state.next_id;
+            state.next_id += 1;
             let _ = waiter_tx.send(Arc::new(Err(GatewayError::CommandCancelled(
                 command.label(),
             ))));
             return Enqueued {
-                operation,
+                entry,
                 outcome: waiter_rx,
             };
         }
@@ -335,7 +336,7 @@ impl CommandQueue {
             {
                 active.waiters.push(waiter_tx);
                 return Enqueued {
-                    operation: active.operation,
+                    entry: active.id,
                     outcome: waiter_rx,
                 };
             }
@@ -345,10 +346,10 @@ impl CommandQueue {
                 .iter_mut()
                 .find(|entry| entry.key.as_ref() == Some(key))
             {
-                let operation = pending.tree.operation();
+                let entry = pending.id;
                 pending.waiters.push(waiter_tx);
                 return Enqueued {
-                    operation,
+                    entry,
                     outcome: waiter_rx,
                 };
             }
@@ -356,15 +357,12 @@ impl CommandQueue {
         let id = state.next_id;
         state.next_id += 1;
         let label = command.label();
-        let tree = self.hub.operation();
-        let operation = tree.operation();
         state.pending.push_back(PendingEntry {
             id,
             command,
             key,
             label,
             queued_at: Instant::now(),
-            tree,
             waiters: vec![waiter_tx],
         });
         // Wake after releasing the lock: the permit is stored, so a worker
@@ -372,24 +370,18 @@ impl CommandQueue {
         drop(state);
         self.notify.notify_one();
         Enqueued {
-            operation,
+            entry: id,
             outcome: waiter_rx,
         }
     }
 
-    /// The running command's status, or `None` when the worker is idle. The
-    /// progress fraction is read off the hub's snapshot, so it is current at
-    /// call time without the worker updating shared state.
+    /// The running command's status, or `None` when the worker is idle.
     pub(crate) fn active_command(&self) -> Option<CommandStatus> {
-        let (name, operation, started_at) = {
-            let state = self.lock();
-            let active = state.active.as_ref()?;
-            (active.label.clone(), active.operation, active.started_at)
-        };
+        let state = self.lock();
+        let active = state.active.as_ref()?;
         Some(CommandStatus {
-            name,
-            progress: self.operation_fraction(operation),
-            started_at,
+            name: active.label.clone(),
+            started_at: active.started_at,
         })
     }
 
@@ -510,7 +502,7 @@ impl CommandQueue {
         }
         self.spawn_worker_with(
             state,
-            Arc::new(|state, command, tree| Box::pin(run_command(state, command, tree))),
+            Arc::new(|state, command, activity| Box::pin(run_command(state, command, activity))),
         )
     }
 
@@ -553,19 +545,22 @@ impl CommandQueue {
         let Some(entry) = state.pending.pop_front() else {
             return BeginNext::Wait;
         };
-        let tree = entry.tree;
         let token = entry.command.token();
         let id = entry.id;
+        // The command's activity begins here, labelled with its name, so
+        // the hub is busy from the first instant the worker owns it; the
+        // body refines the text and its return drops the guard.
+        let activity = self.hub.begin(entry.label.clone());
+        tracing::info!(command = %entry.label, "command started");
         state.active = Some(ActiveEntry {
             id,
             key: entry.key,
             label: entry.label,
-            operation: tree.operation(),
             started_at: Instant::now(),
             token,
             waiters: entry.waiters,
         });
-        BeginNext::Run(id, entry.command, tree)
+        BeginNext::Run(id, entry.command, activity)
     }
 
     /// Clears the active command and settles its waiters, logging the
@@ -597,42 +592,15 @@ impl CommandQueue {
             let _ = waiter.send(Arc::clone(&outcome));
         }
     }
-
-    /// The operation's weighted fraction over its top-level leaves, read
-    /// from the hub snapshot. `1.0` once the tree has detached: the body has
-    /// returned and the worker clears the active entry right after.
-    fn operation_fraction(&self, operation: OperationId) -> f64 {
-        for snapshot in self.hub.snapshot() {
-            if snapshot.operation != operation {
-                continue;
-            }
-            // Top-level leaves are the paths with no separator; the tree's
-            // own fraction aggregates the same set with the same weights.
-            let mut weighted = 0.0;
-            let mut weights = 0.0;
-            for node in &snapshot.nodes {
-                if node.path.contains('/') {
-                    continue;
-                }
-                weighted += node.weight * node.fraction;
-                weights += node.weight;
-            }
-            return if weights > 0.0 {
-                weighted / weights
-            } else {
-                0.0
-            };
-        }
-        1.0
-    }
 }
 
 /// What the worker does next, decided by [`CommandQueue::begin_next`] in
 /// one critical section so a shutdown cannot slip between the pop and the
 /// activation.
 enum BeginNext {
-    /// Runs this command; it is installed as the active entry.
-    Run(u64, Command, ProgressTree),
+    /// Runs this command under its activity; it is installed as the active
+    /// entry.
+    Run(u64, Command, Activity),
     /// The deque is empty; park until notified.
     Wait,
     /// The queue is closed; exit.
@@ -649,76 +617,65 @@ async fn worker_loop(queue: CommandQueue, state: AppState, executor: Arc<Executo
         let notified = queue.notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
-        let (id, command, tree) = match queue.begin_next() {
-            BeginNext::Run(id, command, tree) => (id, command, tree),
+        let (id, command, activity) = match queue.begin_next() {
+            BeginNext::Run(id, command, activity) => (id, command, activity),
             BeginNext::Wait => {
                 notified.await;
                 continue;
             }
             BeginNext::Exit => break,
         };
-        let outcome = executor(state.clone(), command, tree).await;
+        let outcome = executor(state.clone(), command, activity).await;
         queue.finish(id, outcome);
     }
 }
 
-/// Runs one command to its end, reporting progress into its operation tree.
-async fn run_command(state: AppState, command: Command, tree: ProgressTree) -> Outcome {
+/// Runs one command to its end under its activity, which drops with the
+/// body's return on every path.
+async fn run_command(state: AppState, command: Command, activity: Activity) -> Outcome {
     match command {
         Command::LoadProfile { name, token } => {
-            crate::boot_load::run(&state, name, tree, &token).await
+            crate::boot_load::run(&state, name, activity, &token).await
         }
         Command::ApplyConfig { snapshot, token } => {
-            crate::config_apply::apply_config(&state, snapshot, token, tree).await
+            crate::config_apply::apply_config(&state, snapshot, token, activity).await
         }
         Command::ProvisionModel {
             name,
             source,
             token,
-        } => provision_model(&state, &name, &source, token, &tree).await,
-        Command::UnloadModel { name } => unload_model(&state, &name, &tree).await,
+        } => provision_model(&state, &name, &source, token, activity).await,
+        Command::UnloadModel { name } => unload_model(&state, &name, activity).await,
     }
 }
 
 /// The `ProvisionModel` body: download and verify one model into the
-/// artifact store, off the async executor.
+/// artifact store, off the async executor. The activity moves into the
+/// blocking task, which writes the download and verify stages into it and
+/// drops it when the store returns.
 #[cfg(feature = "local")]
 async fn provision_model(
     state: &AppState,
     name: &str,
     source: &str,
     token: CancellationToken,
-    tree: &ProgressTree,
+    activity: Activity,
 ) -> Outcome {
-    let leaf = tree.register(name, 1.0);
     let cache_dir = state.cache_dir().await;
     let source = source.to_owned();
     let label = format!("provision-model: {name}");
-    let progress = leaf.clone();
     let worker_token = token.clone();
     let result = tokio::task::spawn_blocking(move || {
         let root = crate::local::resolve_cache_root(cache_dir.as_deref())?;
         let store = crate::local::artifacts::ArtifactStore::new(root)?;
-        store.ensure_model_with_cancellation(&source, None, Some(&progress), Some(&worker_token))
+        store.ensure_model_with_cancellation(&source, None, Some(&activity), Some(&worker_token))
     })
     .await;
     match result {
-        Ok(Ok(_path)) => {
-            leaf.complete();
-            Ok(format!("provisioned {name}"))
-        }
-        Ok(Err(_)) if token.is_cancelled() => {
-            leaf.fail();
-            Err(GatewayError::CommandCancelled(label))
-        }
-        Ok(Err(error)) => {
-            leaf.fail();
-            Err(GatewayError::cache(error))
-        }
-        Err(join) => {
-            leaf.fail();
-            Err(GatewayError::cache(join))
-        }
+        Ok(Ok(_path)) => Ok(format!("provisioned {name}")),
+        Ok(Err(_)) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label)),
+        Ok(Err(error)) => Err(GatewayError::cache(error)),
+        Err(join) => Err(GatewayError::cache(join)),
     }
 }
 
@@ -729,7 +686,7 @@ async fn provision_model(
     _name: &str,
     _source: &str,
     _token: CancellationToken,
-    _tree: &ProgressTree,
+    _activity: Activity,
 ) -> Outcome {
     Err(GatewayError::switch_failed(
         "provision-model",
@@ -740,40 +697,30 @@ async fn provision_model(
 /// The `UnloadModel` body: drop the model from the routing table, then tear
 /// down its child off the async executor.
 #[cfg(feature = "local")]
-async fn unload_model(state: &AppState, name: &str, tree: &ProgressTree) -> Outcome {
-    let leaf = tree.register("unload-model", 1.0);
+async fn unload_model(state: &AppState, name: &str, activity: Activity) -> Outcome {
     // In-flight requests holding the old table entry keep their connection;
     // the teardown below ends the child under them, which is what the
     // caller asked for.
     let model = {
         let mut live = state.live.write().await;
         let Some(model) = live.local.unload_model(name) else {
-            leaf.fail();
             return Err(GatewayError::UnknownModel(name.to_owned()));
         };
         live.routing = Arc::new(live.routing.without(name));
         model
     };
+    activity.set_text(format!("Stopping {name}"));
     let result = tokio::task::spawn_blocking(move || model.endpoint.upstream.shutdown()).await;
     match result {
-        Ok(Ok(())) => {
-            leaf.complete();
-            Ok(format!("unloaded {name}"))
-        }
-        Ok(Err(error)) => {
-            leaf.fail();
-            Err(GatewayError::switch_failed("unload-model", error))
-        }
-        Err(join) => {
-            leaf.fail();
-            Err(GatewayError::switch_failed("unload-model", join))
-        }
+        Ok(Ok(())) => Ok(format!("unloaded {name}")),
+        Ok(Err(error)) => Err(GatewayError::switch_failed("unload-model", error)),
+        Err(join) => Err(GatewayError::switch_failed("unload-model", join)),
     }
 }
 
 /// The headless `UnloadModel` body: no local runtime exists to hold models.
 #[cfg(not(feature = "local"))]
-async fn unload_model(_state: &AppState, name: &str, _tree: &ProgressTree) -> Outcome {
+async fn unload_model(_state: &AppState, name: &str, _activity: Activity) -> Outcome {
     Err(GatewayError::UnknownModel(name.to_owned()))
 }
 
@@ -862,8 +809,8 @@ mod tests {
         let pending = queue.pending_commands();
         assert_eq!(pending.len(), 1, "the duplicate never enters the queue");
         assert_eq!(
-            first.operation, second.operation,
-            "the duplicate attaches to the pending command's operation"
+            first.entry, second.entry,
+            "the duplicate attaches to the pending command's entry"
         );
         assert!(queue.active_command().is_none());
     }
@@ -880,8 +827,8 @@ mod tests {
             "one apply is pending; the duplicate never enters the queue"
         );
         assert_eq!(
-            first.operation, second.operation,
-            "the duplicate attaches to the pending apply's operation"
+            first.entry, second.entry,
+            "the duplicate attaches to the pending apply's entry"
         );
     }
 
@@ -1047,7 +994,7 @@ mod tests {
         let _other = queue.enqueue(provision("n"));
 
         assert_eq!(
-            first.operation, duplicate.operation,
+            first.entry, duplicate.entry,
             "a same-model duplicate attaches to the pending command"
         );
         let pending = queue.pending_commands();
@@ -1071,10 +1018,7 @@ mod tests {
         let second = queue.enqueue(unload("m"));
 
         assert_eq!(queue.pending_commands().len(), 2);
-        assert_ne!(
-            first.operation, second.operation,
-            "each unload keeps its own operation"
-        );
+        assert_ne!(first.entry, second.entry, "each unload keeps its own entry");
     }
 
     #[tokio::test]
@@ -1099,7 +1043,7 @@ mod tests {
         let order = Arc::new(Mutex::new(Vec::new()));
         let executor: Arc<Executor> = Arc::new({
             let order = Arc::clone(&order);
-            move |_state, command: Command, _tree| {
+            move |_state, command: Command, _activity| {
                 let order = Arc::clone(&order);
                 Box::pin(async move {
                     let label = command.label();
@@ -1167,22 +1111,25 @@ mod tests {
         queue.shutdown();
     }
 
+    /// The worker begins the command's activity under its label, the body
+    /// refines the text, and the hub falls idle once the body returns.
     #[tokio::test]
-    #[expect(
-        clippy::float_cmp,
-        reason = "0.625 = (3 * 0.5 + 1 * 1.0) / 4 is exact in binary floating point"
-    )]
-    async fn the_active_commands_progress_reads_off_the_hub() {
+    async fn the_active_command_drives_the_hubs_busy_text() {
         let state = state();
         let queue = state.commands.clone();
-        // The stub reports known leaf fractions on the command's tree, then
-        // parks until cancelled: 3/4 through the weighted pair.
-        let executor: Arc<Executor> = Arc::new(|_state, command, tree| {
+        let hub = Arc::clone(&state.hub);
+        assert!(!hub.current().busy, "a pending command is not yet busy");
+        let _pending = queue.enqueue(load_profile("alpha"));
+        assert!(
+            !hub.current().busy,
+            "a queued command that has not started reports nothing"
+        );
+
+        // The stub writes a stage into the activity, then parks until
+        // cancelled.
+        let executor: Arc<Executor> = Arc::new(|_state, command, activity| {
             Box::pin(async move {
-                let download = tree.register("download", 3.0);
-                let verify = tree.register("verify", 1.0);
-                download.set_fraction(0.5);
-                verify.set_fraction(1.0);
+                activity.set_text("Downloading qwen 45%");
                 let label = command.label();
                 let token = command.token().expect("a load command carries a token");
                 token.cancelled().await;
@@ -1194,18 +1141,18 @@ mod tests {
             .spawn_worker_with(&state, executor)
             .expect("worker spawns");
 
-        let _handle = queue.enqueue(load_profile("alpha"));
-        wait_until("the command to go active", || {
-            queue.active_command().is_some()
+        wait_until("the command to write its stage", || {
+            hub.current().text == "Downloading qwen 45%"
         })
         .await;
-        let status = queue.active_command().expect("active");
-        // The tree's own aggregate: (3 * 0.5 + 1 * 1.0) / 4.
-        assert_eq!(
-            status.progress, 0.625,
-            "the status fraction matches the tree's weighted aggregate"
-        );
+        assert!(hub.current().busy, "a running command is busy");
         queue.cancel_active();
+        wait_until("the queue to go idle", || queue.active_command().is_none()).await;
+        assert_eq!(
+            hub.current(),
+            gateway_api_types::Progress::default(),
+            "the body's return drops the activity and the hub falls idle"
+        );
         queue.shutdown();
     }
 
@@ -1214,11 +1161,11 @@ mod tests {
         let state = state();
         let token = CancellationToken::new();
         token.cancel();
-        let tree = state.hub.operation();
+        let activity = state.hub.begin("test");
         let outcome = run_command(
             state.clone(),
             Command::load_profile(ProfileName::parse("alpha").expect("profile name"), token),
-            tree,
+            activity,
         )
         .await;
         assert!(
@@ -1246,7 +1193,7 @@ mod tests {
     fn recording_executor(order: &Arc<Mutex<Vec<String>>>) -> Arc<Executor> {
         Arc::new({
             let order = Arc::clone(order);
-            move |_state, command: Command, _tree| {
+            move |_state, command: Command, _activity| {
                 let order = Arc::clone(&order);
                 Box::pin(async move {
                     let label = command.label();
@@ -1412,8 +1359,8 @@ mod tests {
     #[tokio::test]
     async fn an_unload_of_a_model_the_runtime_does_not_hold_is_unknown_model() {
         let state = state();
-        let tree = state.hub.operation();
-        let outcome = run_command(state.clone(), unload("ghost"), tree).await;
+        let activity = state.hub.begin("test");
+        let outcome = run_command(state.clone(), unload("ghost"), activity).await;
         assert!(
             matches!(&outcome, Err(GatewayError::UnknownModel(name)) if name == "ghost"),
             "an unload miss is UnknownModel, not a queue error: {outcome:?}"
@@ -1449,8 +1396,8 @@ mod tests {
             &mut state,
             ScriptedModelFactory::new(ScriptedDecoder::new()),
         );
-        let tree = state.hub.operation();
-        let outcome = run_command(state.clone(), load_profile("alpha"), tree).await;
+        let activity = state.hub.begin("test");
+        let outcome = run_command(state.clone(), load_profile("alpha"), activity).await;
 
         assert_eq!(
             outcome.as_deref().ok(),
@@ -1495,7 +1442,7 @@ mod tests {
         let boot_handle = queue.enqueue(load_profile("alpha"));
         let attached = queue.enqueue(load_profile("alpha"));
         assert_eq!(
-            boot_handle.operation, attached.operation,
+            boot_handle.entry, attached.entry,
             "the duplicate attaches to the boot command"
         );
         let worker = state.commands.spawn_worker(&state).expect("worker spawns");

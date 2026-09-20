@@ -18,7 +18,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 
 use super::confine::{ensure_cache_directory, validate_cache_path, write_synced};
 use super::digest::file_digest_with_progress;
@@ -66,9 +66,8 @@ pub(super) fn verify_blob(
     verify_blob_with_progress(cache_root, path, expected, marker, None)
 }
 
-/// [`verify_blob`] variant that reports hash-pass bytes read into `progress`,
-/// when given. A marker hit reads nothing and reports no updates, but still
-/// completes the leaf: every exit path owes the terminal event.
+/// [`verify_blob`] variant that formats the hash pass's percent into
+/// `activity`, when given. A marker hit reads nothing and changes no text.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsafeCachePath`] when `marker` (or `path`, when it
@@ -81,7 +80,7 @@ pub(super) fn verify_blob_with_progress(
     path: &Path,
     expected: &str,
     marker: &Path,
-    progress: Option<&ProgressHandle>,
+    activity: Option<&Activity>,
 ) -> Result<VerifyOutcome> {
     validate_cache_path(cache_root, marker)?;
     // A path source lives outside the cache by design; only confine the blob
@@ -90,19 +89,9 @@ pub(super) fn verify_blob_with_progress(
         validate_cache_path(cache_root, path)?;
     }
     if marker_matches(marker, path, expected)? {
-        // The verify work is done with nothing to measure; the leaf still
-        // owes its terminal event on every exit path.
-        if let Some(handle) = progress {
-            handle.complete();
-        }
         return Ok(VerifyOutcome::MarkerHit);
     }
-    let actual = file_digest_with_progress(path, progress)?;
-    // The hash pass is the leaf's measurable work and is done whether or not
-    // the digest matches; the mismatch error carries the failure.
-    if let Some(handle) = progress {
-        handle.complete();
-    }
+    let actual = file_digest_with_progress(path, activity)?;
     if actual != expected {
         let _ignored = fs::remove_file(marker);
         return Err(LocalError::DigestMismatch {

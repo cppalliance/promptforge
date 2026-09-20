@@ -7,12 +7,33 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 
 use super::Result;
 use super::assets::ArchiveKind;
 use super::confine::{ensure_cache_directory, safe_relative_path, validate_tree_path};
+use super::download::PercentText;
 use crate::error::LocalError;
+
+/// The `"Extracting {archive} {pct}%"` reporter for one extraction, when
+/// the caller runs an activity.
+struct Extracting<'a> {
+    activity: &'a Activity,
+    text: PercentText,
+}
+
+impl<'a> Extracting<'a> {
+    fn new(activity: Option<&'a Activity>, archive: &Path) -> Option<Self> {
+        let activity = activity?;
+        let name = archive.file_name().map_or_else(
+            || archive.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let text = PercentText::new("Extracting", name);
+        activity.set_text(text.label());
+        Some(Self { activity, text })
+    }
+}
 
 /// Extracts `archive` into `destination`, dispatching on the archive kind.
 ///
@@ -23,8 +44,8 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path, kind: ArchiveK
     extract_archive_with_progress(archive, destination, kind, None)
 }
 
-/// [`extract_archive`] variant that reports extracted-entry counts into
-/// `progress`, when given.
+/// [`extract_archive`] variant that formats the extracted-entry percent
+/// into `activity`, when given.
 ///
 /// # Errors
 /// Returns [`LocalError`] on unsafe entries or extraction failures.
@@ -32,26 +53,19 @@ pub(super) fn extract_archive_with_progress(
     archive: &Path,
     destination: &Path,
     kind: ArchiveKind,
-    progress: Option<&ProgressHandle>,
+    activity: Option<&Activity>,
 ) -> Result<()> {
-    let result = match kind {
-        ArchiveKind::TarGz => extract_tar_gz(archive, destination, progress),
-        ArchiveKind::Zip => extract_zip(archive, destination, progress),
-    };
-    // Every exit path owes the leaf its terminal event; the success path
-    // completed it inside, and terminal state is sticky.
-    if result.is_err()
-        && let Some(handle) = progress
-    {
-        handle.fail();
+    let progress = Extracting::new(activity, archive);
+    match kind {
+        ArchiveKind::TarGz => extract_tar_gz(archive, destination, progress.as_ref()),
+        ArchiveKind::Zip => extract_zip(archive, destination, progress.as_ref()),
     }
-    result
 }
 
 /// Reports `done` of `total` entries into `progress`, when both are known.
-fn report_entries(progress: Option<&ProgressHandle>, total: Option<u64>, done: u64) {
-    if let (Some(handle), Some(total)) = (progress, total) {
-        handle.set_units(done, total);
+fn report_entries(progress: Option<&Extracting<'_>>, total: Option<u64>, done: u64) {
+    if let (Some(progress), Some(total)) = (progress, total) {
+        progress.text.report(progress.activity, done, total);
     }
 }
 
@@ -82,7 +96,7 @@ fn count_tar_gz_entries(archive: &Path) -> Result<u64> {
 fn extract_tar_gz(
     archive: &Path,
     destination: &Path,
-    progress: Option<&ProgressHandle>,
+    progress: Option<&Extracting<'_>>,
 ) -> Result<()> {
     let total = match progress {
         Some(_) => Some(count_tar_gz_entries(archive)?),
@@ -140,16 +154,13 @@ fn extract_tar_gz(
         done = done.saturating_add(1);
         report_entries(progress, total, done);
     }
-    if let Some(handle) = progress {
-        handle.complete();
-    }
     Ok(())
 }
 
 fn extract_zip(
     archive: &Path,
     destination: &Path,
-    progress: Option<&ProgressHandle>,
+    progress: Option<&Extracting<'_>>,
 ) -> Result<()> {
     let file = File::open(archive).map_err(|source| LocalError::Io {
         operation: "open archive",
@@ -214,9 +225,6 @@ fn extract_zip(
         apply_archive_mode(&output, mode)?;
         done = done.saturating_add(1);
         report_entries(progress, total, done);
-    }
-    if let Some(handle) = progress {
-        handle.complete();
     }
     Ok(())
 }

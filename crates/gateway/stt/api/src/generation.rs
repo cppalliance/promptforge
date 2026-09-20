@@ -8,7 +8,7 @@ use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 #[cfg(feature = "test-fixtures")]
 use gateway_stt_engine::ModelFactory;
 use gateway_stt_engine::{DecodeMode, EnginePolicy};
-use shared_progress::ProgressHandle;
+use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, PreparedGeneration, SpeechError};
@@ -63,7 +63,7 @@ impl GenerationState {
     pub(crate) fn load_initial(
         &self,
         config: &Config,
-        progress: Option<&ProgressHandle>,
+        progress: Option<&Arc<Activity>>,
         cancel: &CancellationToken,
     ) -> Result<(), SpeechError> {
         self.claim_initial_load()?;
@@ -73,6 +73,11 @@ impl GenerationState {
         let prepared = artifacts::prepare(config, progress)?;
         if cancel.is_cancelled() {
             return Err(SpeechError::InitialLoadCancelled);
+        }
+        if let Some(activity) = progress
+            && prepared.generation.is_some()
+        {
+            activity.set_text("Loading speech models");
         }
         let runtime = prepared
             .generation

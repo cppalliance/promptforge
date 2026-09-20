@@ -1,10 +1,11 @@
 // Pins the bottom status bar: the idle LED strip maps each endpoint's
 // ready/provisioning flags to its LED state beside the model/VRAM
-// summary; an active queue command shows the shared shell's barberpole
-// beside the still-visible LEDs with the command label in the text
-// region, the pending count with per-entry cancel buttons, and a cancel
-// button that calls POST /admin/queue/cancel; and panel mode mounts no
-// bar at all (the workshop owns status display there).
+// summary; a busy Progress snapshot shows the shared shell's barberpole
+// beside the still-visible LEDs with the activity text in the text
+// region; an active queue command adds the pending count with per-entry
+// cancel buttons and a cancel button that calls POST /admin/queue/cancel;
+// and panel mode mounts no bar at all (the workshop owns status display
+// there).
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -62,19 +63,20 @@ test("an active command shows the barberpole beside the LEDs, and cancel calls t
   assert.equal(indicators.hidden, false, "the LED strip shows while the queue is idle");
   assert.equal(barberpole.hidden, true, "the barberpole hides while the queue is idle");
 
+  stub.state.progress = { busy: true, text: "Downloading qwen 34%" };
   stub.state.queue = {
-    active: { name: "load-profile: main", fraction: 0.34, started_at: 1_700_000_000 },
+    active: { name: "load-profile: main", started_at: 1_700_000_000 },
     pending: [{ name: "provision-model: extra", queued_at: 1_700_000_001 }],
   };
   t.mock.timers.tick(2000);
   await settle();
 
   assert.equal(indicators.hidden, false, "the LED strip stays visible while a command runs");
-  assert.equal(barberpole.hidden, false, "the barberpole shows while a command runs");
+  assert.equal(barberpole.hidden, false, "the barberpole shows while the snapshot is busy");
   assert.equal(
     root.querySelector(".status-bar__text").textContent,
-    "load-profile: main (34%)",
-    "the text carries the command name and rounded percent",
+    "Downloading qwen 34%",
+    "the text is the snapshot's activity text, not the command name",
   );
   assert.equal(
     root.querySelector(".status-bar-pending").textContent,
@@ -98,11 +100,34 @@ test("an active command shows the barberpole beside the LEDs, and cancel calls t
   assert.equal(stub.state.cancelActiveCalls, 1, "the cancel button fired the cancel route");
 
   // The command settled: the next poll hides the barberpole.
+  stub.state.progress = { busy: false, text: "" };
   stub.state.queue = { active: null, pending: [] };
   t.mock.timers.tick(2000);
   await settle();
   assert.equal(indicators.hidden, false, "the LED strip is still visible once the queue drains");
-  assert.equal(barberpole.hidden, true, "the barberpole hides once the queue drains");
+  assert.equal(barberpole.hidden, true, "the barberpole hides once the snapshot goes idle");
+  assert.equal(root.querySelector(".status-bar__text").textContent, "", "the text clears");
+});
+
+test("a busy snapshot with no queue command still shows the barberpole and text", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const stub = gatewayStub({ key: "k", config: modelsFixture(), models: ["a"], endpoints: ENDPOINTS });
+  const { root } = await bootApp({ key: "k", stub });
+
+  // Startup provisioning and cache downloads report through the hub
+  // without a queue command: the snapshot alone drives the busy state.
+  stub.state.progress = { busy: true, text: "Downloading model.bin 12%" };
+  t.mock.timers.tick(2000);
+  await settle();
+
+  assert.equal(root.querySelector(".status-bar__barberpole").hidden, false);
+  assert.equal(root.querySelector(".status-bar__text").textContent, "Downloading model.bin 12%");
+  assert.equal(
+    root.querySelector(".status-bar-summary").hidden,
+    false,
+    "with no queue command the model summary stays in the extras region",
+  );
+  assert.equal(root.querySelector(".status-bar-queue").hidden, true, "no cancel controls");
 });
 
 test("panel mode mounts no status bar", async () => {

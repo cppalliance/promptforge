@@ -385,7 +385,6 @@ fn companion_args_are_byte_identical_across_respawn_and_shutdown() {
         Path::new("pinned-model.gguf"),
         &opts,
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -564,7 +563,6 @@ fn debug_redacts_api_key() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -578,53 +576,15 @@ fn debug_redacts_api_key() {
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn ready_leaf_completes_when_the_readiness_poll_succeeds() {
-    // The readiness leaf is indeterminate: it jumps from 0.0 to 1.0 exactly
-    // once, when the bounded poll confirms authenticated readiness.
-    let hub = Arc::new(shared_progress::ProgressHub::new());
-    let tree = hub.operation();
-    let ready = tree.register("ready", 1.0);
-    let port = free_port().expect("select free port");
-    let mut ports = VecDeque::from([port]);
-    let mut select_port = || {
-        ports.pop_front().ok_or_else(|| LocalError::Port {
-            operation: "unexpected test port selection",
-            source: std::io::Error::other("test port queue exhausted"),
-        })
-    };
-    let mut make_identity = || deterministic_identity(0);
-    let interrupted = AtomicBool::new(false);
-    let guard = ServerGuard::start_with(
-        Path::new("fake-llama-server"),
-        Path::new("pinned-model.gguf"),
-        &options(false),
-        &interrupted,
-        Some(&ready),
-        TEST_POLICY,
-        &mut select_port,
-        &mut make_identity,
-        &ChildSpawner::new(spawn_fake_child),
-    )
-    .expect("fake child should become ready");
-    assert_eq!(ready.fraction(), 1.0);
-    drop(guard);
-}
-
-#[test]
-#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
-fn ready_leaf_stays_unfinished_when_readiness_never_arrives() {
+fn a_child_serving_a_foreign_alias_never_becomes_ready() {
     // A child serving another attempt's alias never passes the identity
-    // check, so the poll times out and the leaf is never completed.
+    // check, so the bounded poll times out and the start fails.
     const FAST_POLICY: StartupPolicy = StartupPolicy {
         attempts: 1,
         deadline: Duration::from_millis(300),
         interval: Duration::from_millis(10),
         http_timeout: Duration::from_millis(50),
     };
-    let hub = Arc::new(shared_progress::ProgressHub::new());
-    let tree = hub.operation();
-    let ready = tree.register("ready", 1.0);
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
     let mut select_port = || {
@@ -640,7 +600,6 @@ fn ready_leaf_stays_unfinished_when_readiness_never_arrives() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        Some(&ready),
         FAST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -650,7 +609,6 @@ fn ready_leaf_stays_unfinished_when_readiness_never_arrives() {
     )
     .expect_err("a foreign alias must never become ready");
     assert!(matches!(error, LocalError::Startup { .. }));
-    assert_eq!(ready.fraction(), 0.0);
 }
 
 #[test]
@@ -679,7 +637,6 @@ fn retries_after_foreign_health_listener_wins_selected_port() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -724,7 +681,6 @@ fn drop_kills_the_child_process() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -771,7 +727,6 @@ fn respawn_reuses_port_and_identity_after_child_death() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -844,7 +799,6 @@ fn local_upstream_send_respawns_dead_child_once() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -936,7 +890,6 @@ fn local_upstream_send_embeddings_routes_through_child() {
         Path::new("pinned-embed.gguf"),
         &opts,
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -1004,7 +957,6 @@ fn local_upstream_send_rerank_routes_through_child() {
         Path::new("pinned-rerank.gguf"),
         &opts,
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -1075,7 +1027,6 @@ fn local_upstream_send_honors_cooldown_after_failed_respawn() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -1174,7 +1125,6 @@ fn local_upstream_concurrent_sends_respawn_child_at_most_once() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -1255,7 +1205,6 @@ fn recover_if_dead_is_a_noop_for_a_live_but_unreachable_child() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -1319,7 +1268,6 @@ fn local_upstream_shutdown_kills_child_and_disables_respawn() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,
@@ -1449,7 +1397,6 @@ fn switch_shutdown_terminates_an_in_flight_respawned_child() {
         Path::new("pinned-model.gguf"),
         &options(false),
         &interrupted,
-        None,
         TEST_POLICY,
         &mut select_port,
         &mut make_identity,

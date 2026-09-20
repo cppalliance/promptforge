@@ -1,39 +1,37 @@
-//! The `GET /admin/progress` route: the process progress hub as an SSE
-//! stream with heartbeats.
+//! The `GET /admin/progress` route: the process activity hub as an SSE
+//! stream of [`Progress`] snapshots with heartbeats.
 
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::Response;
+use gateway_api_types::Progress;
+use shared_progress::ProgressHub;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use crate::shutdown;
-use shared_progress::{EventState, ProgressEvent, ProgressHub};
 
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an
 /// idle connection alive through NAT and firewall timeouts.
 pub(crate) const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The `GET /admin/progress` route: bearer-authed, streams the process
-/// progress hub as SSE.
+/// activity hub as SSE.
 ///
 /// The reply is `text/event-stream` and never terminates on its own: a
-/// freshly connected subscriber first receives the live operations replayed
-/// as synthetic `Begun`/`Updated` events, plus a `Finished` for each leaf
-/// that already reached its terminal state, so it can render current state
-/// without waiting for the next event, and then every broadcast
-/// [`ProgressEvent`], including one operation-level terminal event when a
-/// tree detaches, with heartbeat comment lines every
-/// [`PROGRESS_HEARTBEAT`] while the hub is idle. Intermediate events are
-/// lossy - a lagging subscriber drops them - and terminal events are never
-/// coalesced at the source. Client disconnect is Drop all the way down, as
-/// with the switch stream: the response body owns the receiver. The one
-/// server-side end is the process shutdown signal: an attached subscriber
-/// (the config SPA, the workshop) would otherwise hold its connection open
-/// through the graceful drain and pin the process.
+/// freshly connected subscriber first receives the current [`Progress`]
+/// snapshot, so it can render state without waiting for the next change,
+/// then one `data:` line per change, with heartbeat comment lines every
+/// [`PROGRESS_HEARTBEAT`] while nothing changes. The hub keeps only the
+/// latest snapshot, so a slow subscriber skips intermediate texts and never
+/// falls behind. Client disconnect is Drop all the way down: the response
+/// body owns the receiver. The one server-side end is the process shutdown
+/// signal: an attached subscriber (the config SPA, the workshop) would
+/// otherwise hold its connection open through the graceful drain and pin
+/// the process.
 pub(crate) async fn admin_progress(
     State(state): State<AppState>,
     _caller: AuthedCaller,
@@ -41,83 +39,45 @@ pub(crate) async fn admin_progress(
     Ok(progress_sse_response(&state.hub, state.shutdown.clone()))
 }
 
-/// Builds the progress SSE response over `hub`: a snapshot of the live
-/// operations first, then the broadcast stream, heartbeats in the gaps,
-/// until `shutdown` fires.
+/// Builds the progress SSE response over `hub`: the current snapshot first,
+/// then one line per change, heartbeats in the gaps, until `shutdown`
+/// fires.
 pub(crate) fn progress_sse_response(
     hub: &ProgressHub,
     shutdown: shutdown::ShutdownSignal,
 ) -> Response {
-    // Subscribe before snapshotting so no event between the two is lost; a
-    // `Begun` replayed from the snapshot is idempotent for remote import.
-    let rx = hub.subscribe();
-    let mut pending = std::collections::VecDeque::new();
-    for operation in hub.snapshot() {
-        for node in &operation.nodes {
-            pending.extend(event_line(&ProgressEvent::new(
-                operation.operation,
-                node.path.clone(),
-                node.label.clone(),
-                EventState::Begun {
-                    weight: node.weight,
-                },
-            )));
-            if node.fraction > 0.0 {
-                pending.extend(event_line(&ProgressEvent::new(
-                    operation.operation,
-                    node.path.clone(),
-                    node.label.clone(),
-                    EventState::Updated {
-                        fraction: node.fraction,
-                    },
-                )));
-            }
-            // A leaf that finished before the subscriber connected replays
-            // its terminal event too, or the subscriber would hold it as
-            // unfinished until the tree detaches.
-            if node.finished {
-                pending.extend(event_line(&ProgressEvent::new(
-                    operation.operation,
-                    node.path.clone(),
-                    node.label.clone(),
-                    EventState::Finished { ok: node.ok },
-                )));
-            }
-        }
-    }
+    // The receiver starts holding the current snapshot as unseen, so the
+    // first `changed()` resolves at once with the opening line and nothing
+    // between subscribe and first poll is lost.
+    let mut rx = hub.subscribe();
+    rx.mark_changed();
     let heartbeat_at = tokio::time::Instant::now() + PROGRESS_HEARTBEAT;
     let stream = futures_util::stream::unfold(
         (
-            pending,
             rx,
             tokio::time::interval_at(heartbeat_at, PROGRESS_HEARTBEAT),
             shutdown,
         ),
-        |(mut pending, mut rx, mut heartbeat, shutdown)| async move {
-            if let Some(line) = pending.pop_front() {
-                return Some((
-                    Ok::<_, std::convert::Infallible>(line),
-                    (pending, rx, heartbeat, shutdown),
-                ));
-            }
+        |(mut rx, mut heartbeat, shutdown)| async move {
             loop {
                 tokio::select! {
                     () = shutdown.fired() => return None,
                     _ = heartbeat.tick() => {
-                        return Some((Ok(": heartbeat\n\n".to_owned()), (pending, rx, heartbeat, shutdown)));
+                        return Some((
+                            Ok::<_, std::convert::Infallible>(": heartbeat\n\n".to_owned()),
+                            (rx, heartbeat, shutdown),
+                        ));
                     }
-                    received = rx.recv() => match received {
-                        Ok(event) => {
-                            if let Some(line) = event_line(&event) {
-                                return Some((Ok(line), (pending, rx, heartbeat, shutdown)));
+                    changed = rx.changed() => match changed {
+                        Ok(()) => {
+                            let line = snapshot_line(&rx.borrow_and_update());
+                            if let Some(line) = line {
+                                return Some((Ok(line), (rx, heartbeat, shutdown)));
                             }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            tracing::debug!(skipped, "progress subscriber lagged; events dropped");
                         }
                         // The hub lives in `AppState` for the process
                         // lifetime, so its sender never closes first.
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                        Err(_) => return None,
                     },
                 }
             }
@@ -130,14 +90,14 @@ pub(crate) fn progress_sse_response(
     response
 }
 
-/// Serializes one event as an SSE `data:` line, or `None` (logged) when
-/// serialization fails: the wire types are plain data, so a failure is a
-/// schema bug, and one bad event must not kill the stream.
-fn event_line(event: &ProgressEvent) -> Option<String> {
-    match serde_json::to_string(event) {
+/// Serializes one snapshot as an SSE `data:` line, or `None` (logged) when
+/// serialization fails: the wire type is plain data, so a failure is a
+/// schema bug, and one bad snapshot must not kill the stream.
+fn snapshot_line(snapshot: &Progress) -> Option<String> {
+    match serde_json::to_string(snapshot) {
         Ok(json) => Some(format!("data: {json}\n\n")),
         Err(error) => {
-            tracing::warn!(%error, "progress event failed to serialize; dropping it");
+            tracing::warn!(%error, "progress snapshot failed to serialize; dropping it");
             None
         }
     }
