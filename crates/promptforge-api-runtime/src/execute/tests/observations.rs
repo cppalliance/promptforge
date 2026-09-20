@@ -1,5 +1,10 @@
+use promptforge_api_types::event::Event;
+
 use super::run;
+use super::serial_driver::perform_locally;
 use super::*;
+use crate::execute::run::Run;
+use crate::test_support::drive;
 
 const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
@@ -7,6 +12,96 @@ const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\
 const SECOND_SECTION_ERRORS: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nerror('expected failure')\n```\n";
+
+/// Every offline fixture this suite pins an observation sequence for,
+/// named so a diverging comparison says which one.
+const STREAM_FIXTURES: [(&str, &str); 4] = [
+    ("two sections", TWO_SECTIONS),
+    ("store sections", STORE_SECTIONS),
+    ("failing prompt", FAILING_PROMPT),
+    ("second section errors", SECOND_SECTION_ERRORS),
+];
+
+/// Drives `md` on the serial driver - no runtime, no observer, no
+/// forwarding adapter - and returns the raw outcome and event stream.
+fn drive_serially(md: &str) -> (RunResult, Vec<Event>) {
+    let prompt = parse(md);
+    let env = Environment::new();
+    let ctx = test_context(EXECUTION).vfs(env.run_vfs());
+    let (ctx, requirements) = env.prepare(&prompt, ctx);
+    assert!(
+        requirements.refusal().is_none(),
+        "the fixtures declare nothing prepare could refuse"
+    );
+    drive(Run::new(Arc::new(prompt), "", ctx), |_, effect| {
+        perform_locally(effect, &mut |effect| {
+            panic!("the fixtures issue no model round: {effect:?}")
+        })
+    })
+}
+
+/// The `(section, kind)` trace of a raw event, read off its serialized
+/// `kind` tag rather than through the recording adapter, so the comparison
+/// never passes through the seam it checks.
+fn event_trace(event: &Event) -> (String, String) {
+    let value = serde_json::to_value(event).expect("an event serializes");
+    let kind = value["kind"]
+        .as_str()
+        .expect("a serialized event carries its kind tag");
+    (event.section().to_owned(), kind.to_owned())
+}
+
+/// An observer detail in the serialized `kind` spelling:
+/// `Store read_numbered succeeded` is `store_read_numbered_succeeded`.
+fn observer_kind(detail: &str) -> String {
+    detail.to_ascii_lowercase().replace(' ', "_")
+}
+
+#[tokio::test]
+async fn the_returned_event_stream_matches_the_former_observer_sequence() {
+    // The checkpoint's equivalence: for every fixture this suite pins, the
+    // raw `Event` values a serial drive returns spell, by their own `kind`
+    // tags, the same `(section, detail)` sequence the recording observer
+    // saw through the tokio driver and the forwarding adapter, and the two
+    // drivers decide the run alike.
+    for (name, md) in STREAM_FIXTURES {
+        let (observed_result, records) = run_recorded(md).await;
+        let (result, stream) = drive_serially(md);
+
+        let streamed: Vec<(String, String)> = stream.iter().map(event_trace).collect();
+        let observed: Vec<(String, String)> = events(&records)
+            .into_iter()
+            .map(|(section, detail)| (section, observer_kind(&detail)))
+            .collect();
+        assert!(
+            streamed
+                .first()
+                .is_some_and(|(_, kind)| kind == "run_started"),
+            "{name}: the stream opens with the run boundary: {streamed:?}"
+        );
+        assert_eq!(
+            streamed, observed,
+            "{name}: the returned event stream and the former observer sequence agree"
+        );
+
+        match (result, observed_result) {
+            (RunResult::Ok(text), Ok(observed_text)) => {
+                assert_eq!(
+                    text, observed_text,
+                    "{name}: both drivers return the same text"
+                );
+            }
+            (RunResult::Failure(error), Err(observed_error)) => assert_eq!(
+                Error::from(error).to_string(),
+                observed_error.to_string(),
+                "{name}: both drivers fail with the same error"
+            ),
+            (result, observed_result) => panic!(
+                "{name}: the two drivers must decide the run alike: {result:?} vs {observed_result:?}"
+            ),
+        }
+    }
+}
 
 #[tokio::test]
 async fn a_two_section_run_reports_the_exact_observation_sequence() {
