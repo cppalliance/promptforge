@@ -22,6 +22,8 @@
 //! does not cover same-site requests, since ports are not part of a site.
 
 #[cfg(feature = "config-ui")]
+use axum::Router;
+#[cfg(feature = "config-ui")]
 use axum::extract::{Query, State};
 #[cfg(feature = "config-ui")]
 use axum::http::StatusCode;
@@ -30,12 +32,33 @@ use axum::http::header::COOKIE;
 use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderName};
 #[cfg(feature = "config-ui")]
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
+#[cfg(feature = "config-ui")]
+use axum::routing::get;
 
 #[cfg(feature = "config-ui")]
 use crate::AppState;
 #[cfg(feature = "config-ui")]
 use crate::error::GatewayError;
+
+/// The browser entry onto the config SPA: the `/auth` handoff and the
+/// `/config` redirect onto the SPA mount. Neither takes an auth extractor:
+/// the handoff is how the browser earns its credential, and the redirect
+/// carries nothing but a location. Both sit in the walled tier because
+/// they exist only for the surface the wall protects.
+#[cfg(feature = "config-ui")]
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/config", get(config_ui_redirect))
+        .route("/auth", get(auth_handoff))
+}
+
+/// Redirects `GET /config` to `/config/`, where the SPA index is served
+/// and its relative asset references resolve.
+#[cfg(feature = "config-ui")]
+async fn config_ui_redirect() -> Redirect {
+    Redirect::permanent("/config/")
+}
 
 /// The cookie carrying the session proof for browser sessions.
 pub(crate) const AUTH_COOKIE: &str = "promptforge-gateway-session";

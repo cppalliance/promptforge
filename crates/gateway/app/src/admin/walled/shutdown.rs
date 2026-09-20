@@ -8,13 +8,20 @@
 //! drains in-flight requests before closing their connections, so the
 //! response always reaches the caller ahead of the shutdown it asked for.
 
+use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::routing::post;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::GatewayError;
+
+/// The shutdown route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/shutdown", post(admin_shutdown))
+}
 
 /// The process-shutdown signal shared by the `POST /shutdown` route, the
 /// serve loop (which selects on it alongside the caller-owned shutdown
@@ -54,7 +61,7 @@ impl ShutdownSignal {
 /// deliberately credential-free empty-key configuration.
 pub(crate) async fn admin_shutdown(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<StatusCode, GatewayError> {
     // Cancel the active queue command first: a shutdown during provisioning
     // stops the download, so the serve loop's drain and the process exit

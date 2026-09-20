@@ -1,18 +1,25 @@
 //! The `GET /admin/progress` route: the process activity hub as an SSE
 //! stream of [`Progress`] snapshots with heartbeats.
 
+use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::Response;
+use axum::routing::get;
 use gateway_api_types::Progress;
 use gateway_progress::ProgressHub;
 
 use crate::AppState;
+use crate::admin::walled::shutdown;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
-use crate::shutdown;
+
+/// The progress stream route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/progress", get(admin_progress))
+}
 
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an
 /// idle connection alive through NAT and firewall timeouts.

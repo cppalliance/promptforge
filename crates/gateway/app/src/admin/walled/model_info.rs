@@ -7,72 +7,24 @@
 //! The parser itself lives in the local crate beside the blob cache, which
 //! owns GGUF domain knowledge.
 
-#[cfg(feature = "local")]
-use axum::Json;
-#[cfg(feature = "local")]
-use axum::extract::State;
-#[cfg(feature = "local")]
-use serde::Deserialize;
-use serde::Serialize;
-#[cfg(feature = "local")]
 use std::path::PathBuf;
 
-#[cfg(feature = "local")]
+use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
+use serde::Deserialize;
+
 use crate::AppState;
-#[cfg(feature = "local")]
-use crate::auth::AuthedCaller;
-#[cfg(feature = "local")]
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireQuery, blocking};
-#[cfg(feature = "local")]
 use crate::local::{LocalError, gguf, resolve_cache_root};
-use crate::wire::ModelInfo;
 
-/// The model-list wire response, including routed and active speech models.
-#[derive(Debug, Serialize)]
-pub(crate) struct CatalogModelsResponse {
-    /// Always `"list"`.
-    pub(crate) object: &'static str,
-    /// Models currently accepting their respective request shape.
-    pub(crate) data: Vec<CatalogModelInfo>,
-}
-
-/// One routed inference model or active speech model.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub(crate) enum CatalogModelInfo {
-    /// Existing chat, embedding, classifier, or speech metadata.
-    Inference(ModelInfo),
-    /// Generic transcription metadata.
-    #[cfg(feature = "stt")]
-    Speech(SpeechCatalogModelInfo),
-}
-
-impl CatalogModelInfo {
-    pub(crate) fn inference(model: ModelInfo) -> Self {
-        Self::Inference(model)
-    }
-
-    #[cfg(feature = "stt")]
-    pub(crate) fn speech(model: &gateway_stt::SpeechModelInfo) -> Self {
-        Self::Speech(SpeechCatalogModelInfo {
-            id: model.name().to_owned(),
-            object: "model",
-            kind: "transcription",
-        })
-    }
-}
-
-/// Speech metadata contains only fields meaningful to transcription clients.
-#[cfg(feature = "stt")]
-#[derive(Debug, Serialize)]
-pub(crate) struct SpeechCatalogModelInfo {
-    id: String,
-    object: &'static str,
-    kind: &'static str,
+/// The GGUF header readout route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/model-info", get(admin_model_info))
 }
 
 /// Query parameters for `GET /admin/model-info`.
-#[cfg(feature = "local")]
 #[derive(Debug, Deserialize)]
 pub(crate) struct ModelInfoQuery {
     /// Cache-relative path of the GGUF file to inspect.
@@ -91,10 +43,9 @@ pub(crate) struct ModelInfoQuery {
 /// arbitrary file. A missing or escaping path maps to 400; a file that is
 /// missing or not a well-formed GGUF header maps to 422. The UI treats any
 /// failure as "layer count unknown" and falls back to a plain readout.
-#[cfg(feature = "local")]
 pub(crate) async fn admin_model_info(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
     WireQuery(query): WireQuery<ModelInfoQuery>,
 ) -> Result<Json<gguf::ModelInfo>, GatewayError> {
     // The retained running config carries the `[local].cache_dir` the path
@@ -116,20 +67,13 @@ pub(crate) async fn admin_model_info(
     Ok(Json(info))
 }
 
-#[cfg(all(test, feature = "local"))]
+#[cfg(test)]
 mod tests {
-    #![expect(
-        clippy::expect_used,
-        reason = "route fixtures fail with the named setup or transport invariant"
-    )]
-
     use std::net::SocketAddr;
     use std::path::Path;
 
     use gateway_config::Config;
 
-    #[cfg(feature = "stt")]
-    use super::{CatalogModelInfo, CatalogModelsResponse};
     use crate::test_support::serve;
 
     /// A profile rooting the artifact cache at `cache_dir`.
@@ -283,38 +227,5 @@ cache_dir = '{cache_dir}'
             reqwest::StatusCode::UNAUTHORIZED,
             "a request with the wrong bearer token is refused"
         );
-    }
-
-    #[cfg(feature = "stt")]
-    #[test]
-    fn speech_catalog_metadata_is_generic_transcription_metadata() {
-        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory, scripted_service};
-
-        let factory =
-            ScriptedModelFactory::new(ScriptedDecoder::new()).with_final(ScriptedDecoder::new());
-        let service = scripted_service(factory, 15, 500).expect("scripted service starts");
-        let data = service
-            .models()
-            .iter()
-            .map(CatalogModelInfo::speech)
-            .collect();
-        let value = serde_json::to_value(CatalogModelsResponse {
-            object: "list",
-            data,
-        })
-        .expect("catalog serializes");
-
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "object": "list",
-                "data": [
-                    {"id": "scripted-interim", "object": "model", "kind": "transcription"},
-                    {"id": "scripted-final", "object": "model", "kind": "transcription"},
-                    {"id": "realtime-transcribe", "object": "model", "kind": "transcription"},
-                ],
-            })
-        );
-        service.shutdown();
     }
 }

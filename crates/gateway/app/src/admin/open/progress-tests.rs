@@ -9,7 +9,7 @@ use gateway_api_types::Progress;
 use gateway_progress::ProgressHub;
 
 use super::{PROGRESS_HEARTBEAT, progress_sse_response};
-use crate::shutdown::ShutdownSignal;
+use crate::admin::walled::shutdown::ShutdownSignal;
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 

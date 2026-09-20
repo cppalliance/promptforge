@@ -1,13 +1,24 @@
 //! The queue cancellation routes: `POST /admin/queue/cancel` and
 //! `POST /admin/queue/cancel-pending`.
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::post;
+use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
+
+/// The queue cancellation routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/queue/cancel", post(admin_queue_cancel))
+        .route(
+            "/admin/queue/cancel-pending",
+            post(admin_queue_cancel_pending),
+        )
+}
 
 /// The `POST /admin/queue/cancel` route: bearer-authed, fires the active
 /// command's cancellation token. The reply reports whether a command was

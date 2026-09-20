@@ -10,16 +10,16 @@ todos:
     status: completed
   - id: area-routes
     content: Add routes() to every area module; move web_search/health/config_ui_redirect out of lib.rs
-    status: pending
+    status: completed
   - id: walled-dir
     content: Move 13 walled modules under admin/walled/, existing admin/* to admin/open/; merge walled once behind route_layer
-    status: pending
+    status: completed
   - id: loopback-caller
     content: Add LoopbackCaller extractor; switch admin/walled handler signatures (Finding 4)
-    status: pending
+    status: completed
   - id: shrink-build-router
     content: Reduce build_router to merges; drop too_many_lines waiver; verify mounts identical
-    status: pending
+    status: completed
   - id: route-registry
     content: Per-area RouteInfo consts with tier kind plus registry test; shrink lib.rs doc paragraph (Finding 6)
     status: pending
@@ -84,6 +84,8 @@ Pure mechanical, no route moves, verified by the existing suite.
 - Feature-gated areas: keep `#[cfg]` on the `mod` and on the merge line (or return `Router::new()` in non-feature builds, per Windmill), whichever keeps the URL space identical.
 - Verify mounts identical, then add a `LoopbackCaller` extractor (Svix per-tier extractor) wrapping `AuthedCaller` plus the loopback check, and switch every `admin/walled/` handler signature to it. The `route_layer` wall stays as defense in depth.
 - `build_router` becomes a dozen merges plus the STT merge, SPA nest, and host wall; drop the `too_many_lines` waiver.
+- As executed: `admin/config.rs` (the 21-line `GET /admin/config`) folded into `config_write.rs`, which became `admin/walled/config.rs`, so the `/admin/config` path has one owning module; `config_write_error` and `error_chain` now live there. The catalog wire types (`CatalogModelsResponse`, `CatalogModelInfo`, `SpeechCatalogModelInfo`) and their one test moved from `model_info.rs` to `models.rs` and a new `models-tests.rs`, so `model_info.rs` is the pure walled GGUF route and can sit behind `#[cfg(feature = "local")]` at the `mod` line. `health` and `web_search` became one-file area modules at the crate root; `config_ui_redirect` joined `handoff.rs` as the second route of the browser entry onto the SPA. `handoff`'s two routes take no caller (the handoff mints the credential). `LoopbackCaller` has `Rejection = Response`: the wall's bare 403 for a non-loopback or peerless caller, checked before auth, then `GatewayError`'s envelope for auth; its five tests live in `auth-loopback-tests.rs`.
+- Verified: all 35 route paths present before and after; clippy `-D warnings`, fmt, headless check, rustdoc `-D warnings`, `cargo test -p build-xtask`, nextest 474 passed (469 plus the 5 new extractor tests).
 - Commit: `Install routes per area behind tier-named constructors`
 
 ## Step 3: Route registry with a tier kind (Finding 6)

@@ -1,27 +1,77 @@
-//! The model catalog surface: `GET /v1/models` and the capability-endpoint
-//! status entries the admin status readout renders.
+//! The model catalog surface: `GET /v1/models`, its wire shape, and the
+//! capability-endpoint status entries the admin status readout renders.
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
+use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
-use crate::model_info;
 use crate::wire::ModelInfo;
+
+/// The catalog route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/v1/models", get(list_models))
+}
+
+/// The model-list wire response, including routed and active speech models.
+#[derive(Debug, Serialize)]
+pub(crate) struct CatalogModelsResponse {
+    /// Always `"list"`.
+    pub(crate) object: &'static str,
+    /// Models currently accepting their respective request shape.
+    pub(crate) data: Vec<CatalogModelInfo>,
+}
+
+/// One routed inference model or active speech model.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum CatalogModelInfo {
+    /// Existing chat, embedding, classifier, or speech metadata.
+    Inference(ModelInfo),
+    /// Generic transcription metadata.
+    #[cfg(feature = "stt")]
+    Speech(SpeechCatalogModelInfo),
+}
+
+impl CatalogModelInfo {
+    pub(crate) fn inference(model: ModelInfo) -> Self {
+        Self::Inference(model)
+    }
+
+    #[cfg(feature = "stt")]
+    pub(crate) fn speech(model: &gateway_stt::SpeechModelInfo) -> Self {
+        Self::Speech(SpeechCatalogModelInfo {
+            id: model.name().to_owned(),
+            object: "model",
+            kind: "transcription",
+        })
+    }
+}
+
+/// Speech metadata contains only fields meaningful to transcription clients.
+#[cfg(feature = "stt")]
+#[derive(Debug, Serialize)]
+pub(crate) struct SpeechCatalogModelInfo {
+    id: String,
+    object: &'static str,
+    kind: &'static str,
+}
 
 /// Bearer-authed catalog of configured models for host bind.
 pub(crate) async fn list_models(
     State(state): State<AppState>,
     _caller: AuthedCaller,
-) -> Result<Json<model_info::CatalogModelsResponse>, GatewayError> {
+) -> Result<Json<CatalogModelsResponse>, GatewayError> {
     let live = state.live.read().await;
     let data = live
         .routing
         .models()
         .iter()
         .map(|model| {
-            model_info::CatalogModelInfo::inference(ModelInfo {
+            CatalogModelInfo::inference(ModelInfo {
                 id: model.name.clone(),
                 object: "model",
                 kind: model.kind,
@@ -37,14 +87,10 @@ pub(crate) async fn list_models(
     let data = {
         let mut data = data;
         let speech_models = state.speech.models();
-        data.extend(
-            speech_models
-                .iter()
-                .map(model_info::CatalogModelInfo::speech),
-        );
+        data.extend(speech_models.iter().map(CatalogModelInfo::speech));
         data
     };
-    Ok(Json(model_info::CatalogModelsResponse {
+    Ok(Json(CatalogModelsResponse {
         object: "list",
         data,
     }))
@@ -97,3 +143,7 @@ pub(crate) fn with_speech_endpoint(
     ));
     (endpoints, speech)
 }
+
+#[cfg(all(test, feature = "stt"))]
+#[path = "models-tests.rs"]
+mod tests;

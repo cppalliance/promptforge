@@ -63,7 +63,7 @@ pub(crate) fn decide(resolution: &gateway_api_discovery::Resolution) -> Relaunch
         gateway_api_discovery::Resolution::Attach(file) => {
             // The file carries the real port of the loopback bind; URLs
             // normalize to a literal 127.0.0.1, never localhost.
-            Relaunch::OpenSettings(crate::handoff::auth_url(
+            Relaunch::OpenSettings(crate::admin::walled::handoff::auth_url(
                 &format!("http://127.0.0.1:{}", file.port),
                 &file.api_key,
             ))
@@ -73,7 +73,7 @@ pub(crate) fn decide(resolution: &gateway_api_discovery::Resolution) -> Relaunch
 }
 
 fn settings_url(connection: &gateway_api_discovery::ValidatedConnection) -> String {
-    crate::handoff::auth_url(
+    crate::admin::walled::handoff::auth_url(
         &format!("http://127.0.0.1:{}", connection.port()),
         connection.api_key(),
     )

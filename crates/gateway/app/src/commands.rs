@@ -24,7 +24,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
-use crate::config_apply::ApplySnapshot;
+use crate::admin::walled::config_apply::ApplySnapshot;
 use crate::error::GatewayError;
 
 /// The `ApplyConfig` command's display name: the status bar and tray show
@@ -638,7 +638,8 @@ async fn run_command(state: AppState, command: Command, activity: Activity) -> O
             crate::boot_load::run(&state, name, activity, &token).await
         }
         Command::ApplyConfig { snapshot, token } => {
-            crate::config_apply::apply_config(&state, snapshot, token, activity).await
+            crate::admin::walled::config_apply::apply_config(&state, snapshot, token, activity)
+                .await
         }
         Command::ProvisionModel {
             name,

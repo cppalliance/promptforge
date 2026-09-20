@@ -32,7 +32,10 @@ pub(crate) async fn serve(config: Config) -> SocketAddr {
 /// Serves like [`serve`], but with the Hugging Face proxy replaced, so a
 /// test can aim the `/admin/hf/*` routes at a local stub hub with an
 /// explicit token instead of the process env.
-pub(crate) async fn serve_with_hf(config: Config, hf: crate::hf::HfProxy) -> SocketAddr {
+pub(crate) async fn serve_with_hf(
+    config: Config,
+    hf: crate::admin::walled::hf::HfProxy,
+) -> SocketAddr {
     serve_with(config, Some(hf), None).await
 }
 
@@ -45,7 +48,7 @@ pub(crate) async fn serve_with_paths(config: Config, paths: AdminPaths) -> Socke
 /// [`serve_with_paths`].
 async fn serve_with(
     config: Config,
-    hf: Option<crate::hf::HfProxy>,
+    hf: Option<crate::admin::walled::hf::HfProxy>,
     paths: Option<AdminPaths>,
 ) -> SocketAddr {
     let mut state = app_state(config, paths);

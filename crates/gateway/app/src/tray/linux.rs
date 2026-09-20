@@ -37,8 +37,8 @@ use std::time::Duration;
 use ksni::TrayMethods as _;
 use ksni::menu::{CheckmarkItem, StandardItem};
 
+use crate::admin::walled::handoff::auth_url;
 use crate::api_error::StartupError;
-use crate::handoff::auth_url;
 use crate::runner::{GatewayHandle, ServeOptions, run_headless, spawn};
 use crate::tray::logic::{self, MenuItemSpec, TrayPhase};
 

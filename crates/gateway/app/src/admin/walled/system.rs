@@ -13,15 +13,21 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
 use nvml_wrapper::Nvml;
 use serde::Serialize;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+
+/// The host-metrics route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/system", get(admin_system))
+}
 
 /// Generic speech lifecycle facts included in Gateway operational status.
 #[cfg(feature = "stt")]
@@ -163,7 +169,7 @@ impl fmt::Debug for SystemSampler {
 /// rather than link time.
 pub(crate) async fn admin_system(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<SystemSnapshot>, GatewayError> {
     let cache_dir = state.config().await.local().cache_dir().map(str::to_owned);
     let metrics = Arc::clone(&state.metrics);

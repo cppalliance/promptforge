@@ -5,20 +5,28 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{FromRequest, Request, State};
 use axum::http::HeaderValue;
 use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use gateway_config::ModelKind;
+use gateway_protocol::ProtocolError;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
 use crate::relay::{CLIENT_HEADER, resolve_routed_model};
 use crate::wire::{SpeechRequest, SpeechResponseFormat, SpeechStreamFormat, SpeechVoice};
-use gateway_config::ModelKind;
-use gateway_protocol::ProtocolError;
+
+/// The speech routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/v1/audio/speech", post(audio_speech))
+        .route("/v1/audio/voices", get(audio_voices))
+}
 
 /// The speech route to a backend: the same auth, routing, kind guard, and
 /// dominion queue admission as chat, for `kind = "speech"` models.

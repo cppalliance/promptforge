@@ -9,18 +9,31 @@
 
 use std::time::Duration;
 
+use axum::Router;
 use axum::body::Body;
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderValue;
 use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
+use axum::routing::get;
 use gateway_config::Secret;
 use gateway_protocol::ProtocolError;
 use gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WirePath};
+
+/// The Hugging Face proxy routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/hf/search", get(admin_hf_search))
+        .route("/admin/hf/model/{owner}/{name}", get(admin_hf_model))
+        .route(
+            "/admin/hf/model/{owner}/{name}/readme",
+            get(admin_hf_readme),
+        )
+}
 
 /// Whole-request deadline for one hub call, applied per request; reqwest's
 /// per-request timeout replaces the bounded client's wider default.
@@ -162,7 +175,7 @@ pub(crate) struct HfSearchQuery {
 pub(crate) async fn admin_hf_search(
     State(state): State<AppState>,
     RawQuery(query): RawQuery,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Response, GatewayError> {
     let query = parse_search_query(query.as_deref())?;
     let renames = [("search", &query.q)];
@@ -267,7 +280,7 @@ fn validate_search_value(
 /// the sibling list carries the exact file sizes the quant picker needs.
 pub(crate) async fn admin_hf_model(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
     WirePath((owner, name)): WirePath<(String, String)>,
 ) -> Result<Response, GatewayError> {
     let repo = format!("{owner}/{name}");
@@ -283,7 +296,7 @@ pub(crate) async fn admin_hf_model(
 /// `text/markdown; charset=utf-8`. A missing README maps to 404.
 pub(crate) async fn admin_hf_readme(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
     WirePath((owner, name)): WirePath<(String, String)>,
 ) -> Result<Response, GatewayError> {
     let repo = format!("{owner}/{name}");

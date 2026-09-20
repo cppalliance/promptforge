@@ -12,16 +12,16 @@ use std::ops::Deref;
 use axum::extract::State;
 use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
 #[cfg(feature = "stt")]
 use axum::http::header::ORIGIN;
 use axum::http::request::Parts;
-#[cfg(feature = "stt")]
 use axum::response::{IntoResponse, Response};
 
 use crate::AppState;
+use crate::admin::walled::handoff;
 use crate::error::GatewayError;
-use crate::handoff;
 
 /// The request headers plus the peer address, as [`check_auth`]
 /// needs them.
@@ -111,9 +111,52 @@ impl FromRequestParts<AppState> for AuthedCaller {
     }
 }
 
+/// An [`AuthedCaller`] on a connection the server recorded as a loopback
+/// peer: the extractor every handler in the walled admin tier takes.
+///
+/// `build_router` already mounts that tier behind the shared loopback wall,
+/// which refuses a non-loopback peer with a bare 403 before auth runs, so in
+/// the assembled router this check never fires. The extractor is the
+/// handler's own statement of the tier it belongs to, readable from its
+/// signature, and it repeats the wall's question through the same
+/// [`shared_loopback::is_loopback_peer`] predicate: a walled handler that
+/// is ever mounted without the wall still refuses a LAN or peerless caller
+/// with the wall's 403, and refuses before auth, in the wall's order.
+pub(crate) struct LoopbackCaller(AuthedCaller);
+
+impl Deref for LoopbackCaller {
+    type Target = AuthedCaller;
+
+    fn deref(&self) -> &AuthedCaller {
+        &self.0
+    }
+}
+
+impl FromRequestParts<AppState> for LoopbackCaller {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<LoopbackCaller, Response> {
+        let Ok(caller) = Caller::from_request_parts(parts, state).await;
+        if !shared_loopback::is_loopback_peer(caller.peer()) {
+            return Err(StatusCode::FORBIDDEN.into_response());
+        }
+        check_auth(state, &caller)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        Ok(LoopbackCaller(AuthedCaller(caller)))
+    }
+}
+
 #[cfg(test)]
 #[path = "auth-tests.rs"]
 mod secret_tests;
+
+#[cfg(test)]
+#[path = "auth-loopback-tests.rs"]
+mod loopback_caller_tests;
 
 /// Authenticates the caller by any one of three rules, in this order.
 ///

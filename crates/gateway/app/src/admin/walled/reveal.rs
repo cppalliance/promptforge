@@ -21,13 +21,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::routing::post;
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, blocking};
+
+/// The reveal route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/reveal", post(admin_reveal))
+}
 
 /// The `POST /admin/reveal` body: the filesystem path to reveal.
 #[derive(Debug, Deserialize)]
@@ -92,7 +99,7 @@ impl RevealLauncher for SpawnLauncher {
 /// [`GatewayError::RevealFailed`] when the file manager cannot spawn.
 pub(crate) async fn admin_reveal(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
     WireJson(request): WireJson<RevealRequest>,
 ) -> Result<StatusCode, GatewayError> {
     #[cfg(feature = "local")]

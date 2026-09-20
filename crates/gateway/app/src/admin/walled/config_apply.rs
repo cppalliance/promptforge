@@ -23,21 +23,29 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::post;
+use axum::{Json, Router};
 use gateway_config::{Config, ProfileSelection, load_pending_config, shadow_path, write_atomic};
 use gateway_progress::Activity;
 #[cfg(feature = "web-search")]
 use gateway_web_search::WebSearchState;
 use tokio_util::sync::CancellationToken;
 
+use super::config::{config_write_error, error_chain};
+use super::config_pending::{canonical_form, config_root, relative_name, shadow_census};
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
-use crate::config_pending::{canonical_form, config_root, relative_name, shadow_census};
-use crate::config_write::{config_write_error, error_chain};
 use crate::error::{GatewayError, blocking};
 use crate::routing::Routing;
+
+/// The apply and revert routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/config-apply", post(admin_config_apply))
+        .route("/admin/config-revert", post(admin_config_revert))
+}
 
 /// Top-level sections the process reads once at boot. A change to one of
 /// them promotes to disk but takes effect at the next start, so the apply
@@ -75,7 +83,7 @@ const RESTART_SECTIONS: [&str; 6] = [
 /// still staged, so a retry of Apply re-runs the whole thing.
 pub(crate) async fn admin_config_apply(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let (enqueued, applied, restart_required) = {
@@ -136,7 +144,7 @@ pub(crate) async fn admin_config_apply(
 /// [`GatewayError::ApplyCancelled`].
 pub(crate) async fn admin_config_revert(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // A revert issued during an apply wins: cancel the apply before its
     // commit can write the snapshot over the files being reverted. The

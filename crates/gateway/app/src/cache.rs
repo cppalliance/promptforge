@@ -13,17 +13,17 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get};
+use axum::{Json, Router};
+use gateway_progress::Activity;
 use serde::Deserialize;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-
-use gateway_progress::Activity;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
@@ -33,6 +33,13 @@ use crate::local::artifacts::{
 };
 use crate::local::cache::{BlobCache, CacheEntry, CachedBlob};
 use crate::local::{LocalError, resolve_cache_root};
+
+/// The blob-cache routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/v1/cache", get(list_cache).post(post_cache))
+        .route("/v1/cache/{sha256}", delete(delete_cache))
+}
 
 /// Opens the blob cache at the active profile's resolved cache root.
 fn open_cache(cache_dir: Option<&str>) -> Result<BlobCache, LocalError> {

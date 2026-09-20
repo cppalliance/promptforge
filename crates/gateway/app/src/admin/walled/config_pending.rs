@@ -1,7 +1,7 @@
 //! Pending-state read routes: `GET /admin/config-pending` and
 //! `GET /admin/config-dirty`.
 //!
-//! The write route (`config_write.rs`) stages the global config as a
+//! The write route (`config.rs`) stages the global config as a
 //! `.next` shadow beside the real file; these routes read that pending
 //! state back. Profile selection is never staged: `config-pending` reports
 //! the selection the real `gateway.state.toml` persists, which may differ
@@ -14,15 +14,25 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::AppState;
-use crate::auth::AuthedCaller;
-use crate::error::{GatewayError, blocking};
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
 use gateway_config::{
     Config, ProfileSelection, ProfileState, load_pending_config, pending_report,
     profile_state_path, shadow_path,
 };
+
+use super::config::error_chain;
+use crate::AppState;
+use crate::auth::LoopbackCaller;
+use crate::error::{GatewayError, blocking};
+
+/// The pending-state read routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/config-pending", get(admin_config_pending))
+        .route("/admin/config-dirty", get(admin_config_dirty))
+}
 
 /// The `GET /admin/config-pending` route: bearer-authed, renders the
 /// shadow-preferred global config and the persisted profile selection.
@@ -36,7 +46,7 @@ use gateway_config::{
 /// redacted.
 pub(crate) async fn admin_config_pending(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
@@ -103,7 +113,7 @@ fn persisted_selection(config_path: &Path) -> Result<Option<String>, GatewayErro
 /// or `active_profile`.
 pub(crate) async fn admin_config_dirty(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
@@ -115,7 +125,7 @@ pub(crate) async fn admin_config_dirty(
 /// writing, so an unresolvable pending state is a server fault (500) with
 /// the full cause chain in the message.
 fn pending_read_error(error: &gateway_config::ConfigError) -> GatewayError {
-    GatewayError::PendingConfig(crate::config_write::error_chain(error))
+    GatewayError::PendingConfig(error_chain(error))
 }
 
 /// Every shadow on disk for one gateway and the sections they change.

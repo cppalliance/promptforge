@@ -234,7 +234,7 @@ impl Tray {
         let app = NSApplication::sharedApplication(mtm);
         let glyph = logic::macos::template_glyph(BRAND_RGBA);
         let glyph = Icon::from_rgba(glyph, ICON_SIZE, ICON_SIZE).map_err(TrayError::Icon)?;
-        let auth_url = crate::handoff::auth_url(handle.url(), handle.tray_key());
+        let auth_url = crate::admin::walled::handoff::auth_url(handle.url(), handle.tray_key());
         let workshop_exe = probe_workshop();
         let login = LoginService::new();
         let login_checked = login

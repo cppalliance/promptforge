@@ -1,21 +1,41 @@
-//! Shadow-file write route: `PUT /admin/config`.
+//! The `/admin/config` routes: `GET` renders the running global
+//! configuration as JSON with secrets redacted; `PUT` stages the pending
+//! global TOML document as a shadow file.
 //!
-//! The route stages the pending global TOML document beside its real file
-//! (`gateway.toml` gains `gateway.toml.next`) without touching the real
-//! file or reloading the gateway. The body is the config JSON shape
-//! `GET /admin/config` returns; secrets arriving as `"***"` preserve the
-//! existing value, and the merged pending configuration is validated
-//! before any shadow is written, so a bad save leaves nothing behind. The
-//! shadow mechanics live in `gateway-config`; these handlers
-//! own auth, path resolution, and the JSON-to-TOML boundary.
+//! The write stages the document beside its real file (`gateway.toml`
+//! gains `gateway.toml.next`) without touching the real file or reloading
+//! the gateway. The body is the config JSON shape `GET /admin/config`
+//! returns; secrets arriving as `"***"` preserve the existing value, and
+//! the merged pending configuration is validated before any shadow is
+//! written, so a bad save leaves nothing behind. The shadow mechanics live
+//! in `gateway-config`; these handlers own auth, path resolution, and the
+//! JSON-to-TOML boundary.
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
 use gateway_config::{ConfigErrorKind, save_config_shadow};
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, blocking};
+
+/// The `/admin/config` routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/config", get(admin_config).put(admin_put_config))
+}
+
+/// The `GET /admin/config` route: bearer-authed, renders the running global
+/// config in the pending admin shape. The running profile is not part of
+/// the document (`GET /admin/status` reports it), so the reply round-trips
+/// through `PUT /admin/config` unchanged.
+pub(crate) async fn admin_config(
+    State(state): State<AppState>,
+    _caller: LoopbackCaller,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let config = state.config().await;
+    Ok(Json(config.to_json()))
+}
 
 /// The `PUT /admin/config` route: bearer-authed, stages the global config.
 ///
@@ -27,7 +47,7 @@ use crate::error::{GatewayError, WireJson, blocking};
 /// config-write error: selection belongs to `POST /admin/switch-profile`.
 pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
     WireJson(body): WireJson<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Saves take the apply lock: apply promotes shadows without

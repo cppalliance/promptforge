@@ -25,16 +25,27 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use axum::Json;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use gateway_api_types::{ACCEPTED_SHEET_SCHEMA_VERSION, Sheet};
 use gateway_protocol::http_util::{MAX_JSON_BODY, bounded_client, read_bytes_capped};
 use time::OffsetDateTime;
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+
+/// The cloud provider model sheet routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/cloud-models", get(admin_cloud_models))
+        .route(
+            "/admin/cloud-models/refresh",
+            post(admin_cloud_models_refresh),
+        )
+}
 
 /// The release artifact the sheet downloads from.
 pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";
@@ -379,7 +390,7 @@ fn write_cache_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// arrived, or the last download error.
 pub(crate) async fn admin_cloud_models(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Response, GatewayError> {
     if let Some(sheet) = state.cloud_models.sheet() {
         return Ok(Json(Sheet::clone(&sheet)).into_response());
@@ -397,7 +408,7 @@ pub(crate) async fn admin_cloud_models(
 /// awaits the same download rather than starting a second one.
 pub(crate) async fn admin_cloud_models_refresh(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<Sheet>, GatewayError> {
     let sheet = state.cloud_models.refresh().await?;
     Ok(Json(Sheet::clone(&sheet)))

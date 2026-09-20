@@ -1,8 +1,10 @@
 //! The `GET /admin/status` readout: profile, models, queue, and one
 //! readiness entry per capability endpoint.
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
+use gateway_config::ModelKind;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
@@ -10,7 +12,11 @@ use crate::error::GatewayError;
 use crate::models::endpoint_status;
 #[cfg(feature = "stt")]
 use crate::models::with_speech_endpoint;
-use gateway_config::ModelKind;
+
+/// The status route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/status", get(admin_status))
+}
 
 /// An `Instant` as Unix epoch seconds for the status wire shape. The
 /// conversion goes through the elapsed duration, so a clock that jumped
@@ -113,7 +119,8 @@ pub(crate) async fn admin_status(
     #[cfg(feature = "stt")]
     let response = {
         let mut response = response;
-        response["speech"] = serde_json::json!(crate::system::SpeechSnapshot::from(speech));
+        response["speech"] =
+            serde_json::json!(crate::admin::walled::system::SpeechSnapshot::from(speech));
         response
     };
     Ok(Json(response))

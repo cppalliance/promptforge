@@ -4,12 +4,14 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
+use axum::routing::post;
+use axum::{Json, Router};
+use gateway_config::ModelKind;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
@@ -17,10 +19,17 @@ use crate::error::{GatewayError, WireJson};
 use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
 };
-use gateway_config::ModelKind;
 
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
 pub(crate) const CLIENT_HEADER: &str = "X-PromptForge-Client";
+
+/// The OpenAI passthrough routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/embeddings", post(embeddings))
+        .route("/v1/rerank", post(rerank))
+}
 
 /// Resolves a request's model name against the live routing table.
 ///

@@ -12,14 +12,20 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
 use gateway_config::{pending_var_references, write_shadow};
 
+use super::config::config_write_error;
 use crate::AppState;
-use crate::auth::AuthedCaller;
-use crate::config_write::config_write_error;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, WireQuery, blocking};
+
+/// The `/admin/env` routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/env", get(admin_get_env).put(admin_put_env))
+}
 
 /// The `GET /admin/env` route: bearer-authed, parses the global `.env` file.
 ///
@@ -33,7 +39,7 @@ use crate::error::{GatewayError, WireJson, WireQuery, blocking};
 /// is an empty `vars` map.
 pub(crate) async fn admin_get_env(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let config = crate::admin::config_path(&state)?.to_path_buf();
     let env = config.with_extension("env");
@@ -70,7 +76,7 @@ pub(crate) struct EnvPutQuery {
 /// The real `.env` file is never touched.
 pub(crate) async fn admin_put_env(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
     WireQuery(scope): WireQuery<EnvPutQuery>,
     WireJson(vars): WireJson<BTreeMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {

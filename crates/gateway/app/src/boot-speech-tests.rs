@@ -342,7 +342,7 @@ async fn a_failed_boot_speech_load_leaves_the_gateway_serving_without_speech() {
         .expect("the worker settles the command");
     let chain = match &*outcome {
         Ok(profile) => panic!("the STT failure fails the boot command, got {profile}"),
-        Err(error) => crate::config_write::error_chain(error),
+        Err(error) => crate::admin::walled::config::error_chain(error),
     };
     assert!(chain.contains("load-speech"), "the stage is named: {chain}");
     assert!(

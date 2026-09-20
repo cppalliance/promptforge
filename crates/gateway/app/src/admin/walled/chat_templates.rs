@@ -3,8 +3,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
 use gateway_config::{Config, LocalModelConfig, ModelKind};
 use gateway_local::artifacts::existing_model_path;
 use gateway_local::chat_templates::{Family, model_family_mappings};
@@ -13,10 +14,15 @@ use gateway_local::{
 };
 use serde::Serialize;
 
+use super::config_pending::load_pending_for_running;
 use crate::AppState;
-use crate::auth::AuthedCaller;
-use crate::config_pending::load_pending_for_running;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+
+/// The chat-template catalog route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/chat-templates", get(admin_chat_templates))
+}
 
 #[derive(Serialize)]
 struct FamilyReply {
@@ -49,7 +55,7 @@ struct CatalogReply {
 /// Serves bundled families, exact model mappings, and pending-model decisions.
 pub(crate) async fn admin_chat_templates(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let (running, running_profile) = {
         let live = state.live.read().await;

@@ -1,4 +1,4 @@
-//! PromptForge inference gateway.
+﻿//! PromptForge inference gateway.
 //!
 //! A small always-on service that accepts OpenAI-shaped chat completions, holds
 //! the backend credential, resolves the request's model name to a configured
@@ -83,11 +83,23 @@
 //! ## Where new route code goes
 //!
 //! A route area gets a module named after it (`relay`, `speech`,
-//! `models`, `admin`); a module earns a directory at three or more
-//! files, the way `admin/` does. A new endpoint never edits this crate
-//! root outside the route table in `build_router`: the handler goes in
-//! its area's module, and its tests in that module's kebab `-tests.rs`
-//! sibling, wired with `#[path]`.
+//! `models`, `health`); a module earns a directory at three or more
+//! files. Each area module owns its own mounts behind
+//! `pub(crate) fn routes() -> Router<AppState>`, and `build_router` only
+//! merges the areas and applies the walls, so a new endpoint never edits
+//! this crate root: the handler and its `.route()` line go in the area's
+//! module, and its tests in that module's kebab `-tests.rs` sibling,
+//! wired with `#[path]`.
+//!
+//! The admin surface is split by tier, and the tier is the directory.
+//! `admin/open/` holds the bearer-authed routes any admitted peer may
+//! reach; `admin/walled/` holds the routes that read secrets in
+//! plaintext, write files, or launch processes, which `build_router`
+//! merges once behind the shared loopback wall. A handler under
+//! `walled/` takes `LoopbackCaller` where an open handler takes
+//! `AuthedCaller`, so its signature states the tier its path already
+//! does. A new admin route picks its directory by that question and
+//! nothing else.
 //!
 //! Handlers read live state through the `AppState` accessors
 //! (`config()`, `routing()`, `profile_name()`), never by naming the
@@ -102,34 +114,22 @@ mod boot;
 mod boot_load;
 #[cfg(feature = "local")]
 mod cache;
-#[cfg(feature = "local")]
-mod chat_templates;
-mod cloud_models;
 mod commands;
-mod config_apply;
-mod config_pending;
-mod config_write;
 mod diagnostics;
 mod dialect;
-mod env_file;
 mod error;
-mod handoff;
-mod hf;
-mod model_info;
+mod health;
 mod models;
-#[cfg(feature = "local")]
-mod orphans;
 mod relaunch;
 mod relay;
-mod reveal;
 mod routing;
 mod runner;
-mod shutdown;
 mod speech;
-mod system;
 #[cfg(test)]
 mod test_support;
 mod tray;
+#[cfg(feature = "web-search")]
+mod web_search;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
 // these re-exports keep every `crate::wire::*` and `crate::upstream::*`
@@ -161,20 +161,11 @@ pub use gateway_config::{
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use axum::Json;
-#[cfg(feature = "web-search")]
-use axum::extract::State;
-#[cfg(feature = "local")]
-use axum::routing::delete;
-use axum::routing::{get, post};
-use axum::{Router, response::IntoResponse};
+use axum::Router;
 use tokio::sync::RwLock;
 
 use crate::admin::AdminConfig;
-#[cfg(feature = "web-search")]
-use crate::auth::AuthedCaller;
-#[cfg(feature = "web-search")]
-use crate::error::{GatewayError, WireJson};
+use crate::admin::walled::{cloud_models, hf, reveal, shutdown, system};
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
@@ -184,7 +175,7 @@ use gateway_progress::ProgressHub;
 #[cfg(feature = "stt")]
 use gateway_stt::SpeechService;
 #[cfg(feature = "web-search")]
-use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
+use gateway_web_search::WebSearchState;
 
 /// Mutable live configuration held behind a lock so the boot load and a
 /// config apply can swap routing without rebuilding the axum router.
@@ -508,110 +499,29 @@ impl AppState {
 /// no loopback allowlist to enforce. The [`Gateway::router`] seam passes
 /// `None` and carries no host wall: with no bound socket there is no
 /// authority to allowlist.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the route table is deliberately one screen: every mount, wall, and feature gate in a single scan"
-)]
 pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>) -> Router {
+    // The open tier: every area any admitted peer may reach, each mounted
+    // by its own module. Feature-gated areas merge under the same gate
+    // that compiles them, so a build with a feature off serves exactly
+    // the space of a build with it on, minus that area.
     let router = Router::new()
-        .route("/v1/chat/completions", post(relay::chat_completions))
-        .route("/v1/embeddings", post(relay::embeddings))
-        .route("/v1/rerank", post(relay::rerank))
-        .route("/v1/audio/speech", post(speech::audio_speech))
-        .route("/v1/audio/voices", get(speech::audio_voices))
-        .route("/v1/models", get(models::list_models))
-        .route("/health", get(health))
-        .route("/admin/profiles", get(admin::profiles::admin_list_profiles))
-        .route("/admin/status", get(admin::status::admin_status))
-        .route("/admin/progress", get(admin::progress::admin_progress))
-        .route(
-            "/admin/switch-profile",
-            post(admin::profiles::admin_switch_profile),
-        )
-        .route(
-            "/admin/queue/cancel",
-            post(admin::queue::admin_queue_cancel),
-        )
-        .route(
-            "/admin/queue/cancel-pending",
-            post(admin::queue::admin_queue_cancel_pending),
-        );
-    // The web-search tool route delegates to the service crate, so it exists
-    // only in builds with the `web-search` feature.
+        .merge(relay::routes())
+        .merge(speech::routes())
+        .merge(models::routes())
+        .merge(health::routes())
+        .merge(admin::open::routes());
     #[cfg(feature = "web-search")]
-    let router = router.route("/v1/tools/web_search", post(web_search));
-    // The blob-cache routes serve the local artifact store, so they exist
-    // only in builds with local inference.
+    let router = router.merge(web_search::routes());
     #[cfg(feature = "local")]
-    let router = router
-        .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
-        .route("/v1/cache/{sha256}", delete(cache::delete_cache));
-
-    // The admin config surface reads secrets in plaintext, writes files,
-    // and launches processes, so every route below sits behind the shared
-    // loopback wall in every build: a non-loopback peer is refused with
-    // 403 before bearer auth even runs. `POST /shutdown` kills the process
-    // and `GET /auth` mints the key's ambient cookie, so both are walled
-    // with the config surface they serve.
-    let walled = Router::new()
-        .route("/shutdown", post(shutdown::admin_shutdown))
-        .route("/admin/system", get(system::admin_system))
-        .route(
-            "/admin/config",
-            get(admin::config::admin_config).put(config_write::admin_put_config),
-        )
-        .route(
-            "/admin/config-pending",
-            get(config_pending::admin_config_pending),
-        )
-        .route(
-            "/admin/config-dirty",
-            get(config_pending::admin_config_dirty),
-        )
-        .route(
-            "/admin/config-apply",
-            post(config_apply::admin_config_apply),
-        )
-        .route(
-            "/admin/config-revert",
-            post(config_apply::admin_config_revert),
-        )
-        .route(
-            "/admin/env",
-            get(env_file::admin_get_env).put(env_file::admin_put_env),
-        )
-        .route("/admin/cloud-models", get(cloud_models::admin_cloud_models))
-        .route(
-            "/admin/cloud-models/refresh",
-            post(cloud_models::admin_cloud_models_refresh),
-        )
-        .route("/admin/reveal", post(reveal::admin_reveal))
-        .route("/admin/hf/search", get(hf::admin_hf_search))
-        .route("/admin/hf/model/{owner}/{name}", get(hf::admin_hf_model))
-        .route(
-            "/admin/hf/model/{owner}/{name}/readme",
-            get(hf::admin_hf_readme),
-        );
-    // The template, orphan, and model-info routes read local-inference
-    // facilities, so they exist only in builds with local inference.
-    #[cfg(feature = "local")]
-    let walled = walled
-        .route(
-            "/admin/chat-templates",
-            get(chat_templates::admin_chat_templates),
-        )
-        .route("/admin/orphans", get(orphans::admin_orphans))
-        .route("/admin/model-info", get(model_info::admin_model_info));
-    // `GET /config` (no trailing slash) redirects to `/config/` so the
-    // SPA's relative asset references resolve against the mount point;
-    // it is walled like the assets it fronts. `GET /auth` is the browser
-    // handoff onto that surface, so it exists only when the surface does.
-    #[cfg(feature = "config-ui")]
-    let walled = walled
-        .route("/config", get(config_ui_redirect))
-        .route("/auth", get(handoff::auth_handoff));
-    let router = router
-        .merge(walled.route_layer(axum::middleware::from_fn(shared_loopback::require_loopback)));
+    let router = router.merge(cache::routes());
+    // The walled tier reads secrets in plaintext, writes files, and
+    // launches processes, so it sits behind the shared loopback wall in
+    // every build: a non-loopback peer is refused with 403 before bearer
+    // auth even runs. The wall is applied here, once, at the merge.
+    let router = router.merge(
+        admin::walled::routes()
+            .route_layer(axum::middleware::from_fn(shared_loopback::require_loopback)),
+    );
     // The SPA asset router arrives with the same loopback wall already
     // applied inside `routes()`; `nest_service` because the asset router
     // carries no gateway state.
@@ -636,39 +546,6 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
         )),
         None => router,
     }
-}
-
-/// Redirects `GET /config` to `/config/`, where the SPA index is served
-/// and its relative asset references resolve.
-#[cfg(feature = "config-ui")]
-async fn config_ui_redirect() -> axum::response::Redirect {
-    axum::response::Redirect::permanent("/config/")
-}
-
-/// The `POST /v1/tools/web_search` route: bearer-authed, delegates to the
-/// web-search service crate.
-///
-/// # Errors
-/// Returns [`GatewayError::Unauthorized`] when the bearer token is absent or
-/// wrong, [`GatewayError::ToolNotConfigured`] when no `[tools.web_search]`
-/// section is present, [`GatewayError::MalformedRequest`] when the request
-/// fails validation, and the upstream variants on a provider failure.
-#[cfg(feature = "web-search")]
-async fn web_search(
-    State(state): State<AppState>,
-    _caller: AuthedCaller,
-    WireJson(request): WireJson<WebSearchRequest>,
-) -> Result<Json<WebSearchResponse>, GatewayError> {
-    let service = state
-        .web_search()
-        .await
-        .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
-    Ok(Json(service.search(&request).await?))
-}
-
-/// Liveness probe; unauthenticated and always 200 while serving.
-async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "serving" }))
 }
 
 #[cfg(test)]

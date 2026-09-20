@@ -1,15 +1,24 @@
 //! The profile routes: `GET /admin/profiles` and
 //! `POST /admin/switch-profile`.
 
-use axum::Json;
 use axum::extract::State;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use gateway_config::ProfileName;
 use serde::Deserialize;
 
-use super::config_path;
 use crate::AppState;
+use crate::admin::config_path;
+use crate::admin::walled::config::config_write_error;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson, blocking};
-use gateway_config::ProfileName;
+
+/// The profile routes.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/admin/profiles", get(admin_list_profiles))
+        .route("/admin/switch-profile", post(admin_switch_profile))
+}
 
 /// The `POST /admin/switch-profile` body: a profile name, or `null` (or
 /// absent) to select no profile.
@@ -82,7 +91,7 @@ pub(crate) async fn admin_switch_profile(
         None => gateway_config::clear_profile_state(&config_path),
     })
     .await?
-    .map_err(crate::config_write::config_write_error)?;
+    .map_err(config_write_error)?;
     Ok(Json(serde_json::json!({
         "profile": selected.as_ref().map(ProfileName::as_str),
         "restart_required": restart_required,

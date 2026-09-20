@@ -7,15 +7,20 @@
 //! The diff itself lives in the local crate beside the blob cache, which owns
 //! the slot layout and the sidecar records.
 
-use axum::Json;
 use axum::extract::State;
-
+use axum::routing::get;
+use axum::{Json, Router};
 use gateway_config::SttModelConfig;
 
 use crate::AppState;
-use crate::auth::AuthedCaller;
+use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
 use crate::local::{cache::orphans, resolve_cache_root};
+
+/// The orphan-scan route.
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new().route("/admin/orphans", get(admin_orphans))
+}
 
 /// The `GET /admin/orphans` route: bearer-authed, scans `<cache_dir>/models/`
 /// and reports every file no `[[local_model]]` or `[[stt_model]]` declared in
@@ -28,7 +33,7 @@ use crate::local::{cache::orphans, resolve_cache_root};
 /// reports an empty list.
 pub(crate) async fn admin_orphans(
     State(state): State<AppState>,
-    _caller: AuthedCaller,
+    _caller: LoopbackCaller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // The retained running config carries both the `[local].cache_dir` the
     // scan resolves and the catalog it diffs against: every `[[local_model]]`
