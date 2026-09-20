@@ -1,20 +1,16 @@
 // The status bar shell shared by both UIs: a permanent full-width footer
-// with a text region on the left and a fixed-width slot on the right that
-// holds either the inline progress bar or the indicators group - never
-// both. Each UI populates the indicators group with its own LEDs (the
-// workshop: recording + activity; the gateway: per-endpoint capability)
-// and the extras region with its own controls (the gateway: the model
-// summary, the pending-queue count, and the cancel buttons). The shell
-// owns no timers, listeners, or polling; the consumer drives it through
-// setText and renderSlot and owns every lifecycle.
+// with a text region on the left and, on the right, a barberpole beside
+// the indicators group. The barberpole is an indeterminate busy signal:
+// it shows while work is in flight and hides otherwise, and it never
+// displaces the indicators - the LEDs stay visible either way. Each UI
+// populates the indicators group with its own LEDs (the workshop:
+// recording + activity; the gateway: per-endpoint capability) and the
+// extras region with its own controls (the gateway: the model summary,
+// the pending-queue count, and the cancel buttons). The shell owns no
+// timers, listeners, or polling; the consumer drives it through setText
+// and setBusy and owns every lifecycle.
 
 import "./status-bar.css";
-
-/** One progress reading for the slot's bar. */
-export interface SlotProgress {
-  readonly current: number;
-  readonly total: number;
-}
 
 /** Options for {@link StatusBarShell.setText}. */
 export interface StatusBarText {
@@ -30,22 +26,20 @@ export interface StatusBarShell {
   readonly element: HTMLElement;
   /** The left text region. */
   readonly text: HTMLElement;
-  /** The slot's progress bar. */
-  readonly progress: HTMLProgressElement;
-  /** The slot's indicators group; the consumer fills it with its LEDs. */
+  /** The animated busy barberpole; hidden while idle. */
+  readonly barberpole: HTMLElement;
+  /** The indicators group; the consumer fills it with its LEDs. */
   readonly indicators: HTMLElement;
-  /** The region between the text and the slot for consumer controls. */
+  /** The region between the text and the right group for consumer controls. */
   readonly extras: HTMLElement;
   /** Sets the left text, its error styling, and the bar tooltip. */
   setText(label: string, options?: StatusBarText): void;
   /**
-   * Swaps the slot between the progress bar and the indicators group.
-   * Progress wins: a reading shows the bar and hides the group; null
-   * restores the group. The swap rides the `hidden` attribute and never
-   * touches the indicators' contents, so a live LED reappears lit; the
-   * slot's fixed width keeps the bar from reflowing.
+   * Shows or hides the barberpole. The toggle rides the `hidden`
+   * attribute on the barberpole alone and never touches the indicators
+   * group or its contents, so a live LED keeps glowing beside it.
    */
-  renderSlot(progress: SlotProgress | null): void;
+  setBusy(busy: boolean): void;
 }
 
 /** Creates the status bar shell. */
@@ -63,24 +57,26 @@ export function createStatusBarShell(): StatusBarShell {
 
   const right = document.createElement("span");
   right.className = "status-bar__right";
+  // An indeterminate progressbar: role without aria-valuenow tells
+  // assistive tech that work is in flight with no known fraction.
+  const barberpole = document.createElement("span");
+  barberpole.className = "status-bar__barberpole";
+  barberpole.setAttribute("role", "progressbar");
+  barberpole.setAttribute("aria-label", "Busy");
+  barberpole.hidden = true;
   const slot = document.createElement("span");
   slot.className = "status-bar__slot";
-  const progress = document.createElement("progress");
-  progress.className = "status-bar__progress";
-  progress.value = 0;
-  progress.max = 100;
-  progress.setAttribute("aria-label", "Task progress");
-  progress.hidden = true;
   const indicators = document.createElement("span");
   indicators.className = "status-bar__indicators";
-  slot.append(progress, indicators);
-  right.append(slot);
+  slot.append(indicators);
+  // The barberpole sits immediately before the indicators group.
+  right.append(barberpole, slot);
   element.append(text, extras, right);
 
   return {
     element,
     text,
-    progress,
+    barberpole,
     indicators,
     extras,
     setText(label: string, options?: StatusBarText): void {
@@ -88,17 +84,8 @@ export function createStatusBarShell(): StatusBarShell {
       element.title = options?.tooltip ?? "";
       text.classList.toggle("status-bar__text--error", options?.error === true);
     },
-    renderSlot(value: SlotProgress | null): void {
-      if (value) {
-        // A zero total is degenerate; clamp so value/max stay valid.
-        progress.max = value.total > 0 ? value.total : 1;
-        progress.value = value.current;
-        progress.hidden = false;
-        indicators.hidden = true;
-      } else {
-        progress.hidden = true;
-        indicators.hidden = false;
-      }
+    setBusy(busy: boolean): void {
+      barberpole.hidden = !busy;
     },
   };
 }

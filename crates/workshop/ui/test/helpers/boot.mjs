@@ -351,7 +351,7 @@ export async function bootWorkbench(name, run, options = {}) {
   const statusBar = window.document.querySelector(".status-bar");
   const statusText = window.document.querySelector(".status-bar__text");
   const statusSlot = window.document.querySelector(".status-bar__slot");
-  const progressEl = window.document.querySelector(".status-bar__progress");
+  const barberpoleEl = window.document.querySelector(".status-bar__barberpole");
   const indicatorsEl = window.document.querySelector(".status-bar__indicators");
   const ledEl = window.document.querySelector(".status-bar__led:not(.status-bar__led--rec)");
   const recEl = window.document.querySelector(".status-bar__led--rec");
@@ -469,7 +469,7 @@ export async function bootWorkbench(name, run, options = {}) {
     statusBar,
     statusText,
     statusSlot,
-    progressEl,
+    barberpoleEl,
     indicatorsEl,
     ledEl,
     recEl,

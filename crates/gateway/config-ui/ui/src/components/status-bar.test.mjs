@@ -1,10 +1,10 @@
 // Pins the bottom status bar: the idle LED strip maps each endpoint's
 // ready/provisioning flags to its LED state beside the model/VRAM
-// summary; an active queue command swaps the shared shell's slot to the
-// progress bar with the command label in the text region, the pending
-// count with per-entry cancel buttons, and a cancel button that calls
-// POST /admin/queue/cancel; and panel mode mounts no bar at
-// all (the workshop owns status display there).
+// summary; an active queue command shows the shared shell's barberpole
+// beside the still-visible LEDs with the command label in the text
+// region, the pending count with per-entry cancel buttons, and a cancel
+// button that calls POST /admin/queue/cancel; and panel mode mounts no
+// bar at all (the workshop owns status display there).
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -39,7 +39,8 @@ test("the idle bar maps each endpoint to its LED state plus the model summary", 
     "2 models, 4.1 GB",
     "the summary carries the model count and declared VRAM",
   );
-  assert.equal(bar.querySelector(".status-bar__progress").hidden, true, "no progress bar idle");
+  assert.equal(bar.querySelector(".status-bar__barberpole").hidden, true, "no barberpole idle");
+  assert.equal(bar.querySelector("progress"), null, "no <progress> element remains");
 });
 
 test("the idle bar omits the VRAM total when nothing declares any", async () => {
@@ -52,13 +53,14 @@ test("the idle bar omits the VRAM total when nothing declares any", async () => 
   );
 });
 
-test("an active command swaps the slot to the progress bar, and cancel calls the route", async (t) => {
+test("an active command shows the barberpole beside the LEDs, and cancel calls the route", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const stub = gatewayStub({ key: "k", config: modelsFixture(), endpoints: ENDPOINTS });
   const { root } = await bootApp({ key: "k", stub });
   const indicators = root.querySelector(".status-bar__indicators");
-  const progress = root.querySelector(".status-bar__progress");
+  const barberpole = root.querySelector(".status-bar__barberpole");
   assert.equal(indicators.hidden, false, "the LED strip shows while the queue is idle");
+  assert.equal(barberpole.hidden, true, "the barberpole hides while the queue is idle");
 
   stub.state.queue = {
     active: { name: "load-profile: main", fraction: 0.34, started_at: 1_700_000_000 },
@@ -67,15 +69,13 @@ test("an active command swaps the slot to the progress bar, and cancel calls the
   t.mock.timers.tick(2000);
   await settle();
 
-  assert.equal(indicators.hidden, true, "the LED strip hides while a command runs");
-  assert.equal(progress.hidden, false, "the progress bar takes the slot");
+  assert.equal(indicators.hidden, false, "the LED strip stays visible while a command runs");
+  assert.equal(barberpole.hidden, false, "the barberpole shows while a command runs");
   assert.equal(
     root.querySelector(".status-bar__text").textContent,
     "load-profile: main (34%)",
     "the text carries the command name and rounded percent",
   );
-  assert.equal(progress.value, 34, "the bar reads the rounded percent");
-  assert.equal(progress.max, 100);
   assert.equal(
     root.querySelector(".status-bar-pending").textContent,
     "1 queued",
@@ -97,12 +97,12 @@ test("an active command swaps the slot to the progress bar, and cancel calls the
   await settle();
   assert.equal(stub.state.cancelActiveCalls, 1, "the cancel button fired the cancel route");
 
-  // The command settled: the next poll swaps back to the LED strip.
+  // The command settled: the next poll hides the barberpole.
   stub.state.queue = { active: null, pending: [] };
   t.mock.timers.tick(2000);
   await settle();
-  assert.equal(indicators.hidden, false, "the LED strip returns once the queue drains");
-  assert.equal(progress.hidden, true);
+  assert.equal(indicators.hidden, false, "the LED strip is still visible once the queue drains");
+  assert.equal(barberpole.hidden, true, "the barberpole hides once the queue drains");
 });
 
 test("panel mode mounts no status bar", async () => {

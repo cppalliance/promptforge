@@ -1,9 +1,10 @@
 // Unit test for the shared status bar shell (shared-ui/status-bar.ts):
-// the slot swap between the inline progress bar and the consumer's
-// indicators group (progress wins, null restores, the group's contents
-// survive the swap), the zero-total clamp, the text region's label,
-// tooltip, and error styling, and the extras region the consumers fill.
-// Bundles the module with esbuild and drives it against jsdom.
+// the barberpole beside the consumer's indicators group (setBusy shows
+// and hides the barberpole, the group stays visible throughout and keeps
+// its contents, the barberpole precedes the group in DOM order), the
+// text region's label, tooltip, and error styling, and the extras region
+// the consumers fill. Bundles the module with esbuild and drives it
+// against jsdom.
 // Run: node test/shared-status-bar.mjs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +45,7 @@ function check(name, condition) {
 const shell = createStatusBarShell();
 window.document.body.append(shell.element);
 
-// A consumer's indicator: the swap must never touch its contents.
+// A consumer's indicator: busy toggling must never touch its contents.
 const led = window.document.createElement("span");
 led.className = "status-bar__led";
 shell.indicators.append(led);
@@ -53,32 +54,45 @@ shell.indicators.append(led);
 
 check("the element is the status-bar footer", shell.element.matches("footer.status-bar"));
 check("the bar is a polite live region", shell.element.getAttribute("aria-live") === "polite");
-check("the progress bar starts hidden", shell.progress.hidden === true);
+check(
+  "the barberpole is the shell's element of that class",
+  shell.barberpole === shell.element.querySelector(".status-bar__barberpole"),
+);
+check("the barberpole starts hidden", shell.barberpole.hidden === true);
 check("the indicators group starts visible", shell.indicators.hidden === false);
+check(
+  "the barberpole sits in the right group",
+  shell.barberpole.parentElement?.matches(".status-bar__right") === true,
+);
+check(
+  "the barberpole precedes the indicators group in DOM order",
+  (shell.barberpole.compareDocumentPosition(shell.indicators) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+);
+check(
+  "the barberpole is an indeterminate progressbar to assistive tech",
+  shell.barberpole.getAttribute("role") === "progressbar" &&
+    !shell.barberpole.hasAttribute("aria-valuenow"),
+);
+check("no <progress> element remains in the shell", shell.element.querySelector("progress") === null);
 check("the text region starts empty", shell.text.textContent === "");
 check("the extras region is empty until the consumer fills it", shell.extras.childElementCount === 0);
 
-// --- The slot swap --------------------------------------------------------------
+// --- The busy toggle --------------------------------------------------------------
 
-shell.renderSlot({ current: 1, total: 4 });
-check("a reading reveals the progress bar", shell.progress.hidden === false);
-check("a reading hides the indicators group", shell.indicators.hidden === true);
-check(
-  "the bar shows the reading",
-  shell.progress.value === 1 && shell.progress.max === 4,
-);
-check("the swap kept the consumer's LED in the group", shell.indicators.contains(led));
+shell.setBusy(true);
+check("setBusy(true) shows the barberpole", shell.barberpole.hidden === false);
+check("setBusy(true) leaves the indicators group visible", shell.indicators.hidden === false);
+check("setBusy(true) kept the consumer's LED in the group", shell.indicators.contains(led));
 
-shell.renderSlot({ current: 2, total: 4 });
-check("a second reading updates the bar in place", shell.progress.value === 2);
+shell.setBusy(true);
+check("a repeated setBusy(true) keeps the barberpole shown", shell.barberpole.hidden === false);
 
-shell.renderSlot({ current: 0, total: 0 });
-check("a zero total clamps max so value/max stay valid", shell.progress.max === 1);
-
-shell.renderSlot(null);
-check("clearing progress hides the bar", shell.progress.hidden === true);
-check("clearing progress restores the indicators group", shell.indicators.hidden === false);
-check("the restored group still carries the consumer's LED", shell.indicators.contains(led));
+shell.setBusy(false);
+check("setBusy(false) hides the barberpole", shell.barberpole.hidden === true);
+check("setBusy(false) leaves the indicators group visible", shell.indicators.hidden === false);
+check("the group still carries the consumer's LED", shell.indicators.contains(led));
+check("the shell exposes no renderSlot", typeof shell.renderSlot === "undefined");
+check("the shell exposes no progress element", typeof shell.progress === "undefined");
 
 // --- The text region --------------------------------------------------------------
 

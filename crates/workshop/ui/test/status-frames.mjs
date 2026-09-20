@@ -1,15 +1,15 @@
 // Status frames render into the status bar. Text and tooltip: info and
 // error frames set the bar text and description tooltip, error frames style
 // the text and the styling clears on the next info frame, and debug frames
-// are internal instrumentation that must not touch either. Progress: a
-// non-null progress renders the bar in the slot at the frame's fraction and
-// hides the recording+activity LED indicators group; a null progress removes
-// the bar and restores the group; debug frames never disturb the slot.
+// are internal instrumentation that must not touch either. Busy: a
+// non-null progress shows the barberpole beside the recording+activity LED
+// indicators group, which stays visible; a null progress hides the
+// barberpole; debug frames never disturb it.
 // Run: node test/status-frames.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
 await bootWorkbench("status frames render into the bar", async (ctx) => {
-  const { emitStatus, statusText, statusBar, progressEl, indicatorsEl, failures } = ctx;
+  const { emitStatus, statusText, statusBar, barberpoleEl, indicatorsEl, failures } = ctx;
 
   emitStatus({
     label: "Streaming response...",
@@ -52,12 +52,9 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
     activity: "general",
     progress: { current: 1, total: 4 },
   });
-  if (progressEl.hidden) failures.push("a progress frame did not reveal the progress bar");
-  if (progressEl.value !== 1 || progressEl.max !== 4) {
-    failures.push(`progress bar shows ${progressEl.value}/${progressEl.max}, expected 1/4`);
-  }
-  if (!indicatorsEl.hidden) {
-    failures.push("the recording and activity LED group did not hide while progress is showing");
+  if (barberpoleEl.hidden) failures.push("a progress frame did not reveal the barberpole");
+  if (indicatorsEl.hidden) {
+    failures.push("the recording and activity LED group hid while the barberpole is showing");
   }
   emitStatus({
     label: "Downloading model",
@@ -66,12 +63,12 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
     progress: { current: 2, total: 4 },
   });
   emitStatus({ label: "per-delta pulse", severity: "debug", activity: "generating" });
-  if (progressEl.hidden || progressEl.value !== 2) {
-    failures.push("a debug frame disturbed the progress bar");
+  if (barberpoleEl.hidden) {
+    failures.push("a debug frame disturbed the barberpole");
   }
   emitStatus({ label: "Download complete", description: "ready" });
-  if (!progressEl.hidden) failures.push("a null-progress frame did not hide the progress bar");
+  if (!barberpoleEl.hidden) failures.push("a null-progress frame did not hide the barberpole");
   if (indicatorsEl.hidden) {
-    failures.push("the recording and activity LED group did not return when progress cleared");
+    failures.push("the recording and activity LED group hid when progress cleared");
   }
 });

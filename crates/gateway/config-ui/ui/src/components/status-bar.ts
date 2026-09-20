@@ -1,15 +1,15 @@
 // The fixed bottom status bar [VS Code], built on the shared shell
 // (shared-ui/status-bar): the shell owns the bar, the text region, and
-// the slot's progress/indicators swap; this component populates them
-// from the extended GET /admin/status response. Idle shows the endpoint
-// LED strip (green ready, amber provisioning, gray unconfigured) in the
-// indicators group plus the model count and declared VRAM in the extras
-// region; an active queue command swaps the slot to the progress bar,
-// puts the command label in the text, and fills the extras region with
-// the pending count, one cancel button per pending command (POST
-// /admin/queue/cancel-pending), and the active command's cancel button
-// (POST /admin/queue/cancel). Self-contained on purpose - it owns its
-// poll loop and the body class that keeps page content clear of the
+// the busy barberpole beside the indicators; this component populates
+// them from the extended GET /admin/status response. The endpoint LED
+// strip (green ready, amber provisioning, gray unconfigured) stands in
+// the indicators group throughout; idle adds the model count and
+// declared VRAM in the extras region; an active queue command shows the
+// barberpole, puts the command label in the text, and fills the extras
+// region with the pending count, one cancel button per pending command
+// (POST /admin/queue/cancel-pending), and the active command's cancel
+// button (POST /admin/queue/cancel). Self-contained on purpose - it owns
+// its poll loop and the body class that keeps page content clear of the
 // fixed strip.
 
 import { X, createElement as lucideElement } from "lucide";
@@ -137,7 +137,9 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
         const fraction = Math.min(Math.max(active.fraction, 0), 1);
         const percent = Math.round(fraction * 100);
         shell.setText(`${active.name} (${percent}%)`);
-        shell.renderSlot({ current: percent, total: 100 });
+        // Interim: the presence of an active command is the busy signal
+        // until the status document carries the Progress snapshot.
+        shell.setBusy(true);
         summary.hidden = true;
         queueGroup.hidden = false;
         const pendingCount = status.queue.pending.length;
@@ -178,7 +180,7 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
         return;
       }
       shell.setText("");
-      shell.renderSlot(null);
+      shell.setBusy(false);
       summary.hidden = false;
       queueGroup.hidden = true;
       leds.replaceChildren(

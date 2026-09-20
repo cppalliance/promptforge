@@ -1,11 +1,12 @@
 // The status bar renderer: consumes the observer's status frames off the
 // persistent socket and paints them into the shared status bar shell
 // (shared-ui/status-bar), which owns the bar, the text region, and the
-// slot's progress/indicators swap. Info and error frames set the text
-// (the description rides as the tooltip) and drive the slot; debug frames
-// are internal instrumentation: they never touch the text or the slot,
-// but they do pulse the LED. The workshop's indicators group holds the
-// recording and activity LEDs; the shell's extras region stays empty.
+// busy barberpole beside the indicators. Info and error frames set the
+// text (the description rides as the tooltip) and drive the barberpole;
+// debug frames are internal instrumentation: they never touch the text
+// or the barberpole, but they do pulse the LED. The workshop's
+// indicators group holds the recording and activity LEDs; the shell's
+// extras region stays empty.
 
 import { createStatusBarShell, type StatusBarShell } from "shared-ui/status-bar";
 
@@ -86,7 +87,9 @@ export class StatusBar extends Disposable {
       tooltip: frame.description,
       error: frame.severity === "error",
     });
-    this.shell.renderSlot(frame.progress);
+    // Interim: the frame still carries a fraction; only its presence
+    // drives the barberpole until the protocol's busy flag lands.
+    this.shell.setBusy(frame.progress !== null);
   }
 
   /**
@@ -134,7 +137,7 @@ export class StatusBar extends Disposable {
   /**
    * Clears every LED activity state - sustained and pulsed - and applies
    * the idle lens. Only the activity LED is touched: the text, tooltip,
-   * progress, and recording LED belong to other flows. Used when a chat is
+   * barberpole, and recording LED belong to other flows. Used when a chat is
    * aborted, because the recycled socket never sees the server's terminal
    * status frame for the aborted chat.
    */
@@ -155,13 +158,13 @@ export class StatusBar extends Disposable {
 
   /**
    * Returns the bar to its reconnecting state after the persistent socket
-   * drops: neutral text, no tooltip, no error styling, and the indicators
-   * group back in the slot.
+   * drops: neutral text, no tooltip, no error styling, and the barberpole
+   * hidden.
    */
   reset(): void {
     this.sustained = null;
     this.shell.setText("Reconnecting...");
-    this.shell.renderSlot(null);
+    this.shell.setBusy(false);
   }
 
   /** Applies the lit set: green wins while generating and thinking coincide. */

@@ -367,7 +367,7 @@ Each step runs only the focused tests listed in it. The full gate set runs once,
 
 <step-2>
 
-### Step 2: Barberpole in the shared status bar shell
+### Step 2: Barberpole in the shared status bar shell [completed]
 
 - Component: shared-ui
 - Piece: status bar shell

@@ -1,18 +1,17 @@
 /* Styles for status-bar.ts, which imports this file; esbuild bundles it
    into the consuming UI's app.css. Themed values come from the :root
-   tokens in tokens.css. Carries the bar itself, the text/extras/slot
-   regions, the slot's inline progress bar, and the generic status LED
-   primitive (idle lens, lit modifiers, and the pulse/decay transitions).
-   Rules live in the components layer so a consumer's own rules (the
-   gateway's fixed positioning) override these. */
+   tokens in tokens.css. Carries the bar itself, the text/extras/right
+   regions, the busy barberpole, and the generic status LED primitive
+   (idle lens, lit modifiers, and the pulse/decay transitions). Rules
+   live in the components layer so a consumer's own rules (the gateway's
+   fixed positioning) override these. */
 
 /* The status bar: a permanent full-width footer below the shell. The
    left text carries the current label; the extras region holds consumer
-   controls; the right group holds the slot, which holds the progress bar
-   or the consumer's LED indicators group (never both - the slot's
-   children are mutually exclusive, driven by the hidden attribute).
-   min-height rather than height so a descender never clips against a
-   fixed box. */
+   controls; the right group holds the barberpole and then the slot with
+   the consumer's LED indicators group. The barberpole hides while idle
+   (the hidden attribute); the indicators never hide. min-height rather
+   than height so a descender never clips against a fixed box. */
 @layer components {
 	.status-bar {
 		flex: none;
@@ -70,9 +69,9 @@
 		gap: var(--space-1);
 	}
 
-	/* The LED indicators group: swapped out as one unit whenever the
-	   progress bar occupies the slot. The gap is one LED-width so two
-	   LEDs sit one LED-width apart. */
+	/* The LED indicators group: always visible, standing beside the
+	   barberpole. The gap is one LED-width so two LEDs sit one LED-width
+	   apart. */
 	.status-bar__indicators {
 		display: inline-flex;
 		align-items: center;
@@ -84,45 +83,61 @@
 		display: flex;
 		align-items: center;
 		justify-content: flex-end;
-		min-width: var(--progress-width);
 	}
 
-	.status-bar__progress[hidden],
-	.status-bar__indicators[hidden] {
+	.status-bar__barberpole[hidden] {
 		display: none;
 	}
 
-	/* The inline progress bar: a thin rounded track with a green fill and
-	   a subtle glow. The hosts are Chromium (WebView2, Electron-class),
-	   so the webkit progress pseudoelements are the styled surface. */
-	.status-bar__progress {
+	/* The busy barberpole: a thin rounded track carrying diagonal green
+	   stripes that slide while work is in flight. One fill stripe plus one
+	   track gap spans one period horizontally, and the period is twice the
+	   bar height so each stripe is as wide as the bar is tall. The tile is
+	   a square of twice the period: on a 45-degree gradient a 25% step of
+	   the gradient line is exactly one period across, so the tile holds two
+	   stripe pairs and joins its neighbors without a seam. The animation
+	   slides the tile one period per loop, which lands on an identical
+	   frame, so the loop is seamless too. */
+	.status-bar__barberpole {
+		--barberpole-period: calc(2 * var(--progress-height));
+		flex: none;
 		width: var(--progress-width);
 		height: var(--progress-height);
-		appearance: none;
-		border: none;
 		border-radius: calc(var(--progress-height) / 2);
-		background: var(--progress-track);
 		overflow: hidden;
-	}
-
-	.status-bar__progress::-webkit-progress-bar {
-		background: var(--progress-track);
-		border-radius: calc(var(--progress-height) / 2);
-	}
-
-	.status-bar__progress::-webkit-progress-value {
-		background: var(--progress-fill);
-		border-radius: calc(var(--progress-height) / 2);
+		background-color: var(--progress-track);
+		background-image: repeating-linear-gradient(
+			-45deg,
+			var(--progress-fill) 0 12.5%,
+			transparent 12.5% 25%
+		);
+		background-size: calc(2 * var(--barberpole-period)) calc(2 * var(--barberpole-period));
 		box-shadow: 0 0 var(--progress-glow) var(--progress-fill);
+		animation: status-bar-barberpole 0.8s linear infinite;
+	}
+
+	@keyframes status-bar-barberpole {
+		from {
+			background-position: 0 0;
+		}
+		to {
+			background-position: var(--barberpole-period) 0;
+		}
+	}
+
+	/* Reduced motion: the stripes stay, still. */
+	@media (prefers-reduced-motion: reduce) {
+		.status-bar__barberpole {
+			animation: none;
+		}
 	}
 
 	/* The status LEDs: small circles standing in the indicators group
-	   whenever no progress reading occupies the slot. Idle is an unlit
-	   lens - a dark translucent disc with a subtle inner highlight. A
-	   pulse adds a lit modifier: a bright radial-gradient core with a
-	   layered box-shadow bloom. The idle rule's transition is the slow
-	   ease-out decay; each modifier's own transition makes the fade-in
-	   fast. */
+	   beside the barberpole. Idle is an unlit lens - a dark translucent
+	   disc with a subtle inner highlight. A pulse adds a lit modifier: a
+	   bright radial-gradient core with a layered box-shadow bloom. The
+	   idle rule's transition is the slow ease-out decay; each modifier's
+	   own transition makes the fade-in fast. */
 	.status-bar__led {
 		width: var(--led-size);
 		height: var(--led-size);

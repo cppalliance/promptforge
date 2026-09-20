@@ -222,12 +222,13 @@
   --status-bar-padding-inline: 7px;
   --status-bar-gap: 3px;
 
-  /* Status bar progress bar */
-  --progress-width: 96px;
-  --progress-height: 6px;
-  --progress-fill: #3FA266;
-  --progress-track: #F0F0F011;
-  --progress-glow: 4px; /* blur radius of the fill's box-shadow glow */
+  /* Status bar barberpole (the fill and track also color the block
+     progress bar in progress.css) */
+  --progress-width: 144px; /* 1.5in at CSS 96dpi; px so it composes with sibling px tokens */
+  --progress-height: 6px; /* also sets the stripe width: one stripe is one bar height */
+  --progress-fill: #3FA266; /* the sliding stripes */
+  --progress-track: #F0F0F011; /* the gaps between stripes */
+  --progress-glow: 4px; /* blur radius of the barberpole's box-shadow glow */
 
   /* Status bar activity LED */
   --led-size: 10px;

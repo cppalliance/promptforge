@@ -3,14 +3,14 @@
 // panel (its menu visible, its session view hidden until a session is
 // acknowledged, its input pinned closed, its toolbar reading the shared
 // model service's snapshot selection), and the status bar boots as a
-// <footer> landmark reading "Ready" with its progress bar hidden and its
+// <footer> landmark reading "Ready" with its barberpole hidden and its
 // activity LED present. Guards the DOM contract between index.html and
 // the panel factories. Run: node test/workbench-mount.mjs (after `npm run
 // build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
 await bootWorkbench("the bundled app mounts the whole workbench", async (ctx) => {
-  const { document, failures, agentPanel, statusBar, statusText, statusSlot, progressEl, ledEl } = ctx;
+  const { document, failures, agentPanel, statusBar, statusText, statusSlot, barberpoleEl, ledEl } = ctx;
 
   const dock = document.querySelector("#dock");
   if (!dock) failures.push("#dock missing");
@@ -73,10 +73,10 @@ await bootWorkbench("the bundled app mounts the whole workbench", async (ctx) =>
     failures.push(`status bar placeholder text is "${statusText.textContent}", expected "Ready"`);
   }
   if (!statusSlot) failures.push("status bar slot missing");
-  if (!progressEl) {
-    failures.push("status bar progress element missing");
-  } else if (!progressEl.hidden) {
-    failures.push("progress bar must start hidden");
+  if (!barberpoleEl) {
+    failures.push("status bar barberpole element missing");
+  } else if (!barberpoleEl.hidden) {
+    failures.push("the barberpole must start hidden");
   }
   if (!ledEl) failures.push("status bar activity LED missing");
 });
