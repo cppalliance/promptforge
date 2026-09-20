@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use harness_api::bridge::discovery::AgentSource;
+use harness_api::bridge::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use harness_api::bridge::lifecycle::RunLifecycle;
 use harness_api::bridge::transition::RunId;
 use harness_api::cancel::CancelHandle;
@@ -16,10 +17,8 @@ use tokio::sync::broadcast;
 
 use workshop_gateway::WorkshopObserver;
 use workshop_menu::MenuBus;
-use workshop_protocol::{Activity, AgentDeltaKind, InputFrame, InputResponse};
+use workshop_protocol::{Activity, AgentDeltaKind, InputResponse};
 use workshop_registry::{Push, Registry};
-
-use crate::input::{WaitError, WaitRegistry};
 
 /// One live delta on a session's dedicated channel, stamped with the
 /// reply id of the durable event that will supersede it.
@@ -54,8 +53,9 @@ pub(crate) struct AgentSession {
     pub(super) rounds: Arc<AtomicU64>,
     /// The session's unresolved user-input waits.
     pub(crate) waits: Arc<WaitRegistry>,
-    /// Where the `user_input` tool announces waits; sockets subscribe.
-    pub(crate) input_frames: broadcast::Sender<InputFrame>,
+    /// Where the input broker announces waits; sockets subscribe and
+    /// render each [`WaitFrame`] as a protocol input frame.
+    pub(crate) input_frames: broadcast::Sender<WaitFrame>,
     /// The dedicated live-delta channel; deltas never enter the event
     /// log.
     pub(super) deltas: broadcast::Sender<AgentDelta>,
@@ -86,7 +86,7 @@ impl AgentSession {
         log: Arc<WorkshopObserver>,
         lifecycle: Arc<RunLifecycle>,
         waits: Arc<WaitRegistry>,
-        input_frames: broadcast::Sender<InputFrame>,
+        input_frames: broadcast::Sender<WaitFrame>,
         deltas: broadcast::Sender<AgentDelta>,
         errors: broadcast::Sender<String>,
     ) -> Self {
@@ -126,7 +126,12 @@ impl AgentSession {
         after_acceptance: impl FnOnce(),
     ) -> Result<(), WaitError> {
         let accepted_run = self.lifecycle.accept_input();
-        let result = crate::input::complete_input_response(&self.waits, response, after_acceptance);
+        let result = complete_input_response(
+            &self.waits,
+            &response.token,
+            response.text,
+            after_acceptance,
+        );
         if let (Err(_), Some(run)) = (&result, accepted_run) {
             self.lifecycle.settle_turn(run);
         }

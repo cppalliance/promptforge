@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use harness_api::bridge::InputBroker;
+use harness_api::bridge::{BoxFuture, InputPerformer};
 use promptforge_api_runtime::execute::{RunError, RunErrorKind};
 use promptforge_api_runtime::input::{InputError, InputOutcome};
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
@@ -33,28 +33,26 @@ fn test_model() -> ModelDescriptor {
 /// unavailable, so the built-in chat returns without a model call.
 struct UnavailableBroker;
 
-#[async_trait::async_trait]
-impl InputBroker for UnavailableBroker {
-    async fn user_input(
+impl InputPerformer for UnavailableBroker {
+    fn wait(
         &self,
-        _execution: &str,
-        _section: &str,
-    ) -> Result<InputOutcome, InputError> {
-        Ok(InputOutcome::Unavailable)
+        _execution: String,
+        _section: String,
+    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        Box::pin(async { Ok(InputOutcome::Unavailable) })
     }
 }
 
 /// A broker whose every wait fails: the failure policy.
 struct FailingBroker;
 
-#[async_trait::async_trait]
-impl InputBroker for FailingBroker {
-    async fn user_input(
+impl InputPerformer for FailingBroker {
+    fn wait(
         &self,
-        _execution: &str,
-        _section: &str,
-    ) -> Result<InputOutcome, InputError> {
-        Err(InputError::message("the input device is gone"))
+        _execution: String,
+        _section: String,
+    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        Box::pin(async { Err(InputError::message("the input device is gone")) })
     }
 }
 
@@ -83,7 +81,7 @@ fn silent_sink() -> (SessionSink, Arc<WorkshopObserver>) {
 /// session wiring builds them, so the prompt's declared contract is
 /// activated, prepared, and checked the production way.
 async fn run_builtin_chat(
-    broker: Arc<dyn InputBroker>,
+    broker: Arc<dyn InputPerformer>,
     model: ModelDescriptor,
 ) -> (Result<(), AgentRunError>, Arc<WorkshopObserver>) {
     let (sink, log) = silent_sink();
@@ -205,14 +203,13 @@ async fn a_cancelled_token_interrupts_the_run() {
     // the session's token must end it as an interruption, never a failure.
     struct ParkedBroker;
 
-    #[async_trait::async_trait]
-    impl InputBroker for ParkedBroker {
-        async fn user_input(
+    impl InputPerformer for ParkedBroker {
+        fn wait(
             &self,
-            _execution: &str,
-            _section: &str,
-        ) -> Result<InputOutcome, InputError> {
-            std::future::pending().await
+            _execution: String,
+            _section: String,
+        ) -> BoxFuture<Result<InputOutcome, InputError>> {
+            Box::pin(std::future::pending())
         }
     }
 

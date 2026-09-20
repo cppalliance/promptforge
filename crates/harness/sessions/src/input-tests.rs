@@ -2,17 +2,21 @@ use super::*;
 
 use std::sync::Arc;
 
-use harness_api::bridge::InputBroker;
+use harness_runner::performers::InputPerformer;
+use harness_runner::spawn::spawn_tagged;
+use harness_runner::test_support::mock_tag;
 use promptforge_api_runtime::input::InputOutcome;
+use promptforge_api_runtime::{Effect, EffectAnswer, Prompt, Run, RunContext, RunResult, Step};
+use promptforge_api_types::timestamp::Timestamp;
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.
 const GNARLY: &str = "line1\r\nline2 \"quoted\" {\"text\":\"decoy\"} \\slash \u{1F980}";
 
-async fn required_token(socket: &mut broadcast::Receiver<InputFrame>) -> String {
+async fn required_token(socket: &mut broadcast::Receiver<WaitFrame>) -> String {
     let frame = socket.recv().await.expect("a frame arrives");
-    let InputFrame::Required { token } = frame else {
-        panic!("expected input_required first, got {frame:?}");
+    let WaitFrame::Required { token } = frame else {
+        panic!("expected a required frame first, got {frame:?}");
     };
     token
 }
@@ -121,25 +125,50 @@ async fn reconnect_resends_unresolved_waits_in_creation_order() {
     registry.resend_unresolved(&frames);
     assert_eq!(
         socket.recv().await.expect("the first resend arrives"),
-        InputFrame::Required { token: first },
+        WaitFrame::Required { token: first },
         "resend replays the retained waits"
     );
     assert_eq!(
         socket.recv().await.expect("the second resend arrives"),
-        InputFrame::Required { token: second },
+        WaitFrame::Required { token: second },
         "resend preserves creation order"
+    );
+}
+
+#[test]
+fn complete_input_response_runs_the_seam_before_the_wait_resumes() {
+    let registry = WaitRegistry::new();
+    let (token, mut receiver) = registry.create();
+    let mut seam_ran = false;
+    complete_input_response(&registry, &token, "typed".to_owned(), || {
+        assert!(
+            receiver.try_recv().is_err(),
+            "the seam runs before the suspended call can see the text"
+        );
+        seam_ran = true;
+    })
+    .expect("a live wait completes");
+    assert!(seam_ran, "the acceptance seam ran");
+    assert_eq!(receiver.try_recv().expect("the value arrived"), "typed");
+    assert_eq!(
+        complete_input_response(&registry, &token, "again".to_owned(), || {}),
+        Err(WaitError::UnknownToken),
+        "the seam does not revive a consumed token"
     );
 }
 
 /// A fresh broker, registry, and channel with no subscribers.
 fn broker_fixture() -> (
-    SessionInputBroker,
+    Arc<SessionInputBroker>,
     Arc<WaitRegistry>,
-    broadcast::Sender<InputFrame>,
+    broadcast::Sender<WaitFrame>,
 ) {
     let registry = Arc::new(WaitRegistry::new());
     let (frames, _) = broadcast::channel(8);
-    let broker = SessionInputBroker::new(Arc::clone(&registry), frames.clone());
+    let broker = Arc::new(SessionInputBroker::new(
+        Arc::clone(&registry),
+        frames.clone(),
+    ));
     (broker, registry, frames)
 }
 
@@ -147,7 +176,7 @@ fn broker_fixture() -> (
 async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = tokio::spawn(async move { broker.user_input("run", "chat").await });
+    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
     let token = required_token(&mut socket).await;
     assert_eq!(
         registry.unresolved(),
@@ -171,15 +200,15 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
             socket.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ),
-        "a completed wait dies silently: no input_cancelled follows"
+        "a completed wait dies silently: no cancelled frame follows"
     );
 }
 
 #[tokio::test]
-async fn a_dropped_broker_future_removes_the_wait_and_emits_input_cancelled() {
+async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = tokio::spawn(async move { broker.user_input("run", "chat").await });
+    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
     let token = required_token(&mut socket).await;
     call.abort();
     let joined = call.await;
@@ -194,16 +223,16 @@ async fn a_dropped_broker_future_removes_the_wait_and_emits_input_cancelled() {
     let frame = socket.recv().await.expect("the cancellation frame arrives");
     assert_eq!(
         frame,
-        InputFrame::Cancelled { token },
-        "the SPA is told exactly which prompt died"
+        WaitFrame::Cancelled { token },
+        "the client is told exactly which prompt died"
     );
 }
 
 #[tokio::test]
-async fn a_registry_cancel_fails_the_broker_call_and_emits_input_cancelled() {
+async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = tokio::spawn(async move { broker.user_input("run", "chat").await });
+    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
     let token = required_token(&mut socket).await;
     registry.cancel(&token);
     let error = call
@@ -214,7 +243,54 @@ async fn a_registry_cancel_fails_the_broker_call_and_emits_input_cancelled() {
     let frame = socket.recv().await.expect("the cancellation frame arrives");
     assert_eq!(
         frame,
-        InputFrame::Cancelled { token },
+        WaitFrame::Cancelled { token },
         "cancellation is an outcome on the wire, not silence"
+    );
+}
+
+#[tokio::test]
+async fn a_user_input_effect_is_answered_when_the_registry_receives_the_text() {
+    // The performer against a real engine effect: a section parked on
+    // `user_input()` issues `Effect::UserInput`, the performer opens the
+    // wait for it, the registry completes with the operator's text, and
+    // the answer resumes the run to its result.
+    let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n---\n\n\
+                  # Ask\n\n## Only\n\n```lua\nreturn user_input()\n```\n";
+    let (prompt, _parse_events) = Prompt::parse(source, "ask");
+    let prompt = prompt.expect("the fixture prompt parses");
+    let mut run = Run::new(
+        Arc::new(prompt),
+        "",
+        RunContext::new("ask", 1, Timestamp::UNIX_EPOCH),
+    );
+    let Step::Pending { mut effects, .. } = run.step() else {
+        panic!("the input wait leaves the run pending");
+    };
+    assert_eq!(effects.len(), 1, "one wait, one effect");
+    let (id, _provenance, effect) = effects.remove(0);
+    let Effect::UserInput { execution, section } = effect else {
+        panic!("a parked user_input() issues a UserInput effect, got {effect:?}");
+    };
+
+    let (broker, registry, frames) = broker_fixture();
+    let mut socket = frames.subscribe();
+    let wait = spawn_tagged(mock_tag(), broker.wait(execution, section));
+    let token = required_token(&mut socket).await;
+    registry
+        .complete(&token, "typed by the operator".to_owned())
+        .expect("the wait completes");
+    let answer = wait.await.expect("the wait task joins");
+
+    run.resume(id, EffectAnswer::UserInput(answer));
+    let Step::Done { result, .. } = run.step() else {
+        panic!("the answered wait finishes the run");
+    };
+    let RunResult::Ok(text) = result else {
+        panic!("the operator's text is the section's return value, got {result:?}");
+    };
+    assert_eq!(text, "typed by the operator");
+    assert!(
+        registry.unresolved().is_empty(),
+        "the answered wait leaves nothing behind"
     );
 }

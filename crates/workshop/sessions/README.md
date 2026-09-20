@@ -10,7 +10,7 @@ Discovery reads the directory per request, so a newly added agent file shows up 
 
 ## Sessions
 
-Every session carries the Workshop's input broker behind the script-side `user_input()` - never advertised to a model - a `ui()` snapshot serving the selected model and the first granted workspace root, a model catalog built from the retained gateway catalog, and an in-memory event log of the run's transcript events (nothing persists across a restart until the harness's run log lands). Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it.
+Every session carries the harness's input broker behind the script-side `user_input()` - never advertised to a model; its wait registry and `InputPerformer` live in `harness-sessions` and are named through `harness-api`'s bridge, and the socket renders their wait frames as `input_required` and `input_cancelled` - a `ui()` snapshot serving the selected model and the first granted workspace root, a model catalog built from the retained gateway catalog, and an in-memory event log of the run's transcript events (nothing persists across a restart until the harness's run log lands). Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it.
 
 A host-fired cancel interrupts the run, even while a host call is suspended, and a relaunch reruns the program over the retained event log - a stop reason, never an error. Closing the session ends the run for good and drops its transcript.
 

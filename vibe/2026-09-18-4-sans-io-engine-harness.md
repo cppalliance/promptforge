@@ -945,7 +945,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-47>
 
-### Step 47: Input wait registry and `InputPerformer`
+### Step 47: Input wait registry and `InputPerformer` [completed]
 
 - Component: Harness sessions and Workshop migration
 - Piece: moves

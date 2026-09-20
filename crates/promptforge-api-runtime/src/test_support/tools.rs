@@ -3,8 +3,8 @@
 //! a `ToolCall` effect's id resolves in.
 //!
 //! The engine holds no implementation and names no implementation trait;
-//! the production traits (`Tool`, `InputBroker`) are the harness's, behind
-//! the door in `harness-capabilities`, and a `promptforge-*` crate never
+//! the production traits (`Tool`, `InputPerformer`) are the harness's, behind
+//! the door in `harness-capabilities` and `harness-runner`, and a `promptforge-*` crate never
 //! depends on a harness crate. The suites still need something to perform
 //! a `ToolCall` or answer a `UserInput` effect with, so these are the test
 //! doubles: the same method shapes as the harness's traits (so a fixture
@@ -89,7 +89,7 @@ pub trait TestTool: Send + Sync {
 }
 
 /// A fixture broker the tokio test driver answers a `UserInput` effect
-/// through: the suites' stand-in for the harness's `InputBroker`.
+/// through: the suites' stand-in for the harness's `InputPerformer`.
 pub trait TestBroker: Send + Sync {
     /// Waits for the answer to one input request for `section` of
     /// `execution`. The future resolves to the outcome, or to an

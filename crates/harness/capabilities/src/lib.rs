@@ -1,12 +1,11 @@
 //! harness-capabilities - the harness's capability layer: the registry,
-//! activation with co-activation conflict checking, and the [`Capability`],
-//! [`Tool`], and [`InputBroker`] traits the first-party capability crates
-//! implement.
+//! activation with co-activation conflict checking, and the [`Capability`]
+//! and [`Tool`] traits the first-party capability crates implement.
 //!
 //! The engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge_api_types::tools::ToolCatalog`]) and issues every tool
-//! call and input wait as an effect naming an id; the implementations
-//! behind those ids live here, on the harness side of the door. A host
+//! call as an effect naming an id; the implementations behind those ids
+//! live here, on the harness side of the door. A host
 //! builds one [`CapabilityRegistry`] of installed capabilities, calls
 //! [`activate`] per run to turn a prompt's declarations into the run's
 //! catalog and its [`ToolTable`] of implementations, hands the catalog to
@@ -31,13 +30,11 @@
 
 mod activation;
 mod capability;
-mod input;
 mod registry;
 mod tool;
 
 pub use activation::{Activation, ToolTable, activate};
 pub use capability::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
-pub use input::InputBroker;
 pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use tool::Tool;
 

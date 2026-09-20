@@ -37,7 +37,8 @@ use workshop_protocol::{
     InputFrame, InputResponse,
 };
 
-use crate::input::WaitError;
+use harness_api::bridge::input::{WaitError, WaitFrame};
+
 use crate::session::{cross_site_refusal, send_error, send_frame};
 use crate::state::SessionsState;
 
@@ -99,7 +100,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
     // `attached`; attach() and the arms keep them all in step.
     let mut events_rx: Option<broadcast::Receiver<Event>> = None;
     let mut deltas_rx: Option<broadcast::Receiver<AgentDelta>> = None;
-    let mut input_rx: Option<broadcast::Receiver<InputFrame>> = None;
+    let mut input_rx: Option<broadcast::Receiver<WaitFrame>> = None;
     let mut errors_rx: Option<broadcast::Receiver<String>> = None;
 
     loop {
@@ -135,7 +136,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
             received = recv_or_pending(&mut input_rx) => {
                 match received {
                     Ok(frame) => {
-                        if !send_frame(&mut socket, &frame).await {
+                        if !send_frame(&mut socket, &input_frame(frame)).await {
                             break;
                         }
                     }
@@ -213,9 +214,18 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
 type Subscriptions<'a> = (
     &'a mut Option<broadcast::Receiver<Event>>,
     &'a mut Option<broadcast::Receiver<AgentDelta>>,
-    &'a mut Option<broadcast::Receiver<InputFrame>>,
+    &'a mut Option<broadcast::Receiver<WaitFrame>>,
     &'a mut Option<broadcast::Receiver<String>>,
 );
+
+/// Renders a harness wait frame as the protocol's input frame: the one
+/// place the harness's wait vocabulary meets Workshop's wire shape.
+fn input_frame(frame: WaitFrame) -> InputFrame {
+    match frame {
+        WaitFrame::Required { token } => InputFrame::Required { token },
+        WaitFrame::Cancelled { token } => InputFrame::Cancelled { token },
+    }
+}
 
 /// Handles one inbound text frame. A `false` return means the client is
 /// gone and the socket loop should end.

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use harness_api::bridge::input::SessionInputBroker;
 use harness_api::bridge::{CapabilityRegistry, GatewayClient as ModelClient};
 use promptforge_api_types::wire::StreamDelta;
 
@@ -14,7 +15,6 @@ use crate::agents::run::{RunParts, now_timestamp, run_markdown_agent};
 use crate::agents::{
     AgentSession, AgentSource, SessionHost, SessionSink, agent_client, delta_stamp, ui_provider,
 };
-use crate::input::SessionInputBroker;
 
 use super::events::{CollectedEvent, EventCollector, RunFuture};
 use super::transition::{

@@ -15,7 +15,7 @@
 //! unavailable-fallback policy, and an [`InputError`] is the failure
 //! policy, raising a typed [`RunErrorKind::Input`](crate::RunErrorKind::Input)
 //! failure at the Lua call site. The policy trait a host implements
-//! (`InputBroker`) is the harness's, in `harness-capabilities`; the engine
+//! (`InputPerformer`) is the harness's, in `harness-runner`; the engine
 //! knows only this answer vocabulary. Waits and responses are reported as
 //! events - a wait-opened event and a byte-exact `UserInput` report -
 //! without any replay machinery.

@@ -13,7 +13,6 @@ default = []
 test-fixtures = []
 
 [dependencies]
-async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 harness-api.workspace = true

@@ -2662,7 +2662,11 @@ name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
  "harness-runner",
+ "promptforge-api-runtime",
+ "promptforge-api-types",
+ "rand 0.9.5",
  "tempfile",
+ "thiserror 2.0.19",
  "tokio",
  "workspace-hack",
 ]
@@ -8582,7 +8586,6 @@ dependencies = [
 name = "workshop-sessions"
 version = "0.0.0"
 dependencies = [
- "async-trait",
  "axum",
  "futures-util",
  "harness-api",

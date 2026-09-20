@@ -1,18 +1,24 @@
 //! The user-input wait: the [`WaitRegistry`] of single-use wait tokens,
-//! the session's input broker behind the script-side `user_input()`, and
-//! the `input_response` producer that completes a wait.
+//! the session's input broker behind the script-side `user_input()` (the
+//! harness's `InputPerformer`), and the producer seam that completes a
+//! wait with the operator's text.
 //!
 //! An agent program asks its operator for input through the session's
 //! input broker - session-supplied code, never advertised to a model. The
-//! broker registers a wait, announces it with a durable
-//! `input_required` frame, and suspends on the wait's receiver until the
-//! session completes the wait with the operator's answer or the wait
-//! dies. A dying wait is an outcome, never silence: every path
-//! out of an unresolved wait - the future dropped by a turn-cancel, the
-//! wait cancelled out of the registry - removes the entry and pushes a
-//! durable `input_cancelled` frame, so the SPA never pins its input box
-//! to a dead token. Unresolved waits are retained across socket loss and
+//! engine issues the call as a `UserInput` effect; the broker performs it
+//! by registering a wait, announcing it with a durable
+//! [`WaitFrame::Required`], and suspending on the wait's receiver until
+//! the session completes the wait with the operator's answer or the wait
+//! dies. A dying wait is an outcome, never silence: every path out of an
+//! unresolved wait - the future dropped by a turn-cancel, the wait
+//! cancelled out of the registry - removes the entry and pushes a durable
+//! [`WaitFrame::Cancelled`], so a client never pins its input box to a
+//! dead token. Unresolved waits are retained across socket loss and
 //! re-announced on reconnect: sessions outlive sockets.
+//!
+//! The frames are harness data, not wire shapes: the client that owns
+//! the socket (Workshop's `/agents/ws`) renders each into its own
+//! protocol frame.
 
 #[path = "input-tool.rs"]
 mod tool;
@@ -22,9 +28,34 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::{broadcast, oneshot};
 
-use workshop_protocol::{InputFrame, InputResponse};
-
 pub use tool::SessionInputBroker;
+
+/// A user-input wait lifecycle notice, pushed on a session's wait
+/// channel for its attached client to render.
+///
+/// `Required` announces an open wait: the client pins its input box to
+/// the token and answers with the operator's text. `Cancelled` announces
+/// a wait that died unresolved, so the client never holds a prompt
+/// against a dead token - cancellation is an outcome, never silence.
+///
+/// Delivery is durable through the registry rather than the channel: the
+/// [`WaitRegistry`] retains every unresolved wait and
+/// [`resend_unresolved`](WaitRegistry::resend_unresolved) re-announces
+/// them, so a push lost to a dead socket is repaired by the resent set -
+/// a live wait reappears, and a cancelled one vanishes by its absence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitFrame {
+    /// A wait opened: the session wants operator input for `token`.
+    Required {
+        /// The single-use wait token the operator's answer must echo.
+        token: String,
+    },
+    /// A wait died unresolved: the prompt for `token` is stale.
+    Cancelled {
+        /// The token whose wait is gone.
+        token: String,
+    },
+}
 
 /// One unresolved wait: its single-use token, and the sender that resumes
 /// the suspended `user_input` call with the operator's text.
@@ -69,7 +100,7 @@ impl WaitRegistry {
     ///
     /// # Examples
     /// ```
-    /// use workshop_sessions::WaitRegistry;
+    /// use harness_sessions::input::WaitRegistry;
     ///
     /// let registry = WaitRegistry::new();
     /// assert!(registry.unresolved().is_empty());
@@ -91,17 +122,17 @@ impl WaitRegistry {
     ///
     /// The token is 128 bits from the OS-seeded cryptographic RNG
     /// (`rand::rng`, a ChaCha-based CSPRNG), hex-encoded, so it cannot be
-    /// guessed by anything that has not seen the `input_required` frame.
+    /// guessed by anything that has not seen the [`WaitFrame::Required`].
     ///
     /// # Examples
     /// ```
-    /// use workshop_sessions::WaitRegistry;
+    /// use harness_sessions::input::WaitRegistry;
     ///
     /// let registry = WaitRegistry::new();
     /// let (token, mut receiver) = registry.create();
     /// registry.complete(&token, "hello".to_owned())?;
     /// assert_eq!(receiver.try_recv(), Ok("hello".to_owned()));
-    /// # Ok::<(), workshop_sessions::WaitError>(())
+    /// # Ok::<(), harness_sessions::input::WaitError>(())
     /// ```
     #[must_use]
     pub fn create(&self) -> (String, oneshot::Receiver<String>) {
@@ -127,7 +158,7 @@ impl WaitRegistry {
     ///
     /// # Examples
     /// ```
-    /// use workshop_sessions::{WaitError, WaitRegistry};
+    /// use harness_sessions::input::{WaitError, WaitRegistry};
     ///
     /// let registry = WaitRegistry::new();
     /// let (token, mut receiver) = registry.create();
@@ -137,7 +168,7 @@ impl WaitRegistry {
     ///     registry.complete(&token, "again".to_owned()),
     ///     Err(WaitError::UnknownToken),
     /// );
-    /// # Ok::<(), workshop_sessions::WaitError>(())
+    /// # Ok::<(), harness_sessions::input::WaitError>(())
     /// ```
     pub fn complete(&self, token: &str, value: String) -> Result<(), WaitError> {
         let wait = {
@@ -160,7 +191,7 @@ impl WaitRegistry {
     ///
     /// # Examples
     /// ```
-    /// use workshop_sessions::WaitRegistry;
+    /// use harness_sessions::input::WaitRegistry;
     ///
     /// let registry = WaitRegistry::new();
     /// let (token, mut receiver) = registry.create();
@@ -179,7 +210,7 @@ impl WaitRegistry {
     ///
     /// # Examples
     /// ```
-    /// use workshop_sessions::WaitRegistry;
+    /// use harness_sessions::input::WaitRegistry;
     ///
     /// let registry = WaitRegistry::new();
     /// let (token, _receiver) = registry.create();
@@ -190,8 +221,8 @@ impl WaitRegistry {
         self.lock().iter().map(|wait| wait.token.clone()).collect()
     }
 
-    /// Re-announces every unresolved wait to `frames` as an
-    /// `input_required` frame, in creation order.
+    /// Re-announces every unresolved wait to `frames` as a
+    /// [`WaitFrame::Required`], in creation order.
     ///
     /// The reconnect half of the durable-delivery promise: a client that
     /// missed pushes rebuilds its prompt state from this resend - a live
@@ -199,29 +230,30 @@ impl WaitRegistry {
     ///
     /// # Examples
     /// ```
-    /// use workshop_protocol::InputFrame;
-    /// use workshop_sessions::WaitRegistry;
+    /// use harness_sessions::input::{WaitFrame, WaitRegistry};
     ///
     /// let registry = WaitRegistry::new();
     /// let (token, _receiver) = registry.create();
     /// let (frames, mut socket) = tokio::sync::broadcast::channel(8);
     /// registry.resend_unresolved(&frames);
-    /// assert_eq!(socket.try_recv()?, InputFrame::Required { token });
+    /// assert_eq!(socket.try_recv()?, WaitFrame::Required { token });
     /// # Ok::<(), tokio::sync::broadcast::error::TryRecvError>(())
     /// ```
-    pub fn resend_unresolved(&self, frames: &broadcast::Sender<InputFrame>) {
+    pub fn resend_unresolved(&self, frames: &broadcast::Sender<WaitFrame>) {
         for token in self.unresolved() {
             // No receiver means the client vanished again between
             // subscribing and this resend; the registry still holds the
             // wait, so the next reconnect resends it once more.
-            let _ = frames.send(InputFrame::Required { token });
+            let _ = frames.send(WaitFrame::Required { token });
         }
     }
 }
 
 /// A [`WaitRegistry`] operation failed.
+///
+/// Exhaustive on purpose: a client matches every variant so a new
+/// failure is a compile error at its render site, not a silent default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
 pub enum WaitError {
     /// No unresolved wait holds the token: never created, already
     /// completed (tokens are single-use), cancelled, or its suspended
@@ -230,7 +262,8 @@ pub enum WaitError {
     UnknownToken,
 }
 
-/// Completes the wait `response` names without recording anything.
+/// Completes the wait holding `token` with the operator's `text` without
+/// recording anything: the producer side of an operator's answer.
 ///
 /// The engine records the operator's text consumer-side, as a
 /// `UserInput` event when the suspended `user_input` call resumes, so
@@ -239,15 +272,29 @@ pub enum WaitError {
 /// before the suspended call resumes.
 ///
 /// # Errors
-/// Returns [`WaitError::UnknownToken`] when no unresolved wait holds the
-/// response's token.
-pub(crate) fn complete_input_response(
+/// Returns [`WaitError::UnknownToken`] when no unresolved wait holds
+/// `token`.
+///
+/// # Examples
+/// ```
+/// use harness_sessions::input::{WaitRegistry, complete_input_response};
+///
+/// let registry = WaitRegistry::new();
+/// let (token, mut receiver) = registry.create();
+/// let mut accepted = false;
+/// complete_input_response(&registry, &token, "typed".to_owned(), || accepted = true)?;
+/// assert!(accepted);
+/// assert_eq!(receiver.try_recv(), Ok("typed".to_owned()));
+/// # Ok::<(), harness_sessions::input::WaitError>(())
+/// ```
+pub fn complete_input_response(
     registry: &WaitRegistry,
-    response: InputResponse,
+    token: &str,
+    text: String,
     before_completion: impl FnOnce(),
 ) -> Result<(), WaitError> {
     before_completion();
-    registry.complete(&response.token, response.text)
+    registry.complete(token, text)
 }
 
 #[cfg(test)]

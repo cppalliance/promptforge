@@ -13,15 +13,29 @@ categories = ["development-tools", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-# The awaitable cancel token a run lifecycle arms for each run.
+# The awaitable cancel token a run lifecycle arms for each run, and the
+# performer trait the input broker implements.
 harness-runner.workspace = true
-# `sync` for the supervisor's typed event queues (`mpsc`).
+# The engine door: the input outcome and error vocabulary a `UserInput`
+# effect is answered with.
+promptforge-api-runtime.workspace = true
+# Wait tokens are 128 bits from the OS CSPRNG: unguessable by anything
+# that has not seen the announcing frame.
+rand.workspace = true
+thiserror.workspace = true
+# `sync` for the supervisor's typed event queues (`mpsc`) and the wait
+# registry's `oneshot` and `broadcast` channels.
 tokio = { workspace = true, features = ["sync"] }
 workspace-hack.workspace = true
 
 [dev-dependencies]
+# The tag fixture the input suite spawns its suspended waits under.
+harness-runner = { workspace = true, features = ["test-support"] }
+# The input suite drives a real engine `Run` to its `UserInput` effect.
+promptforge-api-types.workspace = true
 # The discovery suite seeds an agents directory on disk.
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

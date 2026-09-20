@@ -16,7 +16,7 @@
 //! the model-safe tool error, and [`capabilities`] is the capability
 //! identity vocabulary, the [`CapabilityId`](capabilities::CapabilityId) a
 //! prompt declares and a tool id sits under. The implementation traits
-//! behind them (`Tool`, `Capability`, `InputBroker`) are the harness's, in
+//! behind them (`Tool`, `Capability`) are the harness's, in
 //! `harness-capabilities`; the engine issues effects naming ids and never
 //! holds an implementation. [`ids`] is the hierarchical, deterministic
 //! identity of a run's chains and tasks and the [`Provenance`](ids::Provenance)

@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_api::bridge::{
-    CapabilityRegistry, GatewayClient as ModelClient, InputBroker, RunServices, ToolTable, activate,
+    CapabilityRegistry, GatewayClient as ModelClient, InputPerformer, RunServices, ToolTable,
+    activate,
 };
 use harness_api::cancel::CancelHandle;
 use promptforge_api_runtime::test_support::{Performers, drive_tokio};
@@ -37,9 +38,10 @@ use super::supervisor::AgentRunError;
 pub(super) struct RunParts {
     /// The session's event sink: the memory log and the side effects.
     pub(super) sink: SessionSink,
-    /// The broker `UserInput` effects wait on: the session's wait registry
-    /// behind [`SessionInputBroker`](crate::input::SessionInputBroker).
-    pub(super) broker: Arc<dyn InputBroker>,
+    /// The performer `UserInput` effects wait on: the session's wait
+    /// registry behind the harness's
+    /// [`SessionInputBroker`](harness_api::bridge::input::SessionInputBroker).
+    pub(super) broker: Arc<dyn InputPerformer>,
     /// The `ui()` snapshot taken at launch.
     pub(super) ui: serde_json::Value,
     /// The run's seed, drawn at launch from the OS CSPRNG.
@@ -140,7 +142,7 @@ fn performers(
     client: ModelClient,
     on_delta: Arc<dyn Fn(StreamDelta) + Send + Sync>,
     tools: ToolTable,
-    broker: Arc<dyn InputBroker>,
+    broker: Arc<dyn InputPerformer>,
 ) -> Performers {
     let limits = RunLimits::new();
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
@@ -196,7 +198,7 @@ fn performers(
                 let Effect::UserInput { execution, section } = effect else {
                     return EffectAnswer::Dropped;
                 };
-                EffectAnswer::UserInput(broker.user_input(&execution, &section).await)
+                EffectAnswer::UserInput(broker.wait(execution, section).await)
             })
         }),
     }

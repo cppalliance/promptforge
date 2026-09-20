@@ -4,7 +4,7 @@
 //! A session owns one running agent: its memory event log
 //! ([`workshop_gateway::WorkshopObserver`], the transcript sockets replay
 //! by cursor; nothing persists across a restart until the harness's run
-//! log lands), its [`crate::input::WaitRegistry`] and `user_input` tool,
+//! log lands), its [`WaitRegistry`] and input broker (the harness's),
 //! its dedicated delta broadcast (deltas never enter the event log), and
 //! the retained cancel handle behind turn-cancel. The supervisor task
 //! relaunches the agent run over the retained event log after a
@@ -42,14 +42,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::sync::{broadcast, mpsc};
 
 use harness_api::bridge::discovery::{agent_source, discover_agents};
+use harness_api::bridge::input::WaitRegistry;
 use harness_api::bridge::lifecycle::{self, RunLifecycle};
 use harness_api::bridge::{GatewayClient, GatewayEndpoint, SecretString};
 use workshop_gateway::{GatewayBinding, WorkshopObserver};
 use workshop_menu::{CatalogBus, MenuBus};
 use workshop_registry::{Push, Registry};
 use workshop_support::ReconnectBackoff;
-
-use crate::input::WaitRegistry;
 
 pub use environment::session_registry;
 pub(crate) use harness_api::bridge::discovery::AgentSource;
@@ -296,7 +295,7 @@ impl AgentSessions {
         id: &str,
         response: workshop_protocol::InputResponse,
         after_acceptance: impl FnOnce(),
-    ) -> Option<Result<(), crate::input::WaitError>> {
+    ) -> Option<Result<(), harness_api::bridge::input::WaitError>> {
         let session = self.get(id)?;
         Some(session.accept_input(response, after_acceptance))
     }

@@ -2,8 +2,9 @@
 //! reaches through the harness door before the session machinery itself
 //! moves into the harness - the harness's model client, its capability
 //! registry and activation, the implementation traits behind a run's
-//! tools and input waits, and the pure session pieces that have already
-//! moved (the supervisor reducer, the run lifecycle, agent discovery) -
+//! tools and input waits, and the session pieces that have already
+//! moved (the supervisor reducer, the run lifecycle, agent discovery,
+//! the input wait registry and its performer) -
 //! re-exported here so that `workshop-sessions` names them through one
 //! door today and the harness's own session runtime replaces them in
 //! place as it lands.
@@ -17,9 +18,14 @@
 use std::sync::Arc;
 
 /// The pure session pieces: the supervisor's state machine, the
-/// synchronous run lifecycle that feeds it, and agent discovery with the
-/// embedded built-in chat.
-pub use harness_sessions::{discovery, lifecycle, transition};
+/// synchronous run lifecycle that feeds it, agent discovery with the
+/// embedded built-in chat, and the user-input wait registry with the
+/// input performer over it.
+pub use harness_sessions::{discovery, input, lifecycle, transition};
+
+/// The performer trait behind a run's input waits and the boxed future
+/// its implementations return.
+pub use harness_runner::performers::{BoxFuture, InputPerformer};
 
 /// The harness's gateway-facing model client and its failure vocabulary.
 pub use harness_models::{
@@ -34,8 +40,8 @@ pub use harness_capabilities::{
     activate,
 };
 
-/// The implementation traits behind a run's tool calls and input waits.
-pub use harness_capabilities::{InputBroker, Tool};
+/// The implementation trait behind a run's tool calls.
+pub use harness_capabilities::Tool;
 
 /// The first-party `promptforge/web` capability.
 pub use harness_web::Web;

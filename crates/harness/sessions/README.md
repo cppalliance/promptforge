@@ -1,3 +1,5 @@
 # harness-sessions
 
 The harness session layer: agent discovery, session state, the input wait registry, and the supervisor state machine that takes a run from alive through closing to closed. It registers the first-party capability set and is what `harness-api`'s `Session` drives. Private to the harness family; clients reach it through `harness-api`.
+
+`WaitRegistry` holds a session's unresolved user-input waits behind single-use cryptographic tokens, retained across socket loss and resent on reconnect. `SessionInputBroker` is the harness's `InputPerformer` for the engine's `UserInput` effect - the input broker behind the script-side `user_input()`, never advertised to a model - which registers a wait, pushes the durable `WaitFrame::Required` itself, and suspends until the session completes the wait with the operator's text byte-exact. A drop guard turns every dying wait into a durable `WaitFrame::Cancelled`, so a cancelled turn never leaks a wait or leaves a stale prompt. The frames are harness data; the client owning the socket renders them into its own protocol.

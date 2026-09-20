@@ -28,14 +28,18 @@
 //!   the cross-site guard stays the shell's security boundary.
 //! - A dying input wait is an outcome, never silence: every path out of
 //!   an unresolved wait removes the entry and pushes a durable
-//!   `input_cancelled` frame.
+//!   `input_cancelled` frame. The wait registry and broker are the
+//!   harness's (`harness-sessions`, through the bridge); this crate
+//!   renders their wait frames into the protocol's `input_required` and
+//!   `input_cancelled`.
 
 pub mod agents;
-pub mod input;
 mod relay;
 mod session;
 pub mod state;
 
 pub use agents::{AgentSessions, SessionHost, session_registry};
-pub use input::{SessionInputBroker, WaitError, WaitRegistry};
+/// The input wait registry and the session's input broker, the harness's
+/// now; named here so `workshop-server` keeps one import path.
+pub use harness_api::bridge::input::{SessionInputBroker, WaitError, WaitRegistry};
 pub use state::{SessionsState, register, routes};

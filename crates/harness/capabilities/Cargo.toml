@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness capabilities: the capability registry, activation, and the Capability, Tool, and InputBroker traits the first-party capability crates implement"
+description = "PromptForge harness capabilities: the capability registry, activation, and the Capability and Tool traits the first-party capability crates implement"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "tools"]
 categories = ["development-tools", "api-bindings"]

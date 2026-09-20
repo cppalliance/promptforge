@@ -17,7 +17,14 @@
 //! - Nothing in this crate spawns a tokio task directly; the harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
+//! - The input broker backs only the script-side `user_input()` function,
+//!   performed as the engine's `UserInput` effect. No `user_input` tool
+//!   is ever advertised to a model unless a prompt explicitly adds it.
+//! - A dying input wait is an outcome, never silence: every path out of
+//!   an unresolved wait removes the entry and pushes a durable cancelled
+//!   frame.
 
 pub mod discovery;
+pub mod input;
 pub mod lifecycle;
 pub mod transition;
