@@ -1,4 +1,4 @@
-// The prompt input (src/parts/agent/prompt-input.ts) in jsdom: a Tiptap/
+// The prompt input (src/parts/chatbox/chat-box.ts) in jsdom: a Tiptap/
 // ProseMirror editor framed as the chat box. Covers: the editor mounts
 // inside the framed container with an accessible editable region; the
 // placeholder decorates the empty paragraph and lifts once content
@@ -12,7 +12,7 @@
 // whose canUndo/canRedo track the history plugin's depth; dispose
 // destroys the editor. Runs under the shared
 // leak check: a PromptInput that is never disposed fails.
-// Run: node test/prompt-input.mjs
+// Run: node test/chat-box.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -27,7 +27,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { PromptInput, clampPromptInputHeight } from "./src/parts/agent/prompt-input.ts";
+      export { PromptInput, clampPromptInputHeight } from "./src/parts/chatbox/chat-box.ts";
       export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
       export { getService } from "./src/services/service-registry.ts";
     `,

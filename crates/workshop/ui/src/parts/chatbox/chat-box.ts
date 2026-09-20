@@ -7,7 +7,7 @@
 // grows with its content: every edit re-measures scrollHeight and clamps
 // it between the skin's min/max height tokens.
 
-import "./prompt-input.css";
+import "./chat-box.css";
 
 import { Editor, type JSONContent } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";

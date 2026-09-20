@@ -1,4 +1,4 @@
-// The mention typeahead popup (src/parts/agent/typeahead-popup.ts) in
+// The mention typeahead popup (src/parts/chatbox/typeahead-popup.ts) in
 // jsdom, driven through a real editor over the MentionChip wiring from
 // mention-chip.ts. Covers: the stub source filters its three canned
 // entries by query; typing "@" opens the popup with listbox semantics,
@@ -31,9 +31,9 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { PromptInput } from "./src/parts/agent/prompt-input.ts";
-      export { MentionChip } from "./src/parts/agent/mention-chip.ts";
-      export { mentionTypeaheadItems } from "./src/parts/agent/typeahead-popup.ts";
+      export { PromptInput } from "./src/parts/chatbox/chat-box.ts";
+      export { MentionChip } from "./src/parts/chatbox/mention-chip.ts";
+      export { mentionTypeaheadItems } from "./src/parts/chatbox/typeahead-popup.ts";
       export { Editor } from "@tiptap/core";
       export { StarterKit } from "@tiptap/starter-kit";
     `,

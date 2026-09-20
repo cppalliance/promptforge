@@ -29,7 +29,7 @@ import type { ModelService } from "../../services/model-service";
 import { SpeechCaptureService } from "../../services/speech-capture";
 import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
-import { PromptInput } from "./prompt-input";
+import { PromptInput } from "../chatbox/chat-box";
 import { ToolCallCard } from "./tool-call-card";
 import {
   setupStt,

@@ -1,4 +1,4 @@
-// The mention chip (src/parts/agent/mention-chip.ts) in jsdom: the
+// The mention chip (src/parts/chatbox/mention-chip.ts) in jsdom: the
 // configured Mention extension renamed to mentionNode with a vanilla-DOM
 // NodeView pill. Covers: a mention node renders as a pill with icon
 // slot, label, and a labelled remove button; the pill carries the
@@ -25,8 +25,8 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { PromptInput } from "./src/parts/agent/prompt-input.ts";
-      export { MentionChip } from "./src/parts/agent/mention-chip.ts";
+      export { PromptInput } from "./src/parts/chatbox/chat-box.ts";
+      export { MentionChip } from "./src/parts/chatbox/mention-chip.ts";
       export { Editor } from "@tiptap/core";
       export { StarterKit } from "@tiptap/starter-kit";
     `,

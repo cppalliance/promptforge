@@ -1,4 +1,4 @@
-/* PromptInput (src/parts/agent/prompt-input.ts): the framed rich-text prompt box.
+/* PromptInput (src/parts/chatbox/chat-box.ts): the framed rich-text prompt box.
    The ws-agent-session card carries the frame; the inner ProseMirror
    contenteditable carries the type and the JS-driven height, clamped
    between the min/max tokens. */
@@ -44,7 +44,7 @@
   opacity: 0.5;
 }
 
-/* MentionChip (src/parts/agent/mention-chip.ts): the inline pill for an
+/* MentionChip (src/parts/chatbox/mention-chip.ts): the inline pill for an
    @-referenced file. The label truncates against the chip's max width;
    the remove button stays quiet until the chip is hovered or focused. */
 .ws-mention-chip {
