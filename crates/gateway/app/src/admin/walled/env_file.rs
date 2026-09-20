@@ -17,12 +17,33 @@ use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{pending_var_references, write_shadow};
+use serde::Serialize;
 
-use super::config::config_write_error;
+use super::config::{ShadowReply, config_write_error};
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, WireQuery, blocking};
 use crate::registry::RouteInfo;
+
+/// The `GET /admin/env` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct EnvReply {
+    /// The config-sibling `.env` file the gateway boots with.
+    boot: Option<EnvSection>,
+    /// Always `null`: profiles carry no env file of their own.
+    profile: Option<EnvSection>,
+    /// Each `${VAR}` name the pending config references, mapped to labels
+    /// of the referencing fields.
+    references: BTreeMap<String, Vec<String>>,
+}
+
+/// One side of the `GET /admin/env` reply: an env file's path and its
+/// parsed variables.
+#[derive(Debug, Serialize)]
+pub(crate) struct EnvSection {
+    path: String,
+    vars: serde_json::Map<String, serde_json::Value>,
+}
 
 const ENV: RouteInfo = RouteInfo::walled("/admin/env", &[Method::GET, Method::PUT]);
 
@@ -47,7 +68,7 @@ pub(crate) fn routes() -> Router<AppState> {
 pub(crate) async fn admin_get_env(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<EnvReply>, GatewayError> {
     let config = crate::admin::config_path(&state)?.to_path_buf();
     let env = config.with_extension("env");
     let reply = blocking(move || {
@@ -56,11 +77,11 @@ pub(crate) async fn admin_get_env(
         // unparsable config file - surfaced, never hidden.
         let references = pending_var_references(&config)
             .map_err(|error| GatewayError::EnvFile(Box::new(error)))?;
-        Ok::<_, GatewayError>(serde_json::json!({
-            "boot": env_section(Some(&env))?,
-            "profile": null,
-            "references": references,
-        }))
+        Ok::<_, GatewayError>(EnvReply {
+            boot: Some(env_section(&env)?),
+            profile: None,
+            references,
+        })
     })
     .await??;
     Ok(Json(reply))
@@ -86,7 +107,7 @@ pub(crate) async fn admin_put_env(
     _caller: LoopbackCaller,
     WireQuery(scope): WireQuery<EnvPutQuery>,
     WireJson(vars): WireJson<BTreeMap<String, String>>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<ShadowReply>, GatewayError> {
     // Saves take the apply lock; see `admin_put_config` for the why.
     let _guard = state.apply.lock().await;
     let env = match scope.scope.as_deref() {
@@ -101,21 +122,16 @@ pub(crate) async fn admin_put_env(
     let shadow = blocking(move || write_shadow(&env, &contents))
         .await?
         .map_err(config_write_error)?;
-    Ok(Json(
-        serde_json::json!({ "shadow": shadow.display().to_string() }),
-    ))
+    Ok(Json(ShadowReply::staged(&shadow)))
 }
 
 /// One side of the `GET /admin/env` reply: the file's path and its parsed
-/// variables, or `null` when that side is not configured.
-fn env_section(path: Option<&Path>) -> Result<serde_json::Value, GatewayError> {
-    let Some(path) = path else {
-        return Ok(serde_json::Value::Null);
-    };
-    Ok(serde_json::json!({
-        "path": path.display().to_string(),
-        "vars": parse_env(path)?,
-    }))
+/// variables.
+fn env_section(path: &Path) -> Result<EnvSection, GatewayError> {
+    Ok(EnvSection {
+        path: path.display().to_string(),
+        vars: parse_env(path)?,
+    })
 }
 
 /// Parses one `.env` file into a map, without touching the process

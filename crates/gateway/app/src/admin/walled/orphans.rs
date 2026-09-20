@@ -12,12 +12,21 @@ use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::SttModelConfig;
+use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
-use crate::local::{cache::orphans, resolve_cache_root};
+use crate::local::cache::{OrphanEntry, orphans};
+use crate::local::resolve_cache_root;
 use crate::registry::RouteInfo;
+
+/// The `GET /admin/orphans` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct OrphansReply {
+    /// Every cache file no catalog entry references.
+    orphans: Vec<OrphanEntry>,
+}
 
 const ORPHANS: RouteInfo = RouteInfo::walled("/admin/orphans", &[Method::GET]);
 
@@ -41,7 +50,7 @@ pub(crate) fn routes() -> Router<AppState> {
 pub(crate) async fn admin_orphans(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<OrphansReply>, GatewayError> {
     // The retained running config carries both the `[local].cache_dir` the
     // scan resolves and the catalog it diffs against: every `[[local_model]]`
     // and `[[stt_model]]` the document declares, whether or not the running
@@ -59,7 +68,7 @@ pub(crate) async fn admin_orphans(
     })
     .await?
     .map_err(GatewayError::cache)?;
-    Ok(Json(serde_json::json!({ "orphans": entries })))
+    Ok(Json(OrphansReply { orphans: entries }))
 }
 
 #[cfg(test)]

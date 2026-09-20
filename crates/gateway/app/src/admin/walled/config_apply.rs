@@ -31,6 +31,7 @@ use gateway_config::{Config, ProfileSelection, load_pending_config, shadow_path,
 use gateway_progress::Activity;
 #[cfg(feature = "web-search")]
 use gateway_web_search::WebSearchState;
+use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use super::config::{config_write_error, error_chain};
@@ -53,6 +54,24 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route(APPLY.path, post(admin_config_apply))
         .route(REVERT.path, post(admin_config_revert))
+}
+
+/// The `POST /admin/config-apply` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct ApplyReply {
+    /// The promoted real files, relative to the config root, sorted.
+    applied: Vec<String>,
+    /// Whether a config shadow applied and the remote routing reloaded.
+    reloaded: bool,
+    /// Whether a promoted change takes effect only at the next start.
+    restart_required: bool,
+}
+
+/// The `POST /admin/config-revert` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct RevertReply {
+    /// The deleted shadow files, relative to the config root.
+    reverted: Vec<String>,
 }
 
 /// Top-level sections the process reads once at boot. A change to one of
@@ -92,7 +111,7 @@ const RESTART_SECTIONS: [&str; 6] = [
 pub(crate) async fn admin_config_apply(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<ApplyReply>, GatewayError> {
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let (enqueued, applied, restart_required) = {
         // The lock spans the census, the parse, and the capture (or the
@@ -107,11 +126,11 @@ pub(crate) async fn admin_config_apply(
                 restart_required,
             } => {
                 let applied = blocking(move || promote_captures(&files)).await??;
-                return Ok(Json(serde_json::json!({
-                    "applied": applied,
-                    "reloaded": false,
-                    "restart_required": restart_required,
-                })));
+                return Ok(Json(ApplyReply {
+                    applied,
+                    reloaded: false,
+                    restart_required,
+                }));
             }
             ApplyPlan::Reload(snapshot) => snapshot,
         };
@@ -132,11 +151,11 @@ pub(crate) async fn admin_config_apply(
         )))
     });
     match &*outcome {
-        Ok(_) => Ok(Json(serde_json::json!({
-            "applied": applied,
-            "reloaded": true,
-            "restart_required": restart_required,
-        }))),
+        Ok(_) => Ok(Json(ApplyReply {
+            applied,
+            reloaded: true,
+            restart_required,
+        })),
         Err(GatewayError::CommandCancelled(_)) => Err(GatewayError::ApplyCancelled),
         Err(error) => Err(GatewayError::ApplyReloadFailed(error_chain(error))),
     }
@@ -153,7 +172,7 @@ pub(crate) async fn admin_config_apply(
 pub(crate) async fn admin_config_revert(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<RevertReply>, GatewayError> {
     // A revert issued during an apply wins: cancel the apply before its
     // commit can write the snapshot over the files being reverted. The
     // commit re-checks the token under the apply lock, so an apply already
@@ -164,7 +183,7 @@ pub(crate) async fn admin_config_revert(
     let _guard = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let reverted = blocking(move || delete_all_shadows(&config_path)).await??;
-    Ok(Json(serde_json::json!({ "reverted": reverted })))
+    Ok(Json(RevertReply { reverted }))
 }
 
 /// One shadow as the Apply route captured it, ready to land in its real

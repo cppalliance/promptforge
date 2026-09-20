@@ -24,10 +24,10 @@ todos:
     content: Per-area RouteInfo consts with tier kind plus registry test; shrink lib.rs doc paragraph (Finding 6)
     status: completed
   - id: typed-responses
-    content: Serialize structs for admin replies, byte-identical JSON (Finding 5)
-    status: pending
+    content: Serialize structs for admin replies, byte-identical JSON (Finding 5); status.rs deferred to the gated step
+    status: completed
   - id: split-config-apply
-    content: "GATED on progress plan Step 5: move apply_config command body beside commands; leave thin handlers (Finding 7)"
+    content: "GATED on progress plan Step 5: move apply_config command body beside commands; leave thin handlers (Finding 7); type the admin/open/status.rs reply; blocking() in the two commands.rs sites"
     status: pending
 isProject: false
 ---
@@ -99,12 +99,15 @@ Pure mechanical, no route moves, verified by the existing suite.
 ## Step 4: Typed admin responses (Finding 5)
 
 - One `Serialize` struct per admin reply in the module that produces it, replacing `json!` literals in `admin/open/status.rs`, `admin/open/profiles.rs`, `admin/walled/config_apply.rs`, `admin/walled/config_pending.rs`, `admin/walled/env_file.rs`. Wire JSON stays byte-identical; the integration tests become shape tests against a type. When rebased onto the progress plan's Step 4, `StatusResponse` carries `progress: gateway_api_types::Progress` and no `active.fraction`.
+- As executed: `ProfilesReply`, `SwitchProfileReply` (profiles), `ShadowReply` (config, shared by `PUT /admin/config` and `PUT /admin/env`), `ApplyReply`, `RevertReply` (config_apply), `PendingReply`, `DirtyReply` (config_pending), `EnvReply`, `EnvSection` (env_file), plus `CancelReply` (queue) and `OrphansReply` (orphans) for uniformity. `PendingReply.profile` stays a `serde_json::Value`: it is the config document itself with `active_profile` inserted, dynamic by nature. `dirty_reply`'s unit test now asserts on struct fields. `admin/open/status.rs` is deferred to Step 5: the progress plan's Step 4 rewrites its reply body (adds `progress`, drops `active.fraction`), and typing it now would put the two changes in the same lines.
+- Verified: clippy `-D warnings`, fmt, headless check, rustdoc `-D warnings`, nextest 475 passed.
 - Commit: `Type the admin reply shapes`
 
 ## Step 5: Split config_apply.rs (Finding 7) - GATED
 
 - Gate: the progress plan's Step 5 commit is on `vibe2` and this branch is rebased onto it.
 - Move `apply_config` and its snapshot types beside the other commands (`commands.rs` is already 1,400+ lines, so a `commands-apply.rs` sibling with `#[path]`); `admin/walled/config_apply.rs` keeps two thin handlers. Keep the apply mutex acquisition in the same relative position. This is the one step that can shift behavior.
+- Also in this step, the two pieces deferred from Steps 1 and 4 because their lines are the progress plan's: the two `commands.rs` `spawn_blocking` sites (`provision_model`, `unload_model`) move to `blocking()`, and `admin/open/status.rs` gets a typed `StatusReply` carrying their `progress: gateway_api_types::Progress` field and no `active.fraction`.
 - Commit: `Move the apply command body beside the other commands`
 
 ## Step 6 (optional): AppState builder (Finding 8) - GATED

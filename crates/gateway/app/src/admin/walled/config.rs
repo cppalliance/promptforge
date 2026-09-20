@@ -11,16 +11,35 @@
 //! in `gateway-config`; these handlers own auth, path resolution, and the
 //! JSON-to-TOML boundary.
 
+use std::path::Path;
+
 use axum::extract::State;
 use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{ConfigErrorKind, save_config_shadow};
+use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, blocking};
 use crate::registry::RouteInfo;
+
+/// The reply of every shadow-write route: the shadow file the save
+/// staged, as a display path.
+#[derive(Debug, Serialize)]
+pub(crate) struct ShadowReply {
+    shadow: String,
+}
+
+impl ShadowReply {
+    /// The reply naming `shadow`.
+    pub(crate) fn staged(shadow: &Path) -> ShadowReply {
+        ShadowReply {
+            shadow: shadow.display().to_string(),
+        }
+    }
+}
 
 const CONFIG: RouteInfo = RouteInfo::walled("/admin/config", &[Method::GET, Method::PUT]);
 
@@ -56,7 +75,7 @@ pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
     WireJson(body): WireJson<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<ShadowReply>, GatewayError> {
     // Saves take the apply lock: apply promotes shadows without
     // re-validating, so the combination it promotes must be one the latest
     // save validated whole - saves serialize with apply, revert, and each
@@ -67,9 +86,7 @@ pub(crate) async fn admin_put_config(
     let shadows = blocking(move || save_config_shadow(&config, document))
         .await?
         .map_err(config_write_error)?;
-    Ok(Json(serde_json::json!({
-        "shadow": shadows.config.display().to_string(),
-    })))
+    Ok(Json(ShadowReply::staged(&shadows.config)))
 }
 
 /// Maps a config-crate failure onto the wire: a failed disk write is a

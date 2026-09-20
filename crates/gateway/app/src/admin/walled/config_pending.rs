@@ -22,12 +22,35 @@ use gateway_config::{
     Config, ProfileSelection, ProfileState, load_pending_config, pending_report,
     profile_state_path, shadow_path,
 };
+use serde::Serialize;
 
 use super::config::error_chain;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
 use crate::registry::RouteInfo;
+
+/// The `GET /admin/config-pending` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct PendingReply {
+    /// The shadow-preferred global config document plus `active_profile`,
+    /// the persisted selection.
+    profile: serde_json::Value,
+    /// Always `null`: the boot side has no pending view of its own.
+    boot: Option<serde_json::Value>,
+}
+
+/// The `GET /admin/config-dirty` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct DirtyReply {
+    /// Whether any shadow exists.
+    dirty: bool,
+    /// The real files whose shadows exist, relative to the config root,
+    /// sorted.
+    pending_files: Vec<String>,
+    /// The top-level sections the config shadow changes.
+    changed_sections: Vec<String>,
+}
 
 const PENDING: RouteInfo = RouteInfo::walled("/admin/config-pending", &[Method::GET]);
 const DIRTY: RouteInfo = RouteInfo::walled("/admin/config-dirty", &[Method::GET]);
@@ -55,7 +78,7 @@ pub(crate) fn routes() -> Router<AppState> {
 pub(crate) async fn admin_config_pending(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<PendingReply>, GatewayError> {
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let running_profile = state.profile_name().await;
@@ -70,10 +93,10 @@ pub(crate) async fn admin_config_pending(
                 }),
             );
         }
-        Ok::<_, GatewayError>(serde_json::json!({
-            "profile": profile,
-            "boot": null,
-        }))
+        Ok::<_, GatewayError>(PendingReply {
+            profile,
+            boot: None,
+        })
     })
     .await??;
     Ok(Json(reply))
@@ -122,7 +145,7 @@ fn persisted_selection(config_path: &Path) -> Result<Option<String>, GatewayErro
 pub(crate) async fn admin_config_dirty(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<DirtyReply>, GatewayError> {
     let _publication = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
     let reply = blocking(move || dirty_reply(&config_path)).await??;
@@ -168,7 +191,7 @@ pub(crate) fn config_root(config_path: &Path) -> Option<&Path> {
 
 /// Assembles the `GET /admin/config-dirty` body: the shadowed config file
 /// plus the `.env` sibling, and the config shadow's section diff.
-fn dirty_reply(config_path: &Path) -> Result<serde_json::Value, GatewayError> {
+fn dirty_reply(config_path: &Path) -> Result<DirtyReply, GatewayError> {
     let census = shadow_census(config_path)?;
     let root = config_root(config_path);
     let mut pending_files: Vec<String> = census
@@ -177,11 +200,11 @@ fn dirty_reply(config_path: &Path) -> Result<serde_json::Value, GatewayError> {
         .map(|file| relative_name(file, root))
         .collect();
     pending_files.sort_unstable();
-    Ok(serde_json::json!({
-        "dirty": !pending_files.is_empty(),
-        "pending_files": pending_files,
-        "changed_sections": census.sections,
-    }))
+    Ok(DirtyReply {
+        dirty: !pending_files.is_empty(),
+        pending_files,
+        changed_sections: census.sections,
+    })
 }
 
 /// Appends `file` unless its canonical form is already listed. The same
@@ -270,9 +293,9 @@ models = []
 
         let reply = dirty_reply(&config).expect("dirty reply");
 
-        assert_eq!(reply["dirty"], true);
-        assert_eq!(reply["pending_files"], serde_json::json!(["gateway.toml"]));
-        assert_eq!(reply["changed_sections"], serde_json::json!(["server"]));
+        assert!(reply.dirty);
+        assert_eq!(reply.pending_files, ["gateway.toml"]);
+        assert_eq!(reply.changed_sections, ["server"]);
         assert!(shadow_path(&config).is_file());
     }
 

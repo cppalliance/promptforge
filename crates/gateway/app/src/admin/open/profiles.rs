@@ -6,7 +6,7 @@ use axum::http::Method;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use gateway_config::ProfileName;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::admin::config_path;
@@ -35,18 +35,35 @@ pub(crate) struct SwitchProfileRequest {
     name: Option<String>,
 }
 
+/// The `GET /admin/profiles` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct ProfilesReply {
+    /// Every profile name the loaded catalog defines, in catalog order.
+    profiles: Vec<String>,
+}
+
+/// The `POST /admin/switch-profile` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct SwitchProfileReply {
+    /// The persisted selection, `null` when no profile is selected.
+    profile: Option<String>,
+    /// Whether the selection differs from the running profile, so it
+    /// takes effect only at the next start.
+    restart_required: bool,
+}
+
 /// Lists profile names from the loaded global catalog.
 pub(crate) async fn admin_list_profiles(
     State(state): State<AppState>,
     _caller: AuthedCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<ProfilesReply>, GatewayError> {
     let config = state.config().await;
-    let profiles: Vec<&str> = config
+    let profiles = config
         .profiles()
         .iter()
-        .map(gateway_config::ProfileConfig::name)
+        .map(|profile| profile.name().to_owned())
         .collect();
-    Ok(Json(serde_json::json!({ "profiles": profiles })))
+    Ok(Json(ProfilesReply { profiles }))
 }
 
 /// Persists the profile selection and reports whether a restart is needed.
@@ -67,7 +84,7 @@ pub(crate) async fn admin_switch_profile(
     State(state): State<AppState>,
     _caller: AuthedCaller,
     WireJson(request): WireJson<SwitchProfileRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<SwitchProfileReply>, GatewayError> {
     let selected = request
         .name
         .as_deref()
@@ -100,10 +117,10 @@ pub(crate) async fn admin_switch_profile(
     })
     .await?
     .map_err(config_write_error)?;
-    Ok(Json(serde_json::json!({
-        "profile": selected.as_ref().map(ProfileName::as_str),
-        "restart_required": restart_required,
-    })))
+    Ok(Json(SwitchProfileReply {
+        profile: selected.map(|name| name.as_str().to_owned()),
+        restart_required,
+    }))
 }
 
 /// The `profile not found` detail for a switch to a name the live catalog
