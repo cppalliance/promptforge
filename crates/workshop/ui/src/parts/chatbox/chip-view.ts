@@ -90,6 +90,16 @@ function iconFor(chip: ChipRef): IconNode {
 }
 
 /**
+ * Draws a chip's icon alone, as a decorative `<svg>`: the same glyph
+ * the pill shows, for the typeahead row that offers the chip.
+ */
+export function renderChipIcon(chip: ChipRef): SVGElement {
+  const svg = createElement(iconFor(chip), { width: ICON_SIZE_PX, height: ICON_SIZE_PX });
+  svg.setAttribute("aria-hidden", "true");
+  return svg;
+}
+
+/**
  * Draws a chip as a `ws-mention-chip` pill: icon slot, label, and an
  * unwired remove button. `data-kind` and `data-tone` mirror the chip's
  * fields and are absent when the fields are. The element is
@@ -111,7 +121,7 @@ export function renderChip(chip: ChipRef): HTMLElement {
   const icon = document.createElement("span");
   icon.className = "ws-mention-chip__icon";
   icon.setAttribute("aria-hidden", "true");
-  icon.appendChild(createElement(iconFor(chip), { width: ICON_SIZE_PX, height: ICON_SIZE_PX }));
+  icon.appendChild(renderChipIcon(chip));
 
   const label = document.createElement("span");
   label.className = "ws-mention-chip__label";

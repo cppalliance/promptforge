@@ -19,8 +19,14 @@
 // insertMention places a pill plus one trailing space at the cursor;
 // serialize/restore round-trips text, pills, and each pill's payload
 // byte-for-byte and paints attachments into the strip; restore with a
-// missing or unknown `v` leaves the box unchanged. The static renderer
-// (src/parts/chatbox/chat-box-view.ts): renderDraft turns a
+// missing or unknown `v` leaves the box unchanged. The typeahead seams:
+// the default stub source lists its three entries when `@` is typed;
+// an injected mentionSource replaces the stub and the popup lists its
+// items; the source receives the plugin's AbortSignal, which fires when
+// a newer keystroke arrives; an older query resolving after a newer one
+// does not overwrite the newer results; `/` is plain text with no
+// popup (commandSource's default is stored, not wired). The static
+// renderer (src/parts/chatbox/chat-box-view.ts): renderDraft turns a
 // SerializedDraft with text, one inline pill, and one attachment into
 // the expected read-only DOM. Runs under the shared leak check: a
 // ChatBox that is never disposed fails.
@@ -39,7 +45,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { ChatBox, clampPromptInputHeight } from "./src/parts/chatbox/chat-box.ts";
+      export { ChatBox, clampPromptInputHeight, stubMentionSource } from "./src/parts/chatbox/chat-box.ts";
       export { renderDraft } from "./src/parts/chatbox/chat-box-view.ts";
       export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
       export { getService } from "./src/services/service-registry.ts";
@@ -75,6 +81,8 @@ globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.HTMLInputElement = dom.window.HTMLInputElement;
 globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
 globalThis.Node = dom.window.Node;
+// The suggestion plugin's managed mount reads the DOMRect global.
+globalThis.DOMRect = dom.window.DOMRect;
 // Tiptap's focus command schedules with the bare globals.
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
@@ -86,8 +94,15 @@ dom.window.Range.prototype.getBoundingClientRect = () => zeroRect;
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-chat-box-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, ChatBox, clampPromptInputHeight, renderDraft, TEXT_CONTROL_SERVICE, getService } =
-  await import(pathToFileURL(bundlePath).href);
+const {
+  lifecycle,
+  ChatBox,
+  clampPromptInputHeight,
+  stubMentionSource,
+  renderDraft,
+  TEXT_CONTROL_SERVICE,
+  getService,
+} = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -119,6 +134,52 @@ function micButton(input) {
 
 function sendButton(input) {
   return input.element.querySelector(".ws-agent-session__send");
+}
+
+// The suggestion plugin debounces its item fetch (the component
+// configures 50 to 100 ms), so a typeahead assertion waits past that
+// window plus the mount's computePosition before reading the popup.
+function settle() {
+  return new Promise((resolve) => setTimeout(resolve, 160));
+}
+
+// A mounted box whose editor the test can drive: Tiptap stamps the
+// Editor on the view DOM (dom.editor), and the suggestion session only
+// activates for a focused, connected editor.
+function mountedBox(props = {}, sink = () => {}) {
+  const input = new ChatBox(props, sink);
+  document.body.appendChild(input.element);
+  const editor = editorElement(input).editor;
+  editor.commands.focus();
+  return { input, editor };
+}
+
+// insertContent dispatches the same transaction typing would.
+async function typeText(editor, text) {
+  editor.commands.insertContent(text);
+  await settle();
+}
+
+function popup() {
+  return document.body.querySelector(".ws-typeahead-popup");
+}
+
+function popupLabels() {
+  return [...(popup()?.querySelectorAll(".ws-typeahead-popup__item") ?? [])].map(
+    (item) => item.querySelector(".ws-typeahead-popup__label")?.textContent ?? item.textContent,
+  );
+}
+
+// A source whose every call is recorded and resolves only when the test
+// says so, for the abort and stale-result assertions.
+function deferredSource() {
+  const calls = [];
+  const source = (query, signal) =>
+    new Promise((resolve) => {
+      calls.push({ query, signal, resolve });
+    });
+  source.calls = calls;
+  return source;
 }
 
 // A sink that records every event and counts the sends, standing in for
@@ -1002,6 +1063,113 @@ await assertNoLeaks(lifecycle, async () => {
       input.getText() === "keep me" && strip.childElementCount === 0,
     );
     input.dispose();
+  }
+
+  // --- The mention source seam -----------------------------------------------------------
+
+  {
+    const all = await stubMentionSource("", new AbortController().signal);
+    check(
+      "the default stub source lists its three canned entries as chips",
+      all.length === 3 &&
+        all[0].label === "README.md" &&
+        all[1].label === "src/main.ts" &&
+        all[2].label === "Cargo.toml" &&
+        all.every((chip) => chip.id === chip.label && chip.kind === "file" && chip.data === null),
+    );
+    const narrowed = await stubMentionSource("RE", new AbortController().signal);
+    check(
+      "the stub source filters by case-insensitive substring on the label",
+      narrowed.length === 1 &&
+        narrowed[0].label === "README.md" &&
+        (await stubMentionSource("re", new AbortController().signal)).length === 1 &&
+        (await stubMentionSource("zzz", new AbortController().signal)).length === 0,
+    );
+  }
+
+  {
+    const { input, editor } = mountedBox();
+    await typeText(editor, "@");
+    check(
+      "with no mentionSource, typing @ lists the stub entries",
+      popupLabels().join(",") === "README.md,src/main.ts,Cargo.toml",
+    );
+    input.dispose();
+    input.element.remove();
+  }
+
+  {
+    const seen = [];
+    const mentionSource = async (query, signal) => {
+      seen.push({ query, aborted: signal instanceof AbortSignal ? signal.aborted : null });
+      return [
+        { id: "docs/alpha.md", label: "alpha.md", kind: "file", description: "docs", data: { p: 1 } },
+        { id: "docs/beta.md", label: "beta.md", kind: "file", description: "docs", data: { p: 2 } },
+      ].filter((chip) => chip.label.includes(query));
+    };
+    const { input, editor } = mountedBox({ mentionSource });
+    await typeText(editor, "@");
+    check(
+      "an injected mentionSource replaces the stub and the popup lists its items",
+      popupLabels().join(",") === "alpha.md,beta.md" && popup()?.hidden === false,
+    );
+    check(
+      "the source is called with the query and a live AbortSignal",
+      seen.length >= 1 && seen[0].query === "" && seen[0].aborted === false,
+    );
+    await typeText(editor, "bet");
+    check(
+      "a narrowed query reaches the source and filters the popup",
+      seen.at(-1)?.query === "bet" && popupLabels().join(",") === "beta.md",
+    );
+    input.dispose();
+    input.element.remove();
+    check("disposing the box mid-session removes the popup", popup() === null);
+  }
+
+  {
+    const mentionSource = deferredSource();
+    const { input, editor } = mountedBox({ mentionSource });
+    await typeText(editor, "@");
+    check(
+      "the pending source has been asked for the empty query",
+      mentionSource.calls.length === 1 && mentionSource.calls[0].query === "",
+    );
+    await typeText(editor, "x");
+    check(
+      "a newer keystroke fires the older query's AbortSignal",
+      mentionSource.calls[0].signal.aborted === true &&
+        mentionSource.calls.length === 2 &&
+        mentionSource.calls[1].query === "x" &&
+        mentionSource.calls[1].signal.aborted === false,
+    );
+    mentionSource.calls[1].resolve([{ id: "x1", label: "xylophone.ts", data: null }]);
+    await settle();
+    check(
+      "the newer query's results fill the popup",
+      popupLabels().join(",") === "xylophone.ts",
+    );
+    mentionSource.calls[0].resolve([{ id: "old", label: "stale.ts", data: null }]);
+    await settle();
+    check(
+      "an older query resolving after a newer one does not overwrite the newer results",
+      popupLabels().join(",") === "xylophone.ts",
+    );
+    input.dispose();
+    input.element.remove();
+  }
+
+  {
+    const { input, editor } = mountedBox();
+    await typeText(editor, "/");
+    check(
+      "a typed / is plain text with no popup while commandSource is the default",
+      popup() === null && input.getText() === "/",
+    );
+    await typeText(editor, "help");
+    check("text after / stays text", popup() === null && input.getText() === "/help");
+    input.dispose();
+    input.element.remove();
   }
 
   // --- The static renderer (chat-box-view.ts) ----------------------------------------

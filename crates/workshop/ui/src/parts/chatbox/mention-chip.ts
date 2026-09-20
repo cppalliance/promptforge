@@ -12,13 +12,16 @@
 // icon, preview, tone, and the opaque host payload `data`, each written
 // to and read from a data attribute so the pill survives the clipboard
 // (copy renders HTML, paste parses it) and JSON persistence alike.
+// The suggestion here is configured only as far as the schema cares
+// (trigger, plugin key, no spaces); the item source, the popup
+// renderer, and the fetch timing are the chat box's to configure per
+// instance (chat-box.ts), so this module stays free of the popup.
 
 import { Mention } from "@tiptap/extension-mention";
 import type { MentionNodeAttrs } from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
 import { renderChip } from "./chip-view";
 import type { ChipRef, JsonValue } from "./types";
-import { mentionTypeaheadItems, renderMentionTypeahead } from "./typeahead-popup";
 
 /** The node's attribute set: upstream's three plus the chip model. Absent fields are null. */
 export interface ChipNodeAttrs extends MentionNodeAttrs {
@@ -85,6 +88,23 @@ export function chipFromAttrs(attrs: ChipNodeAttrs): ChipRef {
   return chip;
 }
 
+/**
+ * The node attributes a chip is inserted with. Only the stored subset
+ * crosses: `description` and `group` are typeahead-only and never land
+ * on the node. Absent fields become null, the schema's default.
+ */
+export function attrsFromChip(chip: ChipRef): ChipNodeAttrs {
+  return {
+    id: chip.id,
+    label: chip.label,
+    kind: chip.kind ?? null,
+    icon: chip.icon ?? null,
+    preview: chip.preview ?? null,
+    tone: chip.tone ?? null,
+    data: chip.data,
+  };
+}
+
 /** One optional string attribute mirrored onto `data-<name>`, absent when null. */
 function stringAttribute(name: string) {
   return {
@@ -116,8 +136,13 @@ export const MentionSuggestionPluginKey = new PluginKey<MentionSuggestionState>(
 /**
  * The configured mention extension: upstream Mention renamed to
  * `mentionNode`, with a vanilla-DOM NodeView rendering the pill (icon
- * slot, truncated label, remove button). Registered in PromptInput's
- * extensions array.
+ * slot, truncated label, remove button). The chat box registers it
+ * after configuring the suggestion's `items`, `render`, and timing on
+ * top of what is set here. Upstream's insertion command is kept: it
+ * replaces the trigger-plus-query range with the node and one trailing
+ * space, extending the range by one when a space already follows so
+ * two never stack; with `deleteTriggerWithBackspace` off, Backspace
+ * directly after a pill restores the literal `@`.
  */
 export const MentionChip = Mention.extend({
   name: "mentionNode",
@@ -189,12 +214,15 @@ export const MentionChip = Mention.extend({
     };
   },
 }).configure({
+  deleteTriggerWithBackspace: false,
   suggestion: {
     char: "@",
     // A named key instead of the extension's anonymous default, so the
-    // prompt input can read the session state through it.
+    // chat box can read the session state through it.
     pluginKey: MentionSuggestionPluginKey,
-    items: ({ query }) => mentionTypeaheadItems(query),
-    render: renderMentionTypeahead,
+    // A space ends the query (the session closes, the text stays), and
+    // the default allowedPrefixes (a space or the start of a text node)
+    // keep an `@` inside a word from triggering.
+    allowSpaces: false,
   },
 });

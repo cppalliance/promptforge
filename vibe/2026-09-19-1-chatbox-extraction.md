@@ -555,7 +555,7 @@ Gates: every commit leaves `npm run typecheck` green in `crates/workshop/ui/` (a
 
 <step-5>
 
-### Step 5: Seams, typeahead extension, boundary guard, full verification
+### Step 5: Seams, typeahead extension, boundary guard, full verification [completed]
 
 - Component: `chatbox-extraction`
 - Piece: seams, typeahead, verification

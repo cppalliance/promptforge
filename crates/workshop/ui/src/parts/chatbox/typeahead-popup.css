@@ -34,13 +34,70 @@
 }
 
 .ws-typeahead-popup__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding-block: var(--space-1);
   padding-inline: var(--space-2);
   border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* The chip's glyph, sized by the icon itself; kept from shrinking so a
+   long label truncates instead of the icon. */
+.ws-typeahead-popup__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
+/* Shrinkable (flex-basis auto, min-inline-size 0) so the ellipsis is
+   reachable; a flex item's default min-inline-size is its content width,
+   which would hard-clip the label at the item edge instead. */
+.ws-typeahead-popup__label {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The row detail (for files, the parent path): dimmed, to the right of
+   the label, and the first thing to give way when space is short. The
+   larger flex-shrink takes width from the description well before the
+   label starts to truncate. */
+.ws-typeahead-popup__description {
+  flex: 1 8 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* A group boundary: not an option, not selectable, not highlighted. */
+.ws-typeahead-popup__header {
+  padding-block: var(--space-1);
+  padding-inline: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.ws-typeahead-popup__header:not(:first-child) {
+  margin-block-start: var(--space-1);
+  border-block-start: var(--ws-border-width) solid var(--border-subtle);
+}
+
+/* The source is still working: shown in place of an empty list so the
+   popup does not blink shut between keystrokes. */
+.ws-typeahead-popup__loading {
+  padding-block: var(--space-1);
+  padding-inline: var(--space-2);
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 /* The keyboard highlight; the rows are not focusable (the editor keeps

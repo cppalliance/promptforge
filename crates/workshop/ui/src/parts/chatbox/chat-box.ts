@@ -12,7 +12,10 @@
 // It reaches no service registry - the text-control registrar is
 // injected - and imports nothing from the host layers. Every prop-driven
 // state is mirrored onto the DOM as a data attribute beside the classes
-// the skin already relies on.
+// the skin already relies on. The `@` typeahead's items come from the
+// injected mentionSource (a three-item stub by default) through the
+// suggestion plugin, which owns the debounce, the abort, and the
+// stale-result guard; the box only forwards the plugin's signal.
 
 import "./chat-box.css";
 
@@ -20,16 +23,25 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { StarterKit } from "@tiptap/starter-kit";
+import type { EditorState } from "@tiptap/pm/state";
 import { Disposable, type IDisposable, toDisposable } from "../../base/lifecycle";
 import { ICON_MIC, ICON_SEND } from "../shared/icons";
 import { renderChip } from "./chip-view";
-import { type ChipNodeAttrs, chipFromAttrs, MentionChip, MentionSuggestionPluginKey } from "./mention-chip";
+import {
+  attrsFromChip,
+  type ChipNodeAttrs,
+  chipFromAttrs,
+  MentionChip,
+  MentionSuggestionPluginKey,
+} from "./mention-chip";
+import { renderMentionTypeahead } from "./typeahead-popup";
 import type {
   ChatBoxDynamicProps,
   ChatBoxEventSink,
   ChatBoxHandle,
   ChatBoxProps,
   ChipRef,
+  ChipSource,
   SerializedDraft,
 } from "./types";
 
@@ -37,6 +49,44 @@ import type {
 // apply when the skin is absent (tests) or the token is deleted.
 const DEFAULT_MIN_HEIGHT_PX = 36;
 const DEFAULT_MAX_HEIGHT_PX = 200;
+
+// The suggestion plugin waits this long after the last keystroke before
+// asking the source, and aborts the in-flight query when a newer one
+// arrives; the box adds no timing logic of its own.
+const MENTION_DEBOUNCE_MS = 60;
+
+// STUB for the future workspace file index: three canned entries keep
+// the popup's open/filter/select cycle working until a host supplies a
+// mentionSource.
+const STUB_CHIPS: readonly ChipRef[] = [
+  { id: "README.md", label: "README.md", kind: "file", data: null },
+  { id: "src/main.ts", label: "src/main.ts", kind: "file", data: null },
+  { id: "Cargo.toml", label: "Cargo.toml", kind: "file", data: null },
+];
+
+/**
+ * The default `@` source: the stub entries filtered by case-insensitive
+ * substring match on the label. Exported so the stub's shape is pinned
+ * by a test rather than by the popup it happens to fill.
+ */
+export const stubMentionSource: ChipSource = (query) => {
+  const needle = query.toLowerCase();
+  return Promise.resolve(STUB_CHIPS.filter((chip) => chip.label.toLowerCase().includes(needle)));
+};
+
+/** The `/` source until commands arrive: nothing, so a typed `/` stays text. */
+const NO_COMMANDS: ChipSource = () => Promise.resolve([]);
+
+/**
+ * Whether a typeahead session owns the keyboard: editorProps handlers
+ * run before the suggestion state plugin's, so the box's Enter and Tab
+ * handling must yield while a trigger's session is active or the send
+ * would fire instead of the selection. One key today (`@`); the `/`
+ * trigger joins this list when it is wired.
+ */
+function suggestionActive(state: EditorState): boolean {
+  return MentionSuggestionPluginKey.getState(state)?.active === true;
+}
 
 /**
  * Clamps a measured content height into the input's height band.
@@ -98,6 +148,10 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   private readonly variant: NonNullable<ChatBoxProps["variant"]>;
   private readonly dynamic: ResolvedDynamicProps;
   private attachments: ChipRef[] = [];
+  // Held for the `/` trigger, which is not wired to a plugin in this
+  // plan: a typed `/` stays text. The seam exists so the host's source
+  // is in place when the command chip arrives.
+  private readonly commandSource: ChipSource;
 
   // Two locks, one property: the pending-wait gate (the editable prop)
   // and a dictation take (setReadOnly) both map onto contenteditable,
@@ -116,6 +170,8 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       action: props.action ?? "send",
       mic: props.mic ?? "idle",
     };
+    this.commandSource = props.commandSource ?? NO_COMMANDS;
+    const mentionSource = props.mentionSource ?? stubMentionSource;
 
     this.element = document.createElement("div");
     this.element.className = "ws-agent-session__bar";
@@ -199,9 +255,21 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           // working" message IS the non-editable state.
           showOnlyWhenEditable: false,
         }),
-        // Inline mention pills (@-referenced files) with the typeahead
-        // popup wired into the extension's suggestion seam.
-        MentionChip,
+        // Inline mention pills (@-referenced chips) with this box's
+        // source and the typeahead popup wired into the extension's
+        // suggestion seam. The plugin owns the async handling: it
+        // debounces, hands the source an AbortSignal it fires on a
+        // newer keystroke, discards a stale resolution, and reports
+        // `loading` to the popup. minQueryLength 0 means a bare `@`
+        // shows results.
+        MentionChip.configure({
+          suggestion: {
+            items: ({ query, signal }) => mentionSource(query, signal),
+            render: renderMentionTypeahead,
+            debounce: MENTION_DEBOUNCE_MS,
+            minQueryLength: 0,
+          },
+        }),
       ],
       content: props.content ?? "",
       editable: this.dynamic.editable,
@@ -213,6 +281,11 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           "aria-multiline": "true",
         },
         handleKeyDown: (view, event) => {
+          // An open typeahead owns Enter and Tab - both insert the
+          // highlighted item - so the box yields them to the plugin.
+          if ((event.key === "Enter" || event.key === "Tab") && suggestionActive(view.state)) {
+            return false;
+          }
           if (event.key !== "Enter" || event.shiftKey) {
             return false;
           }
@@ -222,13 +295,6 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
           // otherwise split the paragraph under the composition.
           if (event.isComposing) {
             return true;
-          }
-          // An open mention typeahead owns Enter - it inserts the
-          // highlighted item. editorProps handlers run before the
-          // suggestion state plugin's, so without this check the
-          // submit would fire instead of the selection.
-          if (MentionSuggestionPluginKey.getState(view.state)?.active === true) {
-            return false;
           }
           this.emitAction();
           return true;
@@ -483,16 +549,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
       .insertContent([
         {
           type: "mentionNode",
-          attrs: {
-            id: chip.id,
-            label: chip.label,
-            mentionSuggestionChar: "@",
-            kind: chip.kind ?? null,
-            icon: chip.icon ?? null,
-            preview: chip.preview ?? null,
-            tone: chip.tone ?? null,
-            data: chip.data,
-          },
+          attrs: { ...attrsFromChip(chip), mentionSuggestionChar: "@" },
         },
         { type: "text", text: " " },
       ])
