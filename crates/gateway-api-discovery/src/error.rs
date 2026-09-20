@@ -6,17 +6,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// A JSON cause behind a [`SidecarError`] variant: a crate-owned wrapper so
-/// the public error surface does not name the JSON library's error type.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct JsonSource(serde_json::Error);
-
-impl From<serde_json::Error> for JsonSource {
-    fn from(source: serde_json::Error) -> Self {
-        JsonSource(source)
-    }
-}
+// The JSON cause behind a `SidecarError` variant. A caller that needs the
+// JSON error itself names `shared_error_source` directly; this crate does not
+// re-export the wrapper, so there is one name for the cause across the
+// workspace rather than one per crate.
+use shared_error_source::JsonSource;
 
 /// A failure of a gateway-discovery-file or launch-lock operation.
 #[derive(Debug, thiserror::Error)]
@@ -109,4 +103,29 @@ pub enum SidecarError {
         /// The budget that elapsed.
         timeout: Duration,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonSource, SidecarError};
+    use std::error::Error as _;
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_parse_variant_reaches_the_json_error_through_the_shared_wrapper() {
+        let Err(json) = serde_json::from_str::<u32>("nope") else {
+            panic!("`nope` must not parse as a u32");
+        };
+        let error = SidecarError::Parse {
+            path: PathBuf::from("gateway.json"),
+            source: json.into(),
+        };
+        let Some(cause) = error.source() else {
+            panic!("the parse variant carries its JSON cause as source()");
+        };
+        let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
+            panic!("the JSON cause is the shared JsonSource");
+        };
+        assert!(wrapper.as_inner().is_syntax());
+    }
 }

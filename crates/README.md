@@ -18,6 +18,10 @@ The PromptForge runtime: prompt parsing and the sans-IO `Run` state machine that
 
 The promptforge public types: untrusted-content guards, cooperative cancellation, run observation, and the model and tool vocabulary. Nearly every promptforge consumer and several workshop crates depend on it; it is the other half of the family's public surface. Depends only on shared-vfs.
 
+## shared-error-source
+
+The shared error-source wrappers: `JsonSource`, `HttpSource`, and `DatabaseSource`, one crate-owned newtype per third-party error (`serde_json`, `reqwest`, `turso`) a public error surface would otherwise name. Each sits behind its own feature (`json`, `http`, `database`) so a consumer takes only the third-party dependency it already has. The harness, workshop, and gateway families all wrap their causes through it. No workspace dependencies - that independence is what keeps it off the cross-family edge.
+
 ## shared-loopback
 
 The loopback wall: the `require_loopback` and `require_loopback_host` middleware plus the per-product WebSocket origin policies. The gateway applies it to the admin surface and every loopback-bound build, and config-ui wraps its SPA assets with it. No workspace dependencies; axum is the only third-party crate.

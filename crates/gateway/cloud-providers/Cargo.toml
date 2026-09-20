@@ -26,6 +26,7 @@ hmac.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shared-error-source = { workspace = true, features = ["http"] }
 sha2.workspace = true
 gateway-api-types.workspace = true
 thiserror.workspace = true

@@ -265,7 +265,7 @@ Six remediation choices are settled. Three were escalated because they change a 
 
 <step-6>
 
-### Step 6: shared-error-source crate and the gateway newtypes collapsed onto it
+### Step 6: shared-error-source crate and the gateway newtypes collapsed onto it [completed]
 
 - Component: debt-removal
 - Create `crates/shared-error-source/` (package `shared-error-source`), registered in the workspace members, depending on no workspace crate. That independence is what lets `harness-log`, `workshop-workspace`, `workshop-user-state`, `gateway-api-discovery`, `gateway-local`, and `gateway-cloud-providers` all use it without a cross-family edge.

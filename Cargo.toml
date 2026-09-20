@@ -34,6 +34,7 @@ gateway-config = { path = "crates/gateway/config", version = "0.3.0" }
 gateway-config-ui = { path = "crates/gateway/config-ui", version = "0.3.0" }
 gateway-local = { path = "crates/gateway/local", version = "0.3.0" }
 gateway-logging = { path = "crates/gateway/logging", version = "0.3.0" }
+shared-error-source = { path = "crates/shared-error-source", version = "0.3.0" }
 shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
 gateway-protocol = { path = "crates/gateway/protocol", version = "0.3.0" }
 gateway-api-discovery = { path = "crates/gateway-api-discovery", version = "0.3.0" }

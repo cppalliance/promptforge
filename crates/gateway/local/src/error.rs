@@ -5,30 +5,11 @@ use std::path::PathBuf;
 
 use gateway_config::ModelKind;
 
-/// A transport cause behind a [`LocalError`] variant: a crate-owned wrapper
-/// so the public error surface does not name the HTTP client's error type.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct HttpSource(reqwest::Error);
-
-impl From<reqwest::Error> for HttpSource {
-    fn from(source: reqwest::Error) -> Self {
-        HttpSource(source)
-    }
-}
-
-/// A JSON decode cause behind a [`LocalError`] variant: a crate-owned
-/// wrapper so the public error surface does not name the JSON library's
-/// error type.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct JsonSource(serde_json::Error);
-
-impl From<serde_json::Error> for JsonSource {
-    fn from(source: serde_json::Error) -> Self {
-        JsonSource(source)
-    }
-}
+// The transport and JSON causes behind `LocalError` variants. A caller that
+// needs the underlying error names `shared_error_source` directly; this crate
+// does not re-export the wrappers, so there is one name for each cause across
+// the workspace rather than one per crate.
+use shared_error_source::{HttpSource, JsonSource};
 
 /// A failure while downloading, verifying, or launching a local model.
 #[derive(Debug, thiserror::Error)]
@@ -518,6 +499,36 @@ mod tests {
             .is_retryable()
         );
         assert!(!LocalError::Capture { stream: "stdout" }.is_retryable());
+    }
+
+    #[test]
+    fn transport_and_json_variants_reach_their_causes_through_the_shared_wrappers() {
+        let Err(transport) = reqwest::Proxy::all("http://") else {
+            panic!("a proxy URL with an empty host must not build");
+        };
+        let client = LocalError::HttpClient(transport.into());
+        let Some(cause) = client.source() else {
+            panic!("the http-client variant carries its transport cause as source()");
+        };
+        let Some(wrapper) = cause.downcast_ref::<HttpSource>() else {
+            panic!("the transport cause is the shared HttpSource");
+        };
+        assert!(wrapper.as_inner().is_builder());
+
+        let Err(json) = serde_json::from_str::<u32>("nope") else {
+            panic!("`nope` must not parse as a u32");
+        };
+        let decode = LocalError::DialectDecode {
+            operation: "GET /props",
+            source: json.into(),
+        };
+        let Some(cause) = decode.source() else {
+            panic!("the dialect-decode variant carries its JSON cause as source()");
+        };
+        let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
+            panic!("the JSON cause is the shared JsonSource");
+        };
+        assert!(wrapper.as_inner().is_syntax());
     }
 
     #[test]

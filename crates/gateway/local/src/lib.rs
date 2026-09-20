@@ -36,7 +36,7 @@ mod testsupport;
 mod upstream;
 
 pub use crate::dialect::DialectResolveError;
-pub use crate::error::{HttpSource, JsonSource, LocalError};
+pub use crate::error::LocalError;
 pub use crate::launch_templates::{
     ChatTemplateResolution, ChatTemplateSource, inspect_chat_template,
 };

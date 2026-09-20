@@ -47,7 +47,7 @@ mod sys;
 mod validated;
 
 pub use crate::cancellation::CancellationToken;
-pub use crate::error::{JsonSource, SidecarError};
+pub use crate::error::SidecarError;
 pub use crate::file::{GatewayDiscoveryFile, remove_if_mine};
 pub use crate::health::{HealthError, ProbeError, wait_for_health, wait_for_health_cancellable};
 pub use crate::lock::{

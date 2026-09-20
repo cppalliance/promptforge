@@ -1,0 +1,27 @@
+[package]
+name = "shared-error-source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge shared error-source wrappers: one crate-owned newtype per third-party error a public error surface would otherwise name"
+
+[dependencies]
+reqwest = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror.workspace = true
+turso = { workspace = true, optional = true }
+workspace-hack.workspace = true
+
+# One wrapper per feature, so a consumer takes only the third-party
+# dependency it already has: gateway-api-discovery does not acquire turso
+# and harness-log does not acquire reqwest.
+[features]
+json = ["dep:serde_json"]
+http = ["dep:reqwest"]
+database = ["dep:turso"]
+
+[lints]
+workspace = true

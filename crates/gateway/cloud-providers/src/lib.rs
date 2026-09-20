@@ -14,6 +14,12 @@ mod taxonomy;
 
 pub use sheet::{build_sheet, fetch_sheet};
 
+// The transport cause behind `FetchError::Http`. A caller that needs the
+// transport error itself names `shared_error_source` directly; this crate does
+// not re-export the wrapper, so there is one name for the cause across the
+// workspace rather than one per crate.
+use shared_error_source::HttpSource;
+
 /// The const-friendly twin of the schema's `EnvVar`: the schema type
 /// holds `String`s and cannot sit in a `const` descriptor, so the
 /// descriptor carries `&'static str` and slice construction converts.
@@ -122,15 +128,9 @@ pub enum FetchError {
 
 impl From<reqwest::Error> for FetchError {
     fn from(source: reqwest::Error) -> Self {
-        FetchError::Http(HttpSource(source))
+        FetchError::Http(HttpSource::from(source))
     }
 }
-
-/// The transport cause behind [`FetchError::Http`]: a crate-owned wrapper
-/// so the public error surface does not name the HTTP client's error type.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct HttpSource(reqwest::Error);
 
 /// Renders an error and its full `source()` chain as one line, each cause
 /// separated by `; `. A variant's `Display` carries only its own message,
@@ -208,7 +208,22 @@ mod tests {
 
     use gateway_api_types::{ModelEntry, Tier};
 
-    use super::{FetchError, Provider, error_chain, fetch_models, providers};
+    use super::{FetchError, HttpSource, Provider, error_chain, fetch_models, providers};
+
+    #[test]
+    fn the_http_variant_reaches_the_transport_error_through_the_shared_wrapper() {
+        let Err(transport) = reqwest::Proxy::all("http://") else {
+            panic!("a proxy URL with an empty host must not build");
+        };
+        let error = FetchError::from(transport);
+        let Some(cause) = std::error::Error::source(&error) else {
+            panic!("the http variant carries its transport cause as source()");
+        };
+        let Some(wrapper) = cause.downcast_ref::<HttpSource>() else {
+            panic!("the transport cause is the shared HttpSource");
+        };
+        assert!(wrapper.as_inner().is_builder());
+    }
 
     /// Applies one provider's private taxonomy rules to a list of
     /// entries, by registry name. The production path applies the rules
