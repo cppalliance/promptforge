@@ -564,12 +564,21 @@ impl IntoResponse for GatewayError {
 /// the whole chain in its message flattens it here. The multi-line form
 /// the binary writes to the log and to stderr is a different rendering
 /// and stays in `main.rs`.
+///
+/// A cause that renders as nothing, and a cause whose text the
+/// accumulated rendering already contains, are both skipped: some
+/// variants copy their source's text into their own message, and
+/// appending that cause again would print it twice. The check is a plain
+/// substring test on the text rendered so far.
 pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {
-        text.push_str("; ");
-        text.push_str(&cause.to_string());
+        let cause_text = cause.to_string();
+        if !cause_text.is_empty() && !text.contains(&cause_text) {
+            text.push_str("; ");
+            text.push_str(&cause_text);
+        }
         source = cause.source();
     }
     text
@@ -1013,5 +1022,54 @@ mod tests {
         )));
         assert!(matches!(err, GatewayError::Protocol(_)));
         assert_eq!(err.to_string(), "upstream returned 502");
+    }
+
+    /// A leaf cause with its own text.
+    #[derive(Debug, thiserror::Error)]
+    #[error("disk full")]
+    struct Leaf;
+
+    /// An outer error that copies its cause's text into its own message,
+    /// the shape of the variants that carry an [`error_chain`] rendering
+    /// in their own string.
+    #[derive(Debug, thiserror::Error)]
+    #[error("config write rejected: {message}")]
+    struct Copying {
+        message: String,
+        #[source]
+        source: Leaf,
+    }
+
+    /// A cause that renders as nothing.
+    #[derive(Debug, thiserror::Error)]
+    #[error("")]
+    struct Silent;
+
+    /// An outer error whose cause renders as nothing.
+    #[derive(Debug, thiserror::Error)]
+    #[error("config write rejected")]
+    struct OverSilent(#[source] Silent);
+
+    #[test]
+    fn a_cause_the_outer_message_already_carries_renders_once() {
+        let error = Copying {
+            message: "disk full".to_owned(),
+            source: Leaf,
+        };
+        let rendered = error_chain(&error);
+        assert_eq!(
+            rendered, "config write rejected: disk full",
+            "a cause whose text the outer message already carries is skipped"
+        );
+        assert_eq!(
+            rendered.matches("disk full").count(),
+            1,
+            "the cause text appears exactly once"
+        );
+        assert_eq!(
+            error_chain(&OverSilent(Silent)),
+            "config write rejected",
+            "a cause that renders as nothing adds no trailing separator"
+        );
     }
 }

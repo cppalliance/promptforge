@@ -136,13 +136,22 @@ pub struct HttpSource(reqwest::Error);
 /// separated by `; `. A variant's `Display` carries only its own message,
 /// so this is how a person-facing note recovers the transport or decode
 /// text underneath.
+///
+/// A cause that renders as nothing, and a cause whose text the
+/// accumulated rendering already contains, are both skipped: some
+/// variants copy their source's text into their own message, and
+/// appending that cause again would print it twice. The check is a plain
+/// substring test on the text rendered so far.
 #[must_use]
 pub fn error_chain(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {
-        text.push_str("; ");
-        text.push_str(&cause.to_string());
+        let cause_text = cause.to_string();
+        if !cause_text.is_empty() && !text.contains(&cause_text) {
+            text.push_str("; ");
+            text.push_str(&cause_text);
+        }
         source = cause.source();
     }
     text
@@ -199,7 +208,7 @@ mod tests {
 
     use gateway_api_types::{ModelEntry, Tier};
 
-    use super::{FetchError, Provider, fetch_models, providers};
+    use super::{FetchError, Provider, error_chain, fetch_models, providers};
 
     /// Applies one provider's private taxonomy rules to a list of
     /// entries, by registry name. The production path applies the rules
@@ -498,6 +507,53 @@ mod tests {
         assert!(
             err.to_string().contains("no-such-provider"),
             "the error must name the provider: {err}"
+        );
+    }
+
+    /// A leaf cause with its own text.
+    #[derive(Debug, thiserror::Error)]
+    #[error("connection reset")]
+    struct Leaf;
+
+    /// An outer error that copies its cause's text into its own message.
+    #[derive(Debug, thiserror::Error)]
+    #[error("model sheet unavailable: {message}")]
+    struct Copying {
+        message: String,
+        #[source]
+        source: Leaf,
+    }
+
+    /// A cause that renders as nothing.
+    #[derive(Debug, thiserror::Error)]
+    #[error("")]
+    struct Silent;
+
+    /// An outer error whose cause renders as nothing.
+    #[derive(Debug, thiserror::Error)]
+    #[error("model sheet unavailable")]
+    struct OverSilent(#[source] Silent);
+
+    #[test]
+    fn a_cause_the_outer_message_already_carries_renders_once() {
+        let error = Copying {
+            message: "connection reset".to_owned(),
+            source: Leaf,
+        };
+        let rendered = error_chain(&error);
+        assert_eq!(
+            rendered, "model sheet unavailable: connection reset",
+            "a cause whose text the outer message already carries is skipped"
+        );
+        assert_eq!(
+            rendered.matches("connection reset").count(),
+            1,
+            "the cause text appears exactly once"
+        );
+        assert_eq!(
+            error_chain(&OverSilent(Silent)),
+            "model sheet unavailable",
+            "a cause that renders as nothing adds no trailing separator"
         );
     }
 }

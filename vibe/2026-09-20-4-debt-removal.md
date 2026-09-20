@@ -202,7 +202,7 @@ Six remediation choices are settled. Three were escalated because they change a 
 
 <step-2>
 
-### Step 2: One error-chain rendering contract at both gateway exits
+### Step 2: One error-chain rendering contract at both gateway exits [completed]
 
 - Component: debt-removal
 - Add the dedup predicate and the empty-text guard that `crates/harness/runner/src/display_chain.rs::display_chain` already carries to `crates/gateway/app/src/error.rs::error_chain` and to `crates/gateway/cloud-providers/src/lib.rs::error_chain`. Both keep the `"; "` separator; the separator difference from the harness exit is deliberate and stays.
