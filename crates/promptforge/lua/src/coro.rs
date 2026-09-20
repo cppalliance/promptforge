@@ -387,18 +387,23 @@ pub fn install_section_user_input_shim(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)
 }
 
-/// Installs the agent-only `models.chat` yield shim on a VM whose shim
+/// Installs the raw `chat` yield as `models.chat` on a VM whose shim
 /// prelude already ran (`install_shim_prelude` stashed the shim in the
-/// registry).
+/// registry), so a fixture section can yield one `chat` round straight at
+/// the driver's dispatch arm.
 ///
-/// The agent executor is the only caller: `models.chat` never exists in a
-/// section VM - not stubbed, simply absent - so a document prompt calling
-/// it fails as an undefined global.
+/// Test hosts are the only callers, so the install exists only under the
+/// `test-support` feature: in production the loop shim yields the `chat`
+/// request itself, so the stashed function has no production reader, and
+/// `models.chat` never exists in any VM - not stubbed, simply absent - so a
+/// prompt calling it
+/// fails as an undefined global.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the shim prelude was never installed on this
 /// VM, the `models` table is absent, or the install fails.
-pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
+#[cfg(feature = "test-support")]
+pub fn install_model_chat_shim(lua: &Lua) -> Result<()> {
     let chat: Function = lua
         .named_registry_value(CHAT_REGISTRY)
         .map_err(Error::lua)?;

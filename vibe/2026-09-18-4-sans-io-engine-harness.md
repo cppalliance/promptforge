@@ -848,7 +848,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-39>
 
-### Step 39: Guards go live
+### Step 39: Guards go live [completed]
 
 - Component: Run API and engine purity
 - Piece: guards

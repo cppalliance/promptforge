@@ -1,5 +1,6 @@
-//! Tidy-style architecture checks for the workshop server decomposition
-//! and the harness family.
+//! Tidy-style architecture checks for the workshop server decomposition,
+//! the harness family, and the sans-I/O engine (manifest guard and
+//! retired-symbol scan, run from `engine_guards`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
@@ -44,6 +45,7 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
         &root.join("crates").join("harness"),
         &root.join("crates").join("harness-api"),
     ));
+    violations.extend(crate::engine_guards::engine_guard_violations(root));
     violations
 }
 

@@ -144,7 +144,7 @@ where
     crate::lua::install_section_user_input_shim(vm.lua())?;
     #[cfg(test)]
     if setup.raw_shims {
-        promptforge_lua::install_agent_chat_shim(vm.lua())?;
+        promptforge_lua::install_model_chat_shim(vm.lua())?;
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;
     }
     vm.replay_shared(setup.shared, setup.emitter, setup.section_name)?;

@@ -127,12 +127,9 @@ pub use collection::render_item;
 pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
-pub use coro::install_model_tool_call_shim;
+pub use coro::{install_model_chat_shim, install_model_tool_call_shim};
 #[doc(hidden)]
-pub use coro::{
-    install_agent_chat_shim, install_section_loop_shim, install_section_user_input_shim,
-    install_store_shims,
-};
+pub use coro::{install_section_loop_shim, install_section_user_input_shim, install_store_shims};
 #[doc(hidden)]
 pub use dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
