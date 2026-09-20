@@ -1,8 +1,9 @@
-//! Pure state transitions for one agent-session supervisor.
+//! Pure state transitions for one agent-session supervisor: the reducer
+//! whose matches stay wildcard-free, so a new variant is a compile error.
 
 /// Why the current run's cancellation handle fires.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum CancelOrigin {
+pub enum CancelOrigin {
     /// The operator explicitly cancelled the current turn.
     Operator,
     /// A usable catalog generation replaced the run's frozen bindings.
@@ -13,7 +14,7 @@ pub(in crate::agents) enum CancelOrigin {
 
 /// One run's terminal result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum RunCompletion {
+pub enum RunCompletion {
     /// Cancellation stopped the run without ending the session.
     Interrupted,
     /// The program returned normally.
@@ -24,7 +25,7 @@ pub(in crate::agents) enum RunCompletion {
 
 /// How a published catalog generation relates to the frozen run catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum CatalogDisposition {
+pub enum CatalogDisposition {
     /// No chat-capable catalog is currently available.
     Unavailable,
     /// The generation is usable without changing frozen model bindings.
@@ -35,11 +36,11 @@ pub(in crate::agents) enum CatalogDisposition {
 
 /// Identity assigned to one launched run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) struct RunId(u64);
+pub struct RunId(u64);
 
 /// An input to the pure supervisor transition model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum SupervisorEvent {
+pub enum SupervisorEvent {
     /// A run produced its terminal result.
     RunCompleted {
         /// The run that completed.
@@ -68,7 +69,7 @@ pub(in crate::agents) enum SupervisorEvent {
 
 /// The condition the supervisor must await.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum WaitFor {
+pub enum WaitFor {
     /// A usable chat catalog.
     Catalog,
     /// The accepted turn's durable terminal event.
@@ -77,7 +78,7 @@ pub(in crate::agents) enum WaitFor {
 
 /// Why the current ownership remains unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum PreserveReason {
+pub enum PreserveReason {
     /// The current run remains authoritative.
     CurrentRun,
     /// Cancellation already owns run retirement.
@@ -90,27 +91,27 @@ pub(in crate::agents) enum PreserveReason {
 
 /// Event-log handling for a launched replacement run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum HistoryEffect {
+pub enum HistoryEffect {
     /// Reuse the session's retained event log.
     Preserve,
 }
 
 /// The complete immutable inputs for one replacement run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) struct RelaunchEffect {
+pub struct RelaunchEffect {
     /// Identity assigned to the replacement run.
-    pub(in crate::agents) run: RunId,
+    pub run: RunId,
     /// Catalog generation frozen by the replacement.
-    pub(in crate::agents) catalog_generation: u64,
+    pub catalog_generation: u64,
     /// Gateway generation frozen by the replacement.
-    pub(in crate::agents) gateway_generation: u64,
+    pub gateway_generation: u64,
     /// Event-log treatment across replacement.
-    pub(in crate::agents) history: HistoryEffect,
+    pub history: HistoryEffect,
 }
 
 /// Why supervision ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum CloseReason {
+pub enum CloseReason {
     /// The owning session requested close.
     Requested,
     /// The agent program returned normally.
@@ -121,7 +122,7 @@ pub(in crate::agents) enum CloseReason {
 
 /// One typed action selected by the transition model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) enum SupervisorEffect {
+pub enum SupervisorEffect {
     /// Await a named condition.
     Wait(WaitFor),
     /// Cancel the current run with provenance.
@@ -145,7 +146,7 @@ enum Phase {
 
 /// Pure state owned by one agent-session supervisor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) struct SupervisorState {
+pub struct SupervisorState {
     phase: Phase,
     active_run: Option<RunId>,
     next_run: u64,
@@ -158,7 +159,8 @@ pub(in crate::agents) struct SupervisorState {
 
 impl SupervisorState {
     /// Starts supervision before a usable chat catalog exists.
-    pub(in crate::agents) fn new(gateway_generation: u64) -> Self {
+    #[must_use]
+    pub fn new(gateway_generation: u64) -> Self {
         Self {
             phase: Phase::WaitingForCatalog,
             active_run: None,
@@ -174,16 +176,16 @@ impl SupervisorState {
 
 /// The next immutable state and its one typed effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agents) struct SupervisorTransition {
-    pub(in crate::agents) state: SupervisorState,
-    pub(in crate::agents) effect: SupervisorEffect,
+pub struct SupervisorTransition {
+    /// The state after the event.
+    pub state: SupervisorState,
+    /// The one typed action the event selected.
+    pub effect: SupervisorEffect,
 }
 
 /// Reduces one explicit event without performing asynchronous work.
-pub(in crate::agents) fn transition(
-    state: SupervisorState,
-    event: SupervisorEvent,
-) -> SupervisorTransition {
+#[must_use]
+pub fn transition(state: SupervisorState, event: SupervisorEvent) -> SupervisorTransition {
     if state.phase == Phase::Closed {
         return changed(state, SupervisorEffect::Preserve(PreserveReason::Closed));
     }

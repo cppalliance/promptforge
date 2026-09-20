@@ -2579,12 +2579,12 @@ version = "0.3.0"
 dependencies = [
  "harness-capabilities",
  "harness-models",
+ "harness-runner",
+ "harness-sessions",
  "harness-web",
  "promptforge-api-types",
  "serde",
  "serde_json",
- "tokio",
- "tokio-util",
  "workspace-hack",
 ]
 
@@ -2652,6 +2652,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-util",
  "tracing",
  "workspace-hack",
 ]
@@ -2660,6 +2661,9 @@ dependencies = [
 name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
+ "harness-runner",
+ "tempfile",
+ "tokio",
  "workspace-hack",
 ]
 
@@ -8749,6 +8753,7 @@ dependencies = [
  "time-macros",
  "tinystr",
  "tokio",
+ "tokio-util",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "tower",

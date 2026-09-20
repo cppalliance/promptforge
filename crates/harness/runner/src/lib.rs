@@ -26,7 +26,12 @@
 //!   exactly one answer record; a dropped effect's answer is `Dropped`.
 //! - The loop never reads an event to decide anything; control rides on
 //!   the run's own word (`Step`, `Run::decided`) and the cancel flag.
+//! - [`cancel::CancelHandle`] is the awaitable token a host selects over;
+//!   the engine observes only the polled flag in
+//!   `promptforge_api_types::cancel`, and a host bridges the one to the
+//!   other when it launches a run. `harness-api` re-exports the module.
 
+pub mod cancel;
 pub mod effect_loop;
 pub mod performers;
 pub mod prepare;

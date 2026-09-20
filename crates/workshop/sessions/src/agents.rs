@@ -28,7 +28,6 @@
 //! itself, so both sides agree without sharing more than the log.
 
 mod environment;
-mod lifecycle;
 mod run;
 mod session;
 pub(crate) mod socket;
@@ -37,11 +36,13 @@ mod supervisor;
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::{broadcast, mpsc};
 
+use harness_api::bridge::discovery::{agent_source, discover_agents};
+use harness_api::bridge::lifecycle::{self, RunLifecycle};
 use harness_api::bridge::{GatewayClient, GatewayEndpoint, SecretString};
 use workshop_gateway::{GatewayBinding, WorkshopObserver};
 use workshop_menu::{CatalogBus, MenuBus};
@@ -50,10 +51,9 @@ use workshop_support::ReconnectBackoff;
 
 use crate::input::WaitRegistry;
 
-use self::lifecycle::RunLifecycle;
-
 pub use environment::session_registry;
-pub(crate) use session::{AgentDelta, AgentSession, AgentSource, SessionSink};
+pub(crate) use harness_api::bridge::discovery::AgentSource;
+pub(crate) use session::{AgentDelta, AgentSession, SessionSink};
 pub(crate) use session::{delta_stamp, reply_stamp, ui_provider};
 
 /// Capacity of a session's delta broadcast. Deltas are ephemeral: a
@@ -71,16 +71,6 @@ const INPUT_CAPACITY: usize = 32;
 /// surfaces one frame each, and a receiver that lags misses only what
 /// the durable transcript already shows as a turn without a reply.
 pub(crate) const ERROR_CAPACITY: usize = 8;
-
-/// The committed built-in chat agent, embedded at compile time - the same
-/// shipped-asset pattern as the SPA `dist/` - so a fresh install has a
-/// working chat with no agents directory at all. The built-in is a
-/// Markdown prompt on the unified runtime.
-pub(crate) const BUILTIN_CHAT_SOURCE: &str = include_str!("../agents/chat.md");
-
-/// The built-in default agent's name: discovery always offers it, and a
-/// directory file named `chat.md` shadows the embedded source.
-const BUILTIN_CHAT_NAME: &str = "chat";
 
 /// The shared handles a session's lifecycle reports flow through,
 /// captured once at [`AgentSessions`] construction. The buses come from
@@ -375,49 +365,6 @@ pub(crate) fn agent_client(base_url: &str, api_key: &str) -> Option<GatewayClien
         }
     };
     Some(GatewayClient::new(endpoint, key))
-}
-
-/// Lists the launchable agent names: the `.md` file stems under `dir`
-/// plus the built-in `chat`, sorted. A missing or unreadable directory
-/// offers exactly the built-in, and a directory `chat.md` lists once -
-/// it shadows the embedded source instead of duplicating the name.
-fn discover_agents(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file() && path.extension().is_some_and(|extension| extension == "md")
-        })
-        .filter_map(|path| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(str::to_owned)
-        })
-        .collect();
-    if !names.iter().any(|name| name == BUILTIN_CHAT_NAME) {
-        names.push(BUILTIN_CHAT_NAME.to_owned());
-    }
-    names.sort();
-    names
-}
-
-/// Reads the agent's program source: the directory file when it exists -
-/// a directory `chat.md` shadows the built-in - else the embedded
-/// built-in for the `chat` name alone. Launch resolved `name` through
-/// discovery already, so a missing file for any other name is a real
-/// filesystem race, surfaced as the error it is; so is an existing
-/// `chat.md` that cannot be read, because silently serving the built-in
-/// would mask the operator's own file.
-fn agent_source(dir: &Path, name: &str) -> io::Result<AgentSource> {
-    match std::fs::read_to_string(dir.join(format!("{name}.md"))) {
-        Ok(source) => Ok(AgentSource::Markdown(source)),
-        Err(error) if name == BUILTIN_CHAT_NAME && error.kind() == io::ErrorKind::NotFound => {
-            Ok(AgentSource::Markdown(BUILTIN_CHAT_SOURCE.to_owned()))
-        }
-        Err(error) => Err(error),
-    }
 }
 
 /// A fresh unguessable session id: 128 bits from the OS-seeded

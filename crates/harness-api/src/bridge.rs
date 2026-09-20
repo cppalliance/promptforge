@@ -1,18 +1,25 @@
 //! Interim bridge: the facilities Workshop's session machinery still
 //! reaches through the harness door before the session machinery itself
 //! moves into the harness - the harness's model client, its capability
-//! registry and activation, and the implementation traits behind a run's
-//! tools and input waits - re-exported here so that `workshop-sessions`
-//! names them through one door today and the harness's own session
-//! runtime replaces them in place as it lands.
+//! registry and activation, the implementation traits behind a run's
+//! tools and input waits, and the pure session pieces that have already
+//! moved (the supervisor reducer, the run lifecycle, agent discovery) -
+//! re-exported here so that `workshop-sessions` names them through one
+//! door today and the harness's own session runtime replaces them in
+//! place as it lands.
 //!
 //! Pure indirection, plus [`first_party_registry`]: nothing else in this
 //! module is defined here. Everything re-exported is already the
-//! harness's (`harness-models`, `harness-capabilities`); the bridge and
-//! the registration function go once `harness-sessions` builds the
-//! registry itself.
+//! harness's (`harness-models`, `harness-capabilities`,
+//! `harness-sessions`); the bridge and the registration function go once
+//! `harness-sessions` builds the registry itself.
 
 use std::sync::Arc;
+
+/// The pure session pieces: the supervisor's state machine, the
+/// synchronous run lifecycle that feeds it, and agent discovery with the
+/// embedded built-in chat.
+pub use harness_sessions::{discovery, lifecycle, transition};
 
 /// The harness's gateway-facing model client and its failure vocabulary.
 pub use harness_models::{

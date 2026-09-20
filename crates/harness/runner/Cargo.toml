@@ -27,8 +27,10 @@ sha2.workspace = true
 shared-vfs.workspace = true
 thiserror.workspace = true
 # `fs` for the prompt file read at preparation, so launching a run never
-# blocks a worker thread.
-tokio = { workspace = true, features = ["fs"] }
+# blocks a worker thread; `sync` and `rt` for the awaitable cancel token
+# (`cancel::CancelHandle`) and the task-local scope it installs in.
+tokio = { workspace = true, features = ["fs", "sync", "rt"] }
+tokio-util.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true
 

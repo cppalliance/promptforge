@@ -13,7 +13,15 @@ categories = ["development-tools", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+# The awaitable cancel token a run lifecycle arms for each run.
+harness-runner.workspace = true
+# `sync` for the supervisor's typed event queues (`mpsc`).
+tokio = { workspace = true, features = ["sync"] }
 workspace-hack.workspace = true
+
+[dev-dependencies]
+# The discovery suite seeds an agents directory on disk.
+tempfile.workspace = true
 
 [lints]
 workspace = true

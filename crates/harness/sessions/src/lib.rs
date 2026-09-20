@@ -17,3 +17,7 @@
 //! - Nothing in this crate spawns a tokio task directly; the harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
+
+pub mod discovery;
+pub mod lifecycle;
+pub mod transition;

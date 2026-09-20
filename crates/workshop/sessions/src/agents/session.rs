@@ -6,6 +6,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use harness_api::bridge::discovery::AgentSource;
+use harness_api::bridge::lifecycle::RunLifecycle;
+use harness_api::bridge::transition::RunId;
 use harness_api::cancel::CancelHandle;
 use promptforge_api_types::event::Event;
 use promptforge_api_types::wire::StreamDelta;
@@ -16,18 +19,7 @@ use workshop_menu::MenuBus;
 use workshop_protocol::{Activity, AgentDeltaKind, InputFrame, InputResponse};
 use workshop_registry::{Push, Registry};
 
-use super::lifecycle::RunLifecycle;
-use super::supervisor::transition::RunId;
 use crate::input::{WaitError, WaitRegistry};
-
-/// One agent's program source: a Markdown prompt document on the
-/// unified runtime. Directory agents and the embedded built-in chat are
-/// both Markdown; the standalone Lua agent path is retired.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AgentSource {
-    /// A Markdown prompt document (the unified runtime).
-    Markdown(String),
-}
 
 /// One live delta on a session's dedicated channel, stamped with the
 /// reply id of the durable event that will supersede it.

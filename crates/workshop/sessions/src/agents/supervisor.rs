@@ -10,10 +10,10 @@ use super::{AgentSession, AgentSessions, SessionHost};
 mod catalog;
 mod effects;
 mod events;
-pub(super) mod transition;
 pub(super) use effects::AgentRunError;
 use effects::{EffectExecutor, EffectOutcome};
 use events::{CollectedEvent, EventCollector};
+pub(super) use harness_api::bridge::transition;
 use transition::{SupervisorEvent, SupervisorState, transition};
 
 /// Spawns one session supervisor. Each run freezes one usable chat

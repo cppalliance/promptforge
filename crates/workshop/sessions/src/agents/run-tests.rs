@@ -13,8 +13,10 @@ use workshop_registry::Registry;
 use workshop_support::ReconnectBackoff;
 
 use super::*;
-use crate::agents::lifecycle::{CANCELLATION_CAPACITY, RunLifecycle};
-use crate::agents::{BUILTIN_CHAT_SOURCE, ERROR_CAPACITY, agent_client, session_registry};
+use harness_api::bridge::discovery::BUILTIN_CHAT_SOURCE;
+use harness_api::bridge::lifecycle::{CANCELLATION_CAPACITY, RunLifecycle};
+
+use crate::agents::{ERROR_CAPACITY, agent_client, session_registry};
 
 /// The descriptor the chat unit runs bind the declared `chat` role to; its
 /// window clears the role's declared minimum.

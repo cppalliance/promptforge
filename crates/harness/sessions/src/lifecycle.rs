@@ -2,10 +2,10 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use harness_api::cancel::CancelHandle;
+use harness_runner::cancel::CancelHandle;
 use tokio::sync::mpsc;
 
-use super::supervisor::transition::{RunId, SupervisorEvent};
+use crate::transition::{RunId, SupervisorEvent};
 
 /// Capacity of the bounded operator-cancellation queue.
 ///
@@ -15,16 +15,18 @@ use super::supervisor::transition::{RunId, SupervisorEvent};
 /// concurrent duplicate preserves semantics. Producers are operator
 /// gestures, so one pending cancellation covers the entire in-flight set
 /// with headroom.
-pub(super) const CANCELLATION_CAPACITY: usize = 1;
+pub const CANCELLATION_CAPACITY: usize = 1;
 
 /// Synchronous producers for one supervisor's typed event stream.
-pub(super) struct RunLifecycle {
+#[derive(Debug)]
+pub struct RunLifecycle {
     state: Mutex<RunState>,
     events: mpsc::UnboundedSender<SupervisorEvent>,
     cancellations: mpsc::Sender<SupervisorEvent>,
 }
 
 /// The current run identity and cancellation handle.
+#[derive(Debug)]
 struct RunState {
     cancel: CancelHandle,
     run: Option<RunId>,
@@ -34,7 +36,8 @@ impl RunLifecycle {
     /// Creates the lifecycle over the supervisor's event senders: the
     /// unbounded queue carries the loss-intolerant events the reducer
     /// waits on, the bounded queue carries operator cancellations.
-    pub(super) fn new(
+    #[must_use]
+    pub fn new(
         events: mpsc::UnboundedSender<SupervisorEvent>,
         cancellations: mpsc::Sender<SupervisorEvent>,
     ) -> Self {
@@ -53,8 +56,10 @@ impl RunLifecycle {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Arms the cancellation handle for `run`.
-    pub(super) fn arm(&self, run: RunId) -> CancelHandle {
+    /// Arms the cancellation handle for `run` and returns it: the handle
+    /// is the only way the armed run observes a later cancel.
+    #[must_use]
+    pub fn arm(&self, run: RunId) -> CancelHandle {
         let fresh = CancelHandle::new();
         let mut state = self.lock();
         state.cancel = fresh.clone();
@@ -67,38 +72,38 @@ impl RunLifecycle {
     /// Loss-tolerant by design: when the bounded queue is full it already
     /// holds a pending cancellation that retires the current run, so a
     /// concurrent duplicate is dropped rather than queued.
-    pub(super) fn operator_cancel(&self) {
+    pub fn operator_cancel(&self) {
         let _ = self
             .cancellations
             .try_send(SupervisorEvent::OperatorCancellation);
     }
 
     /// Publishes that input resumed the currently armed run.
-    pub(super) fn accept_input(&self) -> Option<RunId> {
+    pub fn accept_input(&self) -> Option<RunId> {
         let run = self.lock().run?;
         self.send(SupervisorEvent::AcceptedInput(run));
         Some(run)
     }
 
     /// Publishes a durable terminal event for the currently armed run.
-    pub(super) fn settle_current_turn(&self) {
+    pub fn settle_current_turn(&self) {
         if let Some(run) = self.lock().run {
             self.settle_turn(run);
         }
     }
 
     /// Publishes a terminal event scoped to `run`.
-    pub(super) fn settle_turn(&self, run: RunId) {
+    pub fn settle_turn(&self, run: RunId) {
         self.send(SupervisorEvent::TerminalSettlement(run));
     }
 
     /// Cancels the reducer-owned current run.
-    pub(super) fn cancel_current(&self) {
+    pub fn cancel_current(&self) {
         self.lock().cancel.cancel();
     }
 
     /// Clears `run` after its future completes or is dropped.
-    pub(super) fn finish(&self, run: RunId) {
+    pub fn finish(&self, run: RunId) {
         let mut state = self.lock();
         if state.run == Some(run) {
             state.run = None;
@@ -106,7 +111,7 @@ impl RunLifecycle {
     }
 
     /// Publishes session close for reducer ownership.
-    pub(super) fn close(&self) {
+    pub fn close(&self) {
         self.send(SupervisorEvent::Close);
     }
 
