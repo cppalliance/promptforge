@@ -11,6 +11,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::blocking::blocking;
+
 use super::Workspace;
 
 /// The pointer file's name inside the state directory.
@@ -106,8 +108,16 @@ impl Workspace {
     /// that has vanished, and a file that is refused all log and leave
     /// the workspace ephemeral, so boot goes on regardless.
     pub async fn reopen_last(&self) -> bool {
-        let Some(path) = self.pointer.as_ref().and_then(LastWorkspacePointer::read) else {
+        let Some(pointer) = self.pointer.clone() else {
             return false;
+        };
+        let path = match blocking(move || pointer.read()).await {
+            Ok(Some(path)) => path,
+            Ok(None) => return false,
+            Err(error) => {
+                tracing::warn!(%error, "last-workspace pointer not read; starting ephemeral");
+                return false;
+            }
         };
         match self.open_file(&path).await {
             Ok(()) => {
@@ -126,12 +136,16 @@ impl Workspace {
     }
 
     /// Records `path` as the last-used workspace file when a state
-    /// directory is configured. A write that fails is logged; the switch
-    /// that just happened stands.
-    pub(super) fn remember(&self, path: &Path) {
-        if let Some(pointer) = &self.pointer
-            && let Err(error) = pointer.write(path)
-        {
+    /// directory is configured. The write runs on the blocking pool and
+    /// is awaited, so the pointer is on disk when this returns. A write
+    /// that fails is logged; the switch that just happened stands.
+    pub(super) async fn remember(&self, path: &Path) {
+        let Some(pointer) = self.pointer.clone() else {
+            return;
+        };
+        let target = path.to_path_buf();
+        let written = blocking(move || pointer.write(&target)).await;
+        if let Err(error) = written.unwrap_or_else(Err) {
             tracing::warn!(
                 %error,
                 file = %path.display(),

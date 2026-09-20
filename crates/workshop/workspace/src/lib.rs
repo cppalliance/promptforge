@@ -27,6 +27,7 @@
 //! - The crate maps its own [`WorkspaceError`] to the wire envelope at
 //!   its route boundary; no shell error type appears here.
 
+mod blocking;
 mod error;
 mod handlers;
 pub mod handles;

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use super::{WorkspaceFileError, already_taken};
+use super::WorkspaceFileError;
 
 /// The entries a workspace may grow beside its file, each created
 /// lazily by its own project; duplicate copies whichever exist, minus
@@ -53,8 +53,34 @@ pub(super) fn plan_siblings(
     Ok(siblings)
 }
 
+/// Copies every planned sibling of a duplicate; when one copy fails,
+/// removes the siblings already copied and the copied workspace file at
+/// `destination`, so a failed duplicate leaves nothing behind. A failed
+/// removal cannot say more than the copy failure did.
+pub(super) fn copy_siblings_or_clean_up(
+    siblings: &[(PathBuf, PathBuf)],
+    destination: &Path,
+) -> io::Result<()> {
+    if let Err(source) = copy_siblings(siblings) {
+        for (_, to) in siblings {
+            let _ = remove_sibling(to);
+        }
+        let _ = fs::remove_file(destination);
+        return Err(source);
+    }
+    Ok(())
+}
+
+/// An `AlreadyExists` I/O refusal carrying `message`: the shape both
+/// create and duplicate use to refuse a path that is already taken.
+pub(super) fn already_taken(message: &'static str) -> WorkspaceFileError {
+    WorkspaceFileError::Io {
+        source: io::Error::new(io::ErrorKind::AlreadyExists, message),
+    }
+}
+
 /// Copies every planned sibling, a directory tree or a single file.
-pub(super) fn copy_siblings(siblings: &[(PathBuf, PathBuf)]) -> io::Result<()> {
+fn copy_siblings(siblings: &[(PathBuf, PathBuf)]) -> io::Result<()> {
     for (from, to) in siblings {
         if from.is_dir() {
             copy_dir_recursive(from, to)?;
@@ -66,7 +92,7 @@ pub(super) fn copy_siblings(siblings: &[(PathBuf, PathBuf)]) -> io::Result<()> {
 }
 
 /// Removes a copied sibling, a directory tree or a single file.
-pub(super) fn remove_sibling(path: &Path) -> io::Result<()> {
+fn remove_sibling(path: &Path) -> io::Result<()> {
     if path.is_dir() {
         fs::remove_dir_all(path)
     } else {

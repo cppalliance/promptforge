@@ -302,7 +302,7 @@ Commit: one commit naming the test and the gate.
 
 <step-2>
 
-### Step 2: Blocking filesystem work off the tokio executor
+### Step 2: Blocking filesystem work off the tokio executor [completed]
 
 - Component: `async-fs`
 - Piece: workshop-workspace and harness-sessions (D1)

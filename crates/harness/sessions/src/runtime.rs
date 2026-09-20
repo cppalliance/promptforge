@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_log::{LogError, RunLog};
 use harness_runner::effect_loop::SharedLog;
-use harness_runner::spawn::spawn_session;
+use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
 use tokio::sync::{OnceCell, mpsc};
 
 use crate::discovery::{agent_source, discover_agents};
@@ -209,8 +209,16 @@ impl Harness {
         let LaunchRequest { agent, args } = request;
         // Resolving through the discovered list is the trust boundary: a
         // client-sent name never reaches the filesystem unless it is the
-        // bare stem of a real `.md` file in the configured directory.
-        if !self.discover().contains(&agent) {
+        // bare stem of a real `.md` file in the configured directory. The
+        // directory walk is filesystem work and runs on the blocking pool,
+        // through the harness's one spawn site.
+        let agents_path = self.config.agents_path.clone();
+        let known = spawn_blocking_launch(&agent, move || discover_agents(&agents_path))
+            .await
+            .map_err(|join| LaunchError::SessionState {
+                source: io::Error::other(join),
+            })?;
+        if !known.contains(&agent) {
             return Err(LaunchError::UnknownAgent { name: agent });
         }
         // Subscribe before reading the snapshot: `watch::Sender::subscribe`
@@ -227,7 +235,13 @@ impl Harness {
             .gateway()
             .filter(|resources| resources.client().is_some())
             .ok_or(LaunchError::GatewayUnusable)?;
-        let source = agent_source(&self.config.agents_path, &agent)
+        // The source read is filesystem work too; a worker that cannot
+        // report is the same unavailable state as an unreadable file.
+        let agents_path = self.config.agents_path.clone();
+        let name = agent.clone();
+        let source = spawn_blocking_launch(&agent, move || agent_source(&agents_path, &name))
+            .await
+            .unwrap_or_else(|join| Err(io::Error::other(join)))
             .map_err(|source| LaunchError::SessionState { source })?;
         let log = self.log().await?;
 

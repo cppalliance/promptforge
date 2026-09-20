@@ -81,6 +81,15 @@ pub(super) fn canonicalize_simplified(path: &Path) -> io::Result<PathBuf> {
     Ok(dunce::simplified(&path.canonicalize()?).to_path_buf())
 }
 
+/// Whether `requested` and `current` canonicalize to the same file. A
+/// path that does not canonicalize is not the same file; the open that
+/// follows reports why.
+pub(super) fn names_same_file(requested: &Path, current: &Path) -> bool {
+    canonicalize_simplified(requested).is_ok_and(|requested| {
+        canonicalize_simplified(current).is_ok_and(|current| current == requested)
+    })
+}
+
 /// Rejects the lexical tricks canonicalization would otherwise hide: `..`
 /// traversal everywhere, and `:` alternate data stream names on Windows,
 /// where a colon in a name addresses an NTFS stream. Elsewhere a colon is

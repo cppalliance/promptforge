@@ -1,12 +1,14 @@
 //! The harness's one spawn site.
 //!
 //! Every tokio task the harness starts passes through [`spawn_tagged`],
-//! [`spawn_blocking_tagged`], or [`spawn_session`]. The first two open a
-//! `tracing` span carrying the effect the task performs - its
-//! [`EffectId`] and [`Provenance`] - so a run's tasks trace as a group and
-//! slice by task; the third is the one task that performs no effect, a
-//! session's supervisor, and its span carries the session id instead. Each
-//! is a permitted caller of the raw tokio method it wraps, and no other
+//! [`spawn_blocking_tagged`], [`spawn_session`], or
+//! [`spawn_blocking_launch`]. The first two open a `tracing` span
+//! carrying the effect the task performs - its [`EffectId`] and
+//! [`Provenance`] - so a run's tasks trace as a group and slice by task.
+//! The last two cover the work that performs no effect: a session's
+//! supervisor, whose span carries the session id, and a launch's
+//! filesystem probes, whose span carries the agent name. Each is a
+//! permitted caller of the raw tokio method it wraps, and no other
 //! harness code is.
 
 use promptforge_api_runtime::EffectId;
@@ -89,6 +91,32 @@ where
         task = %provenance.task,
         seq = provenance.seq
     );
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        f()
+    })
+}
+
+/// Run `f`, a launch's filesystem work, on tokio's blocking pool inside
+/// a span named `launch` that carries the agent name under `agent`.
+///
+/// A launch walks the agents directory and reads the agent's source
+/// before any run or session exists, so the work has no [`Tag`] and no
+/// session id; the agent name is what ties it to the launch that asked.
+/// The closure runs to completion even if its [`JoinHandle`] is aborted
+/// or dropped, exactly as with `tokio::task::spawn_blocking`.
+///
+/// # Panics
+///
+/// Panics when called outside a tokio runtime, as
+/// `tokio::task::spawn_blocking` does.
+#[allow(clippy::disallowed_methods)]
+pub fn spawn_blocking_launch<F, R>(agent: &str, f: F) -> JoinHandle<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let span = tracing::info_span!("launch", agent = %agent);
     tokio::task::spawn_blocking(move || {
         let _entered = span.enter();
         f()

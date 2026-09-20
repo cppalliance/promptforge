@@ -23,7 +23,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use serde::Serialize;
 
 use crate::error::WorkspaceError;
-use crate::workspace_file::now_rfc3339;
+use crate::workspace_file::{WindowState, now_rfc3339};
 
 #[path = "workspace-backing.rs"]
 mod backing;
@@ -35,7 +35,6 @@ mod pointer;
 mod token;
 
 use backing::Backing;
-pub use backing::{GrantEntry, WorkspaceSummary};
 use confine::{canonicalize_simplified, modified_ms, reject_forbidden};
 use token::{current_token, file_token};
 #[cfg(test)]
@@ -96,6 +95,30 @@ pub struct FileContents {
     token: String,
     /// The file's UTF-8 text.
     text: String,
+}
+
+/// One granted root as the workspace reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GrantEntry {
+    /// The canonical granted root.
+    pub path: PathBuf,
+    /// Whether the root is on disk right now. A vanished root stays
+    /// granted and listed so the user can see it and revoke it.
+    pub exists: bool,
+}
+
+/// The workspace as a whole: its file, if any, and what it holds; built
+/// by [`Workspace::current`] in the backing module.
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceSummary {
+    /// The backing file; `None` while the workspace is ephemeral.
+    pub path: Option<PathBuf>,
+    /// The display name: the file's own, or `Untitled` while ephemeral.
+    pub name: String,
+    /// The granted roots in canonical order.
+    pub grants: Vec<GrantEntry>,
+    /// The saved window geometry; `None` while ephemeral or never saved.
+    pub window_state: Option<WindowState>,
 }
 
 /// What memory keeps beside each granted root so the file holds the

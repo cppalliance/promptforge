@@ -11,15 +11,15 @@ use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
 use std::sync::atomic::Ordering;
 
-use serde::Serialize;
-
+use crate::blocking::{blocking, try_blocking};
 use crate::error::WorkspaceError;
 use crate::workspace_file::{
     GrantRow, WindowState, WorkspaceContents, WorkspaceFile, WorkspaceFileError, empty_ui_state,
     stem_of,
 };
 
-use super::{GrantMeta, Workspace, canonicalize_simplified};
+use super::confine::names_same_file;
+use super::{GrantEntry, GrantMeta, Workspace, WorkspaceSummary};
 
 #[path = "workspace-ui-state.rs"]
 mod ui_state;
@@ -40,29 +40,6 @@ pub(super) struct Backing {
     ui_state: BTreeMap<&'static str, Option<serde_json::Value>>,
 }
 
-/// One granted root as the workspace reports it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct GrantEntry {
-    /// The canonical granted root.
-    pub path: PathBuf,
-    /// Whether the root is on disk right now. A vanished root stays
-    /// granted and listed so the user can see it and revoke it.
-    pub exists: bool,
-}
-
-/// The workspace as a whole: its file, if any, and what it holds.
-#[derive(Debug, Clone, Serialize)]
-pub struct WorkspaceSummary {
-    /// The backing file; `None` while the workspace is ephemeral.
-    pub path: Option<PathBuf>,
-    /// The display name: the file's own, or `Untitled` while ephemeral.
-    pub name: String,
-    /// The granted roots in canonical order.
-    pub grants: Vec<GrantEntry>,
-    /// The saved window geometry; `None` while ephemeral or never saved.
-    pub window_state: Option<WindowState>,
-}
-
 impl Workspace {
     /// Registers `path` as a granted root and mirrors the grant into the
     /// backing file when one is open. Memory is updated first and stands
@@ -74,7 +51,14 @@ impl Workspace {
     /// # Errors
     /// The same as [`Workspace::grant`]; persistence never fails the call.
     pub async fn grant_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
-        let (root, meta) = self.grant_with_meta(path)?;
+        // The grant canonicalizes and stats the path: blocking-pool work.
+        let workspace = self.clone();
+        let requested = path.to_path_buf();
+        let (root, meta) = try_blocking(
+            move || workspace.grant_with_meta(&requested),
+            |source| WorkspaceError::ResolveGrant { source },
+        )
+        .await?;
         if let Some(file) = self.backing_file() {
             let row = GrantRow {
                 path: root.clone(),
@@ -102,7 +86,14 @@ impl Workspace {
     /// The same as [`Workspace::revoke`]; persistence never fails the
     /// call.
     pub async fn revoke_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
-        let root = self.revoke(path)?;
+        // The revoke canonicalizes the path: blocking-pool work.
+        let workspace = self.clone();
+        let requested = path.to_path_buf();
+        let root = try_blocking(
+            move || workspace.revoke(&requested),
+            |source| WorkspaceError::ResolveGrant { source },
+        )
+        .await?;
         if let Some(file) = self.backing_file()
             && let Err(error) = file.remove_grant(&root).await
         {
@@ -148,11 +139,14 @@ impl Workspace {
         // appending to: every write after that would be lost at quit.
         // Compare canonical forms so a respelling of the same path (a `.`
         // segment, a case difference on Windows) takes the same branch.
-        if let Some((file, current)) = self.backing_parts()
-            && let Ok(requested) = canonicalize_simplified(path)
-            && canonicalize_simplified(&current).is_ok_and(|current| current == requested)
-        {
-            return self.reload_current(&file, path).await;
+        if let Some((file, current)) = self.backing_parts() {
+            let requested = path.to_path_buf();
+            let same = blocking(move || names_same_file(&requested, &current))
+                .await
+                .map_err(|source| WorkspaceError::ResolvePath { source })?;
+            if same {
+                return self.reload_current(&file, path).await;
+            }
         }
         let file = WorkspaceFile::open(path).await?;
         let contents = match file.contents().await {
@@ -260,14 +254,23 @@ impl Workspace {
     /// the file. A file that cannot be read degrades to its stem and no
     /// window state rather than failing the call.
     pub async fn current(&self) -> WorkspaceSummary {
-        let grants = self
-            .granted_roots()
-            .into_iter()
-            .map(|path| GrantEntry {
-                exists: fs::metadata(&path).is_ok(),
-                path,
-            })
-            .collect();
+        // One blocking-pool trip stats every root; a worker that cannot
+        // report degrades to no grants listed rather than failing the call.
+        let roots = self.granted_roots();
+        let grants = blocking(move || {
+            roots
+                .into_iter()
+                .map(|path| GrantEntry {
+                    exists: fs::metadata(&path).is_ok(),
+                    path,
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "granted roots not inspected; reporting none");
+            Vec::new()
+        });
         let Some((file, path)) = self.backing_parts() else {
             return WorkspaceSummary {
                 path: None,
@@ -415,7 +418,7 @@ impl Workspace {
                 path: path.to_path_buf(),
                 ui_state,
             });
-        self.remember(path);
+        self.remember(path).await;
         if let Some(previous) = previous {
             previous.file.close().await;
         }
@@ -442,7 +445,7 @@ impl Workspace {
         {
             backing.ui_state = contents.ui_state;
         }
-        self.remember(path);
+        self.remember(path).await;
         Ok(())
     }
 

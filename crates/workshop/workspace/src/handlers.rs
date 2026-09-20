@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use workshop_support::{DEFAULT_DEADLINE, with_deadline};
 
+use crate::blocking::try_blocking;
 use crate::error::WorkspaceError;
 use crate::workspace::Workspace;
 
@@ -109,34 +110,59 @@ fn decode_path_param(raw: &str) -> String {
 }
 
 /// Lists one level of a workspace directory, or the granted roots when the
-/// query carries no path.
+/// query carries no path. The listing is filesystem work and runs on the
+/// blocking pool; the confinement check runs inside the same call, so the
+/// check-then-use window is no wider than before.
 pub(crate) async fn tree(
     State(workspace): State<Workspace>,
     Query(query): Query<TreeQuery>,
 ) -> Response {
     let path = query.path.as_deref().map(decode_path_param);
-    respond(workspace.tree(path.as_deref().map(Path::new)))
+    respond(
+        try_blocking(
+            move || workspace.tree(path.as_deref().map(Path::new)),
+            |source| WorkspaceError::ListDirectory { source },
+        )
+        .await,
+    )
 }
 
-/// Reads a confined UTF-8 text file with its metadata.
+/// Reads a confined UTF-8 text file with its metadata. Confinement and
+/// the read run together on the blocking pool.
 pub(crate) async fn read_file(
     State(workspace): State<Workspace>,
     Query(query): Query<FileQuery>,
 ) -> Response {
     let path = decode_path_param(&query.path);
-    respond(workspace.read_file(Path::new(&path)))
+    respond(
+        try_blocking(
+            move || workspace.read_file(Path::new(&path)),
+            |source| WorkspaceError::ReadFile { source },
+        )
+        .await,
+    )
 }
 
 /// Writes a confined file after path, size, and conflict-token validation.
+/// Confinement, the token check, and the write run together on the
+/// blocking pool.
 pub(crate) async fn write_file(
     State(workspace): State<Workspace>,
     Json(body): Json<WriteRequest>,
 ) -> Response {
-    respond(workspace.write_file(
-        Path::new(&body.path),
-        &body.text,
-        body.expected_token.as_deref(),
-    ))
+    respond(
+        try_blocking(
+            move || {
+                workspace.write_file(
+                    Path::new(&body.path),
+                    &body.text,
+                    body.expected_token.as_deref(),
+                )
+            },
+            |source| WorkspaceError::WriteFile { source },
+        )
+        .await,
+    )
 }
 
 /// Registers a dropped path as a granted root, mirrored into the open

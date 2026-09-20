@@ -1,7 +1,7 @@
 //! The tagged spawn wrappers run their work to completion under an
 //! effect's tag.
 
-use harness_runner::spawn::{spawn_blocking_tagged, spawn_tagged};
+use harness_runner::spawn::{spawn_blocking_launch, spawn_blocking_tagged, spawn_tagged};
 use promptforge_api_runtime::{EffectId, Step};
 use promptforge_api_types::ids::Provenance;
 
@@ -30,4 +30,11 @@ async fn spawn_blocking_tagged_runs_a_closure_to_completion() {
     let handle = spawn_blocking_tagged(tag(), || "done".repeat(2));
     let value = handle.await.expect("the blocking closure completes");
     assert_eq!(value, "donedone");
+}
+
+#[tokio::test]
+async fn spawn_blocking_launch_runs_a_closure_to_completion() {
+    let handle = spawn_blocking_launch("chat", || "walked".len());
+    let value = handle.await.expect("the launch closure completes");
+    assert_eq!(value, 6);
 }

@@ -10,8 +10,9 @@ use tokio::sync::{mpsc, oneshot};
 use super::ui_state::{put_ui_state_row, read_ui_state_rows};
 use super::{
     FORMAT_NAME, GrantRow, KV_WINDOW, META_CREATED_AT, META_FORMAT, META_NAME, META_VERSION,
-    SUPPORTED_VERSION, WindowState, WorkspaceContents, WorkspaceFileError,
+    SUPPORTED_VERSION, WindowState, WorkspaceContents, WorkspaceFileError, io_failure,
 };
+use crate::blocking::blocking;
 
 /// A reply slot for a command that answers with success or failure.
 type Ack = oneshot::Sender<Result<(), WorkspaceFileError>>;
@@ -154,13 +155,18 @@ pub(crate) async fn run(mut rx: mpsc::Receiver<Command>, conn: turso::Connection
 /// exactly the file behind: the WAL is checkpointed into the main file
 /// and truncated, the connection dropped, and the emptied `-wal` sidecar
 /// removed. A sidecar that still holds frames is never touched; the
-/// engine replays it on the next open.
+/// engine replays it on the next open. The sidecar check is filesystem
+/// work and runs on the blocking pool, awaited, so the close is complete
+/// when this returns.
 pub(crate) async fn close_database(conn: turso::Connection, path: &Path) {
     if let Err(error) = checkpoint(&conn).await {
         tracing::warn!(%error, path = %path.display(), "workspace file checkpoint failed on close");
     }
     drop(conn);
-    remove_empty_wal_sidecar(path);
+    let sidecar_of = path.to_path_buf();
+    if let Err(error) = blocking(move || remove_empty_wal_sidecar(&sidecar_of)).await {
+        tracing::warn!(%error, path = %path.display(), "workspace file wal sidecar not checked");
+    }
 }
 
 /// Folds every WAL frame into the main file and truncates the WAL, so
@@ -177,17 +183,21 @@ async fn checkpoint(conn: &turso::Connection) -> Result<(), WorkspaceFileError> 
 /// `destination`. Running on the actor, between commands, this is the
 /// one moment the main file is guaranteed complete and still: the
 /// actor owns the only connection, so nothing writes or checkpoints
-/// until the copy returns. The copy is a small synchronous file copy on
-/// the actor task, the same blocking discipline as [`close_database`].
+/// until the copy returns. The copy is synchronous filesystem work and
+/// runs on the blocking pool, awaited here so the actor handles no other
+/// command while it is in flight, the same discipline as
+/// [`close_database`].
 async fn snapshot(
     conn: &turso::Connection,
     path: &Path,
     destination: &Path,
 ) -> Result<(), WorkspaceFileError> {
     checkpoint(conn).await?;
-    std::fs::copy(path, destination)
-        .map(|_| ())
-        .map_err(|source| WorkspaceFileError::Io { source })
+    let (from, to) = (path.to_path_buf(), destination.to_path_buf());
+    match blocking(move || std::fs::copy(&from, &to)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(source)) | Err(source) => Err(io_failure(source)),
+    }
 }
 
 /// Writes the stamp, the grants, the window state, and any ui-state

@@ -26,14 +26,14 @@ mod actor;
 #[path = "workspace_file-siblings.rs"]
 mod siblings;
 #[path = "workspace_file-ui-state.rs"]
-mod ui_state;
+pub(crate) mod ui_state;
 
 pub(crate) use actor::now_rfc3339;
 use actor::{COMMAND_QUEUE_DEPTH, Command, SCHEMA_V1};
-use siblings::{copy_siblings, plan_siblings, remove_sibling};
-#[cfg(test)]
-pub(crate) use ui_state::UI_STATE_VALUE_CAP;
+use siblings::{already_taken, copy_siblings_or_clean_up, plan_siblings};
 pub(crate) use ui_state::{UI_STATE_KEYS, check_ui_state_cap, empty_ui_state, ui_state_key};
+
+use crate::blocking::{blocking, try_blocking};
 
 /// Meta key naming the file format; always [`FORMAT_NAME`].
 pub(crate) const META_FORMAT: &str = "format";
@@ -175,7 +175,8 @@ impl WorkspaceFile {
         path: &Path,
         contents: &WorkspaceContents,
     ) -> Result<Self, WorkspaceFileError> {
-        if path.exists() {
+        let probe = path.to_path_buf();
+        if blocking(move || probe.exists()).await.map_err(io_failure)? {
             return Err(already_taken("workspace file path is already taken"));
         }
         let conn = open_database(path).await?;
@@ -183,8 +184,12 @@ impl WorkspaceFile {
             // The connection must go before the file can; a failed
             // removal cannot say more than the write failure did.
             drop(conn);
-            let _ = fs::remove_file(actor::wal_sidecar_of(path));
-            let _ = fs::remove_file(path);
+            let created = path.to_path_buf();
+            let _ = blocking(move || {
+                let _ = fs::remove_file(actor::wal_sidecar_of(&created));
+                let _ = fs::remove_file(&created);
+            })
+            .await;
             return Err(error);
         }
         Ok(Self::spawn(conn, path))
@@ -197,7 +202,11 @@ impl WorkspaceFile {
     /// that fails it is left byte-identical. The path must already
     /// exist: opening never creates.
     pub(crate) async fn open(path: &Path) -> Result<Self, WorkspaceFileError> {
-        if !path.is_file() {
+        let probe = path.to_path_buf();
+        if !blocking(move || probe.is_file())
+            .await
+            .map_err(io_failure)?
+        {
             return Err(WorkspaceFileError::Io {
                 source: io::Error::new(io::ErrorKind::NotFound, "workspace file does not exist"),
             });
@@ -271,28 +280,37 @@ impl WorkspaceFile {
     /// is written, so another workspace's data is never merged into. A
     /// failure after the copy appears removes the file and every
     /// sibling this call created.
+    ///
+    /// The probes and the sibling copies are synchronous filesystem work
+    /// and run on the blocking pool; the snapshot itself runs on the actor.
     pub(crate) async fn duplicate_to(
         &self,
         destination: &Path,
     ) -> Result<Self, WorkspaceFileError> {
-        if destination.exists() {
-            return Err(already_taken("workspace file path is already taken"));
-        }
-        let siblings = plan_siblings(&self.path, destination)?;
+        let source = self.path.to_path_buf();
+        let target = destination.to_path_buf();
+        let siblings = try_blocking(
+            move || {
+                if target.exists() {
+                    return Err(already_taken("workspace file path is already taken"));
+                }
+                plan_siblings(&source, &target)
+            },
+            io_failure,
+        )
+        .await?;
         let target = destination.to_path_buf();
         self.request(|reply| Command::Snapshot {
             destination: target,
             reply,
         })
         .await?;
-        if let Err(source) = copy_siblings(&siblings) {
-            // A failed removal cannot say more than the copy failure did.
-            for (_, to) in &siblings {
-                let _ = remove_sibling(to);
-            }
-            let _ = fs::remove_file(destination);
-            return Err(WorkspaceFileError::Io { source });
-        }
+        let target = destination.to_path_buf();
+        try_blocking(
+            move || copy_siblings_or_clean_up(&siblings, &target).map_err(io_failure),
+            io_failure,
+        )
+        .await?;
         Self::open(destination).await
     }
 
@@ -438,11 +456,9 @@ async fn has_meta_table(conn: &turso::Connection) -> Result<bool, WorkspaceFileE
     }
 }
 
-/// An `AlreadyExists` I/O refusal carrying `message`.
-fn already_taken(message: &'static str) -> WorkspaceFileError {
-    WorkspaceFileError::Io {
-        source: io::Error::new(io::ErrorKind::AlreadyExists, message),
-    }
+/// An I/O failure as the file error that carries it.
+pub(crate) fn io_failure(source: io::Error) -> WorkspaceFileError {
+    WorkspaceFileError::Io { source }
 }
 
 /// Whether an engine failure says the file is not a database at all.
