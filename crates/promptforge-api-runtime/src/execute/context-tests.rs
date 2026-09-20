@@ -71,6 +71,34 @@ fn forks_swap_only_their_own_fields() {
 }
 
 #[test]
+fn the_root_task_sequence_starts_where_the_context_says() {
+    let prompt = test_prompt();
+    let ctx = RunState::new(
+        Arc::new(prompt),
+        "",
+        &promptforge_vfs::empty(),
+        LuaProgram::empty().expect("the empty chunk compiles"),
+        &RunContext::new(
+            "run-context-test",
+            1,
+            promptforge_api_types::timestamp::Timestamp::UNIX_EPOCH,
+        )
+        .provenance_start(5),
+    );
+    ctx.emitter().report(
+        "Only",
+        promptforge_api_types::event::lifecycle::SECTION_STARTED,
+    );
+    let events = ctx.take_events();
+    assert_eq!(events[0].provenance().task, TaskId::from(ChainId::root()));
+    assert_eq!(
+        events[0].provenance().seq,
+        5,
+        "the root task's first stamp continues past the host's parse events"
+    );
+}
+
+#[test]
 fn a_task_fork_reports_into_the_shared_buffer_under_its_own_task() {
     let ctx = test_context(&test_prompt());
     let task: TaskId = "0.1".parse().expect("a task id parses");

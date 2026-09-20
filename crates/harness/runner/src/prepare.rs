@@ -229,7 +229,13 @@ pub async fn prepare_run(
         }
     };
 
-    let mut ctx = RunContext::new(session_id, seed, started_at).cancel(cancel);
+    // The parse events were stamped under task `0` from zero; the run's
+    // root task continues the sequence past them, so `(task_id, task_seq)`
+    // is unique across every record of the run.
+    let provenance_start = u32::try_from(parse_events.len()).unwrap_or(u32::MAX);
+    let mut ctx = RunContext::new(session_id, seed, started_at)
+        .cancel(cancel)
+        .provenance_start(provenance_start);
     if let Some(ui) = ui {
         ctx = ctx.ui(ui);
     }

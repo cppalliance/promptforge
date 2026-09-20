@@ -46,6 +46,29 @@ fn each_task_counts_its_own_sequence_from_zero() {
 }
 
 #[test]
+fn a_seeded_sink_continues_the_root_sequence_and_leaves_other_tasks_at_zero() {
+    let sink = EventSink::seeded(3);
+    let walk = emitter(&sink, root());
+    let arm = walk.for_task("0.0".parse().expect("a task id parses"));
+    walk.report("A", lifecycle::SECTION_STARTED);
+    let stamp = walk.stamp_effect();
+    arm.report("W", lifecycle::SECTION_STARTED);
+
+    let events = sink.take();
+    assert_eq!(
+        events[0].provenance().seq,
+        3,
+        "the root task's first stamp continues from the seed"
+    );
+    assert_eq!(stamp.seq, 4, "an effect stamp advances the seeded counter");
+    assert_eq!(
+        events[1].provenance().seq,
+        0,
+        "a spawned task's sequence is unaffected by the seed"
+    );
+}
+
+#[test]
 fn a_lifecycle_report_becomes_the_matching_event_with_its_coordinates() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());

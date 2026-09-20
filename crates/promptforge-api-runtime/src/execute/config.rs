@@ -61,6 +61,12 @@ pub struct RunContext {
     /// When the run began, as the host stamped it: rendered as `sys.when`
     /// in every section, the H1 pass included.
     pub(crate) started_at: Timestamp,
+    /// Where the root task's provenance sequence starts: 0 by default. A
+    /// host that logged the prompt's parse events (stamped under task `0`
+    /// from zero) ahead of the run passes their count, so the run's root
+    /// task continues the sequence and `(task, seq)` is unique across the
+    /// parse/run boundary.
+    pub(crate) provenance_start: u32,
     /// Model-orchestrated prompt-tool nesting depth: 0 for a root run.
     /// Always 0 today - the sub-run adapter that increments it lands with
     /// the deferred prompt-pack.
@@ -132,6 +138,7 @@ impl RunContext {
             seed,
             flags: Flags::EMPTY,
             started_at,
+            provenance_start: 0,
             depth: 0,
             report_debug: false,
             cancel: CancelHandle::new(),
@@ -197,6 +204,18 @@ impl RunContext {
     #[must_use]
     pub fn flags(mut self, flags: Flags) -> RunContext {
         self.flags = flags;
+        self
+    }
+
+    /// Sets where the root task's provenance sequence starts. The default
+    /// (0) is a run recorded on its own. A host that records the prompt's
+    /// parse events ahead of the run in one stream passes their count:
+    /// `Prompt::parse` stamps them under task `0` from zero, and this seeds
+    /// the run's root counter past them so every `(task, seq)` in the
+    /// stream is unique. Spawned tasks are unaffected and count from zero.
+    #[must_use]
+    pub fn provenance_start(mut self, start: u32) -> RunContext {
+        self.provenance_start = start;
         self
     }
 
@@ -386,6 +405,7 @@ impl fmt::Debug for RunContext {
             .field("seed", &self.seed)
             .field("flags", &self.flags)
             .field("started_at", &self.started_at)
+            .field("provenance_start", &self.provenance_start)
             .field("depth", &self.depth)
             .field("report_debug", &self.report_debug)
             .field("cancel", &self.cancel)

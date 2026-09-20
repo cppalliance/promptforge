@@ -142,7 +142,9 @@ impl RunState {
         let tool_set = Arc::new(Mutex::new(bound_tool_set(&prompt, ctx)));
         let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
-        let events = EventSink::default();
+        // The root task's counter starts where the host says: past the
+        // parse events it logged ahead of the run, or at zero.
+        let events = EventSink::seeded(ctx.provenance_start);
         // The root chain - the main walk - is task `0`.
         let emitter = Arc::new(Emitter::new(
             events.clone(),

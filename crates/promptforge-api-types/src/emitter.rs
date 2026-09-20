@@ -79,6 +79,21 @@ impl EventBuffer {
 pub struct EventSink(Arc<Mutex<EventBuffer>>);
 
 impl EventSink {
+    /// A buffer whose root task (`0`) counts from `start` instead of zero.
+    ///
+    /// A prompt's parse reports under task `0` through its own sink before
+    /// any run exists, so a host that records the parse events and the run
+    /// in one stream seeds the run's buffer with the parse's event count:
+    /// the run's first root-task stamp continues the parse's sequence, and
+    /// `(task, seq)` stays unique across the two. Every other task still
+    /// counts from zero.
+    #[must_use]
+    pub fn seeded(start: u32) -> Self {
+        let mut buffer = EventBuffer::default();
+        buffer.seqs.insert(TaskId::from(ChainId::root()), start);
+        Self(Arc::new(Mutex::new(buffer)))
+    }
+
     /// Pushes one event built from `task`'s next provenance. The lock is
     /// held only for the allocation and the push; `build` runs under it,
     /// so it must not touch the sink.

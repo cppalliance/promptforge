@@ -37,8 +37,13 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+# The end-to-end suite drives a prepared run through the effect loop with
+# this crate's chat performer and reads the record stream back.
+harness-log.workspace = true
 # The tag fixture the mock gateways are spawned under.
 harness-runner = { workspace = true, features = ["test-support"] }
+shared-vfs.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 
 [lints]
