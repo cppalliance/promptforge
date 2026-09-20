@@ -325,7 +325,7 @@ fn peel_json_tool_calls_fence(input: &str) -> Peel<'_> {
     }
     match parse_openai_tool_calls(raw_calls) {
         Ok(calls) => Peel::Calls(calls, after),
-        Err(rejection) => Peel::Malformed(crate::admin::walled::config::error_chain(&rejection)),
+        Err(rejection) => Peel::Malformed(crate::error::error_chain(&rejection)),
     }
 }
 

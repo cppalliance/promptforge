@@ -558,6 +558,23 @@ impl IntoResponse for GatewayError {
     }
 }
 
+/// Renders an error and every source beneath it as one `; `-joined line.
+///
+/// The gateway's wire messages carry one line, so a variant that wants
+/// the whole chain in its message flattens it here. The multi-line form
+/// the binary writes to the log and to stderr is a different rendering
+/// and stays in `main.rs`.
+pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str("; ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 /// Runs `work` on tokio's blocking pool and hands back its value.
 ///
 /// Every route that touches the filesystem, a blocking client, or an OS

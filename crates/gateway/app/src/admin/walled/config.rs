@@ -22,7 +22,7 @@ use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
-use crate::error::{GatewayError, WireJson, blocking};
+use crate::error::{GatewayError, WireJson, blocking, error_chain};
 use crate::registry::RouteInfo;
 
 /// The reply of every shadow-write route: the shadow file the save
@@ -99,18 +99,6 @@ pub(crate) fn config_write_error(error: gateway_config::ConfigError) -> GatewayE
     } else {
         GatewayError::ConfigWriteRejected(error_chain(&error))
     }
-}
-
-/// Renders an error and every source beneath it as one `; `-joined line.
-pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        text.push_str("; ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    text
 }
 
 /// Converts the request body into the TOML document a shadow save takes.

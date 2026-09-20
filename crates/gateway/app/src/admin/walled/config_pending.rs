@@ -24,9 +24,9 @@ use gateway_config::{
 };
 use serde::Serialize;
 
-use super::config::error_chain;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
+use crate::error::error_chain;
 use crate::error::{GatewayError, blocking};
 use crate::registry::RouteInfo;
 

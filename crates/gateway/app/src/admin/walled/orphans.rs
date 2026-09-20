@@ -2,8 +2,8 @@
 //! tree that no `[[local_model]]` or `[[stt_model]]` declared in the catalog
 //! references, so an operator can adopt or delete leftovers.
 //!
-//! The scan is blocking filesystem work, so it runs inside
-//! `tokio::task::spawn_blocking` like every store operation (Amendment D).
+//! The scan is blocking filesystem work, so it goes through
+//! [`crate::error::blocking`] like every store operation (Amendment D).
 //! The diff itself lives in the local crate beside the blob cache, which owns
 //! the slot layout and the sidecar records.
 

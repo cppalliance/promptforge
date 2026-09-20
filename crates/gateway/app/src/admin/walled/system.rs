@@ -6,8 +6,8 @@
 //! process-wide `sysinfo::System` and primes it on first use; every later
 //! request reports the change since the previous poll (the UI polls every
 //! 5s). Sampling reads OS counters and the first call sleeps one CPU-update
-//! interval, so it runs inside `tokio::task::spawn_blocking` like every
-//! store operation (Amendment D).
+//! interval, so it goes through [`crate::error::blocking`] like every store
+//! operation (Amendment D).
 
 use std::fmt;
 use std::path::{Path, PathBuf};

@@ -2,8 +2,8 @@
 //! parameter count read from a GGUF header in the artifact cache, feeding
 //! the UI's `gpu_layers` "N / total" slider readout.
 //!
-//! The header parse is blocking filesystem work, so it runs inside
-//! `tokio::task::spawn_blocking` like every store operation (Amendment D).
+//! The header parse is blocking filesystem work, so it goes through
+//! [`crate::error::blocking`] like every store operation (Amendment D).
 //! The parser itself lives in the local crate beside the blob cache, which
 //! owns GGUF domain knowledge.
 
