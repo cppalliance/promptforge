@@ -465,7 +465,7 @@ Each step runs only the focused tests listed in it. The full gate set runs once,
 
 <step-7>
 
-### Step 7: Make the Invariants marker mandatory by family name
+### Step 7: Make the Invariants marker mandatory by family name [completed]
 
 - Component: enforcement
 - Piece: the rule and the final gate

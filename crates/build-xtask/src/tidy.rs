@@ -7,8 +7,10 @@
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
 //! enforces the architecture; `cargo xtask tidy` prints the same report
 //! on demand. The file ceiling and lint inheritance checks bind every
-//! crate whose crate docs carry the `## Invariants` marker: the
-//! `workshop-*` crates today and the `harness-*` crates as they land.
+//! `workshop-*` and `harness-*` crate (plus `harness-api`, minus the
+//! `workshop` shell) by package name, and every other crate whose crate
+//! docs carry the `## Invariants` marker; a family crate missing the marker
+//! is itself a violation.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,16 +29,18 @@ const SHELL: &[&str] = &["workshop-server"];
 /// File-line ceiling from the `AGENTS.md` structural rules.
 const MAX_FILE_LINES: usize = 500;
 
-/// Marker in a crate's `lib.rs` (or `main.rs`) crate docs opting the crate
-/// into the decomposed-architecture checks. The `new-crate` scaffolder emits
-/// it; every `workshop-*` and `harness-*` crate carries it, and crates
-/// outside those families are left alone.
+/// Marker in a crate's `lib.rs` (or `main.rs`) crate docs. Mandatory for
+/// every `workshop-*` and `harness-*` crate (see [`family_requires_marker`]);
+/// on any other crate it opts that crate into the decomposed-architecture
+/// checks (`build-xtask` carries it deliberately). The `new-crate`
+/// scaffolder emits it.
 const INVARIANT_MARKER: &str = "//! ## Invariants";
 
 /// Runs every check and returns all violations.
 #[must_use]
 pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     let mut violations = tier_dependency_violations(root);
+    violations.extend(marker_violations(root));
     violations.extend(file_ceiling_violations(root));
     violations.extend(lint_inheritance_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
@@ -213,12 +217,49 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Crates under `crates/` whose crate docs carry the invariant marker. A
-/// directory containing a `Cargo.toml` is a crate and is not descended
-/// into; any other directory is a container and the walk descends one
-/// level, so crates nested under `crates/workshop/` and `crates/harness/`
-/// stay visible.
+/// Check that every crate the families bind by name carries the marker.
+#[must_use]
+pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
+    let mut violations = Vec::new();
+    for dir in workspace_crates(root) {
+        let Some(name) = package_name(&dir) else {
+            continue;
+        };
+        if family_requires_marker(&name) && !carries_marker(&dir) {
+            violations.push(format!(
+                "{name}: src/lib.rs lacks the `{INVARIANT_MARKER}` marker required of every \
+                 workshop-* and harness-* crate"
+            ));
+        }
+    }
+    violations
+}
+
+/// Whether a package name places the crate in a family that must carry the
+/// marker: `workshop-*` and `harness-*` (which covers `harness-api`). The
+/// Tauri shell (the `workshop` package) is exempt.
+fn family_requires_marker(name: &str) -> bool {
+    name != "workshop" && (name.starts_with("workshop-") || name.starts_with("harness-"))
+}
+
+/// Crates bound by the file ceiling and lint inheritance checks: the union
+/// of the crates the families bind by name and every crate carrying the
+/// marker.
 fn participating_crates(root: &Path) -> Vec<PathBuf> {
+    workspace_crates(root)
+        .into_iter()
+        .filter(|dir| {
+            package_name(dir).is_some_and(|name| family_requires_marker(&name))
+                || carries_marker(dir)
+        })
+        .collect()
+}
+
+/// Every crate directory under `crates/`. A directory containing a
+/// `Cargo.toml` is a crate and is not descended into; any other directory
+/// is a container and the walk descends one level, so crates nested under
+/// `crates/workshop/` and `crates/harness/` stay visible.
+fn workspace_crates(root: &Path) -> Vec<PathBuf> {
     let mut crates = Vec::new();
     let Ok(entries) = fs::read_dir(root.join("crates")) else {
         return crates;
@@ -229,19 +270,28 @@ fn participating_crates(root: &Path) -> Vec<PathBuf> {
             continue;
         }
         if dir.join("Cargo.toml").exists() {
-            if carries_marker(&dir) {
-                crates.push(dir);
-            }
+            crates.push(dir);
         } else if let Ok(inner) = fs::read_dir(&dir) {
             for entry in inner.flatten() {
                 let sub = entry.path();
-                if sub.is_dir() && sub.join("Cargo.toml").exists() && carries_marker(&sub) {
+                if sub.is_dir() && sub.join("Cargo.toml").exists() {
                     crates.push(sub);
                 }
             }
         }
     }
     crates
+}
+
+/// The `[package] name` declared in a crate directory's manifest.
+fn package_name(dir: &Path) -> Option<String> {
+    let text = fs::read_to_string(dir.join("Cargo.toml")).ok()?;
+    let manifest: toml::Value = toml::from_str(&text).ok()?;
+    manifest
+        .get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
 }
 
 /// Whether a crate's `lib.rs` or `main.rs` crate docs carry the marker.
@@ -275,131 +325,5 @@ fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn workspace_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("build-xtask lives at <root>/crates/build-xtask")
-            .to_path_buf()
-    }
-
-    #[test]
-    fn workshop_tier_dependencies_flow_one_way() {
-        let violations = tier_dependency_violations(&workspace_root());
-        assert!(
-            violations.is_empty(),
-            "tier violations:\n{}",
-            violations.join("\n")
-        );
-    }
-
-    #[test]
-    fn participating_crates_respect_the_file_line_ceiling() {
-        let violations = file_ceiling_violations(&workspace_root());
-        assert!(
-            violations.is_empty(),
-            "ceiling violations:\n{}",
-            violations.join("\n")
-        );
-    }
-
-    #[test]
-    fn participating_crates_inherit_workspace_lints() {
-        let violations = lint_inheritance_violations(&workspace_root());
-        assert!(
-            violations.is_empty(),
-            "lint violations:\n{}",
-            violations.join("\n")
-        );
-    }
-
-    #[test]
-    fn a_tiered_crate_whose_manifest_is_missing_is_reported_not_skipped() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        std::fs::create_dir_all(root.path().join("crates")).expect("the crates directory creates");
-        let violations = tier_dependency_violations(root.path());
-        let tiered = [VOCABULARY, SERVICES, FEATURES, SHELL].concat();
-        assert_eq!(
-            violations.len(),
-            tiered.len(),
-            "every tiered crate's missing manifest is reported: {violations:?}"
-        );
-        for name in tiered {
-            assert!(
-                violations.iter().any(|v| v.contains(name)),
-                "{name} is named in the violations: {violations:?}"
-            );
-        }
-    }
-
-    /// Writes a crate under `crates/<dir>/` with the given `lib.rs` docs and
-    /// one source file of `lines` lines.
-    fn write_marked_crate(root: &Path, dir: &str, lib_docs: &str, lines: usize) {
-        let src = root.join("crates").join(dir).join("src");
-        std::fs::create_dir_all(&src).expect("the crate source directory creates");
-        std::fs::write(
-            src.parent().expect("src has a parent").join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\n[lints]\nworkspace = true\n",
-        )
-        .expect("the manifest writes");
-        std::fs::write(src.join("lib.rs"), lib_docs).expect("lib.rs writes");
-        std::fs::write(src.join("big.rs"), "// line\n".repeat(lines)).expect("big.rs writes");
-    }
-
-    #[test]
-    fn a_harness_crate_carrying_the_marker_is_held_to_the_ceiling() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_marked_crate(
-            root.path(),
-            "harness/runner",
-            "//! Effect loop.\n//!\n//! ## Invariants\n//!\n//! - none\n",
-            MAX_FILE_LINES + 1,
-        );
-        let violations = file_ceiling_violations(root.path());
-        assert_eq!(violations.len(), 1, "{violations:?}");
-        assert!(
-            violations[0].contains("big.rs") && violations[0].contains("over the 500-line ceiling"),
-            "the oversized harness file is reported: {violations:?}"
-        );
-    }
-
-    #[test]
-    fn a_harness_crate_without_the_marker_is_outside_the_ceiling() {
-        let root = tempfile::TempDir::new().expect("tempdir");
-        write_marked_crate(
-            root.path(),
-            "harness/runner",
-            "//! Effect loop, not yet opted in.\n",
-            MAX_FILE_LINES + 1,
-        );
-        assert!(
-            file_ceiling_violations(root.path()).is_empty(),
-            "the marker is what opts a harness crate into the ceiling"
-        );
-    }
-
-    #[test]
-    fn tier_table_grants_each_tier_only_lower_tiers() {
-        assert_eq!(allowed_dependencies("workshop-protocol"), Some(Vec::new()));
-        assert_eq!(
-            allowed_dependencies("workshop-registry"),
-            Some(vec!["workshop-protocol"])
-        );
-        assert_eq!(
-            allowed_dependencies("workshop-gateway"),
-            Some(VOCABULARY.to_vec())
-        );
-        assert_eq!(
-            allowed_dependencies("workshop-workspace"),
-            Some([VOCABULARY, SERVICES].concat())
-        );
-        assert_eq!(
-            allowed_dependencies("workshop-server"),
-            Some([VOCABULARY, SERVICES, FEATURES].concat())
-        );
-        assert_eq!(allowed_dependencies("gateway"), None);
-    }
-}
+#[path = "tidy-tests.rs"]
+mod tests;
