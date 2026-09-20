@@ -62,6 +62,38 @@ pub const INPUT_CAPACITY: usize = 32;
 /// the durable transcript already shows as a turn without a reply.
 pub const ERROR_CAPACITY: usize = 8;
 
+/// What kind of failure a session is reporting: the machine-readable
+/// fact a client classifies on. The first two are turn failures the
+/// program survived (the built-in chat pcalls `models.loop` and returns
+/// to waiting); the last two end the run. Deliberately not
+/// `#[non_exhaustive]`: a client that labels each kind matches on it
+/// exhaustively, so a new kind fails that client's build until it is
+/// labelled instead of silently falling into a wildcard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
+    /// A model round failed; the program survived and is waiting again.
+    ModelTurnFailed,
+    /// A tool dispatch failed; the program survived and is waiting again.
+    ToolCallFailed,
+    /// The run itself ended in error.
+    RunFailed,
+    /// A requested close interrupted the run before a genuine terminal;
+    /// this is the synthetic terminal the supervisor renders after the
+    /// drain.
+    Interrupted,
+}
+
+/// One operator-facing failure report: the kind is the fact code acts
+/// on, the message is display text for the operator and the model. Code
+/// never derives meaning from the message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionFailure {
+    /// Which failure this is.
+    pub kind: FailureKind,
+    /// The sentence a client shows for it.
+    pub message: String,
+}
+
 /// A live agent session: the handle a client launches, sends input to,
 /// cancels, closes, and subscribes to events and deltas through. Cheap
 /// to clone; every clone names the same session.
@@ -137,11 +169,13 @@ impl Session {
         self.core.wait_frames.subscribe()
     }
 
-    /// Subscribes to the session's operator-facing error reports from
-    /// this call on: a failed model round the program survived, or a run
-    /// that ended in error. Ephemeral like the deltas.
+    /// Subscribes to the session's operator-facing failure reports from
+    /// this call on. Each carries its [`FailureKind`] - a failed model
+    /// round or tool call the program survived, a run that ended in
+    /// error, or an interrupt's synthetic terminal - beside its display
+    /// message. Ephemeral like the deltas.
     #[must_use]
-    pub fn subscribe_errors(&self) -> broadcast::Receiver<String> {
+    pub fn subscribe_errors(&self) -> broadcast::Receiver<SessionFailure> {
         self.core.errors.subscribe()
     }
 
@@ -256,8 +290,8 @@ pub(crate) struct SessionCore {
     events: broadcast::Sender<SessionEvent>,
     /// The dedicated live-delta channel; deltas never enter the log.
     deltas: broadcast::Sender<Delta>,
-    /// The session's error reports.
-    pub(crate) errors: broadcast::Sender<String>,
+    /// The session's failure reports.
+    pub(crate) errors: broadcast::Sender<SessionFailure>,
     /// The sink the chat performers stream raw deltas to; the supervisor
     /// drains its receiver and stamps each delta. Held here so the
     /// channel never closes while the session lives.
@@ -361,10 +395,11 @@ impl SessionCore {
         self.lifecycle.finish(run);
     }
 
-    /// Reports one operator-facing message. No receiver means no client is
-    /// attached; reports are ephemeral by design.
-    pub(crate) fn report(&self, message: String) {
-        let _ = self.errors.send(message);
+    /// Reports one operator-facing failure of `kind` with its display
+    /// `message`. No receiver means no client is attached; reports are
+    /// ephemeral by design.
+    pub(crate) fn report(&self, kind: FailureKind, message: String) {
+        let _ = self.errors.send(SessionFailure { kind, message });
     }
 
     /// Stamps one raw delta with the current round and broadcasts it.
@@ -397,12 +432,14 @@ impl SessionCore {
             // and only the session can tell the client. Both are terminal
             // for the turn.
             Event::ModelTurnFailed { section, .. } | Event::ToolCallFailed { section, .. } => {
-                let boundary = match event {
-                    Event::ModelTurnFailed { .. } => "Model turn failed",
-                    _ => "Tool call failed",
+                let (kind, boundary) = match event {
+                    Event::ModelTurnFailed { .. } => {
+                        (FailureKind::ModelTurnFailed, "Model turn failed")
+                    }
+                    _ => (FailureKind::ToolCallFailed, "Tool call failed"),
                 };
                 self.lifecycle.settle_current_turn();
-                self.report(format!("{boundary} in agent `{section}`"));
+                self.report(kind, format!("{boundary} in agent `{section}`"));
             }
             Event::AssistantReply { .. } => self.lifecycle.settle_current_turn(),
             _ => {}

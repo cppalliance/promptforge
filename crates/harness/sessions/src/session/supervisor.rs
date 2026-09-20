@@ -34,8 +34,8 @@ use crate::transition::{
 
 use crate::runtime::SessionTable;
 
-use super::SessionCore;
 use super::run::{RunFailure, RunInputs, run_once};
+use super::{FailureKind, SessionCore};
 
 /// One owned run future paired with its reducer identity.
 type RunFuture = Pin<Box<dyn Future<Output = (RunId, Result<RunOutcome, RunFailure>)> + Send>>;
@@ -274,7 +274,7 @@ impl Supervisor {
             %message,
             "agent run failed"
         );
-        self.core.report(message.to_owned());
+        self.core.report(FailureKind::RunFailed, message.to_owned());
     }
 
     /// Executes one typed effect without making transition decisions.
@@ -402,7 +402,8 @@ impl Supervisor {
         }
         self.core.done();
         if let Some(frame) = self.interrupt.take() {
-            self.core.report(frame.message().to_owned());
+            self.core
+                .report(FailureKind::Interrupted, frame.message().to_owned());
         }
     }
 }

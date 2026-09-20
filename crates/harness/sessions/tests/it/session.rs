@@ -3,16 +3,17 @@
 //! reconnecting client's transcript read matches what the log holds and
 //! what a live subscriber saw; an operator's answer resumes the parked
 //! program and the run completes; a turn-cancel relaunches the program as
-//! a second run whose transcript indices continue; a catalog whose models
-//! changed retires the run; and a close drains the run - outstanding
-//! effects are answered `Dropped` before the session is `Closed`.
+//! a second run whose transcript indices continue; and a catalog whose
+//! models changed retires the run. The close path - draining outstanding
+//! effects and reporting the interrupt as one `Interrupted` failure -
+//! lives in the `close` child module.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use harness_log::{RecordKind, RunOutcome};
+use harness_log::RunOutcome;
 use harness_sessions::environment::{CatalogBinding, GatewayBinding};
 use harness_sessions::input::{WaitError, WaitFrame};
 use harness_sessions::protocol::{LaunchRequest, SessionEvent, SessionId};
@@ -20,6 +21,9 @@ use harness_sessions::runtime::{Harness, HarnessConfig, LaunchError};
 use harness_sessions::session::Session;
 use harness_sessions::transition::SessionState;
 use tokio::sync::broadcast;
+
+#[path = "session-close.rs"]
+mod close;
 
 /// A prompt that parks on operator input and returns it.
 const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge: 0\n---\n\n\
@@ -384,72 +388,4 @@ async fn an_empty_catalog_holds_the_session_until_a_chat_model_arrives() {
 
     assert!(harness.close(session.id()));
     wait_for(&session, SessionState::Closed).await;
-}
-
-#[tokio::test]
-async fn closing_answers_outstanding_effects_dropped_before_closed() {
-    let dir = tempfile::tempdir().unwrap();
-    let harness = harness(dir.path());
-    let session = launch(&harness).await;
-    let mut waits = session.subscribe_waits();
-    let token = required_token(&mut waits).await;
-    assert_eq!(session.state(), SessionState::Alive);
-    assert_eq!(session.unresolved_waits(), vec![token.clone()]);
-
-    assert!(harness.close(session.id()), "the session was registered");
-    assert_eq!(
-        session.state(),
-        SessionState::Closing,
-        "close is requested: the run is not yet done"
-    );
-    assert!(
-        harness.session(session.id()).is_none(),
-        "a closed session leaves the harness at once"
-    );
-
-    wait_for(&session, SessionState::Closed).await;
-
-    // The outstanding input wait died as an outcome, not silence.
-    assert!(session.unresolved_waits().is_empty(), "no wait leaks");
-    let frame = waits.recv().await.expect("the cancelled frame arrives");
-    assert_eq!(frame, WaitFrame::Cancelled { token });
-
-    // In the log: the wait's effect has exactly one answer, `Dropped`,
-    // and the run's row closed as cancelled - both before `Closed`.
-    let log = harness.log().await.unwrap();
-    let runs = session.run_ids();
-    assert_eq!(runs.len(), 1);
-    let log = log.lock().await;
-    let row = log.run(runs[0]).await.unwrap();
-    assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
-    let records = log
-        .records(runs[0], harness_log::RecordFilter::default())
-        .await
-        .unwrap();
-    let effects: Vec<_> = records
-        .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Effect)
-        .collect();
-    assert_eq!(effects.len(), 1, "one effect was out: the input wait");
-    let answers: Vec<_> = records
-        .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Answer)
-        .collect();
-    assert_eq!(answers.len(), 1, "every effect has exactly one answer");
-    assert_eq!(answers[0].record.effect_id, effects[0].record.effect_id);
-    assert_eq!(
-        answers[0].record.payload,
-        serde_json::json!("Dropped"),
-        "the outstanding effect was answered Dropped: {}",
-        answers[0].record.payload
-    );
-    assert!(
-        answers[0].seq > effects[0].seq,
-        "the answer follows the effect it drops"
-    );
-    drop(log);
-    assert!(
-        matches!(session.transcript(0).await, Ok(events) if !events.is_empty()),
-        "the transcript stays readable after close"
-    );
 }

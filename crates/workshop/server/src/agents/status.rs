@@ -8,7 +8,7 @@
 //! itself when the harness lets the session go and the last socket
 //! detaches: the channels close, and the loop returns.
 
-use harness_api::{Delta, DeltaKind, SessionEvent};
+use harness_api::{Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};
 use promptforge_api_types::event::Event;
 use tokio::sync::broadcast;
 use workshop_protocol::Activity;
@@ -30,7 +30,7 @@ pub(super) fn spawn_relay(session: &harness_api::Session, push: Push, backoff: R
 async fn relay(
     mut events: broadcast::Receiver<SessionEvent>,
     mut deltas: broadcast::Receiver<Delta>,
-    mut errors: broadcast::Receiver<String>,
+    mut errors: broadcast::Receiver<SessionFailure>,
     push: Push,
     backoff: ReconnectBackoff,
 ) {
@@ -52,7 +52,7 @@ async fn relay(
                 Err(broadcast::error::RecvError::Closed) => return,
             },
             received = errors.recv() => match received {
-                Ok(message) => on_error(&message, &push),
+                Ok(failure) => on_error(&failure, &push),
                 // Reports are ephemeral like the deltas; a lagged receiver
                 // missed a failure the error frame already carried.
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -87,35 +87,37 @@ fn on_event(event: &SessionEvent, push: &Push, backoff: &ReconnectBackoff) {
     }
 }
 
-/// The status labels for the two turn failures the program survives. The
-/// session's report for a survived turn opens with the boundary that
-/// failed (`Model turn failed in agent ...`), the same text the socket's
-/// error frame carries, and the label repeats that boundary so the status
-/// bar tells a still-running agent from one whose run ended.
-const SURVIVED_TURN_LABELS: [&str; 2] = ["Model turn failed", "Tool call failed"];
-
 /// The label for a run that ended in error or the synthetic terminal of
 /// an interrupt: the agent itself is gone.
 const RUN_FAILED_LABEL: &str = "Agent failed";
 
-/// The operator-facing failure status for one of the session's error
-/// reports: a failed model turn or tool call the program survived, a run
-/// that ended in error, or the synthetic terminal of an interrupt. Each
-/// is terminal for its turn and never reaches a reply, so this status is
-/// the one frame that releases the turn-dispatch Thinking push; without
-/// it the status bar's sustained amber LED never returns to idle. The
-/// session reports every failure here, engine-side or harness-side, so
-/// the status bar and the socket's error frame always agree.
-fn on_error(message: &str, push: &Push) {
-    push.push_failure(failure_label(message), message, Activity::General);
+/// The operator-facing failure status for one of the session's failure
+/// reports. The session reports the kind - a failed model turn or tool
+/// call the program survived, a run that ended in error, or the synthetic
+/// terminal of an interrupt - and the shell labels it; the report's
+/// message passes through as the description, the same text the socket's
+/// error frame carries. Each kind is terminal for its turn and never
+/// reaches a reply, so this status is the one frame that releases the
+/// turn-dispatch Thinking push; without it the status bar's sustained
+/// amber LED never returns to idle.
+fn on_error(failure: &SessionFailure, push: &Push) {
+    push.push_failure(
+        failure_label(failure.kind),
+        &failure.message,
+        Activity::General,
+    );
 }
 
-/// The boundary a survived-turn report names, else the run-failed label.
-fn failure_label(message: &str) -> &'static str {
-    SURVIVED_TURN_LABELS
-        .into_iter()
-        .find(|label| message.starts_with(label))
-        .unwrap_or(RUN_FAILED_LABEL)
+/// The status label for one failure kind: a survived turn is labelled by
+/// its boundary, so the status bar tells a still-running agent from one
+/// whose run ended. The match is exhaustive on purpose: a new kind fails
+/// this build until it is labelled here.
+fn failure_label(kind: FailureKind) -> &'static str {
+    match kind {
+        FailureKind::ModelTurnFailed => "Model turn failed",
+        FailureKind::ToolCallFailed => "Tool call failed",
+        FailureKind::RunFailed | FailureKind::Interrupted => RUN_FAILED_LABEL,
+    }
 }
 
 #[cfg(test)]

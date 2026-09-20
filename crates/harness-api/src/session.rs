@@ -6,9 +6,11 @@
 //! [`Session::transcript`] past the last seen index.
 //!
 //! The wait frames a session announces its input waits with, and the
-//! error a refused answer returns, are the wait registry's own.
+//! error a refused answer returns, are the wait registry's own. A
+//! session's failure reports carry a [`FailureKind`] a client matches on
+//! beside the display message; the sentence is never the classifier.
 
 pub use harness_sessions::input::{WaitError, WaitFrame};
 pub use harness_sessions::protocol::{Delta, DeltaKind, LaunchRequest, SessionEvent, SessionId};
-pub use harness_sessions::session::Session;
+pub use harness_sessions::session::{FailureKind, Session, SessionFailure};
 pub use harness_sessions::transition::SessionState;

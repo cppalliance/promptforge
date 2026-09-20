@@ -27,7 +27,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use harness_api::{Delta, DeltaKind, Session, SessionEvent, WaitError, WaitFrame};
+use harness_api::{Delta, DeltaKind, Session, SessionEvent, SessionFailure, WaitError, WaitFrame};
 use promptforge_api_types::event::Event;
 use tokio::sync::broadcast;
 
@@ -97,7 +97,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
     let mut events_rx: Option<broadcast::Receiver<SessionEvent>> = None;
     let mut deltas_rx: Option<broadcast::Receiver<Delta>> = None;
     let mut input_rx: Option<broadcast::Receiver<WaitFrame>> = None;
-    let mut errors_rx: Option<broadcast::Receiver<String>> = None;
+    let mut errors_rx: Option<broadcast::Receiver<SessionFailure>> = None;
 
     loop {
         tokio::select! {
@@ -116,8 +116,8 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
             // what the durable transcript shows as a turn with no reply.
             received = recv_or_pending(&mut errors_rx) => {
                 match received {
-                    Ok(message) => {
-                        if !send_frame(&mut socket, &ErrorFrame::new(message, None)).await {
+                    Ok(failure) => {
+                        if !send_frame(&mut socket, &ErrorFrame::new(failure.message, None)).await {
                             break;
                         }
                     }
@@ -208,7 +208,7 @@ type Subscriptions<'a> = (
     &'a mut Option<broadcast::Receiver<SessionEvent>>,
     &'a mut Option<broadcast::Receiver<Delta>>,
     &'a mut Option<broadcast::Receiver<WaitFrame>>,
-    &'a mut Option<broadcast::Receiver<String>>,
+    &'a mut Option<broadcast::Receiver<SessionFailure>>,
 );
 
 /// Renders a harness wait frame as the protocol's input frame: the one

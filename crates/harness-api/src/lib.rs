@@ -26,6 +26,6 @@ pub use harness::{
     CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchError,
 };
 pub use session::{
-    Delta, DeltaKind, LaunchRequest, Session, SessionEvent, SessionId, SessionState, WaitError,
-    WaitFrame,
+    Delta, DeltaKind, FailureKind, LaunchRequest, Session, SessionEvent, SessionFailure, SessionId,
+    SessionState, WaitError, WaitFrame,
 };

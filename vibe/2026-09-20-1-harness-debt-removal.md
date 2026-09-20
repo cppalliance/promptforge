@@ -183,7 +183,7 @@ Two commits, one per debt, independent of each other. Each contains its code and
 
 <step-2>
 
-### Step 2: Type the harness failure boundary
+### Step 2: Type the harness failure boundary [completed]
 
 - Component: `none`
 - Goal: the Workshop learns a session failure's kind from `FailureKind`, not from the sentence; the sentence remains display text.

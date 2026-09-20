@@ -47,28 +47,47 @@ fn reply_event() -> Event {
     }
 }
 
-/// The three report shapes the session sends on its error channel: a
-/// failed model turn and a failed tool call the program survived, and a
-/// run that ended in error. Each must release the turn-dispatch Thinking
-/// push with a terminal, non-thinking status; the survived turns keep
-/// the boundary as their label because the agent is still running, and
-/// only a run that ended reads `Agent failed`.
+/// The four failure kinds the session reports on its error channel: a
+/// failed model turn and a failed tool call the program survived, a run
+/// that ended in error, and the synthetic terminal of an interrupt. Each
+/// must release the turn-dispatch Thinking push with a terminal,
+/// non-thinking status; the survived turns keep the boundary as their
+/// label because the agent is still running, and only a run that ended
+/// reads `Agent failed`. The label comes from the kind alone: the message
+/// is deliberately unlike the label, so a relay that read the sentence
+/// would mislabel every row.
 #[test]
 fn every_error_report_pushes_a_terminal_failure_status() {
     let (push, mut status_rx, _guards) = wired_push();
     let reports = [
-        ("Model turn failed in agent `chat`", "Model turn failed"),
-        ("Tool call failed in agent `chat`", "Tool call failed"),
-        ("agent run failed: kaboom", "Agent failed"),
-        ("run cancelled", "Agent failed"),
+        (
+            FailureKind::ModelTurnFailed,
+            "round 3 in agent `chat`",
+            "Model turn failed",
+        ),
+        (
+            FailureKind::ToolCallFailed,
+            "call 7 in agent `chat`",
+            "Tool call failed",
+        ),
+        (
+            FailureKind::RunFailed,
+            "agent run failed: kaboom",
+            "Agent failed",
+        ),
+        (FailureKind::Interrupted, "run cancelled", "Agent failed"),
     ];
 
-    for (report, label) in reports {
-        on_error(report, &push);
+    for (kind, message, label) in reports {
+        let failure = SessionFailure {
+            kind,
+            message: message.to_owned(),
+        };
+        on_error(&failure, &push);
         let update = status_rx
             .try_recv()
             .expect("the report pushes a terminal status");
-        assert_eq!(update.severity, Severity::Error, "report: {report}");
+        assert_eq!(update.severity, Severity::Error, "kind: {kind:?}");
         assert_eq!(
             update.activity,
             Activity::General,
@@ -76,11 +95,11 @@ fn every_error_report_pushes_a_terminal_failure_status() {
         );
         assert_eq!(
             update.label, label,
-            "a survived turn is labeled by its boundary, a dead run by the agent: {report}"
+            "the label is chosen by the kind, never by the sentence: {kind:?}"
         );
         assert_eq!(
-            update.description, report,
-            "the status carries the same message the socket's error frame does"
+            update.description, message,
+            "the message passes through unchanged as the status description"
         );
     }
 }
