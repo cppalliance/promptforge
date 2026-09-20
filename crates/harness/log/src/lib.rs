@@ -14,9 +14,10 @@
 //!   record is updated or deleted once written. A `runs` row is written
 //!   at `begin_run` and closed exactly once at `end_run`; a closed run
 //!   accepts no more records.
-//! - Every `u64` the engine hands over (`seed`, `task_id`, `effect_id`)
-//!   is stored as its two's-complement `i64`, losslessly; timestamps are
-//!   UTC milliseconds since the Unix epoch. `started_at` is the caller's;
+//! - Every `u64` the engine hands over (`seed`, `effect_id`) is stored as
+//!   its two's-complement `i64`, losslessly; a `task_id` is the engine's
+//!   hierarchical task path stored as text; timestamps are UTC
+//!   milliseconds since the Unix epoch. `started_at` is the caller's;
 //!   `at` and `ended_at` are the log's wall clock.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.

@@ -15,18 +15,21 @@
 //! so does not serialize itself. [`Effect::record`] projects it onto an
 //! [`EffectRecord`], the effect minus its handles, which round-trips
 //! through serde: a run log stores records, and a later replay compares a
-//! re-executed run's records against them.
+//! re-executed run's records against them. An [`EffectAnswer`] likewise
+//! carries values a log cannot hold whole (a completion's bodies, an
+//! error's boxed cause); [`EffectAnswer::record`] projects it onto an
+//! [`AnswerRecord`], the answer's outcome as a log stores it.
 
 use std::sync::Arc;
 
 use promptforge_api_types::event::Event;
 use promptforge_api_types::ids::TaskId;
-use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
+use promptforge_api_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::input::{InputError, InputOutcome};
-use crate::model::{Completion, CompletionError, Message, ToolSchema};
+use crate::model::{Completion, CompletionError, CompletionResult, Message, ToolSchema};
 use crate::model::{CompletionOptions, ModelBinding, Temperature};
 use crate::store::{Access, StoreError};
 
@@ -37,6 +40,21 @@ use crate::execute::protocol::{StoreOp, StoreOutcome};
 /// run-wide counter; it need not reproduce across runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EffectId(pub(crate) u64);
+
+impl EffectId {
+    /// The raw handle, for a host that keys its log or its task table by
+    /// it. Meaningful only within the run that issued it.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for EffectId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// One piece of work the engine asks its host to perform.
 #[derive(Debug)]
@@ -252,3 +270,133 @@ pub enum EffectAnswer {
     /// other, so every issued effect receives exactly one.
     Dropped,
 }
+
+impl EffectAnswer {
+    /// The answer's record: its outcome minus what a log cannot hold
+    /// whole. A failure is recorded as its display text; a completion as
+    /// the reply or the requested tool names, since the round's bodies
+    /// travel as debug events and its metrics as the turn's event.
+    #[must_use]
+    pub fn record(&self) -> AnswerRecord {
+        match self {
+            EffectAnswer::Chat(result) => AnswerRecord::Chat(match result {
+                Ok(completion) => Ok(ChatAnswerRecord::from(completion.as_ref())),
+                Err(error) => Err(error.to_string()),
+            }),
+            EffectAnswer::ToolCall(result) => AnswerRecord::ToolCall(match result {
+                Ok(output) => Ok(ToolAnswerRecord {
+                    text: output.text().to_owned(),
+                    trusted: output.trust() == OutputTrust::Trusted,
+                }),
+                Err(error) => Err(error.to_string()),
+            }),
+            EffectAnswer::UserInput(result) => AnswerRecord::UserInput(match result {
+                Ok(InputOutcome::Text(text)) => Ok(InputAnswerRecord::Text(text.clone())),
+                Ok(InputOutcome::Unavailable) => Ok(InputAnswerRecord::Unavailable),
+                Err(error) => Err(error.to_string()),
+            }),
+            EffectAnswer::Store(result) => AnswerRecord::Store(match result {
+                Ok(StoreOutcome::Unit) => Ok(StoreAnswerRecord::Unit),
+                Ok(StoreOutcome::Text(text)) => Ok(StoreAnswerRecord::Text(text.clone())),
+                Ok(StoreOutcome::Paths(paths)) => Ok(StoreAnswerRecord::Paths(paths.clone())),
+                Ok(StoreOutcome::Bool(flag)) => Ok(StoreAnswerRecord::Bool(*flag)),
+                Err(error) => Err(error.to_string()),
+            }),
+            EffectAnswer::Timer => AnswerRecord::Timer,
+            EffectAnswer::TaskEvents(events) => AnswerRecord::TaskEvents(events.clone()),
+            EffectAnswer::Dropped => AnswerRecord::Dropped,
+        }
+    }
+}
+
+/// An [`EffectAnswer`] as a run log stores it: one variant per answer
+/// kind, each carrying its outcome with every failure rendered to its
+/// display text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AnswerRecord {
+    /// The model round's outcome.
+    Chat(std::result::Result<ChatAnswerRecord, String>),
+    /// The tool call's outcome.
+    ToolCall(std::result::Result<ToolAnswerRecord, String>),
+    /// The input wait's outcome.
+    UserInput(std::result::Result<InputAnswerRecord, String>),
+    /// The store operation's outcome.
+    Store(std::result::Result<StoreAnswerRecord, String>),
+    /// The timer fired.
+    Timer,
+    /// The task's events after the read's `last`, in sequence order.
+    TaskEvents(Vec<Event>),
+    /// The host dropped the effect without performing it.
+    Dropped,
+}
+
+/// A completed model round as the log records it: what identifies the
+/// answer without the request and response bodies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatAnswerRecord {
+    /// The model that served the round, as the response body named it.
+    pub model: String,
+    /// The provider's finish reason, when it sent one.
+    pub finish_reason: Option<String>,
+    /// The reply text, when the round produced text.
+    pub reply: Option<String>,
+    /// The names of the tools the model requested, in call order, when it
+    /// requested any.
+    pub tool_calls: Vec<String>,
+}
+
+impl From<&Completion> for ChatAnswerRecord {
+    fn from(completion: &Completion) -> Self {
+        let (reply, tool_calls) = match completion.result() {
+            CompletionResult::Text(text) => (Some(text.clone()), Vec::new()),
+            CompletionResult::ToolCalls(calls) => (
+                None,
+                calls.iter().map(|call| call.name().to_owned()).collect(),
+            ),
+            // The vocabulary is `#[non_exhaustive]`; a variant this crate
+            // does not know records as a round with neither product.
+            _ => (None, Vec::new()),
+        };
+        ChatAnswerRecord {
+            model: completion.model().to_owned(),
+            finish_reason: completion.finish_reason().map(str::to_owned),
+            reply,
+            tool_calls,
+        }
+    }
+}
+
+/// A tool's own output as the log records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolAnswerRecord {
+    /// The output text, before the engine's trust rules apply.
+    pub text: String,
+    /// Whether the tool declared its output trusted.
+    pub trusted: bool,
+}
+
+/// An input wait's outcome as the log records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InputAnswerRecord {
+    /// The operator supplied text.
+    Text(String),
+    /// The host had no input to give.
+    Unavailable,
+}
+
+/// A store operation's outcome as the log records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StoreAnswerRecord {
+    /// The operation succeeded with no return value.
+    Unit,
+    /// A read's text.
+    Text(String),
+    /// A glob's matching paths.
+    Paths(Vec<String>),
+    /// An existence check's flag.
+    Bool(bool),
+}
+
+#[cfg(test)]
+#[path = "run-effect-tests.rs"]
+mod tests;

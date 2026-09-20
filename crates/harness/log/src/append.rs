@@ -100,7 +100,7 @@ impl RunLog {
                 (
                     run.get(),
                     signed(seq.get()),
-                    signed(record.task_id),
+                    record.task_id,
                     i64::from(record.task_seq),
                     record.kind.as_str(),
                     record.effect_id.map(signed),

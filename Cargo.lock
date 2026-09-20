@@ -2637,6 +2637,12 @@ dependencies = [
 name = "harness-runner"
 version = "0.3.0"
 dependencies = [
+ "harness-log",
+ "promptforge-api-runtime",
+ "promptforge-api-types",
+ "serde_json",
+ "shared-vfs",
+ "thiserror 2.0.19",
  "tokio",
  "tracing",
  "workspace-hack",

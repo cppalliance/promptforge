@@ -8,10 +8,12 @@
 //! record's `Provenance`, so a run can be sliced by task and ordered within
 //! one without inspecting the payload.
 //!
-//! Every integer that is a `u64` in Rust (`seed`, `task_id`, `effect_id`)
-//! is stored as its two's-complement `i64` reinterpretation, since SQLite
-//! integers are signed; see `append::signed` and `append::unsigned`.
-//! Timestamps are UTC milliseconds since the Unix epoch.
+//! Every integer that is a `u64` in Rust (`seed`, `effect_id`) is stored
+//! as its two's-complement `i64` reinterpretation, since SQLite integers
+//! are signed; see `append::signed` and `append::unsigned`. `task_id` is
+//! the engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as
+//! text, since a path of unbounded depth has no integer form. Timestamps
+//! are UTC milliseconds since the Unix epoch.
 
 /// The DDL, idempotent so an existing file opens without change.
 pub(crate) const SCHEMA: &str = "
@@ -33,7 +35,7 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS records (
     run_id    INTEGER NOT NULL REFERENCES runs (run_id),
     seq       INTEGER NOT NULL,
-    task_id   INTEGER NOT NULL,
+    task_id   TEXT    NOT NULL,
     task_seq  INTEGER NOT NULL,
     kind      TEXT    NOT NULL CHECK (kind IN ('effect', 'answer', 'event')),
     effect_id INTEGER,

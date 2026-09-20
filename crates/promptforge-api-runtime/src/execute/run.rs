@@ -35,7 +35,10 @@ use promptforge_api_types::ids::Provenance;
 #[path = "run-effect.rs"]
 mod effect;
 
-pub use effect::{Effect, EffectAnswer, EffectId, EffectRecord};
+pub use effect::{
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
+    InputAnswerRecord, StoreAnswerRecord, ToolAnswerRecord,
+};
 
 use crate::cancel::CancelHandle;
 use crate::parser::{ParseErrorKind, Prompt};

@@ -1,7 +1,7 @@
 //! The read side: one run's row and its records, whole or sliced by kind
 //! and task.
 
-use crate::append::{RunLog, signed, unsigned};
+use crate::append::{RunLog, unsigned};
 use crate::error::LogError;
 use crate::record::{
     Record, RecordFilter, RecordKind, RunId, RunMeta, RunOutcome, RunRow, Seq, StoredRecord,
@@ -71,10 +71,7 @@ impl RunLog {
             }
             Some(task) => {
                 self.conn()
-                    .query(
-                        schema::SELECT_TASK_RECORDS,
-                        (run.get(), signed(task), kind, limit),
-                    )
+                    .query(schema::SELECT_TASK_RECORDS, (run.get(), task, kind, limit))
                     .await?
             }
         };
@@ -93,7 +90,7 @@ impl RunLog {
                 seq: Seq::from_raw(unsigned(row.get(0)?)),
                 at: row.get(6)?,
                 record: Record {
-                    task_id: unsigned(row.get(1)?),
+                    task_id: row.get(1)?,
                     task_seq: to_u32(row.get(2)?, "task_seq")?,
                     kind,
                     effect_id: row.get::<Option<i64>>(4)?.map(unsigned),
@@ -105,9 +102,10 @@ impl RunLog {
         Ok(records)
     }
 
-    /// The `Event` payloads of one task, in `task_seq` order: what the
-    /// `TaskEvents` performer hands back to the engine. `last` keeps only
-    /// the final `n`. A task that never logged reads as empty.
+    /// The `Event` payloads of one task (named by its rendered path), in
+    /// `task_seq` order: what the `TaskEvents` performer hands back to the
+    /// engine. `last` keeps only the final `n`. A task that never logged
+    /// reads as empty.
     ///
     /// # Errors
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
@@ -117,12 +115,12 @@ impl RunLog {
     pub async fn events_for_task(
         &self,
         run: RunId,
-        task: u64,
+        task: &str,
         last: Option<u32>,
     ) -> Result<Vec<serde_json::Value>, LogError> {
         let filter = RecordFilter {
             kind: Some(RecordKind::Event),
-            task: Some(task),
+            task: Some(task.to_owned()),
             last,
         };
         let records = self.records(run, filter).await?;

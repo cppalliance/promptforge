@@ -96,9 +96,9 @@ pub(crate) mod untrusted;
 pub(crate) use crate::error::{Error, Result};
 
 pub use crate::execute::{
-    Effect, EffectAnswer, EffectId, EffectRecord, Environment, RequirementCheck, Requirements, Run,
-    RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
-    UnmetRequirement,
+    AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Environment, RequirementCheck,
+    Requirements, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation,
+    Step, UnmetRequirement,
 };
 pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

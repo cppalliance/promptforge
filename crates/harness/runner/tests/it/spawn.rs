@@ -1,24 +1,33 @@
-//! The tagged spawn wrappers run their work to completion.
+//! The tagged spawn wrappers run their work to completion under an
+//! effect's tag.
 
 use harness_runner::spawn::{spawn_blocking_tagged, spawn_tagged};
+use promptforge_api_runtime::{EffectId, Step};
+use promptforge_api_types::ids::Provenance;
+
+use crate::support::run;
+
+/// The id and provenance of a real issued effect: the one input wait a
+/// `user_input()` section parks on.
+fn tag() -> (EffectId, Provenance) {
+    let mut run = run("return user_input()");
+    let Step::Pending { mut effects, .. } = run.step() else {
+        panic!("the input wait leaves the run pending");
+    };
+    let (id, provenance, _effect) = effects.remove(0);
+    (id, provenance)
+}
 
 #[tokio::test]
 async fn spawn_tagged_runs_a_future_to_completion() {
-    let handle = spawn_tagged("effect-7", async { 6 * 7 });
+    let handle = spawn_tagged(tag(), async { 6 * 7 });
     let value = handle.await.expect("the spawned future completes");
     assert_eq!(value, 42);
 }
 
 #[tokio::test]
 async fn spawn_blocking_tagged_runs_a_closure_to_completion() {
-    let handle = spawn_blocking_tagged("store-3", || "done".repeat(2));
+    let handle = spawn_blocking_tagged(tag(), || "done".repeat(2));
     let value = handle.await.expect("the blocking closure completes");
     assert_eq!(value, "donedone");
-}
-
-#[tokio::test]
-async fn spawn_tagged_accepts_any_display_tag() {
-    let tag = format!("task-{}/{}", 0, 12);
-    let handle = spawn_tagged(tag, async { true });
-    assert!(handle.await.expect("the spawned future completes"));
 }

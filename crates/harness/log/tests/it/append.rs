@@ -25,7 +25,7 @@ fn meta() -> RunMeta {
 /// One record of `kind` on task 0 at `task_seq`.
 fn record(kind: RecordKind, task_seq: u32, effect_id: Option<u64>) -> Record {
     Record {
-        task_id: 0,
+        task_id: "0".to_owned(),
         task_seq,
         kind,
         effect_id,
@@ -68,7 +68,7 @@ async fn a_run_with_three_records_round_trips_through_an_in_memory_log() {
     assert_eq!(effect_ids, [Some(7), Some(7), None]);
     for (index, stored) in records.iter().enumerate() {
         let task_seq = u32::try_from(index).unwrap();
-        assert_eq!(stored.record.task_id, 0);
+        assert_eq!(stored.record.task_id, "0");
         assert_eq!(stored.record.task_seq, task_seq);
         assert_eq!(stored.record.payload, json!({ "task_seq": task_seq }));
         assert!(stored.at >= row.meta.started_at);
@@ -124,24 +124,31 @@ async fn seq_is_per_run_so_two_runs_each_start_at_zero() {
 async fn a_filter_selects_by_kind_and_task_and_keeps_the_last_n() {
     let mut log = RunLog::in_memory().await.unwrap();
     let run = log.begin_run(meta()).await.unwrap();
-    // Two tasks interleaved; task 1's records arrive out of `task_seq`
-    // order so the per-task slice must sort by `task_seq`, not `seq`.
+    // Two tasks interleaved (the main walk and its first child); task
+    // `0.0`'s records arrive out of `task_seq` order so the per-task slice
+    // must sort by `task_seq`, not `seq`.
     let appended = [
-        (0, 0, RecordKind::Event),
-        (1, 1, RecordKind::Event),
-        (0, 1, RecordKind::Effect),
-        (1, 0, RecordKind::Event),
-        (0, 2, RecordKind::Event),
+        ("0", 0, RecordKind::Event),
+        ("0.0", 1, RecordKind::Event),
+        ("0", 1, RecordKind::Effect),
+        ("0.0", 0, RecordKind::Event),
+        ("0", 2, RecordKind::Event),
     ];
     for (task_id, task_seq, kind) in appended {
         let mut record = record(kind, task_seq, None);
-        record.task_id = task_id;
+        record.task_id = task_id.to_owned();
         log.append(run, record).await.unwrap();
     }
-    let positions = |records: Vec<harness_log::StoredRecord>| -> Vec<(u64, u32)> {
+    let positions = |records: Vec<harness_log::StoredRecord>| -> Vec<(String, u32)> {
         records
             .into_iter()
             .map(|stored| (stored.record.task_id, stored.record.task_seq))
+            .collect()
+    };
+    let expected = |positions: &[(&str, u32)]| -> Vec<(String, u32)> {
+        positions
+            .iter()
+            .map(|(task, seq)| ((*task).to_owned(), *seq))
             .collect()
     };
 
@@ -149,33 +156,39 @@ async fn a_filter_selects_by_kind_and_task_and_keeps_the_last_n() {
         kind: Some(RecordKind::Event),
         ..ALL
     };
-    let all_events = log.records(run, events).await.unwrap();
-    assert_eq!(positions(all_events), [(0, 0), (1, 1), (1, 0), (0, 2)]);
+    let all_events = log.records(run, events.clone()).await.unwrap();
+    assert_eq!(
+        positions(all_events),
+        expected(&[("0", 0), ("0.0", 1), ("0.0", 0), ("0", 2)])
+    );
 
     let task_one = log
         .records(
             run,
             RecordFilter {
-                task: Some(1),
+                task: Some("0.0".to_owned()),
                 ..ALL
             },
         )
         .await
         .unwrap();
-    assert_eq!(positions(task_one), [(1, 0), (1, 1)]);
+    assert_eq!(positions(task_one), expected(&[("0.0", 0), ("0.0", 1)]));
 
     let last_two_of_task_zero = log
         .records(
             run,
             RecordFilter {
-                task: Some(0),
+                task: Some("0".to_owned()),
                 last: Some(2),
                 ..ALL
             },
         )
         .await
         .unwrap();
-    assert_eq!(positions(last_two_of_task_zero), [(0, 1), (0, 2)]);
+    assert_eq!(
+        positions(last_two_of_task_zero),
+        expected(&[("0", 1), ("0", 2)])
+    );
 
     let last_event = log
         .records(
@@ -187,7 +200,7 @@ async fn a_filter_selects_by_kind_and_task_and_keeps_the_last_n() {
         )
         .await
         .unwrap();
-    assert_eq!(positions(last_event), [(0, 2)]);
+    assert_eq!(positions(last_event), expected(&[("0", 2)]));
 }
 
 #[tokio::test]

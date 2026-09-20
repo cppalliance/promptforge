@@ -109,7 +109,15 @@ pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
 pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
-pub use run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
+pub use run::{
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
+    InputAnswerRecord, Run, Step, StoreAnswerRecord, ToolAnswerRecord,
+};
+// The store vocabulary a `Store` effect carries and its answer returns:
+// named here so a host's store performer can be written against this one
+// door without reaching behind it.
+pub use promptforge_lua::{StoreOp, StoreOutcome};
+pub use promptforge_store::StoreError;
 
 /// What the run produced. Domain outcomes (including "the prompt
 /// declined") are values, not thrown errors: the variant is for code, the

@@ -13,6 +13,12 @@ categories = ["development-tools", "asynchronous"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+harness-log.workspace = true
+promptforge-api-runtime.workspace = true
+promptforge-api-types.workspace = true
+serde_json.workspace = true
+shared-vfs.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true

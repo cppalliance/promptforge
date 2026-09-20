@@ -108,8 +108,10 @@ impl RecordKind {
 /// One record as the harness appends it. `seq` and `at` are the log's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    /// The nearest enclosing task; the main walk is task `0`.
-    pub task_id: u64,
+    /// The nearest enclosing task, as the engine's `TaskId` renders: a
+    /// dot-separated path of child indices from the root chain, so the
+    /// main walk is task `0` and its second child task is `0.1`.
+    pub task_id: String,
     /// The record's position within its task.
     pub task_seq: u32,
     /// Which side of the loop the record came from.
@@ -126,12 +128,13 @@ pub struct Record {
 /// With `task`, they come back in that task's own `task_seq` order, which
 /// can differ from `seq` when tasks interleave. `last` keeps only the
 /// final `n` in whichever order applies.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecordFilter {
     /// Only records of this kind.
     pub kind: Option<RecordKind>,
-    /// Only records from this task, ordered by `task_seq`.
-    pub task: Option<u64>,
+    /// Only records from this task (its rendered path), ordered by
+    /// `task_seq`.
+    pub task: Option<String>,
     /// Only the final `n` records.
     pub last: Option<u32>,
 }
