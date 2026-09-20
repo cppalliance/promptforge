@@ -119,6 +119,26 @@ Pure mechanical, no route moves, verified by the existing suite.
 - Only if the test harness churn from Steps 2 and 4 multiplies `from_parts` calls. Confidence low; `runner.rs` is mostly the serve loop, not assembly.
 - Decision: not done. `AppState::from_parts` still has exactly two callers (`runner.rs` and `test_support::state_over`); Steps 2 and 4 added none. The builder would be machinery with no second consumer.
 
+## Outcome
+
+- Five commits on `vibe3`, rebased onto the finished `vibe2` at `49d645ec`: `4e59eaea` (Step 1), `5d899e80` (Step 2), `bc7d6549` (Step 3), `fd9e8601` (Step 4), `ed471fe1` (Step 5). Step 6 not done, by the criterion above.
+- `build_router` is 50 lines of merges and walls, down from 120 under a `too_many_lines` waiver. `lib.rs` is 500 lines, down from 668. Every route is mounted by its own module behind `routes()`, declared in the registry, and swept by the registry tests against the wall its tier promises.
+- Full gate set on the combined tree: `cargo fmt --all --check`; workspace clippy `-D warnings` (excluding the workshop crates); workspace nextest `--all-features` 3,761 passed; workspace doctests passed; workspace rustdoc `-D warnings`; `cargo check -p gateway --no-default-features`; `cargo test -p build-xtask` 101 passed, including the mandatory-marker rule the progress plan's Step 7 added. The workshop crates, `npm test`, and `mdbook build guide` were not run: no file outside `crates/gateway/app` and this plan changed.
+
+### Second rebase
+
+`vibe2` was rewritten onto a newer `master` carrying the rust-rulebook sweep, so the final rebase crossed six sweep commits that touch `crates/gateway/app` and never appeared in the first one. Three conflicts, all mechanical:
+
+- `error.rs`: the sweep reworded `system_metrics`'s doc while Step 1 deleted the function (its only producer became `blocking()`). Deletion wins; no reference survives.
+- `cloud_models/tests/`: the sweep retired `mod.rs` (`tests/mod.rs` to `tests.rs`, children to `tests-refresh.rs` and `tests-version-gate.rs` with `#[path]`) while Step 2 moved the directory under `admin/walled/`. Resolved to the sweep's flat kebab layout at the new location; the `tests/` copies were dropped, since their inherited `#[path]` would have misresolved one level down.
+- `model_info.rs`: the sweep's feature-gated import block against Step 2's rewritten one. Step 2's wins.
+
+One silent break the conflicts did not surface: the sweep added a `crate::config_write::error_chain` call in `dialect.rs`, a module Step 2 had renamed to `admin::walled::config`. Caught by `cargo check`, repointed. It leaves the tool-call parser reaching into the walled admin module for a string formatter - see the note below.
+
+### Follow-up worth considering
+
+`error_chain` renders an error's `source()` chain as one line. It lives in `admin/walled/config.rs` because that is where the config-write routes needed it, but it now has three callers outside that module: `admin/walled/config_pending.rs`, `admin/walled/config_apply.rs`, and `dialect.rs`. The last is a relay-path module reaching into the walled admin tier for a formatter that has nothing to do with config or with the wall. `error.rs` is its natural home. Not done here: it is the sweep's call site, not this plan's, and moving it would widen a rebase that was already wider than planned.
+
 ## Constraints
 
 - Steps 1, 2, 3 are pure structure: status and error envelope for every route, including malformed query/path, must be byte-identical. Step 4 changes the serializer, not the JSON.
