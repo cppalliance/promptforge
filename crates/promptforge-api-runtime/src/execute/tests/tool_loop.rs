@@ -238,11 +238,7 @@ async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     let gateway = ScriptedGateway::start(vec![resp_status(500, "private backend response")]).await;
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{}/v1", gateway.addr()))
-            .expect("valid test endpoint"),
-        SecretString::new("secret token").expect("non-empty test key"),
-    );
+    let client = MockGatewayClient::new(gateway.addr(), "secret token");
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('private model input')\n\

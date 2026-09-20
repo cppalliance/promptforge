@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use promptforge_api_types::tools::{ToolError, ToolOutput};
 
-use crate::client::{Completion, CompletionError};
 use crate::execute::protocol::{Answer, StoreOutcome, ToolCallOutcome};
 use crate::execute::tools::accept_infer;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
 use crate::lua::{ModelReport, UserInputOutcome, prepare_dispatch, prepare_model_dispatch};
+use crate::model::{Completion, CompletionError};
 use crate::observe::Observation;
 use crate::store::StoreError;
 use crate::{Error, Result};

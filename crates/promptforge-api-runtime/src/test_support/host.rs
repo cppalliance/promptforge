@@ -4,7 +4,7 @@
 //! A [`Run`](crate::execute::Run) issues effects and reports events as
 //! values; it holds no client, no tool implementation, no broker, and no
 //! sink. Those belong to whoever performs the effects. `RunHost` is that
-//! bundle for the suites: the gateway client a `Chat` effect is performed
+//! bundle for the suites: the [`ChatClient`] a `Chat` effect is performed
 //! with, the capability registry [`run_with_host`](super::run_with_host)
 //! activates the prompt's declarations against (filling the [`ToolTable`]
 //! a `ToolCall` effect's id resolves in), the [`InputBroker`] a
@@ -21,17 +21,42 @@ use std::sync::Arc;
 use promptforge_api_types::event::Event;
 
 use crate::capabilities::CapabilityRegistry;
-use crate::client::{GatewayClient, StreamDelta};
 use crate::debug::DebugCapture;
 use crate::execute::{Activation, Requirements, RunLimits, ToolTable};
 use crate::input::InputBroker;
+use crate::model::{
+    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
+};
 use crate::observe::{NullObserver, Observer};
 
 use super::events_to_observer;
 #[cfg(test)]
 use super::tokio_driver::EventSink;
-use super::tokio_driver::{Performers, refuse_tool_call};
+use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
 use crate::execute::{Effect, EffectAnswer};
+
+/// The live streaming-delta callback a chat round forwards its chunks to.
+pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
+
+/// What the test driver performs a `Chat` round on: a stand-in for the
+/// harness's model client, which the engine never holds and this crate
+/// never names. The suites' implementation speaks the wire vocabulary to
+/// an axum mock gateway over a dev-only HTTP client; a scripted host can
+/// answer from a table.
+pub trait ChatClient: Send + Sync {
+    /// Performs one round: sends `messages` (with `tools` advertised when
+    /// non-empty) under `options`, bounded by `limits`' request timeout
+    /// and response cap, forwarding each live delta to `on_delta` when
+    /// the round streams, and returns the completion or its failure.
+    fn complete(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolSchema>,
+        options: CompletionOptions,
+        limits: RunLimits,
+        on_delta: Option<DeltaHook>,
+    ) -> BoxFuture<Result<Completion, CompletionError>>;
+}
 
 /// The suites' resources for one run driven by the tokio test driver.
 #[derive(Clone)]
@@ -41,9 +66,9 @@ pub struct RunHost {
     pub(crate) observer: Arc<dyn Observer>,
     /// The opt-in raw request/response capture.
     pub(crate) debug: Option<Arc<dyn DebugCapture>>,
-    /// The gateway client `Chat` effects are performed with; `None`
-    /// answers every round with the disabled-gateway failure.
-    pub(crate) client: Option<GatewayClient>,
+    /// The chat client `Chat` effects are performed with; `None` answers
+    /// every round with the disabled-gateway failure.
+    pub(crate) client: Option<Arc<dyn ChatClient>>,
     /// The installed capabilities the prompt's declarations activate
     /// against; `None` activates nothing, and the environment's own
     /// catalog stands.
@@ -55,7 +80,7 @@ pub struct RunHost {
     pub(crate) input: Option<Arc<dyn InputBroker>>,
     /// The live streaming-delta callback a section's model rounds forward
     /// their chunks to; `None` drops deltas at the leaf.
-    pub(crate) on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
+    pub(crate) on_delta: Option<DeltaHook>,
     /// What activation could not satisfy, folded into the prepare report
     /// by [`run_with_host`](super::run_with_host) so one refusal names
     /// every gap.
@@ -95,11 +120,11 @@ impl RunHost {
         self
     }
 
-    /// Sets the gateway client `Chat` effects are performed with; without
-    /// one every round fails with the disabled-gateway error.
+    /// Sets the chat client `Chat` effects are performed with; without one
+    /// every round fails with the disabled-gateway error.
     #[must_use]
-    pub fn client(mut self, client: GatewayClient) -> RunHost {
-        self.client = Some(client);
+    pub fn client(mut self, client: impl ChatClient + 'static) -> RunHost {
+        self.client = Some(Arc::new(client));
         self
     }
 
@@ -149,25 +174,24 @@ impl RunHost {
     /// Sets the live streaming-delta callback `models.loop` rounds forward
     /// their chunks to. The default (`None`) drops deltas at the leaf.
     #[must_use]
-    pub fn on_delta(mut self, hook: Arc<dyn Fn(StreamDelta) + Send + Sync>) -> RunHost {
+    pub fn on_delta(mut self, hook: DeltaHook) -> RunHost {
         self.on_delta = Some(hook);
         self
     }
 
     /// The host's performers for the tokio test driver, starting from
     /// [`Performers::refusing`] and overriding the slots this host
-    /// supplies: with a client, a `Chat` runs on it with `limits`'
-    /// request timeout and body cap applied; a `ToolCall` resolves its id
-    /// in the tool table (a miss is the refusal); with a broker, a
-    /// `UserInput` waits on it.
+    /// supplies: with a client, a `Chat` runs on it under `limits`'
+    /// request timeout and body cap; a `ToolCall` resolves its id in the
+    /// tool table (a miss is the refusal); with a broker, a `UserInput`
+    /// waits on it.
     #[must_use]
     pub fn performers(&self, limits: RunLimits) -> Performers {
         let mut performers = Performers::refusing();
         if let Some(client) = self.client.clone() {
-            let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
             let on_delta = self.on_delta.clone();
             performers.chat = Box::new(move |effect| {
-                let client = client.clone();
+                let client = Arc::clone(&client);
                 let on_delta = on_delta.clone();
                 Box::pin(async move {
                     let Effect::Chat {
@@ -186,13 +210,8 @@ impl RunHost {
                     // chunks drop at the leaf and the completed reply is
                     // the repair.
                     let on_delta = stream.then_some(on_delta).flatten();
-                    let tool_arg = (!tools.is_empty()).then_some(tools.as_slice());
                     let result = client
-                        .complete(&messages, tool_arg, &options, |delta| {
-                            if let Some(hook) = &on_delta {
-                                hook(delta);
-                            }
-                        })
+                        .complete(messages, tools, options, limits, on_delta)
                         .await
                         .map(Box::new);
                     EffectAnswer::Chat(result)
@@ -256,7 +275,7 @@ impl fmt::Debug for RunHost {
         f.debug_struct("RunHost")
             .field("observer", &"<dyn Observer>")
             .field("debug", &self.debug.is_some())
-            .field("client", &self.client)
+            .field("client", &self.client.is_some())
             .field("registry", &self.registry)
             .field("tools", &self.tools)
             .field("input", &self.input.is_some())

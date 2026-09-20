@@ -345,7 +345,10 @@ impl RunContext {
         self
     }
 
-    pub(crate) fn client(mut self, client: crate::client::GatewayClient) -> RunContext {
+    pub(crate) fn client(
+        mut self,
+        client: crate::test_support::mock_gateway_client::MockGatewayClient,
+    ) -> RunContext {
         self.test_host = self.test_host.client(client);
         self
     }
@@ -357,7 +360,7 @@ impl RunContext {
 
     pub(crate) fn on_delta(
         mut self,
-        hook: Arc<dyn Fn(crate::client::StreamDelta) + Send + Sync>,
+        hook: Arc<dyn Fn(crate::model::StreamDelta) + Send + Sync>,
     ) -> RunContext {
         self.test_host = self.test_host.on_delta(hook);
         self

@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::client::ToolSchema;
 use crate::execute::scope::DispatchTarget;
 use crate::lua::TaskAllowlist;
+use crate::model::ToolSchema;
 use crate::{Error, Result};
 
 /// One built-in's fixed schema; the five are the engine's own, so a

@@ -13,7 +13,28 @@ categories = ["development-tools", "web-programming::http-client"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+# The engine door: the chat vocabulary (Message, ToolSchema, Completion,
+# CompletionError) this transport exchanges with a Run's Chat effect, and
+# the SSE reassembly the streamed body is folded through.
+promptforge-api-runtime.workspace = true
+# The canonical metrics, model catalog, and delta vocabulary.
+promptforge-api-types.workspace = true
+# Names `bytes::Bytes`, the buffer `reqwest` yields per body chunk, as the
+# reassembly's chunk type so no chunk is copied on its way in.
+bytes.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
 workspace-hack.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+# The mock gateways the transport tests serve are spawned through the
+# harness's one instrumented wrapper.
+harness-runner.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
 
 [lints]
 workspace = true

@@ -810,7 +810,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-36>
 
-### Step 36: Model transport moves to `harness-models`
+### Step 36: Model transport moves to `harness-models` [completed]
 
 - Component: Run API and engine purity
 - Piece: moves

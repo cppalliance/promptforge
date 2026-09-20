@@ -40,10 +40,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::cancel::CancelHandle;
-#[cfg(test)]
-use crate::client::GatewayClient;
 use crate::lua::run_store_op;
 use crate::store::Store;
+#[cfg(test)]
+use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::{Error, Result};
 
 #[cfg(test)]
@@ -155,10 +155,10 @@ impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`: the suites' entry, which
     /// shape the context themselves. The performers and sink come from the
     /// test host the suite set on its context (observer, broker, tools,
-    /// delta hook), with `client` as the run's gateway client when the
-    /// suite supplies one.
+    /// delta hook), with `client` as the run's mock-gateway client when
+    /// the suite supplies one.
     #[cfg(test)]
-    pub(crate) fn new(state: &RunState, client: Option<GatewayClient>) -> TokioDriver<'static> {
+    pub(crate) fn new(state: &RunState, client: Option<MockGatewayClient>) -> TokioDriver<'static> {
         let mut host = state.test_host();
         if let Some(client) = client {
             host = host.client(client);

@@ -2,22 +2,26 @@
 //!
 //! [`Error`] mirrors the role `promptforge-api-runtime`'s substrate plays there: it is
 //! never part of the documented API. Every public boundary returns its own
-//! typed error ([`crate::model::CompletionError`], [`crate::client::SecretError`],
+//! typed error ([`crate::model::CompletionError`],
 //! [`crate::model::ModelIdError`]); those wrappers classify this substrate and
 //! preserve its source. The substrate is `#[doc(hidden)]` and re-exported only
 //! so `promptforge-api-runtime` can map every variant back onto its own substrate
-//! verbatim; it is not a stable API and is not marked `#[non_exhaustive]`, so
-//! that mapping stays total.
+//! verbatim, and so the transport that performs a round (the harness's
+//! gateway client, reaching it through that door) can build the
+//! [`CompletionError`](crate::model::CompletionError) it answers with; it is
+//! not a stable API and is not marked `#[non_exhaustive]`, so that mapping
+//! stays total.
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// The crate's internal error substrate, spanning client transport and
+/// The crate's internal error substrate, spanning completion transport and
 /// catalog transport failures.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
 /// companion `promptforge-api-runtime` crate can convert it back onto its own
-/// substrate variant-for-variant. It is not host API.
+/// substrate variant-for-variant, and so a transport can construct the
+/// failure it reports. It is not host API.
 #[derive(Debug, thiserror::Error)]
 #[doc(hidden)]
 pub enum Error {
@@ -91,10 +95,11 @@ pub enum Error {
     /// Reading a non-success backend response body failed at the transport
     /// layer.
     ///
-    /// Retains the [`reqwest::Error`] as the `#[source]` cause (MODEL-010)
-    /// rather than flattening the read failure into display text, so the error
-    /// chain (timeout, connection reset) survives. The status the backend had
-    /// already returned is preserved for classification.
+    /// Retains the transport's own read error as the `#[source]` cause
+    /// (MODEL-010) rather than flattening the read failure into display
+    /// text, so the error chain (timeout, connection reset) survives. The
+    /// status the backend had already returned is preserved for
+    /// classification.
     #[error("unreadable backend error body (status {status})")]
     BackendBodyRead {
         /// The non-success HTTP status whose body could not be read.
@@ -130,10 +135,29 @@ pub enum Error {
 
 impl Error {
     /// Wrap a transport-layer error, hiding its concrete type from the API.
-    pub(crate) fn http(source: reqwest::Error) -> Error {
+    ///
+    /// A transport that knows the failure was a timeout wraps it in
+    /// [`Timeout`] first, so [`CompletionError::is_timeout`] can say so
+    /// without this crate naming the HTTP client.
+    ///
+    /// [`CompletionError::is_timeout`]: crate::model::CompletionError::is_timeout
+    #[doc(hidden)]
+    pub fn http(source: impl std::error::Error + Send + Sync + 'static) -> Error {
         Error::Http(Box::new(source))
     }
 }
+
+/// A transport failure that was a timeout: the marker the transport wraps
+/// its own timeout error in, so the classification survives the type
+/// erasure of [`Error::Http`] and [`Error::BackendBodyRead`] without this
+/// crate naming the HTTP client. The transport's error stays reachable as
+/// the `#[source]`.
+///
+/// `#[doc(hidden)]`: a cross-crate seam for the transports, not host API.
+#[derive(Debug, thiserror::Error)]
+#[error("request timed out")]
+#[doc(hidden)]
+pub struct Timeout(#[source] pub BoxedSource);
 
 /// Crate-internal result alias over the [`Error`] substrate.
 pub(crate) type Result<T> = std::result::Result<T, Error>;

@@ -6,10 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge gateway model client: OpenAI-shaped completions transport, wire types, and the model catalog/binding vocabulary"
+description = "PromptForge model vocabulary: the chat-completions wire types and SSE reassembly a Chat effect exchanges, and the model catalog/binding vocabulary; no transport"
 readme = "README.md"
-keywords = ["llm", "gateway", "openai", "http-client"]
-categories = ["web-programming::http-client"]
+keywords = ["llm", "gateway", "openai", "wire-types"]
+categories = ["data-structures"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
@@ -17,17 +17,11 @@ documentation = "https://cppalliance.github.io/promptforge/"
 # ClientTiming, CallMetrics) this crate parses response bodies into and
 # re-exports.
 promptforge-api-types.workspace = true
-reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-url.workspace = true
 workspace-hack.workspace = true
-
-[dev-dependencies]
-axum.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true

@@ -18,7 +18,6 @@ use super::scope::prepare_scoped_tools;
 use super::support::advance_turn;
 use super::*;
 use crate::capabilities::CapabilityRegistry;
-use crate::client::{GatewayClient, GatewayEndpoint, SecretString};
 use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
@@ -27,6 +26,7 @@ use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
 use crate::test_support::RunHost;
+use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::tokio_driver::TokioDriver;
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
@@ -215,7 +215,7 @@ fn bound_with_tools(md: &str) -> TestPrompt {
 struct RunOptions {
     execution: &'static str,
     observer: Arc<dyn Observer>,
-    client: Option<GatewayClient>,
+    client: Option<MockGatewayClient>,
     debug: Option<Arc<dyn DebugCapture>>,
 }
 
@@ -303,11 +303,8 @@ fn silent() -> RunOptions {
 }
 
 /// Builds a client pointed at the given scripted gateway.
-fn gateway_client(addr: SocketAddr) -> GatewayClient {
-    GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    )
+fn gateway_client(addr: SocketAddr) -> MockGatewayClient {
+    MockGatewayClient::new(addr, "test")
 }
 
 /// Options that report nowhere and point the run's client at the given

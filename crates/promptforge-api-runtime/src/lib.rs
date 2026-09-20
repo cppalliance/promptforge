@@ -12,11 +12,11 @@
 //! catalogs, the tool contract, the event enum - lives in the
 //! `promptforge-api-types` crate, re-exported here as [`types`]
 //! (`types::event`, `types::models`, `types::tools`), so a host depends on
-//! this one crate alone. The store handle a host seeds or extracts comes
-//! from `shared-vfs` and `promptforge-vfs`. The [`client`] module is the
-//! interim door to the gateway model client for Workshop's session
-//! machinery until the harness owns its own; the engine itself never uses
-//! it.
+//! this one crate alone; the chat vocabulary a `Chat` effect carries and
+//! its answer returns is [`model`]. The store handle a host seeds or
+//! extracts comes from `shared-vfs` and `promptforge-vfs`. No model client
+//! lives here: the harness owns the transport that performs a round and
+//! reaches the vocabulary through this door.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
@@ -78,14 +78,13 @@
 //!
 pub(crate) mod cancel;
 pub mod capabilities;
-pub mod client;
 pub mod debug;
 mod error;
 pub mod execute;
 pub(crate) mod fanout;
 pub mod input;
 pub(crate) mod lua;
-pub(crate) mod model;
+pub mod model;
 pub(crate) mod observe;
 pub mod parser;
 pub(crate) mod store;
@@ -98,11 +97,11 @@ pub(crate) mod untrusted;
 pub(crate) use crate::error::{Error, Result};
 
 pub use crate::capabilities::{CapabilityRegistry, RegistryError, RegistryErrorKind, Web};
-pub use crate::client::{CompletionError, CompletionErrorKind};
 pub use crate::execute::{
     Activation, Effect, EffectAnswer, EffectId, EffectRecord, Environment, RequirementCheck,
     Requirements, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation,
     Step, ToolTable, UnmetRequirement, activate,
 };
+pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};
 pub use promptforge_api_types as types;

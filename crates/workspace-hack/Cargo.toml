@@ -27,6 +27,7 @@ futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["io", "sink"] }
 icu_locale_core = { version = "2", default-features = false, features = ["alloc", "zerovec"] }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
+icu_properties = { version = "2", default-features = false, features = ["compiled_data"] }
 icu_provider = { version = "2", default-features = false, features = ["alloc", "baked"] }
 itertools = { version = "0.10" }
 libc = { version = "0.2" }
@@ -94,6 +95,7 @@ futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["io", "sink"] }
 icu_locale_core = { version = "2", default-features = false, features = ["alloc", "zerovec"] }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
+icu_properties = { version = "2", default-features = false, features = ["compiled_data"] }
 icu_provider = { version = "2", default-features = false, features = ["alloc", "baked"] }
 itertools = { version = "0.10" }
 libc = { version = "0.2" }
@@ -166,6 +168,7 @@ windows-sys-d4189bed749088b6 = { package = "windows-sys", version = "0.61", feat
 [target.x86_64-pc-windows-msvc.build-dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
+cc = { version = "1", default-features = false, features = ["parallel"] }
 dpi = { version = "0.1", features = ["serde"] }
 futures-channel = { version = "0.3", features = ["sink"] }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
@@ -204,6 +207,7 @@ zbus = { version = "5" }
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
+cc = { version = "1", default-features = false, features = ["parallel"] }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-io = { version = "0.3" }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
@@ -249,6 +253,7 @@ zbus = { version = "5" }
 [target.aarch64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 brotli = { version = "8" }
+cc = { version = "1", default-features = false, features = ["parallel"] }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-io = { version = "0.3" }
 getrandom = { version = "0.4", default-features = false, features = ["std", "sys_rng"] }
@@ -296,6 +301,7 @@ tower-http = { version = "0.6", default-features = false, features = ["decompres
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 block2 = { version = "0.6" }
 brotli = { version = "8" }
+cc = { version = "1", default-features = false, features = ["parallel"] }
 dpi = { version = "0.1", features = ["serde"] }
 errno = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
@@ -342,6 +348,7 @@ tower-http = { version = "0.6", default-features = false, features = ["decompres
 bitflags = { version = "2", default-features = false, features = ["serde"] }
 block2 = { version = "0.6" }
 brotli = { version = "8" }
+cc = { version = "1", default-features = false, features = ["parallel"] }
 dpi = { version = "0.1", features = ["serde"] }
 errno = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }

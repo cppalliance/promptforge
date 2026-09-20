@@ -17,11 +17,11 @@ use promptforge_api_types::ids::{AbandonReason, Provenance, TaskId};
 use super::model_tasks::{NeverBroker, model_task_context_with};
 use super::scheduler::scheduler_context_from;
 use super::*;
-use crate::client::{Completion, CompletionResult, ToolCall};
 use crate::execute::run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
 use crate::execute::task_history;
 use crate::input::InputOutcome;
 use crate::lua::run_store_op;
+use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::store::Store;
 use crate::test_support::drive;
 

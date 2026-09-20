@@ -8,11 +8,11 @@
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::client::StreamDelta;
 use crate::execute::protocol::StoreOp;
 use crate::execute::run::EffectRecord;
 use crate::input::{InputBroker, InputError, InputOutcome};
 use crate::lua::ToolSet;
+use crate::model::StreamDelta;
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// Serializes a record and reads it back: the round trip a run log and a

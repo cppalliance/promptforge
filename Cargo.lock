@@ -2577,6 +2577,7 @@ dependencies = [
 name = "harness-api"
 version = "0.3.0"
 dependencies = [
+ "harness-models",
  "promptforge-api-runtime",
  "serde",
  "serde_json",
@@ -2606,6 +2607,17 @@ dependencies = [
 name = "harness-models"
 version = "0.3.0"
 dependencies = [
+ "axum",
+ "bytes",
+ "harness-runner",
+ "promptforge-api-runtime",
+ "promptforge-api-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "url",
  "workspace-hack",
 ]
 
@@ -4685,6 +4697,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
+ "bytes",
  "criterion",
  "mlua",
  "promptforge-api-types",
@@ -4695,6 +4708,7 @@ dependencies = [
  "promptforge-vfs",
  "promptforge-web",
  "promptforge-web-search",
+ "reqwest",
  "serde",
  "serde_json",
  "shared-vfs",
@@ -4744,15 +4758,11 @@ dependencies = [
 name = "promptforge-model-client"
 version = "0.3.0"
 dependencies = [
- "axum",
  "promptforge-api-types",
- "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
- "tokio",
  "tracing",
- "url",
  "workspace-hack",
 ]
 
@@ -8646,6 +8656,7 @@ dependencies = [
  "bitflags 2.13.1",
  "block2",
  "brotli",
+ "cc",
  "crossbeam-epoch",
  "crossbeam-utils",
  "crypto-common 0.1.7",
@@ -8668,6 +8679,7 @@ dependencies = [
  "hyper-util",
  "icu_locale_core",
  "icu_normalizer",
+ "icu_properties",
  "icu_provider",
  "itertools 0.10.5",
  "libc",

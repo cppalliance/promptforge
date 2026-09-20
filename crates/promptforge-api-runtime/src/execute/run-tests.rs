@@ -12,9 +12,9 @@ use promptforge_model_client::model::{ModelInvocation, Temperature};
 use serde_json::json;
 
 use super::*;
-use crate::client::{Message, ToolSchema};
 use crate::execute::protocol::StoreOp;
 use crate::input::{InputBroker, InputError, InputOutcome};
+use crate::model::{Message, ToolSchema};
 use crate::model::{ModelBinding, ModelId};
 use crate::observe::NullObserver;
 

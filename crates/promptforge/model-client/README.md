@@ -1,26 +1,28 @@
 # promptforge-model-client
 
-The PromptForge gateway's model client: an `OpenAI`-compatible chat
-completions transport (`GatewayClient`), the wire types it exchanges, the
-model catalog (`ModelCatalog`, `ModelDescriptor`, `ModelId`), and the
-prompt-local binding vocabulary (`ModelBinding`, `ModelSet`, `ModelView`)
-the executor resolves `models.bind` declarations against.
+The PromptForge model vocabulary: the chat-completions wire types a
+`Chat` effect exchanges (`Message`, `ToolSchema`, `ToolCall`,
+`Completion`, `CompletionResult`), the SSE reassembly that folds a
+streamed body into one `Completion`, the model catalog (`ModelCatalog`,
+`ModelDescriptor`, `ModelId`), and the prompt-local binding vocabulary
+(`ModelBinding`, `ModelSet`, `ModelView`) the executor resolves model
+declarations against. No transport: the HTTP client that sends a round to
+the gateway is the harness's (`harness-models`).
 
-The client holds only the gateway's URL and the shared key; the vendor
-credential lives in the gateway, so a caller never sees it. `complete` is
-the one completion method and always streams SSE internally: it requests
-`stream_options.include_usage`, accumulates the deltas into one
-`Completion`, and invokes the caller's callback with each live
-`StreamDelta` text or reasoning fragment (a caller with no use for deltas
-passes a no-op closure). A tool-call batch finished by `length` or
-`content_filter` fails whole, so partial arguments never execute.
+A round is always streamed. The transport asks for
+`stream_options.include_usage`, hands each SSE `data:` payload to the
+`StreamAccumulator`, and invokes the caller's callback with each live
+`StreamDelta` text or reasoning fragment; `finish` applies the one rule
+set (a tool-call batch finished by `length` or `content_filter` fails
+whole, so partial arguments never execute; an empty product is
+`EmptyReply`) and produces the `Completion`.
 
 Each `Completion` carries the call's metadata parsed from the stream:
 the serving `model`, `usage` token accounting (with cached- and
-reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and a
-`client_timing` (TTFT, mean inter-token latency, end-to-end) measured on
-the client's own clock. The metrics vocabulary (`Usage`, `LlamaTimings`,
-`VllmMetrics`, `ClientTiming`, `CallMetrics`) is canonical in
-`promptforge-api-types` and re-exported at this crate's root. A
+reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and the
+`client_timing` (TTFT, mean inter-token latency, end-to-end) the
+transport measured on its own clock. The metrics vocabulary (`Usage`,
+`LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) is canonical
+in `promptforge-api-types` and re-exported at this crate's root. A
 malformed metadata section degrades to `None` with a `tracing` warning; it
 never fails the call.

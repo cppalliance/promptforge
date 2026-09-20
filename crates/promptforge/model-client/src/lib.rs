@@ -1,36 +1,41 @@
-//! The PromptForge gateway's model client and model-catalog vocabulary.
+//! The PromptForge model vocabulary: what a model round exchanges, and how a
+//! prompt binds models. No transport.
 //!
-//! [`client`] holds the `OpenAI`-compatible chat-completions transport:
-//! [`client::GatewayClient`] speaks the always-streaming `/chat/completions`
-//! SSE shape to one gateway URL with a shared bearer key, and the wire types
-//! ([`client::Message`], [`client::ToolSchema`], [`client::Completion`],
-//! [`client::StreamDelta`]) are what it exchanges. [`model`] holds the
-//! catalog and prompt-local binding vocabulary: [`model::ModelCatalog`]
-//! built from the gateway's
-//! `GET /v1/models`, the validated [`model::ModelId`] identity, and the
-//! [`model::ModelBinding`]/[`model::ModelSet`]/[`model::ModelView`] types a
-//! host resolves and freezes model selections through.
+//! [`client`] holds the chat-completions protocol vocabulary: the wire
+//! types a `Chat` effect carries out of the engine and its answer carries
+//! back ([`client::Message`], [`client::ToolSchema`], [`client::Completion`],
+//! [`client::StreamDelta`]), the request body builder, and the SSE
+//! reassembly that folds a streamed body into a [`client::Completion`] under
+//! the one strict turn rule set. [`model`] holds the catalog and
+//! prompt-local binding vocabulary: [`model::ModelCatalog`] built from the
+//! gateway's `GET /v1/models`, the validated [`model::ModelId`] identity,
+//! and the [`model::ModelBinding`]/[`model::ModelSet`]/[`model::ModelView`]
+//! types a host resolves and freezes model selections through, with
+//! [`model::CompletionError`] as the failure a round reports.
 //!
 //! The metrics vocabulary ([`Usage`], [`LlamaTimings`], [`VllmMetrics`],
 //! [`ClientTiming`], [`CallMetrics`]) is canonical in
-//! `promptforge-api-types` and re-exported here: the client parses each
+//! `promptforge-api-types` and re-exported here: the reassembly parses each
 //! response body's call metadata into it, and [`client::Completion`] carries
 //! the result. The model identity/catalog vocabulary ([`model::ModelId`],
 //! [`model::ModelCatalog`], [`model::ModelDescriptor`],
 //! [`model::ThinkingMode`]) and the streaming [`client::StreamDelta`] are
 //! canonical there too and re-exported through their historical paths.
 //!
-//! The crate contains no prompt parser, no Lua runtime, and no executor; it is
-//! the gateway's model client only, never a universal client.
+//! The HTTP client that sends a round to the gateway and fetches its model
+//! list is the harness's (`harness-models`), the engine's production host;
+//! it reaches this vocabulary through the `promptforge-api-runtime` door.
+//! This crate contains no HTTP, no prompt parser, no Lua runtime, and no
+//! executor.
 
 pub mod client;
 mod error;
 pub mod model;
 mod normalize;
 
-#[doc(hidden)]
-pub use crate::error::Error;
 pub(crate) use crate::error::Result;
+#[doc(hidden)]
+pub use crate::error::{Error, Timeout};
 
 pub use promptforge_api_types::events::{
     CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,

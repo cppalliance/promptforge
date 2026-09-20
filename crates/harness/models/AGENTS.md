@@ -1,0 +1,12 @@
+# harness-models
+
+This crate owns the harness's model transport: the HTTP client that performs the engine's `Chat` effects against the bound gateway, and the catalog fetch a host resolves model selections against.
+
+- This is a Gateway model client, not a universal transport. It speaks the one always-streaming `/chat/completions` SSE shape and `GET /v1/models` the gateway serves. Other protocols use separate clients.
+- Everything the client exchanges is the engine's vocabulary (`Message`, `ToolSchema`, `CompletionOptions`, `Completion`, `CompletionError`), reached through `promptforge_api_runtime::model`. The request body builder, the SSE reassembly, and the read loop (`read_body_capped`, `read_completion_stream` over a `ChunkSource`) are shared seams behind that door; this crate never rebuilds the body shape, re-judges a turn, or grows its own copy of the byte cap, the `[DONE]` rule, or the timing arithmetic. It owns only what touches the wire: sending, the request timeout, the response as a chunk source, the clock it hands the read loop, and environment loading.
+- Metrics vocabulary is canonical in `promptforge-api-types`. `ClientTiming` is measured against this crate's clock by the shared read loop; this crate never defines a parallel metrics model.
+- Every `reqwest::Error` this crate erases into the substrate (`Http`, `BackendBodyRead`) is boxed through `transport_source`, which applies the timeout marker, so `is_timeout` holds under every variant.
+- The client holds only the gateway's URL and the shared bearer key, wrapped in `SecretString` at the boundary. The vendor credential lives in the gateway. A bearer key never appears in `Debug`, `Display`, logs, or error text; `Debug` redacts to a fixed marker so no presence or length signal leaks.
+- A keyless client is an explicit choice (`GatewayClient::keyless`, or `from_env` against a loopback URL); nothing here checks the endpoint's host on the caller's behalf.
+- A backend error body is bounded and control-escaped before it is kept, and rides only in the opt-in `backend_body` accessor, never in `Display`. A success stream is refused once it exceeds the run's byte cap, before decoding.
+- Family rules: depends on `promptforge-api-runtime`, `promptforge-api-types`, and container siblings only. Never on a `workshop-*` crate, a private `gateway-*` crate, or a `promptforge-*` crate behind the door. Tests spawn their mock gateways through `harness-runner`'s instrumented wrapper, never `tokio::spawn`.

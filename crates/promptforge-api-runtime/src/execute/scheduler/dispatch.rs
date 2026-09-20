@@ -12,12 +12,12 @@
 
 use std::sync::Arc;
 
-use crate::client::Message;
 use crate::execute::protocol::{Answer, Request, StoreOp};
 use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
 use crate::lua::{ToolSet, resolve_model_binding};
+use crate::model::Message;
 use crate::model::ModelBinding;
 use crate::observe::{Observation, detail};
 use crate::store::StoreError;

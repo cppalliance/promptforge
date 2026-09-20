@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::client::ToolSchema;
 use crate::lua::ToolBinding;
+use crate::model::ToolSchema;
 use crate::observe::detail;
 use crate::{Error, Result};
 

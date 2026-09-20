@@ -37,10 +37,10 @@ use std::sync::atomic::Ordering;
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use serde_json::Value;
 
-use crate::client::ToolSchema;
 use crate::execute::protocol::{Answer, TaskStatus, ToolCallOutcome};
 use crate::execute::section_context::TaskSeed;
 use crate::lua::{SectionVm, TaskAllowlist, ToolBinding, ToolSet};
+use crate::model::ToolSchema;
 use crate::observe::detail;
 use crate::{Error, Result};
 

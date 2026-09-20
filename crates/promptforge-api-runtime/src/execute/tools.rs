@@ -13,7 +13,7 @@
 use std::sync::atomic::AtomicU32;
 
 use crate::Error;
-use crate::client::{Completion, CompletionError, CompletionResult};
+use crate::model::{Completion, CompletionError, CompletionResult};
 use crate::observe::detail;
 
 use super::event_buffer::Emitter;

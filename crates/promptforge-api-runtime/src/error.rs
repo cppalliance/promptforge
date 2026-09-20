@@ -552,8 +552,8 @@ impl From<GatewayClientError> for Error {
     }
 }
 
-impl From<crate::client::CompletionError> for Error {
-    fn from(error: crate::client::CompletionError) -> Error {
+impl From<crate::model::CompletionError> for Error {
+    fn from(error: crate::model::CompletionError) -> Error {
         Error::from(GatewayClientError::from(error))
     }
 }
@@ -862,25 +862,32 @@ mod tests {
     }
 
     #[test]
-    fn config_errors_preserve_the_secret_and_url_causes() {
-        // client :419 / AUDIT-DISCARDED-SOURCE: an unusable credential and a bad
-        // endpoint URL both retain their concrete cause through the public
-        // CompletionError::source, classified as Config.
-        use crate::client::{CompletionError, CompletionErrorKind, GatewayEndpoint, SecretString};
+    fn config_errors_preserve_their_causes_across_the_substrate_bridge() {
+        // AUDIT-DISCARDED-SOURCE: a transport's configuration failure (an
+        // unusable credential, a bad endpoint URL) arrives as the client
+        // substrate's `Config` variant with its concrete cause attached;
+        // the cause survives both the public CompletionError::source and
+        // the mapping onto this crate's substrate, classified as Config.
+        use crate::model::{ClientError, CompletionError, CompletionErrorKind};
 
-        let secret_error = SecretString::new("").expect_err("blank key is rejected");
-        let completion = CompletionError::from(secret_error);
+        let cause = std::io::Error::other("gateway URL is not a valid URL");
+        let completion = CompletionError::from(ClientError::Config {
+            message: "gateway endpoint is unusable".to_owned(),
+            source: Box::new(cause),
+        });
         assert_eq!(completion.kind(), CompletionErrorKind::Config);
         assert!(
             std::error::Error::source(&completion).is_some(),
-            "the SecretError cause must survive"
+            "the configuration cause must survive the public wrapper"
         );
-
-        let url_error = GatewayEndpoint::new("not a url").expect_err("malformed URL is rejected");
-        assert_eq!(url_error.kind(), CompletionErrorKind::Config);
+        let bridged = Error::from(completion);
         assert!(
-            std::error::Error::source(&url_error).is_some(),
-            "the url::ParseError cause must survive"
+            matches!(bridged, Error::Config { .. }),
+            "the substrate maps Config onto Config, got {bridged:?}"
+        );
+        assert!(
+            std::error::Error::source(&bridged).is_some(),
+            "the cause must survive the bridge"
         );
     }
 

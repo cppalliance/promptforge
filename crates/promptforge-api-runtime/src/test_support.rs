@@ -40,11 +40,46 @@ use crate::parser::Prompt;
 
 pub(crate) mod events_to_observer;
 pub mod host;
+#[cfg(test)]
+#[path = "test_support/mock-gateway-client.rs"]
+pub(crate) mod mock_gateway_client;
 pub mod tokio_driver;
 
 pub use events_to_observer::forward;
-pub use host::RunHost;
+pub use host::{ChatClient, DeltaHook, RunHost};
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
+
+/// The suites' mock-gateway client performs a `Chat` round over its
+/// dev-only HTTP under the run's limits.
+#[cfg(test)]
+impl ChatClient for mock_gateway_client::MockGatewayClient {
+    fn complete(
+        &self,
+        messages: Vec<crate::model::Message>,
+        tools: Vec<crate::model::ToolSchema>,
+        options: crate::model::CompletionOptions,
+        limits: crate::execute::RunLimits,
+        on_delta: Option<DeltaHook>,
+    ) -> BoxFuture<Result<crate::model::Completion, crate::model::CompletionError>> {
+        let client = self.clone();
+        Box::pin(async move {
+            client
+                .complete(
+                    &messages,
+                    &tools,
+                    &options,
+                    limits.timeout(),
+                    limits.response_bytes(),
+                    |delta| {
+                        if let Some(hook) = &on_delta {
+                            hook(delta);
+                        }
+                    },
+                )
+                .await
+        })
+    }
+}
 
 /// Drives `run` to its end on the calling thread, performing every effect
 /// through `perform` as it is issued, and returns the run's result with

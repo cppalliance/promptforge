@@ -28,13 +28,58 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_api_runtime::client::{GatewayClient, GatewayEndpoint, SecretString};
-use promptforge_api_runtime::test_support::{RunHost, run_with_host};
-use promptforge_api_runtime::{Environment, Prompt, RunContext, RunResult};
+use promptforge_api_runtime::model::{
+    Completion, CompletionError, CompletionOptions, Message, ToolSchema,
+};
+use promptforge_api_runtime::test_support::{
+    BoxFuture, ChatClient, DeltaHook, RunHost, run_with_host,
+};
+use promptforge_api_runtime::{Environment, Prompt, RunContext, RunLimits, RunResult};
 use promptforge_api_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::observe::NullObserver;
 
+// The suites' mock-gateway chat client, shared by path: the engine holds no
+// client of its own, and the bench performs its rounds the way the
+// in-crate suites do.
+#[path = "../src/test_support/mock-gateway-client.rs"]
+mod mock_gateway_client;
+
+use mock_gateway_client::MockGatewayClient;
+
 const EXECUTION: &str = "bench";
+
+/// The bench's chat client: the mock-gateway client performing a round
+/// under the run's limits.
+struct BenchClient(MockGatewayClient);
+
+impl ChatClient for BenchClient {
+    fn complete(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolSchema>,
+        options: CompletionOptions,
+        limits: RunLimits,
+        on_delta: Option<DeltaHook>,
+    ) -> BoxFuture<Result<Completion, CompletionError>> {
+        let client = self.0.clone();
+        Box::pin(async move {
+            client
+                .complete(
+                    &messages,
+                    &tools,
+                    &options,
+                    limits.timeout(),
+                    limits.response_bytes(),
+                    |delta| {
+                        if let Some(hook) = &on_delta {
+                            hook(delta);
+                        }
+                    },
+                )
+                .await
+        })
+    }
+}
 
 /// A minimal scripted gateway: every completion request gets the same
 /// terminal-text SSE reply, so a `models.loop` bench measures exactly one
@@ -93,12 +138,8 @@ impl BenchGateway {
     }
 
     /// A client pointed at this gateway.
-    fn client(&self) -> GatewayClient {
-        GatewayClient::new(
-            GatewayEndpoint::new(&format!("http://{}/v1", self.addr))
-                .expect("the bench endpoint is valid"),
-            SecretString::new("bench").expect("the bench key is non-empty"),
-        )
+    fn client(&self) -> BenchClient {
+        BenchClient(MockGatewayClient::new(self.addr, "bench"))
     }
 }
 

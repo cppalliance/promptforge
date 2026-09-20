@@ -3,8 +3,7 @@
 
 use std::fmt;
 
-use crate::Error;
-use crate::model::CompletionError;
+use promptforge_api_runtime::model::{ClientError as Error, CompletionError};
 
 /// A bearer credential whose contents never appear in `Debug`, `Display`, or
 /// logs.
@@ -26,13 +25,13 @@ impl SecretString {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_model_client::client::SecretString;
+    /// use harness_models::SecretString;
     ///
     /// let secret = SecretString::new("bearer-token")?;
     /// assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
     /// assert_eq!(format!("{secret}"), "<redacted>");
     /// assert!(SecretString::new("").is_err());
-    /// # Ok::<(), promptforge_model_client::client::SecretError>(())
+    /// # Ok::<(), harness_models::SecretError>(())
     /// ```
     pub fn new(secret: impl Into<String>) -> std::result::Result<SecretString, SecretError> {
         let secret = secret.into();
@@ -110,13 +109,13 @@ impl GatewayEndpoint {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_model_client::client::GatewayEndpoint;
+    /// use harness_models::GatewayEndpoint;
     ///
     /// let endpoint = GatewayEndpoint::new("https://gateway.example.com/v1/")?;
     /// assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
     /// assert!(GatewayEndpoint::new("ftp://example.com").is_err());
     /// assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
-    /// # Ok::<(), promptforge_model_client::model::CompletionError>(())
+    /// # Ok::<(), harness_models::CompletionError>(())
     /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
         let reject = |detail: String| CompletionError::from(Error::InvalidConfig(detail));
@@ -173,20 +172,20 @@ impl GatewayEndpoint {
     /// True for `localhost`, `127.0.0.1` (and the rest of `127.0.0.0/8`), and
     /// `::1`; false for every other name or address. A loopback gateway admits
     /// keyless same-machine callers by default, so
-    /// [`GatewayClient::from_env`](super::GatewayClient::from_env) makes the
+    /// [`GatewayClient::from_env`](crate::GatewayClient::from_env) makes the
     /// bearer key optional exactly when this holds.
     ///
     /// # Examples
     ///
     /// ```
-    /// use promptforge_model_client::client::GatewayEndpoint;
+    /// use harness_models::GatewayEndpoint;
     ///
     /// assert!(GatewayEndpoint::new("http://127.0.0.1:8081/v1")?.is_loopback());
     /// assert!(GatewayEndpoint::new("http://[::1]:8081/v1")?.is_loopback());
     /// assert!(GatewayEndpoint::new("http://localhost:8081/v1")?.is_loopback());
     /// assert!(!GatewayEndpoint::new("http://192.168.1.20:8081/v1")?.is_loopback());
     /// assert!(!GatewayEndpoint::new("https://gateway.example.com/v1")?.is_loopback());
-    /// # Ok::<(), promptforge_model_client::model::CompletionError>(())
+    /// # Ok::<(), harness_models::CompletionError>(())
     /// ```
     #[must_use]
     pub fn is_loopback(&self) -> bool {

@@ -35,29 +35,30 @@ pub enum CompletionErrorKind {
     Config,
 }
 
-/// The error returned by the gateway transport ([`crate::client::GatewayClient`]
-/// completion and catalog calls) and [`fetch_model_catalog`](super::fetch_model_catalog).
+/// The error a model round or a catalog fetch fails with: what the
+/// transport that performed it (the harness's gateway client) reports, and
+/// what a `Chat` effect's answer carries back into the engine.
 ///
 /// Carries a stable [`kind`](CompletionError::kind) classifier plus the
 /// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
 /// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`
-/// and not constructible outside the crate.
+/// and constructible outside the crate only from the hidden substrate.
 ///
 /// # Examples
 ///
-/// ```no_run
-/// # async fn run() {
-/// use promptforge_model_client::model::{fetch_model_catalog, CompletionErrorKind};
+/// ```
+/// use promptforge_model_client::model::{CompletionError, CompletionErrorKind};
 ///
-/// if let Err(error) = fetch_model_catalog("http://127.0.0.1:8081/v1", "tok").await {
+/// fn report(error: &CompletionError) -> &'static str {
 ///     if error.kind() == CompletionErrorKind::Backend {
-///         eprintln!("gateway returned status {:?}", error.status());
+///         return "gateway returned a non-success status";
 ///     }
 ///     if error.is_retryable() {
-///         // A transient transport/backend failure: safe to retry.
+///         return "transient; safe to retry";
 ///     }
+///     "inspect"
 /// }
-/// # }
+/// # let _ = report;
 /// ```
 #[derive(Debug)]
 #[non_exhaustive]
@@ -127,12 +128,15 @@ impl CompletionError {
     }
 
     /// Returns `true` when the transport failure was a timeout.
+    ///
+    /// The transport marks a timeout by wrapping its own error in
+    /// [`Timeout`](crate::Timeout); this crate names no HTTP client.
     #[must_use]
     pub fn is_timeout(&self) -> bool {
         match &self.inner {
-            Error::Http(source) | Error::BackendBodyRead { source, .. } => source
-                .downcast_ref::<reqwest::Error>()
-                .is_some_and(reqwest::Error::is_timeout),
+            Error::Http(source) | Error::BackendBodyRead { source, .. } => {
+                source.downcast_ref::<crate::Timeout>().is_some()
+            }
             _ => false,
         }
     }
@@ -178,6 +182,23 @@ impl From<CompletionError> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timeout_marked_transport_failure_reports_is_timeout() {
+        let timed_out = CompletionError::from(Error::http(crate::Timeout(Box::new(
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "deadline"),
+        ))));
+        assert!(timed_out.is_timeout());
+        assert_eq!(timed_out.kind(), CompletionErrorKind::Transport);
+        let plain = CompletionError::from(Error::http(std::io::Error::other("reset")));
+        assert!(!plain.is_timeout());
+        let body_read = CompletionError::from(Error::BackendBodyRead {
+            status: 500,
+            source: Box::new(crate::Timeout(Box::new(std::io::Error::other("slow")))),
+        });
+        assert!(body_read.is_timeout());
+        assert_eq!(body_read.status(), Some(500));
+    }
 
     #[test]
     fn every_config_variant_classifies_as_config() {

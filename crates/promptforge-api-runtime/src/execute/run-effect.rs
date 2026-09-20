@@ -25,8 +25,8 @@ use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::client::{Completion, CompletionError, Message, ToolSchema};
 use crate::input::{InputError, InputOutcome};
+use crate::model::{Completion, CompletionError, Message, ToolSchema};
 use crate::model::{CompletionOptions, ModelBinding, Temperature};
 use crate::store::{Access, StoreError};
 

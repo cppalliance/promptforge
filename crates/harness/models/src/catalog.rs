@@ -2,10 +2,11 @@
 
 use std::num::NonZeroU32;
 
+use promptforge_api_runtime::model::{ClientError as Error, CompletionError};
+use promptforge_api_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use serde::Deserialize;
 
-use super::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use crate::Error;
+use crate::transport::{http, transport_source};
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
 ///
@@ -58,7 +59,7 @@ async fn read_catalog_body_capped(
         ))));
     }
     let mut body: Vec<u8> = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(Error::http)? {
+    while let Some(chunk) = response.chunk().await.map_err(http)? {
         if body.len() as u64 + chunk.len() as u64 > cap {
             return Err(CompletionError::from(Error::MalformedResponse(format!(
                 "model list body exceeds the {cap}-byte limit"
@@ -125,7 +126,8 @@ fn catalog_client() -> reqwest::Client {
 /// each gateway endpoint: `Transport` when the send fails, `Backend` with a
 /// bounded, control-escaped body on a non-success status (MODEL-010: no
 /// unbounded buffering), and `BackendBodyRead` when that error body cannot be
-/// read, keeping the [`reqwest::Error`] as a typed source.
+/// read, keeping the [`reqwest::Error`] as a typed source under the same
+/// timeout marking as a send failure, so `is_timeout` holds on both.
 async fn get_authed(
     url: String,
     token: &str,
@@ -135,7 +137,7 @@ async fn get_authed(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(Error::http)?;
+        .map_err(http)?;
     let status = response.status();
     if status.is_success() {
         return Ok(response);
@@ -145,7 +147,7 @@ async fn get_authed(
         Err(source) => {
             return Err(CompletionError::from(Error::BackendBodyRead {
                 status: status.as_u16(),
-                source: Box::new(source),
+                source: transport_source(source),
             }));
         }
     };
@@ -167,8 +169,8 @@ async fn get_authed(
 /// # Examples
 ///
 /// ```no_run
-/// # async fn run() -> Result<(), promptforge_model_client::model::CompletionError> {
-/// use promptforge_model_client::model::fetch_model_catalog;
+/// # async fn run() -> Result<(), harness_models::CompletionError> {
+/// use harness_models::fetch_model_catalog;
 ///
 /// let catalog = fetch_model_catalog("http://127.0.0.1:8081/v1", "secret-token").await?;
 /// println!("gateway offers {} models", catalog.models().len());
@@ -236,13 +238,15 @@ pub async fn fetch_model_catalog(
 
 #[cfg(test)]
 mod tests {
+    use harness_runner::spawn::spawn_tagged;
+
     use super::*;
-    use crate::model::CompletionErrorKind;
+    use crate::CompletionErrorKind;
 
     async fn spawn_models(app: axum::Router) -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        spawn_tagged("mock-models", async move {
             axum::serve(listener, app).await.unwrap();
         });
         addr
@@ -404,7 +408,7 @@ mod tests {
         // as its `#[source]`, not display text.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        spawn_tagged("mock-truncating-models", async move {
             if let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
                 let _ = sock.read(&mut buf).await;

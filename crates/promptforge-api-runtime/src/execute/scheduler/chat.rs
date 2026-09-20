@@ -22,7 +22,6 @@ use std::sync::atomic::AtomicU32;
 
 use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 
-use crate::client::{Completion, CompletionResult, ToolCall};
 use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ChatResult};
 use crate::execute::run::Effect;
@@ -33,6 +32,7 @@ use crate::lua::{
     project_messages, resolve_model_binding,
 };
 use crate::model::ModelBinding;
+use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::observe::detail;
 use crate::{Error, Result};
 

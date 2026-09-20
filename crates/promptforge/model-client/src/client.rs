@@ -1,28 +1,38 @@
-//! An `OpenAI`-compatible chat completions client, pointed at the gateway.
+//! The chat-completions protocol vocabulary: what a model round exchanges,
+//! with no transport attached.
 //!
-//! The client speaks `/chat/completions` and always streams: every request
-//! carries `stream: true` with `stream_options.include_usage`, and
-//! [`GatewayClient::complete`] accumulates the SSE deltas into one
-//! [`Completion`] - a text reply or the tool calls the model asked for -
-//! while invoking the caller's delta callback with each live
-//! [`StreamDelta`]. A caller with no use for deltas passes a no-op closure.
-//! [`GatewayClient::complete`] sends a `tools` array when the caller
-//! supplies one, so the executor's tool-call loop runs over this client.
-//! The client holds only the gateway's URL and, when one is set, the shared
-//! key; the vendor credential lives in the gateway, so the executor never
-//! sees it. Point `PROMPTFORGE_GATEWAY_URL` at a local server or another
-//! gateway to retarget it; a loopback gateway needs no key.
+//! The wire types ([`Message`], [`ToolSchema`], [`ToolCall`],
+//! [`Completion`], [`CompletionResult`]) are what a `Chat` effect carries
+//! out of the engine and what its answer carries back. Beside them sit the
+//! protocol pieces every transport shares, all `#[doc(hidden)]`
+//! cross-crate seams: the request body builder, so one JSON shape leaves
+//! for the gateway no matter who sends it; the SSE reassembly (scanner,
+//! accumulator, and its `finish` into a [`Completion`]), so streamed and
+//! buffered turns are judged by one rule set; and the read loop over a
+//! transport's [`ChunkSource`], so the byte cap, the sentinel rule, and
+//! the timing arithmetic live once.
+//!
+//! Nothing here opens a connection or reads a clock. The HTTP client that
+//! sends the body and yields the chunks is the harness's
+//! (`harness-models`); the engine's own suites drive the same protocol
+//! through a dev-only client against a mock gateway. The engine itself
+//! never performs a round: a model round is a `Chat` effect its host
+//! performs and answers.
 
-mod config;
+mod read;
+mod request;
 mod stream;
-mod transport;
 mod wire;
 
-pub use config::{GatewayEndpoint, SecretError, SecretString};
 // Canonical in `promptforge-api-types`; re-exported so the
 // `promptforge_model_client::client::StreamDelta` path keeps resolving.
 pub use promptforge_api_types::wire::StreamDelta;
-pub use transport::GatewayClient;
+#[doc(hidden)]
+pub use read::{ChunkSource, read_body_capped, read_completion_stream};
+#[doc(hidden)]
+pub use request::build_request_body;
+#[doc(hidden)]
+pub use stream::{Applied, SseScanner, StreamAccumulator, escape_controls};
 #[doc(hidden)]
 pub use wire::ToolSchemaError;
 pub use wire::{Completion, CompletionResult, Message, ToolArguments, ToolCall, ToolSchema};

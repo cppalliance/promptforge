@@ -1,49 +1,64 @@
-//! SSE consumption for the always-streaming completion transport.
+//! SSE reassembly for the always-streaming completion protocol.
 //!
 //! [`SseScanner`] splits the raw byte stream into `data:` payloads, and
 //! [`StreamAccumulator`] folds those payloads back into the buffered
-//! chat-completion body shape. The strict turn rules stay in
+//! chat-completion body shape, then [`finishes`](StreamAccumulator::finish)
+//! it into a [`Completion`]. The strict turn rules stay in
 //! [`crate::normalize`]: the accumulator only reassembles, so streamed and
 //! buffered turns are judged by exactly one rule set.
 //!
-//! The progress subscription in [`crate::model`] carries its own SSE decoder
-//! deliberately, and neither can substitute for the other: that one decodes
-//! blank-line-terminated event blocks into typed progress items and stays
-//! lossy (an undecodable block is one `Err` item in a telemetry stream),
-//! while this one hands raw `data:` payloads to a transport loop that meters
-//! bytes and timing and hard-fails on the first malformed chunk, because a
-//! completion's product must be whole.
+//! No HTTP happens here. The transport that reads the bytes off the wire
+//! lives with the host that performs the `Chat` effect (the harness's model
+//! client); the engine's own suites drive the same reassembly through a
+//! dev-only client against a mock gateway. Both hand bytes to the scanner,
+//! payloads to the accumulator, and take the completion from `finish`.
+//!
+//! The progress subscription in the model vocabulary carries its own SSE
+//! decoder deliberately, and neither can substitute for the other: that one
+//! decodes blank-line-terminated event blocks into typed progress items and
+//! stays lossy (an undecodable block is one `Err` item in a telemetry
+//! stream), while this one hands raw `data:` payloads to a transport loop
+//! that meters bytes and timing and hard-fails on the first malformed
+//! chunk, because a completion's product must be whole.
 
 use std::collections::BTreeMap;
 
+use promptforge_api_types::events::ClientTiming;
 use serde_json::{Map, Value};
 
-use super::StreamDelta;
-use super::transport::escape_controls;
+use super::{Completion, StreamDelta};
+use crate::model::CompletionError;
 use crate::{Error, Result};
 
 /// Splits a raw SSE byte stream into `data:` payloads.
 ///
 /// Blank lines, `:` comments, and non-`data:` fields (`event:`, `id:`,
 /// `retry:`) are skipped; the caller sees only payload text.
-pub(crate) struct SseScanner {
+///
+/// `#[doc(hidden)]`: a cross-crate seam for the transports that read a
+/// completion stream (the harness's model client and the engine's test
+/// client), not host API.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct SseScanner {
     buffer: Vec<u8>,
 }
 
 impl SseScanner {
     /// A scanner with an empty buffer.
-    pub(crate) fn new() -> SseScanner {
+    #[must_use]
+    pub fn new() -> SseScanner {
         SseScanner { buffer: Vec::new() }
     }
 
     /// Buffers freshly received bytes for line extraction.
-    pub(crate) fn extend(&mut self, bytes: &[u8]) {
+    pub fn extend(&mut self, bytes: &[u8]) {
         self.buffer.extend_from_slice(bytes);
     }
 
     /// Returns the next complete `data:` payload, or `None` until one is
     /// fully buffered.
-    pub(crate) fn next_data(&mut self) -> Option<String> {
+    pub fn next_data(&mut self) -> Option<String> {
         loop {
             let end = self.buffer.iter().position(|byte| *byte == b'\n')?;
             let line: Vec<u8> = self.buffer.drain(..=end).collect();
@@ -61,8 +76,12 @@ impl SseScanner {
 }
 
 /// The outcome of applying one `data:` payload.
-#[derive(Debug)]
-pub(crate) enum Applied {
+///
+/// `#[doc(hidden)]`: a cross-crate seam for the stream transports, not
+/// host API.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applied {
     /// The payload advanced the accumulation; `delta` is true when it
     /// carried answer text, reasoning, or a tool-call fragment (the
     /// TTFT/ITL clock ticks on those, never on role or summary chunks).
@@ -77,7 +96,7 @@ pub(crate) enum Applied {
 /// One tool call assembled from streamed fragments, keyed by the fragment
 /// `index`. `id`, `name`, and `arguments` each grow by string concatenation
 /// as fragments arrive, per the `OpenAI` streaming contract.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ToolCallParts {
     id: String,
     name: String,
@@ -92,7 +111,12 @@ struct ToolCallParts {
 /// whichever chunk carried them last, including the empty-choices summary
 /// chunk `stream_options.include_usage` appends, and are handed to the
 /// lenient metadata parser unjudged.
-pub(crate) struct StreamAccumulator {
+///
+/// `#[doc(hidden)]`: a cross-crate seam for the stream transports, not
+/// host API.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct StreamAccumulator {
     /// Answer text; `None` until the first `content` fragment arrives.
     content: Option<String>,
     /// Reasoning side-channel text; `None` until the first fragment.
@@ -106,36 +130,29 @@ pub(crate) struct StreamAccumulator {
 
 impl StreamAccumulator {
     /// An empty accumulator.
-    pub(crate) fn new() -> StreamAccumulator {
-        StreamAccumulator {
-            content: None,
-            reasoning: None,
-            tool_calls: BTreeMap::new(),
-            finish_reason: None,
-            model: None,
-            sections: Map::new(),
-        }
-    }
-
-    /// Whether any tool-call fragment has arrived.
-    pub(crate) fn has_tool_calls(&self) -> bool {
-        !self.tool_calls.is_empty()
-    }
-
-    /// The latest `finish_reason` a chunk carried, if any.
-    pub(crate) fn finish_reason(&self) -> Option<&str> {
-        self.finish_reason.as_deref()
+    #[must_use]
+    pub fn new() -> StreamAccumulator {
+        StreamAccumulator::default()
     }
 
     /// Applies one `data:` payload, invoking `on_delta` for each text or
     /// reasoning fragment it carries.
     ///
     /// # Errors
-    /// Returns [`Error::MalformedResponse`] (or the source-preserving
-    /// variant) when the payload is not valid JSON or a recognized field has
-    /// the wrong shape, and a transport-classified error when the payload is
-    /// a mid-stream error envelope.
-    pub(crate) fn apply(&mut self, data: &str, on_delta: &impl Fn(StreamDelta)) -> Result<Applied> {
+    /// Returns a `MalformedResponse`-kind [`CompletionError`] when the
+    /// payload is not valid JSON or a recognized field has the wrong
+    /// shape, and a `Transport`-kind one when the payload is a mid-stream
+    /// error envelope.
+    pub fn apply(
+        &mut self,
+        data: &str,
+        on_delta: &impl Fn(StreamDelta),
+    ) -> std::result::Result<Applied, CompletionError> {
+        self.apply_inner(data, on_delta)
+            .map_err(CompletionError::from)
+    }
+
+    fn apply_inner(&mut self, data: &str, on_delta: &impl Fn(StreamDelta)) -> Result<Applied> {
         if data == "[DONE]" {
             return Ok(Applied::Done);
         }
@@ -299,10 +316,59 @@ impl StreamAccumulator {
         Ok(())
     }
 
+    /// Finishes the accumulation into the [`Completion`] the turn produced:
+    /// the truncation rule, the strict turn normalizer, and the lenient
+    /// metadata parser, in that order. `request_body` is the body the
+    /// transport sent and `client_timing` what it measured on its own
+    /// clock; both ride on the completion for the debug capture.
+    ///
+    /// # Errors
+    /// Returns a `MalformedResponse`-kind [`CompletionError`] when a
+    /// tool-call batch was cut short by a `length` or `content_filter`
+    /// finish (partial arguments must not execute), and the normalizer's
+    /// own errors otherwise (`EmptyReply` for a turn with neither
+    /// non-empty tool calls nor non-empty text).
+    pub fn finish(
+        self,
+        request_body: Value,
+        client_timing: Option<ClientTiming>,
+    ) -> std::result::Result<Completion, CompletionError> {
+        // The truncation rule runs before normalization: a tool-call batch
+        // cut short by `length` or `content_filter` may hold partial JSON
+        // arguments, and partial arguments must not execute.
+        if !self.tool_calls.is_empty()
+            && matches!(
+                self.finish_reason.as_deref(),
+                Some("length" | "content_filter")
+            )
+        {
+            let reason = self.finish_reason.unwrap_or_default();
+            return Err(CompletionError::from(Error::MalformedResponse(format!(
+                "tool-call batch truncated by finish_reason {reason:?}: \
+                 partial arguments must not execute"
+            ))));
+        }
+        let response_body = self.into_body();
+        let turn = crate::normalize::normalize(&response_body)?;
+        let metadata = crate::normalize::response_metadata(&response_body);
+        Ok(Completion {
+            result: turn.outcome,
+            finish_reason: turn.finish_reason,
+            reasoning_content: turn.reasoning_content,
+            model: metadata.model,
+            usage: metadata.usage,
+            llama_timings: metadata.llama_timings,
+            vllm_metrics: metadata.vllm_metrics,
+            client_timing,
+            request_body,
+            response_body,
+        })
+    }
+
     /// Reassembles the accumulation into the buffered chat-completion body
     /// shape, ready for the strict turn normalizer and the lenient metadata
     /// parser.
-    pub(crate) fn into_body(self) -> Value {
+    fn into_body(self) -> Value {
         let mut message = Map::new();
         message.insert("role".to_owned(), Value::String("assistant".to_owned()));
         message.insert(
@@ -373,245 +439,34 @@ fn append_string_fragment(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn no_delta(_: StreamDelta) {}
-
-    /// Feeds every `data:` payload into a fresh accumulator and returns it.
-    fn accumulate(payloads: &[Value]) -> StreamAccumulator {
-        let mut accumulator = StreamAccumulator::new();
-        for payload in payloads {
-            accumulator
-                .apply(&payload.to_string(), &no_delta)
-                .expect("fixture payloads are well-formed");
-        }
-        accumulator
+/// Escapes control characters in a diagnostic body and bounds it to `max` chars.
+///
+/// Control characters (including newlines and carriage returns) are rendered in
+/// their `\u{..}`/`\n` escaped form so a backend body cannot forge log lines or
+/// smuggle terminal control sequences into a diagnostic (F5). An empty body is
+/// reported as a fixed marker.
+///
+/// `#[doc(hidden)]`: shared with the transports so a backend error body is
+/// bounded and escaped by one rule everywhere; not host API.
+#[doc(hidden)]
+#[must_use]
+pub fn escape_controls(body: &str, max: usize) -> String {
+    if body.is_empty() {
+        return "(empty body)".to_owned();
     }
-
-    fn content_chunk(text: &str) -> Value {
-        serde_json::json!({
-            "model": "qwen3-30b",
-            "choices": [{ "index": 0, "delta": { "content": text }, "finish_reason": null }]
-        })
-    }
-
-    #[test]
-    fn scanner_splits_data_lines_and_skips_noise() {
-        let mut scanner = SseScanner::new();
-        scanner.extend(b": comment\nevent: message\ndata: {\"a\":1}\r\n\ndata: [DO");
-        assert_eq!(scanner.next_data().as_deref(), Some("{\"a\":1}"));
-        assert_eq!(scanner.next_data(), None, "partial line stays buffered");
-        scanner.extend(b"NE]\n");
-        assert_eq!(scanner.next_data().as_deref(), Some("[DONE]"));
-    }
-
-    #[test]
-    fn streamed_accumulation_matches_the_buffered_fixture_byte_for_byte() {
-        // The buffered llama.cpp fixture from the normalize suite, split
-        // into a streamed form: the reassembled body must normalize to the
-        // same turn and metadata, with the answer text byte-identical.
-        let usage =
-            serde_json::json!({ "completion_tokens": 3, "prompt_tokens": 7, "total_tokens": 10 });
-        let timings = serde_json::json!({
-            "prompt_n": 7, "prompt_ms": 12.5, "prompt_per_second": 560.0,
-            "predicted_n": 3, "predicted_ms": 30.5, "predicted_per_second": 98.5
-        });
-        let accumulator = accumulate(&[
-            content_chunk("Hel"),
-            content_chunk("lo \u{1F980}"),
-            content_chunk("!"),
-            serde_json::json!({
-                "model": "qwen3-30b",
-                "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
-            }),
-            serde_json::json!({
-                "model": "qwen3-30b",
-                "choices": [],
-                "usage": usage,
-                "timings": timings
-            }),
-        ]);
-        let body = accumulator.into_body();
-        assert_eq!(
-            body.pointer("/choices/0/message/content")
-                .and_then(Value::as_str),
-            Some("Hello \u{1F980}!"),
-            "fragments concatenate byte-for-byte"
-        );
-        assert_eq!(
-            body.pointer("/choices/0/finish_reason")
-                .and_then(Value::as_str),
-            Some("stop")
-        );
-        assert_eq!(body.get("model").and_then(Value::as_str), Some("qwen3-30b"));
-        assert_eq!(body.get("usage"), Some(&usage), "usage kept verbatim");
-        assert_eq!(body.get("timings"), Some(&timings), "timings kept verbatim");
-    }
-
-    #[test]
-    fn tool_call_fragments_buffer_across_chunks_by_index() {
-        // OpenAI streams a call's name once and its arguments in pieces;
-        // interleaved fragments for two calls must land on their own
-        // buffers, keyed by `index`, and reassemble whole.
-        let accumulator = accumulate(&[
-            serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [
-                { "index": 0, "id": "call_a", "type": "function",
-                  "function": { "name": "search", "arguments": "{\"qu" } }
-            ] } }] }),
-            serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [
-                { "index": 1, "id": "call_b", "type": "function",
-                  "function": { "name": "fetch", "arguments": "{\"url\":\"x\"}" } }
-            ] } }] }),
-            serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [
-                { "index": 0, "function": { "arguments": "ery\":\"a\"}" } }
-            ] } }] }),
-            serde_json::json!({
-                "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }]
-            }),
-        ]);
-        assert!(accumulator.has_tool_calls());
-        let body = accumulator.into_body();
-        let calls = body
-            .pointer("/choices/0/message/tool_calls")
-            .and_then(Value::as_array)
-            .expect("tool calls reassembled");
-        assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0]["id"], "call_a");
-        assert_eq!(calls[0]["function"]["arguments"], "{\"query\":\"a\"}");
-        assert_eq!(calls[1]["id"], "call_b");
-        assert_eq!(calls[1]["function"]["name"], "fetch");
-    }
-
-    #[test]
-    fn reasoning_and_text_deltas_reach_the_callback_separated_in_order() {
-        let seen = std::sync::Mutex::new(Vec::new());
-        let mut accumulator = StreamAccumulator::new();
-        let record = |delta: StreamDelta| seen.lock().expect("delta log").push(delta);
-        for payload in [
-            serde_json::json!({ "choices": [{ "index": 0,
-                "delta": { "reasoning_content": "think" } }] }),
-            serde_json::json!({ "choices": [{ "index": 0, "delta": { "content": "ans" } }] }),
-            serde_json::json!({ "choices": [{ "index": 0, "delta": { "content": "wer" } }] }),
-        ] {
-            accumulator
-                .apply(&payload.to_string(), &record)
-                .expect("well-formed");
-        }
-        assert_eq!(
-            *seen.lock().expect("delta log"),
-            vec![
-                StreamDelta::Reasoning("think".to_owned()),
-                StreamDelta::Text("ans".to_owned()),
-                StreamDelta::Text("wer".to_owned()),
-            ]
-        );
-        let body = accumulator.into_body();
-        assert_eq!(
-            body.pointer("/choices/0/message/reasoning_content")
-                .and_then(Value::as_str),
-            Some("think"),
-            "reasoning stays a side channel on the reassembled message"
-        );
-        assert_eq!(
-            body.pointer("/choices/0/message/content")
-                .and_then(Value::as_str),
-            Some("answer")
-        );
-    }
-
-    #[test]
-    fn empty_choices_usage_chunk_is_metadata_not_a_turn() {
-        // The `stream_options.include_usage` summary chunk has an empty
-        // `choices` array; it must be consumed as metadata, never indexed
-        // for a choice and never counted as a content delta.
-        let mut accumulator = StreamAccumulator::new();
-        let applied = accumulator
-            .apply(
-                &serde_json::json!({ "choices": [], "usage": { "prompt_tokens": 1,
-                    "completion_tokens": 2, "total_tokens": 3 } })
-                .to_string(),
-                &no_delta,
-            )
-            .expect("summary chunk is well-formed");
-        assert!(matches!(applied, Applied::Chunk { delta: false }));
-        let body = accumulator.into_body();
-        assert_eq!(
-            body.pointer("/usage/total_tokens").and_then(Value::as_u64),
-            Some(3)
-        );
-    }
-
-    #[test]
-    fn error_envelope_fails_the_stream_with_the_escaped_message() {
-        let mut accumulator = StreamAccumulator::new();
-        let error = accumulator
-            .apply(
-                &serde_json::json!({ "error": { "message": "upstream\ndied", "code": "x" } })
-                    .to_string(),
-                &no_delta,
-            )
-            .expect_err("an error envelope must fail the stream");
-        assert!(matches!(error, Error::Http(_)));
-        let source = std::error::Error::source(&error)
-            .expect("the envelope message rides as the cause")
-            .to_string();
-        assert!(source.contains("upstream\\ndied"), "escaped: {source}");
-    }
-
-    #[test]
-    fn malformed_chunks_are_rejected_not_skipped() {
-        let cases: [(&str, &str); 4] = [
-            ("not json", "undecodable payload"),
-            ("{\"choices\":{}}", "non-array choices"),
-            (
-                "{\"choices\":[{\"index\":0,\"delta\":{\"content\":7}}]}",
-                "non-string content",
-            ),
-            (
-                "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"x\"}]}}]}",
-                "fragment without index",
-            ),
-        ];
-        for (payload, label) in cases {
-            let mut accumulator = StreamAccumulator::new();
-            let error = accumulator.apply(payload, &no_delta).expect_err(label);
-            assert!(
-                matches!(
-                    error,
-                    Error::MalformedResponse(_) | Error::MalformedResponseSource { .. }
-                ),
-                "{label}: {error:?}"
-            );
+    let mut escaped = String::with_capacity(body.len());
+    for ch in body.chars().take(max) {
+        if ch.is_control() {
+            for part in ch.escape_default() {
+                escaped.push(part);
+            }
+        } else {
+            escaped.push(ch);
         }
     }
-
-    #[test]
-    fn non_first_choices_are_ignored_like_the_buffered_parser() {
-        let accumulator = accumulate(&[
-            content_chunk("kept"),
-            serde_json::json!({ "choices": [{ "index": 1,
-                "delta": { "content": "dropped" } }] }),
-        ]);
-        let body = accumulator.into_body();
-        assert_eq!(
-            body.pointer("/choices/0/message/content")
-                .and_then(Value::as_str),
-            Some("kept")
-        );
-    }
-
-    #[test]
-    fn no_content_at_all_reassembles_null_content() {
-        let accumulator = accumulate(&[serde_json::json!({
-            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
-        })]);
-        let body = accumulator.into_body();
-        assert_eq!(
-            body.pointer("/choices/0/message/content"),
-            Some(&Value::Null),
-            "a stream with no content fragments yields a null content"
-        );
-    }
+    escaped
 }
+
+#[cfg(test)]
+#[path = "stream-tests.rs"]
+mod tests;
