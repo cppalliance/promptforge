@@ -15,7 +15,9 @@ use tower::ServiceExt as _;
 
 use super::*;
 
+#[path = "tests-refresh.rs"]
 mod refresh;
+#[path = "tests-version-gate.rs"]
 mod version_gate;
 
 /// A one-provider sheet stamped `generated_at`, carrying one model

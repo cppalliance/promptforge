@@ -96,4 +96,5 @@ pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Resu
 }
 
 #[cfg(test)]
+#[path = "fanout-tests.rs"]
 mod tests;

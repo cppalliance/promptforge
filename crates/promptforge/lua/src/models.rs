@@ -18,6 +18,7 @@ use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation, Mo
 use crate::alias::validate_alias;
 use crate::{Error, Result};
 
+#[path = "models-userdata.rs"]
 mod userdata;
 
 pub(crate) use userdata::{LuaModelHandle, ModelsInferHook};
@@ -215,4 +216,5 @@ pub(crate) fn install_models(
 }
 
 #[cfg(test)]
+#[path = "models-tests.rs"]
 mod tests;

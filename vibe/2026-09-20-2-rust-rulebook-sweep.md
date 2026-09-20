@@ -411,7 +411,7 @@ Commit: one commit.
 
 <step-7>
 
-### Step 7: Retire `mod.rs` files
+### Step 7: Retire `mod.rs` files [completed]
 
 - Component: `layout-lint-hygiene`
 - Piece: module layout moves (D4a)

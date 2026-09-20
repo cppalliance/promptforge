@@ -87,5 +87,7 @@ fn resolve_section_model(vm: &SectionVm) -> Result<Option<ModelBinding>> {
     resolve_model_binding(&Mutex::new(models), &runtime).map_err(Error::from)
 }
 
+#[path = "tests-always.rs"]
 mod always;
+#[path = "tests-integration.rs"]
 mod integration;
