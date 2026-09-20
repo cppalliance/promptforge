@@ -23,8 +23,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::error::VfsError;
 use crate::glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
 use crate::path::{VfsPath, canonicalize};
+use crate::stat::{Entry, FileType, Stat};
 use crate::traits::{ExecId, Vfs, VfsAccess};
-use crate::types::{Entry, FileType, Stat};
 
 /// Maps an I/O failure to the error kind the trait surface promises.
 fn map_io(path: &str, err: &std::io::Error) -> VfsError {
@@ -609,8 +609,8 @@ mod tests {
     use super::{HostBackend, identity_to_virtual, map_io};
     use crate::error::VfsError;
     use crate::path::{VfsPath, canonicalize};
+    use crate::stat::FileType;
     use crate::traits::{ExecId, Vfs, VfsAccess};
-    use crate::types::FileType;
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
         canonicalize(s)

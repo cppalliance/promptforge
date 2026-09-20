@@ -2,7 +2,7 @@ use super::{
     ConversationItem, DurationUsage, EffectiveSession, InputAudioContent, ServerEvent, WireError,
 };
 use crate::realtime::result_mailbox::{ItemFailure, ItemResult};
-use crate::realtime::wire::shared::{OptionalNullable, RequiredNullable};
+use crate::realtime::wire::vocabulary::{OptionalNullable, RequiredNullable};
 use crate::take::InterimSnapshot;
 impl ServerEvent {
     pub(in crate::realtime) fn session_created(

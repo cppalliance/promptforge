@@ -14,11 +14,12 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
+use crate::grep::{GrepQuery, GrepResults};
 use crate::handle::VfsRef;
 use crate::observe::{OpEvent, OpSink};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize};
+use crate::stat::{Entry, Stat};
 use crate::traits::{AllowAll, ExecId, Policy, Vfs, VfsAccess};
-use crate::types::{Entry, GrepQuery, GrepResults, Stat};
 
 /// One mounted backend behind a shared lock.
 type Mounted = Arc<Mutex<Box<dyn Vfs>>>;
@@ -412,8 +413,8 @@ mod tests {
     use crate::handle::VfsRef;
     use crate::observe::Origin;
     use crate::path::VfsPath;
+    use crate::stat::{Entry, Stat};
     use crate::traits::{ExecId, Vfs, VfsAccess};
-    use crate::types::{Entry, Stat};
 
     /// A recording in-memory stub. Files are keyed by the exact paths
     /// the backend is handed, so tests observe prefix stripping

@@ -16,11 +16,12 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
+use crate::grep::{GrepQuery, GrepResults};
 use crate::observe::{OpEvent, OpSink, Origin};
 use crate::path::{VfsPath, canonicalize};
 use crate::router::{Mounts, Router, VfsRefBuilder};
+use crate::stat::{Entry, Stat};
 use crate::traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
-use crate::types::{Entry, GrepQuery, GrepResults, Stat};
 
 /// Whether an operation claims read or write intent on its path.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -767,8 +768,8 @@ mod tests {
     use crate::error::VfsError;
     use crate::observe::{OpEvent, Origin};
     use crate::path::VfsPath;
+    use crate::stat::{Entry, Stat};
     use crate::traits::{ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
-    use crate::types::{Entry, Stat};
 
     /// Minimal in-memory backend shared between the `Vfs` and the access
     /// objects it vends. Releases are recorded so tests can observe the

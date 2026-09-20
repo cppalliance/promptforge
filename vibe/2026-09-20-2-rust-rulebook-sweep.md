@@ -457,7 +457,7 @@ Commit: one commit.
 
 <step-9>
 
-### Step 9: Parser facade root and junk-drawer renames
+### Step 9: Parser facade root and junk-drawer renames [completed]
 
 - Component: `layout-lint-hygiene`
 - Piece: facade and names (D6)

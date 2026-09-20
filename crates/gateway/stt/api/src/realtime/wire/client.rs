@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use super::shared::{
+use super::vocabulary::{
     AUDIO_RATE, AUDIO_TYPE, ClientError, ClientEvent, Correlation, HYPOTHESIS_INCLUDE, MODEL,
     SESSION_TYPE, SessionPatch,
 };

@@ -8,8 +8,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::VfsError;
+use crate::grep::{GrepMatch, GrepQuery, GrepResults};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize};
-use crate::types::{Entry, GrepMatch, GrepQuery, GrepResults, Stat};
+use crate::stat::{Entry, Stat};
 
 /// Identity of one serial thread of execution. Process-unique, vended
 /// from a process-global monotonic counter. Opaque: no public constructor -
@@ -388,8 +389,9 @@ mod tests {
 
     use super::{AllowAll, Op, Policy, Verdict, VfsAccess};
     use crate::error::VfsError;
+    use crate::grep::{GrepQuery, GrepResults};
     use crate::path::{VfsPath, canonicalize};
-    use crate::types::{Entry, GrepQuery, GrepResults, Stat};
+    use crate::stat::{Entry, Stat};
 
     /// Minimal in-memory backend exercising the trait defaults: the
     /// required methods are direct map operations, and glob understands

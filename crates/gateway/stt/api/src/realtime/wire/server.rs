@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::client::parse_client_event;
-use super::shared::{
+use super::vocabulary::{
     AUDIO_RATE, AUDIO_TYPE, ClientError, ClientEvent, HYPOTHESIS_INCLUDE, MODEL, OptionalNullable,
     RequiredNullable, SESSION_OBJECT, SESSION_TYPE, deserialize_required_nullable,
 };

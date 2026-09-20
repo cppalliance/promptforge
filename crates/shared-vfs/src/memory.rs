@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use crate::error::VfsError;
 use crate::glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
 use crate::path::VfsPath;
+use crate::stat::{Entry, FileType, Stat};
 use crate::traits::{ExecId, Vfs, VfsAccess};
-use crate::types::{Entry, FileType, Stat};
 
 /// The storage one backend shares with every session it vends. `BTreeMap`
 /// and `BTreeSet` keep listing and glob results ordered without a sort
@@ -435,8 +435,8 @@ mod tests {
     use super::MemoryBackend;
     use crate::error::VfsError;
     use crate::path::{VfsPath, canonicalize};
+    use crate::stat::FileType;
     use crate::traits::{ExecId, Vfs, VfsAccess};
-    use crate::types::FileType;
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
         canonicalize(s)

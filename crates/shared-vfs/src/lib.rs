@@ -8,24 +8,26 @@
 
 mod error;
 mod glob;
+mod grep;
 mod handle;
 mod host;
 mod memory;
 mod observe;
 mod path;
 mod router;
+mod stat;
 mod traits;
-mod types;
 
 pub use error::VfsError;
+pub use grep::{GrepMatch, GrepQuery, GrepResults};
 pub use handle::{Access, VfsRef};
 pub use host::HostBackend;
 pub use memory::MemoryBackend;
 pub use observe::{OpEvent, OpSink, Origin};
 pub use path::{VfsPath, VfsPathBuf};
 pub use router::VfsRefBuilder;
+pub use stat::{Entry, FileType, Stat};
 pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
-pub use types::{Entry, FileType, GrepMatch, GrepQuery, GrepResults, Stat};
 
 #[cfg(test)]
 mod tests {

@@ -1,3 +1,7 @@
+//! The realtime wire vocabulary both directions speak: protocol constants,
+//! the parsed client event, the error envelope, the nullable field
+//! wrappers, and the id generator.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
