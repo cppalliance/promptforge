@@ -12,6 +12,7 @@
 //! JSON-to-TOML boundary.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{ConfigErrorKind, save_config_shadow};
@@ -19,10 +20,16 @@ use gateway_config::{ConfigErrorKind, save_config_shadow};
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, blocking};
+use crate::registry::RouteInfo;
+
+const CONFIG: RouteInfo = RouteInfo::walled("/admin/config", &[Method::GET, Method::PUT]);
+
+/// The `/admin/config` routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[CONFIG];
 
 /// The `/admin/config` routes.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/config", get(admin_config).put(admin_put_config))
+    Router::new().route(CONFIG.path, get(admin_config).put(admin_put_config))
 }
 
 /// The `GET /admin/config` route: bearer-authed, renders the running global

@@ -2,6 +2,7 @@
 //! capability-endpoint status entries the admin status readout renders.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
@@ -9,11 +10,17 @@ use serde::Serialize;
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
+use crate::registry::RouteInfo;
 use crate::wire::ModelInfo;
+
+const LIST_MODELS: RouteInfo = RouteInfo::open("/v1/models", &[Method::GET]);
+
+/// The catalog route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[LIST_MODELS];
 
 /// The catalog route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/v1/models", get(list_models))
+    Router::new().route(LIST_MODELS.path, get(list_models))
 }
 
 /// The model-list wire response, including routed and active speech models.

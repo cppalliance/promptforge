@@ -2,6 +2,7 @@
 //! `POST /admin/queue/cancel-pending`.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -9,15 +10,19 @@ use serde::Deserialize;
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
+use crate::registry::RouteInfo;
+
+const CANCEL: RouteInfo = RouteInfo::open("/admin/queue/cancel", &[Method::POST]);
+const CANCEL_PENDING: RouteInfo = RouteInfo::open("/admin/queue/cancel-pending", &[Method::POST]);
+
+/// The queue cancellation routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[CANCEL, CANCEL_PENDING];
 
 /// The queue cancellation routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/queue/cancel", post(admin_queue_cancel))
-        .route(
-            "/admin/queue/cancel-pending",
-            post(admin_queue_cancel_pending),
-        )
+        .route(CANCEL.path, post(admin_queue_cancel))
+        .route(CANCEL_PENDING.path, post(admin_queue_cancel_pending))
 }
 
 /// The `POST /admin/queue/cancel` route: bearer-authed, fires the active

@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{
@@ -26,12 +27,19 @@ use super::config::error_chain;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+use crate::registry::RouteInfo;
+
+const PENDING: RouteInfo = RouteInfo::walled("/admin/config-pending", &[Method::GET]);
+const DIRTY: RouteInfo = RouteInfo::walled("/admin/config-dirty", &[Method::GET]);
+
+/// The pending-state read routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[PENDING, DIRTY];
 
 /// The pending-state read routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/config-pending", get(admin_config_pending))
-        .route("/admin/config-dirty", get(admin_config_dirty))
+        .route(PENDING.path, get(admin_config_pending))
+        .route(DIRTY.path, get(admin_config_dirty))
 }
 
 /// The `GET /admin/config-pending` route: bearer-authed, renders the

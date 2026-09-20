@@ -12,8 +12,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{RawQuery, State};
-use axum::http::HeaderValue;
 use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderValue, Method};
 use axum::response::Response;
 use axum::routing::get;
 use gateway_config::Secret;
@@ -23,16 +23,22 @@ use gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WirePath};
+use crate::registry::RouteInfo;
+
+const SEARCH: RouteInfo = RouteInfo::walled("/admin/hf/search", &[Method::GET]);
+const MODEL: RouteInfo = RouteInfo::walled("/admin/hf/model/{owner}/{name}", &[Method::GET]);
+const README: RouteInfo =
+    RouteInfo::walled("/admin/hf/model/{owner}/{name}/readme", &[Method::GET]);
+
+/// The Hugging Face proxy routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[SEARCH, MODEL, README];
 
 /// The Hugging Face proxy routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/hf/search", get(admin_hf_search))
-        .route("/admin/hf/model/{owner}/{name}", get(admin_hf_model))
-        .route(
-            "/admin/hf/model/{owner}/{name}/readme",
-            get(admin_hf_readme),
-        )
+        .route(SEARCH.path, get(admin_hf_search))
+        .route(MODEL.path, get(admin_hf_model))
+        .route(README.path, get(admin_hf_readme))
 }
 
 /// Whole-request deadline for one hub call, applied per request; reqwest's

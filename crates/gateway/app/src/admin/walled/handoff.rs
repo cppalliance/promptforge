@@ -26,6 +26,8 @@ use axum::Router;
 #[cfg(feature = "config-ui")]
 use axum::extract::{Query, State};
 #[cfg(feature = "config-ui")]
+use axum::http::Method;
+#[cfg(feature = "config-ui")]
 use axum::http::StatusCode;
 use axum::http::header::COOKIE;
 #[cfg(feature = "config-ui")]
@@ -40,6 +42,17 @@ use axum::routing::get;
 use crate::AppState;
 #[cfg(feature = "config-ui")]
 use crate::error::GatewayError;
+#[cfg(feature = "config-ui")]
+use crate::registry::RouteInfo;
+
+#[cfg(feature = "config-ui")]
+const CONFIG_REDIRECT: RouteInfo = RouteInfo::walled("/config", &[Method::GET]);
+#[cfg(feature = "config-ui")]
+const AUTH: RouteInfo = RouteInfo::walled("/auth", &[Method::GET]);
+
+/// The browser-entry routes, as the registry sees them.
+#[cfg(feature = "config-ui")]
+pub(crate) const ROUTES: &[RouteInfo] = &[CONFIG_REDIRECT, AUTH];
 
 /// The browser entry onto the config SPA: the `/auth` handoff and the
 /// `/config` redirect onto the SPA mount. Neither takes an auth extractor:
@@ -49,8 +62,8 @@ use crate::error::GatewayError;
 #[cfg(feature = "config-ui")]
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/config", get(config_ui_redirect))
-        .route("/auth", get(auth_handoff))
+        .route(CONFIG_REDIRECT.path, get(config_ui_redirect))
+        .route(AUTH.path, get(auth_handoff))
 }
 
 /// Redirects `GET /config` to `/config/`, where the SPA index is served

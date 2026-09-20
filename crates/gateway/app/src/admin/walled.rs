@@ -33,6 +33,7 @@ pub(crate) mod system;
 use axum::Router;
 
 use crate::AppState;
+use crate::registry::RouteInfo;
 
 /// The walled admin routes. The caller applies the loopback wall; this
 /// router only assembles the tier, feature-gated areas included, so the
@@ -60,4 +61,26 @@ pub(crate) fn routes() -> Router<AppState> {
     #[cfg(feature = "config-ui")]
     let router = router.merge(handoff::routes());
     router
+}
+
+/// The walled admin routes, as the registry sees them, under the same
+/// feature gates [`routes`] mounts them.
+pub(crate) fn registry() -> Vec<RouteInfo> {
+    let mut routes = [
+        shutdown::ROUTES,
+        system::ROUTES,
+        config::ROUTES,
+        config_pending::ROUTES,
+        config_apply::ROUTES,
+        env_file::ROUTES,
+        cloud_models::ROUTES,
+        reveal::ROUTES,
+        hf::ROUTES,
+    ]
+    .concat();
+    #[cfg(feature = "local")]
+    routes.extend([chat_templates::ROUTES, orphans::ROUTES, model_info::ROUTES].concat());
+    #[cfg(feature = "config-ui")]
+    routes.extend_from_slice(handoff::ROUTES);
+    routes
 }

@@ -2,6 +2,7 @@
 //! readiness entry per capability endpoint.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::ModelKind;
@@ -12,10 +13,16 @@ use crate::error::GatewayError;
 use crate::models::endpoint_status;
 #[cfg(feature = "stt")]
 use crate::models::with_speech_endpoint;
+use crate::registry::RouteInfo;
+
+const STATUS: RouteInfo = RouteInfo::open("/admin/status", &[Method::GET]);
+
+/// The status route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[STATUS];
 
 /// The status route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/status", get(admin_status))
+    Router::new().route(STATUS.path, get(admin_status))
 }
 
 /// An `Instant` as Unix epoch seconds for the status wire shape. The

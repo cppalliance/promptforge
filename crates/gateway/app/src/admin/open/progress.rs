@@ -4,8 +4,8 @@
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 use axum::response::Response;
 use axum::routing::get;
 use gateway_api_types::Progress;
@@ -15,10 +15,16 @@ use crate::AppState;
 use crate::admin::walled::shutdown;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
+use crate::registry::RouteInfo;
+
+const PROGRESS: RouteInfo = RouteInfo::open("/admin/progress", &[Method::GET]);
+
+/// The progress stream route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[PROGRESS];
 
 /// The progress stream route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/progress", get(admin_progress))
+    Router::new().route(PROGRESS.path, get(admin_progress))
 }
 
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an

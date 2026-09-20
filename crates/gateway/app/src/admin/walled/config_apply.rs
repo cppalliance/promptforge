@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::post;
 use axum::{Json, Router};
 use gateway_config::{Config, ProfileSelection, load_pending_config, shadow_path, write_atomic};
@@ -38,13 +39,20 @@ use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
 use crate::error::{GatewayError, blocking};
+use crate::registry::RouteInfo;
 use crate::routing::Routing;
+
+const APPLY: RouteInfo = RouteInfo::walled("/admin/config-apply", &[Method::POST]);
+const REVERT: RouteInfo = RouteInfo::walled("/admin/config-revert", &[Method::POST]);
+
+/// The apply and revert routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[APPLY, REVERT];
 
 /// The apply and revert routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/config-apply", post(admin_config_apply))
-        .route("/admin/config-revert", post(admin_config_revert))
+        .route(APPLY.path, post(admin_config_apply))
+        .route(REVERT.path, post(admin_config_revert))
 }
 
 /// Top-level sections the process reads once at boot. A change to one of

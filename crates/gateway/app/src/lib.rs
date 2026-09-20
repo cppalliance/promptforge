@@ -6,79 +6,42 @@
 //! in the system with an edge to an LLM backend, so the executor above it never
 //! holds a vendor key.
 //!
-//! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
-//! bearer auth, model routing, and a typed SSE relay for `stream: true`, an
-//! embeddings passthrough at
-//! `POST /v1/embeddings` for `kind = "embedding"` models, a rerank
-//! passthrough at `POST /v1/rerank` for `kind = "classifier"` models, shared
-//! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
-//! gateway-owned local generative inference via a managed `llama-server`
-//! subprocess (`[[local_model]]`), named profile checklists from one loaded
-//! catalog with `POST /admin/switch-profile` persisting the selection and
-//! reporting `restart_required`, a bearer-authed `GET /admin/status` readout
-//! carrying the command queue's active and pending commands plus one
-//! readiness entry per capability endpoint, bearer-authed
-//! `POST /admin/queue/cancel` and `POST /admin/queue/cancel-pending`
-//! cancelling the queue's active and waiting commands, a bearer-authed
-//! `GET /v1/models` catalog, a bearer-authed `GET /admin/config` view of the
-//! running global configuration as JSON with secrets redacted, a
-//! bearer-authed `GET /admin/progress` SSE
-//! stream of the process progress hub, a Brave-backed `POST /v1/tools/web_search`
-//! configured by `[tools.web_search]`, an on-demand blob cache
-//! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
-//! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, a
-//! bearer-authed `GET /admin/orphans` listing of cache files no loaded
-//! `[[local_model]]` entry references (local builds), a bearer-authed
-//! `GET /admin/model-info` GGUF-header readout of a cache file's layer and
-//! parameter counts (local builds), a bearer-authed
-//! `GET /admin/chat-templates` family catalog and per-model effective
-//! resolution view (local builds), a bearer-authed
-//! `POST /v1/audio/transcriptions` OpenAI-compatible multipart STT endpoint
-//! (stt builds), a bearer-authed `POST /v1/audio/speech` speech-synthesis
-//! passthrough for `kind = "speech"` models streaming the upstream's audio
-//! bytes unread, a bearer-authed `GET /v1/audio/voices` union catalog of
-//! the speech models' configured voices, a bearer-authed
-//! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
-//! metrics, a bearer-authed `GET /admin/hf/search` and
-//! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
-//! (attaching the process `HF_TOKEN` when set), bearer-authed shadow-file
-//! write routes staging pending edits beside the real files without ever
-//! touching them (`PUT /admin/config`, `PUT /admin/env`) plus a bearer-authed
-//! `GET /admin/env` readout of the single config-sibling `.env` file,
-//! bearer-authed pending-state reads - `GET /admin/config-pending` (the
-//! merged real-plus-shadow view in the `GET /admin/config` shape, with a
-//! distinct boot side for the restart-required banner) and
-//! `GET /admin/config-dirty` (shadow existence, pending files, changed
-//! sections) - bearer-authed `POST /admin/config-apply` (promote every
-//! shadow to its real file, then reload the active profile, or report
-//! restart-required for a promoted boot shadow) and
-//! `POST /admin/config-revert` (delete every shadow, touching nothing
-//! else), a loopback-only, bearer-authed `POST /admin/reveal` opening the
-//! host OS file manager at a path confined to the artifact cache, a
-//! bearer-authed `GET /admin/cloud-models` readout of the cached cloud
-//! provider model sheet (with `POST /admin/cloud-models/refresh` forcing
-//! a re-download and answering with the fresh sheet), a loopback-only, bearer-authed
-//! `POST /shutdown` driving the same
-//! graceful shutdown Ctrl-C drives - and
-//! `GET /health`. The whole admin config surface (config read/write, env,
-//! pending state, apply/revert, orphans, system, model-info, the HF
-//! proxy, cloud-models, reveal, shutdown) sits behind the shared loopback
-//! wall from `shared-loopback` in every build; with the
-//! default-on `stt` feature, `WS /v1/realtime?intent=transcription`
-//! serves Gateway-owned Realtime transcription beside the batch route;
-//! with the
-//! `config-ui` feature the embedded config SPA is served at `/config/`
-//! behind the same wall, and `GET /auth?key=` sets a session proof
-//! derived from the bearer key as an HttpOnly cookie and redirects to the
-//! key-free `/config/`, so a browser handoff never leaves the key in
-//! browser history. With `[server] trust_loopback` on (the default), a
-//! loopback peer presenting no credential is admitted to every route
-//! unless its Fetch Metadata marks a cross-origin page; `trust_loopback =
-//! false` requires the bearer key from every caller. When the listener is
-//! bound to loopback, every route additionally sits behind the shared
+//! What ships is an OpenAI-shaped inference surface and an admin surface
+//! in two tiers, plus `GET /health`. The inference surface is
+//! `POST /v1/chat/completions` (with a typed SSE relay for `stream:
+//! true`), `POST /v1/embeddings`, `POST /v1/rerank`, `POST /v1/audio/speech`
+//! and `GET /v1/audio/voices`, `GET /v1/models`, the Brave-backed
+//! `POST /v1/tools/web_search` (`web-search` builds), the `/v1/cache` blob
+//! cache (`local` builds), and, with the default-on `stt` feature, the
+//! `POST /v1/audio/transcriptions` batch route and
+//! `WS /v1/realtime?intent=transcription` served by the speech crate. All
+//! of it is bearer-authed behind model routing and the shared dominion
+//! queues (`[[dominion]]`); local generative inference runs as a managed
+//! `llama-server` child (`[[local_model]]`).
+//!
+//! The admin surface's open tier - profiles and the profile switch, the
+//! status readout, the progress stream, and queue cancellation - is
+//! bearer-authed and reachable from any peer the listener admits. Its
+//! walled tier - the config read and shadow-write routes, env, pending
+//! state, apply and revert, host metrics, the Hugging Face proxy, the
+//! cloud model sheet, reveal, `POST /shutdown`, and (in `config-ui`
+//! builds) the embedded SPA at `/config/` with its `GET /auth?key=`
+//! browser handoff, plus orphans, model-info, and chat-templates in
+//! `local` builds - reads secrets in plaintext, writes files, or launches
+//! processes, so it sits behind the shared loopback wall from
+//! `shared-loopback` in every build. The one enumerable list of routes,
+//! with the tier each belongs to, is the registry (`registry::all`); it
+//! is logged at debug level when the router is built and swept by the
+//! tests that prove each tier's wall.
+//!
+//! With `[server] trust_loopback` on (the default), a loopback peer
+//! presenting no credential is admitted to every route unless its Fetch
+//! Metadata marks a cross-origin page; `trust_loopback = false` requires
+//! the bearer key from every caller. When the listener is bound to
+//! loopback, every route additionally sits behind the shared
 //! host-authority wall, which refuses requests whose `Host` is not the
-//! bound socket (the DNS-rebinding defense). In-process
-//! llama.cpp FFI and endpoint pinning are deferred.
+//! bound socket (the DNS-rebinding defense). In-process llama.cpp FFI and
+//! endpoint pinning are deferred.
 //!
 //! ## Where new route code goes
 //!
@@ -120,6 +83,7 @@ mod dialect;
 mod error;
 mod health;
 mod models;
+mod registry;
 mod relaunch;
 mod relay;
 mod routing;
@@ -537,6 +501,17 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
             auth::authorize_stt_route,
         )),
     );
+    // The registry is the enumerable form of the table just assembled;
+    // logging it at debug level puts the mounted surface, tier by tier,
+    // in the log of every build without anyone maintaining a list.
+    for route in registry::all() {
+        tracing::debug!(
+            path = route.path,
+            methods = ?route.methods,
+            tier = ?route.tier,
+            "route mounted"
+        );
+    }
     // The host-authority wall is the outermost layer, so a rebound
     // hostname is refused before any route logic runs.
     match bound {

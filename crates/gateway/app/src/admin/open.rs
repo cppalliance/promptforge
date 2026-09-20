@@ -11,6 +11,7 @@ pub(crate) mod status;
 use axum::Router;
 
 use crate::AppState;
+use crate::registry::RouteInfo;
 
 /// The open admin routes, merged into the root router without a wall.
 pub(crate) fn routes() -> Router<AppState> {
@@ -19,4 +20,15 @@ pub(crate) fn routes() -> Router<AppState> {
         .merge(status::routes())
         .merge(progress::routes())
         .merge(queue::routes())
+}
+
+/// The open admin routes, as the registry sees them.
+pub(crate) fn registry() -> Vec<RouteInfo> {
+    [
+        profiles::ROUTES,
+        status::ROUTES,
+        progress::ROUTES,
+        queue::ROUTES,
+    ]
+    .concat()
 }

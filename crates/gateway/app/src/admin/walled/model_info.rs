@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -18,10 +19,16 @@ use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireQuery, blocking};
 use crate::local::{LocalError, gguf, resolve_cache_root};
+use crate::registry::RouteInfo;
+
+const MODEL_INFO: RouteInfo = RouteInfo::walled("/admin/model-info", &[Method::GET]);
+
+/// The GGUF header readout route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[MODEL_INFO];
 
 /// The GGUF header readout route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/model-info", get(admin_model_info))
+    Router::new().route(MODEL_INFO.path, get(admin_model_info))
 }
 
 /// Query parameters for `GET /admin/model-info`.

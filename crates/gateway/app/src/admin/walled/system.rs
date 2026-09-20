@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use nvml_wrapper::Nvml;
@@ -23,10 +24,16 @@ use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+use crate::registry::RouteInfo;
+
+const SYSTEM: RouteInfo = RouteInfo::walled("/admin/system", &[Method::GET]);
+
+/// The host-metrics route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[SYSTEM];
 
 /// The host-metrics route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/system", get(admin_system))
+    Router::new().route(SYSTEM.path, get(admin_system))
 }
 
 /// Generic speech lifecycle facts included in Gateway operational status.

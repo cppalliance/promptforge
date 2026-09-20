@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: route-registry
     content: Per-area RouteInfo consts with tier kind plus registry test; shrink lib.rs doc paragraph (Finding 6)
-    status: pending
+    status: completed
   - id: typed-responses
     content: Serialize structs for admin replies, byte-identical JSON (Finding 5)
     status: pending
@@ -92,6 +92,8 @@ Pure mechanical, no route moves, verified by the existing suite.
 
 - Each area declares `const` route infos with a tier kind (mistral.rs `RouteInfo`) and binds them in `routes()`. One test asserts every registered path sits under the kind its module directory claims.
 - Shrink the 80-line doc paragraph at the top of `lib.rs` to the tier model and a pointer at the registry.
+- As executed: `registry.rs` holds `Tier { Open, Walled }`, `RouteInfo { path, methods, tier }` with `const fn open` / `walled`, and `all()`, which concatenates every area's `pub(crate) const ROUTES: &[RouteInfo]` under the same feature gates `build_router` merges under; `admin::open::registry()` and `admin::walled::registry()` do the same for their children. Every `routes()` binds `INFO.path`, never a literal. `build_router` logs the registry at debug level ("route mounted", path, methods, tier) so the registry has a production consumer. `registry-tests.rs` sweeps it against the assembled router: every walled route refuses a LAN peer and a peerless caller with 403 and admits a loopback peer (not 403, 404, or 405); every open route answers a LAN peer with something other than 403, 404, or 405; paths are unique and both tiers non-empty. Captures are filled with values that fail the handler's own validation, and the fixture's `HfProxy` points at a dead port, so the sweep never reaches the network. The hand-listed `walled_requests()` and bearer-only sweeps in `loopback-tests.rs` (which had drifted: `/shutdown` was missing) are replaced by these; its tempdir fixture moved to `test_support::walled_fixture`, and it keeps the SPA mount, feature-state, and host-wall tests the registry cannot enumerate.
+- Verified: clippy `-D warnings`, fmt, headless check, rustdoc `-D warnings`, nextest 475 passed.
 - Commit: `Declare routes as typed registry entries with a tier kind`
 
 ## Step 4: Typed admin responses (Finding 5)

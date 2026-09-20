@@ -23,17 +23,23 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use axum::routing::post;
 use serde::Deserialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, blocking};
+use crate::registry::RouteInfo;
+
+const REVEAL: RouteInfo = RouteInfo::walled("/admin/reveal", &[Method::POST]);
+
+/// The reveal route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[REVEAL];
 
 /// The reveal route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/reveal", post(admin_reveal))
+    Router::new().route(REVEAL.path, post(admin_reveal))
 }
 
 /// The `POST /admin/reveal` body: the filesystem path to reveal.

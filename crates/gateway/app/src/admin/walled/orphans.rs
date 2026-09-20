@@ -8,6 +8,7 @@
 //! the slot layout and the sidecar records.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::SttModelConfig;
@@ -16,10 +17,16 @@ use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
 use crate::local::{cache::orphans, resolve_cache_root};
+use crate::registry::RouteInfo;
+
+const ORPHANS: RouteInfo = RouteInfo::walled("/admin/orphans", &[Method::GET]);
+
+/// The orphan-scan route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[ORPHANS];
 
 /// The orphan-scan route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/orphans", get(admin_orphans))
+    Router::new().route(ORPHANS.path, get(admin_orphans))
 }
 
 /// The `GET /admin/orphans` route: bearer-authed, scans `<cache_dir>/models/`

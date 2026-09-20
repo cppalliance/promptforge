@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -36,15 +37,19 @@ use time::OffsetDateTime;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+use crate::registry::RouteInfo;
+
+const CLOUD_MODELS: RouteInfo = RouteInfo::walled("/admin/cloud-models", &[Method::GET]);
+const REFRESH: RouteInfo = RouteInfo::walled("/admin/cloud-models/refresh", &[Method::POST]);
+
+/// The cloud provider model sheet routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[CLOUD_MODELS, REFRESH];
 
 /// The cloud provider model sheet routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/cloud-models", get(admin_cloud_models))
-        .route(
-            "/admin/cloud-models/refresh",
-            post(admin_cloud_models_refresh),
-        )
+        .route(CLOUD_MODELS.path, get(admin_cloud_models))
+        .route(REFRESH.path, post(admin_cloud_models_refresh))
 }
 
 /// The release artifact the sheet downloads from.

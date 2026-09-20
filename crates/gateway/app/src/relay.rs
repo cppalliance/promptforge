@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -16,6 +16,7 @@ use gateway_config::ModelKind;
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
+use crate::registry::RouteInfo;
 use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
 };
@@ -23,12 +24,19 @@ use crate::wire::{
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
 pub(crate) const CLIENT_HEADER: &str = "X-PromptForge-Client";
 
+const CHAT_COMPLETIONS: RouteInfo = RouteInfo::open("/v1/chat/completions", &[Method::POST]);
+const EMBEDDINGS: RouteInfo = RouteInfo::open("/v1/embeddings", &[Method::POST]);
+const RERANK: RouteInfo = RouteInfo::open("/v1/rerank", &[Method::POST]);
+
+/// The OpenAI passthrough routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[CHAT_COMPLETIONS, EMBEDDINGS, RERANK];
+
 /// The OpenAI passthrough routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/embeddings", post(embeddings))
-        .route("/v1/rerank", post(rerank))
+        .route(CHAT_COMPLETIONS.path, post(chat_completions))
+        .route(EMBEDDINGS.path, post(embeddings))
+        .route(RERANK.path, post(rerank))
 }
 
 /// Resolves a request's model name against the live routing table.

@@ -10,17 +10,23 @@
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use axum::routing::post;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::GatewayError;
+use crate::registry::RouteInfo;
+
+const SHUTDOWN: RouteInfo = RouteInfo::walled("/shutdown", &[Method::POST]);
+
+/// The shutdown route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[SHUTDOWN];
 
 /// The shutdown route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/shutdown", post(admin_shutdown))
+    Router::new().route(SHUTDOWN.path, post(admin_shutdown))
 }
 
 /// The process-shutdown signal shared by the `POST /shutdown` route, the

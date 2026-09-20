@@ -3,6 +3,7 @@
 //! feature, since the route has nothing to delegate to without it.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::post;
 use axum::{Json, Router};
 use gateway_web_search::{WebSearchRequest, WebSearchResponse};
@@ -10,10 +11,16 @@ use gateway_web_search::{WebSearchRequest, WebSearchResponse};
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
+use crate::registry::RouteInfo;
+
+const WEB_SEARCH: RouteInfo = RouteInfo::open("/v1/tools/web_search", &[Method::POST]);
+
+/// The web-search tool route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[WEB_SEARCH];
 
 /// The web-search tool route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/v1/tools/web_search", post(web_search))
+    Router::new().route(WEB_SEARCH.path, post(web_search))
 }
 
 /// The `POST /v1/tools/web_search` route.

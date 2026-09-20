@@ -2,6 +2,7 @@
 //! `POST /admin/switch-profile`.
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use gateway_config::ProfileName;
@@ -12,12 +13,19 @@ use crate::admin::config_path;
 use crate::admin::walled::config::config_write_error;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson, blocking};
+use crate::registry::RouteInfo;
+
+const PROFILES: RouteInfo = RouteInfo::open("/admin/profiles", &[Method::GET]);
+const SWITCH_PROFILE: RouteInfo = RouteInfo::open("/admin/switch-profile", &[Method::POST]);
+
+/// The profile routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[PROFILES, SWITCH_PROFILE];
 
 /// The profile routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/profiles", get(admin_list_profiles))
-        .route("/admin/switch-profile", post(admin_switch_profile))
+        .route(PROFILES.path, get(admin_list_profiles))
+        .route(SWITCH_PROFILE.path, post(admin_switch_profile))
 }
 
 /// The `POST /admin/switch-profile` body: a profile name, or `null` (or

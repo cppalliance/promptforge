@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{pending_var_references, write_shadow};
@@ -21,10 +22,16 @@ use super::config::config_write_error;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, WireJson, WireQuery, blocking};
+use crate::registry::RouteInfo;
+
+const ENV: RouteInfo = RouteInfo::walled("/admin/env", &[Method::GET, Method::PUT]);
+
+/// The `/admin/env` routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[ENV];
 
 /// The `/admin/env` routes.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/env", get(admin_get_env).put(admin_put_env))
+    Router::new().route(ENV.path, get(admin_get_env).put(admin_put_env))
 }
 
 /// The `GET /admin/env` route: bearer-authed, parses the global `.env` file.

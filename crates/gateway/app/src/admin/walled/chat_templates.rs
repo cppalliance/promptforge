@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{Config, LocalModelConfig, ModelKind};
@@ -18,10 +19,16 @@ use super::config_pending::load_pending_for_running;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::error::{GatewayError, blocking};
+use crate::registry::RouteInfo;
+
+const CHAT_TEMPLATES: RouteInfo = RouteInfo::walled("/admin/chat-templates", &[Method::GET]);
+
+/// The chat-template catalog route, as the registry sees it.
+pub(crate) const ROUTES: &[RouteInfo] = &[CHAT_TEMPLATES];
 
 /// The chat-template catalog route.
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/admin/chat-templates", get(admin_chat_templates))
+    Router::new().route(CHAT_TEMPLATES.path, get(admin_chat_templates))
 }
 
 #[derive(Serialize)]

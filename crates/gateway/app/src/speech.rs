@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::extract::{FromRequest, Request, State};
-use axum::http::HeaderValue;
 use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderValue, Method};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -18,14 +18,21 @@ use gateway_protocol::ProtocolError;
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::error::{GatewayError, WireJson};
+use crate::registry::RouteInfo;
 use crate::relay::{CLIENT_HEADER, resolve_routed_model};
 use crate::wire::{SpeechRequest, SpeechResponseFormat, SpeechStreamFormat, SpeechVoice};
+
+const AUDIO_SPEECH: RouteInfo = RouteInfo::open("/v1/audio/speech", &[Method::POST]);
+const AUDIO_VOICES: RouteInfo = RouteInfo::open("/v1/audio/voices", &[Method::GET]);
+
+/// The speech routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[AUDIO_SPEECH, AUDIO_VOICES];
 
 /// The speech routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/audio/speech", post(audio_speech))
-        .route("/v1/audio/voices", get(audio_voices))
+        .route(AUDIO_SPEECH.path, post(audio_speech))
+        .route(AUDIO_VOICES.path, get(audio_voices))
 }
 
 /// The speech route to a backend: the same auth, routing, kind guard, and

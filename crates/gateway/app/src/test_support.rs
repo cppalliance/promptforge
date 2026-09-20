@@ -22,6 +22,46 @@ pub(crate) struct AdminPaths {
     pub(crate) config_path: PathBuf,
 }
 
+/// A tempdir-backed state with a real config file and a `local` cache
+/// root, so every walled handler has something to answer with once past
+/// the wall. The Hugging Face proxy points at a dead loopback port, so a
+/// sweep that reaches the HF routes fails its connection rather than
+/// calling the real hub.
+pub(crate) fn walled_fixture() -> (tempfile::TempDir, AppState) {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let models = temp.path().join("cache").join("models");
+    std::fs::create_dir_all(&models).expect("mkdir cache models");
+    let boot = temp.path().join("gateway.toml");
+    std::fs::write(&boot, "").expect("write boot");
+    let config = Config::from_toml_str(&format!(
+        r#"
+config-version = 0
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[local]
+cache_dir = '{cache}'
+"#,
+        cache = temp.path().join("cache").display(),
+    ))
+    .expect("the fixture profile parses");
+    let mut state = app_state(
+        config,
+        Some(AdminPaths {
+            fixture_dir: temp.path().to_path_buf(),
+            active: "main".to_owned(),
+            config_path: boot,
+        }),
+    );
+    state.hf = Arc::new(crate::admin::walled::hf::HfProxy::new(
+        "http://127.0.0.1:9".to_owned(),
+        None,
+    ));
+    (temp, state)
+}
+
 /// Serves `build_router` over a state assembled from `config` with no
 /// running children: the retained config still carries everything the
 /// admin routes read (the cache root, the `[[local_model]]` entries).

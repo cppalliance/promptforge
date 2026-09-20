@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
@@ -33,12 +33,19 @@ use crate::local::artifacts::{
 };
 use crate::local::cache::{BlobCache, CacheEntry, CachedBlob};
 use crate::local::{LocalError, resolve_cache_root};
+use crate::registry::RouteInfo;
+
+const CACHE: RouteInfo = RouteInfo::open("/v1/cache", &[Method::GET, Method::POST]);
+const CACHE_ENTRY: RouteInfo = RouteInfo::open("/v1/cache/{sha256}", &[Method::DELETE]);
+
+/// The blob-cache routes, as the registry sees them.
+pub(crate) const ROUTES: &[RouteInfo] = &[CACHE, CACHE_ENTRY];
 
 /// The blob-cache routes.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/cache", get(list_cache).post(post_cache))
-        .route("/v1/cache/{sha256}", delete(delete_cache))
+        .route(CACHE.path, get(list_cache).post(post_cache))
+        .route(CACHE_ENTRY.path, delete(delete_cache))
 }
 
 /// Opens the blob cache at the active profile's resolved cache root.
