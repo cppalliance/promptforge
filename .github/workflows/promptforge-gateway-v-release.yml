@@ -143,7 +143,7 @@ jobs:
         with:
           "node-version": 22
       - name: "Install UI dependencies"
-        run: "npm ci --prefix crates/workshop/server/ui"
+        run: "npm ci --prefix crates/workshop/ui"
       - name: "Install config UI dependencies"
         run: "npm ci --prefix crates/gateway/config-ui/ui"
       - name: Install dist

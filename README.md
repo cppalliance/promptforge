@@ -71,7 +71,7 @@ Every build needs Rust and Node.js 22. The two web UIs are bundled with esbuild 
 ```bash
 git clone git@github.com:cppalliance/promptforge.git
 cd promptforge
-npm ci --prefix crates/workshop/server/ui
+npm ci --prefix crates/workshop/ui
 npm ci --prefix crates/gateway/config-ui/ui
 ```
 

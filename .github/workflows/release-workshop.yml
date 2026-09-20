@@ -118,7 +118,7 @@ jobs:
             crates/workshop/*/ui/package-lock.json
 
       - name: Install UI dependencies
-        working-directory: crates/workshop/server/ui
+        working-directory: crates/workshop/ui
         run: npm ci
 
       # The gateway sidecar build needs the config UI's esbuild pipeline

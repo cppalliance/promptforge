@@ -1,0 +1,144 @@
+/* Rendered markdown (src/parts/agent/markdown-render.ts): styles the sanitized
+   marked + Shiki output inside a .ws-markdown-content root. Every value
+   comes from the skin's design tokens with a fallback, so a missing
+   token degrades to these defaults instead of breaking the property. */
+
+.ws-markdown-content {
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-lg);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.ws-markdown-content > :first-child {
+  margin-block-start: 0;
+}
+
+.ws-markdown-content > :last-child {
+  margin-block-end: 0;
+}
+
+.ws-markdown-content p {
+  margin-block: var(--space-2);
+}
+
+.ws-markdown-content h1,
+.ws-markdown-content h2,
+.ws-markdown-content h3,
+.ws-markdown-content h4,
+.ws-markdown-content h5,
+.ws-markdown-content h6 {
+  margin-block: var(--space-3) var(--space-2);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-lg);
+}
+
+.ws-markdown-content h1 {
+  font-size: var(--font-size-lg);
+}
+
+.ws-markdown-content h2 {
+  font-size: var(--font-size-lg);
+}
+
+.ws-markdown-content h3,
+.ws-markdown-content h4,
+.ws-markdown-content h5,
+.ws-markdown-content h6 {
+  font-size: var(--font-size-base);
+}
+
+/* Inline code; the pre rule below undoes the pill inside fenced blocks. */
+.ws-markdown-content code {
+  font-family: var(--code-font);
+  font-size: var(--font-size-sm);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  padding-block: var(--ws-size-1);
+  padding-inline: var(--space-1);
+}
+
+/* Fenced blocks, highlighted (Shiki's pre carries inline colors from the
+   theme) or not (the degraded path's plain pre). */
+.ws-markdown-content pre {
+  margin-block: var(--space-2);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
+  background: var(--syntax-bg);
+  border: var(--ws-border-width) solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.ws-markdown-content pre code {
+  background: transparent;
+  border-radius: 0;
+  padding-block: 0;
+  padding-inline: 0;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+}
+
+.ws-markdown-content a {
+  color: var(--syntax-link);
+  text-decoration: none;
+}
+
+.ws-markdown-content a:hover {
+  text-decoration: underline;
+}
+
+.ws-markdown-content a:focus-visible {
+  outline: none;
+  text-decoration: underline;
+}
+
+.ws-markdown-content ul,
+.ws-markdown-content ol {
+  margin-block: var(--space-2);
+  padding-inline-start: var(--space-5);
+}
+
+.ws-markdown-content li {
+  margin-block: var(--space-1);
+}
+
+.ws-markdown-content blockquote {
+  margin-block: var(--space-2);
+  margin-inline: 0;
+  padding-inline-start: var(--space-3);
+  border-inline-start: var(--ws-border-width-strong) solid var(--border);
+  color: var(--text-muted);
+}
+
+.ws-markdown-content table {
+  margin-block: var(--space-2);
+  border-collapse: collapse;
+}
+
+.ws-markdown-content th,
+.ws-markdown-content td {
+  border: var(--ws-border-width) solid var(--border-subtle);
+  padding-block: var(--space-1);
+  padding-inline: var(--space-2);
+  text-align: start;
+}
+
+.ws-markdown-content th {
+  font-weight: var(--font-weight-semibold);
+  background: var(--bg-card);
+}
+
+/* height: auto keeps the =WxH attribute ratio when max-inline-size
+   clamps an image wider than the column. */
+.ws-markdown-content img {
+  max-inline-size: 100%;
+  height: auto;
+}
+
+.ws-markdown-content hr {
+  border: none;
+  border-block-start: var(--ws-border-width) solid var(--border);
+  margin-block: var(--space-3);
+}

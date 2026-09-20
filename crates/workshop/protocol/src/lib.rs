@@ -6,12 +6,12 @@
 //! outbound (server to client) second. Nothing here touches a socket, a
 //! task, or a clock, so every wire shape is pinned by the plain tests in
 //! `tests/it`. The TypeScript half of this contract is
-//! `workshop-server/ui/src/services/protocol.ts`; the two files
+//! `crates/workshop/ui/src/services/protocol.ts`; the two files
 //! cross-cite each other so a shape change touches both or neither. The
 //! agent-session frame family is additionally pinned by the shared
 //! fixture `tests/fixtures/agent-frames.json`, asserted as the same JSON
 //! by the fixture test here and by the SPA suite's
-//! `workshop-server/ui/test/agent-wire-fixtures.mjs`, so drift on either
+//! `crates/workshop/ui/test/agent-wire-fixtures.mjs`, so drift on either
 //! side fails that side's tests. The wire shapes are additionally frozen
 //! end to end by the characterization tests in `workshop-server`'s
 //! `tests/it`.

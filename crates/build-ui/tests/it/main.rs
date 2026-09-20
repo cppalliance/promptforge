@@ -16,7 +16,6 @@ fn both_implementers_emit_the_same_layout() -> anyhow::Result<()> {
     let ui_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("workshop")
-        .join("server")
         .join("ui");
     if !node_available() {
         eprintln!("skipping: node is not on PATH; install Node.js 22 to run this test");

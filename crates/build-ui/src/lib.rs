@@ -1,15 +1,17 @@
-//! Shared build-script helper that bundles a crate's `ui/` TypeScript
+//! Shared build-script helper that bundles a UI package's TypeScript
 //! sources with esbuild into the Cargo build output directory.
 //!
-//! Both UI crates (`workshop-server` and
-//! `gateway-config-ui`) drive their entire UI build through
-//! [`build`]: the bundle and copies of the static files land in
-//! `$OUT_DIR/ui-dist/`, which git never tracks, so no build step can dirty
-//! the repository. Cargo's own change detection decides when the bundle is
-//! rebuilt. Splitting builds content-hash every bundle file and emit a
-//! `manifest.json` plus a stamped `index.html`; non-splitting builds keep
-//! the unversioned `app.js`. Building requires
-//! Node.js 22 and one `npm ci` per `ui/` folder; there is no fallback.
+//! Both UI crates drive their entire UI build through this crate:
+//! `gateway-config-ui` keeps its package nested at `<crate>/ui/` and calls
+//! [`build`]; `workshop-server` builds its sibling package at
+//! `crates/workshop/ui/` through [`build_sibling`]. Either way the bundle
+//! and copies of the static files land in `$OUT_DIR/ui-dist/`, which git
+//! never tracks, so no build step can dirty the repository. Cargo's own
+//! change detection decides when the bundle is rebuilt. Splitting builds
+//! content-hash every bundle file and emit a `manifest.json` plus a
+//! stamped `index.html`; non-splitting builds keep the unversioned
+//! `app.js`. Building requires Node.js 22 and one `npm ci` per UI
+//! package; there is no fallback.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -57,10 +59,25 @@ pub struct UiBuild {
 /// manifest and the stamped index page.
 ///
 /// # Errors
-/// Returns an error when not run through Cargo, when the local
-/// esbuild install is missing or fails, or when a static file cannot be
-/// copied.
+/// Returns an error when not run through Cargo, when `<crate>/ui/` is not
+/// a directory, when the local esbuild install is missing or fails, or
+/// when a static file cannot be copied.
 pub fn build(config: UiBuild) -> anyhow::Result<()> {
+    build_sibling("ui", config)
+}
+
+/// The general form of [`build`]: `relative` is joined onto
+/// `CARGO_MANIFEST_DIR` to locate the UI package, so it serves both the
+/// nested layout (`"ui"`, which [`build`] passes) and a package outside
+/// the crate (the workshop server passes `"../ui"` for its sibling at
+/// `crates/workshop/ui/`). Output lands in `$OUT_DIR/ui-dist/` either
+/// way.
+///
+/// # Errors
+/// Returns an error when not run through Cargo, when the resolved
+/// package directory does not exist, when the local esbuild install is
+/// missing or fails, or when a static file cannot be copied.
+pub fn build_sibling(relative: &str, config: UiBuild) -> anyhow::Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
             .ok_or_else(|| anyhow::anyhow!("CARGO_MANIFEST_DIR is not set; run through cargo"))?,
@@ -69,7 +86,12 @@ pub fn build(config: UiBuild) -> anyhow::Result<()> {
         std::env::var_os("OUT_DIR")
             .ok_or_else(|| anyhow::anyhow!("OUT_DIR is not set; run through cargo"))?,
     );
-    let ui_dir = manifest_dir.join("ui");
+    let ui_dir = manifest_dir.join(relative);
+    anyhow::ensure!(
+        ui_dir.is_dir(),
+        "the UI package {relative} resolved to {}, which is not a directory",
+        ui_dir.display()
+    );
     let dist_dir = out_dir.join("ui-dist");
 
     watch(&ui_dir, &config);

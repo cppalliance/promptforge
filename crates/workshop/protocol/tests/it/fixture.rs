@@ -1,5 +1,5 @@
 //! The shared agent-frame fixture pins: the same JSON the SPA suite
-//! (`workshop-server/ui/test/agent-wire-fixtures.mjs`) asserts, so a wire
+//! (`crates/workshop/ui/test/agent-wire-fixtures.mjs`) asserts, so a wire
 //! drift on either side fails that side's fixture test.
 
 use workshop_protocol::{

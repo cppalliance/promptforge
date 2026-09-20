@@ -1,0 +1,104 @@
+/* PromptInput (src/parts/agent/prompt-input.ts): the framed rich-text prompt box.
+   The ws-agent-session card carries the frame; the inner ProseMirror
+   contenteditable carries the type and the JS-driven height, clamped
+   between the min/max tokens. */
+
+.ws-prompt-input {
+  transition: border-color var(--duration-fast) var(--ease-out-cubic);
+}
+
+.ws-prompt-input__editor {
+  min-block-size: var(--prompt-input-min-height);
+  max-block-size: var(--prompt-input-max-height);
+  overflow-y: auto;
+  padding: 0;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--text);
+}
+
+.ws-prompt-input__editor:focus-visible {
+  outline: none;
+}
+
+/* Non-editable is the contenteditable equivalent of disabled. */
+.ws-prompt-input__editor[contenteditable="false"] {
+  color: var(--text);
+}
+
+/* The global reset does not zero paragraph margins; inside the editor a
+   paragraph per newline must not add leading. */
+.ws-prompt-input__editor p {
+  margin: 0;
+}
+
+/* The Placeholder extension marks an empty document's paragraph with
+   is-editor-empty and a data-placeholder attribute; the text is CSS-only. */
+.ws-prompt-input__editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: inline-start;
+  block-size: 0;
+  pointer-events: none;
+  color: var(--input-placeholder);
+  opacity: 0.5;
+}
+
+/* MentionChip (src/parts/agent/mention-chip.ts): the inline pill for an
+   @-referenced file. The label truncates against the chip's max width;
+   the remove button stays quiet until the chip is hovered or focused. */
+.ws-mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  block-size: var(--height-xs);
+  max-inline-size: var(--ws-prompt-chip-max-width);
+  padding-inline: var(--space-1-5);
+  border-radius: var(--radius-sm);
+  background: var(--mention-bg);
+  color: var(--mention-text);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  white-space: nowrap;
+}
+
+.ws-mention-chip__icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.ws-mention-chip__label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-mention-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-cubic);
+}
+
+.ws-mention-chip:hover .ws-mention-chip__remove,
+.ws-mention-chip:focus-within .ws-mention-chip__remove {
+  opacity: 1;
+}
+
+.ws-mention-chip__remove:hover {
+  background: var(--bg-hover);
+}
+
+.ws-mention-chip__remove:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+  opacity: 1;
+}

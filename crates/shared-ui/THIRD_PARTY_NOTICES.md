@@ -4,7 +4,7 @@ Source in this directory that derives from another project, with the notice its 
 
 ## murm-ui
 
-`dropdown.ts` and `dropdown.css` are ported from the `components/dropdown.ts` and `styles/dropdown.css` files of murm-ui 0.2.0 (commit `336ff7db79d928373e83c3672db6041a0adbc868`), cut to the shared action-menu's needs and restyled onto the Cursor Dark tokens. (Moved here from `crates/workshop-server/ui/src/ui/workshop/`, where the port first landed.)
+`dropdown.ts` and `dropdown.css` are ported from the `components/dropdown.ts` and `styles/dropdown.css` files of murm-ui 0.2.0 (commit `336ff7db79d928373e83c3672db6041a0adbc868`), cut to the shared action-menu's needs and restyled onto the Cursor Dark tokens. (Moved here from the workshop UI package, now `crates/workshop/ui/src/parts/`, where the port first landed.)
 
 - Project: <https://github.com/levmv/murm-ui>
 - License: MIT

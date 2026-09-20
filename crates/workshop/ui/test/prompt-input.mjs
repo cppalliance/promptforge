@@ -1,0 +1,530 @@
+// The prompt input (src/parts/agent/prompt-input.ts) in jsdom: a Tiptap/
+// ProseMirror editor framed as the chat box. Covers: the editor mounts
+// inside the framed container with an accessible editable region; the
+// placeholder decorates the empty paragraph and lifts once content
+// lands; Enter submits through onSubmit while an IME-composition Enter
+// and Shift+Enter do not (Shift+Enter inserts a hard break); the box
+// height tracks content clamped between the min/max tokens (jsdom
+// reports scrollHeight 0, so the test stubs it to drive the clamp, and
+// pins the exported clamp directly); getText returns paragraphs and
+// breaks as single newlines; clear empties; setEditable toggles
+// contenteditable; the box registers a prosemirror text-control adapter
+// whose canUndo/canRedo track the history plugin's depth; dispose
+// destroys the editor. Runs under the shared
+// leak check: a PromptInput that is never disposed fails.
+// Run: node test/prompt-input.mjs
+import { writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import * as esbuild from "esbuild";
+import { JSDOM } from "jsdom";
+import { assertNoLeaks } from "./helpers/leak-check.mjs";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+
+const bundle = await esbuild.build({
+  stdin: {
+    contents: `
+      export * as lifecycle from "./src/base/lifecycle.ts";
+      export { PromptInput, clampPromptInputHeight } from "./src/parts/agent/prompt-input.ts";
+      export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
+      export { getService } from "./src/services/service-registry.ts";
+    `,
+    resolveDir: path.join(testDir, ".."),
+    loader: "ts",
+  },
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  logLevel: "silent",
+  // The module under test imports its colocated CSS; strip it - the
+  // test drives only the JS, and jsdom applies no stylesheets anyway.
+  loader: { ".css": "empty" },
+});
+
+// ProseMirror reads the DOM globals at construction, so the jsdom
+// globals must exist before the bundle is imported. pretendToBeVisual
+// supplies the requestAnimationFrame ProseMirror schedules with.
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "http://127.0.0.1:7910/",
+  pretendToBeVisual: true,
+});
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
+// The text-control service probes these constructor globals when it
+// classifies the focused element.
+globalThis.Element = dom.window.Element;
+globalThis.HTMLElement = dom.window.HTMLElement;
+globalThis.HTMLInputElement = dom.window.HTMLInputElement;
+globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
+globalThis.Node = dom.window.Node;
+// Tiptap's focus command schedules with the bare globals.
+globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+// jsdom has no layout: a focused editor's scroll-to-selection measures
+// the cursor through range geometry, so stub it to zero rects.
+const zeroRect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
+dom.window.Range.prototype.getClientRects = () => [];
+dom.window.Range.prototype.getBoundingClientRect = () => zeroRect;
+
+const bundlePath = path.join(os.tmpdir(), "promptforge-prompt-input-test.mjs");
+await writeFile(bundlePath, bundle.outputFiles[0].text);
+const { lifecycle, PromptInput, clampPromptInputHeight, TEXT_CONTROL_SERVICE, getService } = await import(
+  pathToFileURL(bundlePath).href
+);
+
+const failures = [];
+function check(name, condition) {
+  if (!condition) failures.push(name);
+}
+
+function pressEnter(target, init = {}) {
+  target.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    }),
+  );
+}
+
+function editorElement(input) {
+  return input.element.querySelector(".ws-prompt-input__editor");
+}
+
+await assertNoLeaks(lifecycle, async () => {
+  // --- Mount ----------------------------------------------------------------
+
+  {
+    const input = new PromptInput();
+    const editor = editorElement(input);
+    check(
+      "the editor mounts a ProseMirror region inside the framed container",
+      input.element.classList.contains("ws-prompt-input") &&
+        editor !== null &&
+        editor.classList.contains("ProseMirror"),
+    );
+    check(
+      "the editable region is contenteditable with an accessible name",
+      editor.getAttribute("contenteditable") === "true" &&
+        editor.getAttribute("role") === "textbox" &&
+        editor.getAttribute("aria-label") === "Message" &&
+        editor.getAttribute("aria-multiline") === "true",
+    );
+    input.dispose();
+  }
+
+  // --- Placeholder ------------------------------------------------------------
+
+  {
+    const input = new PromptInput({ placeholder: "Message the agent" });
+    const empty = editorElement(input).querySelector("p");
+    check(
+      "the empty paragraph carries the placeholder decoration",
+      empty !== null &&
+        empty.classList.contains("is-editor-empty") &&
+        empty.getAttribute("data-placeholder") === "Message the agent",
+    );
+    const filled = new PromptInput({ content: "<p>hello</p>" });
+    const paragraph = editorElement(filled).querySelector("p");
+    check(
+      "content lifts the placeholder decoration",
+      paragraph !== null && !paragraph.classList.contains("is-editor-empty"),
+    );
+    input.dispose();
+    filled.dispose();
+  }
+
+  // --- Submit -----------------------------------------------------------------
+
+  {
+    let submitted = 0;
+    const input = new PromptInput({
+      content: "<p>hello</p>",
+      onSubmit: () => {
+        submitted++;
+      },
+    });
+    const editor = editorElement(input);
+    pressEnter(editor);
+    check("Enter submits", submitted === 1);
+    check(
+      "a submitting Enter leaves the text untouched",
+      input.getText() === "hello",
+    );
+    input.dispose();
+  }
+
+  {
+    let submitted = 0;
+    const input = new PromptInput({
+      content: "<p>hello</p>",
+      onSubmit: () => {
+        submitted++;
+      },
+    });
+    const editor = editorElement(input);
+    // A full composition session: ProseMirror tracks composing state
+    // from compositionstart, so the committing Enter is inert end to end.
+    editor.dispatchEvent(new dom.window.CompositionEvent("compositionstart", { bubbles: true }));
+    pressEnter(editor, { isComposing: true });
+    check(
+      "an Enter committing an IME composition does not submit",
+      submitted === 0,
+    );
+    check(
+      "an Enter committing an IME composition leaves the text untouched",
+      input.getText() === "hello",
+    );
+    editor.dispatchEvent(new dom.window.CompositionEvent("compositionend", { bubbles: true }));
+    // A bare isComposing flag, with no session ProseMirror tracked: the
+    // guard in the keydown handler is the only thing refusing the send.
+    pressEnter(editor, { isComposing: true });
+    check(
+      "an Enter flagged isComposing without a tracked session still does not submit",
+      submitted === 0,
+    );
+    check(
+      "an Enter flagged isComposing is claimed, not split into a paragraph",
+      input.getText() === "hello",
+    );
+    input.dispose();
+  }
+
+  {
+    let submitted = 0;
+    const input = new PromptInput({
+      content: "<p>hello</p>",
+      onSubmit: () => {
+        submitted++;
+      },
+    });
+    const editor = editorElement(input);
+    pressEnter(editor, { shiftKey: true });
+    check("Shift+Enter does not submit", submitted === 0);
+    check(
+      "Shift+Enter inserts a hard break",
+      editor.querySelector("br:not(.ProseMirror-trailingBreak)") !== null &&
+        input.getText() === "\nhello",
+    );
+    input.dispose();
+  }
+
+  // --- Auto-resize --------------------------------------------------------------
+
+  check(
+    "the clamp passes heights inside the band through",
+    clampPromptInputHeight(150, 36, 200) === 150,
+  );
+  check(
+    "the clamp holds heights at the max token",
+    clampPromptInputHeight(500, 36, 200) === 200,
+  );
+  check(
+    "the clamp lifts heights to the min token",
+    clampPromptInputHeight(10, 36, 200) === 36,
+  );
+
+  {
+    const input = new PromptInput({ content: "<p>hello</p>" });
+    const editor = editorElement(input);
+    let measured = 150;
+    // jsdom reports scrollHeight 0; the stub stands in for layout.
+    Object.defineProperty(editor, "scrollHeight", {
+      configurable: true,
+      get: () => measured,
+    });
+    input.syncHeight();
+    check(
+      "the box height follows the content inside the band",
+      editor.style.height === "150px",
+    );
+    measured = 500;
+    input.syncHeight();
+    check(
+      "the box height clamps at the max token",
+      editor.style.height === "200px",
+    );
+    measured = 10;
+    input.syncHeight();
+    check(
+      "the box height clamps at the min token",
+      editor.style.height === "36px",
+    );
+    measured = 120;
+    input.clear();
+    check(
+      "an edit re-measures the box",
+      editor.style.height === "120px",
+    );
+    input.dispose();
+  }
+
+  // --- Text extraction -----------------------------------------------------------
+
+  {
+    const input = new PromptInput({ content: "<p>first</p><p>second</p>" });
+    check(
+      "getText joins paragraphs with single newlines",
+      input.getText() === "first\nsecond",
+    );
+    input.clear();
+    check("clear empties the editor", input.getText() === "");
+    input.dispose();
+  }
+
+  // --- Editable gate ---------------------------------------------------------------
+
+  {
+    const input = new PromptInput();
+    const editor = editorElement(input);
+    input.setEditable(false);
+    check(
+      "setEditable(false) lifts contenteditable",
+      editor.getAttribute("contenteditable") === "false",
+    );
+    input.setEditable(true);
+    check(
+      "setEditable(true) restores contenteditable",
+      editor.getAttribute("contenteditable") === "true",
+    );
+    input.dispose();
+  }
+
+  // --- The dictation target seam (SttInputTarget) ----------------------------
+
+  {
+    const input = new PromptInput();
+    input.setText("ab");
+    check("setText loads plain text", input.getText() === "ab");
+    input.setSelection(2, 2);
+    const middle = input.insertionContext();
+    check(
+      "insertionContext captures a mid-word cursor with no composition prefix",
+      middle.range.start === 2 &&
+        middle.range.end === 2 &&
+        middle.original === "" &&
+        middle.compositionPrefix === "",
+    );
+    input.replaceRange(2, 2, "X");
+    check("replaceRange splices at the cursor", input.getText() === "aXb");
+    const afterInsert = input.insertionContext().range;
+    check(
+      "replaceRange leaves the cursor after the inserted text",
+      afterInsert.start === 3 && afterInsert.end === 3,
+    );
+    input.replaceRange(1, 4, "");
+    check("replaceRange with empty text deletes the range", input.getText() === "");
+    input.setText("line one\nline two");
+    check(
+      "setText writes one paragraph per newline",
+      input.getText() === "line one\nline two" &&
+        editorElement(input).querySelectorAll("p").length === 2,
+    );
+    input.dispose();
+  }
+
+  {
+    const input = new PromptInput();
+    input.setText("First test alpha");
+    const append = input.insertionContext();
+    check(
+      "insertionContext captures a ProseMirror append separator",
+      append.range.start === append.range.end &&
+        append.range.end === 17 &&
+        append.original === "" &&
+        append.compositionPrefix === " ",
+    );
+    input.replaceRange(append.range.start, append.range.end, " ");
+    check(
+      "a captured ProseMirror composition prefix is immutable",
+      append.compositionPrefix === " ",
+    );
+    input.setText("First test alpha ");
+    check(
+      "insertionContext preserves existing ProseMirror trailing whitespace",
+      input.insertionContext().compositionPrefix === "",
+    );
+    input.setText("First test alpha");
+    input.setSelection(7, 11);
+    const replacement = input.insertionContext();
+    check(
+      "insertionContext captures selected ProseMirror text without a separator",
+      replacement.range.start === 7 &&
+        replacement.range.end === 11 &&
+        replacement.original === "test" &&
+        replacement.compositionPrefix === "",
+    );
+    input.dispose();
+  }
+
+  // --- Newlines cross the target seam ---------------------------------------------
+
+  {
+    const input = new PromptInput();
+    input.setText("a\n\nb");
+    check(
+      "setText writes an empty paragraph for an empty line",
+      input.getText() === "a\n\nb" &&
+        editorElement(input).querySelectorAll("p").length === 3,
+    );
+    input.setText("ab");
+    input.setSelection(2, 2);
+    input.replaceRange(2, 2, "x\ny");
+    check(
+      "replaceRange splices a newline as a hard break inside the paragraph",
+      input.getText() === "ax\nyb" &&
+        editorElement(input).querySelectorAll("p").length === 1,
+    );
+    // The take's splice math (TakeState.length in stt.ts) holds only while
+    // every inserted character, newline included, occupies one position.
+    const afterNewline = input.insertionContext().range;
+    check(
+      "a spliced newline occupies one position, keeping the take's length arithmetic",
+      afterNewline.start === 5 && afterNewline.end === 5,
+    );
+    input.replaceRange(2, 5, "");
+    check(
+      "deleting the spliced range restores the pre-take text",
+      input.getText() === "ab",
+    );
+    input.dispose();
+  }
+
+  // --- The two locks compose on one contenteditable -----------------------------
+
+  {
+    const input = new PromptInput();
+    const editor = editorElement(input);
+    input.setReadOnly(true);
+    check(
+      "setReadOnly locks the editor and marks the frame",
+      editor.getAttribute("contenteditable") === "false" &&
+        input.element.classList.contains("ws-stt-input--recording"),
+    );
+    input.setEditable(false);
+    input.setReadOnly(false);
+    check(
+      "lifting the take lock under a closed gate stays non-editable",
+      editor.getAttribute("contenteditable") === "false" &&
+        !input.element.classList.contains("ws-stt-input--recording"),
+    );
+    input.setReadOnly(true);
+    input.setEditable(true);
+    check(
+      "the gate reopening under a live take lock stays non-editable",
+      editor.getAttribute("contenteditable") === "false",
+    );
+    input.setReadOnly(false);
+    check(
+      "lifting the last lock reopens the editor",
+      editor.getAttribute("contenteditable") === "true",
+    );
+    input.dispose();
+  }
+
+  // --- Enter submits while read-only --------------------------------------------
+
+  {
+    let submitted = 0;
+    const input = new PromptInput({
+      content: "<p>hello</p>",
+      onSubmit: () => {
+        submitted++;
+      },
+    });
+    input.setReadOnly(true);
+    pressEnter(editorElement(input));
+    check(
+      "Enter submits while the box is read-only (a live take)",
+      submitted === 1,
+    );
+    check(
+      "the read-only submitting Enter leaves the text untouched",
+      input.getText() === "hello",
+    );
+    input.dispose();
+  }
+
+  // --- Placeholder dynamics --------------------------------------------------------
+
+  {
+    let label = "first";
+    const input = new PromptInput({ placeholder: () => label });
+    check(
+      "a function placeholder is evaluated for the decoration",
+      editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "first",
+    );
+    label = "second";
+    input.setEditable(false);
+    check(
+      "the placeholder re-evaluates on the gate flip",
+      editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "second",
+    );
+    check(
+      "the placeholder still shows while non-editable",
+      editorElement(input).querySelector("p")?.classList.contains("is-editor-empty") === true,
+    );
+    input.dispose();
+  }
+
+  // --- The text-control adapter (Edit menu routing) ----------------------------
+
+  {
+    const textControls = getService(TEXT_CONTROL_SERVICE);
+    const input = new PromptInput();
+    document.body.appendChild(input.element);
+    input.focus();
+    // Tiptap defers the DOM focus to the next animation frame.
+    await new Promise((resolve) => globalThis.requestAnimationFrame(resolve));
+    const active = textControls.active;
+    check(
+      "the prompt registers a prosemirror text-control adapter",
+      active !== null && active.kind === "prosemirror",
+    );
+    check(
+      "a fresh prompt reports an empty undo and redo history",
+      active !== null && active.canUndo() === false && active.canRedo() === false,
+    );
+    input.setText("hello");
+    check("an edit deepens the adapter's undo history", active !== null && active.canUndo() === true);
+    textControls.undo();
+    check("routing undo through the service reverts the edit", input.getText() === "");
+    check("the reverted edit reports redo depth", active !== null && active.canRedo() === true);
+    textControls.redo();
+    check("routing redo through the service replays the edit", input.getText() === "hello");
+    input.dispose();
+    check("disposing the prompt unregisters its adapter", textControls.active === null);
+    input.element.remove();
+  }
+
+  // --- Dispose -----------------------------------------------------------------------
+
+  {
+    const input = new PromptInput({ content: "<p>hello</p>" });
+    document.body.appendChild(input.element);
+    check(
+      "a live editor renders its paragraph",
+      editorElement(input)?.querySelector("p") !== null,
+    );
+    input.dispose();
+    check(
+      "dispose destroys the editor, removing its DOM from the container",
+      editorElement(input) === null,
+    );
+    input.element.remove();
+  }
+});
+
+if (failures.length > 0) {
+  console.error(`ws-prompt-input: ${failures.length} failure(s)`);
+  for (const failure of failures) console.error(`  - ${failure}`);
+  process.exit(1);
+}
+console.log("ws-prompt-input: all assertions passed");
+process.exit(0);

@@ -102,7 +102,7 @@ The `intro` lens runs a reduced pipeline. It has no extract stage and no tier st
 
 <lens-workshop>
 Audience: the end user of the Workshop desktop application.
-Targets: `crates/workshop/shell/`, `crates/workshop/server/`, including `crates/workshop/server/ui/src/`.
+Targets: `crates/workshop/shell/`, `crates/workshop/server/`, including `crates/workshop/ui/src/`.
 Extract: what the user sees and operates. The chat and agent surface. The editor. The status bar. The menus. Voice input. The update flow. Routes and protocol only where they produce user-visible behavior.
 Noise: Rust internals, wire protocol details, test infrastructure.
 Output: `guide/src/workshop/`.
