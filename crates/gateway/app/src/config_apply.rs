@@ -36,7 +36,7 @@ use crate::auth::AuthedCaller;
 use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
 use crate::config_pending::{canonical_form, config_root, relative_name, shadow_census};
 use crate::config_write::{config_write_error, error_chain};
-use crate::error::GatewayError;
+use crate::error::{GatewayError, blocking};
 use crate::routing::Routing;
 
 /// Top-level sections the process reads once at boot. A change to one of
@@ -84,17 +84,13 @@ pub(crate) async fn admin_config_apply(
         // snapshot is one the latest save validated whole. It is released
         // before the command runs: the queue serializes the reload itself.
         let _guard = state.apply.lock().await;
-        let plan = tokio::task::spawn_blocking(move || capture_apply(&config_path))
-            .await
-            .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
+        let plan = blocking(move || capture_apply(&config_path)).await??;
         let snapshot = match plan {
             ApplyPlan::Inline {
                 files,
                 restart_required,
             } => {
-                let applied = tokio::task::spawn_blocking(move || promote_captures(&files))
-                    .await
-                    .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
+                let applied = blocking(move || promote_captures(&files)).await??;
                 return Ok(Json(serde_json::json!({
                     "applied": applied,
                     "reloaded": false,
@@ -151,9 +147,7 @@ pub(crate) async fn admin_config_revert(
     // either.
     let _guard = state.apply.lock().await;
     let config_path = crate::admin::config_path(&state)?.to_path_buf();
-    let reverted = tokio::task::spawn_blocking(move || delete_all_shadows(&config_path))
-        .await
-        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
+    let reverted = blocking(move || delete_all_shadows(&config_path)).await??;
     Ok(Json(serde_json::json!({ "reverted": reverted })))
 }
 
@@ -382,9 +376,7 @@ async fn apply_snapshot(
     if token.is_cancelled() {
         return Err(apply_cancelled());
     }
-    let applied = tokio::task::spawn_blocking(move || promote_captures(&files))
-        .await
-        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
+    let applied = blocking(move || promote_captures(&files)).await??;
     let mut live = state.live.write().await;
     live.routing = Arc::new(routing);
     live.config = Arc::new(config);

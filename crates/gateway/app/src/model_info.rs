@@ -10,9 +10,7 @@
 #[cfg(feature = "local")]
 use axum::Json;
 #[cfg(feature = "local")]
-use axum::extract::rejection::QueryRejection;
-#[cfg(feature = "local")]
-use axum::extract::{Query, State};
+use axum::extract::State;
 #[cfg(feature = "local")]
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,7 +22,7 @@ use crate::AppState;
 #[cfg(feature = "local")]
 use crate::auth::AuthedCaller;
 #[cfg(feature = "local")]
-use crate::error::GatewayError;
+use crate::error::{GatewayError, WireQuery, blocking};
 #[cfg(feature = "local")]
 use crate::local::{LocalError, gguf, resolve_cache_root};
 use crate::wire::ModelInfo;
@@ -96,24 +94,17 @@ pub(crate) struct ModelInfoQuery {
 #[cfg(feature = "local")]
 pub(crate) async fn admin_model_info(
     State(state): State<AppState>,
-    query: Result<Query<ModelInfoQuery>, QueryRejection>,
     _caller: AuthedCaller,
+    WireQuery(query): WireQuery<ModelInfoQuery>,
 ) -> Result<Json<gguf::ModelInfo>, GatewayError> {
-    // Deferring the extractor keeps auth first and puts the rejection in
-    // the gateway's JSON error envelope instead of axum's plain-text 400.
-    let Query(query) =
-        query.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     // The retained running config carries the `[local].cache_dir` the path
     // is confined to, so the boundary and the store agree on the root.
     let config = state.config().await;
-    let info = tokio::task::spawn_blocking(move || {
+    let info = blocking(move || {
         let root = resolve_cache_root(config.local().cache_dir())?;
         gguf::read_model_info(&root, &PathBuf::from(query.path))
     })
-    .await
-    // A join failure is a panicked server task, not bad client data: 500,
-    // matching the orphans and system routes.
-    .map_err(GatewayError::cache)?
+    .await?
     .map_err(|error| match error {
         // The rejected boundary check is the caller's fault, not the file's.
         LocalError::UnsafeCachePath { path } => GatewayError::MalformedRequest(format!(

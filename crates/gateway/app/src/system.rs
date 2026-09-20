@@ -21,7 +21,7 @@ use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, blocking};
 
 /// Generic speech lifecycle facts included in Gateway operational status.
 #[cfg(feature = "stt")]
@@ -167,12 +167,11 @@ pub(crate) async fn admin_system(
 ) -> Result<Json<SystemSnapshot>, GatewayError> {
     let cache_dir = state.config().await.local().cache_dir().map(str::to_owned);
     let metrics = Arc::clone(&state.metrics);
-    let snapshot = tokio::task::spawn_blocking(move || {
+    let snapshot = blocking(move || {
         let cache_root = disk_target(cache_dir.as_deref());
         sample(&metrics, cache_root.as_deref())
     })
-    .await
-    .map_err(GatewayError::system_metrics)?;
+    .await?;
     Ok(Json(snapshot))
 }
 

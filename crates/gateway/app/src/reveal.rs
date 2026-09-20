@@ -21,15 +21,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
-use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use serde::Deserialize;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, WireJson, blocking};
 
 /// The `POST /admin/reveal` body: the filesystem path to reveal.
 #[derive(Debug, Deserialize)]
@@ -95,13 +93,8 @@ impl RevealLauncher for SpawnLauncher {
 pub(crate) async fn admin_reveal(
     State(state): State<AppState>,
     _caller: AuthedCaller,
-    body: Result<Json<RevealRequest>, JsonRejection>,
+    WireJson(request): WireJson<RevealRequest>,
 ) -> Result<StatusCode, GatewayError> {
-    // Deferring the extractor keeps the guards first and puts the rejection
-    // in the gateway's JSON error envelope instead of axum's plain-text 400.
-    let Json(request) =
-        body.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
-
     #[cfg(feature = "local")]
     let roots = {
         let mut roots = Vec::new();
@@ -117,14 +110,13 @@ pub(crate) async fn admin_reveal(
     let roots: Vec<PathBuf> = Vec::new();
     // Canonicalization and the spawn are blocking filesystem work.
     let launcher = Arc::clone(&state.reveal);
-    tokio::task::spawn_blocking(move || {
+    blocking(move || {
         let command = resolve_reveal(&roots, Path::new(&request.path))?;
         launcher
             .launch(command)
             .map_err(|error| GatewayError::RevealFailed(Box::new(error)))
     })
-    .await
-    .map_err(|join| GatewayError::RevealFailed(Box::new(join)))??;
+    .await??;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -10,8 +10,7 @@
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::rejection::PathRejection;
-use axum::extract::{Path, RawQuery, State};
+use axum::extract::{RawQuery, State};
 use axum::http::HeaderValue;
 use axum::http::header::CONTENT_TYPE;
 use axum::response::Response;
@@ -21,7 +20,7 @@ use gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, WirePath};
 
 /// Whole-request deadline for one hub call, applied per request; reqwest's
 /// per-request timeout replaces the bounded client's wider default.
@@ -268,11 +267,9 @@ fn validate_search_value(
 /// the sibling list carries the exact file sizes the quant picker needs.
 pub(crate) async fn admin_hf_model(
     State(state): State<AppState>,
-    repo: Result<Path<(String, String)>, PathRejection>,
     _caller: AuthedCaller,
+    WirePath((owner, name)): WirePath<(String, String)>,
 ) -> Result<Response, GatewayError> {
-    let Path((owner, name)) =
-        repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let repo = format!("{owner}/{name}");
     validate_repo(&repo)?;
     state
@@ -286,11 +283,9 @@ pub(crate) async fn admin_hf_model(
 /// `text/markdown; charset=utf-8`. A missing README maps to 404.
 pub(crate) async fn admin_hf_readme(
     State(state): State<AppState>,
-    repo: Result<Path<(String, String)>, PathRejection>,
     _caller: AuthedCaller,
+    WirePath((owner, name)): WirePath<(String, String)>,
 ) -> Result<Response, GatewayError> {
-    let Path((owner, name)) =
-        repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let repo = format!("{owner}/{name}");
     validate_repo(&repo)?;
     state

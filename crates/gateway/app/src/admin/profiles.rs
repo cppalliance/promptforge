@@ -8,7 +8,7 @@ use serde::Deserialize;
 use super::config_path;
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::{GatewayError, WireJson};
+use crate::error::{GatewayError, WireJson, blocking};
 use gateway_config::ProfileName;
 
 /// The `POST /admin/switch-profile` body: a profile name, or `null` (or
@@ -77,12 +77,11 @@ pub(crate) async fn admin_switch_profile(
         selected.as_ref().map(ProfileName::as_str) != live.profile_name.as_deref()
     };
     let persisted = selected.clone();
-    tokio::task::spawn_blocking(move || match &persisted {
+    blocking(move || match &persisted {
         Some(name) => gateway_config::persist_profile_state(&config_path, name),
         None => gateway_config::clear_profile_state(&config_path),
     })
-    .await
-    .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+    .await?
     .map_err(crate::config_write::config_write_error)?;
     Ok(Json(serde_json::json!({
         "profile": selected.as_ref().map(ProfileName::as_str),

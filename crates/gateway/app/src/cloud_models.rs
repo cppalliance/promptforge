@@ -34,7 +34,7 @@ use time::OffsetDateTime;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, blocking};
 
 /// The release artifact the sheet downloads from.
 pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";
@@ -336,13 +336,8 @@ async fn download_once(cache_path: &Path, url: &str) -> Result<Sheet, GatewayErr
     })?;
     let display = cache_path.display().to_string();
     let path = cache_path.to_path_buf();
-    tokio::task::spawn_blocking(move || write_cache_atomic(&path, &bytes))
-        .await
-        .map_err(|join| {
-            GatewayError::CloudModelsUnavailable(format!(
-                "cloud provider sheet cache write to {display} failed: {join}"
-            ))
-        })?
+    blocking(move || write_cache_atomic(&path, &bytes))
+        .await?
         .map_err(|error| {
             GatewayError::CloudModelsUnavailable(format!(
                 "cloud provider sheet cache write to {display} failed: {error}"

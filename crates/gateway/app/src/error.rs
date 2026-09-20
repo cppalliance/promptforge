@@ -138,6 +138,14 @@ pub(crate) enum GatewayError {
         failed: Vec<String>,
     },
 
+    /// A blocking-pool task the route dispatched through [`blocking`] did
+    /// not run to completion: it panicked, or the runtime is shutting down.
+    /// Never the caller's fault, whatever the task was doing, so every
+    /// route maps a join failure here instead of choosing a domain variant.
+    #[non_exhaustive]
+    #[error("blocking task failed")]
+    BlockingTask(#[source] Box<dyn std::error::Error + Send + Sync>),
+
     /// A file-backed admin route was reached without a known config path.
     #[error("config path not configured")]
     ConfigPathUnavailable,
@@ -186,11 +194,6 @@ pub(crate) enum GatewayError {
     #[non_exhaustive]
     #[error("env file unreadable")]
     EnvFile(#[source] Box<dyn std::error::Error + Send + Sync>),
-
-    /// The `GET /admin/system` sampling task did not run to completion.
-    #[non_exhaustive]
-    #[error("system metrics sampling failed")]
-    SystemMetrics(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// `POST /admin/reveal` named a path that does not exist.
     #[non_exhaustive]
@@ -338,14 +341,6 @@ impl GatewayError {
         GatewayError::ModelInfo(Box::new(source))
     }
 
-    /// Wraps a system-metrics sampling failure, preserving the cause.
-    #[must_use]
-    pub(crate) fn system_metrics(
-        source: impl std::error::Error + Send + Sync + 'static,
-    ) -> GatewayError {
-        GatewayError::SystemMetrics(Box::new(source))
-    }
-
     /// The `(status, type, code)` triple for the OpenAI error envelope.
     #[expect(
         clippy::too_many_lines,
@@ -434,6 +429,11 @@ impl GatewayError {
                 "server_error",
                 "partial_start",
             ),
+            GatewayError::BlockingTask(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "blocking_task_failed",
+            ),
             GatewayError::ConfigPathUnavailable => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
@@ -468,11 +468,6 @@ impl GatewayError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "env_file_error",
-            ),
-            GatewayError::SystemMetrics(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "system_metrics_error",
             ),
             GatewayError::RevealPathNotFound(_) => (
                 StatusCode::NOT_FOUND,
@@ -563,10 +558,35 @@ impl IntoResponse for GatewayError {
     }
 }
 
+/// Runs `work` on tokio's blocking pool and hands back its value.
+///
+/// Every route that touches the filesystem, a blocking client, or an OS
+/// counter goes through here, so the one thing that can fail around the
+/// work - the join, when the task panicked or the runtime is draining -
+/// is mapped in one place to [`GatewayError::BlockingTask`]. A closure
+/// that itself returns a `Result` composes as `blocking(..).await??` (or
+/// `.await?.map_err(..)?`), keeping the domain error mapping beside the
+/// domain code and the join mapping out of it.
+pub(crate) async fn blocking<T, F>(work: F) -> Result<T, GatewayError>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|join| GatewayError::BlockingTask(Box::new(join)))
+}
+
 /// A JSON body extractor whose rejections render in the OpenAI error
 /// envelope: a malformed body, a wrong content type, or a failed
 /// deserialize all answer [`GatewayError::MalformedRequest`] carrying the
 /// rejection's detail, never axum's plain-text rejection.
+///
+/// [`WireQuery`] and [`WirePath`] are its siblings for the query string
+/// and path captures. All three are fallible extractors, so a handler
+/// lists them after its auth extractor: extractors run in argument order,
+/// and an unauthenticated caller must earn 401 before its malformed input
+/// earns 400.
 pub(crate) struct WireJson<T>(pub(crate) T);
 
 impl<T, S> axum::extract::FromRequest<S> for WireJson<T>
@@ -587,16 +607,56 @@ where
     }
 }
 
+/// A query-string extractor whose rejection renders in the OpenAI error
+/// envelope as [`GatewayError::MalformedRequest`]; see [`WireJson`].
+pub(crate) struct WireQuery<T>(pub(crate) T);
+
+impl<T, S> axum::extract::FromRequestParts<S> for WireQuery<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = GatewayError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<WireQuery<T>, GatewayError> {
+        match axum::extract::Query::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Query(value)) => Ok(WireQuery(value)),
+            Err(rejection) => Err(GatewayError::MalformedRequest(rejection.body_text())),
+        }
+    }
+}
+
+/// A path-capture extractor whose rejection renders in the OpenAI error
+/// envelope as [`GatewayError::MalformedRequest`]; see [`WireJson`].
+pub(crate) struct WirePath<T>(pub(crate) T);
+
+impl<T, S> axum::extract::FromRequestParts<S> for WirePath<T>
+where
+    T: serde::de::DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = GatewayError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<WirePath<T>, GatewayError> {
+        match axum::extract::Path::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Path(value)) => Ok(WirePath(value)),
+            Err(rejection) => Err(GatewayError::MalformedRequest(rejection.body_text())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::error::Error as _;
 
     #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "a flat status table with one row per error variant"
-    )]
     fn gateway_error_classify_is_table_driven() {
         let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
             (
@@ -676,14 +736,6 @@ mod tests {
                     StatusCode::BAD_REQUEST,
                     "invalid_request_error",
                     "switch_failed",
-                ),
-            ),
-            (
-                GatewayError::system_metrics(std::io::Error::other("x")),
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "server_error",
-                    "system_metrics_error",
                 ),
             ),
             (
@@ -861,6 +913,14 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "reveal_error",
+                ),
+            ),
+            (
+                GatewayError::BlockingTask(Box::new(std::io::Error::other("panicked"))),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "blocking_task_failed",
                 ),
             ),
         ];

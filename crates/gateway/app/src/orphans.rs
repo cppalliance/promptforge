@@ -14,7 +14,7 @@ use gateway_config::SttModelConfig;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, blocking};
 use crate::local::{cache::orphans, resolve_cache_root};
 
 /// The `GET /admin/orphans` route: bearer-authed, scans `<cache_dir>/models/`
@@ -36,7 +36,7 @@ pub(crate) async fn admin_orphans(
     // profile selects it. The catalog does not move on an apply, which
     // republishes the document with no profile selected.
     let config = state.config().await;
-    let entries = tokio::task::spawn_blocking(move || {
+    let entries = blocking(move || {
         let root = resolve_cache_root(config.local().cache_dir())?;
         let stt_sources: Vec<&str> = config
             .catalog_stt_models()
@@ -45,8 +45,7 @@ pub(crate) async fn admin_orphans(
             .collect();
         orphans(&root, config.catalog_local_models(), &stt_sources)
     })
-    .await
-    .map_err(GatewayError::cache)?
+    .await?
     .map_err(GatewayError::cache)?;
     Ok(Json(serde_json::json!({ "orphans": entries })))
 }

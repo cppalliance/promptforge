@@ -11,12 +11,11 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::extract::rejection::JsonRejection;
 use gateway_config::{ConfigErrorKind, save_config_shadow};
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, WireJson, blocking};
 
 /// The `PUT /admin/config` route: bearer-authed, stages the global config.
 ///
@@ -29,12 +28,8 @@ use crate::error::GatewayError;
 pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
     _caller: AuthedCaller,
-    body: Result<Json<serde_json::Value>, JsonRejection>,
+    WireJson(body): WireJson<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    // Deferring the extractor keeps auth first and puts the rejection in
-    // the gateway's JSON error envelope instead of axum's plain-text 400.
-    let Json(body) =
-        body.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     // Saves take the apply lock: apply promotes shadows without
     // re-validating, so the combination it promotes must be one the latest
     // save validated whole - saves serialize with apply, revert, and each
@@ -42,9 +37,8 @@ pub(crate) async fn admin_put_config(
     let _guard = state.apply.lock().await;
     let config = crate::admin::config_path(&state)?.to_path_buf();
     let document = toml_document(body)?;
-    let shadows = tokio::task::spawn_blocking(move || save_config_shadow(&config, document))
-        .await
-        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+    let shadows = blocking(move || save_config_shadow(&config, document))
+        .await?
         .map_err(config_write_error)?;
     Ok(Json(serde_json::json!({
         "shadow": shadows.config.display().to_string(),

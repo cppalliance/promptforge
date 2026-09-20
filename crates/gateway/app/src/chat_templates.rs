@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::config_pending::load_pending_for_running;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, blocking};
 
 #[derive(Serialize)]
 struct FamilyReply {
@@ -56,15 +56,14 @@ pub(crate) async fn admin_chat_templates(
         (Arc::clone(&live.config), live.profile_name.clone())
     };
     let config_path = state.config.as_ref().map(|config| config.path.clone());
-    let reply = tokio::task::spawn_blocking(move || {
+    let reply = blocking(move || {
         let config = match config_path {
             Some(path) => load_pending_for_running(&path, running_profile.as_deref())?,
             None => (*running).clone(),
         };
         serialize_catalog(&config)
     })
-    .await
-    .map_err(|join| GatewayError::PendingConfig(join.to_string()))??;
+    .await??;
     Ok(Json(reply))
 }
 

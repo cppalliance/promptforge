@@ -13,14 +13,13 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use axum::Json;
-use axum::extract::rejection::{JsonRejection, QueryRejection};
-use axum::extract::{Query, State};
+use axum::extract::State;
 use gateway_config::{pending_var_references, write_shadow};
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
 use crate::config_write::config_write_error;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, WireJson, WireQuery, blocking};
 
 /// The `GET /admin/env` route: bearer-authed, parses the global `.env` file.
 ///
@@ -38,7 +37,7 @@ pub(crate) async fn admin_get_env(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let config = crate::admin::config_path(&state)?.to_path_buf();
     let env = config.with_extension("env");
-    let reply = tokio::task::spawn_blocking(move || {
+    let reply = blocking(move || {
         // The reference scan parses the pending document without validating
         // or interpolating it, so a failure means an unreadable or
         // unparsable config file - surfaced, never hidden.
@@ -50,8 +49,7 @@ pub(crate) async fn admin_get_env(
             "references": references,
         }))
     })
-    .await
-    .map_err(|join| GatewayError::EnvFile(Box::new(join)))??;
+    .await??;
     Ok(Json(reply))
 }
 
@@ -73,15 +71,9 @@ pub(crate) struct EnvPutQuery {
 pub(crate) async fn admin_put_env(
     State(state): State<AppState>,
     _caller: AuthedCaller,
-    scope: Result<Query<EnvPutQuery>, QueryRejection>,
-    vars: Result<Json<BTreeMap<String, String>>, JsonRejection>,
+    WireQuery(scope): WireQuery<EnvPutQuery>,
+    WireJson(vars): WireJson<BTreeMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    // Deferring the extractors keeps auth first and puts rejections in
-    // the gateway's JSON error envelope instead of axum's plain-text 400.
-    let Query(scope) =
-        scope.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
-    let Json(vars) =
-        vars.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     // Saves take the apply lock; see `admin_put_config` for the why.
     let _guard = state.apply.lock().await;
     let env = match scope.scope.as_deref() {
@@ -93,9 +85,8 @@ pub(crate) async fn admin_put_env(
         }
     };
     let contents = render_env(&vars)?;
-    let shadow = tokio::task::spawn_blocking(move || write_shadow(&env, &contents))
-        .await
-        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+    let shadow = blocking(move || write_shadow(&env, &contents))
+        .await?
         .map_err(config_write_error)?;
     Ok(Json(
         serde_json::json!({ "shadow": shadow.display().to_string() }),

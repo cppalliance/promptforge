@@ -27,7 +27,7 @@ use gateway_progress::Activity;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
-use crate::error::{GatewayError, WireJson};
+use crate::error::{GatewayError, WireJson, blocking};
 use crate::local::artifacts::{
     DownloadProgress, PercentText, filename_from_url, parse_expected_digest,
 };
@@ -54,9 +54,8 @@ pub(crate) async fn list_cache(
     _caller: AuthedCaller,
 ) -> Result<Json<Vec<CacheEntry>>, GatewayError> {
     let cache_dir = live_cache_dir(&state).await;
-    let entries = tokio::task::spawn_blocking(move || open_cache(cache_dir.as_deref())?.list())
-        .await
-        .map_err(GatewayError::cache)?
+    let entries = blocking(move || open_cache(cache_dir.as_deref())?.list())
+        .await?
         .map_err(GatewayError::cache)?;
     Ok(Json(entries))
 }
@@ -114,13 +113,12 @@ pub(crate) async fn post_cache(
     // handed to the download task so the root is enforced exactly once.
     let lookup_source = source.clone();
     let lookup_pin = expected.clone();
-    let (cache, hit) = tokio::task::spawn_blocking(move || {
+    let (cache, hit) = blocking(move || {
         let cache = open_cache(cache_dir.as_deref())?;
         let hit = cache.lookup(&lookup_source, lookup_pin.as_deref())?;
         Ok::<_, LocalError>((cache, hit))
     })
-    .await
-    .map_err(GatewayError::cache)?
+    .await?
     .map_err(GatewayError::cache)?;
 
     if let Some(blob) = hit {
@@ -162,11 +160,9 @@ pub(crate) async fn delete_cache(
         .map_err(|error| GatewayError::MalformedRequest(error.to_string()))?;
     let cache_dir = live_cache_dir(&state).await;
     let lookup = wanted.clone();
-    let removed =
-        tokio::task::spawn_blocking(move || open_cache(cache_dir.as_deref())?.remove(&lookup))
-            .await
-            .map_err(GatewayError::cache)?
-            .map_err(GatewayError::cache)?;
+    let removed = blocking(move || open_cache(cache_dir.as_deref())?.remove(&lookup))
+        .await?
+        .map_err(GatewayError::cache)?;
     if !removed {
         return Err(GatewayError::CacheEntryNotFound(wanted));
     }
