@@ -34,7 +34,7 @@ pub mod handles;
 mod workspace;
 mod workspace_file;
 
-pub use error::WorkspaceError;
+pub use error::{JsonSource, WorkspaceError};
 pub use handlers::routes;
 pub use handles::{register, register_tasks};
 pub use workspace::{

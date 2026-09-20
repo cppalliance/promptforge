@@ -54,8 +54,9 @@ impl WhisperContext {
                 path: model.to_path_buf(),
             });
         };
-        let model_text = CString::new(model_text).map_err(|_| WhisperError::InteriorNull {
+        let model_text = CString::new(model_text).map_err(|source| WhisperError::InteriorNull {
             value: "whisper model path",
+            source,
         })?;
         // SAFETY: the function pointer matches b4938, model_text is a live
         // null-terminated path, and params came from the same loaded library.
@@ -104,8 +105,9 @@ impl WhisperContext {
     pub fn tokenize(&self, text: &str, max: usize) -> Result<Vec<c_int>, WhisperError> {
         let max_c =
             c_int::try_from(max).map_err(|_| WhisperError::CountOverflow { value: "token" })?;
-        let text = CString::new(text).map_err(|_| WhisperError::InteriorNull {
+        let text = CString::new(text).map_err(|source| WhisperError::InteriorNull {
             value: "tokenization text",
+            source,
         })?;
         let mut tokens = vec![0; max];
         // SAFETY: text is null-terminated, tokens has max_c writable entries,

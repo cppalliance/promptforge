@@ -232,7 +232,8 @@ impl HeaderReader {
             .map_err(|_| self.malformed(format!("{what} length {length} exceeds the cap")))?;
         let mut bytes = vec![0u8; capacity];
         self.read_exact(&mut bytes)?;
-        String::from_utf8(bytes).map_err(|_| self.malformed(format!("{what} is not UTF-8")))
+        String::from_utf8(bytes)
+            .map_err(|source| self.malformed(format!("{what} is not UTF-8: {source}")))
     }
 
     /// Skips a GGUF string without materializing it.

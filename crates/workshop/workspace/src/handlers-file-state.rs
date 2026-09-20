@@ -63,7 +63,10 @@ async fn store(
 ) -> Result<SavedResponse, WorkspaceError> {
     let key = ui_state_key(key)?;
     check_ui_state_cap(body.len())?;
-    let value: Value = serde_json::from_slice(body).map_err(|_| WorkspaceError::UiStateNotJson)?;
+    let value: Value =
+        serde_json::from_slice(body).map_err(|source| WorkspaceError::UiStateNotJson {
+            source: source.into(),
+        })?;
     let saved = workspace.put_ui_state(key, value).await?;
     Ok(SavedResponse { saved })
 }

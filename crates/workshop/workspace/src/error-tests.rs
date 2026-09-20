@@ -91,7 +91,9 @@ fn workspace_failures_keep_their_wire_mapping() {
             "binary_file",
         ),
         (
-            WorkspaceError::NotUtf8,
+            WorkspaceError::NotUtf8 {
+                source: String::from_utf8(vec![0xff]).unwrap_err(),
+            },
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "not_utf8",
         ),
@@ -140,12 +142,19 @@ fn ui_state_refusals_map_to_client_errors() {
         "ui-state value is 9 bytes; at most 8 bytes are allowed"
     );
 
-    let not_json = WorkspaceError::UiStateNotJson;
+    let refusal = serde_json::from_str::<serde_json::Value>("{not json").unwrap_err();
+    let not_json = WorkspaceError::UiStateNotJson {
+        source: refusal.into(),
+    };
     assert_eq!(not_json.status(), StatusCode::BAD_REQUEST);
     assert_eq!(not_json.code(), "ui_state_not_json");
     assert_eq!(
         render_message(&not_json, false),
         "ui-state value is not JSON"
+    );
+    assert!(
+        render_message(&not_json, true).starts_with("ui-state value is not JSON: "),
+        "the leaked chain names the parse refusal"
     );
 }
 

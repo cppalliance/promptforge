@@ -48,8 +48,13 @@ pub enum UserStateError {
     },
 
     /// A put body does not parse as JSON.
+    #[non_exhaustive]
     #[error("user-state value is not JSON")]
-    NotJson,
+    NotJson {
+        /// The parse refusal.
+        #[source]
+        source: JsonSource,
+    },
 
     /// The state file could not be written.
     #[non_exhaustive]
@@ -57,11 +62,24 @@ pub enum UserStateError {
     Io(#[source] io::Error),
 }
 
+/// The JSON parse refusal behind [`UserStateError::NotJson`], owned by
+/// this crate so the public error names no JSON library type. Renders and
+/// sources exactly as the serde error does.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct JsonSource(serde_json::Error);
+
+impl From<serde_json::Error> for JsonSource {
+    fn from(source: serde_json::Error) -> Self {
+        Self(source)
+    }
+}
+
 impl UserStateError {
     /// The one HTTP status this failure answers with.
     pub(crate) fn status(&self) -> StatusCode {
         match self {
-            Self::Key(_) | Self::NotJson => StatusCode::BAD_REQUEST,
+            Self::Key(_) | Self::NotJson { .. } => StatusCode::BAD_REQUEST,
             Self::TooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -72,7 +90,7 @@ impl UserStateError {
         match self {
             Self::Key(_) => "user_state_key",
             Self::TooLarge { .. } => "user_state_too_large",
-            Self::NotJson => "user_state_not_json",
+            Self::NotJson { .. } => "user_state_not_json",
             Self::Io(_) => "user_state_io",
         }
     }

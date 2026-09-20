@@ -29,10 +29,11 @@ pub(crate) enum ConfigError {
         source: Box<toml::de::Error>,
     },
 
-    /// A `${VAR}` referenced an environment variable that was not set.
+    /// A `${VAR}` referenced an environment variable that was not set,
+    /// or was set to a value that is not Unicode.
     #[non_exhaustive]
     #[error("unresolved environment variable {0}")]
-    UnresolvedVar(String),
+    UnresolvedVar(String, #[source] std::env::VarError),
 
     /// A `${...}` interpolation was malformed (for example, unclosed).
     #[non_exhaustive]

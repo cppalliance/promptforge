@@ -53,7 +53,7 @@ impl ConfigError {
             ConfigErrorRepr::Read { .. } => ConfigErrorKind::Read,
             ConfigErrorRepr::Parse { .. } => ConfigErrorKind::Parse,
             ConfigErrorRepr::Interpolation(_) => ConfigErrorKind::Interpolation,
-            ConfigErrorRepr::UnresolvedVar(_) => ConfigErrorKind::UnresolvedVar,
+            ConfigErrorRepr::UnresolvedVar(..) => ConfigErrorKind::UnresolvedVar,
             ConfigErrorRepr::Validation(_) => ConfigErrorKind::Validation,
             ConfigErrorRepr::HardBreak { .. } => ConfigErrorKind::HardBreak,
             ConfigErrorRepr::Write { .. } => ConfigErrorKind::Write,
@@ -124,7 +124,7 @@ mod tests {
                 ConfigErrorKind::Parse,
             ),
             (
-                ConfigErrorRepr::UnresolvedVar("V".to_owned()),
+                ConfigErrorRepr::UnresolvedVar("V".to_owned(), std::env::VarError::NotPresent),
                 ConfigErrorKind::UnresolvedVar,
             ),
             (

@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use workshop_registry::{Registration, Registry, RouteRegistrarAdapter};
 
-pub use error::UserStateError;
+pub use error::{JsonSource, UserStateError};
 pub use handlers::routes;
 pub use store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
 

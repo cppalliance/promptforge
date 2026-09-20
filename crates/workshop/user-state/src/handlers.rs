@@ -72,7 +72,9 @@ async fn store_value(
 ) -> Result<Value, UserStateError> {
     let key = user_state_key(key)?;
     check_text_cap(body.len())?;
-    let value: Value = serde_json::from_slice(body).map_err(|_| UserStateError::NotJson)?;
+    let value: Value = serde_json::from_slice(body).map_err(|source| UserStateError::NotJson {
+        source: source.into(),
+    })?;
     store.put(key, value).await?;
     Ok(serde_json::json!({ "saved": true }))
 }

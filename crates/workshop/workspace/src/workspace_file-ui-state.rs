@@ -63,7 +63,9 @@ pub(crate) fn check_ui_state_text(json_text: &str) -> Result<(), WorkspaceError>
     check_ui_state_cap(json_text.len())?;
     serde_json::from_str::<serde::de::IgnoredAny>(json_text)
         .map(|_| ())
-        .map_err(|_| WorkspaceError::UiStateNotJson)
+        .map_err(|source| WorkspaceError::UiStateNotJson {
+            source: source.into(),
+        })
 }
 
 impl WorkspaceFile {

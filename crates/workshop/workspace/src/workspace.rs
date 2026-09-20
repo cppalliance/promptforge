@@ -317,7 +317,7 @@ impl Workspace {
             return Err(WorkspaceError::BinaryFile);
         }
         let token = file_token(&metadata, &bytes);
-        let text = String::from_utf8(bytes).map_err(|_| WorkspaceError::NotUtf8)?;
+        let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::NotUtf8 { source })?;
         Ok(FileContents {
             path: canonical,
             size: metadata.len(),

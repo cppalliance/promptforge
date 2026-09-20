@@ -196,7 +196,7 @@ async fn non_json_text_is_refused_without_a_write() {
             .await
             .expect_err("text that does not parse as JSON is refused");
         assert!(
-            matches!(error, WorkspaceError::UiStateNotJson),
+            matches!(error, WorkspaceError::UiStateNotJson { .. }),
             "expected UiStateNotJson for {text:?}, got {error:?}"
         );
     }

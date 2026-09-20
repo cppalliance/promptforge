@@ -190,8 +190,9 @@ pub trait VfsAccess: Send {
     /// count is not exactly one, or when the read or write fails.
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         let bytes = self.read(path)?;
-        let text = String::from_utf8(bytes)
-            .map_err(|_| VfsError::Backend(format!("str_replace requires UTF-8 text: {path}")))?;
+        let text = String::from_utf8(bytes).map_err(|source| {
+            VfsError::Backend(format!("str_replace requires UTF-8 text: {path}: {source}"))
+        })?;
         let count = text.matches(old).count();
         if count == 0 {
             return Err(VfsError::Backend(format!(

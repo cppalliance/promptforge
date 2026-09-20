@@ -44,6 +44,9 @@ pub enum WhisperError {
     InteriorNull {
         /// Kind of text rejected at the C boundary.
         value: &'static str,
+        /// The refusal, naming the null byte's position.
+        #[source]
+        source: std::ffi::NulError,
     },
 
     /// whisper.cpp returned no context for a model.

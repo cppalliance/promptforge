@@ -394,7 +394,7 @@ Commit: one commit.
 
 <step-6>
 
-### Step 6: Attach discarded error causes
+### Step 6: Attach discarded error causes [completed]
 
 - Component: `error-model`
 - Piece: call sites (D2b)

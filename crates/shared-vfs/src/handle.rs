@@ -374,8 +374,9 @@ impl Access {
     /// Returns an error when the file's contents are not UTF-8.
     pub fn read_string(&self, path: &str) -> Result<String, VfsError> {
         let bytes = self.read(path)?;
-        String::from_utf8(bytes)
-            .map_err(|_| VfsError::Backend(format!("read_string requires UTF-8 text: {path}")))
+        String::from_utf8(bytes).map_err(|source| {
+            VfsError::Backend(format!("read_string requires UTF-8 text: {path}: {source}"))
+        })
     }
 
     /// Reads lines `start..=end` of the file at `path`, 1-based and

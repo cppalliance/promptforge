@@ -41,8 +41,8 @@ pub(crate) fn interpolate(input: &str) -> Result<String, ConfigError> {
                         "unclosed ${...} interpolation".to_string(),
                     ));
                 }
-                let value =
-                    std::env::var(&name).map_err(|_| ConfigError::UnresolvedVar(name.clone()))?;
+                let value = std::env::var(&name)
+                    .map_err(|source| ConfigError::UnresolvedVar(name.clone(), source))?;
                 out.push_str(&value);
             }
             _ => out.push('$'),

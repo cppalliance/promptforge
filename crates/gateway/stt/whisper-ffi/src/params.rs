@@ -77,9 +77,10 @@ impl FullParams {
     /// Returns [`WhisperError::InteriorNull`] when `language` contains a null.
     pub fn set_language(&mut self, language: Option<&str>) -> Result<(), WhisperError> {
         self.language = match language {
-            Some(language) => Language::Explicit(CString::new(language).map_err(|_| {
+            Some(language) => Language::Explicit(CString::new(language).map_err(|source| {
                 WhisperError::InteriorNull {
                     value: "whisper language",
+                    source,
                 }
             })?),
             None => Language::Auto,
@@ -144,8 +145,9 @@ impl FullParams {
     pub fn set_initial_prompt(&mut self, prompt: &str) -> Result<(), WhisperError> {
         self.initial_prompt =
             Some(
-                CString::new(prompt).map_err(|_| WhisperError::InteriorNull {
+                CString::new(prompt).map_err(|source| WhisperError::InteriorNull {
                     value: "whisper initial prompt",
+                    source,
                 })?,
             );
         Ok(())

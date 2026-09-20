@@ -511,7 +511,7 @@ fn unresolved_variable_is_an_error() {
     let missing = "${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}";
     assert!(matches!(
         interpolate(missing),
-        Err(ConfigError::UnresolvedVar(_))
+        Err(ConfigError::UnresolvedVar(..))
     ));
 }
 

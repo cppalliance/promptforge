@@ -110,8 +110,13 @@ pub enum WorkspaceError {
     BinaryFile,
 
     /// The file is not valid UTF-8.
+    #[non_exhaustive]
     #[error("file is not utf-8 text")]
-    NotUtf8,
+    NotUtf8 {
+        /// Where the bytes stopped being UTF-8.
+        #[source]
+        source: std::string::FromUtf8Error,
+    },
 
     /// The file or body exceeds the size limit.
     #[non_exhaustive]
@@ -168,8 +173,26 @@ pub enum WorkspaceError {
     },
 
     /// A ui-state value does not parse as JSON.
+    #[non_exhaustive]
     #[error("ui-state value is not JSON")]
-    UiStateNotJson,
+    UiStateNotJson {
+        /// The parse refusal.
+        #[source]
+        source: JsonSource,
+    },
+}
+
+/// The JSON parse refusal behind [`WorkspaceError::UiStateNotJson`],
+/// owned by this crate so the public error names no JSON library type.
+/// Renders and sources exactly as the serde error does.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct JsonSource(serde_json::Error);
+
+impl From<serde_json::Error> for JsonSource {
+    fn from(source: serde_json::Error) -> Self {
+        Self(source)
+    }
 }
 
 impl From<WorkspaceFileError> for WorkspaceError {
@@ -207,10 +230,10 @@ impl WorkspaceError {
             | Self::NotAFile
             | Self::WorkspaceFileRefused { .. }
             | Self::UiStateKey(_)
-            | Self::UiStateNotJson => StatusCode::BAD_REQUEST,
+            | Self::UiStateNotJson { .. } => StatusCode::BAD_REQUEST,
             Self::OutsideGrants | Self::ForbiddenComponent => StatusCode::FORBIDDEN,
             Self::NotFound | Self::NotGranted => StatusCode::NOT_FOUND,
-            Self::BinaryFile | Self::NotUtf8 => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Self::BinaryFile | Self::NotUtf8 { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::FileTooLarge { .. } | Self::UiStateTooLarge { .. } => {
                 StatusCode::PAYLOAD_TOO_LARGE
             }
@@ -241,7 +264,7 @@ impl WorkspaceError {
             Self::NotADirectory => "not_a_directory",
             Self::NotAFile => "not_a_file",
             Self::BinaryFile => "binary_file",
-            Self::NotUtf8 => "not_utf8",
+            Self::NotUtf8 { .. } => "not_utf8",
             Self::FileTooLarge { .. } => "file_too_large",
             Self::ModifiedConflict => "modified_conflict",
             Self::WorkspaceFileRefused { .. } => "workspace_file_refused",
@@ -249,7 +272,7 @@ impl WorkspaceError {
             Self::WorkspaceFileFailed { .. } => "workspace_file_failed",
             Self::UiStateKey(_) => "ui_state_key",
             Self::UiStateTooLarge { .. } => "ui_state_too_large",
-            Self::UiStateNotJson => "ui_state_not_json",
+            Self::UiStateNotJson { .. } => "ui_state_not_json",
         }
     }
 }

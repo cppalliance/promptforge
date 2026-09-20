@@ -74,8 +74,10 @@ pub(crate) struct CacheRequest {
 /// usable filename segment, which is returned for the download's leaf label.
 /// Anything else is a 400, never a download attempt.
 fn validate_source(source: &str) -> Result<String, GatewayError> {
-    let parsed = url::Url::parse(source).map_err(|_| {
-        GatewayError::MalformedRequest(format!("cache source `{source}` is not a valid URL"))
+    let parsed = url::Url::parse(source).map_err(|cause| {
+        GatewayError::MalformedRequest(format!(
+            "cache source `{source}` is not a valid URL: {cause}"
+        ))
     })?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(GatewayError::MalformedRequest(format!(
