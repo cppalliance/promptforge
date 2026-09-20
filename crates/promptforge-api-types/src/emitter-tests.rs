@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use promptforge_api_types::event::Event;
-use promptforge_api_types::ids::{AbandonReason, ChainId, TaskId, TaskOrigin};
-
-use super::{Emitter, EventSink, unit_observation};
-use crate::observe::{Observation, Observer, detail};
+use super::{Emitter, EventSink};
+use crate::event::{Event, lifecycle};
+use crate::ids::{AbandonReason, ChainId, Provenance, TaskId, TaskOrigin};
 
 fn root() -> TaskId {
     TaskId::from(ChainId::root())
@@ -19,11 +17,11 @@ fn each_task_counts_its_own_sequence_from_zero() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
     let arm = walk.for_task("0.0".parse().expect("a task id parses"));
-    walk.report("A", detail::SECTION_STARTED);
-    arm.report("W", detail::SECTION_STARTED);
-    walk.report("A", detail::LUA_CHUNK_STARTED);
-    arm.report("W", detail::LUA_CHUNK_STARTED);
-    arm.report("W", detail::LUA_CHUNK_SUCCEEDED);
+    walk.report("A", lifecycle::SECTION_STARTED);
+    arm.report("W", lifecycle::SECTION_STARTED);
+    walk.report("A", lifecycle::LUA_CHUNK_STARTED);
+    arm.report("W", lifecycle::LUA_CHUNK_STARTED);
+    arm.report("W", lifecycle::LUA_CHUNK_SUCCEEDED);
 
     let stamps: Vec<(String, u32)> = sink
         .take()
@@ -51,34 +49,46 @@ fn each_task_counts_its_own_sequence_from_zero() {
 fn a_lifecycle_report_becomes_the_matching_event_with_its_coordinates() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
-    walk.report("Gather", detail::STORE_WRITE_SUCCEEDED);
-    let events = sink.take();
+    walk.report("Gather", lifecycle::STORE_WRITE_SUCCEEDED);
     assert_eq!(
-        events,
+        sink.take(),
         vec![Event::StoreWriteSucceeded {
             execution: "run-1".to_owned(),
             section: "Gather".to_owned(),
-            provenance: promptforge_api_types::ids::Provenance {
+            provenance: Provenance {
                 task: root(),
                 seq: 0
             },
         }]
     );
-    assert_eq!(
-        unit_observation(&events[0]),
-        Some(Observation::StoreWriteSucceeded),
-        "the pair list maps back to the observation"
-    );
 }
 
 #[test]
-fn payload_variants_cross_field_for_field_and_unknown_ones_land_as_other() {
+fn an_effect_stamp_shares_the_task_sequence_with_its_events() {
+    let sink = EventSink::default();
+    let walk = emitter(&sink, root());
+    walk.report("A", lifecycle::SECTION_STARTED);
+    let stamp = walk.stamp_effect();
+    walk.report("A", lifecycle::SECTION_FINISHED);
+    let events = sink.take();
+    assert_eq!(
+        stamp.seq, 1,
+        "the effect takes the sequence between the two events"
+    );
+    assert_eq!(events[0].provenance().seq, 0);
+    assert_eq!(events[1].provenance().seq, 2);
+}
+
+#[test]
+fn payload_variants_cross_field_for_field() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
     let task: TaskId = "0.3".parse().expect("a task id parses");
-    walk.report(
-        "Spawner",
-        Observation::TaskStarted {
+    walk.emit("Spawner", |execution, section, provenance| {
+        Event::TaskStarted {
+            execution,
+            section,
+            provenance,
             task: task.clone(),
             target: "Worker".to_owned(),
             origin: TaskOrigin::Author,
@@ -86,21 +96,18 @@ fn payload_variants_cross_field_for_field_and_unknown_ones_land_as_other() {
             item: Some(serde_json::json!("x")),
             index: Some(2),
             var: serde_json::json!({ "k": 1 }),
-        },
-    );
-    walk.report(
-        "Worker",
-        Observation::TaskAbandoned {
+        }
+    });
+    walk.emit("Worker", |execution, section, provenance| {
+        Event::TaskAbandoned {
+            execution,
+            section,
+            provenance,
             task: task.clone(),
             reason: AbandonReason::OwnerFailed,
-        },
-    );
-    walk.observe("run-1", "Worker", Observation::Lua("checkpoint".to_owned()));
-    walk.observe(
-        "run-1",
-        "Worker",
-        Observation::Other("free-form".to_owned()),
-    );
+        }
+    });
+    walk.lua("Worker", "checkpoint");
     let events = sink.take();
     assert!(matches!(
         &events[0],
@@ -112,17 +119,14 @@ fn payload_variants_cross_field_for_field_and_unknown_ones_land_as_other() {
         Event::TaskAbandoned { task: ended, reason: AbandonReason::OwnerFailed, .. } if *ended == task
     ));
     assert!(matches!(&events[2], Event::Lua { message, .. } if message == "checkpoint"));
-    assert!(matches!(&events[3], Event::Other { message, .. } if message == "free-form"));
-    assert_eq!(unit_observation(&events[2]), None);
 }
 
 #[test]
-fn the_observer_seam_routes_content_reports_into_the_buffer() {
+fn content_reports_land_in_the_buffer_in_order() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
-    let observer: &dyn Observer = &walk;
-    observer.on_tool_result("run-1", "Chat", 7, 2, 3, "call_1", "echo", "out", true);
-    observer.on_user_input("run-1", "Chat", "typed");
+    walk.tool_result("Chat", 3, "call_1", "echo", "out", true);
+    walk.user_input("Chat", "typed");
     let events = sink.take();
     assert!(matches!(
         &events[0],
@@ -131,4 +135,17 @@ fn the_observer_seam_routes_content_reports_into_the_buffer() {
     ));
     assert!(matches!(&events[1], Event::UserInput { text, .. } if text == "typed"));
     assert_eq!(events[1].provenance().seq, 1);
+}
+
+#[test]
+fn the_root_emitter_reports_under_task_zero_with_its_execution() {
+    let sink = EventSink::default();
+    let emitter = Emitter::root(sink.clone(), "parse-1", true);
+    assert!(emitter.captures_debug());
+    assert_eq!(emitter.execution(), "parse-1");
+    assert_eq!(emitter.task(), &root());
+    emitter.report("Prompt", lifecycle::PARSE_STARTED);
+    let events = sink.take();
+    assert_eq!(events[0].execution(), "parse-1");
+    assert_eq!(events[0].provenance().task, root());
 }

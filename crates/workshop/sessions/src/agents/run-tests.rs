@@ -97,7 +97,7 @@ async fn run_builtin_chat(
         on_delta: Arc::new(|_| {}),
         model: Some(model),
         execution: "chat-unit".to_owned(),
-        cancel: promptforge_api_types::cancel::CancelHandle::new(),
+        cancel: harness_api::cancel::CancelHandle::new(),
     };
     let result = run_markdown_agent(BUILTIN_CHAT_SOURCE, parts, client, Arc::new(registry)).await;
     (result, log)
@@ -116,12 +116,9 @@ fn run_error(error: &AgentRunError) -> Option<&RunError> {
 
 #[test]
 fn the_builtin_chat_declares_its_contract_in_frontmatter() {
-    let prompt = Prompt::parse(
-        BUILTIN_CHAT_SOURCE,
-        "chat-unit",
-        &promptforge_api_types::observe::NullObserver::default(),
-    )
-    .expect("the embedded chat prompt parses");
+    let prompt = Prompt::parse(BUILTIN_CHAT_SOURCE, "chat-unit")
+        .0
+        .expect("the embedded chat prompt parses");
     let frontmatter = prompt.frontmatter();
     let capabilities = frontmatter.capabilities();
     assert_eq!(
@@ -221,7 +218,7 @@ async fn a_cancelled_token_interrupts_the_run() {
     let registry = session_registry("http://127.0.0.1:9", "k")
         .expect("a well-shaped gateway root builds the session registry");
     let client = agent_client("http://127.0.0.1:9", "k").expect("the test client builds");
-    let token = promptforge_api_types::cancel::CancelHandle::new();
+    let token = harness_api::cancel::CancelHandle::new();
     let parts = RunParts {
         sink,
         broker: Arc::new(ParkedBroker),

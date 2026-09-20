@@ -25,14 +25,14 @@ async fn debug_capture_receives_request_and_response_when_set() {
     assert_eq!(events[0].1, "Only");
     assert_eq!(events[0].2, 1);
     match &events[0].3 {
-        crate::debug::DebugEvent::Request { body } => {
+        crate::test_support::recording::DebugEvent::Request { body } => {
             assert_eq!(body["model"], "claude-sonnet-4-6");
             assert!(body["messages"].as_array().is_some_and(|m| !m.is_empty()));
         }
         other => panic!("expected request first, got {other:?}"),
     }
     match &events[1].3 {
-        crate::debug::DebugEvent::Response {
+        crate::test_support::recording::DebugEvent::Response {
             body,
             finish_reason,
             reasoning_content,
@@ -82,15 +82,17 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         "nested handle-form infer must reach the debug sink (F4), got no events"
     );
     assert!(
-        events
-            .iter()
-            .any(|event| matches!(event.3, crate::debug::DebugEvent::Request { .. })),
+        events.iter().any(|event| matches!(
+            event.3,
+            crate::test_support::recording::DebugEvent::Request { .. }
+        )),
         "nested inference must capture at least one request: {events:#?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|event| matches!(event.3, crate::debug::DebugEvent::Response { .. })),
+        events.iter().any(|event| matches!(
+            event.3,
+            crate::test_support::recording::DebugEvent::Response { .. }
+        )),
         "nested inference must capture at least one response: {events:#?}"
     );
 }
@@ -132,15 +134,17 @@ async fn fanout_arm_debug_events_reach_the_run_sink() {
         .filter(|(_, section, _, _)| section == "Worker")
         .collect();
     assert!(
-        worker_events
-            .iter()
-            .any(|event| matches!(event.3, crate::debug::DebugEvent::Request { .. })),
+        worker_events.iter().any(|event| matches!(
+            event.3,
+            crate::test_support::recording::DebugEvent::Request { .. }
+        )),
         "the arm's request must forward to the run's sink: {events:#?}"
     );
     assert!(
-        worker_events
-            .iter()
-            .any(|event| matches!(event.3, crate::debug::DebugEvent::Response { .. })),
+        worker_events.iter().any(|event| matches!(
+            event.3,
+            crate::test_support::recording::DebugEvent::Response { .. }
+        )),
         "the arm's response must forward to the run's sink: {events:#?}"
     );
 }

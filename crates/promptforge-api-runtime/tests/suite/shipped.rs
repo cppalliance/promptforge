@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use promptforge_api_runtime::parser::Prompt;
-use promptforge_api_types::observe::NullObserver;
 
 const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
 
@@ -32,7 +31,8 @@ fn every_prompt_under_parses(directory: &Path) {
 
     for path in files {
         let source = fs::read_to_string(&path).expect("read prompt fixture");
-        Prompt::parse(&source, SHIPPED_PARSE, &NullObserver::default())
+        Prompt::parse(&source, SHIPPED_PARSE)
+            .0
             .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
     }
 }

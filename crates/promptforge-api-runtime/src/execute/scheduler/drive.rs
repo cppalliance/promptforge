@@ -12,8 +12,8 @@ use crate::execute::RunResult;
 use crate::execute::error::RunError;
 use crate::execute::run::{EffectAnswer, EffectId, Step};
 use crate::execute::support::GENERIC_COMPLETION;
-use crate::observe::detail;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle;
 
 use super::{Phase, Scheduler};
 
@@ -151,9 +151,9 @@ impl Scheduler {
         self.ctx.emitter().report(
             self.ctx.prompt().title(),
             if result.is_ok() {
-                detail::RUN_SUCCEEDED
+                lifecycle::RUN_SUCCEEDED
             } else {
-                detail::RUN_FAILED
+                lifecycle::RUN_FAILED
             },
         );
         self.phase = Phase::Ending(result);

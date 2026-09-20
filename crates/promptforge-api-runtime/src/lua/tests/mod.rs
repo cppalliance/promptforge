@@ -25,7 +25,7 @@ use crate::execute::protocol::{Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{LuaProgram, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelId, ModelSet};
-use crate::observe::{NullObserver, Observer};
+use crate::test_support::recording::null_emitter;
 use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
 use promptforge_api_types::tools::ToolDescriptor;
@@ -82,13 +82,12 @@ fn scheduler_vm_with_tools(
     tools: &ToolSet,
     var: Option<&serde_json::Value>,
 ) -> SectionVm {
-    let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
+    let emitter = null_emitter();
     let mut vm = SectionVm::new_for_section(
-        &GuardNonce::fresh(),
+        &GuardNonce::from_seed(0x7e57),
         &Arc::new(Mutex::new(tools.clone())),
         &Arc::new(Mutex::new(models.clone())),
-        "test-run",
-        &NullObserver::default(),
+        &emitter,
         "Test",
     )
     .expect("the section VM builds");
@@ -106,7 +105,7 @@ fn scheduler_vm_with_tools(
         sys: &sys,
         access: &access,
         seed: VmSeed { var, item: None },
-        observer_arc: observer,
+        emitter: &emitter,
         section_name: "Test",
         shared: &shared,
         max_tool_iterations: 24,
@@ -154,8 +153,7 @@ fn compile_block(source: &str) -> LuaProgram {
         source,
         "section `Test` prologue",
         NonZeroU32::MIN,
-        "test-run",
-        &NullObserver::default(),
+        &null_emitter(),
         "Test",
     )
     .expect("the driver block compiles")

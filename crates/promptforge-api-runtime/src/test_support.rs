@@ -21,9 +21,10 @@
 //! zero-burden path over the tokio driver: prepare, refuse or run. The
 //! tool and broker fixtures implement the stand-in traits in [`tools`]
 //! ([`TestTool`], [`TestBroker`]); the production traits are the harness's,
-//! which no engine crate names. [`forward`] is the adapter that replays
-//! returned events onto a recording observer, so the observation suites
-//! hold without rewriting their assertions.
+//! which no engine crate names. [`recording`] is the suites' recording
+//! observer vocabulary, and its [`forward`] is the adapter that replays
+//! returned events onto one, so the observation suites hold without
+//! rewriting their assertions.
 
 #[cfg(test)]
 pub(crate) use promptforge_parser::test_support::synthetic_section;
@@ -39,16 +40,16 @@ use crate::execute::{
 };
 use crate::parser::Prompt;
 
-pub(crate) mod events_to_observer;
 pub mod host;
 #[cfg(test)]
 #[path = "test_support/mock-gateway-client.rs"]
 pub(crate) mod mock_gateway_client;
+pub mod recording;
 pub mod tokio_driver;
 pub mod tools;
 
-pub use events_to_observer::forward;
 pub use host::{ChatClient, DeltaHook, RunHost};
+pub use recording::{RecordingObserver, forward};
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub use tools::{TestBroker, TestTool, TestToolTable};
 
@@ -111,11 +112,11 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// use promptforge_api_runtime::test_support::drive;
 /// use promptforge_api_runtime::{Prompt, Run, RunContext, RunResult};
 /// use promptforge_api_types::event::Event;
-/// use promptforge_api_types::observe::NullObserver;
 /// use promptforge_api_types::timestamp::Timestamp;
 ///
 /// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
+/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
+/// let prompt = prompt?;
 /// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
 /// let run = Run::new(Arc::new(prompt), "", ctx);
 /// let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));

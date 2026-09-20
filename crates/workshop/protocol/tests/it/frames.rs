@@ -200,8 +200,8 @@ fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
 #[test]
 fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
     use promptforge_api_types::event::Event;
-    use promptforge_api_types::events::ToolCallEvent;
     use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    use promptforge_api_types::metrics::ToolCallEvent;
     let provenance = Provenance {
         task: TaskId::from(ChainId::root()),
         seq: 0,

@@ -13,8 +13,7 @@ use promptforge_api_runtime::Run;
 use promptforge_api_runtime::execute::{Environment, Requirements, RunContext, RunResult};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_runtime::test_support::{Performers, drive_tokio};
-use promptforge_api_types::cancel::sync::CancelHandle;
-use promptforge_api_types::observe::NullObserver;
+use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
 use shared_vfs::Origin;
@@ -32,7 +31,9 @@ pub(super) fn context(name: impl Into<String>) -> RunContext {
 
 /// Parses a fixture prompt.
 pub(super) fn parse(source: &str, execution: &str) -> Prompt {
-    Prompt::parse(source, execution, &NullObserver::default()).expect("the fixture prompt parses")
+    Prompt::parse(source, execution)
+        .0
+        .expect("the fixture prompt parses")
 }
 
 /// The harness's activate-then-prepare ceremony spelled out, so a test can

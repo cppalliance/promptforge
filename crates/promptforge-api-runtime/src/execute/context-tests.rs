@@ -1,12 +1,12 @@
 use super::*;
-use crate::observe::NullObserver;
 
 fn test_prompt() -> Prompt {
     let source = concat!(
         "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n",
         "# Title\n\n## Only\n\ndone\n",
     );
-    Prompt::parse(source, "run-context-test", &NullObserver::default())
+    Prompt::parse(source, "run-context-test")
+        .0
         .expect("the test prompt parses")
 }
 
@@ -75,10 +75,14 @@ fn a_task_fork_reports_into_the_shared_buffer_under_its_own_task() {
     let ctx = test_context(&test_prompt());
     let task: TaskId = "0.1".parse().expect("a task id parses");
     let arm = ctx.with_task(task.clone(), Arc::new(AtomicU32::new(0)));
-    ctx.emitter()
-        .report("Only", crate::observe::detail::SECTION_STARTED);
-    arm.emitter()
-        .report("Only", crate::observe::detail::SECTION_STARTED);
+    ctx.emitter().report(
+        "Only",
+        promptforge_api_types::event::lifecycle::SECTION_STARTED,
+    );
+    arm.emitter().report(
+        "Only",
+        promptforge_api_types::event::lifecycle::SECTION_STARTED,
+    );
     // Both emitters share one buffer, drained through either context.
     let events = arm.events.take();
     assert_eq!(events.len(), 2);

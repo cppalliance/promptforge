@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 #[path = "context-bound.rs"]
 mod bound;
 
+use promptforge_api_types::emitter::{Emitter, EventSink};
 use promptforge_api_types::event::Event;
 use promptforge_api_types::ids::{ChainId, TaskId};
 
@@ -20,13 +21,11 @@ use crate::Result;
 use crate::cancel::CancelHandle;
 use crate::lua::{LuaProgram, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
-use crate::observe::Observer;
 use crate::parser::Prompt;
 use crate::store::{Access, VfsRef};
 use crate::untrusted::GuardNonce;
 
 use super::config::{RunContext, RunLimits};
-use super::event_buffer::{Emitter, EventSink};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::sys_json;
 use bound::{bound_model_set, bound_tool_set, derive_argv};
@@ -67,9 +66,8 @@ pub(crate) struct RunState {
     events: EventSink,
     /// This context's task-scoped emitter: the root task's at
     /// construction, a spawned chain's own after [`with_task`](Self::with_task).
-    /// It is also the observer the Lua layer's `&dyn Observer` seams (the
-    /// shared replay, `log`, teardown, the shared tool-dispatch body) take,
-    /// through [`observer`](Self::observer), so their reports land in the
+    /// The Lua layer's seams (the shared replay, `log`, teardown, the
+    /// shared tool-dispatch body) take it too, so their reports land in the
     /// buffer in order with the scheduler's own.
     emitter: Arc<Emitter>,
     /// Test-only: the host seams the suites set on their `RunContext`,
@@ -275,13 +273,6 @@ impl RunState {
         &self.emitter
     }
 
-    /// The emitter as the observer trait object the Lua layer takes. Only
-    /// the seams that still name `&dyn Observer` should reach for this;
-    /// the scheduler's own reports go through [`emitter`](Self::emitter).
-    pub(crate) fn observer(&self) -> &dyn Observer {
-        self.emitter.as_ref()
-    }
-
     /// Drains the run's event buffer: every event pushed since the last
     /// drain, in push order. The run's `step` calls this once per step and
     /// hands the batch to the host.
@@ -383,7 +374,7 @@ impl RunState {
     }
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, `observer`, `shared`, the shim caps) from
+    /// run-wide slots (`args`, the emitter, `shared`, the shim caps) from
     /// this context; the driver supplies only its own deltas: the `sys`
     /// JSON, the seed, the chain step's access capability (the walk's own,
     /// a call chain's borrowed parent capability, a task chain's spawned
@@ -402,7 +393,7 @@ impl RunState {
             sys,
             access,
             seed,
-            observer_arc: Arc::clone(&self.emitter) as Arc<dyn Observer>,
+            emitter: &self.emitter,
             section_name,
             shared: &self.shared,
             max_tool_iterations: self.max_tool_iterations(),

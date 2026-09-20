@@ -13,9 +13,6 @@ description = "PromptForge API: prompt parser and the sans-IO Run state machine 
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-# The suites' stand-in tool and broker traits (`test_support::tools`) are
-# async traits; nothing in the engine proper awaits.
-async-trait = { workspace = true, optional = true }
 promptforge-api-types.workspace = true
 promptforge-lua.workspace = true
 promptforge-model-client.workspace = true
@@ -26,8 +23,9 @@ serde.workspace = true
 serde_json.workspace = true
 shared-vfs.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 mlua.workspace = true
+# The one runtime the engine names, and only for the tokio test driver
+# behind `test-support`; the engine proper performs no I/O.
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"], optional = true }
 workspace-hack.workspace = true
 
@@ -39,9 +37,11 @@ workspace-hack.workspace = true
 # caller's async performers - the only thing in this crate that needs
 # tokio. Workshop's agent sessions enable it as their interim host until
 # the harness lands; no other production dependent does.
-test-support = ["dep:tokio", "dep:async-trait"]
+test-support = ["dep:tokio"]
 
 [dev-dependencies]
+# The suites write their fixture tools and brokers as `async fn` under the
+# macro; the traits themselves are declared in its expanded form.
 async-trait.workspace = true
 axum.workspace = true
 # The buffer `reqwest` yields per body chunk, named as the mock-gateway
@@ -55,7 +55,6 @@ promptforge-parser = { workspace = true, features = ["test-support"] }
 # engine never performs a round.
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-tracing-subscriber.workspace = true
 
 # The integration suite and the bench drive runs through the tokio test
 # driver, so both need the feature that carries it.

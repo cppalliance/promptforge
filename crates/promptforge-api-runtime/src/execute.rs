@@ -70,9 +70,7 @@
 //! catalog; capability activation itself is the harness's, in
 //! `harness-capabilities`), `requirements` (the preflight
 //! [`Requirements`] report), `context` (the ambient `RunState` run
-//! state), `event_buffer` (the run-level event buffer and the
-//! task-scoped emitter every report goes through),
-//! `tools` (the nested-inference round's answer),
+//! state), `tools` (the nested-inference round's answer),
 //! `section_vm` (the section VM setup half shared by the walk and
 //! the fanout arm), `section_context` (the per-section `SectionContext`
 //! frame the scheduler's chains construct, run, and tear down),
@@ -94,7 +92,6 @@ pub(crate) mod context;
 mod engine;
 mod environment;
 mod error;
-pub(crate) mod event_buffer;
 mod fill;
 pub(crate) mod protocol;
 mod requirements;

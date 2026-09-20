@@ -19,9 +19,10 @@ use crate::execute::support::MAX_CALL_DEPTH;
 use crate::lua::{ToolSet, resolve_model_binding};
 use crate::model::Message;
 use crate::model::ModelBinding;
-use crate::observe::{Observation, detail};
 use crate::store::StoreError;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle;
+use promptforge_api_types::event::lifecycle::Lifecycle;
 
 use super::{ChainIndex, Continuation, Counters, Scheduler};
 
@@ -43,21 +44,36 @@ pub(super) fn unbound_tool_call(tool_set: &ToolSet, name: &str) -> Error {
 /// The succeeded/failed observation pair one store operation reports,
 /// matching the legacy direct closures event for event; `exists` reported
 /// nothing there and reports nothing here.
-fn store_observations(op: &StoreOp) -> Option<(Observation, Observation)> {
+fn store_observations(op: &StoreOp) -> Option<(Lifecycle, Lifecycle)> {
     let pair = match op {
-        StoreOp::Write { .. } => (detail::STORE_WRITE_SUCCEEDED, detail::STORE_WRITE_FAILED),
-        StoreOp::Append { .. } => (detail::STORE_APPEND_SUCCEEDED, detail::STORE_APPEND_FAILED),
-        StoreOp::Read { .. } => (detail::STORE_READ_SUCCEEDED, detail::STORE_READ_FAILED),
+        StoreOp::Write { .. } => (
+            lifecycle::STORE_WRITE_SUCCEEDED,
+            lifecycle::STORE_WRITE_FAILED,
+        ),
+        StoreOp::Append { .. } => (
+            lifecycle::STORE_APPEND_SUCCEEDED,
+            lifecycle::STORE_APPEND_FAILED,
+        ),
+        StoreOp::Read { .. } => (
+            lifecycle::STORE_READ_SUCCEEDED,
+            lifecycle::STORE_READ_FAILED,
+        ),
         StoreOp::ReadNumbered { .. } => (
-            detail::STORE_READ_NUMBERED_SUCCEEDED,
-            detail::STORE_READ_NUMBERED_FAILED,
+            lifecycle::STORE_READ_NUMBERED_SUCCEEDED,
+            lifecycle::STORE_READ_NUMBERED_FAILED,
         ),
         StoreOp::StrReplace { .. } => (
-            detail::STORE_REPLACE_SUCCEEDED,
-            detail::STORE_REPLACE_FAILED,
+            lifecycle::STORE_REPLACE_SUCCEEDED,
+            lifecycle::STORE_REPLACE_FAILED,
         ),
-        StoreOp::Delete { .. } => (detail::STORE_DELETE_SUCCEEDED, detail::STORE_DELETE_FAILED),
-        StoreOp::Glob { .. } => (detail::STORE_GLOB_SUCCEEDED, detail::STORE_GLOB_FAILED),
+        StoreOp::Delete { .. } => (
+            lifecycle::STORE_DELETE_SUCCEEDED,
+            lifecycle::STORE_DELETE_FAILED,
+        ),
+        StoreOp::Glob { .. } => (
+            lifecycle::STORE_GLOB_SUCCEEDED,
+            lifecycle::STORE_GLOB_FAILED,
+        ),
         StoreOp::Exists { .. } => return None,
     };
     Some(pair)
@@ -266,7 +282,7 @@ impl Scheduler {
         chain
             .ctx
             .emitter()
-            .report(&section, detail::USER_INPUT_WAIT_STARTED);
+            .report(&section, lifecycle::USER_INPUT_WAIT_STARTED);
         let effect = Effect::UserInput { execution, section };
         self.issue(id, effect, Continuation::UserInput);
     }

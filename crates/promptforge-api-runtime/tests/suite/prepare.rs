@@ -10,16 +10,13 @@
 //! and its suite lives with it in `harness-capabilities`; the engine's
 //! prepare only ever sees the catalog the host hands it.
 
-use std::io;
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
 
 use promptforge_api_runtime::execute::{Environment, RequirementCheck, RunErrorKind, RunResult};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_runtime::test_support::{RunHost, run_with_host};
 use promptforge_api_types::capabilities::CapabilityId;
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge_api_types::observe::NullObserver;
 use promptforge_api_types::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use shared_vfs::{HostBackend, Origin, VfsError, VfsRef};
 
@@ -39,43 +36,9 @@ const DECLARES_NOTHING: &str = concat!(
 
 /// Parses a fixture prompt.
 fn parse(source: &str, execution: &str) -> Prompt {
-    Prompt::parse(source, execution, &NullObserver::default()).expect("the fixture prompt parses")
-}
-
-/// A shared buffer a fmt subscriber writes log lines into.
-#[derive(Clone, Default)]
-struct Buffer {
-    bytes: Arc<Mutex<Vec<u8>>>,
-}
-
-impl io::Write for Buffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.bytes
-            .lock()
-            .expect("the buffer lock is not poisoned")
-            .extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Runs `f` under a fmt subscriber writing into a shared buffer and
-/// returns everything the subscriber captured.
-fn captured_logs(f: impl FnOnce()) -> String {
-    let buffer = Buffer::default();
-    let writer = buffer.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .finish();
-    tracing::subscriber::with_default(subscriber, f);
-    let bytes = buffer
-        .bytes
-        .lock()
-        .expect("the buffer lock is not poisoned");
-    String::from_utf8_lossy(&bytes).into_owned()
+    Prompt::parse(source, execution)
+        .0
+        .expect("the fixture prompt parses")
 }
 
 /// A unique temporary directory that removes itself on drop. The suite has
@@ -508,19 +471,14 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
     let catalog = ToolCatalog::new(&[web_descriptor("promptforge/web/search", "Search the web")])
         .expect("the catalog builds");
     let env = Environment::new().tools(catalog);
-    let logs = captured_logs(|| {
-        let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
-        assert!(
-            requirements.missing_required.is_empty(),
-            "an active capability is never reported missing: {:?}",
-            requirements.missing_required
-        );
-        assert!(requirements.is_satisfied());
-        // The alias stays unbound; advertising it fails at run time.
-        assert!(ctx.tool_bindings().is_empty());
-    });
+    let (ctx, requirements) = env.prepare(&prompt, context("fill-absent-tool"));
     assert!(
-        logs.contains("fetch"),
-        "the unfilled slot is a log line naming the alias: {logs}"
+        requirements.missing_required.is_empty(),
+        "an active capability is never reported missing: {:?}",
+        requirements.missing_required
     );
+    assert!(requirements.is_satisfied());
+    // The alias stays unbound; advertising it fails at run time with the
+    // alias named. The engine reaches no logger, so nothing else records it.
+    assert!(ctx.tool_bindings().is_empty());
 }

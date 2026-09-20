@@ -12,10 +12,17 @@
 //! test driver takes by [`RunHost`](super::RunHost). Nothing here reaches
 //! the engine.
 //!
+//! The async methods are declared in the boxed form
+//! `#[async_trait::async_trait]` expands an `async fn` to, so a suite
+//! writes its fixtures as `async fn` under that dev-only macro while the
+//! engine crate itself declares no async-trait dependency.
+//!
 //! [`Performers`]: super::Performers
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use promptforge_api_types::tools::{
@@ -24,6 +31,11 @@ use promptforge_api_types::tools::{
 
 use crate::input::{InputError, InputOutcome};
 
+/// The future a fixture's async method returns: boxed, `Send`, and bounded
+/// by the borrow of `self`, exactly as `#[async_trait::async_trait]`
+/// expands an `async fn` impl.
+pub type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 /// A fixture tool the tokio test driver dispatches a `ToolCall` effect to:
 /// the suites' stand-in for the harness's `Tool`.
 ///
@@ -31,10 +43,9 @@ use crate::input::{InputError, InputOutcome};
 /// transport [`wire_name`](TestTool::wire_name), a model-facing
 /// [`description`](TestTool::description), a JSON-Schema
 /// [`parameters_schema`](TestTool::parameters_schema), the
-/// [`structured_output`](TestTool::structured_output) flag, and the async
-/// [`call`](TestTool::call). [`descriptor`](TestTool::descriptor) is the
-/// tool as data, what a suite installs in the run's catalog.
-#[async_trait::async_trait]
+/// [`structured_output`](TestTool::structured_output) flag, and the
+/// future-returning [`call`](TestTool::call). [`descriptor`](TestTool::descriptor)
+/// is the tool as data, what a suite installs in the run's catalog.
 pub trait TestTool: Send + Sync {
     /// The tool's stable identity: the catalog key and what a `ToolCall`
     /// effect names.
@@ -66,24 +77,34 @@ pub trait TestTool: Send + Sync {
     }
 
     /// Performs one call with `args`, as the harness's tool performer
-    /// would.
-    ///
-    /// # Errors
-    /// Returns the tool's own model-safe [`ToolError`].
-    async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError>;
+    /// would. The future resolves to the tool's output or its own
+    /// model-safe [`ToolError`].
+    fn call<'life0, 'async_trait>(
+        &'life0 self,
+        args: serde_json::Value,
+    ) -> FixtureFuture<'async_trait, Result<ToolOutput, ToolError>>
+    where
+        'life0: 'async_trait,
+        Self: 'async_trait;
 }
 
 /// A fixture broker the tokio test driver answers a `UserInput` effect
 /// through: the suites' stand-in for the harness's `InputBroker`.
-#[async_trait::async_trait]
 pub trait TestBroker: Send + Sync {
     /// Waits for the answer to one input request for `section` of
-    /// `execution`.
-    ///
-    /// # Errors
-    /// Returns an [`InputError`] when the wait fails rather than
-    /// answering or declining.
-    async fn user_input(&self, execution: &str, section: &str) -> Result<InputOutcome, InputError>;
+    /// `execution`. The future resolves to the outcome, or to an
+    /// [`InputError`] when the wait fails rather than answering or
+    /// declining.
+    fn user_input<'life0, 'life1, 'life2, 'async_trait>(
+        &'life0 self,
+        execution: &'life1 str,
+        section: &'life2 str,
+    ) -> FixtureFuture<'async_trait, Result<InputOutcome, InputError>>
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        'life2: 'async_trait,
+        Self: 'async_trait;
 }
 
 /// The fixture implementations behind a run's catalog, keyed by identity:

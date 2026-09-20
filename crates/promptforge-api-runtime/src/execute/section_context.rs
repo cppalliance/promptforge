@@ -25,11 +25,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts};
-use crate::observe::detail;
 use crate::{Error, Result, subst};
+use promptforge_api_types::event::lifecycle;
 
 use super::context::RunState;
-use super::event_buffer::Emitter;
+use promptforge_api_types::emitter::Emitter;
 
 /// The seeds a spawned task chain's first section entry carries beyond the
 /// shared host contract: `tasks.spawn`'s `opts.item` (installed as the
@@ -266,7 +266,7 @@ impl Drop for SectionContext {
         // seam, so it lands in the buffer ahead of the completion below.
         vm.teardown(self.emitter.as_ref(), &self.name);
         if self.completed {
-            self.emitter.report(&self.name, detail::SECTION_FINISHED);
+            self.emitter.report(&self.name, lifecycle::SECTION_FINISHED);
         }
     }
 }

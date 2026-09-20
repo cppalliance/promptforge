@@ -30,50 +30,27 @@ pub(super) fn fill_tool_bindings(
     let mut bindings = ToolBindings::default();
     let slots = prompt.frontmatter().tools();
     for (alias, slot) in slots.iter() {
-        match slot {
-            ToolSlot::Exact(id) => {
-                if let Some(tool) = catalog.get(id) {
-                    tracing::info!(alias, tool = %id, "tool slot filled");
-                    bindings.bind(alias, tool.clone());
-                } else {
-                    let capability = id.capability();
-                    let capability_present = catalog
-                        .tools()
-                        .iter()
-                        .any(|tool| capability.contains(&tool.id));
-                    if capability_present {
-                        // The capability contributed to the catalog but not
-                        // this tool: the contribution was rejected at
-                        // assembly or never made. Reporting the capability
-                        // as missing would fail the run unsatisfiably -
-                        // installing it changes nothing - so warn and
-                        // leave the alias unbound instead.
-                        tracing::warn!(
-                            alias,
-                            tool = %id,
-                            capability = %capability,
-                            "exact tool slot's capability is in the catalog but \
-                             contributed no such tool; unfilled - \
-                             advertising the alias fails at run time"
-                        );
-                    } else {
-                        tracing::warn!(
-                            alias,
-                            tool = %id,
-                            capability = %capability,
-                            "exact tool slot's capability contributed nothing to the catalog"
-                        );
-                        if !requirements.missing_required.contains(&capability) {
-                            requirements.missing_required.push(capability);
-                        }
-                    }
-                }
-            }
-            // The open host-offered posture is deferred; a posture this
-            // fill does not model leaves its alias unbound.
-            _ => {
-                tracing::warn!(alias, "tool slot has an unrecognized posture; unfilled");
-            }
+        // The open host-offered posture is deferred; a posture this fill
+        // does not model leaves its alias unbound.
+        let ToolSlot::Exact(id) = slot else {
+            continue;
+        };
+        if let Some(tool) = catalog.get(id) {
+            bindings.bind(alias, tool.clone());
+            continue;
+        }
+        let capability = id.capability();
+        let capability_present = catalog
+            .tools()
+            .iter()
+            .any(|tool| capability.contains(&tool.id));
+        // A capability that contributed to the catalog but not this tool
+        // (the contribution was rejected at assembly or never made) is not
+        // missing: reporting it would fail the run unsatisfiably, since
+        // installing it changes nothing. The alias stays unbound instead,
+        // and advertising it fails at run time with the alias named.
+        if !capability_present && !requirements.missing_required.contains(&capability) {
+            requirements.missing_required.push(capability);
         }
     }
     bindings

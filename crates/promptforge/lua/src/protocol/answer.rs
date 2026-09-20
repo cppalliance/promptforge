@@ -2,8 +2,8 @@
 //! types its variants carry.
 
 use promptforge_api_types::event::Event;
-use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
+use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
 
 use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};

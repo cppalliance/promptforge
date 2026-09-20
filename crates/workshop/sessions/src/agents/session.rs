@@ -6,7 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use promptforge_api_types::cancel::CancelHandle;
+use harness_api::cancel::CancelHandle;
 use promptforge_api_types::event::Event;
 use promptforge_api_types::wire::StreamDelta;
 use tokio::sync::broadcast;

@@ -17,7 +17,6 @@ use promptforge_api_runtime::parser::{
     ArgDecl, ArgsDecl, CapabilityDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ParseError,
     ParseErrorKind, Prompt, ToolSlot,
 };
-use promptforge_api_runtime::types::observe::NullObserver;
 use workshop_protocol::ErrorEnvelope;
 
 use crate::workspace::Workspace;
@@ -257,7 +256,9 @@ impl From<&Frontmatter> for ContractResponse {
 /// Parses the posted prompt text and answers the contract DTO, or a
 /// `422` envelope when the text is not a valid prompt.
 pub(crate) async fn contract(Json(body): Json<ContractRequest>) -> Response {
-    match Prompt::parse(&body.text, &body.name, &NullObserver::default()) {
+    // The contract needs the tree alone; the parse-time events are not
+    // this route's to log.
+    match Prompt::parse(&body.text, &body.name).0 {
         Ok(prompt) => (
             StatusCode::OK,
             Json(ContractResponse::from(prompt.frontmatter())),

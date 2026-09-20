@@ -267,7 +267,7 @@ impl GatewayClient {
     /// [`StreamDelta`] text or reasoning fragment (a caller with no use for
     /// deltas passes a no-op closure). The returned [`Completion`] carries
     /// the reassembled turn, the metadata parsed from the stream's summary
-    /// chunk, and a [`ClientTiming`](promptforge_api_types::events::ClientTiming)
+    /// chunk, and a [`ClientTiming`](promptforge_api_types::metrics::ClientTiming)
     /// measured on this client's own clock
     /// (TTFT, mean inter-token latency, end-to-end).
     ///

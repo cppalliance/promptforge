@@ -109,7 +109,7 @@ impl Capability for Web {
 #[cfg(test)]
 mod tests {
     use harness_capabilities::{Capability, CapabilityErrorKind, CapabilityId, RunServices};
-    use promptforge_api_types::cancel::sync::CancelHandle;
+    use promptforge_api_types::cancel::CancelHandle;
     use promptforge_api_types::tools::ToolId;
 
     use crate::Web;

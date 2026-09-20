@@ -22,7 +22,14 @@ harness-web.workspace = true
 promptforge-api-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The awaitable cancel token (`cancel::CancelHandle`) a client selects
+# over: a `CancellationToken` plus the task-local scope it installs in.
+tokio = { workspace = true, features = ["sync", "rt"] }
+tokio-util.workspace = true
 workspace-hack.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

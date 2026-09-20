@@ -19,19 +19,16 @@ use std::sync::Arc;
 
 use promptforge_api_types::event::Event;
 
-use crate::debug::DebugCapture;
-use crate::execute::RunLimits;
-use crate::model::{
-    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
-};
-use crate::observe::{NullObserver, Observer};
-
-use super::events_to_observer;
+use super::recording::{self, DebugCapture, NullObserver, Observer};
 #[cfg(test)]
 use super::tokio_driver::EventSink;
 use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
 use super::tools::{TestBroker, TestToolTable};
+use crate::execute::RunLimits;
 use crate::execute::{Effect, EffectAnswer};
+use crate::model::{
+    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
+};
 
 /// The live streaming-delta callback a chat round forwards its chunks to.
 pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
@@ -220,7 +217,7 @@ impl RunHost {
     pub fn sink(&self) -> impl FnMut(Event) + Send + use<> {
         let observer = Arc::clone(&self.observer);
         let debug = self.debug.clone();
-        move |event| events_to_observer::forward_one(event, observer.as_ref(), debug.as_deref())
+        move |event| recording::forward_one(event, observer.as_ref(), debug.as_deref())
     }
 
     /// The sink, boxed for the driver.

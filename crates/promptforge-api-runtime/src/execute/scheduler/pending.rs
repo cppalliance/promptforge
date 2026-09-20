@@ -8,7 +8,7 @@
 //! [`Answer`]: super::Answer
 
 use crate::lua::{ScriptReport, ToolBinding};
-use crate::observe::Observation;
+use promptforge_api_types::event::lifecycle::Lifecycle;
 
 use super::ChainIndex;
 use super::task_events::TaskEventsReader;
@@ -31,7 +31,7 @@ pub(super) enum Continuation {
     UserInput,
     /// A store operation: the succeeded/failed observation pair its
     /// outcome reports, `None` for `exists`, which reports nothing.
-    Store(Option<(Observation, Observation)>),
+    Store(Option<(Lifecycle, Lifecycle)>),
     /// The internal timer behind a timed wait: the firing completes the
     /// slot backed by the effect and wakes its waiting owner; no chain
     /// resumes.
@@ -48,7 +48,7 @@ pub(super) enum Continuation {
 pub(super) struct ToolCallContinuation {
     /// The binding the alias resolved to at dispatch.
     pub(super) binding: ToolBinding,
-    /// The chain, depth, and turn the call fired in.
+    /// The turn the call fired in.
     pub(super) report: ScriptReport,
     /// The model-issued call id, or `None` for a script call.
     pub(super) call_id: Option<String>,

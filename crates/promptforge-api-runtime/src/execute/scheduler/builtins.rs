@@ -41,8 +41,8 @@ use crate::execute::protocol::{Answer, TaskStatus, ToolCallOutcome};
 use crate::execute::section_context::TaskSeed;
 use crate::lua::{SectionVm, TaskAllowlist, ToolBinding, ToolSet};
 use crate::model::ToolSchema;
-use crate::observe::detail;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle;
 
 use super::dispatch::unbound_tool_call;
 use super::tool_call::ToolCallDispatch;
@@ -276,9 +276,9 @@ impl Scheduler {
         emitter.report(
             section,
             if answer.ok {
-                detail::TOOL_CALL_SUCCEEDED
+                lifecycle::TOOL_CALL_SUCCEEDED
             } else {
-                detail::TOOL_CALL_FAILED
+                lifecycle::TOOL_CALL_FAILED
             },
         );
         emitter.tool_result(

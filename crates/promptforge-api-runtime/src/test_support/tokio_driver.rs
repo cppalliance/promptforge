@@ -80,12 +80,12 @@ pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 ///
 /// use promptforge_api_runtime::test_support::{Performers, drive_tokio};
 /// use promptforge_api_runtime::{Prompt, Run, RunContext, RunResult};
-/// use promptforge_api_types::cancel::sync::CancelHandle;
-/// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::cancel::CancelHandle;
 /// use promptforge_api_types::timestamp::Timestamp;
 ///
 /// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
-/// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
+/// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");
+/// let prompt = prompt?;
 /// let ctx = RunContext::new("doc-example", 1, Timestamp::UNIX_EPOCH);
 /// let run = Run::new(Arc::new(prompt), "", ctx);
 /// let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;

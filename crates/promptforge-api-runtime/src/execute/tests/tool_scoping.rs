@@ -105,11 +105,10 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         Vec::new(),
     );
     let mut vm = SectionVm::new_for_section(
-        &GuardNonce::fresh(),
+        &GuardNonce::from_seed(0x7e57),
         &Arc::new(Mutex::new(tools.set().clone())),
         &Arc::new(Mutex::new(ModelSet::default())),
-        EXECUTION,
-        &NullObserver::default(),
+        &null_emitter(),
         "Only",
     )
     .expect("captured bindings must install");
@@ -124,12 +123,11 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         "tools.add('section_tool')",
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver::default(),
+        &null_emitter(),
         "Only",
     )
     .expect("the add chunk must compile");
-    vm.run_chunk(&add, &NullObserver::default(), "Only")
+    vm.run_chunk(&add, &null_emitter(), "Only")
         .expect("tools.add must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope =
@@ -137,7 +135,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].name, "section_tool");
-    vm.teardown(&NullObserver::default(), "Only");
+    vm.teardown(&null_emitter(), "Only");
 
     // The same `tools.add` inside a section scopes the alias for the
     // loop's rounds: the round advertises it and dispatches the concrete

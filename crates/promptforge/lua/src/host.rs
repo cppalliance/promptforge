@@ -1,12 +1,13 @@
+use promptforge_api_types::event::lifecycle::Lifecycle;
+
 use super::{
-    Access, Arc, AtomicU32, AtomicUsize, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,
-    LuaSerdeExt, MultiValue, Observation, Observer, Ordering, Result, Store, Value, detail,
+    Access, Arc, AtomicU32, AtomicUsize, Emitter, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,
+    LuaSerdeExt, MultiValue, Ordering, Result, Store, Value, lifecycle,
 };
 
 /// Shared body of the persistent per-section `log(message)` host callback.
 fn log_checkpoint(
-    execution: &str,
-    observer: &dyn Observer,
+    emitter: &Emitter,
     section: &str,
     log_budget: &AtomicU32,
     log_byte_budget: &AtomicUsize,
@@ -50,7 +51,7 @@ fn log_checkpoint(
     {
         return Err(mlua::Error::external(crate::error::lua_quota::LOG_BYTE));
     }
-    observer.observe(execution, section, Observation::Lua(message.to_owned()));
+    emitter.lua(section, &message);
     Ok(())
 }
 
@@ -59,27 +60,18 @@ fn log_checkpoint(
 /// outlives any single chunk without an [`mlua::Scope`].
 pub(crate) fn install_log(
     lua: &Lua,
-    execution: &str,
-    observer: &Arc<dyn Observer>,
+    emitter: &Emitter,
     section: &str,
     log_budget: &Arc<AtomicU32>,
     log_byte_budget: &Arc<AtomicUsize>,
 ) -> Result<()> {
-    let execution = execution.to_owned();
     let section = section.to_owned();
-    let observer = Arc::clone(observer);
+    let emitter = emitter.clone();
     let log_budget = Arc::clone(log_budget);
     let log_byte_budget = Arc::clone(log_byte_budget);
     let log = lua
         .create_function(move |_, arguments: MultiValue| {
-            log_checkpoint(
-                &execution,
-                observer.as_ref(),
-                &section,
-                &log_budget,
-                &log_byte_budget,
-                arguments,
-            )
+            log_checkpoint(&emitter, &section, &log_budget, &log_byte_budget, arguments)
         })
         .map_err(Error::lua)?;
     lua.globals().raw_set("log", log).map_err(Error::lua)
@@ -93,7 +85,7 @@ pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
 /// whole lifecycle. The closure captures an owned clone of the run's nonce -
 /// mlua's `create_function` requires `Fn + Send + 'static`, so no borrow can
 /// cross the install - and every wrap the VM performs shares that one nonce.
-/// Every string input succeeds, so the install needs no observer, no budget,
+/// Every string input succeeds, so the install needs no emitter, no budget,
 /// and no [`mlua::Scope`]; a non-string argument fails through mlua's
 /// automatic type error.
 pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
@@ -135,39 +127,17 @@ pub fn install_ui(lua: &Lua, snapshot: Arc<serde_json::Value>) -> Result<()> {
     lua.globals().raw_set("ui", snapshot).map_err(Error::lua)
 }
 
-/// Owned observation context captured by the persistent `store` closures.
+/// Owned reporting context captured by the persistent `store` closures.
 struct StoreReporter {
-    execution: String,
-    observer: Arc<dyn Observer>,
+    emitter: Emitter,
     section: String,
 }
 
 impl StoreReporter {
-    fn report(&self, succeeded: bool, success: Observation, failure: Observation) {
-        observe_store_result(
-            &self.execution,
-            self.observer.as_ref(),
-            &self.section,
-            succeeded,
-            success,
-            failure,
-        );
+    fn report(&self, succeeded: bool, success: Lifecycle, failure: Lifecycle) {
+        self.emitter
+            .report(&self.section, if succeeded { success } else { failure });
     }
-}
-
-pub(crate) fn observe_store_result(
-    execution: &str,
-    observer: &dyn Observer,
-    section: &str,
-    succeeded: bool,
-    success: Observation,
-    failure: Observation,
-) {
-    observer.observe(
-        execution,
-        section,
-        if succeeded { success } else { failure },
-    );
 }
 
 /// Shared body of the persistent per-section `store.read` host callback.
@@ -265,14 +235,12 @@ pub(crate) fn install_store_table(
     lua: &Lua,
     globals: &mlua::Table,
     access: &Arc<Access>,
-    execution: &str,
-    observer: &Arc<dyn Observer>,
+    emitter: &Emitter,
     section: &str,
 ) -> Result<()> {
     let table = lua.create_table().map_err(Error::lua)?;
     let reporter = Arc::new(StoreReporter {
-        execution: execution.to_owned(),
-        observer: Arc::clone(observer),
+        emitter: emitter.clone(),
         section: section.to_owned(),
     });
 
@@ -304,8 +272,8 @@ pub(crate) fn install_store_table(
         handle,
         (path, contents),
         (String, String),
-        detail::STORE_WRITE_SUCCEEDED,
-        detail::STORE_WRITE_FAILED,
+        lifecycle::STORE_WRITE_SUCCEEDED,
+        lifecycle::STORE_WRITE_FAILED,
         { Store::new(&handle).write(&path, &contents) }
     );
     install_reported_store_fn!(
@@ -313,8 +281,8 @@ pub(crate) fn install_store_table(
         handle,
         (path, contents),
         (String, String),
-        detail::STORE_APPEND_SUCCEEDED,
-        detail::STORE_APPEND_FAILED,
+        lifecycle::STORE_APPEND_SUCCEEDED,
+        lifecycle::STORE_APPEND_FAILED,
         { Store::new(&handle).append(&path, &contents) }
     );
     install_reported_store_fn!(
@@ -322,8 +290,8 @@ pub(crate) fn install_store_table(
         handle,
         (path, start, end),
         (String, Option<i64>, Option<i64>),
-        detail::STORE_READ_SUCCEEDED,
-        detail::STORE_READ_FAILED,
+        lifecycle::STORE_READ_SUCCEEDED,
+        lifecycle::STORE_READ_FAILED,
         { read_store(&Store::new(&handle), &path, start, end) }
     );
     install_reported_store_fn!(
@@ -331,8 +299,8 @@ pub(crate) fn install_store_table(
         handle,
         (path, start, end),
         (String, Option<i64>, Option<i64>),
-        detail::STORE_READ_NUMBERED_SUCCEEDED,
-        detail::STORE_READ_NUMBERED_FAILED,
+        lifecycle::STORE_READ_NUMBERED_SUCCEEDED,
+        lifecycle::STORE_READ_NUMBERED_FAILED,
         { read_store_numbered(&Store::new(&handle), &path, start, end) }
     );
     install_reported_store_fn!(
@@ -340,8 +308,8 @@ pub(crate) fn install_store_table(
         handle,
         (path, old, new),
         (String, String, String),
-        detail::STORE_REPLACE_SUCCEEDED,
-        detail::STORE_REPLACE_FAILED,
+        lifecycle::STORE_REPLACE_SUCCEEDED,
+        lifecycle::STORE_REPLACE_FAILED,
         { Store::new(&handle).str_replace(&path, &old, &new) }
     );
     install_reported_store_fn!(
@@ -349,8 +317,8 @@ pub(crate) fn install_store_table(
         handle,
         path,
         String,
-        detail::STORE_DELETE_SUCCEEDED,
-        detail::STORE_DELETE_FAILED,
+        lifecycle::STORE_DELETE_SUCCEEDED,
+        lifecycle::STORE_DELETE_FAILED,
         { Store::new(&handle).delete(&path) }
     );
 
@@ -361,8 +329,8 @@ pub(crate) fn install_store_table(
             let result = Store::new(&handle).glob(&pattern);
             report.report(
                 result.is_ok(),
-                detail::STORE_GLOB_SUCCEEDED,
-                detail::STORE_GLOB_FAILED,
+                lifecycle::STORE_GLOB_SUCCEEDED,
+                lifecycle::STORE_GLOB_FAILED,
             );
             let paths = result.map_err(mlua::Error::external)?;
             lua.create_sequence_from(paths)

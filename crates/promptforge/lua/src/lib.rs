@@ -9,7 +9,7 @@
 //! even an unbounded loop aborts promptly once the host cancels.
 //! Direct `print` and `warn` are unavailable. A persistent `log(message)`
 //! callback accepts one bounded, single-line UTF-8 string and reports it
-//! through the run's [`Observer`] as `Lua: <message>`.
+//! through the run's emitter as an `Event::Lua` checkpoint.
 //!
 //! The chunk's top-level return value becomes the section's result (the finish
 //! case of the exit rule). The `var` table is read back afterward as JSON for
@@ -37,12 +37,13 @@ pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 pub(crate) use mlua::thread::ThreadStatus;
 pub(crate) use mlua::{
-    Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue,
-    StdLib, Thread, UserData, UserDataMethods, Value, VmState,
+    Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Thread,
+    Value, VmState,
 };
 pub(crate) use serde_json::Value as Json;
 
-pub(crate) use promptforge_api_types::observe::{Observation, Observer, detail};
+pub(crate) use promptforge_api_types::emitter::Emitter;
+pub(crate) use promptforge_api_types::event::lifecycle;
 pub(crate) use promptforge_api_types::tools::ToolId;
 pub(crate) use promptforge_api_types::untrusted::GuardNonce;
 pub(crate) use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
@@ -114,7 +115,6 @@ mod vm;
 pub(crate) use handles::resolve_section_target;
 mod models;
 mod protocol;
-mod runtime_events;
 
 // The executor-facing surface: every item `promptforge-api-runtime` names crosses
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
@@ -153,8 +153,6 @@ pub use protocol::{
     StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, UserInputOutcome,
     YieldParse,
 };
-#[doc(hidden)]
-pub use runtime_events::{EventsSnapshot, install_runtime_events};
 #[doc(hidden)]
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 #[doc(hidden)]

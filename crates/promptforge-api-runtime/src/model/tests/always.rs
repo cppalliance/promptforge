@@ -8,8 +8,7 @@ fn chunk(source: &str) -> crate::lua::LuaProgram {
         source,
         "chunk",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("test Lua must compile")
@@ -25,12 +24,12 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
         Some(false),
         &["no-thinking"],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(r#"models.default("writer")"#),
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("a bound label becomes the default");
@@ -38,7 +37,7 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
         models.lock().expect("set lock").default.as_deref(),
         Some("writer")
     );
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
@@ -51,8 +50,8 @@ fn models_default_returns_an_inspectable_handle() {
         Some(false),
         &["no-thinking", "fast"],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(
@@ -67,11 +66,11 @@ fn models_default_returns_an_inspectable_handle() {
                assert(model.capabilities[1] == "no-thinking")
                assert(model.capabilities[2] == "fast")"#,
         ),
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("the handle exposes the role label and the full keyword set");
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
@@ -84,13 +83,13 @@ fn models_default_rejects_an_unbound_label() {
         None,
         &[],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     let error = vm
         .run_chunk(
             &chunk(r#"models.default("ghost")"#),
-            &NullObserver::default(),
+            &null_emitter(),
             "Section",
         )
         .expect_err("an unbound label is a hard error");
@@ -100,7 +99,7 @@ fn models_default_rejects_an_unbound_label() {
             .contains("models.default label \"ghost\" is not a bound model role"),
         "the rejection names the label: {error}"
     );
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
@@ -116,21 +115,21 @@ fn models_default_is_idempotent_and_never_changes_mid_run() {
             &[],
         ),
     ]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     // The shared library replays into every section, so re-naming the same
     // default is a no-op.
     vm.run_chunk(
         &chunk(r#"models.default("writer"); models.default("writer")"#),
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("re-naming the same default is a no-op");
     let error = vm
         .run_chunk(
             &chunk(r#"models.default("critic")"#),
-            &NullObserver::default(),
+            &null_emitter(),
             "Section",
         )
         .expect_err("the prompt-wide default cannot change mid-run");
@@ -140,7 +139,7 @@ fn models_default_is_idempotent_and_never_changes_mid_run() {
             .contains("models.default is already \"writer\""),
         "the refusal names the parked default: {error}"
     );
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
@@ -153,12 +152,12 @@ fn models_default_resolves_the_section_model_without_use() {
         Some(false),
         &["no-thinking"],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(r#"models.default("writer")"#),
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("the default parks");
@@ -167,5 +166,5 @@ fn models_default_resolves_the_section_model_without_use() {
     let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions::new("small").with_thinking(false);
     assert_eq!(opts, Some(expected));
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }

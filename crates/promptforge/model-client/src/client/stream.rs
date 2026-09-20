@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use promptforge_api_types::events::ClientTiming;
+use promptforge_api_types::metrics::ClientTiming;
 use serde_json::{Map, Value};
 
 use super::{Completion, StreamDelta};
@@ -360,6 +360,7 @@ impl StreamAccumulator {
             llama_timings: metadata.llama_timings,
             vllm_metrics: metadata.vllm_metrics,
             client_timing,
+            metadata_diagnostics: metadata.diagnostics,
             request_body,
             response_body,
         })

@@ -23,6 +23,7 @@ impl Completion {
             llama_timings: None,
             vllm_metrics: None,
             client_timing: None,
+            metadata_diagnostics: Vec::new(),
             request_body: Value::Null,
             response_body: Value::Null,
         }

@@ -3,14 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::lua::{SectionVm, ToolSet, resolve_model_binding};
-use crate::observe::NullObserver;
 use crate::store::Access;
+use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
+use promptforge_api_types::emitter::Emitter;
 use promptforge_model_client::model::{CompletionOptions, ModelInvocation};
 use serde_json::json;
-
-const EXECUTION: &str = "model-bind-test";
 
 /// A fresh stock handle's access capability, for tests that inject host
 /// values into a standalone VM.
@@ -67,15 +66,14 @@ fn shared_tools() -> Arc<Mutex<ToolSet>> {
 
 fn section_vm_with_models(
     models: &Arc<Mutex<ModelSet>>,
-    observer: &dyn crate::observe::Observer,
+    emitter: &Emitter,
     section: &str,
 ) -> Result<SectionVm> {
     let vm = SectionVm::new_for_section(
-        &GuardNonce::fresh(),
+        &GuardNonce::from_seed(0x7e57),
         &shared_tools(),
         models,
-        EXECUTION,
-        observer,
+        emitter,
         section,
     )?;
     vm.install_captured_bindings()?;

@@ -12,9 +12,9 @@ use mlua::Thread;
 
 use crate::execute::protocol::{Answer, YieldParse};
 use crate::lua::{CoroStep, LuaBlockResult};
-use crate::observe::detail;
 use crate::parser::Block;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle;
 
 use super::{ChainIndex, Scheduler};
 
@@ -151,13 +151,13 @@ impl Scheduler {
         let chain = &self.chains[id.index()];
         let emitter = Arc::clone(chain.ctx.emitter());
         let name = chain.section_name().to_owned();
-        emitter.report(&name, detail::LUA_CHUNK_STARTED);
+        emitter.report(&name, lifecycle::LUA_CHUNK_STARTED);
         let frame = chain
             .frame
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
         if let Err(error) = frame.install_lazy_prose(&chain.ctx, pending.as_deref().unwrap_or("")) {
-            emitter.report(&name, detail::LUA_CHUNK_FAILED);
+            emitter.report(&name, lifecycle::LUA_CHUNK_FAILED);
             return Err(error);
         }
         let Block::Lua(program) = &chain.blocks(&prompt)[chain.block] else {
@@ -186,7 +186,7 @@ impl Scheduler {
         let step = match result {
             Ok(step) => step,
             Err(error) => {
-                emitter.report(&name, detail::LUA_CHUNK_FAILED);
+                emitter.report(&name, lifecycle::LUA_CHUNK_FAILED);
                 // A failed H1 assertion ends the run before the walk:
                 // H1's remaining job is the prompt's hard gates, so the
                 // prompt chunk's own Lua failure IS the failed assertion
@@ -233,7 +233,7 @@ impl Scheduler {
                         Ok(())
                     }
                     YieldParse::Malformed(error) => {
-                        emitter.report(&name, detail::LUA_CHUNK_FAILED);
+                        emitter.report(&name, lifecycle::LUA_CHUNK_FAILED);
                         Err(Error::from(error))
                     }
                 }
@@ -243,7 +243,7 @@ impl Scheduler {
                 // boundary reports success and the walk moves to the
                 // resolved target. A jump out of H1 ends the pass and
                 // starts the walk at the target.
-                emitter.report(&name, detail::LUA_CHUNK_SUCCEEDED);
+                emitter.report(&name, lifecycle::LUA_CHUNK_SUCCEEDED);
                 if self.chains[id.index()].h1 {
                     return self.end_live_h1_at_jump(id, &heading, root_result);
                 }
@@ -252,7 +252,7 @@ impl Scheduler {
                 Ok(())
             }
             CoroStep::Done(LuaBlockResult::Returned(value)) => {
-                emitter.report(&name, detail::LUA_CHUNK_SUCCEEDED);
+                emitter.report(&name, lifecycle::LUA_CHUNK_SUCCEEDED);
                 if self.chains[id.index()].h1 {
                     let chain = &mut self.chains[id.index()];
                     if let Some(value) = value {

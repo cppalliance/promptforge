@@ -15,7 +15,7 @@ use promptforge_lua::{Error, ErrorKind};
 use crate::execute::protocol::Answer;
 use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, OverflowReason};
 use crate::model::ModelSet;
-use crate::observe::NullObserver;
+use crate::test_support::recording::null_emitter;
 
 use super::{compile_block, scheduler_vm, start, test_models};
 
@@ -174,8 +174,7 @@ fn an_uncaught_lua_kind_shim_raise_keeps_the_mapped_runtime_error() {
         "local h = models.get(\"fast\")\nmodels.infer(h, \"yo\", { temperature = 0 })",
         "section `Test` prologue",
         NonZeroU32::new(40).expect("40 is non-zero"),
-        "test-run",
-        &NullObserver::default(),
+        &null_emitter(),
         "Test",
     )
     .expect("the driver block compiles");
@@ -344,8 +343,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
         "var = 5\ncall(\"## Child\")",
         "section `Test` prologue",
         NonZeroU32::new(40).expect("40 is non-zero"),
-        "test-run",
-        &NullObserver::default(),
+        &null_emitter(),
         "Test",
     )
     .expect("the driver program compiles");

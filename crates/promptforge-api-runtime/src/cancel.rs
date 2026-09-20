@@ -6,4 +6,4 @@
 //! the `promptforge-api-types` crate, re-exported here so the crate's
 //! `cancel::CancelHandle` path names the one handle a run carries.
 
-pub(crate) use promptforge_api_types::cancel::sync::CancelHandle;
+pub(crate) use promptforge_api_types::cancel::CancelHandle;

@@ -2583,6 +2583,8 @@ dependencies = [
  "promptforge-api-types",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-util",
  "workspace-hack",
 ]
 
@@ -4777,8 +4779,6 @@ dependencies = [
  "shared-vfs",
  "thiserror 2.0.19",
  "tokio",
- "tracing",
- "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -4792,8 +4792,6 @@ dependencies = [
  "shared-vfs",
  "thiserror 2.0.19",
  "time",
- "tokio",
- "tokio-util",
  "workspace-hack",
 ]
 
@@ -4811,7 +4809,6 @@ dependencies = [
  "serde_json",
  "shared-vfs",
  "thiserror 2.0.19",
- "tokio",
  "workspace-hack",
 ]
 
@@ -4823,7 +4820,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.19",
- "tracing",
  "workspace-hack",
 ]
 
@@ -8739,7 +8735,6 @@ dependencies = [
  "time-macros",
  "tinystr",
  "tokio",
- "tokio-util",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "tower",

@@ -37,6 +37,6 @@ pub(crate) use crate::error::Result;
 #[doc(hidden)]
 pub use crate::error::{Error, Timeout};
 
-pub use promptforge_api_types::events::{
+pub use promptforge_api_types::metrics::{
     CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,
 };

@@ -20,9 +20,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
+use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
 
-use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ChatResult};
 use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
@@ -33,8 +32,9 @@ use crate::lua::{
 };
 use crate::model::ModelBinding;
 use crate::model::{Completion, CompletionResult, ToolCall};
-use crate::observe::detail;
 use crate::{Error, Result};
+use promptforge_api_types::emitter::Emitter;
+use promptforge_api_types::event::lifecycle;
 
 use super::builtins::{advertise_task_builtins, scope_halves, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
@@ -158,7 +158,7 @@ impl Scheduler {
         let conversation = match project_messages(messages) {
             Ok(conversation) => conversation,
             Err(error) => {
-                emitter.report(&section, detail::MODEL_TURN_FAILED);
+                emitter.report(&section, lifecycle::MODEL_TURN_FAILED);
                 return Err(Error::from(error));
             }
         };
@@ -168,7 +168,7 @@ impl Scheduler {
         // The refusal is the round's answer - the overflow flag - and is
         // observed as a failed turn, exactly as the loop reported it.
         if let Err(reason) = precheck(&conversation, context) {
-            emitter.report(&section, detail::MODEL_TURN_FAILED);
+            emitter.report(&section, lifecycle::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
                 overflow_result(reason),
             )))));
@@ -281,7 +281,7 @@ impl Round {
         match error {
             Error::Backend { status, body } if is_context_overflow(status, &body) => {
                 self.emitter
-                    .report(&self.section, detail::MODEL_TURN_FAILED);
+                    .report(&self.section, lifecycle::MODEL_TURN_FAILED);
                 Ok(Box::new(overflow_result(OverflowReason::Provider)))
             }
             Error::EmptyModelReply {
@@ -291,7 +291,7 @@ impl Round {
             } => {
                 advance_turn(&self.turns);
                 self.emitter
-                    .report(&self.section, detail::MODEL_TURN_COMPLETED);
+                    .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
                 Ok(Box::new(ChatResult {
                     overflow: false,
                     overflow_reason: None,
@@ -305,7 +305,7 @@ impl Round {
             }
             error => {
                 self.emitter
-                    .report(&self.section, detail::MODEL_TURN_FAILED);
+                    .report(&self.section, lifecycle::MODEL_TURN_FAILED);
                 Err(error)
             }
         }
@@ -337,7 +337,7 @@ impl Round {
             );
         }
         self.emitter
-            .report(&self.section, detail::MODEL_TURN_COMPLETED);
+            .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
         // The content reports every host transcript is built from: the
         // thinking side channel first, then the reply or the tool-call
         // batch, each with model and metrics.
@@ -359,7 +359,7 @@ impl Round {
     fn text_reply(&self, served: &Served, turn: u32, text: String) -> ChatResult {
         if served.finish_reason.as_deref() == Some("length") {
             self.emitter
-                .report(&self.section, detail::MODEL_TURN_TRUNCATED);
+                .report(&self.section, lifecycle::MODEL_TURN_TRUNCATED);
         }
         self.emitter.assistant_reply(
             &self.section,
@@ -412,7 +412,8 @@ impl Round {
             .iter()
             .find(|call| !advertised.contains_key(&call.name))
         {
-            self.emitter.report(&self.section, detail::TOOL_CALL_FAILED);
+            self.emitter
+                .report(&self.section, lifecycle::TOOL_CALL_FAILED);
             return Ok(Err(Error::OutOfScopeToolCall {
                 name: rogue.name.clone(),
                 global_exists: global_exists(&rogue.name)?,

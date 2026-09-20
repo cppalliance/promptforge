@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunResult};
 use promptforge_api_runtime::parser::Prompt;
+use promptforge_api_runtime::test_support::recording::{Observation, Observer};
 use promptforge_api_runtime::test_support::{RunHost, TestTool, run_host};
-use promptforge_api_types::observe::{Observation, Observer};
 use promptforge_api_types::timestamp::Timestamp;
 use promptforge_store::{StoreError, StoreExt};
 use shared_vfs::{Origin, VfsRef};
@@ -150,8 +150,10 @@ pub(super) fn parse_execution_fixture(
     execution: &str,
     observer: &dyn Observer,
 ) -> Prompt {
-    Prompt::parse(source, execution, observer)
-        .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
+    // The parse-time events replay onto the recorder, as the run's will.
+    let (prompt, events) = Prompt::parse(source, execution);
+    promptforge_api_runtime::test_support::forward(events, observer, None);
+    prompt.unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
 }
 
 /// The run's VFS handle with per-call fresh-access store reads, for

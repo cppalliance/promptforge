@@ -1,5 +1,4 @@
 use mlua::{Lua, Value, Variadic};
-use promptforge_api_types::observe::NullObserver;
 use promptforge_api_types::untrusted::GuardNonce;
 use serde_json::json;
 
@@ -250,10 +249,10 @@ fn the_tools_namespace_carries_scoping_and_no_bind_or_call() {
 
 #[test]
 fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
-    let nonce = GuardNonce::fresh();
-    let observer = NullObserver::default();
-    let mut vm = SectionVm::new(&nonce, "test-run", &observer, "Test")
-        .expect("section VM construction cannot fail");
+    let nonce = GuardNonce::from_seed(1);
+    let observer = crate::tests::recording::null_emitter();
+    let mut vm =
+        SectionVm::new(&nonce, &observer, "Test").expect("section VM construction cannot fail");
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host injection cannot fail");
     vm.install_coro_shims(24, 8)

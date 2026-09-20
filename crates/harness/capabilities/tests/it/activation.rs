@@ -4,7 +4,7 @@
 
 use harness_capabilities::{CapabilityId, CapabilityRegistry};
 use promptforge_api_runtime::execute::{Environment, RunErrorKind, RunResult};
-use promptforge_api_types::cancel::sync::CancelHandle;
+use promptforge_api_types::cancel::CancelHandle;
 use shared_vfs::Origin;
 
 use super::support::{

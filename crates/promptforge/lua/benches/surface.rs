@@ -18,7 +18,7 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_api_types::observe::NullObserver;
+use promptforge_api_types::emitter::{Emitter, EventSink};
 use promptforge_api_types::untrusted::GuardNonce;
 use promptforge_lua::{
     LuaProgram, MessageContent, MessageRecord, MessageRole, SectionVm, ToolCallRecord, ToolSet,
@@ -27,18 +27,22 @@ use promptforge_lua::{
 use promptforge_model_client::model::ModelSet;
 use serde_json::json;
 
-const EXECUTION: &str = "bench";
 const SECTION: &str = "Bench";
+
+/// An emitter over a sink nobody drains: the bench measures the VM, not
+/// the reports.
+fn emitter() -> Emitter {
+    Emitter::root(EventSink::default(), "bench", false)
+}
 
 /// A section VM with host values injected, so the `messages` namespace is
 /// installed exactly as the executor installs it.
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(
-        &GuardNonce::fresh(),
+        &GuardNonce::from_seed(1),
         &Arc::new(Mutex::new(ToolSet::default())),
         &Arc::new(Mutex::new(ModelSet::default())),
-        EXECUTION,
-        &NullObserver::default(),
+        &emitter(),
         SECTION,
     )
     .expect("the bench VM builds");
@@ -68,14 +72,14 @@ fn message_building(c: &mut Criterion) {
          return #msgs",
         "bench",
         NonZeroU32::MIN,
-        EXECUTION,
-        &NullObserver::default(),
+        &emitter(),
         SECTION,
     )
     .expect("the builder chunk compiles");
+    let emitter = emitter();
     c.bench_function("message_building", |b| {
         b.iter(|| {
-            vm.run_chunk(&program, &NullObserver::default(), SECTION)
+            vm.run_chunk(&program, &emitter, SECTION)
                 .expect("the builder chunk runs");
         });
     });

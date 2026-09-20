@@ -159,7 +159,7 @@ impl RunContext {
     }
 
     /// Sets the run's cancellation flag: the synchronous
-    /// [`CancelHandle`](promptforge_api_types::cancel::sync::CancelHandle)
+    /// [`CancelHandle`](promptforge_api_types::cancel::CancelHandle)
     /// the engine polls between chain steps and from the Lua instruction
     /// hook. A host that cancels through an awaitable token bridges it to
     /// this flag (set the flag when the token fires), and hands the same
@@ -334,12 +334,18 @@ impl RunContext {
 /// none of these exist outside `cfg(test)`.
 #[cfg(test)]
 impl RunContext {
-    pub(crate) fn observer(mut self, observer: Arc<dyn crate::observe::Observer>) -> RunContext {
+    pub(crate) fn observer(
+        mut self,
+        observer: Arc<dyn crate::test_support::recording::Observer>,
+    ) -> RunContext {
         self.test_host = self.test_host.observer(observer);
         self
     }
 
-    pub(crate) fn debug(mut self, debug: Arc<dyn crate::debug::DebugCapture>) -> RunContext {
+    pub(crate) fn debug(
+        mut self,
+        debug: Arc<dyn crate::test_support::recording::DebugCapture>,
+    ) -> RunContext {
         self.report_debug = true;
         self.test_host = self.test_host.debug(debug);
         self

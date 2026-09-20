@@ -50,27 +50,16 @@ mod inventory;
 
 /// A run's guard-tag nonce.
 ///
-/// Constructed by [`GuardNonce::fresh`], which draws 128 bits from a
-/// cryptographically secure RNG, or by [`GuardNonce::from_seed`], which
-/// derives the value from a run's host-drawn seed so a replayed run wraps
-/// identically. The wrapped hex string is a private field so no caller can
-/// substitute an arbitrary, low-entropy, or reused nonce: one value is
-/// minted at run start and shared by every [`GuardNonce::wrap`] in the run.
+/// Constructed by [`GuardNonce::from_seed`], which derives the value from
+/// a run's host-drawn seed so a replayed run wraps identically; the engine
+/// itself reads no RNG. The wrapped hex string is a private field so no
+/// caller can substitute an arbitrary, low-entropy, or reused nonce: one
+/// value is minted at run start and shared by every [`GuardNonce::wrap`]
+/// in the run.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GuardNonce(String);
 
 impl GuardNonce {
-    /// Mints one fresh 128-bit nonce rendered as 32 lowercase hex digits.
-    ///
-    /// `rand::random` draws from the thread-local ChaCha-based CSPRNG (seeded
-    /// from operating-system entropy), so fetched content cannot predict or
-    /// forge the guard tag's closing delimiter. 128 bits leaves no useful
-    /// guessing margin.
-    #[must_use]
-    pub fn fresh() -> GuardNonce {
-        GuardNonce(format!("{:032x}", rand::random::<u128>()))
-    }
-
     /// Derives the run nonce from the run's `seed`: the same seed always
     /// yields the same nonce, which is what lets a replayed run reproduce
     /// its envelopes byte for byte.

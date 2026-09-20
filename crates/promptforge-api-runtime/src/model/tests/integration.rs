@@ -8,8 +8,7 @@ fn chunk(source: &str) -> crate::lua::LuaProgram {
         source,
         "chunk",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("test Lua must compile")
@@ -25,12 +24,12 @@ fn models_use_selects_a_bound_role_by_label() {
         Some(true),
         &["thinking", "frontier"],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(r#"models.use("analyst")"#),
-        &NullObserver::default(),
+        &null_emitter(),
         "Section",
     )
     .expect("a bound label selects");
@@ -42,7 +41,7 @@ fn models_use_selects_a_bound_role_by_label() {
         model.capabilities(),
         &["thinking".to_owned(), "frontier".to_owned()]
     );
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
@@ -55,12 +54,12 @@ fn no_use_or_default_leaves_the_section_unbound() {
         None,
         &[],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     let model = resolve_section_model(&vm).expect("the resolution reads the shared set");
     assert!(model.is_none());
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
@@ -73,13 +72,13 @@ fn models_use_rejects_an_unbound_label() {
         None,
         &[],
     )]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     let error = vm
         .run_chunk(
             &chunk(r#"models.use("missing")"#),
-            &NullObserver::default(),
+            &null_emitter(),
             "Section",
         )
         .expect_err("an unbound label must fail");
@@ -88,19 +87,19 @@ fn models_use_rejects_an_unbound_label() {
         rendered.contains("models.use label \"missing\" is not a bound model role"),
         "the error must name the unbound label: {rendered}"
     );
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }
 
 #[test]
 fn models_bind_is_gone() {
     let models = shared_models(vec![]);
-    let mut vm = section_vm_with_models(&models, &NullObserver::default(), "Section")
-        .expect("the section VM builds");
+    let mut vm =
+        section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
     vm.inject_host("", &json!({}), &fresh_access()).unwrap();
     let gone = vm
         .run_chunk(
             &chunk("return tostring(models.bind)"),
-            &NullObserver::default(),
+            &null_emitter(),
             "Section",
         )
         .expect("the probe runs");
@@ -109,5 +108,5 @@ fn models_bind_is_gone() {
         crate::lua::LuaBlockResult::Returned(Some("nil".to_owned())),
         "models.bind is removed"
     );
-    vm.teardown(&NullObserver::default(), "Section");
+    vm.teardown(&null_emitter(), "Section");
 }

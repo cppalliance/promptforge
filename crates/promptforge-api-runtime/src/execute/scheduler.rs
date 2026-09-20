@@ -84,10 +84,10 @@ use mlua::Thread;
 use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
 use shared_vfs::Origin;
 
-use crate::observe::detail;
 use crate::parser::{Block, Prompt, Section};
 use crate::store::Access;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle;
 
 use super::context::RunState;
 use super::protocol::Answer;
@@ -428,7 +428,7 @@ impl Scheduler {
         // into the buffer under the root task, so the host sees them in
         // order with the sections between them.
         ctx.emitter()
-            .report(ctx.prompt().title(), detail::RUN_STARTED);
+            .report(ctx.prompt().title(), lifecycle::RUN_STARTED);
         Self {
             ctx,
             chains: Vec::new(),

@@ -1,5 +1,4 @@
 use mlua::{Lua, LuaSerdeExt, Value};
-use promptforge_api_types::observe::NullObserver;
 use promptforge_api_types::untrusted::GuardNonce;
 use serde_json::json;
 
@@ -202,10 +201,10 @@ fn host_validation_still_rejects_a_bad_builder_record() {
 
 #[test]
 fn the_builders_run_under_the_hardened_section_sandbox() {
-    let nonce = GuardNonce::fresh();
-    let observer = NullObserver::default();
-    let mut vm = SectionVm::new(&nonce, "test-run", &observer, "Test")
-        .expect("section VM construction cannot fail");
+    let nonce = GuardNonce::from_seed(1);
+    let observer = crate::tests::recording::null_emitter();
+    let mut vm =
+        SectionVm::new(&nonce, &observer, "Test").expect("section VM construction cannot fail");
     vm.inject_host("", &json!({}), &fresh_access())
         .expect("host injection cannot fail");
     let json: serde_json::Value = vm

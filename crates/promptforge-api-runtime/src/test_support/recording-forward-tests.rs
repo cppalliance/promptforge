@@ -3,7 +3,6 @@ use std::sync::Mutex;
 use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
 
 use super::*;
-use crate::observe::detail;
 
 fn provenance() -> Provenance {
     Provenance {
@@ -37,7 +36,7 @@ impl Observer for Recorder {
         text: &str,
         finish_reason: Option<&str>,
         model: &str,
-        _metrics: Option<&promptforge_api_types::events::CallMetrics>,
+        _metrics: Option<&promptforge_api_types::metrics::CallMetrics>,
     ) {
         self.content
             .lock()
@@ -126,7 +125,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
     assert_eq!(
         *recorder.observed.lock().expect("not poisoned"),
         vec![
-            ("A".to_owned(), detail::SECTION_STARTED.to_string()),
+            ("A".to_owned(), Observation::SectionStarted.to_string()),
             ("A".to_owned(), "Lua: note".to_owned()),
             ("W".to_owned(), "Task succeeded".to_owned()),
         ]

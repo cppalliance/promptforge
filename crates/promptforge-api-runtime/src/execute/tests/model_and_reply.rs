@@ -15,8 +15,7 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
 ```lua\nmodels.use('analyst')\n```\n\n\
 Ask the model.\n\n\
 ```lua\nreturn models.infer(prose)\n```\n";
-    let prompt =
-        Prompt::parse(md, EXECUTION, &NullObserver::default()).expect("fixture must parse");
+    let prompt = Prompt::parse(md, EXECUTION).0.expect("fixture must parse");
     let mut ctx = test_context(EXECUTION).client(gateway_client(addr));
     ctx.model_bindings.bind(
         "analyst",

@@ -16,7 +16,6 @@ use crate::execute::protocol::StoreOp;
 use crate::input::{InputError, InputOutcome};
 use crate::model::{Message, ToolSchema};
 use crate::model::{ModelBinding, ModelId};
-use crate::observe::NullObserver;
 use crate::test_support::TestBroker;
 
 /// A context for the run `run-test` under fixed host inputs; nothing here
@@ -181,7 +180,8 @@ fn run_of(body: &str, ctx: RunContext) -> Run {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\n{body}\n```\n"
     );
-    let prompt = Prompt::parse(&source, "run-test", &NullObserver::default())
+    let prompt = Prompt::parse(&source, "run-test")
+        .0
         .expect("the run test prompt parses");
     Run::new(Arc::new(prompt), "", ctx)
 }
@@ -385,7 +385,8 @@ fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
 #[test]
 fn a_context_without_a_host_handle_shares_its_one_flag_with_prepare_and_the_run() {
     let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Run\n\n## Only\n\n```lua\nreturn 'x'\n```\n";
-    let prompt = Prompt::parse(source, "run-test", &NullObserver::default())
+    let prompt = Prompt::parse(source, "run-test")
+        .0
         .expect("the run test prompt parses");
     // The flag `prepare` hands the capabilities is the context's own.
     let (ctx, _) = crate::execute::Environment::new().prepare(&prompt, run_context());
@@ -430,7 +431,8 @@ fn a_run_is_decided_once_its_end_is_reported_while_done_is_withheld() {
 #[test]
 fn a_stillborn_run_reports_its_failure_on_the_first_step() {
     let source = "---\nname: t\ndescription: d\npromptforge: 7\n---\n\n# Run\n\n## Only\n\ndone\n";
-    let prompt = Prompt::parse(source, "run-test", &NullObserver::default())
+    let prompt = Prompt::parse(source, "run-test")
+        .0
         .expect("the prompt parses whatever version it declares");
     let mut run = Run::new(Arc::new(prompt), "", run_context());
     let Step::Done { result, events } = run.step() else {

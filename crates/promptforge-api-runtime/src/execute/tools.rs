@@ -14,10 +14,10 @@ use std::sync::atomic::AtomicU32;
 
 use crate::Error;
 use crate::model::{Completion, CompletionError, CompletionResult};
-use crate::observe::detail;
+use promptforge_api_types::event::lifecycle;
 
-use super::event_buffer::Emitter;
 use super::support::advance_turn;
+use promptforge_api_types::emitter::Emitter;
 
 /// Reports one completed infer round exactly like a single prose round and
 /// renders its text: the turn advance, the debug capture pair, the
@@ -40,12 +40,12 @@ fn accept_infer_completion(
             completion.reasoning_content.clone(),
         );
     }
-    emitter.report(section, detail::MODEL_TURN_COMPLETED);
+    emitter.report(section, lifecycle::MODEL_TURN_COMPLETED);
 
     match completion.result {
         CompletionResult::Text(text) => {
             if completion.finish_reason.as_deref() == Some("length") {
-                emitter.report(section, detail::MODEL_TURN_TRUNCATED);
+                emitter.report(section, lifecycle::MODEL_TURN_TRUNCATED);
             }
             Ok(text)
         }
@@ -83,7 +83,7 @@ pub(crate) fn accept_infer(
     let completion = match result {
         Ok(completion) => completion,
         Err(error) => {
-            emitter.report(section, detail::MODEL_TURN_FAILED);
+            emitter.report(section, lifecycle::MODEL_TURN_FAILED);
             return Err(Error::from(error));
         }
     };

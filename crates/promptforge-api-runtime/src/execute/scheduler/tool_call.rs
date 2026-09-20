@@ -23,12 +23,12 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::execute::event_buffer::Emitter;
 use crate::execute::protocol::{Answer, ToolCallOutcome};
 use crate::execute::run::Effect;
 use crate::lua::{ScriptReport, SectionVm, ToolCallCounts, current_tool_bindings};
-use crate::observe::detail;
 use crate::{Error, Result};
+use promptforge_api_types::emitter::Emitter;
+use promptforge_api_types::event::lifecycle;
 
 use super::builtins::is_task_builtin;
 use super::dispatch::unbound_tool_call;
@@ -95,9 +95,9 @@ fn answer_local_tool(
     emitter.report(
         section,
         if result.is_ok() {
-            detail::TOOL_CALL_SUCCEEDED
+            lifecycle::TOOL_CALL_SUCCEEDED
         } else {
-            detail::TOOL_CALL_FAILED
+            lifecycle::TOOL_CALL_FAILED
         },
     );
     let text = result?;
@@ -184,10 +184,6 @@ impl Scheduler {
         let emitter = Arc::clone(chain.ctx.emitter());
         let section = chain.section_name().to_owned();
         let report = ScriptReport {
-            chain_id: id.0,
-            // The call depth is capped at MAX_CALL_DEPTH, far inside
-            // u32; the saturation is a defensive no-op.
-            depth: u32::try_from(chain.call_depth).unwrap_or(u32::MAX),
             turn: chain.ctx.turns().load(Ordering::Relaxed),
         };
         let frame = chain

@@ -1,14 +1,15 @@
 use super::{
     Access, Arc, Argv, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
-    DEFAULT_LUA_MEMORY_BYTES, Error, Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json,
-    Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
-    ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer,
-    Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
-    ToolRuntime, ToolSet, Value, block_guard, detail, guarded_var, harden, install_compactors,
+    DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, Function, GuardNonce, InstructionBudget,
+    IntoLuaMulti, Json, Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt,
+    LuaToolHandle, ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue,
+    Mutex, Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
+    ToolRuntime, ToolSet, Value, block_guard, guarded_var, harden, install_compactors,
     install_instruction_budget, install_log, install_messages, install_models,
     install_shim_prelude, install_store_table,
     install_tool_call_counts as install_tool_call_counts_impl, install_tools, install_untrusted,
-    log_byte_budget, resolve_section_target, scalar_return, seal_sys, take_failure, var_to_json,
+    lifecycle, log_byte_budget, resolve_section_target, scalar_return, seal_sys, take_failure,
+    var_to_json,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -49,17 +50,17 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// # Examples
 /// ```text
 /// use promptforge_lua::SectionVm;
-/// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::emitter::{Emitter, EventSink};
 /// use promptforge_api_types::untrusted::GuardNonce;
 ///
-/// let nonce = GuardNonce::fresh();
-/// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-/// vm.teardown(&NullObserver::default(), "Example");
+/// let nonce = GuardNonce::from_seed(1);
+/// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+/// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
+/// vm.teardown(&emitter, "Example");
 /// # Ok::<(), promptforge_lua::Error>(())
 /// ```
 #[derive(Debug)]
 pub struct SectionVm {
-    execution: String,
     lua: Lua,
     /// The run's shared tool set: the frontmatter's filled slots plus the
     /// prompt-wide `always` aliases. Shared with the run, not snapshotted:
@@ -215,8 +216,8 @@ impl SectionVm {
     /// limits, the host values, the persistent host APIs, the control
     /// globals, the shared-library replay, and the captured alias globals -
     /// is a separate explicit step the caller drives in that order (see the
-    /// type-level docs). The VM retains `execution` for every later
-    /// lifecycle report.
+    /// type-level docs). Every lifecycle report goes through the emitter
+    /// the caller hands each step; the VM retains none.
     ///
     /// The VM shares the run's (possibly empty) tool and model sets, so the
     /// validating `tools.add` installed by
@@ -229,20 +230,16 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::observe::NullObserver;
+    /// use promptforge_api_types::emitter::{Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
-    /// let nonce = GuardNonce::fresh();
-    /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.teardown(&NullObserver::default(), "Example");
+    /// let nonce = GuardNonce::from_seed(1);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
+    /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub fn new(
-        nonce: &GuardNonce,
-        execution: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Self> {
+    pub fn new(nonce: &GuardNonce, emitter: &Emitter, section: &str) -> Result<Self> {
         let lua = Lua::new_with(
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
             LuaOptions::default(),
@@ -254,7 +251,6 @@ impl SectionVm {
         lua.set_memory_limit(DEFAULT_LUA_MEMORY_BYTES)
             .map_err(Error::lua)?;
         let mut vm = Self {
-            execution: execution.to_owned(),
             lua,
             bound_tools: Arc::new(Mutex::new(ToolSet::default())),
             bound_models: Arc::new(Mutex::new(ModelSet::default())),
@@ -275,14 +271,14 @@ impl SectionVm {
             raw_model_ids: false,
         };
         if let Err(error) = harden(&vm.lua) {
-            return vm.construction_failed(error, observer, section);
+            return vm.construction_failed(error, emitter, section);
         }
         if let Err(error) = install_untrusted(&vm.lua, nonce) {
-            return vm.construction_failed(error, observer, section);
+            return vm.construction_failed(error, emitter, section);
         }
         match install_instruction_budget(&vm.lua) {
             Ok(budget) => vm.instruction_budget = budget,
-            Err(error) => return vm.construction_failed(error, observer, section),
+            Err(error) => return vm.construction_failed(error, emitter, section),
         }
         Ok(vm)
     }
@@ -303,11 +299,10 @@ impl SectionVm {
         nonce: &GuardNonce,
         tools: &Arc<Mutex<ToolSet>>,
         models: &Arc<Mutex<ModelSet>>,
-        execution: &str,
-        observer: &dyn Observer,
+        emitter: &Emitter,
         section: &str,
     ) -> Result<Self> {
-        let mut vm = Self::new(nonce, execution, observer, section)?;
+        let mut vm = Self::new(nonce, emitter, section)?;
         vm.bound_tools = Arc::clone(tools);
         vm.bound_models = Arc::clone(models);
         Ok(vm)
@@ -317,7 +312,7 @@ impl SectionVm {
     /// block coroutine the VM starts polls it, and a set flag aborts the
     /// running chunk as [`Error::Interrupted`]. A VM without one is never
     /// cancelled. The first install wins.
-    pub fn set_cancel(&self, cancel: promptforge_api_types::cancel::sync::CancelHandle) {
+    pub fn set_cancel(&self, cancel: promptforge_api_types::cancel::CancelHandle) {
         self.instruction_budget.set_cancel(cancel);
     }
 
@@ -352,23 +347,23 @@ impl SectionVm {
     pub fn replay_shared(
         &self,
         program: &LuaProgram,
-        observer: &dyn Observer,
+        emitter: &Emitter,
         section: &str,
     ) -> Result<()> {
-        observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_STARTED);
+        emitter.report(section, lifecycle::LUA_SHARED_LOAD_STARTED);
         match self.run_loaded_with_control(program) {
             Ok(LuaBlockResult::Returned(_)) => {
-                observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED);
+                emitter.report(section, lifecycle::LUA_SHARED_LOAD_SUCCEEDED);
                 Ok(())
             }
             Ok(LuaBlockResult::Jump(_)) => {
-                observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_FAILED);
+                emitter.report(section, lifecycle::LUA_SHARED_LOAD_FAILED);
                 Err(Error::Lua(
                     "jump is not available during shared library load".to_owned(),
                 ))
             }
             Err(error) => {
-                observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_FAILED);
+                emitter.report(section, lifecycle::LUA_SHARED_LOAD_FAILED);
                 Err(error)
             }
         }
@@ -427,8 +422,8 @@ impl SectionVm {
     /// This operation may be called exactly once. The store callbacks own a
     /// clone of the run-scoped store. `log` and `store` are installed once for
     /// the section's whole lifecycle by
-    /// [`install_host_apis`](Self::install_host_apis), which captures an
-    /// observer `Arc` rather than a per-chunk borrow.
+    /// [`install_host_apis`](Self::install_host_apis), which captures a
+    /// clone of the emitter rather than a per-chunk borrow.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or if host
@@ -437,18 +432,19 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::observe::NullObserver;
+    /// use promptforge_api_types::emitter::{Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
-    /// let nonce = GuardNonce::fresh();
+    /// let nonce = GuardNonce::from_seed(1);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
     ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
     ///         .expect("the stock backend acquires"),
     /// );
-    /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
+    /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &access)?;
-    /// vm.teardown(&NullObserver::default(), "Example");
+    /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
     pub fn inject_host(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
@@ -533,33 +529,25 @@ impl SectionVm {
     /// whole lifecycle.
     ///
     /// Called once after [`inject_host_with_var`](Self::inject_host_with_var).
-    /// The closures capture owned strings and Arc clones of the observer, the
-    /// log budget counters, and the store handle, so they stay valid across
+    /// The closures capture owned strings, a clone of the emitter, and Arc
+    /// clones of the log budget counters and the store handle, so they stay valid across
     /// every chunk this VM runs without a live [`mlua::Scope`].
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or the
     /// globals cannot be installed.
-    pub fn install_host_apis(&self, observer: &Arc<dyn Observer>, section: &str) -> Result<()> {
+    pub fn install_host_apis(&self, emitter: &Emitter, section: &str) -> Result<()> {
         let access = self.access.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
         })?;
         install_log(
             &self.lua,
-            &self.execution,
-            observer,
+            emitter,
             section,
             &self.log_budget,
             &self.log_byte_budget,
         )?;
-        install_store_table(
-            &self.lua,
-            &self.lua.globals(),
-            access,
-            &self.execution,
-            observer,
-            section,
-        )
+        install_store_table(&self.lua, &self.lua.globals(), access, emitter, section)
     }
 
     /// Installs `call`, `jump`, and `list_from_section` as persistent
@@ -746,7 +734,7 @@ impl SectionVm {
     /// This is the legacy engine's path for running a section's Lua blocks;
     /// the scheduler drives blocks through
     /// [`start_block_coro`](Self::start_block_coro) instead. Store and
-    /// `log` reports go to the observer captured by
+    /// `log` reports go to the emitter captured by
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
     /// the chunk may call `call`, `jump`, or `fanout`, those must
@@ -763,23 +751,22 @@ impl SectionVm {
     pub fn run_chunk(
         &self,
         program: &LuaProgram,
-        observer: &dyn Observer,
+        emitter: &Emitter,
         section: &str,
     ) -> Result<LuaBlockResult> {
-        observer.observe(&self.execution, section, detail::LUA_CHUNK_STARTED);
+        emitter.report(section, lifecycle::LUA_CHUNK_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_CHUNK_FAILED);
+            emitter.report(section, lifecycle::LUA_CHUNK_FAILED);
             return Err(error);
         }
         let result = self.run_loaded_with_control(program);
-        observer.observe(
-            &self.execution,
+        emitter.report(
             section,
             if result.is_ok() {
-                detail::LUA_CHUNK_SUCCEEDED
+                lifecycle::LUA_CHUNK_SUCCEEDED
             } else {
-                detail::LUA_CHUNK_FAILED
+                lifecycle::LUA_CHUNK_FAILED
             },
         );
         result
@@ -795,19 +782,20 @@ impl SectionVm {
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::observe::NullObserver;
+    /// use promptforge_api_types::emitter::{Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
-    /// let nonce = GuardNonce::fresh();
+    /// let nonce = GuardNonce::from_seed(1);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
     ///     vfs.acquire(shared_vfs::Origin::new("vm example"))
     ///         .expect("the stock backend acquires"),
     /// );
-    /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
+    /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &access)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
-    /// vm.teardown(&NullObserver::default(), "Example");
+    /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
     pub fn var(&self) -> Result<Json> {
@@ -1001,35 +989,30 @@ impl SectionVm {
 
     /// Destroys this section VM at an explicit observed lifecycle boundary.
     ///
-    /// The observer is borrowed only for this synchronous call and is not
+    /// The emitter is borrowed only for this synchronous call and is not
     /// retained by the VM.
     ///
     /// # Examples
     /// ```text
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::observe::NullObserver;
+    /// use promptforge_api_types::emitter::{Emitter, EventSink};
     /// use promptforge_api_types::untrusted::GuardNonce;
     ///
-    /// let nonce = GuardNonce::fresh();
-    /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.teardown(&NullObserver::default(), "Example");
+    /// let nonce = GuardNonce::from_seed(1);
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
+    /// let vm = SectionVm::new(&nonce, &emitter, "Example")?;
+    /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub fn teardown(self, observer: &dyn Observer, section: &str) {
-        let execution = self.execution.clone();
-        observer.observe(&self.execution, section, detail::LUA_TEARDOWN_STARTED);
+    pub fn teardown(self, emitter: &Emitter, section: &str) {
+        emitter.report(section, lifecycle::LUA_TEARDOWN_STARTED);
         self.clear_infer_hook();
         drop(self);
-        observer.observe(&execution, section, detail::LUA_TEARDOWN_SUCCEEDED);
+        emitter.report(section, lifecycle::LUA_TEARDOWN_SUCCEEDED);
     }
 
-    fn construction_failed(
-        self,
-        error: Error,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Self> {
-        self.teardown(observer, section);
+    fn construction_failed(self, error: Error, emitter: &Emitter, section: &str) -> Result<Self> {
+        self.teardown(emitter, section);
         Err(error)
     }
 
@@ -1295,9 +1278,9 @@ pub(crate) struct LuaOutcome {
 /// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
 /// table available, and a `store` table backed by `store`, returning the
 /// chunk's return value and the final `var`. Harness-mediated store operations
-/// report safe outcomes to `observer` under `execution` and `section`.
+/// report safe outcomes through `emitter` under `section`.
 /// `log(message)` reports constrained author checkpoints through the same
-/// observer; direct `print` is unavailable.
+/// emitter; direct `print` is unavailable.
 ///
 /// `store` is the run-scoped virtual-file handle; every section in a run is
 /// given the same handle, so files a section writes persist for later sections
@@ -1319,13 +1302,12 @@ pub(crate) fn run_chunk(
     args: &str,
     sys: &Json,
     access: &Arc<Access>,
-    execution: &str,
-    observer: &Arc<dyn Observer>,
+    emitter: &Emitter,
     section: &str,
 ) -> Result<LuaOutcome> {
-    let mut vm = SectionVm::new(&GuardNonce::fresh(), execution, observer.as_ref(), section)?;
+    let mut vm = SectionVm::new(&GuardNonce::from_seed(0), emitter, section)?;
     vm.inject_host(args, sys, access)?;
-    vm.install_host_apis(observer, section)?;
+    vm.install_host_apis(emitter, section)?;
     let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;
     let returned = scalar_return(returned)?;
     let var = vm.var()?;

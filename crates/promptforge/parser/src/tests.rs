@@ -1,6 +1,4 @@
-use std::sync::Mutex;
-
-use promptforge_api_types::observe::{NullObserver, Observation, detail};
+use promptforge_api_types::event::Event;
 
 use super::list::parse_bullet_items;
 use super::*;
@@ -29,8 +27,7 @@ fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
     // `Frontmatter` and retain the underlying serde_yaml_ng failure as the
     // public error's `source()`, instead of flattening it into a string.
     let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("malformed YAML frontmatter must fail to parse");
+    let error = parse(src).expect_err("malformed YAML frontmatter must fail to parse");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert!(
         std::error::Error::source(&error).is_some(),
@@ -44,8 +41,7 @@ fn frontmatter_syntax_errors_carry_a_position_and_no_name() {
     // serde_yaml_ng position (1-based, file-absolute); the failure predates
     // the prompt's name, so none is reported.
     let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("malformed YAML frontmatter must fail to parse");
+    let error = parse(src).expect_err("malformed YAML frontmatter must fail to parse");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert_eq!(error.line(), Some(4), "the malformed line: {error}");
     assert!(
@@ -64,8 +60,7 @@ fn structured_errors_carry_the_prompt_name_and_source_position() {
         "---\nname: dup\ndescription: d\n---\n", // lines 1-4
         "\n# T\n\n## S\n\np\n\n## S\n\nq\n",     // the second `## S` heads line 12
     );
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("duplicate sibling sections must be rejected");
+    let error = parse(src).expect_err("duplicate sibling sections must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Structure);
     assert_eq!(error.name(), Some("dup"));
     assert_eq!(
@@ -89,7 +84,7 @@ fn mixed_prose_with_one_bullet_is_not_a_list() {
     // PF-PARSER-005: an incidental bullet line in ordinary prose must not
     // force strict list parsing; the section stays prose.
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\nHere is context.\n- one incidental bullet\nMore prose follows.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert!(!section.is_list_only(), "mixed prose is not a list");
     assert!(section.items().is_empty());
@@ -99,7 +94,7 @@ fn mixed_prose_with_one_bullet_is_not_a_list() {
 #[test]
 fn pure_list_section_parses_items() {
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n- beta\n3. gamma\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_list_only());
     assert_eq!(section.items(), ["alpha", "beta", "gamma"]);
@@ -110,8 +105,7 @@ fn all_marker_list_with_empty_item_is_rejected() {
     // Every nonblank line is a marker, so it is a list; the empty marker is
     // then a hard error rather than a detector miss.
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n1.\n- beta\n";
-    let error =
-        Prompt::parse(src, "test", &NullObserver::default()).expect_err("empty item must fail");
+    let error = parse(src).expect_err("empty item must fail");
     assert_eq!(error.kind(), ParseErrorKind::List);
 }
 
@@ -120,8 +114,7 @@ fn list_error_kind_does_not_depend_on_the_section_name() {
     for section in ["frontmatter", "fence"] {
         let src =
             format!("---\nname: p\ndescription: d\n---\n\n# T\n\n## {section}\n\n- alpha\n1.\n");
-        let error = Prompt::parse(&src, "test", &NullObserver::default())
-            .expect_err("an empty list item must fail");
+        let error = parse(&src).expect_err("an empty list item must fail");
         assert_eq!(error.kind(), ParseErrorKind::List);
     }
 }
@@ -132,47 +125,67 @@ fn parsed_prompt_value_types_are_equatable() {
     // a differing source yields unequal values, across the finalized parser
     // value types (`Prompt`, `Frontmatter`, `Section`, `Block`).
     let src = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## One\n\ndo a thing\n";
-    let a = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
-    let b = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let a = parse(src).unwrap();
+    let b = parse(src).unwrap();
     assert_eq!(a, b, "identical sources must parse equal");
     assert_eq!(a.frontmatter, b.frontmatter);
     assert_eq!(a.sections, b.sections);
 
     let other = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## Two\n\ndo a thing\n";
-    let c = Prompt::parse(other, "test", &NullObserver::default()).unwrap();
+    let c = parse(other).unwrap();
     assert_ne!(a, c, "differing section headings must parse unequal");
 }
 
-#[derive(Default)]
-struct Recorder(Mutex<Vec<(String, String, String)>>);
+/// Parses under the suite's execution id, keeping the outcome alone.
+fn parse(src: &str) -> std::result::Result<Prompt, ParseError> {
+    Prompt::parse(src, "test").0
+}
 
-impl Observer for Recorder {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        self.0
-            .lock()
-            .expect("recording lock must remain usable")
-            .push((
-                execution.to_string(),
-                section.to_string(),
-                event.to_string(),
-            ));
+/// The parse-time events read back as `(execution, section, kind)`.
+struct Recorder(Vec<Event>);
+
+/// The `kind` labels the parse reports.
+mod detail {
+    pub(super) const PARSE_STARTED: &str = "parse_started";
+    pub(super) const PARSE_SUCCEEDED: &str = "parse_succeeded";
+    pub(super) const PARSE_FAILED: &str = "parse_failed";
+    pub(super) const LUA_COMPILATION_STARTED: &str = "lua_compilation_started";
+    pub(super) const LUA_COMPILATION_SUCCEEDED: &str = "lua_compilation_succeeded";
+    pub(super) const LUA_COMPILATION_FAILED: &str = "lua_compilation_failed";
+}
+
+/// The `kind` label of one of the events a parse reports.
+fn kind(event: &Event) -> String {
+    match event {
+        Event::ParseStarted { .. } => detail::PARSE_STARTED,
+        Event::ParseSucceeded { .. } => detail::PARSE_SUCCEEDED,
+        Event::ParseFailed { .. } => detail::PARSE_FAILED,
+        Event::LuaCompilationStarted { .. } => detail::LUA_COMPILATION_STARTED,
+        Event::LuaCompilationSucceeded { .. } => detail::LUA_COMPILATION_SUCCEEDED,
+        Event::LuaCompilationFailed { .. } => detail::LUA_COMPILATION_FAILED,
+        other => panic!("a parse reports no {other:?}"),
     }
+    .to_owned()
 }
 
 impl Recorder {
     fn records(&self) -> Vec<(String, String, String)> {
         self.0
-            .lock()
-            .expect("recording lock must remain usable")
-            .clone()
+            .iter()
+            .map(|event| {
+                (
+                    event.execution().to_owned(),
+                    event.section().to_owned(),
+                    kind(event),
+                )
+            })
+            .collect()
     }
 
     fn observations(&self) -> Vec<(String, String)> {
         self.0
-            .lock()
-            .expect("recording lock must remain usable")
             .iter()
-            .map(|(_, section, detail)| (section.clone(), detail.clone()))
+            .map(|event| (event.section().to_owned(), kind(event)))
             .collect()
     }
 }
@@ -204,7 +217,7 @@ Child prose.\n\
 \n\
 Prose for the second section.\n";
 
-    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let p = parse(src).unwrap();
     assert_eq!(p.frontmatter.name, "demo");
     assert_eq!(p.frontmatter.description, "A demo");
     assert_eq!(p.title, "Demo Title");
@@ -240,7 +253,7 @@ Prose for the second section.\n";
 #[test]
 fn parses_single_minimal_section() {
     let src = "---\nname: hi\ndescription: d\n---\n\n# T\n\n## Greet\n\nSay hi\n";
-    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let p = parse(src).unwrap();
     assert_eq!(p.sections.len(), 1);
     assert_eq!(p.sections[0].name, "Greet");
     assert_eq!(p.sections[0].prose(), "Say hi");
@@ -249,38 +262,34 @@ fn parses_single_minimal_section() {
 #[test]
 fn name_and_description_are_sufficient_frontmatter_for_parsing() {
     let src = prompt_src("## S\n\np\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver::default())
-        .expect("minimum frontmatter must parse");
+    let prompt = parse(&src).expect("minimum frontmatter must parse");
     assert_eq!(prompt.frontmatter.name, "x");
 }
 
 #[test]
 fn missing_frontmatter_delimiter_errors() {
     let src = "# T\n\n## S\n\np\n";
-    assert!(Prompt::parse(src, "test", &NullObserver::default()).is_err());
+    assert!(parse(src).is_err());
 }
 
 #[test]
 fn h1_only_prompt_parses_with_empty_sections() {
     let src = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n# Only a title\n\nText.\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver::default()).expect("H1-only prompt must parse");
+    let prompt = parse(src).expect("H1-only prompt must parse");
     assert!(prompt.sections.is_empty());
 }
 
 #[test]
 fn empty_h1_title_errors() {
     let src = "---\nname: x\ndescription: d\n---\n\n#\n\n## S\n\np\n";
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("H1 title must not be empty");
+    let error = parse(src).expect_err("H1 title must not be empty");
     assert!(error.to_string().contains("title must not be empty"));
 }
 
 #[test]
 fn preface_before_h1_is_ignored() {
     let src = "---\nname: x\ndescription: d\n---\n\nIgnored preface.\n\n```text\nalso ignored\n```\n\n# T\n\nDescription.\n\n## S\n\np\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver::default()).expect("preface is not semantic");
+    let prompt = parse(src).expect("preface is not semantic");
     assert_eq!(prompt.title, "T");
     assert_eq!(prompt.description_text, "Description.");
     assert_eq!(prompt.entry().expect("has sections").name, "S");
@@ -289,8 +298,7 @@ fn preface_before_h1_is_ignored() {
 #[test]
 fn shared_library_allows_blank_lines_and_is_compiled() {
     let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n \t\r\n```lua shared\r\nfunction answer() return 42 end\r\n```\r\n\r\nDescription.\r\n\r\n## S\r\n\r\np\r\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver::default()).expect("shared Lua must parse");
+    let prompt = parse(src).expect("shared Lua must parse");
     let replay = prompt.replay.expect("replay program must be present");
     assert_eq!(replay.source(), "function answer() return 42 end");
     assert_eq!(prompt.description_text, "Description.");
@@ -299,8 +307,7 @@ fn shared_library_allows_blank_lines_and_is_compiled() {
 #[test]
 fn h1_plain_lua_and_prose_are_live_blocks() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal first = 1\n```\n\nPlan {{ args }}.\n\n```lua shared\nfunction helper() return 1 end\n```\n\n```lua\nstore.write('done', reply)\n```\n\n## S\n\np\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver::default()).expect("H1 blocks must parse");
+    let prompt = parse(src).expect("H1 blocks must parse");
     assert_eq!(
         prompt.replay.as_ref().map(LuaProgram::source),
         Some("function helper() return 1 end")
@@ -325,8 +332,7 @@ fn h1_plain_lua_and_prose_are_live_blocks() {
 fn lone_plain_h1_lua_is_not_a_shared_library() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal live = true\n```\n\n## S\n\np\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver::default()).expect("plain H1 Lua must parse");
+    let prompt = parse(src).expect("plain H1 Lua must parse");
     assert!(prompt.replay.is_none());
     assert!(matches!(
         prompt.h1_blocks.as_slice(),
@@ -337,8 +343,7 @@ fn lone_plain_h1_lua_is_not_a_shared_library() {
 #[test]
 fn second_shared_fence_is_a_parse_error() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nlocal a = 1\n```\n\n```lua shared\nlocal b = 2\n```\n\n## S\n\np\n";
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("a second shared fence must fail");
+    let error = parse(src).expect_err("a second shared fence must fail");
     assert!(error.to_string().contains("at most one `lua shared`"));
 }
 
@@ -346,16 +351,14 @@ fn second_shared_fence_is_a_parse_error() {
 fn shared_fence_in_h2_is_a_parse_error() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua shared\nlocal a = 1\n```\n";
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("a shared fence in H2 must fail");
+    let error = parse(src).expect_err("a shared fence in H2 must fail");
     assert!(error.to_string().contains("allowed only in H1"));
 }
 
 #[test]
 fn removed_lua_prompt_form_is_a_targeted_error_when_leading() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal a = 1\n```\n\n## S\n\np\n";
-    let error = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("the removed leading form must be rejected by name");
+    let error = parse(src).expect_err("the removed leading form must be rejected by name");
     assert!(
         error
             .to_string()
@@ -366,15 +369,13 @@ fn removed_lua_prompt_form_is_a_targeted_error_when_leading() {
 #[test]
 fn lua_prompt_form_after_prose_is_ordinary_prose() {
     let in_h1 = "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n```lua prompt\nnot compiled =\n```\n\n## S\n\np\n";
-    let prompt = Prompt::parse(in_h1, "test", &NullObserver::default())
-        .expect("the removed form after prose is ordinary Markdown");
+    let prompt = parse(in_h1).expect("the removed form after prose is ordinary Markdown");
     assert!(prompt.replay.is_none());
     assert!(prompt.description_text.contains("```lua prompt"));
 
     let in_section =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua prompt\nnot compiled =\n```\n";
-    let prompt = Prompt::parse(in_section, "test", &NullObserver::default())
-        .expect("the removed form in a section is ordinary Markdown");
+    let prompt = parse(in_section).expect("the removed form in a section is ordinary Markdown");
     let entry = prompt.entry().expect("has sections");
     assert!(entry.prologue().is_none());
     assert!(entry.prose().contains("```lua prompt"));
@@ -395,8 +396,7 @@ fn shared_fence_markers_must_be_exact() {
         "```lua shared extra\nreturn 1\n```",
     ] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{near_miss}\n\n## S\n\np\n");
-        let prompt = Prompt::parse(&src, "test", &NullObserver::default())
-            .expect("leading near-miss shared markers must remain prose");
+        let prompt = parse(&src).expect("leading near-miss shared markers must remain prose");
         assert!(prompt.replay.is_none());
         assert!(prompt.description_text.contains(near_miss.trim()));
     }
@@ -412,24 +412,21 @@ fn shared_fence_markers_must_be_exact() {
         let src = format!(
             "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n{near_miss}\n\n## S\n\np\n"
         );
-        let prompt = Prompt::parse(&src, "test", &NullObserver::default())
-            .expect("near-miss shared markers must remain prose");
+        let prompt = parse(&src).expect("near-miss shared markers must remain prose");
         assert!(prompt.replay.is_none());
         assert!(prompt.description_text.contains(near_miss));
     }
 
     let unclosed =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nreturn 1\n````\n\n## S\n\np\n";
-    let error = Prompt::parse(unclosed, "test", &NullObserver::default())
-        .expect_err("near-miss closing marker must not close the fence");
+    let error = parse(unclosed).expect_err("near-miss closing marker must not close the fence");
     assert!(error.to_string().contains("not closed"));
 }
 
 #[test]
 fn shared_markers_inside_longer_fences_remain_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua shared\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua shared\nreturn 2\n```\n````\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default())
-        .expect("nested shared markers must remain prose");
+    let prompt = parse(src).expect("nested shared markers must remain prose");
 
     assert!(prompt.replay.is_none());
     assert!(prompt.description_text.contains("```lua shared"));
@@ -439,13 +436,13 @@ fn shared_markers_inside_longer_fences_remain_prose() {
 
 #[test]
 fn malformed_shared_lua_retains_diagnostics_and_reports_safe_boundaries() {
-    let recorder = Recorder::default();
     let source = "private_payload =";
     let src = format!(
         "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua shared\n{source}\n```\n\n## S\n\np\n"
     );
-    let error = Prompt::parse(&src, "parse-failure", &recorder)
-        .expect_err("malformed shared Lua must fail");
+    let (error, events) = Prompt::parse(&src, "parse-failure");
+    let recorder = Recorder(events);
+    let error = error.expect_err("malformed shared Lua must fail");
     match error.into_inner() {
         Error::Lua(promptforge_lua::Error::LuaCompile {
             location,
@@ -482,10 +479,11 @@ fn malformed_shared_lua_retains_diagnostics_and_reports_safe_boundaries() {
 
 #[test]
 fn successful_parse_reports_only_fixed_boundaries() {
-    let recorder = Recorder::default();
     let source =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal secret = 42\n```\n\n## S\n\np\n";
-    Prompt::parse(source, "parse-success", &recorder).expect("prompt must parse");
+    let (prompt, events) = Prompt::parse(source, "parse-success");
+    prompt.expect("prompt must parse");
+    let recorder = Recorder(events);
     assert!(
         recorder
             .records()
@@ -506,7 +504,7 @@ fn successful_parse_reports_only_fixed_boundaries() {
 #[test]
 fn lua_fence_separated_from_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nreturn 42\n```\n\nActual prose here.\n";
-    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let p = parse(src).unwrap();
     assert_eq!(
         p.sections[0].prologue().map(LuaProgram::source),
         Some("return 42")
@@ -518,8 +516,7 @@ fn lua_fence_separated_from_prose() {
 #[test]
 fn section_compiles_prologue_and_epilog_around_prose() {
     let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n## Transform\r\n\r\n \t\r\n```lua\r\nvar.before = args\r\n```\r\n\r\nAsk about {{ var.before }}.\r\n\r\n```lua\r\nreturn reply\r\n```\r\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default())
-        .expect("both exact section phases must compile");
+    let prompt = parse(src).expect("both exact section phases must compile");
     let section = prompt.entry().expect("has sections");
 
     assert_eq!(
@@ -536,8 +533,7 @@ fn section_compiles_prologue_and_epilog_around_prose() {
 #[test]
 fn section_compiles_epilog_after_prose_without_prologue() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Transform\n\nAsk the model.\n\n```lua\nreturn reply\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default())
-        .expect("the trailing epilog must compile");
+    let prompt = parse(src).expect("the trailing epilog must compile");
     let section = prompt.entry().expect("has sections");
 
     assert!(section.prologue().is_none());
@@ -551,8 +547,7 @@ fn section_compiles_epilog_after_prose_without_prologue() {
 #[test]
 fn exact_middle_lua_fences_become_compiled_blocks() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nBefore.\n\n```lua\nvar.mid = 1\n```\n\nAfter.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default())
-        .expect("middle Lua fences compile as blocks");
+    let prompt = parse(src).expect("middle Lua fences compile as blocks");
     let section = prompt.entry().expect("has sections");
 
     assert!(section.prologue().is_none());
@@ -576,23 +571,20 @@ fn exact_middle_lua_fences_become_compiled_blocks() {
 #[test]
 fn invalid_middle_lua_fence_fails_parse() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nBefore.\n\n```lua\nnot valid lua =\n```\n\nAfter.\n";
-    let err = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("invalid middle Lua must fail compilation");
+    let err = parse(src).expect_err("invalid middle Lua must fail compilation");
     assert_eq!(err.kind(), ParseErrorKind::Lua);
 }
 
 #[test]
 fn one_exact_fence_is_the_prologue_and_two_can_surround_empty_prose() {
     let one = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n";
-    let prompt =
-        Prompt::parse(one, "test", &NullObserver::default()).expect("one fence is the prologue");
+    let prompt = parse(one).expect("one fence is the prologue");
     let entry = prompt.entry().expect("has sections");
     assert!(entry.prologue().is_some());
     assert!(entry.epilog().is_none());
 
     let two = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n\n```lua\nreturn reply\n```\n";
-    let prompt = Prompt::parse(two, "test", &NullObserver::default())
-        .expect("two fences can enclose empty prose");
+    let prompt = parse(two).expect("two fences can enclose empty prose");
     let entry = prompt.entry().expect("has sections");
     assert_eq!(entry.prose(), "");
     assert!(entry.prologue().is_some());
@@ -608,8 +600,7 @@ fn section_fence_markers_must_be_exact() {
         "```lua extra\nreturn 1\n```",
     ] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{near_miss}\n");
-        let prompt = Prompt::parse(&src, "test", &NullObserver::default())
-            .expect("near-miss fence must remain prose");
+        let prompt = parse(&src).expect("near-miss fence must remain prose");
         let entry = prompt.entry().expect("has sections");
         assert!(entry.prologue().is_none());
         assert!(entry.epilog().is_none());
@@ -623,8 +614,8 @@ fn non_exact_section_closing_before_another_lua_fence_is_a_parse_error() {
         let src = format!(
             "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.a = 1\n{near_miss_close}\n\n```lua\nvar.b = 2\n```\n"
         );
-        let error = Prompt::parse(&src, "test", &NullObserver::default())
-            .expect_err("a near-miss closing fence must not panic or close the block");
+        let error =
+            parse(&src).expect_err("a near-miss closing fence must not panic or close the block");
         assert!(error.to_string().contains("not closed exactly"));
     }
 }
@@ -632,8 +623,7 @@ fn non_exact_section_closing_before_another_lua_fence_is_a_parse_error() {
 #[test]
 fn section_markers_inside_longer_fences_remain_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n````markdown\n```lua\nreturn 1\n```\n````\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default())
-        .expect("nested markers must remain prose");
+    let prompt = parse(src).expect("nested markers must remain prose");
 
     let entry = prompt.entry().expect("has sections");
     assert!(entry.prologue().is_none());
@@ -667,11 +657,12 @@ fn malformed_section_phases_report_locations_and_safe_boundaries() {
             ],
         ),
     ] {
-        let recorder = Recorder::default();
         let src = format!(
             "---\nname: x\ndescription: d\n---\n\n# T\n\n## Private section\n\n{content}\n"
         );
-        let Err(error) = Prompt::parse(&src, "test", &recorder) else {
+        let (outcome, events) = Prompt::parse(&src, "test");
+        let recorder = Recorder(events);
+        let Err(error) = outcome else {
             panic!("malformed {phase} unexpectedly parsed");
         };
         match error.into_inner() {
@@ -712,8 +703,7 @@ fn unclosed_reserved_section_fences_are_location_errors() {
         ("Prose.\n\n```lua\nreturn reply", "epilog"),
     ] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{content}\n");
-        let error = Prompt::parse(&src, "test", &NullObserver::default())
-            .expect_err("reserved fence must close exactly");
+        let error = parse(&src).expect_err("reserved fence must close exactly");
         assert!(error.to_string().contains(phase));
         assert!(error.to_string().contains("not closed"));
     }
@@ -721,9 +711,10 @@ fn unclosed_reserved_section_fences_are_location_errors() {
 
 #[test]
 fn successful_section_compilation_reports_fixed_ordered_boundaries() {
-    let recorder = Recorder::default();
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.secret = 1\n```\n\nProse.\n\n```lua\nreturn reply\n```\n";
-    Prompt::parse(src, "section-programs", &recorder).expect("section programs must compile");
+    let (prompt, events) = Prompt::parse(src, "section-programs");
+    prompt.expect("section programs must compile");
+    let recorder = Recorder(events);
 
     assert_eq!(
         recorder.observations(),
@@ -741,7 +732,7 @@ fn successful_section_compilation_reports_fixed_ordered_boundaries() {
 #[test]
 fn non_lua_fence_stays_in_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nHere is code:\n\n```python\nprint(1)\n```\n";
-    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let p = parse(src).unwrap();
     assert!(p.sections[0].prologue().is_none());
     assert!(p.sections[0].epilog().is_none());
     assert!(p.sections[0].prose().contains("```python"));
@@ -751,7 +742,7 @@ fn non_lua_fence_stays_in_prose() {
 fn recursive_nesting_h2_h3_h4() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n### B\n\nb\n\n#### C\n\nc\n";
-    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let p = parse(src).unwrap();
     let a = &p.sections[0];
     assert_eq!(a.name, "A");
     let b = &a.children[0];
@@ -767,8 +758,7 @@ fn skipped_heading_level_is_rejected_as_orphan() {
     // H4 directly under H2 (no intervening H3) is an orphan deep heading:
     // it has no parent H3, so it must be rejected, not reparented to the H2.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n#### D\n\nd\n";
-    let err = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("an H4 with no parent H3 must be rejected");
+    let err = parse(src).expect_err("an H4 with no parent H3 must be rejected");
     assert!(
         err.to_string().contains("orphan"),
         "expected an orphan-heading error, got: {err}"
@@ -779,8 +769,7 @@ fn skipped_heading_level_is_rejected_as_orphan() {
 fn orphan_top_level_deep_heading_is_rejected() {
     // The first section heading is an H3 with no parent H2: an orphan.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n### A\n\na\n";
-    let err = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("an H3 top-level section with no parent H2 must be rejected");
+    let err = parse(src).expect_err("an H3 top-level section with no parent H2 must be rejected");
     assert!(
         err.to_string().contains("orphan"),
         "expected an orphan-heading error, got: {err}"
@@ -789,7 +778,7 @@ fn orphan_top_level_deep_heading_is_rejected() {
     // An H4 top-level section (double skip) is likewise rejected.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n#### A\n\na\n";
     assert!(
-        Prompt::parse(src, "test", &NullObserver::default()).is_err(),
+        parse(src).is_err(),
         "an H4 top-level section must be rejected"
     );
 }
@@ -797,22 +786,20 @@ fn orphan_top_level_deep_heading_is_rejected() {
 #[test]
 fn unknown_frontmatter_field_is_rejected() {
     let src = "---\nname: x\ndescription: d\nnot_a_real_field: 1\n---\n\n# T\n\n## S\n\np\n";
-    let err = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("an unknown frontmatter field must be rejected");
+    let err = parse(src).expect_err("an unknown frontmatter field must be rejected");
     assert!(
         err.to_string().contains("not_a_real_field") || err.to_string().contains("unknown field"),
         "expected an unknown-field error, got: {err}"
     );
     // A known-field-only frontmatter still parses.
     let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    assert!(Prompt::parse(ok, "test", &NullObserver::default()).is_ok());
+    assert!(parse(ok).is_ok());
 }
 
 #[test]
 fn empty_section_heading_is_rejected() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## \n\na\n";
-    let err = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("an empty section heading must be rejected");
+    let err = parse(src).expect_err("an empty section heading must be rejected");
     assert!(
         err.to_string().contains("must not be empty"),
         "expected an empty-heading error, got: {err}"
@@ -823,8 +810,7 @@ fn empty_section_heading_is_rejected() {
 fn duplicate_sibling_section_names_are_rejected() {
     // Two H2 siblings named `S` are ambiguous section targets.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\na\n\n## S\n\nb\n";
-    let err = Prompt::parse(src, "test", &NullObserver::default())
-        .expect_err("duplicate sibling section names must be rejected");
+    let err = parse(src).expect_err("duplicate sibling section names must be rejected");
     let message = err.to_string();
     assert!(
         message.contains("duplicate sibling section name"),
@@ -848,7 +834,7 @@ fn duplicate_sibling_section_names_are_rejected() {
     // The same name under DIFFERENT parents (not siblings) is allowed.
     let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n### S\n\nx\n\n## B\n\nb\n\n### S\n\ny\n";
     assert!(
-        Prompt::parse(ok, "test", &NullObserver::default()).is_ok(),
+        parse(ok).is_ok(),
         "the same name under different parents is not a sibling collision"
     );
 }
@@ -857,14 +843,14 @@ fn duplicate_sibling_section_names_are_rejected() {
 fn max_tool_iterations_parses_positive_and_defaults_when_absent() {
     let declared =
         "---\nname: x\ndescription: d\nmax_tool_iterations: 20\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(declared, "test", &NullObserver::default()).unwrap();
+    let p = parse(declared).unwrap();
     assert_eq!(
         p.frontmatter.max_tool_iterations,
         MaxToolIterations::Limit(std::num::NonZeroU32::new(20).unwrap())
     );
 
     let absent = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(absent, "test", &NullObserver::default()).unwrap();
+    let p = parse(absent).unwrap();
     assert_eq!(
         p.frontmatter.max_tool_iterations,
         MaxToolIterations::Default
@@ -879,8 +865,8 @@ fn max_tool_iterations_rejects_zero_negative_and_overflow() {
         )
     };
     for bad in ["0", "-1", "1001", "100000000000"] {
-        let error = Prompt::parse(&body(bad), "test", &NullObserver::default())
-            .expect_err(&format!("max_tool_iterations {bad} must be rejected"));
+        let error =
+            parse(&body(bad)).expect_err(&format!("max_tool_iterations {bad} must be rejected"));
         assert_eq!(
             error.kind(),
             ParseErrorKind::Frontmatter,
@@ -894,7 +880,7 @@ fn max_tool_iterations_accepts_the_upper_boundary() {
     let body = format!(
         "---\nname: x\ndescription: d\nmax_tool_iterations: {MAX_TOOL_ITERATIONS}\n---\n\n# T\n\n## S\n\np\n"
     );
-    let p = Prompt::parse(&body, "test", &NullObserver::default()).unwrap();
+    let p = parse(&body).unwrap();
     assert_eq!(
         p.frontmatter.max_tool_iterations,
         MaxToolIterations::Limit(std::num::NonZeroU32::new(MAX_TOOL_ITERATIONS).unwrap())
@@ -914,7 +900,7 @@ fn max_tool_iterations_resolve_uses_default_only_when_absent() {
 fn first_h2_is_entry_regardless_of_name() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## Zebra\n\nfirst\n\n## Main\n\nsecond\n";
-    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let p = parse(src).unwrap();
     assert_eq!(p.entry().expect("has sections").name, "Zebra");
 }
 
@@ -957,11 +943,11 @@ fn detection_malformed_frontmatter_is_none() {
 #[test]
 fn frontmatter_exposes_promptforge_field() {
     let with = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(with, "test", &NullObserver::default()).unwrap();
+    let p = parse(with).unwrap();
     assert_eq!(p.frontmatter.promptforge, Some(0));
 
     let without = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(without, "test", &NullObserver::default()).unwrap();
+    let p = parse(without).unwrap();
     assert_eq!(p.frontmatter.promptforge, None);
 }
 
@@ -1012,7 +998,7 @@ fn bullet_parser_rejects_empty_item() {
 #[test]
 fn list_h3_parses_items_at_load_time() {
     let src = prompt_src("## Parent\n\np\n\n### Items\n\n- alpha\n- beta\n");
-    let p = Prompt::parse(&src, "test", &NullObserver::default()).unwrap();
+    let p = parse(&src).unwrap();
     let items_section = &p.sections[0].children[0];
     assert_eq!(items_section.name, "Items");
     assert_eq!(items_section.items, vec!["alpha", "beta"]);
@@ -1023,7 +1009,7 @@ fn non_list_h3_has_empty_items() {
     let src = prompt_src(
         "## Parent\n\np\n\n### Worker\n\n```lua\nreturn item\n```\n\nDo work on {{ item }}.\n",
     );
-    let p = Prompt::parse(&src, "test", &NullObserver::default()).unwrap();
+    let p = parse(&src).unwrap();
     let worker = &p.sections[0].children[0];
     assert_eq!(worker.name, "Worker");
     assert!(worker.items.is_empty());
@@ -1048,7 +1034,7 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
     // 14: assert(false) <- epilog line 2 (absolute = 14)
     // 15: ```
     let src = prompt_src("## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
+    let prompt = parse(&src).expect("prompt must parse");
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -1085,7 +1071,7 @@ fn prologue_source_line_maps_correctly() {
     // 13: (empty)
     // 14: Do the work.
     let src = prompt_src("## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
+    let prompt = parse(&src).expect("prompt must parse");
     let prologue = prompt
         .entry()
         .expect("has sections")
@@ -1119,7 +1105,7 @@ fn multi_line_chunk_maps_inner_line_correctly() {
     // 16: ```
     let src =
         prompt_src("## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
+    let prompt = parse(&src).expect("prompt must parse");
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -1150,7 +1136,7 @@ fn shared_library_source_line_is_correct() {
     // 14: (empty)
     // 15: p
     let src = prompt_src("```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
+    let prompt = parse(&src).expect("prompt must parse");
     let replay = prompt.replay.as_ref().expect("replay must exist");
     assert_eq!(replay.source_line().get(), 9, "shared Lua starts on line 9");
 }
@@ -1171,7 +1157,7 @@ fn frontmatter_parses_input_and_output() {
         "---\n\n",
         "# Title\n\n## Only\n\ndone\n",
     );
-    let prompt = Prompt::parse(source, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(source).unwrap();
     let fm = prompt.frontmatter();
     let input = fm.input().expect("input declared");
     assert_eq!(input.path(), "paper.md");
@@ -1191,7 +1177,7 @@ fn frontmatter_without_input_output_still_parses() {
         "---\n\n",
         "# Title\n\n## Only\n\ndone\n",
     );
-    let prompt = Prompt::parse(source, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(source).unwrap();
     assert!(prompt.frontmatter().input().is_none());
     assert!(prompt.frontmatter().output().is_none());
 }
@@ -1202,7 +1188,7 @@ fn leading_break_resets_prose_and_content_below_parses() {
     // it only resets the pending buffer, and the content below the break
     // parses and runs normally.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```lua\nvar.x = 1\n```\n\nBelow the break.\n\n## Plain\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 3);
     assert!(matches!(
@@ -1224,7 +1210,7 @@ fn a_break_never_terminates_section_content() {
     // is ordinary pending Markdown. A heading below the break still splits
     // sections.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nIntro.\n\n```lua\nvar.x = 1\n```\n\n---\n\nNotes.\n\n```lua\nvar.y = 2\n```\n\n## After\n\nafter prose\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     assert_eq!(prompt.sections.len(), 2);
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 4);
@@ -1242,7 +1228,7 @@ fn multiple_breaks_each_reset_the_pending_buffer() {
     // Any number of breaks may clear pending prose; only the Markdown below
     // the last break remains pending.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nFirst draft.\n\n---\n\nSecond draft.\n\n---\n\nFinal prose.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 1);
     assert_eq!(section.prose(), "Final prose.");
@@ -1251,7 +1237,7 @@ fn multiple_breaks_each_reset_the_pending_buffer() {
 #[test]
 fn list_items_below_a_leading_break_parse() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Items\n\n---\n\n- alpha\n- beta\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_list_only());
     assert_eq!(section.items(), ["alpha", "beta"]);
@@ -1262,7 +1248,7 @@ fn a_break_resets_list_item_capture() {
     // List items parse from the pending buffer: markers above a break are
     // commentary, and only the markers below the last break parse.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Items\n\n- alpha\n\n---\n\n- beta\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.items(), ["beta"]);
 }
@@ -1274,7 +1260,7 @@ fn h1_break_resets_prose_and_shared_fence_below_stays_live() {
     // below the break is live because a break no longer makes anything
     // reader-only.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription above.\n\n---\n\n```lua shared\nlocal shared = 1\n```\n\nBelow prose.\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     assert_eq!(
         prompt.replay.as_ref().map(LuaProgram::source),
         Some("local shared = 1")
@@ -1293,7 +1279,7 @@ fn rule_inside_a_fenced_code_block_is_not_a_marker() {
     // Pulldown reports only a genuine thematic break: a `---` inside a
     // fenced code block is code, not a rule, so it resets nothing.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nLive prose.\n\n```text\n---\n```\n\nAlso live.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert!(section.prose().contains("Also live."));
     assert!(section.prose().contains("---"));
@@ -1301,7 +1287,7 @@ fn rule_inside_a_fenced_code_block_is_not_a_marker() {
     // With a leading break, a fenced `---` still is not a reset point.
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```text\n---\n```\n\nLive.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert!(section.prose().contains("Live."));
     assert!(section.prose().contains("---"));
@@ -1314,7 +1300,7 @@ fn setext_underline_is_not_a_rule() {
     // the heading scanner reads it as a new section. The blank line before
     // the marker is required.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nSome prose\n---\n\nMore prose\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     assert_eq!(prompt.sections.len(), 2);
     assert_eq!(prompt.sections[0].name, "S");
     assert_eq!(prompt.sections[1].name, "Some prose");
@@ -1326,7 +1312,7 @@ fn pending_markdown_binds_to_the_following_lua_fence() {
     // Capture: Markdown after a section heading accumulates as the pending
     // buffer that the next ordinary Lua fence consumes.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nGather the facts.\n\n```lua\nreturn 1\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 2);
     assert!(matches!(
@@ -1344,7 +1330,7 @@ fn a_heading_resets_the_pending_buffer() {
     // Reset at headings: a section starts with an empty buffer; prose from
     // the previous section never leaks into it.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\nProse for A.\n\n## B\n\n```lua\nreturn 1\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     assert_eq!(prompt.sections[0].prose(), "Prose for A.");
     assert!(matches!(
         prompt.sections[1].blocks(),
@@ -1357,7 +1343,7 @@ fn a_lua_fence_consumes_the_pending_buffer() {
     // Reset at Lua fences: each fence is preceded by exactly the Markdown
     // accumulated since the previous fence.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nFirst.\n\n```lua\nvar.a = 1\n```\n\nSecond.\n\n```lua\nvar.b = 2\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 4);
     assert!(matches!(
@@ -1383,7 +1369,7 @@ fn a_thematic_break_resets_the_pending_buffer() {
     // Reset at thematic breaks: commentary above the break is excluded and
     // the break itself is never part of the prose.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nDraft notes.\n\n---\n\nAsk the question.\n\n```lua\nreturn 1\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 2);
     match &section.blocks()[0] {
@@ -1402,7 +1388,7 @@ fn per_fence_commentary_is_excluded_by_a_break() {
     // Between fences, a break drops commentary on the previous step so only
     // the Markdown below the last break is pending for the next fence.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.a = 1\n```\n\nNotes on step one.\n\n---\n\nPending for step two.\n\n```lua\nvar.b = 2\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 3);
     assert!(matches!(
@@ -1424,8 +1410,8 @@ fn trailing_commentary_after_the_last_fence_is_inert() {
     // Markdown after the final Lua fence is inert trailing commentary: it
     // parses without an unpaired-prose error and stays an ordinary block.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nreturn 1\n```\n\nTrailing notes for the reader.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver::default())
-        .expect("trailing commentary must parse without an unpaired-prose error");
+    let prompt =
+        parse(src).expect("trailing commentary must parse without an unpaired-prose error");
     let section = &prompt.sections[0];
     assert_eq!(section.blocks().len(), 2);
     assert!(matches!(&section.blocks()[0], Block::Lua(_)));
@@ -1437,12 +1423,10 @@ fn prose_without_a_following_fence_is_not_an_error() {
     // The dropped unpaired-prose error: prose with no Lua fence at all, and
     // prose left pending at a section's end, both parse cleanly.
     let prose_only = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nJust prose.\n";
-    Prompt::parse(prose_only, "test", &NullObserver::default())
-        .expect("prose without any fence must parse");
+    parse(prose_only).expect("prose without any fence must parse");
 
     let pending_at_end = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nreturn 1\n```\n\nDiscarded at section end.\n";
-    Prompt::parse(pending_at_end, "test", &NullObserver::default())
-        .expect("unconsumed pending Markdown must parse");
+    parse(pending_at_end).expect("unconsumed pending Markdown must parse");
 }
 
 #[test]
@@ -1450,8 +1434,7 @@ fn promptforge_zero_is_accepted() {
     // `promptforge: 0` is the active engine major: it parses, is exposed on
     // the frontmatter, and is reported by version detection.
     let src = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n# T\n\n## S\n\np\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver::default()).expect("promptforge: 0 must parse");
+    let prompt = parse(src).expect("promptforge: 0 must parse");
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(promptforge_version(src), Some(0));
 }

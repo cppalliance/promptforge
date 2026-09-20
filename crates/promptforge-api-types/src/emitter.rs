@@ -1,12 +1,11 @@
 //! The run-level event buffer and the task-scoped emitter over it.
 //!
 //! The engine reports as values: every boundary, content report, and
-//! debug capture becomes one [`Event`] pushed into the run's
-//! [`EventBuffer`], stamped with a [`Provenance`] - the nearest enclosing
-//! task and that task's next sequence number - and drained by the driver
-//! after every dispatch round. Nothing in here reaches a host; the
-//! `events_to_observer` module forwards a drained batch to the legacy
-//! [`Observer`] and `DebugCapture` seams.
+//! debug capture becomes one [`Event`] pushed into the run's buffer,
+//! stamped with a [`Provenance`] - the nearest enclosing task and that
+//! task's next sequence number - and drained by the run's `step` through
+//! the [`EventSink`]. Nothing in here reaches a host directly; the host
+//! reads the drained batch.
 //!
 //! An [`Emitter`] is one chain's handle onto the buffer: it knows its task
 //! (the main walk is task `0`; a `call` child shares its caller's emitter,
@@ -16,34 +15,30 @@
 //! lock, so a task's sequence is dense from zero however its chains and
 //! the run's leaf tasks interleave.
 //!
-//! The emitter also implements [`Observer`], because the section VM and
-//! the shared tool-dispatch body in `promptforge-lua` still take
-//! `&dyn Observer` for the shared-library replay, the `log` checkpoint,
-//! teardown, and the `ToolResult` report. Through the impl those reports
-//! land in the same buffer as the scheduler's own, in order, until the
-//! trait leaves the engine.
+//! The emitter is the one reporting seam every engine crate takes: the
+//! parser reports parse-time compilation through it, the section VM its
+//! chunk boundaries, the tool-dispatch body its results, the scheduler
+//! everything else. It sits in this crate so those crates can name it
+//! without depending on the runtime.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use promptforge_api_types::event::Event;
-use promptforge_api_types::events::{CallMetrics, ToolCallEvent};
-use promptforge_api_types::ids::{Provenance, TaskId};
 use serde_json::Value;
 
-use crate::observe::{Observation, Observer};
+use crate::event::Event;
+use crate::event::lifecycle::Lifecycle;
+use crate::ids::{ChainId, Provenance, TaskId};
+use crate::metrics::{CallMetrics, ToolCallEvent};
 
-#[path = "event_buffer-lifecycle.rs"]
-mod lifecycle;
-
-use lifecycle::lifecycle_event;
-#[cfg(any(test, feature = "test-support"))]
-pub(crate) use lifecycle::{unit_lifecycle_variants, unit_observation};
+#[cfg(test)]
+#[path = "emitter-tests.rs"]
+mod tests;
 
 /// The run's event buffer: the events not yet drained, plus one sequence
 /// counter per task the run has reported under.
 #[derive(Debug, Default)]
-pub(crate) struct EventBuffer {
+struct EventBuffer {
     /// The events pushed since the last drain, in push order.
     events: Vec<Event>,
     /// Each task's next sequence number.
@@ -64,11 +59,24 @@ impl EventBuffer {
     }
 }
 
-/// The shared handle onto one run's [`EventBuffer`]: every chain's emitter
-/// and every spawned leaf task pushes through a clone, and the driver
-/// drains through its own.
+/// The shared handle onto one run's event buffer: every chain's emitter
+/// pushes through a clone, and the run drains through its own.
+///
+/// # Examples
+/// ```
+/// use promptforge_api_types::emitter::{Emitter, EventSink};
+/// use promptforge_api_types::event::{Event, lifecycle};
+///
+/// let sink = EventSink::default();
+/// let emitter = Emitter::root(sink.clone(), "run-1", false);
+/// emitter.report("Gather", lifecycle::SECTION_STARTED);
+/// let events = sink.take();
+/// assert!(matches!(events.as_slice(), [Event::SectionStarted { section, .. }] if section == "Gather"));
+/// assert_eq!(events[0].provenance().task.to_string(), "0");
+/// assert!(sink.take().is_empty(), "a drain empties the buffer");
+/// ```
 #[derive(Clone, Debug, Default)]
-pub(crate) struct EventSink(Arc<Mutex<EventBuffer>>);
+pub struct EventSink(Arc<Mutex<EventBuffer>>);
 
 impl EventSink {
     /// Pushes one event built from `task`'s next provenance. The lock is
@@ -98,7 +106,8 @@ impl EventSink {
     }
 
     /// Takes every event pushed since the last drain, in push order.
-    pub(crate) fn take(&self) -> Vec<Event> {
+    #[must_use]
+    pub fn take(&self) -> Vec<Event> {
         let mut buffer = self
             .0
             .lock()
@@ -110,8 +119,12 @@ impl EventSink {
 /// One task's handle onto the run's event buffer: every event it pushes is
 /// stamped with the task's next sequence number under the run's execution
 /// id. Cheap to clone; a clone shares the task and the buffer.
+///
+/// Every report is write-only: the engine never reads an event back
+/// through this path, so recording every event or dropping them all
+/// leaves a run's outputs, errors, and ordering unchanged.
 #[derive(Clone, Debug)]
-pub(crate) struct Emitter {
+pub struct Emitter {
     /// The run's buffer.
     sink: EventSink,
     /// The nearest enclosing task of the chain this emitter serves.
@@ -126,7 +139,8 @@ pub(crate) struct Emitter {
 
 impl Emitter {
     /// Builds the emitter for `task` over `sink`.
-    pub(crate) fn new(sink: EventSink, task: TaskId, execution: Arc<str>, debug: bool) -> Self {
+    #[must_use]
+    pub fn new(sink: EventSink, task: TaskId, execution: Arc<str>, debug: bool) -> Self {
         Self {
             sink,
             task,
@@ -135,10 +149,22 @@ impl Emitter {
         }
     }
 
+    /// The root task's emitter over `sink`: the main walk is task `0`,
+    /// and so is a prompt's parse, which happens before any run exists.
+    #[must_use]
+    pub fn root(sink: EventSink, execution: &str, debug: bool) -> Self {
+        Self::new(
+            sink,
+            TaskId::from(ChainId::root()),
+            Arc::from(execution),
+            debug,
+        )
+    }
+
     /// The emitter a spawned chain reports through: the same buffer under
     /// the chain's own task.
     #[must_use]
-    pub(crate) fn for_task(&self, task: TaskId) -> Self {
+    pub fn for_task(&self, task: TaskId) -> Self {
         Self {
             sink: self.sink.clone(),
             task,
@@ -148,24 +174,34 @@ impl Emitter {
     }
 
     /// The task this emitter stamps its events with.
-    #[cfg(test)]
-    pub(crate) fn task(&self) -> &TaskId {
+    #[must_use]
+    pub fn task(&self) -> &TaskId {
         &self.task
     }
 
+    /// The caller-chosen run identifier every event carries.
+    #[must_use]
+    pub fn execution(&self) -> &str {
+        &self.execution
+    }
+
     /// Whether the run captures raw model-turn bodies.
-    pub(crate) fn captures_debug(&self) -> bool {
+    #[must_use]
+    pub fn captures_debug(&self) -> bool {
         self.debug
     }
 
     /// Stamps one issued effect: this task's next provenance, drawn from
     /// the counter its events advance, so the effect orders among them.
-    pub(crate) fn stamp_effect(&self) -> Provenance {
+    #[must_use]
+    pub fn stamp_effect(&self) -> Provenance {
         self.sink.allocate(&self.task)
     }
 
-    /// Pushes one event built from this task's next coordinates.
-    fn push(&self, section: &str, build: impl FnOnce(String, String, Provenance) -> Event) {
+    /// Pushes one event built from this task's next coordinates: the
+    /// general form every named report below is a case of, for the
+    /// payload-carrying variants that have no dedicated method.
+    pub fn emit(&self, section: &str, build: impl FnOnce(String, String, Provenance) -> Event) {
         let execution = self.execution.to_string();
         let section = section.to_owned();
         self.sink.push(&self.task, |provenance| {
@@ -173,17 +209,24 @@ impl Emitter {
         });
     }
 
-    /// Reports one lifecycle boundary under `section`: the value form of
-    /// today's [`Observation`] vocabulary, mapped variant for variant.
-    pub(crate) fn report(&self, section: &str, observation: Observation) {
-        self.push(section, |execution, section, provenance| {
-            lifecycle_event(observation, execution, section, provenance)
+    /// Reports one payload-free lifecycle boundary under `section`.
+    pub fn report(&self, section: &str, boundary: Lifecycle) {
+        self.emit(section, boundary);
+    }
+
+    /// Reports the author's `log(message)` checkpoint.
+    pub fn lua(&self, section: &str, message: &str) {
+        self.emit(section, |execution, section, provenance| Event::Lua {
+            execution,
+            section,
+            provenance,
+            message: message.to_owned(),
         });
     }
 
     /// Reports one completed block of model thinking.
-    pub(crate) fn thinking(&self, section: &str, turn: u32, model: &str, text: &str) {
-        self.push(section, |execution, section, provenance| Event::Thinking {
+    pub fn thinking(&self, section: &str, turn: u32, model: &str, text: &str) {
+        self.emit(section, |execution, section, provenance| Event::Thinking {
             execution,
             section,
             provenance,
@@ -194,7 +237,7 @@ impl Emitter {
     }
 
     /// Reports one completed assistant reply.
-    pub(crate) fn assistant_reply(
+    pub fn assistant_reply(
         &self,
         section: &str,
         turn: u32,
@@ -203,7 +246,7 @@ impl Emitter {
         model: &str,
         metrics: Option<&CallMetrics>,
     ) {
-        self.push(section, |execution, section, provenance| {
+        self.emit(section, |execution, section, provenance| {
             Event::AssistantReply {
                 execution,
                 section,
@@ -218,14 +261,14 @@ impl Emitter {
     }
 
     /// Reports one batch of tool calls the model requested, unexecuted.
-    pub(crate) fn assistant_tool_calls(
+    pub fn assistant_tool_calls(
         &self,
         section: &str,
         turn: u32,
         model: &str,
         calls: &[ToolCallEvent],
     ) {
-        self.push(section, |execution, section, provenance| {
+        self.emit(section, |execution, section, provenance| {
             Event::AssistantToolCalls {
                 execution,
                 section,
@@ -238,7 +281,7 @@ impl Emitter {
     }
 
     /// Reports the result of one dispatched tool call.
-    pub(crate) fn tool_result(
+    pub fn tool_result(
         &self,
         section: &str,
         turn: u32,
@@ -247,7 +290,7 @@ impl Emitter {
         content: &str,
         trusted: bool,
     ) {
-        self.push(section, |execution, section, provenance| {
+        self.emit(section, |execution, section, provenance| {
             Event::ToolResult {
                 execution,
                 section,
@@ -262,8 +305,8 @@ impl Emitter {
     }
 
     /// Reports text the user supplied, byte-exact.
-    pub(crate) fn user_input(&self, section: &str, text: &str) {
-        self.push(section, |execution, section, provenance| Event::UserInput {
+    pub fn user_input(&self, section: &str, text: &str) {
+        self.emit(section, |execution, section, provenance| Event::UserInput {
             execution,
             section,
             provenance,
@@ -272,8 +315,8 @@ impl Emitter {
     }
 
     /// Reports one model-task notice as it is queued for the task's owner.
-    pub(crate) fn task_notice(&self, section: &str, turn: u32, task: &TaskId, text: &str) {
-        self.push(section, |execution, section, provenance| {
+    pub fn task_notice(&self, section: &str, turn: u32, task: &TaskId, text: &str) {
+        self.emit(section, |execution, section, provenance| {
             Event::TaskNotice {
                 execution,
                 section,
@@ -288,8 +331,8 @@ impl Emitter {
     /// Captures the request body of one completed model turn. The caller
     /// gates on [`captures_debug`](Self::captures_debug) so a run that did
     /// not opt in never clones a body.
-    pub(crate) fn request(&self, section: &str, turn: u32, body: Value) {
-        self.push(section, |execution, section, provenance| Event::Request {
+    pub fn request(&self, section: &str, turn: u32, body: Value) {
+        self.emit(section, |execution, section, provenance| Event::Request {
             execution,
             section,
             provenance,
@@ -300,7 +343,7 @@ impl Emitter {
 
     /// Captures the response body of one completed model turn, with its
     /// parsed metadata. Gated as [`request`](Self::request) is.
-    pub(crate) fn response(
+    pub fn response(
         &self,
         section: &str,
         turn: u32,
@@ -308,7 +351,7 @@ impl Emitter {
         finish_reason: Option<String>,
         reasoning_content: Option<String>,
     ) {
-        self.push(section, |execution, section, provenance| Event::Response {
+        self.emit(section, |execution, section, provenance| Event::Response {
             execution,
             section,
             provenance,
@@ -319,91 +362,3 @@ impl Emitter {
         });
     }
 }
-
-/// The seam for the Lua layer's `&dyn Observer` parameters: every report
-/// lands in the buffer under this emitter's task. The `execution` each
-/// call carries is the run's own, so the emitter's copy stands in for it;
-/// `chain_id` and `depth` have no place in an [`Event`], whose provenance
-/// names the task instead.
-impl Observer for Emitter {
-    fn observe(&self, _execution: &str, section: &str, event: Observation) {
-        self.report(section, event);
-    }
-
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        metrics: Option<&CallMetrics>,
-    ) {
-        self.assistant_reply(section, turn, text, finish_reason, model, metrics);
-    }
-
-    fn on_assistant_tool_calls(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        model: &str,
-        calls: &[ToolCallEvent],
-    ) {
-        self.assistant_tool_calls(section, turn, model, calls);
-    }
-
-    fn on_tool_result(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        content: &str,
-        trusted: bool,
-    ) {
-        self.tool_result(section, turn, tool_call_id, alias, content, trusted);
-    }
-
-    fn on_thinking(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
-        self.thinking(section, turn, model, text);
-    }
-
-    fn on_user_input(&self, _execution: &str, section: &str, text: &str) {
-        self.user_input(section, text);
-    }
-
-    fn on_task_notice(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        task: &TaskId,
-        text: &str,
-    ) {
-        self.task_notice(section, turn, task, text);
-    }
-}
-
-#[cfg(test)]
-#[path = "event_buffer-tests.rs"]
-mod tests;

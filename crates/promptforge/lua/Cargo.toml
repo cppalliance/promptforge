@@ -20,7 +20,6 @@ promptforge-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 workspace-hack.workspace = true
 
 [features]
@@ -32,7 +31,6 @@ test-support = []
 criterion.workspace = true
 promptforge-vfs.workspace = true
 shared-vfs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
 [[bench]]
 name = "surface"

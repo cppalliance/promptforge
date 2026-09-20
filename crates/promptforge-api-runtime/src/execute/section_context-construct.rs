@@ -16,9 +16,9 @@ use crate::execute::context::RunState;
 use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
 use crate::lua::SectionVm;
-use crate::observe::detail;
 use crate::parser::Section;
 use crate::store::Access;
+use promptforge_api_types::event::lifecycle;
 
 use super::{SectionContext, TaskSeed};
 
@@ -68,13 +68,12 @@ impl SectionContext {
             sys["index"] = serde_json::Value::from(index);
         }
         ctx.emitter()
-            .report(section.name(), detail::SECTION_STARTED);
+            .report(section.name(), lifecycle::SECTION_STARTED);
         let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
             &ctx.tool_set(),
             &ctx.model_set(),
-            ctx.execution(),
-            ctx.observer(),
+            ctx.emitter(),
             section.name(),
         )?;
         // The run's cancel flag reaches every block coroutine's hook.
@@ -106,7 +105,7 @@ impl SectionContext {
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer(), section.name());
+            vm.teardown(ctx.emitter(), section.name());
             return Err(error);
         }
         Ok(Self {
@@ -154,8 +153,7 @@ impl SectionContext {
             ctx.nonce(),
             &ctx.tool_set(),
             &ctx.model_set(),
-            ctx.execution(),
-            ctx.observer(),
+            ctx.emitter(),
             title,
         )?;
         vm.set_cancel(ctx.cancel().clone());
@@ -177,7 +175,7 @@ impl SectionContext {
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer(), title);
+            vm.teardown(ctx.emitter(), title);
             return Err(error);
         }
         Ok(Self {

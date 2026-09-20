@@ -14,8 +14,6 @@
 //! chain. A `Dropped` answer resumes the chain with the cancelled error,
 //! whatever it was parked on.
 
-use std::sync::Arc;
-
 use promptforge_api_types::tools::{ToolError, ToolOutput};
 
 use crate::execute::protocol::{Answer, StoreOutcome, ToolCallOutcome};
@@ -23,9 +21,9 @@ use crate::execute::tools::accept_infer;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
 use crate::lua::{ModelReport, UserInputOutcome, prepare_dispatch, prepare_model_dispatch};
 use crate::model::{Completion, CompletionError};
-use crate::observe::Observation;
 use crate::store::StoreError;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle::Lifecycle;
 
 use super::dispatch::classify_store_failure;
 use super::tasks::{TaskBacking, TaskState};
@@ -145,12 +143,9 @@ impl Scheduler {
         result: std::result::Result<ToolOutput, ToolError>,
     ) -> Result<ToolCallOutcome> {
         let chain = &self.chains[chain.index()];
-        // The shared dispatch body still names `&dyn Observer`; the emitter
-        // is that observer, so its reports land in the buffer under this
-        // chain's task.
-        let emitter = Arc::clone(chain.ctx.emitter());
-        let observer = emitter.as_ref();
-        let execution = chain.ctx.execution();
+        // The shared dispatch body reports through this chain's emitter, so
+        // its reports land in the buffer under this chain's task.
+        let emitter = chain.ctx.emitter();
         let section = chain.section_name();
         let nonce = chain.ctx.nonce();
         match &call.call_id {
@@ -167,8 +162,7 @@ impl Scheduler {
                     result,
                     None,
                     nonce,
-                    observer,
-                    execution,
+                    emitter,
                     section,
                     &report,
                 )
@@ -180,8 +174,7 @@ impl Scheduler {
                 result,
                 None,
                 nonce,
-                observer,
-                execution,
+                emitter,
                 section,
                 Some(call.report),
             ) {
@@ -230,7 +223,7 @@ impl Scheduler {
     fn accept_store(
         &self,
         chain: ChainIndex,
-        observations: Option<(Observation, Observation)>,
+        observations: Option<(Lifecycle, Lifecycle)>,
         result: std::result::Result<StoreOutcome, StoreError>,
     ) -> Result<StoreOutcome> {
         let chain = &self.chains[chain.index()];

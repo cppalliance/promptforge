@@ -4,7 +4,6 @@
 use std::num::NonZeroU32;
 
 use promptforge_api_runtime::parser::{LuaProgram, MaxToolIterations, ParseErrorKind, Prompt};
-use promptforge_api_types::observe::NullObserver;
 
 struct ValidFixture {
     name: &'static str,
@@ -67,7 +66,8 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
 #[test]
 fn valid_prompt_files_parse_through_the_public_api() {
     for fixture in VALID_FIXTURES {
-        let prompt = Prompt::parse(fixture.source, fixture.name, &NullObserver::default())
+        let prompt = Prompt::parse(fixture.source, fixture.name)
+            .0
             .unwrap_or_else(|error| panic!("fixture {} failed to parse: {error}", fixture.name));
         // Call the verifier directly so its own assertion and source line remain
         // the reported failure rather than a generic wrapper.
@@ -78,8 +78,7 @@ fn valid_prompt_files_parse_through_the_public_api() {
 #[test]
 fn invalid_prompt_files_report_public_error_contracts() {
     for fixture in INVALID_FIXTURES {
-        let Err(error) = Prompt::parse(fixture.source, fixture.name, &NullObserver::default())
-        else {
+        let Err(error) = Prompt::parse(fixture.source, fixture.name).0 else {
             panic!("fixture {} unexpectedly parsed", fixture.name);
         };
         assert_eq!(

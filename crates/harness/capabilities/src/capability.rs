@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::cancel::sync::CancelHandle;
+use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::capabilities::CapabilityId;
 use shared_vfs::VfsRef;
 
@@ -129,7 +129,7 @@ impl RunServices {
     ///
     /// ```
     /// use harness_capabilities::RunServices;
-    /// use promptforge_api_types::cancel::sync::CancelHandle;
+    /// use promptforge_api_types::cancel::CancelHandle;
     ///
     /// let services = RunServices::new(shared_vfs::VfsRef::builder().build(), CancelHandle::new());
     /// assert!(!services.cancel.is_cancelled());

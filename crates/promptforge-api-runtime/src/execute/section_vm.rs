@@ -23,8 +23,9 @@
 
 use std::sync::Arc;
 
+use promptforge_api_types::emitter::Emitter;
+
 use crate::lua::{LuaProgram, SectionVm};
-use crate::observe::Observer;
 use crate::store::Access;
 use crate::{Error, Result};
 
@@ -66,11 +67,9 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The driver-specific seed: the walk's `var`, plus the collection
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
-    /// The observer `Arc`: the persistent host APIs (`log`, `store`) capture
-    /// it, and the shared-library replay reports through it. Owned, not
-    /// borrowed, because the run context holds its emitter as a concrete
-    /// `Arc<Emitter>` and coerces a clone to the trait object here.
-    pub(crate) observer_arc: Arc<dyn Observer>,
+    /// The chain's emitter: the persistent host APIs (`log`, `store`)
+    /// capture a clone, and the shared-library replay reports through it.
+    pub(crate) emitter: &'a Emitter,
     /// The section name used in observations and error messages.
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
@@ -132,7 +131,7 @@ where
         crate::lua::Argv::Frozen(setup.argv)
     };
     vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
-    vm.install_host_apis(&setup.observer_arc, setup.section_name)?;
+    vm.install_host_apis(setup.emitter, setup.section_name)?;
     if let Some(snapshot) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(snapshot))?;
     }
@@ -148,11 +147,7 @@ where
         promptforge_lua::install_agent_chat_shim(vm.lua())?;
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;
     }
-    vm.replay_shared(
-        setup.shared,
-        setup.observer_arc.as_ref(),
-        setup.section_name,
-    )?;
+    vm.replay_shared(setup.shared, setup.emitter, setup.section_name)?;
     // The store yield shims install after the shared replay: the shared
     // chunk runs as a main chunk, not a coroutine, so load-time store
     // calls must hit the direct closures (which capture the same

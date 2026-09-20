@@ -36,7 +36,6 @@ use promptforge_api_runtime::test_support::{
 };
 use promptforge_api_runtime::{Environment, Prompt, RunContext, RunLimits, RunResult};
 use promptforge_api_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge_api_types::observe::NullObserver;
 
 // The suites' mock-gateway chat client, shared by path: the engine holds no
 // client of its own, and the bench performs its rounds the way the
@@ -180,7 +179,8 @@ const LOOP_PROMPT: &str = "---\nname: bench_loop\ndescription: d\npromptforge: 0
 
 /// Parses the loop prompt once for the whole benchmark.
 fn parse_loop_prompt() -> Prompt {
-    Prompt::parse(LOOP_PROMPT, EXECUTION, &NullObserver::default())
+    Prompt::parse(LOOP_PROMPT, EXECUTION)
+        .0
         .expect("the bench prompt parses")
 }
 

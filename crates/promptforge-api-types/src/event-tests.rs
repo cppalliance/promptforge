@@ -1,8 +1,8 @@
 use serde_json::json;
 
 use super::Event;
-use crate::events::{CallMetrics, ToolCallEvent, Usage};
 use crate::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
+use crate::metrics::{CallMetrics, ToolCallEvent, Usage};
 
 fn task(path: &str) -> TaskId {
     path.parse().expect("a task id parses")

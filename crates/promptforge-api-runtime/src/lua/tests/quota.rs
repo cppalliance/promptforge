@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use mlua::{HookTriggers, MultiValue, Thread, Value, VmState};
 use serde_json::json;
 
-use promptforge_api_types::events::ToolCallEvent;
+use promptforge_api_types::metrics::ToolCallEvent;
 use promptforge_lua::Error;
 
 use crate::execute::protocol::{Answer, ChatResult, Request, ToolCallOutcome, YieldParse};

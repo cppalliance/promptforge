@@ -16,12 +16,14 @@ promptforge-api-runtime = "0.1"
 ```rust
 use std::sync::Arc;
 
-use promptforge_api_runtime::types::observe::NullObserver;
 use promptforge_api_runtime::types::timestamp::Timestamp;
 use promptforge_api_runtime::{EffectAnswer, Environment, Prompt, Run, RunContext, RunResult, Step};
 
 fn execute(source: &str, seed: u64, started_at: Timestamp) -> Result<String, Box<dyn std::error::Error>> {
-    let prompt = Prompt::parse(source, "readme", &NullObserver::default())?;
+    // A parse returns its parse-time events beside the outcome, for the
+    // host to log; the engine never reads them back.
+    let (prompt, _parse_events) = Prompt::parse(source, "readme");
+    let prompt = prompt?;
     // Capability-free agents use the default environment (an empty tool
     // catalog); the store handle defaults to a stock in-memory mount. The
     // host draws the seed (from a CSPRNG) and stamps the start instant: the

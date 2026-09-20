@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::cancel::sync::CancelHandle;
+use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::capabilities::CapabilityId;
 
 use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};

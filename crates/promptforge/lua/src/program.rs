@@ -1,4 +1,4 @@
-use super::{Error, Function, Lua, LuaOptions, NonZeroU32, Observer, Result, StdLib, detail};
+use super::{Emitter, Error, Function, Lua, LuaOptions, NonZeroU32, Result, StdLib, lifecycle};
 
 /// Identifies whether temporary compiler setup or chunk compilation failed.
 enum CompilerError {
@@ -53,17 +53,19 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// ```
 /// use std::num::NonZeroU32;
 ///
-/// use promptforge_api_types::observe::NullObserver;
+/// use promptforge_api_types::emitter::{Emitter, EventSink};
 /// use promptforge_lua::LuaProgram;
 ///
+/// let sink = EventSink::default();
+/// let emitter = Emitter::root(sink.clone(), "doc", false);
 /// let program = LuaProgram::compile(
 ///     "return 1",
 ///     "section `Only` prologue",
 ///     NonZeroU32::MIN,
-///     "doc",
-///     &NullObserver::default(),
+///     &emitter,
 ///     "Only",
 /// )?;
+/// assert_eq!(sink.take().len(), 2, "compilation started, then succeeded");
 /// assert_eq!(program.source(), "return 1");
 /// assert!(program.source_line().get() >= 1);
 /// assert!(program.location().contains("Only"));
@@ -90,7 +92,7 @@ impl LuaProgram {
     ///
     /// `location` identifies the source region in diagnostics. Compilation
     /// reports contain only fixed strings and never include `source` or
-    /// `location`; each carries `execution` unchanged.
+    /// `location`; each carries the emitter's coordinates.
     ///
     /// # Errors
     /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
@@ -102,15 +104,15 @@ impl LuaProgram {
     /// use std::num::NonZeroU32;
     ///
     /// use mlua::Lua;
-    /// use promptforge_api_types::observe::NullObserver;
+    /// use promptforge_api_types::emitter::{Emitter, EventSink};
     /// use promptforge_lua::LuaProgram;
     ///
+    /// let emitter = Emitter::root(EventSink::default(), "example-run", false);
     /// let program = LuaProgram::compile(
     ///     "return 40 + 2",
     ///     "example prologue",
     ///     NonZeroU32::MIN,
-    ///     "example-run",
-    ///     &NullObserver::default(),
+    ///     &emitter,
     ///     "Example",
     /// )?;
     /// let lua = Lua::new();
@@ -123,20 +125,19 @@ impl LuaProgram {
         source: &str,
         location: &str,
         source_line: NonZeroU32,
-        execution: &str,
-        observer: &dyn Observer,
+        emitter: &Emitter,
         section: &str,
     ) -> Result<Self> {
-        observer.observe(execution, section, detail::LUA_COMPILATION_STARTED);
+        emitter.report(section, lifecycle::LUA_COMPILATION_STARTED);
 
         let bytecode = match compile_chunk(source, location) {
             Ok(bytecode) => bytecode,
             Err(CompilerError::Vm(error)) => {
-                observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
+                emitter.report(section, lifecycle::LUA_COMPILATION_FAILED);
                 return Err(Error::lua(error));
             }
             Err(CompilerError::Chunk(error)) => {
-                observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
+                emitter.report(section, lifecycle::LUA_COMPILATION_FAILED);
                 return Err(Error::LuaCompile {
                     location: location.to_owned(),
                     source_line: source_line.get(),
@@ -147,7 +148,7 @@ impl LuaProgram {
             }
         };
 
-        observer.observe(execution, section, detail::LUA_COMPILATION_SUCCEEDED);
+        emitter.report(section, lifecycle::LUA_COMPILATION_SUCCEEDED);
         Ok(Self {
             source: source.to_owned(),
             bytecode,

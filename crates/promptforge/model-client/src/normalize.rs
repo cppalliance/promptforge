@@ -14,9 +14,10 @@
 //! body's call metadata - the serving `model`, `usage` token accounting,
 //! llama.cpp's `timings` extension, and vLLM's `metrics` extension - into the
 //! canonical `promptforge-api-types` vocabulary. Metadata never fails a
-//! completion: a malformed section degrades to `None` with a warning.
+//! completion: a malformed section degrades to `None` with a returned
+//! diagnostic naming it.
 
-use promptforge_api_types::events::{LlamaTimings, Usage, VllmMetrics};
+use promptforge_api_types::metrics::{LlamaTimings, Usage, VllmMetrics};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -316,33 +317,40 @@ pub(crate) struct ResponseMetadata {
     pub(crate) llama_timings: Option<LlamaTimings>,
     /// vLLM's `metrics` extension, when that backend served the call.
     pub(crate) vllm_metrics: Option<VllmMetrics>,
+    /// One line per section that was present but malformed and so
+    /// degraded to `None`, and one for a body naming no string `model`:
+    /// the host's to log, since this crate reaches no logger.
+    pub(crate) diagnostics: Vec<String>,
 }
 
 /// Parses the serving model and every metrics family from a response body.
 ///
 /// An absent or JSON-null section is `None` with no complaint; a present
-/// section that does not parse degrades to `None` with a `tracing` warning
-/// naming the section, so a backend with a broken metrics extension still
+/// section that does not parse degrades to `None` with a diagnostic naming
+/// the section, so a backend with a broken metrics extension still
 /// completes the call.
 pub(crate) fn response_metadata(body: &Value) -> ResponseMetadata {
+    let mut diagnostics = Vec::new();
     ResponseMetadata {
-        model: parse_model(body),
-        usage: parse_section(body, "usage", parse_usage),
-        llama_timings: parse_section(body, "timings", parse_llama_timings),
-        vllm_metrics: parse_section(body, "metrics", parse_vllm_metrics),
+        model: parse_model(body, &mut diagnostics),
+        usage: parse_section(body, "usage", parse_usage, &mut diagnostics),
+        llama_timings: parse_section(body, "timings", parse_llama_timings, &mut diagnostics),
+        vllm_metrics: parse_section(body, "metrics", parse_vllm_metrics, &mut diagnostics),
+        diagnostics,
     }
 }
 
 /// The serving model from the body's top-level `model` field.
 ///
 /// Every OpenAI-shaped backend names the model in its response, so a missing
-/// or non-string value is anomalous: it warns and records an empty string,
-/// never fails the call.
-fn parse_model(body: &Value) -> String {
+/// or non-string value is anomalous: it records an empty string and a
+/// diagnostic, never fails the call.
+fn parse_model(body: &Value, diagnostics: &mut Vec<String>) -> String {
     if let Some(Value::String(model)) = body.get("model") {
         model.clone()
     } else {
-        tracing::warn!("completion response named no string `model`; recorded as empty");
+        diagnostics
+            .push("completion response named no string `model`; recorded as empty".to_owned());
         String::new()
     }
 }
@@ -351,18 +359,21 @@ fn parse_model(body: &Value) -> String {
 ///
 /// Absent or JSON-null is `None` silently - a frontier body has no `timings`
 /// and that is not a defect. A present section that fails `parse` degrades to
-/// `None` with a warning naming the section and the parse failure.
+/// `None` with a diagnostic naming the section and the parse failure.
 fn parse_section<T>(
     body: &Value,
     key: &str,
     parse: impl FnOnce(&Value) -> std::result::Result<T, serde_json::Error>,
+    diagnostics: &mut Vec<String>,
 ) -> Option<T> {
     match body.get(key) {
         None | Some(Value::Null) => None,
         Some(value) => match parse(value) {
             Ok(parsed) => Some(parsed),
             Err(error) => {
-                tracing::warn!("malformed `{key}` in completion response ignored: {error}");
+                diagnostics.push(format!(
+                    "malformed `{key}` in completion response ignored: {error}"
+                ));
                 None
             }
         },
@@ -882,37 +893,13 @@ mod tests {
         }
     }
 
-    /// Counts WARN-level tracing events while `f` runs, so the tests can pin
-    /// both halves of the degrade policy: malformed sections warn, and
+    /// Parses the metadata and counts its diagnostics, so the tests can pin
+    /// both halves of the degrade policy: malformed sections report, and
     /// well-formed or absent sections stay silent.
-    fn with_warn_count<T>(f: impl FnOnce() -> T) -> (T, usize) {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        struct WarnCounter(Arc<AtomicUsize>);
-
-        impl tracing::Subscriber for WarnCounter {
-            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
-                true
-            }
-            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-                tracing::span::Id::from_u64(1)
-            }
-            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-            fn event(&self, event: &tracing::Event<'_>) {
-                if *event.metadata().level() == tracing::Level::WARN {
-                    self.0.fetch_add(1, Ordering::SeqCst);
-                }
-            }
-            fn enter(&self, _: &tracing::span::Id) {}
-            fn exit(&self, _: &tracing::span::Id) {}
-        }
-
-        let count = Arc::new(AtomicUsize::new(0));
-        let result = tracing::subscriber::with_default(WarnCounter(Arc::clone(&count)), f);
-        let warnings = count.load(Ordering::SeqCst);
-        (result, warnings)
+    fn with_warn_count(body: &Value) -> (ResponseMetadata, usize) {
+        let metadata = response_metadata(body);
+        let warnings = metadata.diagnostics.len();
+        (metadata, warnings)
     }
 
     /// One assistant text choice, shared by the metadata fixture bodies.
@@ -947,7 +934,7 @@ mod tests {
             }
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 0, "a well-formed body must not warn");
         assert_eq!(metadata.model, "qwen3-30b");
         assert_eq!(
@@ -995,7 +982,7 @@ mod tests {
             }
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 0);
         let timings = metadata.llama_timings.unwrap();
         assert_eq!(timings.draft_n, 0);
@@ -1024,7 +1011,7 @@ mod tests {
             }
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 0, "a well-formed body must not warn");
         assert_eq!(metadata.model, "meta-llama/Llama-3.1-8B-Instruct");
         assert_eq!(
@@ -1059,7 +1046,7 @@ mod tests {
             "metrics": { "time_to_first_token_ms": 8.5 }
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 0);
         assert_eq!(
             metadata.vllm_metrics,
@@ -1095,7 +1082,7 @@ mod tests {
             }
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 0, "a well-formed body must not warn");
         assert_eq!(metadata.model, "gpt-5.2");
         assert_eq!(
@@ -1130,7 +1117,7 @@ mod tests {
         });
 
         for body in [bare, with_nulls] {
-            let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+            let (metadata, warnings) = with_warn_count(&body);
             assert_eq!(warnings, 0, "absence is normal, never a warning: {body}");
             assert_eq!(metadata.model, "m");
             assert_eq!(metadata.usage, None);
@@ -1151,7 +1138,7 @@ mod tests {
             "metrics": ["not", "an", "object"]
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(metadata.model, "", "a non-string model records as empty");
         assert_eq!(metadata.usage, None, "non-numeric token counts degrade");
         assert_eq!(
@@ -1178,7 +1165,7 @@ mod tests {
             }
         });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 1, "only the broken section warns");
         assert_eq!(metadata.usage, None);
         assert!(
@@ -1191,7 +1178,7 @@ mod tests {
     fn missing_model_records_empty_and_warns() {
         let body = serde_json::json!({ "choices": reply_choice() });
 
-        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(metadata.model, "");
         assert_eq!(warnings, 1, "an OpenAI-shaped body without a model warns");
     }

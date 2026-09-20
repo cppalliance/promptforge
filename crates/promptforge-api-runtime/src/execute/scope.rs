@@ -4,10 +4,10 @@ use std::collections::BTreeMap;
 
 use crate::lua::ToolBinding;
 use crate::model::ToolSchema;
-use crate::observe::detail;
 use crate::{Error, Result};
+use promptforge_api_types::event::lifecycle;
 
-use super::event_buffer::Emitter;
+use promptforge_api_types::emitter::Emitter;
 
 /// What kind of tool stands behind one alias a round advertised.
 ///
@@ -40,14 +40,14 @@ pub(crate) fn prepare_effective_scope(
     emitter: &Emitter,
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {
-    emitter.report(section, detail::TOOL_SCOPE_VALIDATION_STARTED);
+    emitter.report(section, lifecycle::TOOL_SCOPE_VALIDATION_STARTED);
     let result = prepare_scoped_tools(bindings, local_schemas);
     emitter.report(
         section,
         if result.is_ok() {
-            detail::TOOL_SCOPE_VALIDATION_SUCCEEDED
+            lifecycle::TOOL_SCOPE_VALIDATION_SUCCEEDED
         } else {
-            detail::TOOL_SCOPE_VALIDATION_FAILED
+            lifecycle::TOOL_SCOPE_VALIDATION_FAILED
         },
     );
     result

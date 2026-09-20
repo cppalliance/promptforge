@@ -10,7 +10,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
-use promptforge_api_types::observe::Observer;
+use promptforge_api_types::emitter::Emitter;
 
 use super::build::{line_add, newlines_before, nz_source_line};
 use super::{Block, LuaProgram, ParseErrorKind};
@@ -39,8 +39,7 @@ pub(super) fn split_h1(
     content: &str,
     title: &str,
     content_abs_line: u32,
-    execution: &str,
-    observer: &dyn Observer,
+    emitter: &Emitter,
 ) -> Result<(Option<LuaProgram>, Vec<Block>, String)> {
     let leading = trim_leading_blank_lines(content);
     if leading.lines().next() == Some("```lua prompt") {
@@ -69,8 +68,7 @@ pub(super) fn split_h1(
                 line_add(content_abs_line, newlines_before(content, opening)?)?,
                 1,
             )?)?,
-            execution,
-            observer,
+            emitter,
             title,
         )?)
     } else {
@@ -97,8 +95,7 @@ pub(super) fn split_h1(
                     &source,
                     &location,
                     nz_source_line(line_add(content_abs_line, line_offset)?)?,
-                    execution,
-                    observer,
+                    emitter,
                     title,
                 )?));
             }

@@ -43,7 +43,7 @@ fn minimal_fixture_event() -> promptforge_api_types::event::Event {
 /// The fixture's `agent_event_stamped` entry as the engine event it
 /// projects from, every metrics section populated.
 fn stamped_fixture_event() -> promptforge_api_types::event::Event {
-    use promptforge_api_types::events::{
+    use promptforge_api_types::metrics::{
         CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,
     };
     promptforge_api_types::event::Event::AssistantReply {

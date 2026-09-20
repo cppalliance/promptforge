@@ -27,7 +27,6 @@
 //! Detect a promptforge source and parse it into a [`Prompt`]:
 //!
 //! ```
-//! use promptforge_api_runtime::types::observe::NullObserver;
 //! use promptforge_api_runtime::{Prompt, promptforge_version};
 //!
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n\n```lua\nreturn models.infer(prose)\n```\n";
@@ -36,7 +35,10 @@
 //! assert_eq!(promptforge_version(source), Some(0));
 //! assert_eq!(promptforge_version("plain text, no frontmatter"), None);
 //!
-//! let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
+//! // A parse returns its parse-time events beside the outcome.
+//! let (prompt, events) = Prompt::parse(source, "doc-example");
+//! let prompt = prompt?;
+//! assert!(!events.is_empty());
 //! assert_eq!(prompt.title(), "Greeter");
 //! assert_eq!(prompt.sections()[0].name(), "Say hi");
 //! # Ok::<(), promptforge_api_runtime::ParseError>(())
@@ -53,12 +55,12 @@
 //! ```
 //! use std::sync::Arc;
 //!
-//! use promptforge_api_runtime::types::observe::NullObserver;
 //! use promptforge_api_runtime::types::timestamp::Timestamp;
 //! use promptforge_api_runtime::{Environment, Prompt, Run, RunContext, RunResult, Step};
 //!
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 0\n---\n\n# Greeter\n\n## Say hi\n\n```lua\nreturn 'hello'\n```\n";
-//! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
+//! let (prompt, _parse_events) = Prompt::parse(source, "run-example");
+//! let prompt = prompt?;
 //!
 //! // Capability-free agents use the default environment: an empty catalog.
 //! // The host draws the run's seed and stamps its start: the engine reads
@@ -77,14 +79,12 @@
 //! ```
 //!
 pub(crate) mod cancel;
-pub mod debug;
 mod error;
 pub mod execute;
 pub(crate) mod fanout;
 pub mod input;
 pub(crate) mod lua;
 pub mod model;
-pub(crate) mod observe;
 pub mod parser;
 pub(crate) mod store;
 pub(crate) mod subst;

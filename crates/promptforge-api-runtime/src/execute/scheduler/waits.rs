@@ -34,8 +34,8 @@ use std::sync::atomic::Ordering;
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
 
 use crate::execute::protocol::{Answer, TaskDelivery, TaskStatus};
-use crate::observe::Observation;
 use crate::{Error, Result};
+use promptforge_api_types::event::Event;
 
 use super::notices::TaskEnd;
 use super::tasks::{TaskBacking, TaskSlot, TaskState};
@@ -307,7 +307,14 @@ impl Scheduler {
         // clears the chain's state.
         let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
         self.abort_subtree(backing_chain);
-        emitter.report(&target, Observation::TaskCancelled { task: task.clone() });
+        emitter.emit(&target, |execution, section, provenance| {
+            Event::TaskCancelled {
+                execution,
+                section,
+                provenance,
+                task: task.clone(),
+            }
+        });
         Ok((origin == TaskOrigin::Model).then_some(target))
     }
 }

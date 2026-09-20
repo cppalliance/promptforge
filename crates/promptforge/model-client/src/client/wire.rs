@@ -5,7 +5,7 @@
 #[path = "wire-canned.rs"]
 mod canned;
 
-use promptforge_api_types::events::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
+use promptforge_api_types::metrics::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::Value;
 
 /// A single chat message.
@@ -441,6 +441,11 @@ pub struct Completion {
     /// mean inter-token latency, and end-to-end wall time for the stream.
     #[doc(hidden)]
     pub client_timing: Option<ClientTiming>,
+    /// One line per response metadata section that was present but
+    /// malformed and degraded to `None`, for the host to log; empty for a
+    /// well-formed body.
+    #[doc(hidden)]
+    pub metadata_diagnostics: Vec<String>,
     /// The JSON body sent to the gateway.
     #[doc(hidden)]
     pub request_body: Value,
@@ -495,6 +500,14 @@ impl Completion {
     #[must_use]
     pub fn vllm_metrics(&self) -> Option<&VllmMetrics> {
         self.vllm_metrics.as_ref()
+    }
+
+    /// Returns one line per response metadata section that was present but
+    /// malformed and so degraded to `None` (or a body naming no string
+    /// `model`): the host's to log, since the vocabulary reaches no logger.
+    #[must_use]
+    pub fn metadata_diagnostics(&self) -> &[String] {
+        &self.metadata_diagnostics
     }
 
     /// Returns the timing this client measured on its own clock, when the

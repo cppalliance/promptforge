@@ -2,12 +2,14 @@
 //!
 //! An [`Event`] is one thing that happened during a run, returned to the
 //! host from `Run::step` beside the effects the run wants performed. It is
-//! the value form of the report-only [`Observer`](crate::observe::Observer)
-//! callbacks, the `on_*` content hooks, and the opt-in debug capture, in one
-//! serializable enum: the engine emits, the host appends to its log, and
-//! nothing is ever read back into the engine by this path. The lifecycle
-//! variants map one to one onto today's [`Observation`](crate::observe::Observation)
-//! members, whose trace labels and sensitivity notes apply unchanged.
+//! the one report-only vocabulary: lifecycle boundaries, content the model,
+//! tools, and user produced, and the opt-in debug capture, in one
+//! serializable enum. The engine emits through an
+//! [`Emitter`](crate::emitter::Emitter), the host appends to its log, and
+//! nothing is ever read back into the engine by this path: recording every
+//! event or dropping them all leaves a run's outputs, errors, and ordering
+//! unchanged. The payload-free lifecycle variants have named constructors
+//! in [`lifecycle`] for the engine's emit sites.
 //!
 //! Every variant carries three coordinates before its payload: `execution`
 //! (the caller-chosen run identifier), `section` (the reporting H2 heading
@@ -49,8 +51,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::events::{CallMetrics, ToolCallEvent};
 use crate::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
+use crate::metrics::{CallMetrics, ToolCallEvent};
+
+#[doc(hidden)]
+#[path = "event-lifecycle.rs"]
+pub mod lifecycle;
 
 #[cfg(test)]
 #[path = "event-tests.rs"]
@@ -131,8 +137,8 @@ events! {
     /// One thing that happened during a run.
     ///
     /// Variants fall into four groups. Lifecycle variants (the first group,
-    /// through [`Other`](Self::Other)) mark operational boundaries and map
-    /// one to one onto [`Observation`](crate::observe::Observation). Task
+    /// through [`Lua`](Self::Lua)) mark operational boundaries; the
+    /// payload-free ones have constructors in [`lifecycle`]. Task
     /// variants report a task chain's start and end. Content variants
     /// carry what a model, tool, or user produced. Debug variants carry the
     /// raw model-turn bodies. Every variant carries `execution`, `section`,
@@ -245,12 +251,6 @@ events! {
         /// replies, tool data, credentials, paths, or store contents in it.
         Lua {
             /// The author's checkpoint text, verbatim.
-            message: String,
-        },
-        /// A forward-compatible escape hatch for an observation with no
-        /// fixed variant.
-        Other {
-            /// The free-form message.
             message: String,
         },
         // Tasks.

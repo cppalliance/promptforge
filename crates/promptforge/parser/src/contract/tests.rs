@@ -4,14 +4,12 @@
 
 use std::num::NonZeroU32;
 
-use promptforge_api_types::observe::NullObserver;
-
 use super::{ArgType, ModelKeyword, ToolSlot};
 use crate::{ParseError, ParseErrorKind, Prompt};
 
 fn parse(yaml: &str) -> Result<Prompt, ParseError> {
     let src = format!("---\n{yaml}---\n\n# T\n\n## S\n\np\n");
-    Prompt::parse(&src, "test", &NullObserver::default())
+    Prompt::parse(&src, "test").0
 }
 
 #[test]
@@ -413,7 +411,8 @@ fn contract_errors_carry_their_frontmatter_line_and_column() {
         "---\n",
         "\n# T\n\n## S\n\np\n",
     );
-    let error = Prompt::parse(src, "test", &NullObserver::default())
+    let error = Prompt::parse(src, "test")
+        .0
         .expect_err("a capability id with spaces must be rejected");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert_eq!(

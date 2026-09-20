@@ -36,8 +36,8 @@ use promptforge_api_types::ids::{AbandonReason, TaskId, TaskOrigin};
 use crate::execute::protocol::Answer;
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
-use crate::observe::Observation;
 use crate::{Error, Result};
+use promptforge_api_types::event::Event;
 
 use super::notices::TaskEnd;
 use super::{ChainIndex, Counters, Scheduler, prompt_origin};
@@ -248,9 +248,11 @@ impl Scheduler {
         // The start carries the spawn seeds: everything a host needs to
         // start the same chain again under the same id. The spawn is the
         // spawner's act, so it rides the spawner's task sequence.
-        spawner_emitter.report(
-            &spawner_section,
-            Observation::TaskStarted {
+        spawner_emitter.emit(&spawner_section, |execution, section, provenance| {
+            Event::TaskStarted {
+                execution,
+                section,
+                provenance,
                 task: task.clone(),
                 target: worker.name().to_owned(),
                 origin,
@@ -258,8 +260,8 @@ impl Scheduler {
                 item: seed.item,
                 index: seed.index,
                 var: var.clone(),
-            },
-        );
+            }
+        });
         Ok((task, child))
     }
 
@@ -283,17 +285,30 @@ impl Scheduler {
         let Some(slot) = self.tasks.get_mut(&task) else {
             return Err(Error::internal("a task chain's end implies its slot"));
         };
-        let event = if outcome.is_ok() {
-            Observation::TaskSucceeded { task: task.clone() }
-        } else {
-            Observation::TaskFailed { task: task.clone() }
-        };
+        let succeeded = outcome.is_ok();
         slot.state = TaskState::Done;
-        slot.ok = Some(outcome.is_ok());
+        slot.ok = Some(succeeded);
         let owner = slot.owner;
         let origin = slot.origin;
         let target = slot.target.clone();
-        emitter.report(&target, event);
+        emitter.emit(&target, |execution, section, provenance| {
+            let task = task.clone();
+            if succeeded {
+                Event::TaskSucceeded {
+                    execution,
+                    section,
+                    provenance,
+                    task,
+                }
+            } else {
+                Event::TaskFailed {
+                    execution,
+                    section,
+                    provenance,
+                    task,
+                }
+            }
+        });
         if origin == TaskOrigin::Model {
             let end = match &outcome {
                 Ok(text) => TaskEnd::Completed(text),
@@ -379,13 +394,15 @@ impl Scheduler {
             // abort clears the chain's state.
             let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
             self.abort_subtree(backing_chain);
-            emitter.report(
-                &target,
-                Observation::TaskAbandoned {
+            emitter.emit(&target, |execution, section, provenance| {
+                Event::TaskAbandoned {
+                    execution,
+                    section,
+                    provenance,
                     task: task.clone(),
                     reason,
-                },
-            );
+                }
+            });
             match origin {
                 TaskOrigin::Author => leaked.push(task),
                 TaskOrigin::Model => {

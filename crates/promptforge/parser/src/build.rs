@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use promptforge_api_types::observe::Observer;
+use promptforge_api_types::emitter::Emitter;
 
 use super::contract::{ArgsDecl, CapabilityDecl, ModelRoles, ToolSlots};
 use super::fence::{RawBlock, lua_block_location, split_section_blocks};
@@ -415,8 +415,7 @@ fn build_heading_blocks(
     heading: &Heading,
     name: &str,
     frontmatter_lines: u32,
-    execution: &str,
-    observer: &dyn Observer,
+    emitter: &Emitter,
 ) -> Result<Vec<Block>> {
     let content_abs_line = line_add(frontmatter_lines, heading.content_start_line)?;
     let raw_blocks = split_section_blocks(&heading.content, name)?;
@@ -438,8 +437,7 @@ fn build_heading_blocks(
                     &source,
                     &location,
                     nz_source_line(abs_line)?,
-                    execution,
-                    observer,
+                    emitter,
                     name,
                 )?;
                 blocks.push(Block::Lua(program));
@@ -467,8 +465,7 @@ pub(crate) fn build_sections(
     pos: &mut usize,
     parent_level: u8,
     frontmatter_lines: u32,
-    execution: &str,
-    observer: &dyn Observer,
+    emitter: &Emitter,
 ) -> Result<Vec<Section>> {
     let mut result = Vec::new();
     // Parallel to `result`: each sibling's name and its 1-based heading line, so
@@ -505,10 +502,9 @@ pub(crate) fn build_sections(
         }
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
         let heading_span = h.span.clone();
-        let blocks = build_heading_blocks(h, &name, frontmatter_lines, execution, observer)?;
+        let blocks = build_heading_blocks(h, &name, frontmatter_lines, emitter)?;
         *pos += 1;
-        let children =
-            build_sections(headings, pos, level, frontmatter_lines, execution, observer)?;
+        let children = build_sections(headings, pos, level, frontmatter_lines, emitter)?;
 
         let has_no_lua = blocks
             .iter()

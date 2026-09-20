@@ -19,13 +19,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use harness_api::bridge::{
     CapabilityRegistry, GatewayClient as ModelClient, InputBroker, RunServices, ToolTable, activate,
 };
+use harness_api::cancel::CancelHandle;
 use promptforge_api_runtime::test_support::{Performers, drive_tokio};
 use promptforge_api_runtime::{
     Effect, EffectAnswer, Environment, Prompt, Run, RunContext, RunLimits, RunResult,
 };
-use promptforge_api_types::cancel::sync::CancelHandle as CancelFlag;
+use promptforge_api_types::cancel::CancelHandle as CancelFlag;
 use promptforge_api_types::models::ModelDescriptor;
-use promptforge_api_types::observe::NullObserver;
 use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::wire::StreamDelta;
 
@@ -54,7 +54,7 @@ pub(super) struct RunParts {
     /// The run's execution identifier: the session id.
     pub(super) execution: String,
     /// The awaitable cancel token the session armed for this run.
-    pub(super) cancel: promptforge_api_types::cancel::CancelHandle,
+    pub(super) cancel: CancelHandle,
 }
 
 /// Runs one Markdown agent prompt: parses it, activates the first-party
@@ -84,11 +84,16 @@ pub(super) async fn run_markdown_agent(
         execution,
         cancel: token,
     } = parts;
-    let prompt = Prompt::parse(source, &execution, &NullObserver::default()).map_err(|error| {
-        AgentRunError::Failed {
-            message: format!("the embedded Markdown agent failed to parse: {error}"),
-            source: Some(Box::new(error)),
-        }
+    // The parse-time events land in the session's log ahead of the run's,
+    // whether or not the parse succeeds.
+    let (prompt, parse_events) = Prompt::parse(source, &execution);
+    let mut sink = sink.into_fn();
+    for event in parse_events {
+        sink(event);
+    }
+    let prompt = prompt.map_err(|error| AgentRunError::Failed {
+        message: format!("the embedded Markdown agent failed to parse: {error}"),
+        source: Some(Box::new(error)),
     })?;
     let (cancel, bridge) = bridge_cancel(token);
     let mut ctx = RunContext::new(execution, seed, started_at)
@@ -113,7 +118,7 @@ pub(super) async fn run_markdown_agent(
     } else {
         let performers = performers(client, on_delta, activation.tools, broker);
         let run = Run::new(Arc::new(prompt), "", ctx);
-        drive_tokio(run, performers, sink.into_fn(), cancel).await
+        drive_tokio(run, performers, sink, cancel).await
     };
     // The run is over, so nothing reads the flag: the bridge ends with it.
     bridge.abort();
@@ -214,9 +219,7 @@ pub(super) fn now_timestamp() -> Timestamp {
 /// token fires. The caller aborts the returned bridge task once the run is
 /// over, so a run that finishes uncancelled leaves no task waiting on a
 /// token nobody will fire.
-fn bridge_cancel(
-    token: promptforge_api_types::cancel::CancelHandle,
-) -> (CancelFlag, tokio::task::JoinHandle<()>) {
+fn bridge_cancel(token: CancelHandle) -> (CancelFlag, tokio::task::JoinHandle<()>) {
     let flag = CancelFlag::new();
     let bridged = flag.clone();
     let bridge = tokio::spawn(async move {

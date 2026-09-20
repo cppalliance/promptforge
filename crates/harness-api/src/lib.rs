@@ -1,7 +1,8 @@
 //! harness-api - the public door into the PromptForge harness family: the
 //! harness configuration, the gateway binding a client pushes at startup
-//! and on every gateway replacement, and the session, event, and delta
-//! types a client renders.
+//! and on every gateway replacement, the session, event, and delta
+//! types a client renders, and the awaitable [`cancel::CancelHandle`] a
+//! client selects over.
 //!
 //! ## Invariants
 //!
@@ -18,6 +19,7 @@
 //!   (enforced by this crate's `clippy.toml`).
 
 pub mod bridge;
+pub mod cancel;
 mod harness;
 mod session;
 
