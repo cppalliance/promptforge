@@ -4,7 +4,7 @@ The PromptForge Workshop's user-state subsystem: the account-scoped UI state buc
 
 ## Tier
 
-A feature crate. It may depend on `workshop-protocol`, `workshop-registry`, and `workshop-support`, and never on `workshop-workspace`, `workshop-sessions`, `workshop-server`, or any `gateway-*` or `promptforge-*` crate. The workspace-scoped bucket (dock layout, expanded tree folders, closed editors) is the `workshop-workspace` crate's business and travels with the `.pfwork` file; this crate knows nothing about workspaces.
+A feature crate. It may depend on `workshop-protocol`, `workshop-registry`, and `workshop-support`, and never on `workshop-workspace`, `workshop-server`, or any `gateway-*` or `promptforge-*` crate. The workspace-scoped bucket (dock layout, expanded tree folders, closed editors) is the `workshop-workspace` crate's business and travels with the `.pfwork` file; this crate knows nothing about workspaces.
 
 ## The state file
 

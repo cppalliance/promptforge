@@ -24,7 +24,8 @@ use serde_json::json;
 use tokio::sync::Notify;
 
 use workshop_server::fixtures::{
-    gateway_updater, replace_gateway as replace_fixture_gateway, state_with_gateway,
+    gateway_updater, replace_gateway as replace_fixture_gateway, spawn_bindings_forwarder,
+    state_with_gateway,
 };
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
@@ -208,6 +209,10 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     // Discovery is bypassed: a test never consults the real run directory.
     let gateway = ResolvedGateway::from_config(&config.gateway);
     let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
+    // The router is bound directly, without the serving loop that spawns
+    // the registered tasks, so the forwarder that pushes gateway and
+    // catalog replacements into the harness is spawned here.
+    spawn_bindings_forwarder(&state);
     // The session's model catalog is built from the retained catalog at
     // launch, so the catalog lands before any test launches.
     state

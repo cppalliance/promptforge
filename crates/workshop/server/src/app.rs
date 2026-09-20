@@ -4,7 +4,8 @@
 //! [`AppState`] holds no subsystem state by name: each extracted
 //! subsystem owns its state behind a narrow handle registered into the
 //! [`Registry`], and consumers fetch the handles through the registry's
-//! type-keyed state collection. What remains here is the shell's own
+//! type-keyed state collection. The harness every agent session runs in
+//! is registered the same way. What remains here is the shell's own
 //! runtime infrastructure - the shared reconnect backoff - plus the
 //! registration guards keeping every self-registration alive.
 
@@ -20,17 +21,18 @@ use std::sync::Arc;
 
 use axum::Router;
 
+use harness_api::Harness;
 use shared_progress::ProgressHub;
 
 use workshop_gateway::GatewayHandles;
 use workshop_menu::MenuHandles;
 use workshop_registry::{Push, Registration, Registry, WorkspaceRoots};
-use workshop_sessions::{AgentSessions, SessionHost, SessionsState};
 use workshop_status::StatusBus;
 use workshop_support::{Config, DEFAULT_DEADLINE, ReconnectBackoff, with_deadline};
 use workshop_user_state::UserStateStore;
 use workshop_workspace::Workspace;
 
+use crate::agents::{self, AgentSessions, SessionsState};
 use crate::catalog::CatalogBus;
 use crate::gateway::GatewayError;
 use crate::gateway_binding::{GatewayBinding, GatewaySnapshot, GatewayUpdater};
@@ -202,13 +204,13 @@ impl AppState {
         &self.registry
     }
 
-    /// The agent-session registry: discovery, launch, and the running
-    /// sessions behind the `/agents/ws` socket. Sessions outlive
-    /// sockets, so an embedding host ends one through
-    /// [`AgentSessions::close`].
+    /// The agent-session opener: discovery, launch, and the running
+    /// sessions behind the `/agents/ws` socket, every one of them run in
+    /// the harness. Sessions outlive sockets, so an embedding host ends
+    /// one through [`AgentSessions::close`].
     ///
     /// # Panics
-    /// Panics when the composition root never registered the registry - a
+    /// Panics when the composition root never registered the opener - a
     /// bug boot already refuses: [`state_with_gateway`] requires every
     /// contribution before sharing state.
     #[must_use]
@@ -250,7 +252,8 @@ pub enum Omit {
     Gateway,
     /// `workshop_workspace::register`.
     Workspace,
-    /// `workshop_sessions::register`.
+    /// `agents::register`: the sessions routes, the harness, and the
+    /// agent-session opener.
     Sessions,
 }
 
@@ -358,7 +361,7 @@ fn compose(
     let progress = Arc::new(ProgressHub::new());
     let backoff = ReconnectBackoff::new();
     let health = GatewayHealth::new();
-    let gateway_handles = GatewayHandles::new(gateway_binding.clone(), health.clone());
+    let gateway_handles = GatewayHandles::new(gateway_binding, health.clone());
     if omit != Some(Omit::Gateway) {
         registrations.hold(workshop_gateway::register(
             &registry,
@@ -401,19 +404,22 @@ fn compose(
     let (routes, state) = workshop_user_state::register(&registry, user_state);
     registrations.hold(routes);
     registrations.hold(state);
-    let agents = AgentSessions::new(
-        config.agents.path.clone(),
-        gateway_binding,
-        SessionHost::new(registry.clone(), backoff.clone(), menu, catalog),
-    );
+    // Agent sessions run in the harness, the engine's production host,
+    // built here like every other subsystem and reached through the
+    // registry; `agents` pushes the shell's state across its door.
+    let harness = agents::harness_for(config, &registry);
+    let agents = AgentSessions::new(registry.clone(), backoff.clone());
     let mut sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
     if let Some(bound) = restart_bound {
         sessions = sessions.with_restart_bound(bound);
     }
     if omit != Some(Omit::Sessions) {
-        let (routes, state) = workshop_sessions::register(&registry, &sessions, &agents);
+        let (routes, harness, agents) = agents::register(&registry, &sessions, harness, &agents);
         registrations.hold(routes);
-        registrations.hold(state);
+        registrations.hold(harness);
+        registrations.hold(agents);
+        // The bindings forwarder, spawned with serving like every task.
+        registrations.hold(agents::register_tasks(&registry));
     }
     // The boot contract: every subsystem's handle set is present before
     // state is shared, so a missing contribution fails here, naming the
@@ -421,6 +427,7 @@ fn compose(
     registry.require::<StatusBus>()?;
     registry.require::<MenuHandles>()?;
     registry.require::<GatewayHandles>()?;
+    registry.require::<Harness>()?;
     registry.require::<AgentSessions>()?;
     registry.require::<Workspace>()?;
     registry.require::<dyn WorkspaceRoots>()?;

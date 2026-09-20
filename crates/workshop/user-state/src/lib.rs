@@ -8,9 +8,8 @@
 //!
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`. Never on
-//!   `workshop-workspace`, `workshop-sessions`, `workshop-server`, or any
-//!   `gateway-*` or `promptforge-*` crate. Read `AGENTS.md` before adding
-//!   an import.
+//!   `workshop-workspace`, `workshop-server`, or any `gateway-*` or
+//!   `promptforge-*` crate. Read `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - The server stores each value verbatim and never interprets it

@@ -4,45 +4,40 @@
 //! On connect the server pushes the discovered agent list. The client
 //! then sends `{"type":"launch","agent":"..."}` to start a session or
 //! `{"type":"attach","session":"..."}` to reattach to a running one -
-//! sessions outlive sockets, so a reconnect replays the session's event
-//! log from index zero and re-announces every unresolved input wait.
-//! While attached, the loop streams four families: durable
-//! `agent_event` frames drained from the session's event log by a
-//! per-client cursor (the log's broadcast is only the wakeup, so a
-//! lagged receiver loses nothing), ephemeral `agent_delta` frames from
-//! the session's delta channel (drops repair via the superseding event),
-//! the durable `input_required` / `input_cancelled` wait frames, and
-//! ephemeral `error` frames reporting a failed model round the program
-//! survived or a run that ended in error.
+//! sessions outlive sockets, so a reconnect replays the session's
+//! transcript from index zero and re-announces every unresolved input
+//! wait. While attached, the loop streams four families: durable
+//! `agent_event` frames drained from the session's transcript by a
+//! per-client cursor (the harness's event broadcast is only the wakeup,
+//! so a lagged receiver loses nothing), ephemeral `agent_delta` frames
+//! from the session's delta channel (drops repair via the superseding
+//! event), the durable `input_required` / `input_cancelled` wait frames,
+//! and ephemeral `error` frames reporting a failed model round the
+//! program survived or a run that ended in error.
 //! `{"type":"input_response",...}` answers a wait and dispatches the
 //! turn (the Thinking status push); `{"type":"cancel"}` fires the
 //! session's turn-cancel - a stop reason, never an error, so nothing is
 //! answered and the frames that follow are the relaunch's own.
 //!
 //! One task owns the socket: a single `select!` loop reads and writes
-//! the same handle, per the crate's socket rule; the session registry
-//! behind it is [`super`]'s documented carve-out.
-
-use std::sync::Arc;
+//! the same handle, per the shell's socket rule; the session table
+//! behind it is the harness's, [`super`]'s documented carve-out.
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
+use harness_api::{Delta, DeltaKind, Session, SessionEvent, WaitError, WaitFrame};
 use promptforge_api_types::event::Event;
 use tokio::sync::broadcast;
 
 use workshop_protocol::{
-    Activity, AgentDeltaFrame, AgentEventFrame, AgentSessionFrame, AgentsFrame, ErrorFrame,
-    InputFrame, InputResponse,
+    Activity, AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, AgentSessionFrame, AgentsFrame,
+    ErrorFrame, InputFrame, InputResponse,
 };
 
-use harness_api::bridge::input::{WaitError, WaitFrame};
-
-use crate::session::{cross_site_refusal, send_error, send_frame};
-use crate::state::SessionsState;
-
-use super::{AgentDelta, AgentSession, reply_stamp};
+use super::session::{cross_site_refusal, send_error, send_frame};
+use super::state::SessionsState;
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
 /// foreign `Origin` is refused with 403, exactly as the workbench
@@ -59,16 +54,17 @@ pub(crate) async fn upgrade(
 }
 
 /// The attachment state of one socket: the session it serves and the
-/// per-client cursors deriving durable-frame indices and reply stamps.
+/// per-client cursors deriving durable-frame indices.
 struct Attached {
     /// The session this socket serves.
-    session: Arc<AgentSession>,
-    /// The next event-log index to send; everything below it has been
-    /// framed to this client already.
+    session: Session,
+    /// The next transcript index to consider; everything below it has
+    /// been read (framed or skipped) for this client already.
     cursor: u64,
-    /// Settled model rounds seen at the cursor - the socket-side half of
-    /// the reply-stamp rule ([`reply_stamp`]).
-    rounds_seen: u64,
+    /// The wire index the next framed entry takes: the count of
+    /// transcript entries with a wire shape sent so far, so the durable
+    /// frames number the transcript the client renders, gap-free.
+    framed: u64,
 }
 
 /// Receives from an optional subscription, pending forever when absent,
@@ -87,7 +83,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
     // The list is discovered per connect: the frame is a complete
     // snapshot, so a directory edited between connects is picked up by
     // the next window with no push machinery. An unregistered sessions
-    // state handle degrades the discovery to the empty list.
+    // handle degrades the discovery to the empty list.
     let discovered = state
         .agents()
         .map_or_else(Vec::new, |agents| agents.discover());
@@ -98,8 +94,8 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
     // The subscriptions ride beside the attachment (not inside it) so the
     // select! arms below can borrow them while the inbound arm borrows
     // `attached`; attach() and the arms keep them all in step.
-    let mut events_rx: Option<broadcast::Receiver<Event>> = None;
-    let mut deltas_rx: Option<broadcast::Receiver<AgentDelta>> = None;
+    let mut events_rx: Option<broadcast::Receiver<SessionEvent>> = None;
+    let mut deltas_rx: Option<broadcast::Receiver<Delta>> = None;
     let mut input_rx: Option<broadcast::Receiver<WaitFrame>> = None;
     let mut errors_rx: Option<broadcast::Receiver<String>> = None;
 
@@ -176,9 +172,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
             received = recv_or_pending(&mut deltas_rx) => {
                 match received {
                     Ok(delta) => {
-                        let frame =
-                            AgentDeltaFrame::new(delta.channel, delta.content, delta.reply);
-                        if !send_frame(&mut socket, &frame).await {
+                        if !send_frame(&mut socket, &delta_frame(delta)).await {
                             break;
                         }
                     }
@@ -188,32 +182,31 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
                     Err(broadcast::error::RecvError::Closed) => deltas_rx = None,
                 }
             }
-            // Durable events: the broadcast is only the wakeup - the
-            // frames are drained from the log by cursor, so a lagged or
-            // even closed receiver never loses an entry.
-            received = recv_or_pending(&mut events_rx) => {
-                match received {
-                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                        if let Some(attached) = attached.as_mut()
-                            && !drain_events(attached, &mut socket).await
-                        {
-                            break;
-                        }
+            // Durable events: the broadcast is only the wakeup - a live
+            // entry at the cursor frames directly, and anything else
+            // (a gap, a lag, even a closed receiver) drains the transcript
+            // from the cursor, so no entry is ever lost.
+            received = recv_or_pending(&mut events_rx) => match received {
+                Err(broadcast::error::RecvError::Closed) => events_rx = None,
+                received => {
+                    if let Some(attached) = attached.as_mut()
+                        && !on_event_wake(attached, received.ok(), &mut socket).await
+                    {
+                        break;
                     }
-                    Err(broadcast::error::RecvError::Closed) => events_rx = None,
                 }
-            }
+            },
         }
     }
     // The socket detaches; the session lives on. Reconnecting replays the
-    // log and re-announces unresolved waits.
+    // transcript and re-announces unresolved waits.
 }
 
 /// The four channel subscriptions an attachment holds, passed as one
 /// bundle so [`handle_frame`] can replace them atomically on attach.
 type Subscriptions<'a> = (
-    &'a mut Option<broadcast::Receiver<Event>>,
-    &'a mut Option<broadcast::Receiver<AgentDelta>>,
+    &'a mut Option<broadcast::Receiver<SessionEvent>>,
+    &'a mut Option<broadcast::Receiver<Delta>>,
     &'a mut Option<broadcast::Receiver<WaitFrame>>,
     &'a mut Option<broadcast::Receiver<String>>,
 );
@@ -225,6 +218,16 @@ fn input_frame(frame: WaitFrame) -> InputFrame {
         WaitFrame::Required { token } => InputFrame::Required { token },
         WaitFrame::Cancelled { token } => InputFrame::Cancelled { token },
     }
+}
+
+/// Renders a harness delta as the protocol's delta frame, the reply stamp
+/// carried through.
+fn delta_frame(delta: Delta) -> AgentDeltaFrame {
+    let channel = match delta.kind {
+        DeltaKind::Text => AgentDeltaKind::Text,
+        DeltaKind::Reasoning => AgentDeltaKind::Reasoning,
+    };
+    AgentDeltaFrame::new(channel, delta.content, delta.reply)
 }
 
 /// Handles one inbound text frame. A `false` return means the client is
@@ -260,21 +263,20 @@ async fn handle_frame(
                 }
             };
             let session = &attached.session;
-            match session.accept_input(response, || {}) {
+            match session.send_input(&response.token, response.text, || {}) {
                 // The wait completed: the turn is dispatched.
                 Ok(()) => state.push().push_status_update(
                     "Running agent turn",
-                    format!("agent `{}` is thinking", session.agent),
+                    format!("agent `{}` is thinking", session.agent()),
                     Activity::Thinking,
                 ),
-                // A response racing a turn-cancel is normal: the text is
-                // recorded as history (the relaunched agent rebuilds from
-                // events), and the dead wait already announced its
-                // `input_cancelled`.
+                // A response racing a turn-cancel is normal: the dead wait
+                // already announced its `input_cancelled`, and the
+                // relaunched agent re-asks.
                 Err(WaitError::UnknownToken) => {
                     tracing::debug!(
-                        session = %session.id,
-                        "input_response for a dead wait; text recorded, wait gone"
+                        session = %session.id(),
+                        "input_response for a dead wait; wait gone"
                     );
                 }
             }
@@ -284,8 +286,12 @@ async fn handle_frame(
             if let Some(attached) = attached.as_ref() {
                 // Cancellation is a stop reason: no reply frame of any
                 // kind. Pending waits announce their own deaths and the
-                // relaunched run re-asks.
-                attached.session.cancel_turn();
+                // relaunched run re-asks. The relaunch reads the host
+                // snapshot, so the shell's current state is pushed first.
+                if let Some(agents) = state.agents() {
+                    agents.sync_bindings();
+                }
+                attached.session.cancel();
             } else {
                 send_error(socket, None, "cancel before a session is attached").await;
             }
@@ -334,7 +340,7 @@ async fn handle_open(
             send_error(socket, None, "launch frame without an agent name").await;
             return true;
         };
-        match agents.launch(agent) {
+        match agents.launch(agent).await {
             Ok(session) => session,
             Err(refusal) => {
                 send_error(socket, None, refusal.to_string()).await;
@@ -355,26 +361,27 @@ async fn handle_open(
     attach(session, attached, subscriptions, socket).await
 }
 
-/// Attaches the socket to `session`: subscribes the three channels
+/// Attaches the socket to `session`: subscribes the four channels
 /// (before the replay, so nothing lands between them unseen),
-/// acknowledges with the session frame, replays the session's log from
-/// index zero, and re-announces unresolved waits. A `false` return means
-/// the client is gone.
+/// acknowledges with the session frame, replays the session's
+/// transcript from index zero, and re-announces unresolved waits. A
+/// `false` return means the client is gone.
 async fn attach(
-    session: Arc<AgentSession>,
+    session: Session,
     attached: &mut Option<Attached>,
     (events_rx, deltas_rx, input_rx, errors_rx): Subscriptions<'_>,
     socket: &mut WebSocket,
 ) -> bool {
-    *events_rx = Some(session.log.subscribe());
+    *events_rx = Some(session.subscribe_events());
     *deltas_rx = Some(session.subscribe_deltas());
-    *input_rx = Some(session.input_frames.subscribe());
+    *input_rx = Some(session.subscribe_waits());
     *errors_rx = Some(session.subscribe_errors());
-    let acknowledgment = AgentSessionFrame::new(session.id.clone(), session.agent.clone());
+    let acknowledgment =
+        AgentSessionFrame::new(session.id().to_string(), session.agent().to_owned());
     let mut state = Attached {
         session,
         cursor: 0,
-        rounds_seen: 0,
+        framed: 0,
     };
     if !send_frame(socket, &acknowledgment).await
         || !drain_events(&mut state, socket).await
@@ -386,36 +393,76 @@ async fn attach(
     true
 }
 
-/// Sends every log entry past the client's cursor as a durable
-/// `agent_event` frame carrying its log index and, on the model-round
+/// Frames what an event wakeup delivered: the live entry itself when it
+/// is the entry at the cursor (or one the replay already covered, which
+/// frames nothing), else - a gap past the cursor, or a lag that delivered
+/// no entry - the transcript from the cursor on. A `false` return means
+/// the client is gone.
+async fn on_event_wake(
+    attached: &mut Attached,
+    entry: Option<SessionEvent>,
+    socket: &mut WebSocket,
+) -> bool {
+    match entry {
+        Some(entry) if entry.index <= attached.cursor => {
+            frame_entry(attached, &entry, socket).await
+        }
+        _ => drain_events(attached, socket).await,
+    }
+}
+
+/// Sends every transcript entry past the client's cursor as a durable
+/// `agent_event` frame carrying its wire index and, on the model-round
 /// content kinds, the reply stamp its deltas carried. A `false` return
 /// means the client is gone.
 async fn drain_events(attached: &mut Attached, socket: &mut WebSocket) -> bool {
-    let len = attached.session.log.len();
-    while attached.cursor < len {
-        let Some(event) = attached.session.log.get(attached.cursor) else {
-            // Unreachable: the log is append-only, so every index below
-            // a witnessed len() reads. Stop cleanly rather than spin.
+    let transcript = match attached.session.transcript(attached.cursor).await {
+        Ok(transcript) => transcript,
+        Err(error) => {
+            // The run log refused the read; the next wakeup retries from
+            // the same cursor, so nothing is skipped.
+            tracing::warn!(session = %attached.session.id(), %error, "transcript read failed");
             return true;
-        };
-        let stamp = reply_stamp(&event, &mut attached.rounds_seen);
-        // The log holds transcript events alone, so every entry frames;
-        // an entry with no wire shape would be skipped, cursor advanced.
-        if let Some(frame) = AgentEventFrame::new(attached.cursor, stamp, &event)
-            && !send_frame(socket, &frame).await
-        {
+        }
+    };
+    for entry in &transcript {
+        if !frame_entry(attached, entry, socket).await {
             return false;
         }
-        attached.cursor += 1;
     }
     true
+}
+
+/// Frames one transcript entry at or past the cursor and advances the
+/// cursor over it. An entry with no wire shape (lifecycle, task, and
+/// debug events) advances the cursor without a frame or a wire index. A
+/// `false` return means the client is gone.
+async fn frame_entry(
+    attached: &mut Attached,
+    entry: &SessionEvent,
+    socket: &mut WebSocket,
+) -> bool {
+    if entry.index < attached.cursor {
+        return true;
+    }
+    attached.cursor = entry.index + 1;
+    let Ok(event) = serde_json::from_value::<Event>(entry.event.clone()) else {
+        // A stored payload this build cannot read has no wire shape
+        // either; the transcript's index sequence stays whole.
+        return true;
+    };
+    let Some(frame) = AgentEventFrame::new(attached.framed, entry.reply, &event) else {
+        return true;
+    };
+    attached.framed += 1;
+    send_frame(socket, &frame).await
 }
 
 /// Re-announces every unresolved wait to this socket in creation order -
 /// the attach-time (and lag-repair) half of the durable input-frame
 /// promise. A `false` return means the client is gone.
 async fn resend_unresolved(attached: &Attached, socket: &mut WebSocket) -> bool {
-    for token in attached.session.waits.unresolved() {
+    for token in attached.session.unresolved_waits() {
         if !send_frame(socket, &InputFrame::Required { token }).await {
             return false;
         }

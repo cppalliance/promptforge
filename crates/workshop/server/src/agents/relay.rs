@@ -9,7 +9,7 @@ use workshop_gateway::{GatewayError, GatewayResponse};
 use workshop_protocol::{Activity, ErrorEnvelope};
 use workshop_registry::Push;
 
-use crate::state::SessionsState;
+use super::state::SessionsState;
 
 /// Whether wire bodies carry internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at

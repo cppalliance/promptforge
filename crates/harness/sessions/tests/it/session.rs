@@ -28,9 +28,16 @@ const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge
 /// How long a test waits for the supervisor to act.
 const PATIENCE: Duration = Duration::from_secs(10);
 
+/// A chat-capable catalog entry with no `id`: usable, so a session
+/// launches under it, yet binding no model, so the gateway is never
+/// contacted.
+fn idless_chat_model() -> serde_json::Value {
+    serde_json::json!({ "kind": "chat" })
+}
+
 /// A harness over a fresh agents directory holding `asks.md`, with a
-/// usable (never contacted) gateway and an empty catalog bound.
-fn harness(dir: &Path) -> Harness {
+/// usable (never contacted) gateway and no catalog bound yet.
+fn unbound_harness(dir: &Path) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join("asks.md"), ASKS).unwrap();
@@ -43,9 +50,15 @@ fn harness(dir: &Path) -> Harness {
         key: "k".to_owned(),
         generation: 1,
     });
+    harness
+}
+
+/// [`unbound_harness`] with a usable catalog bound at generation 1.
+fn harness(dir: &Path) -> Harness {
+    let harness = unbound_harness(dir);
     harness.set_catalog(CatalogBinding {
         generation: 1,
-        models: Vec::new(),
+        models: vec![idless_chat_model()],
     });
     harness
 }
@@ -305,18 +318,18 @@ async fn a_catalog_with_different_models_retires_the_run() {
     // Same models, new generation: retained, the run keeps going.
     harness.set_catalog(CatalogBinding {
         generation: 2,
-        models: Vec::new(),
+        models: vec![idless_chat_model()],
     });
     tokio::task::yield_now().await;
     assert_eq!(session.unresolved_waits(), vec![first_token.clone()]);
 
     // Different models: the frozen bindings are stale, so the run is
     // retired and the program relaunched under the new catalog. The entry
-    // carries no `id`, so the relaunch binds no model and never contacts
-    // the gateway.
+    // still carries no `id`, so the relaunch binds no model and never
+    // contacts the gateway.
     harness.set_catalog(CatalogBinding {
         generation: 3,
-        models: vec![serde_json::json!({ "kind": "chat" })],
+        models: vec![serde_json::json!({ "kind": "chat", "description": "other" })],
     });
     cancelled_frame(&mut waits, &first_token).await;
     let second_token = required_token(&mut waits).await;
@@ -331,6 +344,42 @@ async fn a_catalog_with_different_models_retires_the_run() {
         first.outcome,
         Some(RunOutcome::Cancelled),
         "the retired run closed its row as cancelled"
+    );
+
+    assert!(harness.close(session.id()));
+    wait_for(&session, SessionState::Closed).await;
+}
+
+#[tokio::test]
+async fn an_empty_catalog_holds_the_session_until_a_chat_model_arrives() {
+    let dir = tempfile::tempdir().unwrap();
+    let harness = unbound_harness(dir.path());
+    // A catalog with no chat-capable entry is pushed as an empty list: the
+    // launch is acknowledged, but no run starts under it.
+    harness.set_catalog(CatalogBinding {
+        generation: 1,
+        models: Vec::new(),
+    });
+    let session = launch(&harness).await;
+    let mut waits = session.subscribe_waits();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), waits.recv())
+            .await
+            .is_err(),
+        "no run starts while the catalog holds no chat-capable model"
+    );
+    assert!(session.run_ids().is_empty(), "no run row was opened");
+
+    // The first usable generation starts the program.
+    harness.set_catalog(CatalogBinding {
+        generation: 2,
+        models: vec![idless_chat_model()],
+    });
+    let _token = required_token(&mut waits).await;
+    assert_eq!(
+        session.run_ids().len(),
+        1,
+        "the usable catalog launched one run"
     );
 
     assert!(harness.close(session.id()));

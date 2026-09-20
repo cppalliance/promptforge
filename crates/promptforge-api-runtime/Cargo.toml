@@ -35,8 +35,8 @@ workspace-hack.workspace = true
 # through a caller's closure with no runtime and no HTTP, and the tokio
 # driver (`test_support::drive_tokio`) that performs them through a
 # caller's async performers - the only thing in this crate that needs
-# tokio. Workshop's agent sessions enable it as their interim host until
-# the harness lands; no other production dependent does.
+# tokio. No production dependent enables it: this crate's own integration
+# suite and bench and the companion crates' suites do, as dev-dependencies.
 test-support = ["dep:tokio"]
 
 [dev-dependencies]

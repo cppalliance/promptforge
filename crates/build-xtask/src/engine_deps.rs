@@ -9,12 +9,15 @@
 //! of either. `[dev-dependencies]` are outside the guard: the engine's own
 //! suites drive it from a tokio test harness against a mock gateway.
 //!
-//! Interim rule: an entry marked `optional = true` that only the
-//! `test-support` feature enables is exempt, so the serial driver and the
-//! observer adapter can ship behind that feature while the suites migrate.
-//! "Only" is transitive: a feature that enables `test-support` (such as
-//! `default`) would enable the dependency too, so its presence voids the
-//! exemption. A later step removes the exemption once nothing needs it.
+//! Exemption: an entry marked `optional = true` that only the
+//! `test-support` feature enables is exempt, so the tokio test driver can
+//! ship behind that feature for the engine's own suite and the companion
+//! crates' suites. "Only" is transitive: a feature that enables
+//! `test-support` (such as `default`) would enable the dependency too, so
+//! its presence voids the exemption. The exemption is safe only while
+//! `test-support` is enabled from `[dev-dependencies]` alone; the
+//! `test_support_leak` guard fails the build when any non-dev table in the
+//! workspace enables it.
 //!
 //! The check reads declared dependencies, not the resolved graph, so
 //! `workspace-hack` unification is irrelevant to it.
@@ -27,8 +30,8 @@ use std::path::{Path, PathBuf};
 /// The crates an engine manifest may not declare outside `[dev-dependencies]`.
 const FORBIDDEN: [&str; 4] = ["tokio", "tokio-util", "async-trait", "reqwest"];
 
-/// The one feature that may, for now, gate an optional forbidden dependency.
-const EXEMPTING_FEATURE: &str = "test-support";
+/// The one feature that may gate an optional forbidden dependency.
+pub(crate) const EXEMPTING_FEATURE: &str = "test-support";
 
 /// The dependency tables the guard scans, directly and under `[target]`.
 const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];

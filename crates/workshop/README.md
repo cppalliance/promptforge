@@ -8,7 +8,7 @@ The desktop app (at `shell/`): hosts the workshop server in-process and opens th
 
 ## workshop-server
 
-The workshop HTTP server: serves the workshop API to the desktop shell, loopback-only, with the embedded SPA. The shell hosts it in-process, and it composes every subsystem through the registry. Depends on all nine sibling subsystems plus shared-loopback, shared-progress, and gateway-api-discovery; build-ui is its build dependency.
+The workshop HTTP server: serves the workshop API to the desktop shell, loopback-only, with the embedded SPA. The shell hosts it in-process, and it composes every subsystem through the registry. It also holds the sessions subsystem itself: the `/ws` workbench socket, the `/agents/ws` agent-session socket, and the `/v1/models` catalog relay, with agent sessions run in the harness through `harness-api` (the shell constructs the `Harness` at boot, registers it, and pushes the gateway binding, chat catalog, and host snapshot into it as data). Depends on all eight sibling subsystems plus harness-api, promptforge-api-types, shared-loopback, shared-progress, and gateway-api-discovery; build-ui is its build dependency.
 
 ## workshop-server-api
 
@@ -29,10 +29,6 @@ The wire protocol: every JSON frame over the workshop sockets, typed in one plac
 ## workshop-registry
 
 The sealed proxy slots subsystems self-register into, so the composition root never names them. The server builds its subsystem set through it. Depends on workshop-protocol.
-
-## workshop-sessions
-
-The sockets: the `/ws` workbench, `/agents/ws` agent sessions with supervision and input waits, and the `/v1/models` catalog relay. The server mounts it as the session subsystem, and the SPA's sockets are its client half. Depends on workshop-gateway, workshop-menu, workshop-protocol, workshop-registry, workshop-support, promptforge-api-runtime, promptforge-api-types, and shared-vfs.
 
 ## workshop-status
 

@@ -407,7 +407,9 @@ impl Supervisor {
     }
 }
 
-/// Classifies one retained catalog against the run's frozen bindings.
+/// Classifies one retained catalog against the run's frozen bindings. No
+/// catalog pushed yet, or a catalog with no chat-capable entry, is
+/// unavailable: nothing a run could bind a model against.
 fn classify(
     snapshot: Option<&CatalogBinding>,
     observed_generation: u64,
@@ -416,6 +418,7 @@ fn classify(
     let generation = snapshot.map_or(observed_generation, |catalog| catalog.generation);
     let disposition = match (snapshot, active_models) {
         (None, _) => CatalogDisposition::Unavailable,
+        (Some(catalog), _) if catalog.models.is_empty() => CatalogDisposition::Unavailable,
         (Some(catalog), Some(active)) if catalog.models != active => {
             CatalogDisposition::Replacement
         }

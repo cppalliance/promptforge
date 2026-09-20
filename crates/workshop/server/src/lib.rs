@@ -2,31 +2,53 @@
 //!
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
 //! and the axum router so `src/main.rs` stays a thin shell. Start at
-//! [`Config::load`] for configuration, [`WorkshopObserver`] for the run
-//! event log, [`WaitRegistry`] and [`SessionInputBroker`] for agent input
-//! waits, [`AgentSessions`] for the agent-session registry behind
-//! `/agents/ws`, and [`router`] for the HTTP API; [`spawn`] runs the whole
-//! server in-process on its own thread for embedding binaries.
+//! [`Config::load`] for configuration, [`AgentSessions`] for the
+//! agent-session opener behind `/agents/ws` (every session runs in the
+//! harness, reached through `harness-api`), and [`router`] for the HTTP
+//! API; [`spawn`] runs the whole server in-process on its own thread for
+//! embedding binaries.
 //!
 //! The crate is the composition root of the workshop server
-//! decomposition: the feature subsystems (`workshop-sessions`,
-//! `workshop-user-state`, `workshop-workspace`), the domain services (`workshop-gateway`,
+//! decomposition: the feature subsystems (`workshop-user-state`,
+//! `workshop-workspace`, and the sessions subsystem in `agents`: the
+//! `/ws` workbench socket, the `/agents/ws` agent-session socket, and the
+//! `/v1/models` catalog relay), the domain services (`workshop-gateway`,
 //! `workshop-status`, `workshop-menu`), and the vocabulary crates
 //! (`workshop-protocol`, `workshop-registry`, `workshop-support`) are
 //! assembled in `app.rs`, where every subsystem self-registers its
-//! routes, state handles, and push channels into the registry.
+//! routes, state handles, and push channels into the registry - the
+//! harness among them.
 //!
 //! ## Invariants
 //!
 //! - Tier: shell; may depend on: the vocabulary crates
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
-//!   `workshop-status`), and the feature crates (`workshop-sessions`,
-//!   `workshop-user-state`, `workshop-workspace`). Read `AGENTS.md`
+//!   `workshop-status`), the feature crates (`workshop-user-state`,
+//!   `workshop-workspace`), the harness door `harness-api`, and the
+//!   engine's vocabulary `promptforge-api-types`. Read `AGENTS.md`
 //!   before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
+//! - One task owns each socket: a single `select!` loop reads inbound
+//!   frames and writes every outbound frame itself - no outbox channel,
+//!   no writer task. Agent sessions are the documented carve-out: they
+//!   outlive sockets on purpose, and the harness keeps their table.
+//! - The harness reads the shell's state as data pushed across its door
+//!   (the gateway binding, the chat catalog, the host snapshot); the
+//!   shell never hands it a bus, a registry, or a callback into itself.
+//!   Status-bar reporting for a session is derived on this side from the
+//!   session's events, deltas, and error reports.
+//! - The workspace's granted roots are read through the registry's
+//!   `WorkspaceRoots` slot, never by naming the workspace crate's
+//!   internals: subsystems meet through the registry.
+//! - The shell's WebSocket origin policy is applied to every upgrade;
+//!   the cross-site guard stays the security boundary.
+//! - A dying input wait is an outcome, never silence: the harness's wait
+//!   registry pushes a cancelled frame for every unresolved wait it
+//!   drops, and the agent socket renders it as `input_cancelled`.
 
+mod agents;
 mod app;
 mod assets;
 mod cross_site;
@@ -65,6 +87,7 @@ pub use workshop_gateway::test_gateway;
 #[doc(hidden)]
 pub mod fixtures;
 
+pub use agents::AgentSessions;
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use cross_site::{guard as cross_site_guard, origin_allowed};
 pub use gateway::{
@@ -72,12 +95,14 @@ pub use gateway::{
     SwitchOutcome, SwitchResponse,
 };
 pub use gateway_binding::{GatewayPublicationError, GatewayUpdater};
-pub use observer::WorkshopObserver;
+/// The refusal an answered input wait returns when its token names no
+/// unresolved wait: the harness's own, named here so an embedding host
+/// keeps one import path.
+pub use harness_api::WaitError;
 pub use push::Push;
 pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
 pub use workshop_protocol::{Activity, InputFrame, InputResponse};
-pub use workshop_sessions::{AgentSessions, SessionInputBroker, WaitError, WaitRegistry};
 pub use workshop_support::{
     AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig,
 };

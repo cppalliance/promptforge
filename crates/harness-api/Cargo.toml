@@ -13,8 +13,6 @@ categories = ["development-tools", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-harness-capabilities.workspace = true
-harness-models.workspace = true
 # The awaitable cancel token (`cancel::CancelHandle`) a client selects
 # over, re-exported from the runner.
 harness-runner.workspace = true

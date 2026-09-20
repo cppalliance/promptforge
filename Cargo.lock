@@ -2577,8 +2577,6 @@ dependencies = [
 name = "harness-api"
 version = "0.3.0"
 dependencies = [
- "harness-capabilities",
- "harness-models",
  "harness-runner",
  "harness-sessions",
  "workspace-hack",
@@ -8546,8 +8544,8 @@ dependencies = [
  "build-ui",
  "futures-util",
  "gateway-api-discovery",
+ "harness-api",
  "open",
- "promptforge-api-runtime",
  "promptforge-api-types",
  "reqwest",
  "rust-embed",
@@ -8569,7 +8567,6 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-server",
- "workshop-sessions",
  "workshop-status",
  "workshop-support",
  "workshop-user-state",
@@ -8583,34 +8580,6 @@ version = "0.0.0"
 dependencies = [
  "workshop-server",
  "workshop-server-api",
- "workspace-hack",
-]
-
-[[package]]
-name = "workshop-sessions"
-version = "0.0.0"
-dependencies = [
- "axum",
- "futures-util",
- "harness-api",
- "promptforge-api-runtime",
- "promptforge-api-types",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "shared-vfs",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tokio-tungstenite",
- "tower",
- "tracing",
- "workshop-gateway",
- "workshop-menu",
- "workshop-protocol",
- "workshop-registry",
- "workshop-status",
- "workshop-support",
  "workspace-hack",
 ]
 

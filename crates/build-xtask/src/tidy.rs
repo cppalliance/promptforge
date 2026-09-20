@@ -1,6 +1,7 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
-//! the harness family, and the sans-I/O engine (manifest guard and
-//! retired-symbol scan, run from `engine_guards`).
+//! the harness family, and the sans-I/O engine (manifest guard,
+//! retired-symbol scan, and `test-support` leak guard, run from
+//! `engine_guards`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
@@ -16,12 +17,10 @@ use std::path::{Path, PathBuf};
 const VOCABULARY: &[&str] = &["workshop-protocol", "workshop-registry", "workshop-support"];
 /// Tier 1: domain services. Depend on vocabulary crates only.
 const SERVICES: &[&str] = &["workshop-gateway", "workshop-menu", "workshop-status"];
-/// Tier 2: features. Depend on vocabulary and service crates.
-const FEATURES: &[&str] = &[
-    "workshop-sessions",
-    "workshop-user-state",
-    "workshop-workspace",
-];
+/// Tier 2: features. Depend on vocabulary and service crates. The
+/// sessions subsystem lives inside the shell since Workshop moved onto the
+/// harness, so it has no crate here.
+const FEATURES: &[&str] = &["workshop-user-state", "workshop-workspace"];
 /// Tier 3: the shell. May depend on every lower tier.
 const SHELL: &[&str] = &["workshop-server"];
 
@@ -394,7 +393,7 @@ mod tests {
             Some(VOCABULARY.to_vec())
         );
         assert_eq!(
-            allowed_dependencies("workshop-sessions"),
+            allowed_dependencies("workshop-workspace"),
             Some([VOCABULARY, SERVICES].concat())
         );
         assert_eq!(

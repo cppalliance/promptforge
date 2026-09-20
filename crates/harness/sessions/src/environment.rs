@@ -66,12 +66,15 @@ impl fmt::Debug for GatewayBinding {
 ///
 /// A session freezes the catalog generation it launched under; a later
 /// generation whose `models` differ retires the run and relaunches it
-/// over the retained transcript once the accepted turn settles.
+/// over the retained transcript once the accepted turn settles. An empty
+/// `models` list means no chat-capable model exists at this generation:
+/// a session waits on it rather than launching or relaunching a run.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CatalogBinding {
     /// Monotonic generation the client assigns to each change.
     pub generation: u64,
-    /// The chat-capable entries, as the gateway lists them.
+    /// The chat-capable entries, as the gateway lists them; empty when
+    /// none is available.
     pub models: Vec<serde_json::Value>,
 }
 

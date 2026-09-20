@@ -28,7 +28,9 @@ use axum::routing::{get, post};
 use futures_util::StreamExt as _;
 use serde_json::json;
 
-use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
+use workshop_server::fixtures::{
+    gateway_updater, replace_gateway, spawn_bindings_forwarder, state_with_gateway,
+};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputResponse, ResolvedGateway, ServerConfig,
     router,
@@ -200,6 +202,10 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
     // Discovery is bypassed: a test never consults the real run directory.
     let gateway = ResolvedGateway::from_config(&config.gateway);
     let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
+    // The router is bound directly, without the serving loop that spawns
+    // the registered tasks, so the forwarder that pushes gateway and
+    // catalog replacements into the harness is spawned here.
+    spawn_bindings_forwarder(&state);
     state.catalog().publish(
         models
             .iter()

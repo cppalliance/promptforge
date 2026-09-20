@@ -8,7 +8,7 @@ use tower::ServiceExt as _;
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth};
 use workshop_registry::{Registration, Registry};
 
-use crate::state::routes;
+use crate::agents::state::routes;
 
 const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
 const UPSTREAM_ERROR: &str =

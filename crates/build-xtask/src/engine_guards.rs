@@ -1,5 +1,6 @@
 //! Engine guards, live: the manifest guard and the retired-symbol scan run
-//! over the engine crates as part of `cargo test -p build-xtask` and
+//! over the engine crates, and the `test-support` leak guard runs over the
+//! whole workspace, as part of `cargo test -p build-xtask` and
 //! `cargo xtask tidy`.
 //!
 //! The engine is `promptforge-api-runtime`, `promptforge-api-types`, and
@@ -48,7 +49,7 @@ pub(crate) fn engine_crates(root: &Path) -> Vec<PathBuf> {
 /// Every crate directory under `dir`: a directory holding a `Cargo.toml`
 /// is a crate and is not descended into; any other directory is a
 /// container and the walk descends.
-fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
+pub(crate) fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -87,11 +88,13 @@ pub(crate) fn retired_symbol_violations(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Both engine guards, in one list.
+/// Every engine guard, in one list: the manifest guard, the retired-symbol
+/// scan, and the workspace-wide `test-support` leak guard.
 #[must_use]
 pub(crate) fn engine_guard_violations(root: &Path) -> Vec<String> {
     let mut violations = engine_manifest_violations(root);
     violations.extend(retired_symbol_violations(root));
+    violations.extend(crate::test_support_leak::test_support_leak_violations(root));
     violations
 }
 

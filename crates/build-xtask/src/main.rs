@@ -14,6 +14,7 @@ mod manifest;
 mod new_crate;
 mod product;
 mod retired_symbols;
+mod test_support_leak;
 mod tidy;
 
 use std::path::Path;

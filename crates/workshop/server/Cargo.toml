@@ -16,7 +16,14 @@ path = "src/main.rs"
 anyhow.workspace = true
 axum.workspace = true
 futures-util.workspace = true
+# The harness door: agent sessions run in the harness, which the
+# composition root constructs, registers, and pushes the shell's gateway
+# binding, chat catalog, and host snapshot into as data.
+harness-api.workspace = true
 open.workspace = true
+# The engine's event vocabulary: the agent socket frames transcript
+# entries and the status relay reads the events it derives status from.
+promptforge-api-types.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
@@ -35,7 +42,6 @@ workshop-gateway.workspace = true
 workshop-menu.workspace = true
 workshop-protocol.workspace = true
 workshop-registry.workspace = true
-workshop-sessions.workspace = true
 workshop-status.workspace = true
 workshop-support.workspace = true
 workshop-user-state.workspace = true
@@ -53,7 +59,6 @@ test-fixtures = [
     "dep:tempfile",
     "workshop-gateway/test-fixtures",
     "workshop-menu/test-fixtures",
-    "workshop-sessions/test-fixtures",
     "workshop-support/test-fixtures",
     "workshop-workspace/test-fixtures",
 ]
@@ -64,10 +69,6 @@ workshop-server = { path = ".", features = ["test-fixtures"] }
 # tests can run the real liveness gauntlet against the test binary's own
 # process image.
 gateway-api-discovery = { workspace = true, features = ["test-fixtures"] }
-# The socket integration tests drive agent programs on the runtime engine
-# directly, so the engine crates are test-only dependencies of the shell.
-promptforge-api-runtime.workspace = true
-promptforge-api-types.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true

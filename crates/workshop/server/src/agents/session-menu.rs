@@ -18,8 +18,8 @@ use workshop_menu::{MenuBus, SwitchOutcome};
 use workshop_protocol::{Activity, SwitchProfileFrame};
 use workshop_registry::Push;
 
-use crate::relay::value_from_bytes;
-use crate::state::SessionsState;
+use crate::agents::relay::value_from_bytes;
+use crate::agents::state::SessionsState;
 
 use super::send_error;
 

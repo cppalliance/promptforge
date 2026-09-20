@@ -42,7 +42,7 @@ Every field of `workshop.toml`:
 | `gateway.api_key` | (empty) | Bearer key for the gateway API; supports `${VAR}` interpolation; empty sends no `Authorization` header, which a loopback gateway with the default `trust_loopback = true` accepts (a LAN gateway, or one with `trust_loopback = false`, answers 401) |
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
-| `server.state_dir` | the config file's directory | Directory holding the server's persistent state: agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written here |
+| `server.state_dir` | the config file's directory | Directory holding the server's persistent state: the harness run log every agent session is recorded in lives under `state_dir/harness/`, and the per-profile model memory is written here |
 | `agents.path` | `agents/` beside the config file | Directory whose `.md` files are launchable agent prompts alongside the embedded built-in `chat` agent; a directory `chat.md` shadows the embedded source, and a missing directory offers exactly the built-in |
 
 ## Routes
@@ -132,17 +132,9 @@ The variables:
 | `--scrollbar-thumb` | `rgba(255,255,255,0.16)` | Scrollbar thumb |
 | `--scrollbar-thumb-hover` | `rgba(255,255,255,0.28)` | Scrollbar thumb on hover |
 
-## Run event log
-
-`WorkshopObserver` is the crate's append-only in-memory run event log over the engine's `Event` values: `append` is the write side, `len`/`get` serve indexed reads, and `subscribe()` broadcasts every appended entry live. Nothing persists across a restart until the harness's run log lands.
-
-## Agent input waits
-
-`WaitRegistry` holds an agent session's unresolved user-input waits behind single-use cryptographic tokens, retained across socket loss and resent on reconnect. `SessionInputBroker` is the session's input broker behind the script-side `user_input()` - never advertised to a model - which registers a wait, pushes the durable `input_required` frame itself, and suspends until the session completes the wait with the operator's text byte-exact (the engine records it as a `UserInput` event when the call resumes). A drop guard turns every dying wait into a durable `input_cancelled` frame, so a cancelled turn never leaks a wait or leaves a stale prompt.
-
 ## Agent sessions
 
-`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.md` agent prompts from `agents.path` and always offers the embedded built-in `chat` agent, a Markdown prompt running on the unified `promptforge_api_runtime` runtime (a directory `chat.md` shadows it). Every agent launches as an engine `Run` driven on the tokio test driver (the interim host until the harness lands). Every session carries the Workshop's input broker behind `user_input`, an in-memory `WorkshopObserver` event log, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the session's log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
+Agent sessions run in the PromptForge harness, reached through `harness-api`. The composition root constructs the `Harness` (agents directory and `state_dir/harness/`, where its run log lives) and registers it into the registry like every other subsystem; `AgentSessions` (reached through `AppState::agents`) opens sessions through it behind `GET /agents/ws`. The harness discovers `.md` agent prompts from `agents.path` and always offers the embedded built-in `chat` agent (a directory `chat.md` shadows it). Everything the harness knows about the shell is pushed across its door as data: the gateway endpoint and bearer (at boot and on every replacement), the chat-capable catalog (an empty list means no model to launch under), and the host snapshot serving the `ui()` global's selected model and first granted workspace root, read from the menu and the registry's `WorkspaceRoots` slot. A session's transcript is the harness run log: sockets attach and detach, a reconnect replays the transcript (every durable frame carries its wire index) and re-announces unresolved waits, and the harness's wait registry turns every dying wait into a cancelled frame the socket renders as `input_cancelled`. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel relaunches the program over the retained transcript - a stop reason, never an error - while `AgentSessions::close` ends a session for good. Status-bar reporting stays on this side of the door: a per-session relay derives the Generating and Thinking pulses, the idle on a completed reply (which also resets the reconnect backoff), and the failure status for a failed model turn from the session's events and deltas.
 
 ## Minimum Rust Version
 

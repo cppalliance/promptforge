@@ -20,7 +20,7 @@
 //! refusals when the frame carried one. A frame that is not a
 //! well-formed menu event is answered with an `error` frame and the
 //! session continues. Chat itself lives on the `/agents/ws` socket
-//! ([`crate::agents`]); this endpoint carries no chat frames.
+//! ([`super::socket`]); this endpoint carries no chat frames.
 //!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer
@@ -37,8 +37,6 @@
 //! ([`SessionsState::registry`]), not named directly: an unregistered
 //! slot degrades the session to no status frames rather than failing it.
 
-#[path = "session-log.rs"]
-mod log;
 #[path = "session-menu.rs"]
 mod menu;
 
@@ -52,13 +50,24 @@ use tokio::sync::broadcast;
 
 use workshop_protocol::{ErrorEnvelope, ErrorFrame};
 
-use crate::state::SessionsState;
+use super::state::SessionsState;
 
-use self::log::SessionLog;
 use self::menu::{select_model, start_switch};
 
 /// Session ids for log correlation, handed out in connection order.
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+
+/// Logs the session close when the connection task ends, however it ends,
+/// so the session loop's exit paths carry no cleanup calls.
+struct SessionLog {
+    session: u64,
+}
+
+impl Drop for SessionLog {
+    fn drop(&mut self) {
+        tracing::info!(session = self.session, "chat session closed");
+    }
+}
 
 /// The 403 refusal every WebSocket upgrade answers a foreign `Origin`
 /// with: the same `cross_site` envelope the shell's guard middleware
