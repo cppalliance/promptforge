@@ -174,6 +174,25 @@ pub async fn prepare_run(
             path: prompt_path.to_path_buf(),
             source,
         })?;
+    prepare_source(&source, prompt_path, args, services).await
+}
+
+/// Prepares prompt text already in hand, exactly as [`prepare_run`] does
+/// after its read: for a prompt that has no file of its own (an embedded
+/// built-in) or one the caller read itself. `prompt_path` is the path the
+/// source is attributed to in [`PrepareError::Parse`].
+///
+/// # Errors
+/// Returns [`PrepareError::Parse`] when the source does not parse and
+/// [`PrepareError::Refused`] when the environment cannot satisfy it (in
+/// both cases the row is closed as failed), and [`PrepareError::Log`]
+/// when the log refuses a write. Never [`PrepareError::Read`].
+pub async fn prepare_source(
+    source: &str,
+    prompt_path: &Path,
+    args: &str,
+    services: Services,
+) -> Result<Prepared, PrepareError> {
     let Services {
         registry,
         vfs,
@@ -197,7 +216,7 @@ pub async fn prepare_run(
         .begin_run(RunMeta {
             session_id: session_id.clone(),
             agent,
-            prompt_hash: prompt_hash(&source),
+            prompt_hash: prompt_hash(source),
             seed,
             flags: 0,
             started_at: started_at.unix_millis(),
@@ -206,7 +225,7 @@ pub async fn prepare_run(
 
     // Parse-time events are the run's first records, whether or not the
     // parse succeeds.
-    let (prompt, parse_events) = Prompt::parse(&source, &session_id);
+    let (prompt, parse_events) = Prompt::parse(source, &session_id);
     {
         let mut log = log.lock().await;
         for event in &parse_events {

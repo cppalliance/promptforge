@@ -15,9 +15,9 @@
 //!   an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - [`spawn::spawn_tagged`] and [`spawn::spawn_blocking_tagged`] are the
-//!   only sites in the harness that call `tokio::spawn` and
-//!   `tokio::task::spawn_blocking`; every other harness crate's
+//! - [`spawn::spawn_tagged`], [`spawn::spawn_blocking_tagged`], and
+//!   [`spawn::spawn_session`] are the only sites in the harness that call
+//!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other harness crate's
 //!   `clippy.toml` bans the raw calls, and `cargo test -p build-xtask`
 //!   checks the bans are declared.
 //! - The log is written in loop order: a step's events before the step's

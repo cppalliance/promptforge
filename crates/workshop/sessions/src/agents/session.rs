@@ -10,7 +10,7 @@ use harness_api::bridge::discovery::AgentSource;
 use harness_api::bridge::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use harness_api::bridge::lifecycle::RunLifecycle;
 use harness_api::bridge::transition::RunId;
-use harness_api::cancel::CancelHandle;
+use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::event::Event;
 use promptforge_api_types::wire::StreamDelta;
 use tokio::sync::broadcast;

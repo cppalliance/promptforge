@@ -23,5 +23,10 @@ pub mod cancel;
 mod harness;
 mod session;
 
-pub use harness::{GatewayBinding, Harness, HarnessConfig};
-pub use session::{Delta, DeltaKind, LaunchRequest, Session, SessionEvent, SessionId};
+pub use harness::{
+    CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchError,
+};
+pub use session::{
+    Delta, DeltaKind, LaunchRequest, Session, SessionEvent, SessionId, SessionState, WaitError,
+    WaitFrame,
+};

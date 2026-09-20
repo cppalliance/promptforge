@@ -1,10 +1,13 @@
 //! The harness's one spawn site.
 //!
-//! Every tokio task the harness starts passes through [`spawn_tagged`] or
-//! [`spawn_blocking_tagged`]. Each opens a `tracing` span carrying the
-//! effect the task performs - its [`EffectId`] and [`Provenance`] - so a
-//! run's tasks trace as a group and slice by task, and each is the single
-//! permitted caller of the raw tokio method it wraps.
+//! Every tokio task the harness starts passes through [`spawn_tagged`],
+//! [`spawn_blocking_tagged`], or [`spawn_session`]. The first two open a
+//! `tracing` span carrying the effect the task performs - its
+//! [`EffectId`] and [`Provenance`] - so a run's tasks trace as a group and
+//! slice by task; the third is the one task that performs no effect, a
+//! session's supervisor, and its span carries the session id instead. Each
+//! is a permitted caller of the raw tokio method it wraps, and no other
+//! harness code is.
 
 use promptforge_api_runtime::EffectId;
 use promptforge_api_types::ids::Provenance;
@@ -38,6 +41,27 @@ where
         task = %provenance.task,
         seq = provenance.seq
     );
+    tokio::spawn(fut.instrument(span))
+}
+
+/// Spawn a session's supervisor `fut` inside a span named `session` that
+/// carries the session id under `session`.
+///
+/// A supervisor performs no effect, so it has no [`Tag`]; it is the one
+/// long-lived task the harness starts per session, and the tasks it starts
+/// for the session's effects are tagged through [`spawn_tagged`] inside
+/// its span.
+///
+/// # Panics
+///
+/// Panics when called outside a tokio runtime, as `tokio::spawn` does.
+#[allow(clippy::disallowed_methods)]
+pub fn spawn_session<F>(session: &str, fut: F) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let span = tracing::info_span!("session", session = %session);
     tokio::spawn(fut.instrument(span))
 }
 

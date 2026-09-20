@@ -18,16 +18,9 @@ harness-models.workspace = true
 # The awaitable cancel token (`cancel::CancelHandle`) a client selects
 # over, re-exported from the runner.
 harness-runner.workspace = true
-# The pure session pieces (supervisor reducer, run lifecycle, agent
-# discovery) the interim bridge re-exports for `workshop-sessions`.
+# The harness handle, its bindings, the session handle, and the session
+# vocabulary, all defined there and named through this door.
 harness-sessions.workspace = true
-# The interim bridge registers the first-party capability for
-# `workshop-sessions`; the dependency leaves with the bridge once
-# `harness-sessions` owns registration.
-harness-web.workspace = true
-promptforge-api-types.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 workspace-hack.workspace = true
 
 [lints]

@@ -20,12 +20,11 @@ use harness_api::bridge::{
     CapabilityRegistry, GatewayClient as ModelClient, InputPerformer, RunServices, ToolTable,
     activate,
 };
-use harness_api::cancel::CancelHandle;
 use promptforge_api_runtime::test_support::{Performers, drive_tokio};
 use promptforge_api_runtime::{
     Effect, EffectAnswer, Environment, Prompt, Run, RunContext, RunLimits, RunResult,
 };
-use promptforge_api_types::cancel::CancelHandle as CancelFlag;
+use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::models::ModelDescriptor;
 use promptforge_api_types::timestamp::Timestamp;
 use promptforge_api_types::wire::StreamDelta;
@@ -55,7 +54,8 @@ pub(super) struct RunParts {
     pub(super) model: Option<ModelDescriptor>,
     /// The run's execution identifier: the session id.
     pub(super) execution: String,
-    /// The awaitable cancel token the session armed for this run.
+    /// The engine's cancel flag the session armed for this run: the
+    /// context polls it and the driver awaits it.
     pub(super) cancel: CancelHandle,
 }
 
@@ -84,7 +84,7 @@ pub(super) async fn run_markdown_agent(
         on_delta,
         model,
         execution,
-        cancel: token,
+        cancel,
     } = parts;
     // The parse-time events land in the session's log ahead of the run's,
     // whether or not the parse succeeds.
@@ -97,7 +97,6 @@ pub(super) async fn run_markdown_agent(
         message: format!("the embedded Markdown agent failed to parse: {error}"),
         source: Some(Box::new(error)),
     })?;
-    let (cancel, bridge) = bridge_cancel(token);
     let mut ctx = RunContext::new(execution, seed, started_at)
         .cancel(cancel.clone())
         .ui(ui);
@@ -122,8 +121,6 @@ pub(super) async fn run_markdown_agent(
         let run = Run::new(Arc::new(prompt), "", ctx);
         drive_tokio(run, performers, sink, cancel).await
     };
-    // The run is over, so nothing reads the flag: the bridge ends with it.
-    bridge.abort();
     match outcome {
         RunResult::Ok(_output) => Ok(()),
         RunResult::Cancelled => Err(AgentRunError::Interrupted),
@@ -214,21 +211,6 @@ pub(super) fn now_timestamp() -> Timestamp {
         .ok()
         .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
         .map_or(Timestamp::UNIX_EPOCH, Timestamp::from_unix_millis)
-}
-
-/// Bridges the session's awaitable cancel token to the synchronous flag
-/// the engine polls and the driver awaits: the flag is set the moment the
-/// token fires. The caller aborts the returned bridge task once the run is
-/// over, so a run that finishes uncancelled leaves no task waiting on a
-/// token nobody will fire.
-fn bridge_cancel(token: CancelHandle) -> (CancelFlag, tokio::task::JoinHandle<()>) {
-    let flag = CancelFlag::new();
-    let bridged = flag.clone();
-    let bridge = tokio::spawn(async move {
-        token.cancelled().await;
-        bridged.cancel();
-    });
-    (flag, bridge)
 }
 
 #[cfg(test)]

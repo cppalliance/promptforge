@@ -2581,10 +2581,6 @@ dependencies = [
  "harness-models",
  "harness-runner",
  "harness-sessions",
- "harness-web",
- "promptforge-api-types",
- "serde",
- "serde_json",
  "workspace-hack",
 ]
 
@@ -2661,13 +2657,21 @@ dependencies = [
 name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
+ "harness-capabilities",
+ "harness-log",
+ "harness-models",
  "harness-runner",
+ "harness-web",
  "promptforge-api-runtime",
  "promptforge-api-types",
  "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "shared-vfs",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "workspace-hack",
 ]
 

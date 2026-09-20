@@ -75,7 +75,9 @@ pub enum DriveError {
 /// row with its outcome and returns it.
 ///
 /// The future is boxed internally: the step machinery is large, and the
-/// caller's own future stays small.
+/// caller's own future stays small. It is `Send` when `sink` is, so a host
+/// can hold it in a task of its own; the driver never borrows itself
+/// shared across an await.
 ///
 /// # Errors
 /// Returns [`DriveError::Log`] when the log refuses a write and
@@ -365,7 +367,7 @@ impl<'a> Driver<'a> {
 
     /// Appends one issued effect's record.
     async fn commit_effect(
-        &self,
+        &mut self,
         id: EffectId,
         provenance: &Provenance,
         effect: &Effect,
@@ -382,7 +384,7 @@ impl<'a> Driver<'a> {
 
     /// Appends one answer's record under its effect's provenance.
     async fn commit_answer(
-        &self,
+        &mut self,
         id: EffectId,
         provenance: &Provenance,
         answer: &EffectAnswer,
@@ -397,7 +399,7 @@ impl<'a> Driver<'a> {
         .await
     }
 
-    async fn append(&self, record: Record) -> Result<(), LogError> {
+    async fn append(&mut self, record: Record) -> Result<(), LogError> {
         self.log
             .lock()
             .await
