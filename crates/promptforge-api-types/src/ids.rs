@@ -273,12 +273,15 @@ pub enum AbandonReason {
     /// The owner was aborted from outside: a fatal sibling's fail-fast,
     /// or its own owner ending first.
     OwnerAborted,
+    /// The run itself ended - cancelled by the host or ended by a fatal
+    /// answer - while the task was live; the engine ended it with the run.
+    RunTerminated,
 }
 
 impl AbandonReason {
     /// The phrase the `TaskAbandoned` trace line renders for the reason:
     /// `the section ended`, `the owner failed`, `the tool loop was
-    /// exhausted`, or `the owner was aborted`.
+    /// exhausted`, `the owner was aborted`, or `the run ended`.
     #[must_use]
     pub fn why(self) -> &'static str {
         match self {
@@ -286,6 +289,7 @@ impl AbandonReason {
             AbandonReason::OwnerFailed => "the owner failed",
             AbandonReason::ToolLoopExhausted => "the tool loop was exhausted",
             AbandonReason::OwnerAborted => "the owner was aborted",
+            AbandonReason::RunTerminated => "the run ended",
         }
     }
 }

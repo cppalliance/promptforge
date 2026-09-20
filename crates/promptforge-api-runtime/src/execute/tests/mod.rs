@@ -1516,6 +1516,7 @@ mod models_loop_compactors;
 mod observations;
 mod provenance;
 mod run_inputs;
+mod run_termination;
 mod scheduler;
 mod serial_driver;
 mod task_events;

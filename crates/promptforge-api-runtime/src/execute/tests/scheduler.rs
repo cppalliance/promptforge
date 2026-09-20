@@ -2578,6 +2578,7 @@ const TASK_STARTED: &str = "Task started";
 const TASK_SUCCEEDED: &str = "Task succeeded";
 const TASK_FAILED: &str = "Task failed";
 const TASK_CANCELLED: &str = "Task cancelled";
+const TASK_ABANDONED_BY_RUN_END: &str = "Task abandoned: the run ended";
 
 /// Counts one observation label in the recorder's event stream.
 fn terminal_count(recorder: &Recorder, label: &str) -> usize {
@@ -3381,10 +3382,10 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // Cancellation while suspended in an arm: both arms are parked on slow
     // infers when the cancel lands, so the driver aborts the in-flight I/O
     // tasks and fails the run with Error::Interrupted. The arms are task
-    // chains stranded by the run's end: they started, and no task terminal
-    // fires for them - the run's own interruption is the record. The
-    // 30-second answers and the timeout guard prove the aborted I/O is
-    // never awaited.
+    // chains stranded by the run's end: they started, and the run's end
+    // settles each with one `abandoned` terminal naming the run's end -
+    // not a cancel or a failure of the arm's own. The 30-second answers
+    // and the timeout guard prove the aborted I/O is never awaited.
     let gateway = ScriptedGateway::start(vec![resp_delayed_text(
         "too late",
         std::time::Duration::from_secs(30),
@@ -3437,13 +3438,19 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     assert_eq!(
         terminal_count(&recorder, TASK_CANCELLED) + terminal_count(&recorder, TASK_FAILED),
         0,
-        "a stranded arm reports no terminal of its own: {:?}",
+        "a stranded arm reports no cancel or failure of its own: {:?}",
         recorder.events()
     );
     assert_eq!(
         terminal_count(&recorder, TASK_SUCCEEDED),
         0,
         "no arm succeeded: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, TASK_ABANDONED_BY_RUN_END),
+        2,
+        "the run's end settles each stranded arm once: {:?}",
         recorder.events()
     );
 }

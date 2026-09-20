@@ -14,6 +14,7 @@ use crate::execute::run::{EffectAnswer, EffectId, Step};
 use crate::execute::support::GENERIC_COMPLETION;
 use crate::{Error, Result};
 use promptforge_api_types::event::lifecycle;
+use promptforge_api_types::ids::AbandonReason;
 
 use super::{Phase, Scheduler};
 
@@ -137,16 +138,23 @@ impl Scheduler {
         }
     }
 
-    /// Decides the run: tears every chain down (the suspended chains'
-    /// frames drop unarmed - no `SECTION_FINISHED` - and every effect
-    /// still out with the host becomes an orphan the host still answers),
-    /// reports the run's end boundary, and holds `result` until the
-    /// orphans are answered. A second decision keeps the first: the
-    /// outcome that ended the run is the record.
+    /// Decides the run: settles every live task exactly once (each
+    /// reports `TaskAbandoned` - with `RunTerminated` for a task the run's
+    /// end stranded directly, `OwnerAborted` for one nested under it and
+    /// ended through `abort_subtree` - so a task stranded by a host cancel
+    /// or a fatal answer keeps the one-terminal contract; a run that ended
+    /// well has none left, its root chain having settled its own), tears
+    /// every chain down (the suspended chains' frames
+    /// drop unarmed - no `SECTION_FINISHED` - and every effect still out
+    /// with the host becomes an orphan the host still answers), reports
+    /// the run's end boundary after every task terminal, and holds
+    /// `result` until the orphans are answered. A second decision keeps
+    /// the first: the outcome that ended the run is the record.
     pub(super) fn end(&mut self, result: Result<String>) {
         if matches!(self.phase, Phase::Ending(_) | Phase::Done) {
             return;
         }
+        self.settle_all_tasks(AbandonReason::RunTerminated);
         self.teardown();
         self.ctx.emitter().report(
             self.ctx.prompt().title(),
@@ -162,8 +170,8 @@ impl Scheduler {
     /// Drops every chain's live state in the teardown order (the suspended
     /// coroutine, then the frame unarmed, then the access capability) and
     /// orphans every pending effect. The task slots keep their terminal
-    /// or last live state for inspection; no task event fires - the run's
-    /// own end is the record.
+    /// state for inspection; every slot is terminal by now, `end` having
+    /// settled the live ones, so nothing here reports.
     fn teardown(&mut self) {
         self.ready.clear();
         self.stack.clear();

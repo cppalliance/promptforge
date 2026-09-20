@@ -48,7 +48,7 @@ pub(super) fn task_events(records: &[(String, Observation)]) -> Vec<(&'static st
 /// The terminal labels recorded per started task, in order. Every started
 /// task appears (with an empty list when it has no terminal); a terminal
 /// for a task that never started, or a second start, fails the test.
-fn terminals_per_started_task(
+pub(super) fn terminals_per_started_task(
     records: &[(String, Observation)],
 ) -> BTreeMap<TaskId, Vec<&'static str>> {
     let events = task_events(records);

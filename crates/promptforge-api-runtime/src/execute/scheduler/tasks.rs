@@ -413,6 +413,32 @@ impl Scheduler {
         leaked
     }
 
+    /// Ends every live task in the arena because the run itself is ending:
+    /// the whole-run counterpart of the per-owner chain-end rule, so a
+    /// task stranded by a host cancel or a fatal answer still receives its
+    /// one terminal before the run's end boundary. Each live slot's owner
+    /// is passed to [`abandon_owned_tasks`](Self::abandon_owned_tasks)
+    /// with `reason`, in ascending arena order. No slot reports twice:
+    /// abandoning a task aborts its backing chain, and `abort_subtree`
+    /// abandons that chain's own tasks (as `OwnerAborted`) on the way, so
+    /// a nested slot is already terminal when its owner's turn comes and
+    /// `is_live()` skips it. The leaked-author list is discarded: no one
+    /// receives an outcome for a run that is ending. Detected by
+    /// `cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_ends`.
+    pub(super) fn settle_all_tasks(&mut self, reason: AbandonReason) {
+        let mut owners: Vec<ChainIndex> = self
+            .tasks
+            .values()
+            .filter(|slot| slot.state.is_live())
+            .map(|slot| slot.owner)
+            .collect();
+        owners.sort_unstable_by_key(|owner| owner.index());
+        owners.dedup();
+        for owner in owners {
+            self.abandon_owned_tasks(owner, reason);
+        }
+    }
+
     /// Moves every task `from` owns to `to`, with the notices not yet
     /// delivered: the H1 hand-off, where the pass and the walk are one
     /// chain (`0`) on either side, so a task the pass spawned is waited
