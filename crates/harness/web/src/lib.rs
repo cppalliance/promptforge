@@ -12,6 +12,24 @@
 //! the vendor credential never leaves the server) and an optional fetch
 //! policy; the prompt never sees either. Activation clones the pre-built
 //! tools into the run's [`Contribution`].
+//!
+//! ## Invariants
+//!
+//! - Family: harness, private to `crates/harness/`; may depend on:
+//!   `promptforge-api-runtime`, `promptforge-api-types`,
+//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
+//!   container siblings.
+//!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
+//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
+//!   an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
+//! - Both tools are built once at construction from the gateway root,
+//!   bearer token, and fetch policy; a prompt never sees any of the
+//!   three, and activation only clones the pre-built tools.
+//! - Nothing in this crate spawns a tokio task directly; the harness
+//!   spawns only through the instrumented wrapper in `harness-runner`
+//!   (enforced by this crate's `clippy.toml`).
 
 use std::sync::Arc;
 

@@ -449,7 +449,7 @@ Each step runs only the focused tests listed in it. The full gate set runs once,
 
 <step-6>
 
-### Step 6: Mark the harness web crates and split webfetch under the ceiling
+### Step 6: Mark the harness web crates and split webfetch under the ceiling [completed]
 
 - Component: enforcement
 - Piece: crates made compliant, before the rule
