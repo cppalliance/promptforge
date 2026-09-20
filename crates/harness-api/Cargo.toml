@@ -13,8 +13,13 @@ categories = ["development-tools", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+harness-capabilities.workspace = true
 harness-models.workspace = true
-promptforge-api-runtime.workspace = true
+# The interim bridge registers the first-party capability for
+# `workshop-sessions`; the dependency leaves with the bridge once
+# `harness-sessions` owns registration.
+harness-web.workspace = true
+promptforge-api-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 workspace-hack.workspace = true

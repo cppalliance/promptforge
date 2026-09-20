@@ -126,6 +126,16 @@ pub struct CapabilityConflict {
     pub second: CapabilityId,
 }
 
+impl CapabilityConflict {
+    /// Records one conflicting pair in declaration order: `first` was
+    /// declared before `second`. The host's activation reports these; the
+    /// engine's prepare never does.
+    #[must_use]
+    pub fn new(first: CapabilityId, second: CapabilityId) -> CapabilityConflict {
+        CapabilityConflict { first, second }
+    }
+}
+
 /// One failed model requirement: the role, which check failed, and what
 /// the prompt required versus what the filled model provides.
 #[derive(Debug, Clone, PartialEq, Eq)]

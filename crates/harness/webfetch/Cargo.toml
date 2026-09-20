@@ -1,5 +1,5 @@
 [package]
-name = "promptforge-webfetch"
+name = "harness-webfetch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ categories = ["web-programming::http-client"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+harness-capabilities.workspace = true
 promptforge-api-types.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
@@ -29,6 +30,9 @@ tokio = { workspace = true }
 workspace-hack.workspace = true
 
 [dev-dependencies]
+# The tests spawn their mock servers through the harness's instrumented
+# spawn wrapper, never `tokio::spawn` (see clippy.toml).
+harness-runner.workspace = true
 tokio.workspace = true
 axum.workspace = true
 flate2.workspace = true

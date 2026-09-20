@@ -4,9 +4,10 @@
 //! advertises no `user_input` tool to the model.
 
 use super::*;
-use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputBroker, InputError, InputOutcome};
+use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
 use crate::lua::ToolSet;
 use crate::model::{ModelBinding, ModelId};
+use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 
@@ -59,7 +60,7 @@ fn input_prompt(lua: &str) -> String {
 struct TextBroker(&'static str);
 
 #[async_trait::async_trait]
-impl InputBroker for TextBroker {
+impl TestBroker for TextBroker {
     async fn user_input(
         &self,
         _execution: &str,
@@ -73,7 +74,7 @@ impl InputBroker for TextBroker {
 struct UnavailableBroker;
 
 #[async_trait::async_trait]
-impl InputBroker for UnavailableBroker {
+impl TestBroker for UnavailableBroker {
     async fn user_input(
         &self,
         _execution: &str,
@@ -87,7 +88,7 @@ impl InputBroker for UnavailableBroker {
 struct FailingBroker;
 
 #[async_trait::async_trait]
-impl InputBroker for FailingBroker {
+impl TestBroker for FailingBroker {
     async fn user_input(
         &self,
         _execution: &str,
@@ -101,7 +102,7 @@ impl InputBroker for FailingBroker {
 struct PendingBroker;
 
 #[async_trait::async_trait]
-impl InputBroker for PendingBroker {
+impl TestBroker for PendingBroker {
     async fn user_input(
         &self,
         _execution: &str,

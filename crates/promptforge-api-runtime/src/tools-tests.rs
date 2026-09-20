@@ -1,60 +1,30 @@
 //! Regression coverage for the `promptforge_api_runtime::tools` compatibility
 //! re-exports: the contract vocabulary lives in `promptforge-api-types`'s
-//! `tools` module, and these
-//! tests pin that the re-exported path is the same trait and types, not a
-//! lookalike.
+//! `tools` module, and these tests pin that the re-exported path is the
+//! same types, not a lookalike.
 
-use std::sync::Arc;
+use serde_json::json;
 
-use serde_json::{Value, json};
+use promptforge_api_types::tools::ToolDescriptor;
 
-// The fixture implements the trait through the defining crate's path on
-// purpose: if the re-export ever stopped being the same trait, the `Arc<dyn
-// crate::tools::Tool>` coercions below would fail to compile.
-use promptforge_api_types::tools::{
-    Tool as ContractTool, ToolError, ToolId, ToolOutput, describe_all,
-};
+use crate::tools::ToolCatalog;
 
-use crate::tools::{Tool, ToolCatalog};
-
-struct ReexportFixture;
-
-#[async_trait::async_trait]
-impl ContractTool for ReexportFixture {
-    fn id(&self) -> ToolId {
-        ToolId::parse("fixtures/tools/reexport").expect("fixture id is valid")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn wire_name(&self) -> &str {
-        "reexport_wire"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Exercise the re-exported contract path."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({"type": "object"})
-    }
-
-    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
-        Ok(ToolOutput::trusted("reexport-ok"))
-    }
+/// The fixture descriptor, built through the defining crate's path on
+/// purpose: if the re-export ever stopped being the same type, the catalog
+/// construction below would fail to compile.
+fn reexport_descriptor() -> ToolDescriptor {
+    ToolDescriptor::new(
+        promptforge_api_types::tools::ToolId::parse("fixtures/tools/reexport")
+            .expect("fixture id is valid"),
+        "reexport_wire",
+        "Exercise the re-exported contract path.",
+        json!({"type": "object"}),
+    )
 }
 
 #[test]
 fn reexported_identity_looks_up_in_reexported_catalog() {
-    let tool: Arc<dyn Tool> = Arc::new(ReexportFixture);
-    let catalog =
-        ToolCatalog::new(&describe_all(std::slice::from_ref(&tool))).expect("unique catalog");
+    let catalog = ToolCatalog::new(&[reexport_descriptor()]).expect("unique catalog");
 
     let id = crate::tools::ToolId::parse("fixtures/tools/reexport").expect("valid id");
     let found = catalog
@@ -84,35 +54,16 @@ fn reexported_types_are_the_contract_types() {
     let id = crate::tools::ToolId::parse("fixtures/tools/reexport").expect("valid id");
     assert_eq!(takes_contract_id(&id), "reexport");
 
-    let tool: Arc<dyn Tool> = Arc::new(ReexportFixture);
-    let catalog =
-        ToolCatalog::new(&describe_all(std::slice::from_ref(&tool))).expect("unique catalog");
+    let catalog = ToolCatalog::new(&[reexport_descriptor()]).expect("unique catalog");
     assert_eq!(takes_contract_catalog(&catalog), 1);
 }
 
-#[tokio::test]
-async fn dynamic_dispatch_works_through_the_reexported_path() {
-    let tool: Arc<dyn Tool> = Arc::new(ReexportFixture);
-    let output = tool
-        .call(json!({}))
-        .await
-        .expect("the fixture call succeeds");
+#[test]
+fn reexported_output_carries_the_contract_trust() {
+    let output = crate::tools::ToolOutput::trusted("reexport-ok");
     assert_eq!(output.text(), "reexport-ok");
     assert_eq!(output.trust(), crate::tools::OutputTrust::Trusted);
-}
-
-#[test]
-fn reexported_web_search_is_the_provider_type() {
-    // A function written against the provider crate's type accepts a value
-    // named through the re-exported path only when both names denote the same
-    // type: if the re-export ever became a lookalike, this would not compile.
-    fn takes_provider(
-        tool: &promptforge_web_search::WebSearch,
-    ) -> &promptforge_web_search::WebSearch {
-        tool
-    }
-
-    let tool =
-        crate::tools::WebSearch::new("http://localhost", "tok").expect("valid configuration");
-    let _ = takes_provider(&tool);
+    let error = crate::tools::ToolError::message("refused")
+        .with_kind(crate::tools::ToolErrorKind::Cancelled);
+    assert!(error.is_cancelled());
 }

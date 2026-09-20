@@ -2,7 +2,8 @@ use super::*;
 
 use std::sync::Arc;
 
-use promptforge_api_runtime::input::{InputBroker, InputOutcome};
+use harness_api::bridge::InputBroker;
+use promptforge_api_runtime::input::InputOutcome;
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.

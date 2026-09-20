@@ -10,9 +10,10 @@ use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::execute::protocol::StoreOp;
 use crate::execute::run::EffectRecord;
-use crate::input::{InputBroker, InputError, InputOutcome};
+use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
 use crate::model::StreamDelta;
+use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// Serializes a record and reads it back: the round trip a run log and a
@@ -56,7 +57,7 @@ fn effect_context(
 struct TextBroker(&'static str);
 
 #[async_trait::async_trait]
-impl InputBroker for TextBroker {
+impl TestBroker for TextBroker {
     async fn user_input(
         &self,
         _execution: &str,

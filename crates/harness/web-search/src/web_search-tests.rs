@@ -2,7 +2,9 @@ use super::{
     MAX_COUNT, MAX_DOMAINS, MAX_ERROR_BODY, MAX_QUERY_LEN, MAX_RESPONSE_BODY, MAX_STRING_LEN,
     WebSearch,
 };
-use promptforge_api_types::tools::{OutputTrust, Tool, ToolErrorKind, ToolId};
+use harness_capabilities::Tool;
+use harness_runner::spawn::spawn_tagged;
+use promptforge_api_types::tools::{OutputTrust, ToolErrorKind, ToolId};
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -25,7 +27,7 @@ impl MockServer {
     async fn spawn(router: Router) -> MockServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = spawn_tagged("mock-search-gateway", async move {
             let _ = axum::serve(listener, router).await;
         });
         MockServer { addr, handle }
@@ -498,7 +500,7 @@ async fn oversized_error_body_is_bounded_and_sanitized() {
 async fn error_body_read_failure_is_preserved_as_source() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move {
+    let handle = spawn_tagged("mock-truncating-gateway", async move {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
         if let Ok((mut socket, _)) = listener.accept().await {
             let mut buf = [0u8; 1024];

@@ -170,7 +170,7 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ## Called\n\n\
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
-    let tools: [Arc<dyn Tool>; 1] = [echo];
+    let tools: [Arc<dyn TestTool>; 1] = [echo];
     // The host pattern: the fixture capability is activated into the
     // catalog and the host's table, and the run's tool slot fills by id.
     let out = super::run(

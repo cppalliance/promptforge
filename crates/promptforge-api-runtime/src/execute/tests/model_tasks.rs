@@ -13,15 +13,16 @@ use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::scheduler::TaskState;
-use crate::input::{InputBroker, InputError, InputOutcome};
+use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
+use crate::test_support::TestBroker;
 
 /// A broker that never answers, so a child parked on `user_input()` stays
 /// live until its owner ends or cancels it.
 pub(super) struct NeverBroker;
 
 #[async_trait::async_trait]
-impl InputBroker for NeverBroker {
+impl TestBroker for NeverBroker {
     async fn user_input(
         &self,
         _execution: &str,
@@ -56,7 +57,7 @@ pub(super) fn model_task_context(prompt: &Prompt, recorder: &Arc<TaskRecorder>) 
 pub(super) fn model_task_context_with(
     prompt: &Prompt,
     observer: Arc<dyn Observer>,
-    broker: Arc<dyn InputBroker>,
+    broker: Arc<dyn TestBroker>,
 ) -> RunState {
     let config = test_context(EXECUTION)
         .observer(observer)

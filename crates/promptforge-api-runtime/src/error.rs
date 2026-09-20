@@ -374,7 +374,7 @@ pub(crate) enum Error {
         notice: String,
     },
 
-    /// A dispatched [`promptforge_api_types::tools::Tool`] returned a model-safe failure.
+    /// A dispatched tool returned a model-safe failure.
     ///
     /// The tool's own [`promptforge_api_types::tools::ToolError`] is preserved as the
     /// `#[source]` cause, so the failure chain (and any transport/parse error the

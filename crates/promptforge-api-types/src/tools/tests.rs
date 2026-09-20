@@ -1,86 +1,35 @@
-use std::sync::Arc;
+use serde_json::json;
 
-use serde_json::{Value, json};
-
-use super::{
-    Tool, ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolError, ToolId, ToolOutput,
-    describe_all,
-};
+use super::{ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolId};
 use crate::capabilities::CapabilityId;
 
 fn inspect_id() -> ToolId {
     ToolId::parse("fixtures/tools/inspect").expect("fixture id is valid")
 }
 
-struct FixtureTool;
-
-#[async_trait::async_trait]
-impl Tool for FixtureTool {
-    fn id(&self) -> ToolId {
-        inspect_id()
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn wire_name(&self) -> &str {
-        "inspect_wire"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "Inspect a fixture."
-    }
-
-    fn parameters_schema(&self) -> Value {
+/// The fixture descriptor: the `inspect` tool as data.
+fn inspect_descriptor() -> ToolDescriptor {
+    ToolDescriptor::new(
+        inspect_id(),
+        "inspect_wire",
+        "Inspect a fixture.",
         json!({
             "type": "object",
             "properties": {"path": {"type": "string"}},
             "required": ["path"]
-        })
-    }
-
-    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
-        Ok(ToolOutput::trusted(String::new()))
-    }
+        }),
+    )
 }
 
-struct CatalogFixtureTool {
-    id_name: &'static str,
-    wire_name: &'static str,
-}
-
-#[async_trait::async_trait]
-impl Tool for CatalogFixtureTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse(&format!("fixtures/tools/{}", self.id_name)).expect("fixture id is valid")
-    }
-
-    fn wire_name(&self) -> &str {
-        self.wire_name
-    }
-
-    fn description(&self) -> &str {
-        self.wire_name
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({"type": "object"})
-    }
-
-    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
-        Ok(ToolOutput::trusted(String::new()))
-    }
-}
-
-#[test]
-fn trait_is_dyn_compatible() {
-    let tools: Vec<Box<dyn Tool>> = Vec::new();
-    assert!(tools.is_empty());
+/// A catalog fixture descriptor under `fixtures/tools/<id_name>` advertised
+/// as `wire_name`.
+fn catalog_descriptor(id_name: &str, wire_name: &str) -> ToolDescriptor {
+    ToolDescriptor::new(
+        ToolId::parse(&format!("fixtures/tools/{id_name}")).expect("fixture id is valid"),
+        wire_name,
+        wire_name,
+        json!({"type": "object"}),
+    )
 }
 
 #[test]
@@ -93,9 +42,9 @@ fn tool_output_carries_mandatory_trust() {
 
 #[test]
 fn tool_catalog_is_send_and_sync() {
-    // The public dyn-bearing catalog must stay `Send + Sync` so downstream
-    // callers can share it across tasks; a representation change that dropped
-    // either auto trait would fail to compile here (tools.rs F6).
+    // The public catalog must stay `Send + Sync` so downstream callers can
+    // share it across tasks; a representation change that dropped either
+    // auto trait would fail to compile here (tools.rs F6).
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<ToolCatalog>();
 }
@@ -126,44 +75,19 @@ fn tool_error_classifies_and_hides_source() {
 }
 
 #[test]
-fn descriptor_surface_preserves_identity_description_and_schema() {
-    let tool = FixtureTool;
-
-    assert_eq!(tool.id(), inspect_id());
-    assert_eq!(tool.wire_name(), "inspect_wire");
-    assert_eq!(tool.description(), "Inspect a fixture.");
-    assert_eq!(
-        tool.parameters_schema(),
-        json!({
-            "type": "object",
-            "properties": {"path": {"type": "string"}},
-            "required": ["path"]
-        })
-    );
-}
-
-#[test]
-fn structured_output_defaults_to_plain_text() {
-    // Every existing implementation predates the method, so the default
-    // must be plain text; a structured tool opts in explicitly.
-    let tool = FixtureTool;
-    assert!(
-        !tool.structured_output(),
-        "a tool that does not declare structured output stays plain text"
-    );
-}
-
-#[test]
-fn a_descriptor_carries_the_tools_surface_and_never_the_implementation() {
+fn a_descriptor_carries_the_tools_surface_and_round_trips_through_serde() {
     // The descriptor is the tool as data: identity, wire name, description,
     // schema, and the output kind, so a catalog built from descriptors holds
     // no implementation and round-trips through serde.
-    let descriptor = ToolDescriptor::describe(&FixtureTool);
+    let descriptor = inspect_descriptor();
     assert_eq!(descriptor.id, inspect_id());
     assert_eq!(descriptor.wire_name, "inspect_wire");
     assert_eq!(descriptor.description, "Inspect a fixture.");
     assert_eq!(descriptor.parameters_schema["required"], json!(["path"]));
-    assert!(!descriptor.structured_output);
+    assert!(
+        !descriptor.structured_output,
+        "a descriptor that does not declare structured output stays plain text"
+    );
     assert!(descriptor.conflicts.is_empty());
     let wire = serde_json::to_string(&descriptor).expect("the descriptor serializes");
     let back: ToolDescriptor = serde_json::from_str(&wire).expect("the descriptor deserializes");
@@ -172,9 +96,7 @@ fn a_descriptor_carries_the_tools_surface_and_never_the_implementation() {
 
 #[test]
 fn catalog_lookup_uses_stable_identity_not_wire_name() {
-    let tool: Arc<dyn Tool> = Arc::new(FixtureTool);
-    let catalog =
-        ToolCatalog::new(&describe_all(std::slice::from_ref(&tool))).expect("unique catalog");
+    let catalog = ToolCatalog::new(&[inspect_descriptor()]).expect("unique catalog");
 
     let found = catalog
         .get(&inspect_id())
@@ -190,18 +112,11 @@ fn catalog_lookup_uses_stable_identity_not_wire_name() {
 
 #[test]
 fn catalog_preserves_order_and_first_match_lookup() {
-    let tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(CatalogFixtureTool {
-            id_name: "inspect",
-            wire_name: "first_inspect",
-        }),
-        Arc::new(CatalogFixtureTool {
-            id_name: "summarize",
-            wire_name: "summarize",
-        }),
-    ];
-    let catalog =
-        ToolCatalog::new(&describe_all(&tools)).expect("distinct identities build a catalog");
+    let catalog = ToolCatalog::new(&[
+        catalog_descriptor("inspect", "first_inspect"),
+        catalog_descriptor("summarize", "summarize"),
+    ])
+    .expect("distinct identities build a catalog");
 
     assert_eq!(
         catalog
@@ -223,18 +138,11 @@ fn catalog_preserves_order_and_first_match_lookup() {
 
 #[test]
 fn catalog_rejects_duplicate_tool_ids() {
-    let tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(CatalogFixtureTool {
-            id_name: "inspect",
-            wire_name: "first_inspect",
-        }),
-        Arc::new(CatalogFixtureTool {
-            id_name: "inspect",
-            wire_name: "second_inspect",
-        }),
-    ];
-    let error = ToolCatalog::new(&describe_all(&tools))
-        .expect_err("a repeated tool identity must be rejected at catalog construction");
+    let error = ToolCatalog::new(&[
+        catalog_descriptor("inspect", "first_inspect"),
+        catalog_descriptor("inspect", "second_inspect"),
+    ])
+    .expect_err("a repeated tool identity must be rejected at catalog construction");
     assert_eq!(error.kind(), ToolCatalogErrorKind::DuplicateId);
     assert_eq!(
         error.duplicate_id(),
@@ -371,37 +279,13 @@ fn deserializing_an_invalid_tool_id_is_a_data_error() {
 
 #[test]
 fn catalog_rejects_illegal_wire_name() {
-    struct BadWire;
-
-    #[async_trait::async_trait]
-    impl Tool for BadWire {
-        fn id(&self) -> ToolId {
-            ToolId::parse("fixtures/tools/bad_wire").expect("valid id")
-        }
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn wire_name(&self) -> &str {
-            "bad/name"
-        }
-        #[expect(
-            clippy::unnecessary_literal_bound,
-            reason = "the Tool trait fixes this return type to &str"
-        )]
-        fn description(&self) -> &str {
-            "bad"
-        }
-        fn parameters_schema(&self) -> Value {
-            json!({"type": "object"})
-        }
-        async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
-            Ok(ToolOutput::trusted(String::new()))
-        }
-    }
-
-    let bad: Arc<dyn Tool> = Arc::new(BadWire);
-    let error = ToolCatalog::new(&describe_all(std::slice::from_ref(&bad)))
+    let bad = ToolDescriptor::new(
+        ToolId::parse("fixtures/tools/bad_wire").expect("valid id"),
+        "bad/name",
+        "bad",
+        json!({"type": "object"}),
+    );
+    let error = ToolCatalog::new(&[bad])
         .expect_err("an illegal wire name must be rejected at catalog construction");
     assert_eq!(error.kind(), ToolCatalogErrorKind::InvalidWireName);
     assert!(error.duplicate_id().is_none());

@@ -7,10 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use promptforge_api_runtime::execute::{Environment, RunContext, RunError, RunResult};
 use promptforge_api_runtime::parser::Prompt;
-use promptforge_api_runtime::test_support::{RunHost, run_host};
+use promptforge_api_runtime::test_support::{RunHost, TestTool, run_host};
 use promptforge_api_types::observe::{Observation, Observer};
 use promptforge_api_types::timestamp::Timestamp;
-use promptforge_api_types::tools::Tool;
 use promptforge_store::{StoreError, StoreExt};
 use shared_vfs::{Origin, VfsRef};
 
@@ -65,7 +64,7 @@ impl RunOptions {
 /// slot.
 pub(super) fn prepare_run(
     prompt: &Prompt,
-    tools: &[Arc<dyn Tool>],
+    tools: &[Arc<dyn TestTool>],
     opts: RunOptions,
 ) -> (RunContext, RunHost, VfsRef) {
     let _ = tools;
@@ -98,7 +97,7 @@ pub(super) async fn drive(
 pub(super) async fn run(
     prompt: &Prompt,
     args: &str,
-    tools: &[Arc<dyn Tool>],
+    tools: &[Arc<dyn TestTool>],
     opts: RunOptions,
 ) -> Result<String, RunError> {
     let (ctx, host, _vfs) = prepare_run(prompt, tools, opts);

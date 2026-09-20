@@ -13,7 +13,6 @@ categories = ["rust-patterns"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-async-trait.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true

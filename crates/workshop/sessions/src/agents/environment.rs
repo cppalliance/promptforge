@@ -3,9 +3,9 @@
 //! declarations against, and the launch-time resolution of the dropdown's
 //! current model into the per-run context.
 
-use std::sync::Arc;
-
-use harness_api::bridge::{CapabilityRegistry, CompletionError, Web, fetch_model_catalog};
+use harness_api::bridge::{
+    CapabilityRegistry, CompletionError, fetch_model_catalog, first_party_registry,
+};
 use promptforge_api_types::models::{ModelDescriptor, ModelId};
 
 use super::SessionHost;
@@ -23,20 +23,13 @@ use super::SessionHost;
 #[must_use]
 pub fn session_registry(base_url: &str, api_key: &str) -> Option<CapabilityRegistry> {
     let root = format!("{}/v1", base_url.trim_end_matches('/'));
-    let web = match Web::new(&root, api_key) {
-        Ok(web) => web,
+    match first_party_registry(&root, api_key) {
+        Ok(registry) => Some(registry),
         Err(error) => {
             tracing::warn!(%error, "agent sessions degraded: the gateway cannot build promptforge/web");
-            return None;
+            None
         }
-    };
-    let mut registry = CapabilityRegistry::new();
-    if registry.register(Arc::new(web)).is_err() {
-        // A single registration cannot collide; the registry's error is
-        // defensive on this path.
-        return None;
     }
-    Some(registry)
 }
 
 /// Why launch-time model resolution cannot bind a descriptor. Each cause

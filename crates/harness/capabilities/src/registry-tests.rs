@@ -3,11 +3,10 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::{
-    Capability, CapabilityError, CapabilityId, Contribution, RunServices,
-};
+use promptforge_api_types::capabilities::CapabilityId;
 
 use super::{CapabilityRegistry, RegistryErrorKind};
+use crate::{Capability, CapabilityError, Contribution, RunServices};
 
 /// A minimal capability carrying a fixed id and description.
 struct Stub {

@@ -15,9 +15,9 @@ use super::requirements::Requirements;
 ///
 /// Safe to share across concurrent runs (`Sync`) and holds nothing live:
 /// everything that can change per run rides the [`RunContext`], and the
-/// tool implementations stay with the host (see
-/// [`activation`](super::activation)). Model-free: the gateway's model
-/// list is a host-UI concern and never crosses this interface.
+/// tool implementations stay with the host (the harness's activation, in
+/// `harness-capabilities`). Model-free: the gateway's model list is a
+/// host-UI concern and never crosses this interface.
 ///
 /// [`prepare`](Environment::prepare) builds the per-run router from
 /// `base_vfs`, fills the prompt's tool slots by identity against the
@@ -72,9 +72,9 @@ impl Environment {
     /// Sets the catalog of tools a run may bind: the descriptors the host
     /// assembled from its activated capabilities.
     /// [`prepare`](Environment::prepare) fills the prompt's exact slots
-    /// against it by identity. A host that activates a registry
-    /// ([`activate`](super::activate)) installs the activated catalog
-    /// here before preparing.
+    /// against it by identity. A host that activates a registry (the
+    /// harness's `activate`) installs the activated catalog here before
+    /// preparing.
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> Environment {
         self.tools = tools;
@@ -120,9 +120,8 @@ impl Environment {
     /// warned and left unfilled (advertising an unfilled alias fails at
     /// run time). Every fill is journaled into the context's tool
     /// bindings. Capability resolution, co-activation conflicts, and
-    /// activation itself happen before prepare
-    /// ([`activation::activate`](super::activation::activate)) in the
-    /// host, which merges that report into this one.
+    /// activation itself happen before prepare in the host (the harness's
+    /// `activate`), which merges that report into this one.
     ///
     /// Model satisfaction is a fill function over the declared roles, and
     /// v1's fill is deliberately trivial: every role binds to the

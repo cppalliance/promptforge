@@ -26,8 +26,9 @@ use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{LuaProgram, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelId, ModelSet};
 use crate::observe::{NullObserver, Observer};
-use crate::tools::{Tool, ToolError, ToolId, ToolOutput};
+use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
+use promptforge_api_types::tools::ToolDescriptor;
 use promptforge_model_client::model::ModelInvocation;
 
 fn test_models() -> ModelSet {
@@ -47,49 +48,22 @@ fn test_models() -> ModelSet {
     }
 }
 
-/// A minimal live tool behind a bound alias, for handle-form dispatch
-/// tests; dispatch never reaches its `call` through the yield boundary.
-struct StubTool;
-
-#[async_trait::async_trait]
-impl Tool for StubTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn wire_name(&self) -> &str {
-        "echo"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "echo tool"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        json!({ "type": "object" })
-    }
-
-    async fn call(&self, _args: serde_json::Value) -> std::result::Result<ToolOutput, ToolError> {
-        Ok(ToolOutput::trusted("echoed"))
-    }
+/// A minimal tool descriptor behind a bound alias, for handle-form
+/// dispatch tests; dispatch never reaches an implementation through the
+/// yield boundary, so the tool is data alone.
+fn stub_tool() -> ToolDescriptor {
+    ToolDescriptor::new(
+        ToolId::parse("tests/tools/echo").expect("valid id"),
+        "echo",
+        "echo tool",
+        json!({ "type": "object" }),
+    )
 }
 
 /// One frozen tool set with the `echo` alias bound to the stub tool.
 fn test_tools() -> ToolSet {
     ToolSet::for_test(
-        vec![ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            &promptforge_api_types::tools::ToolDescriptor::describe(&StubTool),
-        )],
+        vec![ToolBinding::for_test("echo", "echo tool", &stub_tool())],
         Vec::new(),
     )
 }

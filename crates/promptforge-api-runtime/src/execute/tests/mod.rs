@@ -17,7 +17,6 @@ use super::context::RunState;
 use super::scope::prepare_scoped_tools;
 use super::support::advance_turn;
 use super::*;
-use crate::capabilities::CapabilityRegistry;
 use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
@@ -25,15 +24,12 @@ use crate::observe::{NullObserver, Observation, Observer, detail};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
 use crate::store::{Access, StoreError, StoreExt, VfsRef};
-use crate::test_support::RunHost;
 use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::tokio_driver::TokioDriver;
-use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use crate::test_support::{RunHost, TestTool, TestToolTable};
+use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
-use promptforge_api_types::capabilities::{
-    Capability, CapabilityError, CapabilityId, Contribution, RunServices,
-};
 use promptforge_model_client::model::ModelCatalog;
 
 /// A fresh stock handle's access capability, for tests that inject host
@@ -336,11 +332,11 @@ async fn run_offline(md: &str) -> Result<String> {
 async fn run(
     test: &TestPrompt,
     args: &str,
-    tools: &[Arc<dyn Tool>],
+    tools: &[Arc<dyn TestTool>],
     store: &TestStore,
     opts: RunOptions,
 ) -> Result<String> {
-    let env = Environment::new();
+    let mut env = Environment::new();
     let mut host = RunHost::new().observer(opts.observer);
     // The run's own router (a fresh store backend per run) is built here
     // and set on the context, so the test store can reconnect to the
@@ -349,11 +345,14 @@ async fn run(
     store.reconnect(vfs.clone());
     let mut ctx = test_context(opts.execution).vfs(vfs);
     if !tools.is_empty() {
-        // The host pattern with capabilities: the fixture capability
-        // contributes the test's tools, and `Environment::run` activates
-        // it into the catalog the run binds against and the table the
-        // host's performer resolves against.
-        host = host.registry(Arc::new(tools_registry(tools)));
+        // The host pattern with tools: the fixtures' descriptors form the
+        // catalog the run binds its frontmatter slots against, and the
+        // implementations go to the host table the driver's tool
+        // performer resolves a `ToolCall` effect in - the two halves a
+        // harness assembles from its activated capabilities.
+        let (catalog, table) = fixture_tools(tools);
+        env = env.tools(catalog);
+        host = host.tools(table);
     }
     // The host pattern: the context carries the current model, and
     // prepare's trivial fill binds every declared role to it.
@@ -381,13 +380,9 @@ async fn run(
 fn fixture_binding(
     alias: &str,
     description: &str,
-    tool: Arc<dyn Tool>,
-) -> (crate::lua::ToolBinding, Arc<dyn Tool>) {
-    let binding = crate::lua::ToolBinding::for_test(
-        alias,
-        description,
-        &promptforge_api_types::tools::ToolDescriptor::describe(tool.as_ref()),
-    );
+    tool: Arc<dyn TestTool>,
+) -> (crate::lua::ToolBinding, Arc<dyn TestTool>) {
+    let binding = crate::lua::ToolBinding::for_test(alias, description, &tool.descriptor());
     (binding, tool)
 }
 
@@ -399,14 +394,17 @@ fn fixture_binding(
 #[derive(Clone, Default)]
 pub(super) struct FixtureTools {
     set: crate::lua::ToolSet,
-    table: ToolTable,
+    table: TestToolTable,
 }
 
 impl FixtureTools {
     /// Builds the fixture from bindings paired with their implementations
     /// and the prompt-wide `always` aliases.
-    fn new(bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>, always: Vec<String>) -> Self {
-        let mut table = ToolTable::new();
+    fn new(
+        bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
+        always: Vec<String>,
+    ) -> Self {
+        let mut table = TestToolTable::new();
         let bindings = bindings
             .into_iter()
             .map(|(binding, tool)| {
@@ -438,7 +436,7 @@ impl From<crate::lua::ToolSet> for FixtureTools {
     fn from(set: crate::lua::ToolSet) -> Self {
         Self {
             set,
-            table: ToolTable::new(),
+            table: TestToolTable::new(),
         }
     }
 }
@@ -446,7 +444,7 @@ impl From<crate::lua::ToolSet> for FixtureTools {
 /// Arms the run state's shared tool set with `bindings` (every alias
 /// prompt-wide through `always`) and its test host with the
 /// implementations, so `TokioDriver::new` performs the calls.
-fn arm_tools(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>) {
+fn arm_tools(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>) {
     let always = bindings
         .iter()
         .map(|(binding, _)| binding.alias().to_owned())
@@ -459,51 +457,25 @@ fn arm_tools(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Too
 /// implementations.
 fn arm_tools_scoped(
     ctx: &RunState,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>,
+    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
     always: Vec<String>,
 ) {
     FixtureTools::new(bindings, always).install(ctx);
 }
 
-/// The fixture capability: contributes the test's tools under
-/// `tests/tools`, so a prompt's frontmatter tool slots fill against them
-/// at prepare - the shape production tools arrive in.
-struct FixtureCapability {
-    id: CapabilityId,
-    tools: Vec<Arc<dyn Tool>>,
-}
-
-impl Capability for FixtureCapability {
-    fn id(&self) -> &CapabilityId {
-        &self.id
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Capability trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "The fixture tool capability."
-    }
-
-    fn create(&self, services: &RunServices) -> std::result::Result<Contribution, CapabilityError> {
-        let _ = services;
-        Ok(Contribution {
-            tools: self.tools.clone(),
-        })
-    }
-}
-
-/// Builds the registry holding one fixture capability contributing `tools`.
-fn tools_registry(tools: &[Arc<dyn Tool>]) -> CapabilityRegistry {
-    let mut registry = CapabilityRegistry::new();
-    registry
-        .register(Arc::new(FixtureCapability {
-            id: CapabilityId::from_validated("tests/tools"),
-            tools: tools.to_vec(),
-        }))
-        .expect("the fixture capability registers");
-    registry
+/// The test's tools as the two halves a host assembles from its
+/// activated capabilities: the catalog of descriptors the run's
+/// frontmatter tool slots (under `tests/tools`) fill against at prepare,
+/// and the table of implementations the driver's tool performer resolves
+/// a `ToolCall` effect's id in.
+fn fixture_tools(
+    tools: &[Arc<dyn TestTool>],
+) -> (promptforge_api_types::tools::ToolCatalog, TestToolTable) {
+    let table = TestToolTable::from_tools(tools);
+    let catalog = table
+        .catalog()
+        .expect("the fixture tools carry legal wire names and distinct ids");
+    (catalog, table)
 }
 
 /// The test-support driver ([`crate::test_support::run_with_host`]) with the
@@ -606,14 +578,14 @@ fn events(records: &[(String, String, String)]) -> Vec<(String, String)> {
 struct EchoTool;
 
 #[async_trait::async_trait]
-impl Tool for EchoTool {
+impl TestTool for EchoTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tests/tools/echo").expect("valid id")
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         "echo"
@@ -621,7 +593,7 @@ impl Tool for EchoTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "Echo the value argument back to the caller."
@@ -659,14 +631,14 @@ fn require_string_arg<'a>(args: &'a Value, key: &str) -> std::result::Result<&'a
 struct UntrustedEchoTool;
 
 #[async_trait::async_trait]
-impl Tool for UntrustedEchoTool {
+impl TestTool for UntrustedEchoTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tests/tools/untrusted_echo").expect("valid id")
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         "echo"
@@ -674,7 +646,7 @@ impl Tool for UntrustedEchoTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "Echo the value argument back as untrusted external data."
@@ -708,14 +680,14 @@ struct StructuredFixtureTool {
 }
 
 #[async_trait::async_trait]
-impl Tool for StructuredFixtureTool {
+impl TestTool for StructuredFixtureTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tests/tools/structured").expect("valid id")
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         "structured"
@@ -723,7 +695,7 @@ impl Tool for StructuredFixtureTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "Return a structured payload."
@@ -747,14 +719,14 @@ impl Tool for StructuredFixtureTool {
 struct FailingTool;
 
 #[async_trait::async_trait]
-impl Tool for FailingTool {
+impl TestTool for FailingTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tests/tools/failing").expect("valid id")
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         "echo"
@@ -762,7 +734,7 @@ impl Tool for FailingTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "Always fail."
@@ -802,7 +774,7 @@ impl ScopedFixtureTool {
 }
 
 #[async_trait::async_trait]
-impl Tool for ScopedFixtureTool {
+impl TestTool for ScopedFixtureTool {
     fn id(&self) -> ToolId {
         self.id.clone()
     }
@@ -1195,7 +1167,7 @@ fn aliased_tool_script(alias: &str) -> Vec<GatewayReply> {
 /// `tools.add` override reaches the advertised schema.
 #[test]
 fn tool_description_override_appears_in_model_schema() {
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let echo: Arc<dyn TestTool> = Arc::new(EchoTool);
     // In production the binding's description is the descriptor's, copied
     // at fill time; the test's slot text stands in for it here.
     let (binding, _) = fixture_binding("echo", "echo capability for live matching", echo);
@@ -1334,14 +1306,14 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
 struct SlowTool;
 
 #[async_trait::async_trait]
-impl Tool for SlowTool {
+impl TestTool for SlowTool {
     fn id(&self) -> ToolId {
         ToolId::parse("test/tools/slow").expect("valid slow tool id")
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         // Matches the function name the mock gateway asks for.
@@ -1350,7 +1322,7 @@ impl Tool for SlowTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "a deliberately slow tool"
@@ -1441,11 +1413,10 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     let test = bound_with_tools(md);
     let mut run_nonces = Vec::new();
     for seed in [1, 2] {
-        let env = Environment::new();
+        let (catalog, table) = fixture_tools(&[Arc::new(UntrustedEchoTool) as Arc<dyn TestTool>]);
+        let env = Environment::new().tools(catalog);
         let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT);
-        let host = RunHost::new().registry(Arc::new(tools_registry(&[
-            Arc::new(UntrustedEchoTool) as Arc<dyn Tool>,
-        ])));
+        let host = RunHost::new().tools(table);
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }

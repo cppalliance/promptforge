@@ -16,19 +16,20 @@
 //! the host the engine's own suites drive.
 //!
 //! [`RunHost`] bundles the resources the suites used to hand the retired
-//! in-crate loop - an observer, a debug capture, a client, a registry, a
-//! tool table, a broker, a delta hook - and [`run_with_host`] is that
-//! loop's zero-burden path over the tokio driver: activate, prepare,
-//! refuse or run. [`forward`] is the adapter that replays returned events
-//! onto a recording observer, so the observation suites hold without
-//! rewriting their assertions.
+//! in-crate loop - an observer, a debug capture, a client, a fixture tool
+//! table, a broker, a delta hook - and [`run_with_host`] is that loop's
+//! zero-burden path over the tokio driver: prepare, refuse or run. The
+//! tool and broker fixtures implement the stand-in traits in [`tools`]
+//! ([`TestTool`], [`TestBroker`]); the production traits are the harness's,
+//! which no engine crate names. [`forward`] is the adapter that replays
+//! returned events onto a recording observer, so the observation suites
+//! hold without rewriting their assertions.
 
 #[cfg(test)]
 pub(crate) use promptforge_parser::test_support::synthetic_section;
 
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::RunServices;
 use promptforge_api_types::event::Event;
 
 use crate::Error;
@@ -44,10 +45,12 @@ pub mod host;
 #[path = "test_support/mock-gateway-client.rs"]
 pub(crate) mod mock_gateway_client;
 pub mod tokio_driver;
+pub mod tools;
 
 pub use events_to_observer::forward;
 pub use host::{ChatClient, DeltaHook, RunHost};
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
+pub use tools::{TestBroker, TestTool, TestToolTable};
 
 /// The suites' mock-gateway client performs a `Chat` round over its
 /// dev-only HTTP under the run's limits.
@@ -162,23 +165,19 @@ pub fn drive(
     }
 }
 
-/// The retired loop's zero-burden path over the tokio driver: activates,
-/// prepares, and runs `prompt` with the resources `host` bundles.
+/// The retired loop's zero-burden path over the tokio driver: prepares
+/// and runs `prompt` with the resources `host` bundles.
 ///
-/// When `host` carries a [registry](RunHost::registry), this is where the
-/// prompt's declared capabilities activate: the run's VFS is built first
-/// ([`Environment::run_vfs`], unless the context's handle was set by the
-/// caller) so the capabilities' services and the run share one store;
-/// each declaration activates with those services
-/// ([`activate`](crate::execute::activate)); the activated catalog is the
-/// run's catalog, its implementations go to the tool performer, and what
-/// activation could not satisfy is folded into prepare's report. Without
-/// a registry nothing activates and the environment's own catalog stands.
+/// The environment's catalog is what prepare fills slots against; a suite
+/// with fixture tools installs their descriptors there
+/// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
+/// implementations on the host ([`RunHost::tools`]). Capability activation
+/// is the harness's, on its side of the door, and never happens here.
 ///
-/// An unsatisfiable prompt - missing required capabilities, conflicts, or
-/// unmet model requirements - is refused with [`RunResult::Failure`]
-/// carrying [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet)
-/// and the model-readable notice naming each gap once.
+/// An unsatisfiable prompt - a missing required capability or an unmet
+/// model requirement - is refused with [`RunResult::Failure`] carrying
+/// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
+/// model-readable notice naming each gap once.
 pub async fn run_with_host(
     env: &Environment,
     prompt: &Prompt,
@@ -186,20 +185,7 @@ pub async fn run_with_host(
     ctx: RunContext,
     host: RunHost,
 ) -> RunResult {
-    let mut ctx = ctx;
-    let mut host = host;
-    let mut env = env.clone();
-    if let Some(registry) = host.registry.take() {
-        if !ctx.vfs_explicit {
-            ctx = ctx.vfs(env.run_vfs());
-        }
-        let services = RunServices::new(ctx.vfs.clone(), ctx.cancel_handle());
-        let mut activation = crate::execute::activate(Some(&registry), prompt, &services);
-        env = env.tools(std::mem::take(&mut activation.catalog));
-        host = host.activated(activation);
-    }
-    let (ctx, mut requirements) = env.prepare(prompt, ctx);
-    requirements.merge(host.requirements.clone());
+    let (ctx, requirements) = env.prepare(prompt, ctx);
     if let Some(refusal) = requirements.refusal() {
         return RunResult::Failure(refusal);
     }

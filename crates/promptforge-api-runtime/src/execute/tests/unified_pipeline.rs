@@ -46,7 +46,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     let out = super::run(
         &test,
         "quantum",
-        &[Arc::new(EchoTool) as Arc<dyn Tool>],
+        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
         &TestStore::new(),
         gatewayed(addr),
     )

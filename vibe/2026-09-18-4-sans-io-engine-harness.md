@@ -331,6 +331,7 @@ The existing engine suites (about 14,000 lines under `crates/promptforge-api-run
   - Papergate's code change lands in its own repository; this plan produces only the migration note.
   - The field study these additions come from ("What to steal for PromptForge: sans-IO engine, harness, effect and event streams, run log, replay, subtasks", 2026-09-18, six references at pinned commits) found the subject already matches or beats the references on effects-as-data at the script boundary, the single-owner scheduler, structural cancellation, the pure supervisor reducer, and test-enforced tiers; those are preserved, not redesigned.
   - Gateway supervision stays in Workshop (`crates/workshop/gateway/`); the harness receives the binding as data through `Harness::set_gateway` and never depends on `workshop-gateway`. Papergate supplies its own binding the same way.
+  - The three relocated web crates (`harness-web`, `harness-webfetch`, `harness-web-search`) do not carry the `## Invariants` marker yet, so the `build-xtask` file ceiling does not bind them (found at the Step 37 review, 2026-09-19). Step 37 is a pure move, and the code arrived over the ceiling: by the check's own count (`str::lines`), `crates/harness/webfetch/src/tool.rs` is 1409 lines, `crates/harness/webfetch/src/config.rs` is 830, `crates/harness/web-search/src/web_search-tests.rs` is 527, and `crates/harness/web-search/src/web_search.rs` is 506. Splitting moved code inside a move step would hide a behavior-neutral refactor in a commit whose only claim is relocation, so the marker is deferred: the first step that edits any of those four files splits it under 500 lines first (the AGENTS.md rule is split before editing), and the step that brings the last of them under the ceiling adds the marker to all three crates. Until then the three crates are the only `harness-*` members outside the ceiling check. Falsifier: Step 39 (guards go live) or the harness `clippy.toml` check is written to require the marker on every `crates/harness/` crate, or a step edits one of the four files without splitting it.
 
 ### Deferred and Out of Scope
 
@@ -822,7 +823,7 @@ Pieces inside a component are sequential. Components 1 to 3 touch no engine crat
 
 <step-37>
 
-### Step 37: Capabilities move to the harness
+### Step 37: Capabilities move to the harness [completed]
 
 - Component: Run API and engine purity
 - Piece: moves

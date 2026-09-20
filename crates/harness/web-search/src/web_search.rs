@@ -9,7 +9,8 @@
 use std::fmt;
 use std::time::Duration;
 
-use promptforge_api_types::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use harness_capabilities::Tool;
+use promptforge_api_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::endpoint::Endpoint;
 use crate::secret::Token;
@@ -95,7 +96,7 @@ impl WebSearch {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_web_search::WebSearch;
+    /// use harness_web_search::WebSearch;
     ///
     /// let tool = WebSearch::new("https://gateway.example.com/v1", "bearer-token")?;
     /// // The token is redacted, never printed.

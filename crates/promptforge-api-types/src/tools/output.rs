@@ -14,7 +14,7 @@ pub enum OutputTrust {
     Untrusted,
 }
 
-/// The result of a successful [`Tool::call`](crate::tools::Tool::call),
+/// The result of a successful tool call (the harness's `Tool::call`),
 /// carrying its text and trust.
 ///
 /// Trust travels with the value so the executor never has to remember a
@@ -106,7 +106,7 @@ pub enum ToolErrorKind {
     Other,
 }
 
-/// A narrow, model-safe error from a [`Tool::call`](crate::tools::Tool::call).
+/// A narrow, model-safe error from a tool call (the harness's `Tool::call`).
 ///
 /// The `Display` message is caller-facing and safe to hand back to the model;
 /// any underlying cause is hidden behind [`std::error::Error::source`]. Match on

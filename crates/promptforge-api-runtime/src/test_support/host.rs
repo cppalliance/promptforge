@@ -5,25 +5,22 @@
 //! values; it holds no client, no tool implementation, no broker, and no
 //! sink. Those belong to whoever performs the effects. `RunHost` is that
 //! bundle for the suites: the [`ChatClient`] a `Chat` effect is performed
-//! with, the capability registry [`run_with_host`](super::run_with_host)
-//! activates the prompt's declarations against (filling the [`ToolTable`]
-//! a `ToolCall` effect's id resolves in), the [`InputBroker`] a
-//! `UserInput` effect waits on, the delta hook a streaming round forwards
-//! to, and the observer and capture the run's events are replayed onto.
-//! [`performers`](RunHost::performers) and [`sink`](RunHost::sink) turn
-//! the bundle into what [`drive_tokio`](super::drive_tokio) takes. None
-//! of it reaches the engine; a production host builds its own
-//! [`Performers`] and sink.
+//! with, the [`TestToolTable`] a `ToolCall` effect's id resolves in, the
+//! [`TestBroker`] a `UserInput` effect waits on, the delta hook a
+//! streaming round forwards to, and the observer and capture the run's
+//! events are replayed onto. [`performers`](RunHost::performers) and
+//! [`sink`](RunHost::sink) turn the bundle into what
+//! [`drive_tokio`](super::drive_tokio) takes. None of it reaches the
+//! engine; a production host builds its own [`Performers`] and sink, and
+//! activates its capabilities on its own side of the door.
 
 use std::fmt;
 use std::sync::Arc;
 
 use promptforge_api_types::event::Event;
 
-use crate::capabilities::CapabilityRegistry;
 use crate::debug::DebugCapture;
-use crate::execute::{Activation, Requirements, RunLimits, ToolTable};
-use crate::input::InputBroker;
+use crate::execute::RunLimits;
 use crate::model::{
     Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
 };
@@ -33,6 +30,7 @@ use super::events_to_observer;
 #[cfg(test)]
 use super::tokio_driver::EventSink;
 use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
+use super::tools::{TestBroker, TestToolTable};
 use crate::execute::{Effect, EffectAnswer};
 
 /// The live streaming-delta callback a chat round forwards its chunks to.
@@ -69,38 +67,28 @@ pub struct RunHost {
     /// The chat client `Chat` effects are performed with; `None` answers
     /// every round with the disabled-gateway failure.
     pub(crate) client: Option<Arc<dyn ChatClient>>,
-    /// The installed capabilities the prompt's declarations activate
-    /// against; `None` activates nothing, and the environment's own
-    /// catalog stands.
-    pub(crate) registry: Option<Arc<CapabilityRegistry>>,
     /// The implementations `ToolCall` effects resolve their ids in.
-    pub(crate) tools: ToolTable,
+    pub(crate) tools: TestToolTable,
     /// The broker `UserInput` effects wait on; `None` answers every wait
     /// with the unavailable fallback.
-    pub(crate) input: Option<Arc<dyn InputBroker>>,
+    pub(crate) input: Option<Arc<dyn TestBroker>>,
     /// The live streaming-delta callback a section's model rounds forward
     /// their chunks to; `None` drops deltas at the leaf.
     pub(crate) on_delta: Option<DeltaHook>,
-    /// What activation could not satisfy, folded into the prepare report
-    /// by [`run_with_host`](super::run_with_host) so one refusal names
-    /// every gap.
-    pub(crate) requirements: Requirements,
 }
 
 impl RunHost {
     /// Builds the silent host: a null observer, no capture, no client, no
-    /// registry, no tools, no broker, no delta hook.
+    /// tools, no broker, no delta hook.
     #[must_use]
     pub fn new() -> RunHost {
         RunHost {
             observer: Arc::new(NullObserver::default()),
             debug: None,
             client: None,
-            registry: None,
-            tools: ToolTable::new(),
+            tools: TestToolTable::new(),
             input: None,
             on_delta: None,
-            requirements: Requirements::default(),
         }
     }
 
@@ -128,36 +116,14 @@ impl RunHost {
         self
     }
 
-    /// Sets the installed capabilities the prompt's declarations activate
-    /// against. [`run_with_host`](super::run_with_host) performs the
-    /// activation once: it builds the run's VFS, activates each declared
-    /// capability with the run's services, installs the resulting catalog
-    /// for prepare to fill slots against, keeps the implementations here
-    /// for the tool performer, and folds what activation could not
-    /// satisfy into the refusal. Without a registry nothing activates and
-    /// the environment's own catalog stands.
-    #[must_use]
-    pub fn registry(mut self, registry: Arc<CapabilityRegistry>) -> RunHost {
-        self.registry = Some(registry);
-        self
-    }
-
     /// Sets the implementations `ToolCall` effects resolve their ids in.
+    /// The catalog the engine binds against is the caller's to install on
+    /// the [`Environment`](crate::execute::Environment) (see
+    /// [`TestToolTable::catalog`]); a production host assembles both from
+    /// its activated capabilities.
     #[must_use]
-    pub fn tools(mut self, tools: ToolTable) -> RunHost {
+    pub fn tools(mut self, tools: TestToolTable) -> RunHost {
         self.tools = tools;
-        self
-    }
-
-    /// Takes an activation's implementations and its unsatisfied
-    /// requirements: the table performs the calls, and the report is
-    /// folded into prepare's so the refusal names every gap. The
-    /// activation's catalog is the caller's to install on the
-    /// [`Environment`](crate::execute::Environment).
-    #[must_use]
-    pub(crate) fn activated(mut self, activation: Activation) -> RunHost {
-        self.tools = activation.tools;
-        self.requirements.merge(activation.requirements);
         self
     }
 
@@ -166,7 +132,7 @@ impl RunHost {
     /// [`INPUT_UNAVAILABLE_FALLBACK`](crate::input::INPUT_UNAVAILABLE_FALLBACK)
     /// with `available` false.
     #[must_use]
-    pub fn input_broker(mut self, broker: Arc<dyn InputBroker>) -> RunHost {
+    pub fn input_broker(mut self, broker: Arc<dyn TestBroker>) -> RunHost {
         self.input = Some(broker);
         self
     }
@@ -225,10 +191,10 @@ impl RunHost {
                 let Effect::ToolCall { tool, args, .. } = effect else {
                     return EffectAnswer::Dropped;
                 };
-                // Resolved by the stable identity against the host's
-                // implementation table, as a harness resolves it against
-                // its activated capabilities; the alias is the record's,
-                // not the resolver's.
+                // Resolved by the stable identity against the suites'
+                // fixture table, as the harness resolves it against its
+                // activated capabilities; the alias is the record's, not
+                // the resolver's.
                 let Some(tool) = tools.get(&tool) else {
                     return refuse_tool_call();
                 };
@@ -276,11 +242,9 @@ impl fmt::Debug for RunHost {
             .field("observer", &"<dyn Observer>")
             .field("debug", &self.debug.is_some())
             .field("client", &self.client.is_some())
-            .field("registry", &self.registry)
             .field("tools", &self.tools)
             .field("input", &self.input.is_some())
             .field("on_delta", &self.on_delta.is_some())
-            .field("requirements", &self.requirements)
             .finish()
     }
 }

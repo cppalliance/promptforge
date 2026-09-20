@@ -429,7 +429,7 @@ models.default('writer')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[Arc::new(EchoTool) as Arc<dyn Tool>],
+        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )
@@ -448,7 +448,7 @@ models.default('writer')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[Arc::new(EchoTool) as Arc<dyn Tool>],
+        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )
@@ -470,7 +470,7 @@ models.default('writer')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[Arc::new(EchoTool) as Arc<dyn Tool>],
+        &[Arc::new(EchoTool) as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )

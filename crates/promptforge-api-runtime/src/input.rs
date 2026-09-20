@@ -1,7 +1,6 @@
-//! The generic input broker: one host policy behind user input.
+//! The user-input vocabulary: what a `UserInput` effect is answered with.
 //!
-//! The broker backs the script-side `user_input()` function only. A
-//! section's direct `user_input()` call suspends on the broker and
+//! A section's direct `user_input()` call issues a `UserInput` effect and
 //! resumes with `(text, available)`: `available` is `true` for real
 //! operator text and `false` when the host had no input, in which case
 //! `text` is the fixed [`INPUT_UNAVAILABLE_FALLBACK`] sentence. The flag
@@ -10,14 +9,16 @@
 //! advertised to the model: a `models.loop` scope carries exactly the
 //! tools the prompt adds.
 //!
-//! The host policies are the broker's: a blocking broker parks the wait
-//! until the host delivers (the section's VM and message history stay
-//! intact), an unavailable answer (or no configured broker at all) is the
-//! unavailable-fallback policy, and a broker error is the failure policy,
-//! raising a typed [`RunErrorKind::Input`](crate::RunErrorKind::Input)
-//! failure at the Lua call site. Waits and responses are recorded through
-//! the run's [`Observer`](promptforge_api_types::observe::Observer) - a wait-opened observation and
-//! a byte-exact `on_user_input` report - without any replay machinery.
+//! The host policies live behind the effect: a blocking host parks the
+//! wait until the operator delivers (the section's VM and message history
+//! stay intact), an [`InputOutcome::Unavailable`] answer is the
+//! unavailable-fallback policy, and an [`InputError`] is the failure
+//! policy, raising a typed [`RunErrorKind::Input`](crate::RunErrorKind::Input)
+//! failure at the Lua call site. The policy trait a host implements
+//! (`InputBroker`) is the harness's, in `harness-capabilities`; the engine
+//! knows only this answer vocabulary. Waits and responses are reported as
+//! events - a wait-opened event and a byte-exact `UserInput` report -
+//! without any replay machinery.
 
 use std::fmt;
 
@@ -30,11 +31,10 @@ use std::fmt;
 pub const INPUT_UNAVAILABLE_FALLBACK: &str =
     "User input is unavailable in this host; continue without it.";
 
-/// What the broker produced for one input request.
+/// What the host produced for one input request.
 ///
 /// `#[non_exhaustive]`: a future policy (for example a deferred
-/// continuation-capable wait) can add variants without breaking
-/// implementors.
+/// continuation-capable wait) can add variants without breaking hosts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InputOutcome {
@@ -45,7 +45,7 @@ pub enum InputOutcome {
     Unavailable,
 }
 
-/// A broker's failure to produce input.
+/// The host's failure to produce input.
 ///
 /// The message is host-authored and safe to surface at the Lua call site;
 /// an underlying cause hides behind [`std::error::Error::source`].
@@ -113,25 +113,4 @@ impl std::error::Error for InputError {
             .as_deref()
             .map(|source| source as &(dyn std::error::Error + 'static))
     }
-}
-
-/// The host policy behind user input: one asynchronous request per wait.
-///
-/// The executor calls [`user_input`](Self::user_input) when a section's
-/// `user_input()` runs, and suspends the caller until the future
-/// resolves. An implementation
-/// that blocks until its host delivers input is the blocking policy;
-/// answering [`InputOutcome::Unavailable`] is the unavailable-fallback
-/// policy; an [`InputError`] is the failure policy. Implementations must
-/// be `Send + Sync`, must not panic, and should return promptly when the
-/// host tears the wait down.
-#[async_trait::async_trait]
-pub trait InputBroker: Send + Sync {
-    /// Waits for the host's answer to one input request for `section` of
-    /// `execution`.
-    ///
-    /// # Errors
-    /// Returns an [`InputError`] when the host fails the wait rather than
-    /// answering or declining it.
-    async fn user_input(&self, execution: &str, section: &str) -> Result<InputOutcome, InputError>;
 }

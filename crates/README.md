@@ -12,7 +12,7 @@ The gateway discovery seam: the `gateway.json` discovery file, the launch lock, 
 
 ## promptforge-api-runtime
 
-The PromptForge runtime: prompt parsing, the model client, and section execution - the crate that turns prompt markdown into a model call. The workshop server and sessions drive the executor through it, and it is one of the two promptforge crates outside crates may name. Depends on promptforge-api-types, shared-vfs, and the promptforge container crates (lua, parser, store, vfs, model-client, web, web-search).
+The PromptForge runtime: prompt parsing and the sans-IO `Run` state machine that executes sections as effects a host performs. The harness (and, in the interim, the workshop sessions) drives the engine through it, and it is one of the two promptforge crates outside crates may name. Depends on promptforge-api-types, shared-vfs, and the promptforge container crates (lua, parser, store, vfs, model-client). The first-party capabilities and the tool implementations behind a run live in the harness, not here.
 
 ## promptforge-api-types
 

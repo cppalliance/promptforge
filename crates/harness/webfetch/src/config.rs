@@ -46,7 +46,7 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The default `User-Agent` header sent on every request.
-const DEFAULT_USER_AGENT: &str = "promptforge-webfetch/0.0";
+const DEFAULT_USER_AGENT: &str = "harness-webfetch/0.0";
 
 /// The default cap on a response body's decompressed size, in bytes (8 MiB).
 const DEFAULT_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -201,12 +201,12 @@ impl ConfigError {
 ///
 /// # Examples
 /// ```
-/// use promptforge_webfetch::FetchConfig;
+/// use harness_webfetch::FetchConfig;
 ///
 /// let policy = FetchConfig::default();
 /// let custom = FetchConfig::builder().allow_http(true).build()?;
 /// assert_ne!(policy, custom);
-/// # Ok::<(), promptforge_webfetch::ConfigError>(())
+/// # Ok::<(), harness_webfetch::ConfigError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchConfig {
@@ -241,10 +241,10 @@ impl FetchConfig {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_webfetch::FetchConfig;
+    /// use harness_webfetch::FetchConfig;
     ///
     /// let policy = FetchConfig::builder().max_chars(10_000).build()?;
-    /// # Ok::<(), promptforge_webfetch::ConfigError>(())
+    /// # Ok::<(), harness_webfetch::ConfigError>(())
     /// ```
     #[must_use]
     pub fn builder() -> FetchConfigBuilder {
@@ -483,13 +483,13 @@ impl FetchConfigBuilder {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_webfetch::FetchConfig;
+    /// use harness_webfetch::FetchConfig;
     ///
     /// let policy = FetchConfig::builder()
     ///     .deny_cidr("203.0.114.0/24")
     ///     .max_bytes(1024)
     ///     .build()?;
-    /// # Ok::<(), promptforge_webfetch::ConfigError>(())
+    /// # Ok::<(), harness_webfetch::ConfigError>(())
     /// ```
     pub fn build(self) -> Result<FetchConfig, ConfigError> {
         let user_agent = validate_user_agent(self.user_agent)?;
@@ -666,7 +666,7 @@ mod tests {
         assert_eq!(cfg.connect_timeout(), Duration::from_secs(5));
         assert_eq!(cfg.timeout(), Duration::from_secs(20));
         assert_eq!(cfg.pool_idle_timeout(), Duration::from_secs(10));
-        assert_eq!(cfg.user_agent(), "promptforge-webfetch/0.0");
+        assert_eq!(cfg.user_agent(), "harness-webfetch/0.0");
     }
 
     #[test]

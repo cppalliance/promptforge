@@ -353,7 +353,10 @@ impl RunContext {
         self
     }
 
-    pub(crate) fn input_broker(mut self, broker: Arc<dyn crate::input::InputBroker>) -> RunContext {
+    pub(crate) fn input_broker(
+        mut self,
+        broker: Arc<dyn crate::test_support::TestBroker>,
+    ) -> RunContext {
         self.test_host = self.test_host.input_broker(broker);
         self
     }

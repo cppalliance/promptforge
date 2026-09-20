@@ -72,7 +72,7 @@ pub(super) fn loop_context(prompt: &Prompt, tools: impl Into<FixtureTools>) -> R
 
 /// The tool set with `tool` bound as `alias` and always in scope, beside
 /// its implementation.
-pub(super) fn always_tool(alias: &str, tool: Arc<dyn Tool>) -> FixtureTools {
+pub(super) fn always_tool(alias: &str, tool: Arc<dyn TestTool>) -> FixtureTools {
     FixtureTools::new(
         vec![fixture_binding(alias, "fixture capability", tool)],
         vec![alias.to_owned()],

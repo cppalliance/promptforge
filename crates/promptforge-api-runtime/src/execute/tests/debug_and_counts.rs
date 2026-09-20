@@ -186,7 +186,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
     let out = run(
         &prompt,
         "",
-        &[Arc::clone(&tool) as Arc<dyn Tool>],
+        &[Arc::clone(&tool) as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )
@@ -250,8 +250,8 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         &prompt,
         "",
         &[
-            Arc::new(search) as Arc<dyn Tool>,
-            Arc::new(other) as Arc<dyn Tool>,
+            Arc::new(search) as Arc<dyn TestTool>,
+            Arc::new(other) as Arc<dyn TestTool>,
         ],
         &TestStore::new(),
         silent(),
@@ -280,7 +280,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
     let error = run(
         &prompt,
         "",
-        &[Arc::new(tool) as Arc<dyn Tool>],
+        &[Arc::new(tool) as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )

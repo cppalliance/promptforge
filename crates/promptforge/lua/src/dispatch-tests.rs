@@ -4,9 +4,7 @@
 use std::sync::Mutex;
 
 use promptforge_api_types::observe::Observation;
-use promptforge_api_types::tools::{
-    Tool, ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput,
-};
+use promptforge_api_types::tools::{ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use serde_json::json;
 
 use super::*;
@@ -14,83 +12,25 @@ use super::*;
 const EXECUTION: &str = "dispatch-test";
 const SECTION: &str = "Test";
 
-/// Echoes the `value` argument, trusted or untrusted per construction.
-struct EchoTool {
-    trusted: bool,
+/// The `echo` fixture tool as data. `prepare_dispatch` sees only the
+/// binding and a canned output; no implementation is ever called.
+fn echo_tool() -> ToolDescriptor {
+    ToolDescriptor::new(
+        ToolId::parse("tests/tools/echo").expect("valid id"),
+        "echo",
+        "echo the value argument",
+        json!({ "type": "object" }),
+    )
 }
 
-#[async_trait::async_trait]
-impl Tool for EchoTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn wire_name(&self) -> &str {
-        "echo"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "echo the value argument"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        json!({ "type": "object" })
-    }
-
-    async fn call(&self, args: serde_json::Value) -> std::result::Result<ToolOutput, ToolError> {
-        let text = format!("echoed: {}", args["value"].as_str().unwrap_or_default());
-        Ok(if self.trusted {
-            ToolOutput::trusted(text)
-        } else {
-            ToolOutput::untrusted(text)
-        })
-    }
-}
-
-/// Fails every call with a typed backend error carrying a cause.
-struct FailingTool;
-
-#[async_trait::async_trait]
-impl Tool for FailingTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/failing").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn wire_name(&self) -> &str {
-        "failing"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "always fail"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        json!({ "type": "object" })
-    }
-
-    async fn call(&self, _args: serde_json::Value) -> std::result::Result<ToolOutput, ToolError> {
-        let cause = std::io::Error::other("upstream socket reset");
-        Err(
-            ToolError::with_source("the tool's own backend failed", cause)
-                .with_kind(ToolErrorKind::Backend),
-        )
-    }
+/// The `failing` fixture tool as data.
+fn failing_tool() -> ToolDescriptor {
+    ToolDescriptor::new(
+        ToolId::parse("tests/tools/failing").expect("valid id"),
+        "failing",
+        "always fail",
+        json!({ "type": "object" }),
+    )
 }
 
 /// One recorded `on_tool_result` report: chain id, depth, turn, call
@@ -139,15 +79,15 @@ impl Observer for Recorder {
     }
 }
 
-fn binding(alias: &str, tool: &dyn Tool) -> ToolBinding {
-    ToolBinding::for_test(alias, "fixture capability", &ToolDescriptor::describe(tool))
+fn binding(alias: &str, tool: &ToolDescriptor) -> ToolBinding {
+    ToolBinding::for_test(alias, "fixture capability", tool)
 }
 
 #[test]
 fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
     let recorder = Recorder::default();
     let counts = ToolCallCounts::new(["echo".to_owned()]);
-    let echo = binding("echo", &EchoTool { trusted: false });
+    let echo = binding("echo", &echo_tool());
     let nonce = GuardNonce::fresh();
     let outcome = prepare_dispatch(
         &echo,
@@ -204,7 +144,7 @@ fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
 #[test]
 fn prepare_dispatch_turns_a_canned_tool_error_into_the_typed_error() {
     let recorder = Recorder::default();
-    let failing = binding("failing", &FailingTool);
+    let failing = binding("failing", &failing_tool());
     let error = prepare_dispatch(
         &failing,
         Err(ToolError::message("canned failure").with_kind(ToolErrorKind::Backend)),
@@ -244,7 +184,7 @@ fn model_report(call_id: &str) -> ModelReport {
 #[test]
 fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id() {
     let recorder = Recorder::default();
-    let failing = binding("failing", &FailingTool);
+    let failing = binding("failing", &failing_tool());
     let nonce = GuardNonce::fresh();
     let outcome = prepare_model_dispatch(
         &failing,
@@ -291,7 +231,7 @@ fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id(
 #[test]
 fn a_model_issued_dispatch_reports_its_result_under_the_call_id() {
     let recorder = Recorder::default();
-    let echo = binding("echo", &EchoTool { trusted: true });
+    let echo = binding("echo", &echo_tool());
     let outcome = prepare_model_dispatch(
         &echo,
         Ok(ToolOutput::trusted("echoed: hi")),

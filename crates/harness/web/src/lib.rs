@@ -4,25 +4,25 @@
 //! capability activates as one frontmatter line
 //! (`capabilities: [promptforge/web]`) and contributes
 //! `promptforge/web/fetch` and `promptforge/web/search` - the tools formerly
-//! shipped as the separate `promptforge-webfetch` and `promptforge-web-search`
+//! shipped as the separate `harness-webfetch` and `harness-web-search`
 //! packs, combined under the single capability their ids already name.
 //!
-//! The host builds the capability once at registration with the gateway's API
-//! root and bearer token (the search tool proxies through the gateway so the
-//! vendor credential never leaves the server) and an optional fetch policy;
-//! the prompt never sees either. Activation clones the pre-built tools into
-//! the run's [`Contribution`].
+//! The harness builds the capability once at registration with the gateway's
+//! API root and bearer token (the search tool proxies through the gateway so
+//! the vendor credential never leaves the server) and an optional fetch
+//! policy; the prompt never sees either. Activation clones the pre-built
+//! tools into the run's [`Contribution`].
 
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::{
+use harness_capabilities::{
     Capability, CapabilityError, CapabilityErrorKind, CapabilityId, Contribution, RunServices,
 };
 use promptforge_api_types::tools::ToolError;
 
-use promptforge_web_search::WebSearch;
-use promptforge_webfetch::WebFetch;
-pub use promptforge_webfetch::{ConfigError, FetchConfig};
+use harness_web_search::WebSearch;
+use harness_webfetch::WebFetch;
+pub use harness_webfetch::{ConfigError, FetchConfig};
 
 /// The first-party `promptforge/web` capability.
 ///
@@ -34,8 +34,8 @@ pub use promptforge_webfetch::{ConfigError, FetchConfig};
 ///
 /// # Examples
 /// ```
-/// use promptforge_web::Web;
-/// use promptforge_api_types::capabilities::Capability;
+/// use harness_capabilities::Capability;
+/// use harness_web::Web;
 ///
 /// let capability = Web::new("https://gateway.example.com/v1", "bearer-token")?;
 /// assert_eq!(capability.id().to_string(), "promptforge/web");
@@ -108,10 +108,8 @@ impl Capability for Web {
 
 #[cfg(test)]
 mod tests {
+    use harness_capabilities::{Capability, CapabilityErrorKind, CapabilityId, RunServices};
     use promptforge_api_types::cancel::sync::CancelHandle;
-    use promptforge_api_types::capabilities::{
-        Capability, CapabilityErrorKind, CapabilityId, RunServices,
-    };
     use promptforge_api_types::tools::ToolId;
 
     use crate::Web;
@@ -180,7 +178,7 @@ mod tests {
 
     #[test]
     fn a_custom_fetch_policy_is_accepted() {
-        let policy = promptforge_webfetch::FetchConfig::builder()
+        let policy = harness_webfetch::FetchConfig::builder()
             .max_chars(10_000)
             .build()
             .expect("valid policy");

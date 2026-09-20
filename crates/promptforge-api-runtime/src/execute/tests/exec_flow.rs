@@ -2376,13 +2376,15 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
         ## Only\n\n```lua\ntools.add('search')\nreturn 'unreachable'\n```\n"
     );
     let test = fixture(md);
-    let registry = Arc::new(tools_registry(&[Arc::new(EchoTool) as Arc<dyn Tool>]));
+    // The catalog holds the capability's `echo`, never `search`: the
+    // slot's capability is present, so the slot is unfilled, not missing.
+    let (catalog, table) = fixture_tools(&[Arc::new(EchoTool) as Arc<dyn TestTool>]);
     let RunResult::Failure(error) = crate::test_support::run_with_host(
-        &Environment::new(),
+        &Environment::new().tools(catalog),
         &test.prompt,
         "",
         test_context(EXECUTION),
-        RunHost::new().registry(registry),
+        RunHost::new().tools(table),
     )
     .await
     else {

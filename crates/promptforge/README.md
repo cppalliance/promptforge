@@ -21,15 +21,3 @@ The promptforge VFS policy: the `/_promptforge` mount layout, the stock empty ha
 ## promptforge-model-client
 
 The gateway model client: OpenAI-shaped chat-completions transport, wire types, and the model catalog and binding vocabulary. The runtime and the Lua host call models through it. Depends on promptforge-api-types; reqwest carries the transport.
-
-## promptforge-web
-
-The web capability pack: the fetch and search tools in one bundle. The runtime mounts it as the `promptforge/web` capability. Depends on promptforge-api-types, promptforge-webfetch, and promptforge-web-search.
-
-## promptforge-webfetch
-
-The `web_fetch` tool: fetches a URL and returns its main content as markdown, behind the SSRF boundary. Packed into the web capability by promptforge-web. Depends on promptforge-api-types; reqwest, readabilityrs, and htmd carry the fetch and extraction.
-
-## promptforge-web-search
-
-The `web_search` tool: proxies a search query through the gateway so the vendor credential never leaves the server. Used by the runtime directly and by the web capability pack. Depends on promptforge-api-types; reqwest carries the transport.

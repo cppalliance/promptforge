@@ -13,15 +13,15 @@ description = "PromptForge API: prompt parser and the sans-IO Run state machine 
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-async-trait.workspace = true
+# The suites' stand-in tool and broker traits (`test_support::tools`) are
+# async traits; nothing in the engine proper awaits.
+async-trait = { workspace = true, optional = true }
 promptforge-api-types.workspace = true
 promptforge-lua.workspace = true
 promptforge-model-client.workspace = true
 promptforge-parser.workspace = true
 promptforge-store.workspace = true
 promptforge-vfs.workspace = true
-promptforge-web.workspace = true
-promptforge-web-search.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shared-vfs.workspace = true
@@ -39,9 +39,10 @@ workspace-hack.workspace = true
 # caller's async performers - the only thing in this crate that needs
 # tokio. Workshop's agent sessions enable it as their interim host until
 # the harness lands; no other production dependent does.
-test-support = ["dep:tokio"]
+test-support = ["dep:tokio", "dep:async-trait"]
 
 [dev-dependencies]
+async-trait.workspace = true
 axum.workspace = true
 # The buffer `reqwest` yields per body chunk, named as the mock-gateway
 # client's chunk type for the shared read loop.

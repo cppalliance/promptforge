@@ -3552,7 +3552,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope carries them
 /// without an H1 pass; the implementations go to the driver's host table.
-fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>) {
+fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>) {
     arm_tools(ctx, bindings);
 }
 
@@ -3561,7 +3561,7 @@ fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn 
 /// without entering any section's effective scope.
 fn arm_tool_set_scoped(
     ctx: &RunState,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn Tool>)>,
+    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
     always: Vec<String>,
 ) {
     arm_tools_scoped(ctx, bindings, always);
@@ -3681,14 +3681,14 @@ struct SignallingSlowTool {
 }
 
 #[async_trait::async_trait]
-impl Tool for SignallingSlowTool {
+impl TestTool for SignallingSlowTool {
     fn id(&self) -> ToolId {
         ToolId::parse("tests/tools/slow").expect("valid id")
     }
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         "slow"
@@ -3696,7 +3696,7 @@ impl Tool for SignallingSlowTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "a deliberately slow tool"

@@ -3,7 +3,7 @@
 //! capability.
 
 use std::num::NonZeroU32;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use promptforge_api_types::models::ThinkingMode;

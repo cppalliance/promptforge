@@ -66,9 +66,9 @@
 //! The run's outcome type ([`RunResult`]) lives here; the rest is split
 //! into focused private children: `error` (the public [`RunError`]),
 //! `config` ([`RunContext`]/[`RunLimits`]), `environment` (the public
-//! [`Environment`]), `activation` (the public host-side capability
-//! activation producing the tool catalog and the implementation table),
-//! `requirements` (the preflight
+//! [`Environment`], whose `prepare` fills slots against the host-supplied
+//! catalog; capability activation itself is the harness's, in
+//! `harness-capabilities`), `requirements` (the preflight
 //! [`Requirements`] report), `context` (the ambient `RunState` run
 //! state), `event_buffer` (the run-level event buffer and the
 //! task-scoped emitter every report goes through),
@@ -88,7 +88,6 @@
 //! yields), `scope` (tool-scope validation and schema/dispatch
 //! preparation), and `support` (shared helpers).
 
-pub mod activation;
 mod bindings;
 mod config;
 pub(crate) mod context;
@@ -108,7 +107,6 @@ mod support;
 mod tools;
 
 // Public API surface.
-pub use activation::{Activation, ToolTable, activate};
 pub use bindings::{ModelBindings, ToolBindings};
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;

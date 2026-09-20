@@ -2577,8 +2577,10 @@ dependencies = [
 name = "harness-api"
 version = "0.3.0"
 dependencies = [
+ "harness-capabilities",
  "harness-models",
- "promptforge-api-runtime",
+ "harness-web",
+ "promptforge-api-types",
  "serde",
  "serde_json",
  "workspace-hack",
@@ -2588,6 +2590,14 @@ dependencies = [
 name = "harness-capabilities"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
+ "promptforge-api-runtime",
+ "promptforge-api-types",
+ "serde_json",
+ "shared-vfs",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -2634,6 +2644,61 @@ dependencies = [
 name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-web"
+version = "0.3.0"
+dependencies = [
+ "harness-capabilities",
+ "harness-web-search",
+ "harness-webfetch",
+ "promptforge-api-types",
+ "shared-vfs",
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-web-search"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "harness-capabilities",
+ "harness-runner",
+ "promptforge-api-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "url",
+ "workspace-hack",
+]
+
+[[package]]
+name = "harness-webfetch"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "encoding_rs",
+ "flate2",
+ "futures-util",
+ "harness-capabilities",
+ "harness-runner",
+ "htmd",
+ "ipnet",
+ "mime",
+ "promptforge-api-types",
+ "readabilityrs",
+ "reqwest",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "url",
  "workspace-hack",
 ]
 
@@ -4706,8 +4771,6 @@ dependencies = [
  "promptforge-parser",
  "promptforge-store",
  "promptforge-vfs",
- "promptforge-web",
- "promptforge-web-search",
  "reqwest",
  "serde",
  "serde_json",
@@ -4723,7 +4786,6 @@ dependencies = [
 name = "promptforge-api-types"
 version = "0.3.0"
 dependencies = [
- "async-trait",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -4739,7 +4801,6 @@ dependencies = [
 name = "promptforge-lua"
 version = "0.3.0"
 dependencies = [
- "async-trait",
  "criterion",
  "mlua",
  "promptforge-api-types",
@@ -4795,56 +4856,6 @@ name = "promptforge-vfs"
 version = "0.3.0"
 dependencies = [
  "shared-vfs",
- "workspace-hack",
-]
-
-[[package]]
-name = "promptforge-web"
-version = "0.3.0"
-dependencies = [
- "promptforge-api-types",
- "promptforge-web-search",
- "promptforge-webfetch",
- "shared-vfs",
- "workspace-hack",
-]
-
-[[package]]
-name = "promptforge-web-search"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "axum",
- "promptforge-api-types",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "url",
- "workspace-hack",
-]
-
-[[package]]
-name = "promptforge-webfetch"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "axum",
- "encoding_rs",
- "flate2",
- "futures-util",
- "htmd",
- "ipnet",
- "mime",
- "promptforge-api-types",
- "readabilityrs",
- "reqwest",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "url",
  "workspace-hack",
 ]
 

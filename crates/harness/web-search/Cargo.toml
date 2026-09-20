@@ -1,5 +1,5 @@
 [package]
-name = "promptforge-web-search"
+name = "harness-web-search"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ categories = ["web-programming::http-client", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+harness-capabilities.workspace = true
 promptforge-api-types.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -24,6 +25,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+# The tests spawn their mock gateways through the harness's instrumented
+# spawn wrapper, never `tokio::spawn` (see clippy.toml).
+harness-runner.workspace = true
 # `io-util` is the `AsyncReadExt`/`AsyncWriteExt` the raw TCP mock frames its
 # truncated response with.
 tokio = { workspace = true, features = ["io-util"] }

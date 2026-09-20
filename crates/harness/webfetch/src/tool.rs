@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use reqwest::header::CONTENT_TYPE;
 
-use promptforge_api_types::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use harness_capabilities::Tool;
+use promptforge_api_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::config::{ConfigError, FetchConfig};
 use crate::error::{Disposition, FetchError, SafeUrl};
@@ -35,10 +36,10 @@ type CallResult = Result<ToolOutput, ToolError>;
 /// ```
 /// use std::sync::Arc;
 ///
-/// use promptforge_webfetch::WebFetch;
+/// use harness_webfetch::WebFetch;
 ///
 /// let tool = WebFetch::new();
-/// let shared: Arc<dyn promptforge_api_types::tools::Tool> = Arc::new(tool);
+/// let shared: Arc<dyn harness_capabilities::Tool> = Arc::new(tool);
 /// assert_eq!(shared.wire_name(), "web_fetch");
 /// ```
 #[derive(Debug, Clone)]
@@ -84,7 +85,7 @@ impl WebFetch {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_webfetch::WebFetch;
+    /// use harness_webfetch::WebFetch;
     ///
     /// let tool = WebFetch::new();
     /// # let _ = tool;
@@ -111,12 +112,12 @@ impl WebFetch {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_webfetch::{FetchConfig, WebFetch};
+    /// use harness_webfetch::{FetchConfig, WebFetch};
     ///
     /// let policy = FetchConfig::builder().max_chars(10_000).build()?;
     /// let tool = WebFetch::try_with_config(policy)?;
     /// # let _ = tool;
-    /// # Ok::<(), promptforge_webfetch::ConfigError>(())
+    /// # Ok::<(), harness_webfetch::ConfigError>(())
     /// ```
     pub fn try_with_config(config: FetchConfig) -> Result<WebFetch, ConfigError> {
         let config = Arc::new(config);
@@ -419,11 +420,13 @@ mod tests {
     use axum::routing::get;
     use flate2::Compression;
     use flate2::write::GzEncoder;
+    use harness_capabilities::Tool;
+    use harness_runner::spawn::spawn_tagged;
+    use promptforge_api_types::tools::{ToolErrorKind, ToolId};
 
     use super::WebFetch;
     use crate::config::{FetchConfig, FetchConfigBuilder};
     use crate::resolver::{Lookup, LookupFuture};
-    use promptforge_api_types::tools::{Tool, ToolErrorKind, ToolId};
 
     /// An article page long enough for readability extraction to fire.
     const ARTICLE_HTML: &str = r"
@@ -710,7 +713,7 @@ mod tests {
             .route("/plainbig", get(plainbig_route))
             .route("/plainbroken", get(plain_broken_route))
             .with_state(state);
-        tokio::spawn(async move {
+        spawn_tagged("mock-loopback-server", async move {
             axum::serve(listener, app)
                 .await
                 .expect("the loopback server must serve");
@@ -786,7 +789,7 @@ mod tests {
             .route("/redir-record", get(redirect_to_record))
             .route("/slow", get(hang))
             .with_state(state);
-        tokio::spawn(async move {
+        spawn_tagged("mock-recording-server", async move {
             axum::serve(listener, app)
                 .await
                 .expect("the loopback recording server must serve");
@@ -930,7 +933,7 @@ mod tests {
                 }),
             )
             .with_state(redir_state);
-        tokio::spawn(async move {
+        spawn_tagged("mock-redirect-server", async move {
             axum::serve(redir_listener, app)
                 .await
                 .expect("the redirect server must serve");

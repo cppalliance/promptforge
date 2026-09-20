@@ -1,8 +1,8 @@
-# promptforge-webfetch
+# harness-webfetch
 
-[![Crates.io](https://img.shields.io/crates/v/promptforge-webfetch.svg)](https://crates.io/crates/promptforge-webfetch)
-[![docs.rs](https://img.shields.io/docsrs/promptforge-webfetch)](https://docs.rs/promptforge-webfetch)
-[![License](https://img.shields.io/crates/l/promptforge-webfetch)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/harness-webfetch.svg)](https://crates.io/crates/harness-webfetch)
+[![docs.rs](https://img.shields.io/docsrs/harness-webfetch)](https://docs.rs/harness-webfetch)
+[![License](https://img.shields.io/crates/l/harness-webfetch)](LICENSE)
 
 A web-fetching tool for language models. Hand it a URL and it fetches the page, extracts the useful content, and returns it as markdown the model can cite - while enforcing an SSRF boundary that prevents the model from reaching your internal network no matter what URL it supplies. The security is layered and runs at DNS-resolution time on every hop, catching names that resolve inward, rebinding attacks, and redirect chains that point somewhere they should not.
 
@@ -10,12 +10,12 @@ A web-fetching tool for language models. Hand it a URL and it fetches the page, 
 
 ```toml
 [dependencies]
-promptforge-webfetch = "0.1"
+harness-webfetch = "0.1"
 ```
 
 ```rust
-use promptforge_webfetch::WebFetch;
-use promptforge_api_types::tools::Tool;
+use harness_webfetch::WebFetch;
+use harness_capabilities::Tool;
 
 let tool = WebFetch::new();
 let output = tool.call(serde_json::json!({ "url": "https://example.com" })).await?;

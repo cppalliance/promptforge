@@ -13,7 +13,20 @@ categories = ["development-tools", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+async-trait.workspace = true
+promptforge-api-runtime.workspace = true
+promptforge-api-types.workspace = true
+serde_json.workspace = true
+shared-vfs.workspace = true
+tracing.workspace = true
 workspace-hack.workspace = true
+
+[dev-dependencies]
+# The activation suite drives activated prompts through the engine's tokio
+# test driver and reads the store the capability wrote into.
+promptforge-api-runtime = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

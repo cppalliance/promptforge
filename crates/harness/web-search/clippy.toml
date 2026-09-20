@@ -1,0 +1,13 @@
+# A per-crate clippy.toml replaces the workspace root's rather than merging
+# with it, so the root's test allowances are restated here.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# The harness spawns only through the instrumented wrapper in
+# harness-runner, which tags each task with its EffectId and Provenance.
+# `cargo test -p build-xtask` checks that every harness crate names both
+# methods. The tests spawn their mock gateways through the wrapper too.
+disallowed-methods = [
+    { path = "tokio::spawn", reason = "spawn through harness-runner's instrumented wrapper" },
+    { path = "tokio::task::spawn_blocking", reason = "spawn through harness-runner's instrumented wrapper" },
+]

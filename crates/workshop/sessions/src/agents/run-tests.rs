@@ -2,8 +2,9 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+use harness_api::bridge::InputBroker;
 use promptforge_api_runtime::execute::{RunError, RunErrorKind};
-use promptforge_api_runtime::input::{InputBroker, InputError, InputOutcome};
+use promptforge_api_runtime::input::{InputError, InputOutcome};
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use tokio::sync::{broadcast, mpsc};
 

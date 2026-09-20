@@ -156,7 +156,7 @@ tools.add_local('grab', 'Local grab', {}, function() return 'local' end)\n\
     let error = run(
         &prompt,
         "",
-        &[tool as Arc<dyn Tool>],
+        &[tool as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )

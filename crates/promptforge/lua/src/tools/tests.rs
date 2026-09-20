@@ -272,11 +272,7 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
 fn tool_call_counts_seed_read_and_reject_unknown_keys() {
     let lua = lua_with_tools();
     let bound = ToolSet::for_test(
-        vec![ToolBinding::for_test(
-            "echo",
-            "echo tool",
-            &promptforge_api_types::tools::ToolDescriptor::describe(&EchoTool),
-        )],
+        vec![ToolBinding::for_test("echo", "echo tool", &echo_tool())],
         Vec::new(),
     );
     let counts =
@@ -294,42 +290,12 @@ fn tool_call_counts_seed_read_and_reject_unknown_keys() {
     );
 }
 
-/// A trivial tool so the counts test can bind an alias.
-struct EchoTool;
-
-#[async_trait::async_trait]
-impl promptforge_api_types::tools::Tool for EchoTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn wire_name(&self) -> &str {
-        "echo"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str"
-    )]
-    fn description(&self) -> &str {
-        "echo tool"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        json!({ "type": "object" })
-    }
-
-    async fn call(
-        &self,
-        _args: serde_json::Value,
-    ) -> std::result::Result<
-        promptforge_api_types::tools::ToolOutput,
-        promptforge_api_types::tools::ToolError,
-    > {
-        Ok(promptforge_api_types::tools::ToolOutput::trusted("echoed"))
-    }
+/// A trivial tool as data, so the counts test can bind an alias.
+fn echo_tool() -> promptforge_api_types::tools::ToolDescriptor {
+    promptforge_api_types::tools::ToolDescriptor::new(
+        ToolId::parse("tests/tools/echo").expect("valid id"),
+        "echo",
+        "echo tool",
+        json!({ "type": "object" }),
+    )
 }

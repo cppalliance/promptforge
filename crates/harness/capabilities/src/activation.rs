@@ -1,6 +1,6 @@
-//! Capability activation: the host-side step that turns a prompt's declared
-//! capabilities into the run's [`ToolCatalog`] and the implementations
-//! behind it.
+//! Capability activation: the harness-side step that turns a prompt's
+//! declared capabilities into the run's [`ToolCatalog`] and the
+//! implementations behind it.
 //!
 //! The engine never activates anything. Before a run is prepared, the host
 //! resolves the prompt's declarations against its
@@ -10,23 +10,22 @@
 //! [`ToolCatalog`] of descriptors [`Environment::prepare`] fills slots
 //! against, and the [`ToolTable`] of implementations the host's tool
 //! performer resolves a `ToolCall` effect's id in. The engine sees only the
-//! first. Workshop's session launch is this module's production caller
-//! today; the harness takes it over when the capability machinery moves
-//! there.
+//! first.
 //!
-//! [`Environment::prepare`]: super::Environment::prepare
+//! [`Environment::prepare`]: promptforge_api_runtime::Environment::prepare
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::{Capability, CapabilityId, Contribution, RunServices};
-use promptforge_api_types::tools::{Tool, ToolCatalog, ToolDescriptor, ToolId};
+use promptforge_api_runtime::execute::{CapabilityConflict, Requirements};
+use promptforge_api_runtime::parser::Prompt;
+use promptforge_api_types::capabilities::CapabilityId;
+use promptforge_api_types::tools::{ToolCatalog, ToolDescriptor, ToolId};
 
-use crate::capabilities::CapabilityRegistry;
-use crate::parser::Prompt;
-
-use super::requirements::{CapabilityConflict, Requirements};
+use crate::capability::{Capability, Contribution, RunServices};
+use crate::registry::CapabilityRegistry;
+use crate::tool::Tool;
 
 /// The implementations behind a run's catalog, keyed by stable identity.
 ///
@@ -77,7 +76,7 @@ impl fmt::Debug for ToolTable {
 pub struct Activation {
     /// The activated capabilities' contributed tools as descriptors, in
     /// declaration order: what the host hands to
-    /// [`Environment::tools`](super::Environment::tools).
+    /// [`Environment::tools`](promptforge_api_runtime::Environment::tools).
     pub catalog: ToolCatalog,
     /// The implementations behind the catalog: what the host's tool
     /// performer resolves against.
@@ -149,10 +148,9 @@ pub fn activate(
                     second = %second_id,
                     "conflicting capabilities declared; neither activates"
                 );
-                requirements.conflicts.push(CapabilityConflict {
-                    first: first_id.clone(),
-                    second: second_id.clone(),
-                });
+                requirements
+                    .conflicts
+                    .push(CapabilityConflict::new(first_id.clone(), second_id.clone()));
                 conflicted[i] = true;
                 conflicted[j] = true;
             }
@@ -226,8 +224,7 @@ fn assemble(
                 );
                 continue;
             }
-            let descriptor =
-                ToolDescriptor::describe(tool.as_ref()).with_conflicts(conflicts.clone());
+            let descriptor: ToolDescriptor = tool.descriptor().with_conflicts(conflicts.clone());
             // The catalog is the transport boundary: validate the wire name
             // per tool so one bad tool costs only itself.
             if let Err(error) = ToolCatalog::new(std::slice::from_ref(&descriptor)) {

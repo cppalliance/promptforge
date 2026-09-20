@@ -15,7 +15,7 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 /// pinned by the always/add tests below.)
 #[test]
 fn declared_tools_are_not_injected_without_always_or_add() {
-    let tool: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+    let tool: Arc<dyn TestTool> = Arc::new(ScopedFixtureTool::new(
         "concrete",
         "canonical_wire",
         "Concrete description.",
@@ -48,7 +48,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         vec![fixture_binding(
             "local_alias",
             "Concrete description.",
-            Arc::clone(&tool) as Arc<dyn Tool>,
+            Arc::clone(&tool) as Arc<dyn TestTool>,
         )],
         vec!["local_alias".to_owned()],
     );
@@ -100,7 +100,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         vec![fixture_binding(
             "section_tool",
             "capability",
-            Arc::clone(&tool) as Arc<dyn Tool>,
+            Arc::clone(&tool) as Arc<dyn TestTool>,
         )],
         Vec::new(),
     );

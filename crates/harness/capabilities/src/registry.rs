@@ -2,7 +2,7 @@
 //!
 //! Linking a capability crate alone registers nothing: a host constructs one
 //! registry, registers each installed capability by hand, and hands the
-//! registry to the [`Environment`](crate::execute::Environment). v1 is
+//! registry to [`activate`](crate::activate) for each run. v1 is
 //! unversioned - one capability per id - so a duplicate registration is
 //! rejected rather than shadowing the installed capability, and an id
 //! differing from a registered id only by `-`/`_`/`.` punctuation is
@@ -18,9 +18,9 @@
 //! ```
 //! use std::sync::Arc;
 //!
-//! use promptforge_api_runtime::capabilities::{CapabilityRegistry, RegistryErrorKind};
-//! use promptforge_api_types::capabilities::{
-//!     Capability, CapabilityError, CapabilityId, Contribution, RunServices,
+//! use harness_capabilities::{
+//!     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
+//!     RegistryErrorKind, RunServices,
 //! };
 //!
 //! struct Web {
@@ -57,19 +57,23 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::{Capability, CapabilityId};
+use promptforge_api_types::capabilities::CapabilityId;
+
+use crate::capability::Capability;
 
 #[cfg(test)]
-#[path = "capabilities-tests.rs"]
+#[path = "registry-tests.rs"]
 mod tests;
-
-// The first-party capability rides the facade so hosts never name the
-// internal pack crate (the one-door rule).
-pub use promptforge_web::Web;
 
 /// An explicit host-built registry of installed capabilities.
 ///
-/// See the [module documentation](self) for the registration rules.
+/// Linking a capability crate alone registers nothing: the host registers
+/// each installed capability by hand and hands the registry to
+/// [`activate`](crate::activate) for each run. v1 is unversioned - one
+/// capability per id - so a duplicate registration is rejected rather than
+/// shadowing the installed capability, and an id differing from a
+/// registered id only by `-`/`_`/`.` punctuation is rejected as a
+/// normalization collision.
 pub struct CapabilityRegistry {
     /// The installed capabilities, keyed by their stable ids.
     capabilities: BTreeMap<CapabilityId, Arc<dyn Capability>>,

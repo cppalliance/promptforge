@@ -13,10 +13,11 @@ use serde_json::json;
 
 use super::*;
 use crate::execute::protocol::StoreOp;
-use crate::input::{InputBroker, InputError, InputOutcome};
+use crate::input::{InputError, InputOutcome};
 use crate::model::{Message, ToolSchema};
 use crate::model::{ModelBinding, ModelId};
 use crate::observe::NullObserver;
+use crate::test_support::TestBroker;
 
 /// A context for the run `run-test` under fixed host inputs; nothing here
 /// reads the seed or `sys.when`.
@@ -189,7 +190,7 @@ fn run_of(body: &str, ctx: RunContext) -> Run {
 struct PendingBroker;
 
 #[async_trait::async_trait]
-impl InputBroker for PendingBroker {
+impl TestBroker for PendingBroker {
     async fn user_input(
         &self,
         _execution: &str,
