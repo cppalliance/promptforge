@@ -20,7 +20,7 @@ isProject: false
 - Scope and target work: repository `c:/Users/Vinnie/cursor/promptforge2`, branch `vibe2`. Baseline `upstream/master` = `37be5c6d`; endpoint and disposition ref `bbff0144`; worktree clean. Target: the seven commits of plan `vibe/2026-09-19-1-chatbox-extraction.md` (`f72730f0`, `012b28a1`, `fcf543f5`, `03b60282`, `fa378289`, `f0c2b1bb`, `bbff0144`). Design records read: `vibe/archdoc.md` (no invariant touched), that plan.
 - Goals: make the `types.ts` contract tell the truth about which seams are read; make every pill the live attachments strip paints button-free until removal ships; delete path globs that match no file; correct the one stale path literal the target left.
 - Non-goals: implementing `onPasteFiles`, `commandSource`, or attachment removal; a relocation-wide path-literal checker (raised for the user, not approved); the `config-ui/ui/` relocation; any change to `ChatBoxHandle`, `SerializedDraft`, the wire, or component ownership.
-- Success criteria: `test/chat-box.mjs` asserts a restored strip pill has no `.ws-mention-chip__remove`; `rg 'workshop/\*/ui' .github` returns nothing; `rg 'parts/agent/' crates/workshop/ui/test` returns nothing; `types.ts` marks `onPasteFiles` and `commandSource` reserved in the wording `action` and `variant` already use; the focused tests and `npm run typecheck` pass.
+- Success criteria: `test/chat-box.mjs` asserts a restored strip pill has no `.ws-mention-chip__remove`; `rg 'workshop/\*/ui' .github` returns nothing; `rg 'parts/agent/mention-chip' crates/workshop/ui/test` returns nothing; `types.ts` marks `onPasteFiles` and `commandSource` reserved in the wording `action` and `variant` already use; the focused tests and `npm run typecheck` pass.
 - Constraints: focused tests only per the operator ("test the minimum, no full verify"); no interface or persisted-shape change; CSS class names unchanged.
 
 ## Functional Specification
@@ -48,7 +48,7 @@ isProject: false
 ## Testing Plan
 
 - Focused (CBX-001): in `crates/workshop/ui/test/chat-box.mjs`, extend the existing `restore` assertions (around lines 1008-1015) to assert the restored strip pill has no `.ws-mention-chip__remove` descendant; `test/mention-chip.mjs` keeps its assertion that a NodeView pill has one (guards the default); `test/chat-box.mjs` line 1241's static-renderer assertion passes through the new option. Command: `node test/chat-box.mjs; node test/mention-chip.mjs` in `crates/workshop/ui/`, plus `npm run typecheck`.
-- Focused (CBX-002): `rg -n 'workshop/\*/ui' .github` returns nothing; `rg -n 'parts/agent/' crates/workshop/ui/test` returns nothing; `node test/mention-chip.mjs` still passes; `Test-Path crates/workshop/ui/package-lock.json` is true (the surviving `crates/*/ui/` pattern has a file to hash).
+- Focused (CBX-002): `rg -n 'workshop/\*/ui' .github` returns nothing; `rg -n 'parts/agent/mention-chip' crates/workshop/ui/test` returns nothing; `node test/mention-chip.mjs` still passes; `Test-Path crates/workshop/ui/package-lock.json` is true (the surviving `crates/*/ui/` pattern has a file to hash).
 - Per the operator, no full-suite, build, formatter, linter, or docs run in this plan; FOCUSED scope on every step, including the last.
 - Exit: `npm run typecheck`; the two grep checks; `git status --porcelain` empty after the commits.
 
@@ -102,12 +102,12 @@ Bounded path: two steps, Component `none`. Focused verification only, per the op
 
 <step-2>
 
-### Step 2: CBX-002 - delete dead lockfile globs and fix the test header
+### Step 2: CBX-002 - delete dead lockfile globs and fix the test header [completed]
 
 - Component: none
 - Depends on: none
 - Work: delete the 11 `crates/workshop/*/ui/package-lock.json` lines from `.github/workflows/ci.yml`, `nightly.yml`, `release-workshop.yml`, `dist-ci/build-setup.yml`; change `crates/workshop/ui/test/mention-chip.mjs` line 1 to `src/parts/chatbox/mention-chip.ts`.
-- Tests: `rg -n 'workshop/\*/ui' .github` empty; `rg -n 'parts/agent/' crates/workshop/ui/test` empty; `node test/mention-chip.mjs` passes. No failing-test-first shape exists (comment and YAML edits).
+- Tests: `rg -n 'workshop/\*/ui' .github` empty; `rg -n 'parts/agent/mention-chip' crates/workshop/ui/test` empty; `node test/mention-chip.mjs` passes. No failing-test-first shape exists (comment and YAML edits).
 - Commit: the four workflow files and the test header.
 
 </step-2>

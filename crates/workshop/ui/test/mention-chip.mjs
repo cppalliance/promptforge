@@ -1,4 +1,4 @@
-// The mention chip (src/parts/agent/mention-chip.ts) in jsdom: the
+// The mention chip (src/parts/chatbox/mention-chip.ts) in jsdom: the
 // configured Mention extension renamed to mentionNode with a vanilla-DOM
 // NodeView pill. Covers: a mention node renders as a pill with icon
 // slot, label, and a labelled remove button; the pill carries the

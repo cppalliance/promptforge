@@ -12,7 +12,6 @@
     cache-dependency-path: |
       crates/*/ui/package-lock.json
       crates/gateway/*/ui/package-lock.json
-            crates/workshop/*/ui/package-lock.json
 - name: Install UI dependencies
   run: npm ci --prefix crates/workshop/ui
 - name: Install config UI dependencies
