@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use promptforge_api_types::ids::TaskId;
 
-use super::scheduler::scheduler_context_on;
+use super::scheduler::{GateObserver, StoreGate, gated_store, scheduler_context_on};
 use super::*;
 use crate::execute::scheduler::TaskState;
 
@@ -308,9 +308,17 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
     // second is a no-op), reads the terminal state, and ends with no live
     // task - so no `tasks_live`. A wait on the cancelled slot delivers
     // `ok = false` with a `cancelled` error value.
+    //
+    // Whether the child's write completes before the cancel lands is the
+    // blocking pool's choice, so the store gate parks the first write the
+    // backend serves until the child's `TaskCancelled` is observed. The
+    // owner's own yield before the cancel must therefore not be a write
+    // or append: `exists` lets the child run without taking the gate.
+    let gate = Arc::new(StoreGate::default());
+    let store = gated_store(&gate);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
-         store.write('park', 'x')\n\
+         store.exists('park')\n\
          tasks.cancel(t)\n\
          tasks.cancel(t)\n\
          local s = tasks.status(t)\n\
@@ -328,8 +336,8 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
     let recorder = Arc::new(WaitRecorder::default());
     let ctx = scheduler_context_on(
         &prompt,
-        &TestStore::new(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
+        &store,
+        GateObserver::new(&gate, Arc::clone(&recorder) as Arc<dyn Observer>),
     );
     let mut scheduler = TokioDriver::new(&ctx, None);
     let out = scheduler

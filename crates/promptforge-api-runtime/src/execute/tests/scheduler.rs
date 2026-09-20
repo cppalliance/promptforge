@@ -2912,15 +2912,18 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
     }
 }
 
-/// A one-shot gate for the winning arm's backend write or append: the
-/// first write-intent op the backend serves parks with its write claim
-/// held until the losing arm's conflict observation opens the gate, so
-/// the cross-arm conflict fires no matter how late the second op's
-/// blocking-pool thread starts. The parked wait is bounded: a claims
-/// model that stopped conflicting would otherwise strand the run-end
-/// drain on the parked op, and the test must fail, never hang.
+/// A one-shot gate for the first backend write or append: the first
+/// write-intent op the backend serves parks with its write claim held
+/// until a [`GateObserver`] opens the gate, so a test's outcome cannot
+/// depend on how late that op's blocking-pool thread starts. The
+/// arm-conflict tests park the winning arm until the losing arm's
+/// conflict observation; the cancel-wait suite parks a child until its
+/// owner's cancel is observed. The parked wait is bounded: a claims model
+/// that stopped conflicting (or a cancel that stopped reporting) would
+/// otherwise strand the run-end drain on the parked op, and the test must
+/// fail, never hang.
 #[derive(Default)]
-struct StoreGate {
+pub(super) struct StoreGate {
     released: Mutex<bool>,
     release: Condvar,
     taken: AtomicBool,
@@ -2961,18 +2964,18 @@ impl StoreGate {
     }
 }
 
-/// Opens the gate when the losing arm's write or append fails: the
-/// conflict's failed observation fires before the answer posts, so the
-/// winner's parked op completes ahead of the run-end drain that awaits
-/// it. Every observation also forwards to `inner`, so a test can keep
-/// its own recorder behind the gate.
-struct GateObserver {
+/// Opens the gate when the losing arm's write or append fails, or when a
+/// task is cancelled: either observation fires before the answer that
+/// ends the run posts, so the parked op completes ahead of the run-end
+/// drain that awaits it. Every observation also forwards to `inner`, so a
+/// test can keep its own recorder behind the gate.
+pub(super) struct GateObserver {
     gate: Arc<StoreGate>,
     inner: Arc<dyn Observer>,
 }
 
 impl GateObserver {
-    fn new(gate: &Arc<StoreGate>, inner: Arc<dyn Observer>) -> Arc<GateObserver> {
+    pub(super) fn new(gate: &Arc<StoreGate>, inner: Arc<dyn Observer>) -> Arc<GateObserver> {
         Arc::new(GateObserver {
             gate: Arc::clone(gate),
             inner,
@@ -2984,7 +2987,9 @@ impl Observer for GateObserver {
     fn observe(&self, execution: &str, section: &str, event: Observation) {
         if matches!(
             event,
-            Observation::StoreWriteFailed | Observation::StoreAppendFailed
+            Observation::StoreWriteFailed
+                | Observation::StoreAppendFailed
+                | Observation::TaskCancelled { .. }
         ) {
             self.gate.open();
         }
@@ -3001,7 +3006,7 @@ struct GatedStore {
 }
 
 /// A test store mounting a [`GatedStore`] on `gate`.
-fn gated_store(gate: &Arc<StoreGate>) -> TestStore {
+pub(super) fn gated_store(gate: &Arc<StoreGate>) -> TestStore {
     TestStore::from_vfs(
         VfsRef::builder()
             .mount(
