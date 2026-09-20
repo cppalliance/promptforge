@@ -101,6 +101,7 @@ impl BitOrAssign for Flags {
 /// effect with two answers, a sequence gap, an unparseable payload), so
 /// there is nothing sound to replay against.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ReplayError {
     /// The re-executed run or task disagreed with its record.
     #[error("replay diverged from its record: {detail}")]

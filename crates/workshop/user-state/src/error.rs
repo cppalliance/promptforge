@@ -30,6 +30,7 @@ const LEAK_DETAIL: bool = cfg!(debug_assertions);
 pub enum UserStateError {
     /// A put named a key outside the allow-list. The message lists the
     /// allow-list itself so it cannot drift from the keys.
+    #[non_exhaustive]
     #[error(
         "user-state key {0:?} is not allowed; one of {allowed} is required",
         allowed = USER_STATE_KEYS.join(", ")
@@ -51,6 +52,7 @@ pub enum UserStateError {
     NotJson,
 
     /// The state file could not be written.
+    #[non_exhaustive]
     #[error("user-state file cannot be written")]
     Io(#[source] io::Error),
 }

@@ -91,6 +91,7 @@ pub fn providers() -> &'static [Provider] {
 /// A failed provider fetch or sheet download. Never fatal to a sheet
 /// build: the caller propagates last-known-good data instead.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum FetchError {
     /// The registry has no fetch implementation for this provider.
     #[error("no fetch implementation for provider `{name}`")]

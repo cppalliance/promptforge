@@ -84,6 +84,7 @@ macro_rules! events {
         $(#[$enum_meta])*
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case")]
+        #[non_exhaustive]
         pub enum $name {
             $(
                 $(#[$variant_meta])*

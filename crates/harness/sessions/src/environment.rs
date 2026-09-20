@@ -342,6 +342,7 @@ impl Bindings {
 /// becomes the launch error, reported to the operator instead of binding
 /// a fabricated fallback descriptor.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CurrentModelError {
     /// The gateway's model catalog could not be fetched; the fetch
     /// failure is the source.

@@ -58,6 +58,7 @@ pub(crate) enum GatewayError {
     /// A transport- or protocol-level failure from the upstream seam. The
     /// variants live in [`ProtocolError`]; the gateway wraps them so a route
     /// handler deals with one error type.
+    #[non_exhaustive]
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
 

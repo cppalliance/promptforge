@@ -16,7 +16,7 @@ use promptforge_api_types::event::Event;
 use super::{DebugCapture, DebugEvent, Observation, Observer};
 
 /// Declares the payload-free lifecycle pairs once and derives the
-/// event-to-observation fold and the or-pattern from the one list.
+/// event-to-observation fold from the one list.
 macro_rules! lifecycle_pairs {
     ($($variant:ident),* $(,)?) => {
         /// The payload-free [`Observation`] matching a payload-free
@@ -26,13 +26,6 @@ macro_rules! lifecycle_pairs {
                 $(Event::$variant { .. } => Observation::$variant,)*
                 _ => return None,
             })
-        }
-
-        /// The payload-free lifecycle variants as one or-pattern.
-        macro_rules! unit_lifecycle_variants {
-            () => {
-                $(Event::$variant { .. })|*
-            };
         }
     };
 }
@@ -122,20 +115,6 @@ macro_rules! debug_variants {
     };
 }
 
-/// Every variant the named group does not own: the arm each group's
-/// match closes with, so it stays exhaustive without a wildcard.
-macro_rules! other_groups {
-    (task_lifecycle) => {
-        unit_lifecycle_variants!() | content_variants!() | debug_variants!()
-    };
-    (content) => {
-        unit_lifecycle_variants!() | task_lifecycle_variants!() | debug_variants!()
-    };
-    (debug) => {
-        unit_lifecycle_variants!() | task_lifecycle_variants!() | content_variants!()
-    };
-}
-
 /// Replays `events`, in order, onto `observer` and `debug`.
 pub fn forward(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
     for event in events {
@@ -143,20 +122,30 @@ pub fn forward(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn D
     }
 }
 
-/// Routes one event to the seam its group belongs to. The match is
-/// exhaustive over [`Event`] with no wildcard, so a new variant fails to
-/// compile here until a group claims it.
+/// Routes one event to the seam its group belongs to. [`Event`] is
+/// `#[non_exhaustive]` in `promptforge-api-types`, so the match cannot be
+/// total here; the recorder exists to observe every event, so a variant
+/// no group claims panics naming itself rather than passing a suite
+/// vacuously. Adding a variant means adding it to a group's or-pattern
+/// by hand.
+///
+/// # Panics
+///
+/// When `event` is a variant none of the groups above claims.
 pub fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
     if let Some(observation) = unit_observation(&event) {
         observer.observe(event.execution(), event.section(), observation);
         return;
     }
     match event {
-        // Forwarded above; named only to keep the match exhaustive.
-        unit_lifecycle_variants!() => {}
         task_lifecycle_variants!() => forward_lifecycle(event, observer),
         content_variants!() => forward_content(event, observer),
         debug_variants!() => forward_debug(event, debug),
+        // The payload-free variants were forwarded above; anything else
+        // is a variant no group claims (`Event` is `#[non_exhaustive]` in
+        // `promptforge-api-types`), which the test recorder must never
+        // drop in silence.
+        _ => unreachable!("Event variant no group claims: {event:?}"),
     }
 }
 
@@ -236,11 +225,9 @@ fn forward_lifecycle(event: Event, observer: &dyn Observer) {
             &section,
             Observation::Other("Task note".to_owned()),
         ),
-        #[expect(
-            clippy::unnested_or_patterns,
-            reason = "the groups compose as or-patterns from one declaration each"
-        )]
-        other_groups!(task_lifecycle) => {}
+        // Routed here by `forward_one` for this group alone; `Event` is
+        // `#[non_exhaustive]` in `promptforge-api-types`.
+        _ => {}
     }
 }
 
@@ -317,11 +304,9 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             text,
             ..
         } => observer.on_task_notice(&execution, &section, 0, 0, turn, &task, &text),
-        #[expect(
-            clippy::unnested_or_patterns,
-            reason = "the groups compose as or-patterns from one declaration each"
-        )]
-        other_groups!(content) => {}
+        // Routed here by `forward_one` for this group alone; `Event` is
+        // `#[non_exhaustive]` in `promptforge-api-types`.
+        _ => {}
     }
 }
 
@@ -362,11 +347,9 @@ fn forward_debug(event: Event, debug: Option<&dyn DebugCapture>) {
                 );
             }
         }
-        #[expect(
-            clippy::unnested_or_patterns,
-            reason = "the groups compose as or-patterns from one declaration each"
-        )]
-        other_groups!(debug) => {}
+        // Routed here by `forward_one` for this group alone; `Event` is
+        // `#[non_exhaustive]` in `promptforge-api-types`.
+        _ => {}
     }
 }
 

@@ -66,8 +66,10 @@ async fn relay(
 /// content, Thinking for the reasoning side channel.
 fn on_delta(delta: &Delta, push: &Push) {
     let activity = match delta.kind {
-        DeltaKind::Text => Activity::Generating,
         DeltaKind::Reasoning => Activity::Thinking,
+        // `Text`, or a side channel `harness-sessions` adds behind its
+        // `#[non_exhaustive]` `DeltaKind`: the agent is producing output.
+        _ => Activity::Generating,
     };
     push.push_activity("Streaming response...", "an agent response chunk", activity);
 }

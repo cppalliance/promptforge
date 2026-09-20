@@ -56,6 +56,13 @@ pub(crate) async fn audio_speech(
         let requested = match &request.voice {
             SpeechVoice::Name(name) => name.as_str(),
             SpeechVoice::Id { id } => id.as_str(),
+            // `SpeechVoice` is `#[non_exhaustive]` in `gateway-protocol`; a
+            // form this route cannot name is refused as malformed.
+            _ => {
+                return Err(GatewayError::MalformedRequest(
+                    "voice must be a name string or an object with `id`".to_owned(),
+                ));
+            }
         };
         if !voices.iter().any(|voice| voice == requested) {
             return Err(GatewayError::InvalidVoice {
@@ -283,6 +290,9 @@ fn speech_fallback_mime(
         SpeechResponseFormat::Flac => "audio/flac",
         SpeechResponseFormat::Wav => "audio/wav",
         SpeechResponseFormat::Pcm => "audio/pcm",
+        // `SpeechResponseFormat` is `#[non_exhaustive]` in `gateway-protocol`;
+        // an encoding without a spelling here is labeled as opaque bytes.
+        _ => "application/octet-stream",
     })
 }
 

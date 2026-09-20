@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer};
 /// inbound frame it takes no delivery classification, because the server
 /// pushes none.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
 pub struct SwitchProfileFrame {
     /// The profile to select, or `None` (`null` on the wire) for no
     /// profile.

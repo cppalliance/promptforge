@@ -57,6 +57,7 @@ pub type SharedLog = Arc<Mutex<RunLog>>;
 
 /// Why the loop stopped without an outcome.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DriveError {
     /// The run log refused a write; the run cannot be recorded, so it is
     /// not driven further.

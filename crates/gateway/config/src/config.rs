@@ -337,6 +337,7 @@ pub struct DominionConfig {
 /// setting is consulted there only.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum LlamaBackend {
     /// Pick from the host's GPUs: a Blackwell (compute capability 12.x) gets
     /// the PromptForge CUDA build, any other NVIDIA GPU gets the upstream

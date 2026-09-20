@@ -175,7 +175,9 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
             received = recv_or_pending(&mut deltas_rx) => {
                 match received {
                     Ok(delta) => {
-                        if !send_frame(&mut socket, &delta_frame(delta)).await {
+                        if let Some(frame) = delta_frame(delta)
+                            && !send_frame(&mut socket, &frame).await
+                        {
                             break;
                         }
                     }
@@ -224,13 +226,17 @@ fn input_frame(frame: WaitFrame) -> InputFrame {
 }
 
 /// Renders a harness delta as the protocol's delta frame, the reply stamp
-/// carried through.
-fn delta_frame(delta: Delta) -> AgentDeltaFrame {
+/// carried through; `None` for a side channel the wire has no label for,
+/// dropped like a lagged delta because the completed-reply event repairs
+/// the transcript.
+fn delta_frame(delta: Delta) -> Option<AgentDeltaFrame> {
     let channel = match delta.kind {
         DeltaKind::Text => AgentDeltaKind::Text,
         DeltaKind::Reasoning => AgentDeltaKind::Reasoning,
+        // `DeltaKind` is `#[non_exhaustive]` in `harness-sessions`.
+        _ => return None,
     };
-    AgentDeltaFrame::new(channel, delta.content, delta.reply)
+    Some(AgentDeltaFrame::new(channel, delta.content, delta.reply))
 }
 
 /// Handles one inbound text frame. A `false` return means the client is

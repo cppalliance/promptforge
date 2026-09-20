@@ -111,6 +111,7 @@ pub struct Prepared {
 
 /// Why a run could not be prepared.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PrepareError {
     /// The prompt file could not be read; no row is written, since there
     /// is no prompt to record. The read failure is the source.

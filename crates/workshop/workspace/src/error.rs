@@ -150,6 +150,7 @@ pub enum WorkspaceError {
 
     /// A ui-state put named a key outside the allow-list. The message
     /// lists the allow-list itself so it cannot drift from the keys.
+    #[non_exhaustive]
     #[error(
         "ui-state key {0:?} is not allowed; one of {allowed} is required",
         allowed = UI_STATE_KEYS.join(", ")

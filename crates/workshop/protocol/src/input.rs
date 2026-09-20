@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 /// reappears, and a cancelled one vanishes by its absence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
+#[non_exhaustive]
 pub enum InputFrame {
     /// A wait opened: the session wants operator input for `token`.
     #[serde(rename = "input_required")]

@@ -234,6 +234,7 @@ pub struct ChatChunkChoice {
 /// The text to embed: one string or a batch of strings (OpenAI shape).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum EmbeddingInput {
     /// A single input string.
     One(String),
@@ -289,6 +290,7 @@ impl EmbeddingRequest {
 
 /// An outgoing embeddings response.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct EmbeddingResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
@@ -350,6 +352,7 @@ const MAX_SPEECH_SPEED: f32 = 4.0;
 /// route, never here, because voice sets are per-checkpoint.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum SpeechVoice {
     /// A plain voice name.
     Name(String),
@@ -366,6 +369,7 @@ pub enum SpeechVoice {
 /// and `mulaw`) stay unrepresentable until the enum is deliberately widened.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum SpeechResponseFormat {
     /// MPEG audio. The default: OpenAI defaults to mp3 while Together
     /// defaults to wav, so the pin lives in the type and an omitted field
@@ -387,6 +391,7 @@ pub enum SpeechResponseFormat {
 /// How a streaming speech response is framed (the OpenAI set).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum SpeechStreamFormat {
     /// Chunked binary audio (the behavior when the field is absent).
     Audio,
@@ -396,6 +401,7 @@ pub enum SpeechStreamFormat {
 
 /// An incoming speech synthesis request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct SpeechRequest {
     /// The model name, resolved against the routing table.
     pub model: String,
@@ -526,6 +532,7 @@ impl RerankRequest {
 
 /// An outgoing rerank response.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct RerankResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
@@ -575,6 +582,7 @@ impl RerankResponse {
 
 /// The OpenAI-shaped model list returned by `GET /v1/models`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct ModelsResponse {
     /// Always `"list"`.
     pub object: &'static str,

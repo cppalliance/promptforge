@@ -404,10 +404,13 @@ impl Scheduler {
                 }
             });
             match origin {
-                TaskOrigin::Author => leaked.push(task),
                 TaskOrigin::Model => {
                     self.queue_task_notice(owner, &task, &target, TaskEnd::Abandoned(reason));
                 }
+                // `Author`, or an origin `promptforge-api-types` adds behind
+                // its `#[non_exhaustive]` `TaskOrigin`: treated as the
+                // author's, like every other `origin == Model` test here.
+                _ => leaked.push(task),
             }
         }
         leaked

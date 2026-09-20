@@ -37,6 +37,7 @@ struct DialectEvidence {
 
 /// Why dialect resolution failed for a local model.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DialectResolveError {
     /// No dialect scored on the provided evidence.
     #[error("no tool dialect matched the provided evidence")]

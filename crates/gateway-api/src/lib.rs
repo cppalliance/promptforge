@@ -76,6 +76,7 @@ pub struct EnvVar {
 /// How a provider uses an environment variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum EnvRole {
     /// A credential: the variable carries API key material.
     Key,
@@ -86,6 +87,7 @@ pub enum EnvRole {
 /// Curated product opinion, not a vendor fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Tier {
     /// The frontier providers.
     Prime,
@@ -100,6 +102,7 @@ pub enum Tier {
 /// Freshness of one provider's slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum SliceStatus {
     /// Fetched fresh this run.
     Ok,

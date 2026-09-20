@@ -135,7 +135,9 @@ pub(crate) async fn run_once(
 fn opened_run(error: &PrepareError) -> Option<LogRunId> {
     match error {
         PrepareError::Parse { run_id, .. } | PrepareError::Refused { run_id, .. } => Some(*run_id),
-        PrepareError::Read { .. } | PrepareError::Log(_) => None,
+        // `Read`, `Log`, or a variant `harness-runner` adds behind its
+        // `#[non_exhaustive]` `PrepareError`: none of them opened a row.
+        _ => None,
     }
 }
 

@@ -233,6 +233,7 @@ impl Request {
 /// Plain data, so the executor's effect record can carry an operation
 /// through serde exactly as the shim yielded it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum StoreOp {
     /// `store.write(path, contents)`.
     Write {

@@ -371,7 +371,7 @@ Commit: one commit.
 
 <step-5>
 
-### Step 5: `#[non_exhaustive]` on error and wire types
+### Step 5: `#[non_exhaustive]` on error and wire types [completed]
 
 - Component: `error-model`
 - Piece: exhaustiveness attributes (D3)

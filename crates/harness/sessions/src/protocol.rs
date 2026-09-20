@@ -79,6 +79,7 @@ pub struct SessionEvent {
 /// Which streaming side channel one delta belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum DeltaKind {
     /// Answer content, superseded by the round's reply event.
     Text,
@@ -94,6 +95,7 @@ pub enum DeltaKind {
 /// ephemeral: they may drop under lag, and the completed-reply event is
 /// the repair path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Delta {
     /// Which side channel the chunk belongs to.
     pub kind: DeltaKind,

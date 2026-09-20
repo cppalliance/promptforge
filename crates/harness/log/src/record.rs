@@ -141,6 +141,7 @@ pub struct RecordFilter {
 
 /// One record as the log returns it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StoredRecord {
     /// The record's position in its run.
     pub seq: Seq,
@@ -183,6 +184,7 @@ impl RunOutcome {
 
 /// One run as the log returns it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RunRow {
     /// The run's identity.
     pub id: RunId,

@@ -6,6 +6,7 @@ use crate::RunId;
 
 /// Why a run log operation failed.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LogError {
     /// The database engine refused an operation; the engine's error is
     /// the source.

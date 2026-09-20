@@ -221,6 +221,7 @@ pub struct Provenance {
 /// tag is the string the Lua shims and the `tasks.pending` filter use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum TaskOrigin {
     /// The prompt's author, through `tasks.spawn` (and `fanout` over it).
     Author,
@@ -258,6 +259,7 @@ impl TaskOrigin {
 /// kind of owner end it was, so the notice can say more than "abandoned".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AbandonReason {
     /// The owner ended normally - a scalar return or an exhausted walk -
     /// without waiting on or cancelling the task. For an author task this

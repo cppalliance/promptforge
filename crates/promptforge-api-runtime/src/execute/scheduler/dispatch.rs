@@ -74,7 +74,10 @@ fn store_observations(op: &StoreOp) -> Option<(Lifecycle, Lifecycle)> {
             lifecycle::STORE_GLOB_SUCCEEDED,
             lifecycle::STORE_GLOB_FAILED,
         ),
-        StoreOp::Exists { .. } => return None,
+        // `exists` reports nothing, and so does any op `promptforge-lua`
+        // adds behind its `#[non_exhaustive]` `StoreOp` before this crate
+        // names it.
+        _ => return None,
     };
     Some(pair)
 }
