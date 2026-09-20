@@ -10,14 +10,14 @@ use gateway_config::ModelKind;
 use serde::Serialize;
 
 use crate::AppState;
-#[cfg(feature = "stt")]
-use crate::admin::walled::system::SpeechSnapshot;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 #[cfg(feature = "stt")]
 use crate::models::with_speech_endpoint;
 use crate::models::{EndpointStatus, endpoint_status};
 use crate::registry::RouteInfo;
+#[cfg(feature = "stt")]
+use crate::speech::SpeechSnapshot;
 
 const STATUS: RouteInfo = RouteInfo::open("/admin/status", &[Method::GET]);
 

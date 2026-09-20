@@ -2,21 +2,6 @@
 
 use crate::test_support::serve;
 
-#[cfg(feature = "stt")]
-#[test]
-fn speech_snapshot_serializes_only_generic_facade_facts() {
-    let snapshot = super::SpeechSnapshot::from(gateway_stt::SpeechService::new().status());
-
-    assert_eq!(
-        serde_json::json!(snapshot),
-        serde_json::json!({
-            "configured": false,
-            "ready": false,
-            "gpu": false,
-        })
-    );
-}
-
 /// A minimal profile rooting the artifact cache at `cache_dir`.
 fn system_config(cache_dir: &std::path::Path) -> Config {
     Config::from_toml_str(&format!(

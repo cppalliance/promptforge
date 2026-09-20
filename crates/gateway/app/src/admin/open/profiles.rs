@@ -10,9 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::admin::config_path;
-use crate::admin::walled::config::config_write_error;
 use crate::auth::AuthedCaller;
-use crate::error::{GatewayError, WireJson, blocking};
+use crate::error::{GatewayError, WireJson, blocking, config_write_error};
 use crate::registry::RouteInfo;
 
 const PROFILES: RouteInfo = RouteInfo::open("/admin/profiles", &[Method::GET]);

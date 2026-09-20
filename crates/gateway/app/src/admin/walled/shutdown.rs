@@ -1,4 +1,5 @@
-﻿//! The `POST /shutdown` route and the process-shutdown signal it fires.
+﻿//! The `POST /shutdown` route, the remote face of
+//! [`crate::shutdown::ShutdownSignal`].
 //!
 //! The route is the remote face of the graceful shutdown that Ctrl-C and
 //! [`GatewayHandle::shutdown`](crate::GatewayHandle::shutdown) drive; the
@@ -12,7 +13,6 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::{Method, StatusCode};
 use axum::routing::post;
-use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
@@ -27,37 +27,6 @@ pub(crate) const ROUTES: &[RouteInfo] = &[SHUTDOWN];
 /// The shutdown route.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(SHUTDOWN.path, post(admin_shutdown))
-}
-
-/// The process-shutdown signal shared by the `POST /shutdown` route, the
-/// serve loop (which selects on it alongside the caller-owned shutdown
-/// future), and every open-ended response stream, which ends when it fires
-/// so the graceful drain has nothing left to wait for.
-///
-/// Every clone shares the one underlying signal. It is a cancellation
-/// token, not a notify: a `fire` wakes every waiter at once and stays
-/// fired, so a stream that subscribes after the signal ends immediately.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ShutdownSignal {
-    token: CancellationToken,
-}
-
-impl ShutdownSignal {
-    /// Fires the signal, starting the serve loop's graceful shutdown.
-    pub(crate) fn fire(&self) {
-        self.token.cancel();
-    }
-
-    /// Whether the signal has been fired; the tray's status tick reads it
-    /// to tell a requested shutdown apart from a serve-loop failure.
-    pub(crate) fn is_fired(&self) -> bool {
-        self.token.is_cancelled()
-    }
-
-    /// Resolves once the signal has fired.
-    pub(crate) async fn fired(&self) {
-        self.token.cancelled().await;
-    }
 }
 
 /// The `POST /shutdown` route: bearer-authed, loopback-only via the shared

@@ -8,6 +8,7 @@ use gateway_api_types::ACCEPTED_SHEET_SCHEMA_VERSION;
 use time::OffsetDateTime;
 
 use super::*;
+use crate::boot::CACHE_FILE_NAME;
 
 #[tokio::test]
 async fn a_version_mismatched_cache_is_treated_as_absent() {

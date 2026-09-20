@@ -20,6 +20,16 @@ const CONFIG_FILE_NAME: &str = "gateway.toml";
 /// The profile the generated default carries and selects.
 pub(crate) const DEFAULT_PROFILE: &str = "default";
 
+/// The release artifact the cloud provider model sheet downloads from.
+pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";
+
+/// The environment override for the sheet URL, matching the repo's
+/// `PROMPTFORGE_*` convention; there is no config-schema knob.
+pub(crate) const SHEET_URL_ENV: &str = "PROMPTFORGE_MODELS_SHEET_URL";
+
+/// The sheet cache file name inside the profile directory.
+pub(crate) const CACHE_FILE_NAME: &str = "cloud-provider-models.json";
+
 /// The installer's STT choice for first-run generation.
 ///
 /// The NSIS components page records the choice as the `InstallSTT` DWORD

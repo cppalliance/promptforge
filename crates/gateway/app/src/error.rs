@@ -584,6 +584,25 @@ pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
     text
 }
 
+/// Maps a config-crate failure onto the wire: a failed disk write is a
+/// server fault (500), everything else - validation, parse, unresolved
+/// `${VAR}`, an unreadable chain file - rejects the payload (422) with the
+/// full cause chain so the UI can show why the save failed.
+pub(crate) fn config_write_error(error: gateway_config::ConfigError) -> GatewayError {
+    if error.kind() == gateway_config::ConfigErrorKind::Write {
+        GatewayError::ConfigWriteIo(Box::new(error))
+    } else {
+        GatewayError::ConfigWriteRejected(error_chain(&error))
+    }
+}
+
+/// Maps a config-crate failure on a pending read: saves validate before
+/// writing, so an unresolvable pending state is a server fault (500) with
+/// the full cause chain in the message.
+pub(crate) fn pending_read_error(error: &gateway_config::ConfigError) -> GatewayError {
+    GatewayError::PendingConfig(error_chain(error))
+}
+
 /// Runs `work` on tokio's blocking pool and hands back its value.
 ///
 /// Every route that touches the filesystem, a blocking client, or an OS

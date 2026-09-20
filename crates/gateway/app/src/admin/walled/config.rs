@@ -17,12 +17,12 @@ use axum::extract::State;
 use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
-use gateway_config::{ConfigErrorKind, save_config_shadow};
+use gateway_config::save_config_shadow;
 use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
-use crate::error::{GatewayError, WireJson, blocking, error_chain};
+use crate::error::{GatewayError, WireJson, blocking, config_write_error};
 use crate::registry::RouteInfo;
 
 /// The reply of every shadow-write route: the shadow file the save
@@ -87,18 +87,6 @@ pub(crate) async fn admin_put_config(
         .await?
         .map_err(config_write_error)?;
     Ok(Json(ShadowReply::staged(&shadows.config)))
-}
-
-/// Maps a config-crate failure onto the wire: a failed disk write is a
-/// server fault (500), everything else - validation, parse, unresolved
-/// `${VAR}`, an unreadable chain file - rejects the payload (422) with the
-/// full cause chain so the UI can show why the save failed.
-pub(crate) fn config_write_error(error: gateway_config::ConfigError) -> GatewayError {
-    if error.kind() == ConfigErrorKind::Write {
-        GatewayError::ConfigWriteIo(Box::new(error))
-    } else {
-        GatewayError::ConfigWriteRejected(error_chain(&error))
-    }
 }
 
 /// Converts the request body into the TOML document a shadow save takes.

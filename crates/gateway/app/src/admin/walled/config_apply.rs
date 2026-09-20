@@ -31,11 +31,11 @@ use gateway_config::shadow_path;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
-use super::config_pending::{config_root, relative_name, shadow_census};
 use crate::AppState;
 use crate::auth::LoopbackCaller;
 use crate::commands::Command;
 use crate::commands::apply::{ApplyPlan, capture_apply, promote_captures};
+use crate::config_shadow::{config_root, relative_name, shadow_census};
 use crate::error::error_chain;
 use crate::error::{GatewayError, blocking};
 use crate::registry::RouteInfo;

@@ -20,6 +20,10 @@ pub(crate) mod config;
 pub(crate) mod config_apply;
 pub(crate) mod config_pending;
 pub(crate) mod env_file;
+// The browser handoff mints the config SPA's cookie, so the module
+// exists only where that surface does; its build-independent auth
+// primitives live in `crate::auth::primitives`.
+#[cfg(feature = "config-ui")]
 pub(crate) mod handoff;
 pub(crate) mod hf;
 #[cfg(feature = "local")]

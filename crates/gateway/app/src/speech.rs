@@ -339,6 +339,26 @@ pub(crate) async fn audio_voices(
     Ok(Json(serde_json::json!({ "voices": voices })))
 }
 
+/// Generic speech lifecycle facts included in Gateway operational status.
+#[cfg(feature = "stt")]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub(crate) struct SpeechSnapshot {
+    configured: bool,
+    ready: bool,
+    gpu: bool,
+}
+
+#[cfg(feature = "stt")]
+impl From<gateway_stt::SpeechStatus> for SpeechSnapshot {
+    fn from(status: gateway_stt::SpeechStatus) -> Self {
+        Self {
+            configured: status.configured(),
+            ready: status.ready(),
+            gpu: status.gpu(),
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "speech-tests.rs"]
 mod tests;

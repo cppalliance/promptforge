@@ -234,7 +234,7 @@ Six remediation choices are settled. Three were escalated because they change a 
 
 <step-4>
 
-### Step 4: Walled-tier relocation - the handoff split and the five rehomed items
+### Step 4: Walled-tier relocation - the handoff split and the five rehomed items [completed]
 
 - Component: debt-removal
 - Move the ungated auth primitives out of `crates/gateway/app/src/admin/walled/handoff.rs` into a new `crates/gateway/app/src/auth-primitives.rs`, wired from `auth.rs` as `#[path = "auth-primitives.rs"] mod primitives;` per the flat source convention: `AUTH_COOKIE`, `presented_cookie_proof`, `session_token`, `fetch_metadata_allows_cookie`, `fetch_metadata_allows_ambient`, `hex_decode`, `hex_digit`, and `auth_url`. Everything moved stays `pub(crate)`.

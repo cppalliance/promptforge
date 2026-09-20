@@ -8,6 +8,21 @@ use crate::build_router;
 use crate::test_support::workshop_state;
 
 #[cfg(feature = "stt")]
+#[test]
+fn speech_snapshot_serializes_only_generic_facade_facts() {
+    let snapshot = super::SpeechSnapshot::from(gateway_stt::SpeechService::new().status());
+
+    assert_eq!(
+        serde_json::json!(snapshot),
+        serde_json::json!({
+            "configured": false,
+            "ready": false,
+            "gpu": false,
+        })
+    );
+}
+
+#[cfg(feature = "stt")]
 #[tokio::test]
 async fn transcription_checks_bearer_auth_before_multipart_extraction() {
     let response = build_router(workshop_state(), None)

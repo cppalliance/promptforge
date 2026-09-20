@@ -12,10 +12,10 @@ use gateway_api_types::Progress;
 use gateway_progress::ProgressHub;
 
 use crate::AppState;
-use crate::admin::walled::shutdown;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
 use crate::registry::RouteInfo;
+use crate::shutdown;
 
 const PROGRESS: RouteInfo = RouteInfo::open("/admin/progress", &[Method::GET]);
 

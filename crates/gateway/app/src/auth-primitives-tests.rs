@@ -37,7 +37,10 @@ fn the_auth_url_percent_encodes_a_configured_key() {
 
 /// Hex-encodes as the route's `hex_encode` does; that encoder is
 /// compiled only with the config surface, while these cookie-auth
-/// tests run in every build.
+/// tests run in every build. `hex_decode_round_trips_through_the_encoder`
+/// pins the codec pair, beside the encoder; nothing pins this duplicate
+/// to either, and `hex_decode` reads both cases, so keep the lowercase
+/// two-digit output in step with the encoder by hand.
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -127,15 +130,7 @@ fn malformed_cookies_present_nothing() {
 }
 
 #[test]
-fn hex_decode_round_trips_through_the_encoder() {
-    #[cfg(feature = "config-ui")]
-    {
-        let key = b"an arbitrary key/with+odd=chars";
-        assert_eq!(
-            hex_decode(&super::hex_encode(key)).as_deref(),
-            Some(key.as_slice())
-        );
-    }
+fn hex_decode_reads_well_formed_hex() {
     assert_eq!(hex_decode("").as_deref(), Some(b"".as_slice()));
     assert_eq!(
         hex_decode("00ff40").as_deref(),

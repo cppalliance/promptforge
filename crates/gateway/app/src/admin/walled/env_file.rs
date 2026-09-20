@@ -19,10 +19,10 @@ use axum::{Json, Router};
 use gateway_config::{pending_var_references, write_shadow};
 use serde::Serialize;
 
-use super::config::{ShadowReply, config_write_error};
+use super::config::ShadowReply;
 use crate::AppState;
 use crate::auth::LoopbackCaller;
-use crate::error::{GatewayError, WireJson, WireQuery, blocking};
+use crate::error::{GatewayError, WireJson, WireQuery, blocking, config_write_error};
 use crate::registry::RouteInfo;
 
 /// The `GET /admin/env` reply.

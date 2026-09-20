@@ -1,7 +1,7 @@
 //! The `ApplyConfig` command: what an apply captures, and how the command
 //! commits it.
 //!
-//! The route side (`admin::walled::config_apply`) takes the census under
+//! The `POST /admin/config-apply` route takes the census under
 //! the apply lock and calls [`capture_apply`] to turn it into an
 //! [`ApplyPlan`]: an inline promotion for shadows that need no reload, or
 //! an [`ApplySnapshot`] that rides onto the queue as `Command::ApplyConfig`
@@ -20,11 +20,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{APPLY_CONFIG_LABEL, Outcome};
 use crate::AppState;
-use crate::admin::walled::config::config_write_error;
-use crate::admin::walled::config_pending::{
-    canonical_form, config_root, relative_name, shadow_census,
-};
-use crate::error::{GatewayError, blocking};
+use crate::config_shadow::{canonical_form, config_root, relative_name, shadow_census};
+use crate::error::{GatewayError, blocking, config_write_error};
 use crate::routing::Routing;
 
 /// Top-level sections the process reads once at boot. A change to one of

@@ -52,16 +52,6 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(REFRESH.path, post(admin_cloud_models_refresh))
 }
 
-/// The release artifact the sheet downloads from.
-pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";
-
-/// The environment override for the sheet URL, matching the repo's
-/// `PROMPTFORGE_*` convention; there is no config-schema knob.
-pub(crate) const SHEET_URL_ENV: &str = "PROMPTFORGE_MODELS_SHEET_URL";
-
-/// The cache file name inside the profile directory.
-pub(crate) const CACHE_FILE_NAME: &str = "cloud-provider-models.json";
-
 /// The cache age past which a launch re-downloads: one week, compared
 /// against the envelope's `generated_at`, which survives file copies and
 /// so needs no sidecar metadata.

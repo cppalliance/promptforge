@@ -15,6 +15,7 @@ use gateway_config::Config;
 use tower::ServiceExt;
 
 use super::{hex_encode, session_token};
+use crate::auth::primitives::hex_decode;
 use crate::test_support::app_state;
 use crate::{AppState, build_router};
 
@@ -40,6 +41,17 @@ async fn get_auth(state: &AppState, uri: &str) -> Response<Body> {
         .oneshot(request)
         .await
         .expect("the router is infallible")
+}
+
+#[test]
+fn hex_decode_round_trips_through_the_encoder() {
+    // The decoder ships in every build and the encoder only with the
+    // config surface, so the pair is pinned here, beside the encoder.
+    let key = b"an arbitrary key/with+odd=chars";
+    assert_eq!(
+        hex_decode(&hex_encode(key)).as_deref(),
+        Some(key.as_slice())
+    );
 }
 
 #[tokio::test]

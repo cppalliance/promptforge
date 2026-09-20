@@ -78,6 +78,7 @@ mod boot_load;
 #[cfg(feature = "local")]
 mod cache;
 mod commands;
+mod config_shadow;
 mod diagnostics;
 mod dialect;
 mod error;
@@ -88,6 +89,7 @@ mod relaunch;
 mod relay;
 mod routing;
 mod runner;
+mod shutdown;
 mod speech;
 #[cfg(test)]
 mod test_support;
@@ -129,7 +131,7 @@ use axum::Router;
 use tokio::sync::RwLock;
 
 use crate::admin::AdminConfig;
-use crate::admin::walled::{cloud_models, hf, reveal, shutdown, system};
+use crate::admin::walled::{cloud_models, hf, reveal, system};
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;

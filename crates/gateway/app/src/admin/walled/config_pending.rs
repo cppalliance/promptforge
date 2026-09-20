@@ -12,22 +12,21 @@
 //! `gateway-config`; these handlers own auth, path assembly,
 //! and the wire shape.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use axum::extract::State;
 use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
 use gateway_config::{
-    Config, ProfileSelection, ProfileState, load_pending_config, pending_report,
-    profile_state_path, shadow_path,
+    Config, ProfileSelection, ProfileState, load_pending_config, profile_state_path,
 };
 use serde::Serialize;
 
 use crate::AppState;
 use crate::auth::LoopbackCaller;
-use crate::error::error_chain;
-use crate::error::{GatewayError, blocking};
+use crate::config_shadow::{config_root, relative_name, shadow_census};
+use crate::error::{GatewayError, blocking, pending_read_error};
 use crate::registry::RouteInfo;
 
 /// The `GET /admin/config-pending` reply.
@@ -152,43 +151,6 @@ pub(crate) async fn admin_config_dirty(
     Ok(Json(reply))
 }
 
-/// Maps a config-crate failure on a pending read: saves validate before
-/// writing, so an unresolvable pending state is a server fault (500) with
-/// the full cause chain in the message.
-fn pending_read_error(error: &gateway_config::ConfigError) -> GatewayError {
-    GatewayError::PendingConfig(error_chain(error))
-}
-
-/// Every shadow on disk for one gateway and the sections they change.
-pub(crate) struct ShadowCensus {
-    /// Real files whose shadows exist, in canonical form, without
-    /// duplicates.
-    pub(crate) files: Vec<PathBuf>,
-    /// Top-level sections whose merged value the shadows change, sorted
-    /// and deduplicated.
-    pub(crate) sections: Vec<String>,
-}
-
-/// Collects the config shadow and one env shadow.
-pub(crate) fn shadow_census(config_path: &Path) -> Result<ShadowCensus, GatewayError> {
-    let profile = pending_report(config_path).map_err(|error| pending_read_error(&error))?;
-    let mut files: Vec<PathBuf> = Vec::new();
-    for file in &profile.shadowed_files {
-        push_unique(&mut files, file);
-    }
-    let sections = profile.changed_sections;
-    let env = config_path.with_extension("env");
-    if shadow_path(&env).is_file() {
-        push_unique(&mut files, &env);
-    }
-    Ok(ShadowCensus { files, sections })
-}
-
-/// The directory config files render relative to.
-pub(crate) fn config_root(config_path: &Path) -> Option<&Path> {
-    config_path.parent()
-}
-
 /// Assembles the `GET /admin/config-dirty` body: the shadowed config file
 /// plus the `.env` sibling, and the config shadow's section diff.
 fn dirty_reply(config_path: &Path) -> Result<DirtyReply, GatewayError> {
@@ -205,48 +167,6 @@ fn dirty_reply(config_path: &Path) -> Result<DirtyReply, GatewayError> {
         pending_files,
         changed_sections: census.sections,
     })
-}
-
-/// Appends `file` unless its canonical form is already listed. The same
-/// file reaches here under different spellings (the profile chain writes
-/// `profiles/../gateway.toml`, the boot path is `gateway.toml`), so the
-/// list holds canonical forms.
-fn push_unique(shadowed: &mut Vec<PathBuf>, file: &Path) {
-    let canonical = canonical_form(file);
-    if !shadowed.contains(&canonical) {
-        shadowed.push(canonical);
-    }
-}
-
-/// A comparable form of `path`: canonicalized when it exists, otherwise
-/// its canonicalized parent plus its own name (a real `.env` may not
-/// exist while its shadow does), otherwise the path as given.
-pub(crate) fn canonical_form(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-    if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
-        && let Ok(parent) = parent.canonicalize()
-    {
-        return parent.join(name);
-    }
-    path.to_path_buf()
-}
-
-/// Renders one shadowed real file for the wire: relative to `root` when
-/// it sits beneath it, the full path otherwise, always with forward
-/// slashes for a stable shape across platforms.
-pub(crate) fn relative_name(file: &Path, root: Option<&Path>) -> String {
-    let file = canonical_form(file);
-    let relative = root
-        .map(canonical_form)
-        .and_then(|root| file.strip_prefix(&root).ok().map(Path::to_path_buf))
-        .unwrap_or(file);
-    let parts: Vec<String> = relative
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    parts.join("/")
 }
 
 #[cfg(test)]

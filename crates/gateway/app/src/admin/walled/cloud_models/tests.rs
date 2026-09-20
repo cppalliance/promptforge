@@ -16,6 +16,7 @@ use tokio::sync::Notify;
 use tower::ServiceExt as _;
 
 use super::*;
+use crate::boot::CACHE_FILE_NAME;
 
 #[path = "tests-refresh.rs"]
 mod refresh;

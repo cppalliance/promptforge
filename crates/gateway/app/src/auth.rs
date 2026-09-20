@@ -20,8 +20,14 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 
 use crate::AppState;
-use crate::admin::walled::handoff;
 use crate::error::GatewayError;
+
+/// The ambient-credential primitives the auth rules read: the handoff
+/// cookie, its session proof, and the Fetch Metadata gates. They ship in
+/// every build, while the `/auth` route that mints the cookie ships only
+/// with the config surface.
+#[path = "auth-primitives.rs"]
+pub(crate) mod primitives;
 
 /// The request headers plus the peer address, as [`check_auth`]
 /// needs them.
@@ -172,7 +178,7 @@ mod loopback_caller_tests;
 /// 3. Loopback trust: `[server] trust_loopback` is on, the server recorded
 ///    a loopback peer for the connection, the request presents no
 ///    `Authorization` header at all, and its Fetch Metadata permits
-///    ambient access ([`handoff::fetch_metadata_allows_ambient`]).
+///    ambient access ([`primitives::fetch_metadata_allows_ambient`]).
 ///
 /// Two edges of rule 3 are deliberate. A presented-but-wrong bearer is
 /// refused even on loopback: absence of credentials is what loopback
@@ -190,11 +196,11 @@ pub(crate) async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), 
     if secret_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
         return Ok(());
     }
-    if let Some(cookie) = handoff::presented_cookie_proof(caller)
-        && handoff::fetch_metadata_allows_cookie(caller)
+    if let Some(cookie) = primitives::presented_cookie_proof(caller)
+        && primitives::fetch_metadata_allows_cookie(caller)
         && secret_eq(
             &cookie,
-            &handoff::session_token(&state.handoff_salt, live.key.expose().as_bytes()),
+            &primitives::session_token(&state.handoff_salt, live.key.expose().as_bytes()),
         )
     {
         return Ok(());
@@ -202,7 +208,7 @@ pub(crate) async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), 
     if live.trust_loopback
         && authorization.is_none()
         && shared_loopback::is_loopback_peer(caller.peer())
-        && handoff::fetch_metadata_allows_ambient(caller)
+        && primitives::fetch_metadata_allows_ambient(caller)
     {
         return Ok(());
     }

@@ -855,7 +855,7 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
 /// `/auth` redirect so the key never sits in browser history. A browser
 /// that cannot launch warns; the gateway serves on.
 fn open_settings_page(handle: &GatewayHandle) {
-    let url = crate::admin::walled::handoff::auth_url(handle.url(), handle.api_key.expose());
+    let url = crate::auth::primitives::auth_url(handle.url(), handle.api_key.expose());
     if let Err(error) = open::that(&url) {
         tracing::warn!("could not open the browser: {error}; the Settings URL is {url}");
     }
@@ -1013,10 +1013,10 @@ fn serve_thread(
 /// The sheet download URL: the `PROMPTFORGE_MODELS_SHEET_URL` override
 /// when set and non-empty, else the published release artifact.
 fn cloud_models_sheet_url() -> String {
-    std::env::var(crate::admin::walled::cloud_models::SHEET_URL_ENV)
+    std::env::var(crate::boot::SHEET_URL_ENV)
         .ok()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| crate::admin::walled::cloud_models::DEFAULT_SHEET_URL.to_owned())
+        .unwrap_or_else(|| crate::boot::DEFAULT_SHEET_URL.to_owned())
 }
 
 /// The sheet cache path in the profile directory: the run directory's
@@ -1027,7 +1027,7 @@ fn cloud_models_cache_path(options: &ServeOptions) -> Option<PathBuf> {
         .clone()
         .or_else(gateway_api_discovery::default_run_dir)
         .and_then(|run_dir| run_dir.parent().map(Path::to_path_buf))
-        .map(|state_dir| state_dir.join(crate::admin::walled::cloud_models::CACHE_FILE_NAME))
+        .map(|state_dir| state_dir.join(crate::boot::CACHE_FILE_NAME))
 }
 
 /// Removes the gateway discovery file on drop when it still belongs to this
@@ -1125,7 +1125,7 @@ pub fn run_printing_url(options: &ServeOptions) -> Result<(), StartupError> {
     // affordance, so it goes to stdout itself, not through the log.
     println!(
         "{}",
-        crate::admin::walled::handoff::auth_url(handle.url(), handle.api_key.expose())
+        crate::auth::primitives::auth_url(handle.url(), handle.api_key.expose())
     );
     run_headless(handle)
 }

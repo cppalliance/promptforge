@@ -36,26 +36,6 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(SYSTEM.path, get(admin_system))
 }
 
-/// Generic speech lifecycle facts included in Gateway operational status.
-#[cfg(feature = "stt")]
-#[derive(Debug, Clone, Copy, Serialize)]
-pub(crate) struct SpeechSnapshot {
-    configured: bool,
-    ready: bool,
-    gpu: bool,
-}
-
-#[cfg(feature = "stt")]
-impl From<gateway_stt::SpeechStatus> for SpeechSnapshot {
-    fn from(status: gateway_stt::SpeechStatus) -> Self {
-        Self {
-            configured: status.configured(),
-            ready: status.ready(),
-            gpu: status.gpu(),
-        }
-    }
-}
-
 /// One `GET /admin/system` snapshot.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SystemSnapshot {
