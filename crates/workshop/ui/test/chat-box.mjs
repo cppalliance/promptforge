@@ -1,4 +1,4 @@
-// The prompt input (src/parts/chatbox/chat-box.ts) in jsdom: a Tiptap/
+// The chat box (src/parts/chatbox/chat-box.ts) in jsdom: a Tiptap/
 // ProseMirror editor framed as the chat box. Covers: the editor mounts
 // inside the framed container with an accessible editable region; the
 // placeholder decorates the empty paragraph and lifts once content
@@ -10,7 +10,9 @@
 // breaks as single newlines; clear empties; setEditable toggles
 // contenteditable; the box registers a prosemirror text-control adapter
 // whose canUndo/canRedo track the history plugin's depth; dispose
-// destroys the editor. Runs under the shared
+// destroys the editor. The static renderer (src/parts/chatbox/chat-box-view.ts):
+// renderDraft turns a SerializedDraft with text, one inline pill, and one
+// attachment into the expected read-only DOM. Runs under the shared
 // leak check: a PromptInput that is never disposed fails.
 // Run: node test/chat-box.mjs
 import { writeFile } from "node:fs/promises";
@@ -28,6 +30,7 @@ const bundle = await esbuild.build({
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { PromptInput, clampPromptInputHeight } from "./src/parts/chatbox/chat-box.ts";
+      export { renderDraft } from "./src/parts/chatbox/chat-box-view.ts";
       export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
       export { getService } from "./src/services/service-registry.ts";
     `,
@@ -71,11 +74,10 @@ const zeroRect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, h
 dom.window.Range.prototype.getClientRects = () => [];
 dom.window.Range.prototype.getBoundingClientRect = () => zeroRect;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-prompt-input-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "promptforge-chat-box-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, PromptInput, clampPromptInputHeight, TEXT_CONTROL_SERVICE, getService } = await import(
-  pathToFileURL(bundlePath).href
-);
+const { lifecycle, PromptInput, clampPromptInputHeight, renderDraft, TEXT_CONTROL_SERVICE, getService } =
+  await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -518,6 +520,84 @@ await assertNoLeaks(lifecycle, async () => {
       editorElement(input) === null,
     );
     input.element.remove();
+  }
+
+  // --- The static renderer (chat-box-view.ts) ----------------------------------------
+
+  {
+    const attachment = { id: "img-1", label: "shot.png", kind: "image", data: { fileId: 7 } };
+    const pill = { id: "src/main.ts", label: "main.ts", kind: "file", data: { path: "src/main.ts" } };
+    const draft = {
+      v: 1,
+      doc: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "look at " },
+              { type: "mentionNode", attrs: { ...pill, mentionSuggestionChar: "@" } },
+              { type: "text", text: " first" },
+              { type: "hardBreak" },
+              { type: "text", text: "then" },
+            ],
+          },
+          { type: "paragraph" },
+          { type: "paragraph", content: [{ type: "text", text: "done" }] },
+        ],
+      },
+      attachments: [attachment],
+    };
+    const fragment = renderDraft(draft);
+    const root = fragment.firstElementChild;
+    check(
+      "renderDraft returns a fragment holding one ws-draft-view root",
+      fragment.childElementCount === 1 && root?.classList.contains("ws-draft-view") === true,
+    );
+    const strip = root?.firstElementChild;
+    check(
+      "the attachments strip comes first and carries one pill per attachment",
+      strip?.classList.contains("ws-draft-view__strip") === true &&
+        strip.querySelectorAll(".ws-mention-chip").length === 1 &&
+        strip.querySelector(".ws-mention-chip")?.getAttribute("data-kind") === "image" &&
+        strip.querySelector(".ws-mention-chip__label")?.textContent === "shot.png",
+    );
+    const paragraphs = [...(root?.querySelectorAll(".ws-draft-view__paragraph") ?? [])];
+    check(
+      "one paragraph element per paragraph node, in order, after the strip",
+      paragraphs.length === 3 &&
+        paragraphs[0] === strip?.nextElementSibling &&
+        paragraphs[2] === root?.lastElementChild,
+    );
+    const first = paragraphs[0];
+    check(
+      "text, the inline pill, and the hard break land in document order",
+      first !== undefined &&
+        first.childNodes[0]?.nodeType === dom.window.Node.TEXT_NODE &&
+        first.childNodes[0]?.textContent === "look at " &&
+        first.childNodes[1]?.classList?.contains("ws-mention-chip") === true &&
+        first.childNodes[1]?.getAttribute("data-kind") === "file" &&
+        first.childNodes[1]?.querySelector(".ws-mention-chip__label")?.textContent === "main.ts" &&
+        first.childNodes[2]?.textContent === " first" &&
+        first.childNodes[3]?.tagName === "BR" &&
+        first.childNodes[4]?.textContent === "then",
+    );
+    check(
+      "an empty paragraph renders as an empty paragraph element",
+      paragraphs[1]?.childNodes.length === 0 && paragraphs[2]?.textContent === "done",
+    );
+    check(
+      "the read-only rendering carries no remove buttons and no editor",
+      root?.querySelector(".ws-mention-chip__remove") === null &&
+        root?.querySelector(".ProseMirror") === null &&
+        root?.querySelector('[contenteditable="true"]') === null,
+    );
+    const empty = renderDraft({ v: 1, doc: { type: "doc", content: [] }, attachments: [] });
+    check(
+      "an empty draft renders a root with an empty strip and no paragraphs",
+      empty.firstElementChild?.querySelector(".ws-draft-view__strip")?.childElementCount === 0 &&
+        empty.firstElementChild?.querySelectorAll(".ws-draft-view__paragraph").length === 0,
+    );
   }
 });
 

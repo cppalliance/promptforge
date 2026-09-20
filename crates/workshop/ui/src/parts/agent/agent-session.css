@@ -239,7 +239,7 @@
 }
 
 /* The prompt box owns the row's remaining width; its frame and type
-   styles live in prompt-input.css. */
+   styles live in chatbox/chat-box.css. */
 .ws-agent-session__bar > .ws-prompt-input {
   flex: 1;
   min-inline-size: 0;

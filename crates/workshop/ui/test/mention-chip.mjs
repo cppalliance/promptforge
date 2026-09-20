@@ -1,4 +1,4 @@
-// The mention chip (src/parts/chatbox/mention-chip.ts) in jsdom: the
+// The mention chip (src/parts/agent/mention-chip.ts) in jsdom: the
 // configured Mention extension renamed to mentionNode with a vanilla-DOM
 // NodeView pill. Covers: a mention node renders as a pill with icon
 // slot, label, and a labelled remove button; the pill carries the
@@ -7,7 +7,13 @@
 // id when no label is set; the chip is non-editable; the remove button
 // deletes the node and leaves the surrounding text intact; getJSON
 // serializes the node with type "mentionNode"; PromptInput registers the
-// extension, so chips render and remove inside the real input. Runs
+// extension, so chips render and remove inside the real input. The chip
+// model: a pill inserted with a kind carries data-kind and one without
+// carries none; kind, icon, preview, tone, and data survive getJSON, are
+// null on a chip inserted without them, and are rebuilt by setContent
+// from that JSON; data round-trips byte-for-byte; parsing the pill's
+// rendered HTML (copy and paste) restores data-payload; renderChip
+// (src/parts/chatbox/chip-view.ts) draws the same pill standalone. Runs
 // under the shared leak check: a PromptInput that is never disposed
 // fails.
 // Run: node test/mention-chip.mjs
@@ -27,6 +33,7 @@ const bundle = await esbuild.build({
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { PromptInput } from "./src/parts/chatbox/chat-box.ts";
       export { MentionChip } from "./src/parts/chatbox/mention-chip.ts";
+      export { renderChip } from "./src/parts/chatbox/chip-view.ts";
       export { Editor } from "@tiptap/core";
       export { StarterKit } from "@tiptap/starter-kit";
     `,
@@ -57,7 +64,7 @@ globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-mention-chip-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, PromptInput, MentionChip, Editor, StarterKit } = await import(
+const { lifecycle, PromptInput, MentionChip, renderChip, Editor, StarterKit } = await import(
   pathToFileURL(bundlePath).href
 );
 
@@ -90,6 +97,34 @@ function mentionInDoc(editor) {
   });
   return found;
 }
+
+function mentionJson(editor) {
+  const paragraph = editor.getJSON().content?.[0];
+  return paragraph?.content?.find((node) => node.type === "mentionNode");
+}
+
+// A bare editor with one chip carrying the given attrs at position 1.
+function editorWithChip(attrs) {
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: [StarterKit, MentionChip],
+    content: "<p>x</p>",
+  });
+  editor.commands.insertContentAt(1, { type: "mentionNode", attrs });
+  return editor;
+}
+
+// The full chip model, with a payload whose shape exercises nesting,
+// unicode, and JSON-significant characters.
+const FULL_CHIP = {
+  id: "src/main.ts",
+  label: "main.ts",
+  kind: "file",
+  icon: "file-code",
+  preview: "pf://preview/1",
+  tone: "expired",
+  data: { path: "src/main.ts", grants: ["r\"w"], nested: { n: 1.5, ok: true, none: null }, s: "é\n" },
+};
 
 await assertNoLeaks(lifecycle, () => {
   // --- Render ---------------------------------------------------------------
@@ -192,6 +227,170 @@ await assertNoLeaks(lifecycle, () => {
       input.element.querySelector(".ws-mention-chip") === null,
     );
     input.dispose();
+  }
+
+  // --- Chip model: kind on the pill ------------------------------------------------
+
+  {
+    const editor = editorWithChip({ id: "src/main.ts", label: "main.ts", kind: "file" });
+    check(
+      "a pill inserted with a kind carries data-kind",
+      editor.view.dom.querySelector(".ws-mention-chip")?.getAttribute("data-kind") === "file",
+    );
+    editor.destroy();
+  }
+
+  {
+    const editor = editorWithChip({ id: "src/main.ts", label: "main.ts" });
+    check(
+      "a pill inserted without a kind carries no data-kind",
+      editor.view.dom.querySelector(".ws-mention-chip")?.hasAttribute("data-kind") === false,
+    );
+    editor.destroy();
+  }
+
+  // --- Chip model: the extended attrs survive getJSON -----------------------------
+
+  {
+    const editor = editorWithChip(FULL_CHIP);
+    const mention = mentionJson(editor);
+    check(
+      "kind, icon, preview, and tone survive getJSON",
+      mention?.attrs?.kind === "file" &&
+        mention?.attrs?.icon === "file-code" &&
+        mention?.attrs?.preview === "pf://preview/1" &&
+        mention?.attrs?.tone === "expired",
+    );
+    check(
+      "data round-trips through getJSON byte-for-byte",
+      JSON.stringify(mention?.attrs?.data) === JSON.stringify(FULL_CHIP.data),
+    );
+    // setContent from the serialized JSON: the round trip is the persisted
+    // draft's path back into a live editor.
+    const rebuilt = new Editor({
+      element: document.createElement("div"),
+      extensions: [StarterKit, MentionChip],
+      content: editor.getJSON(),
+    });
+    const again = mentionJson(rebuilt);
+    check(
+      "setContent from the JSON rebuilds the extended attrs",
+      again?.attrs?.kind === "file" &&
+        again?.attrs?.icon === "file-code" &&
+        again?.attrs?.preview === "pf://preview/1" &&
+        again?.attrs?.tone === "expired" &&
+        JSON.stringify(again?.attrs?.data) === JSON.stringify(FULL_CHIP.data),
+    );
+    check(
+      "the rebuilt pill renders its kind and tone",
+      rebuilt.view.dom.querySelector(".ws-mention-chip")?.getAttribute("data-kind") === "file" &&
+        rebuilt.view.dom.querySelector(".ws-mention-chip")?.getAttribute("data-tone") === "expired",
+    );
+    rebuilt.destroy();
+    editor.destroy();
+  }
+
+  {
+    const editor = editorWithChip({ id: "README.md", label: "README.md" });
+    const mention = mentionJson(editor);
+    check(
+      "kind, icon, preview, tone, and data are absent from a chip inserted without them",
+      mention !== undefined &&
+        mention.attrs?.kind == null &&
+        mention.attrs?.icon == null &&
+        mention.attrs?.preview == null &&
+        mention.attrs?.tone == null &&
+        mention.attrs?.data == null,
+    );
+    editor.destroy();
+  }
+
+  // --- Chip model: the rendered HTML parses back (copy and paste) -----------------
+
+  {
+    const editor = editorWithChip(FULL_CHIP);
+    // getHTML runs the schema's renderHTML - the clipboard serializer's
+    // path - and setContent from that HTML runs parseHTML, the paste path.
+    const html = editor.getHTML();
+    check(
+      "the rendered pill HTML carries a JSON data-payload and the model attributes",
+      html.includes('data-kind="file"') &&
+        html.includes('data-icon="file-code"') &&
+        html.includes('data-preview="pf://preview/1"') &&
+        html.includes('data-tone="expired"') &&
+        html.includes("data-payload="),
+    );
+    const pasted = new Editor({
+      element: document.createElement("div"),
+      extensions: [StarterKit, MentionChip],
+      content: html,
+    });
+    const mention = mentionJson(pasted);
+    check(
+      "parsing the pill's HTML restores the model attrs and data-payload",
+      mention?.attrs?.id === "src/main.ts" &&
+        mention?.attrs?.kind === "file" &&
+        mention?.attrs?.icon === "file-code" &&
+        mention?.attrs?.preview === "pf://preview/1" &&
+        mention?.attrs?.tone === "expired" &&
+        JSON.stringify(mention?.attrs?.data) === JSON.stringify(FULL_CHIP.data),
+    );
+    pasted.destroy();
+    editor.destroy();
+  }
+
+  {
+    const plain = new Editor({
+      element: document.createElement("div"),
+      extensions: [StarterKit, MentionChip],
+      content:
+        '<p><span data-type="mentionNode" data-id="a" data-label="a" data-payload="not json"></span></p>',
+    });
+    check(
+      "an unparseable data-payload parses as null rather than throwing",
+      mentionJson(plain)?.attrs?.data === null,
+    );
+    plain.destroy();
+  }
+
+  // --- renderChip: the standalone pill --------------------------------------------
+
+  {
+    const pill = renderChip(FULL_CHIP);
+    check(
+      "renderChip draws the pill with icon, label, and remove button",
+      pill.classList.contains("ws-mention-chip") &&
+        pill.querySelector(".ws-mention-chip__icon svg") !== null &&
+        pill.querySelector(".ws-mention-chip__label")?.textContent === "main.ts" &&
+        pill.querySelector('button.ws-mention-chip__remove[aria-label="Remove"]') !== null,
+    );
+    check(
+      "renderChip stamps data-kind and data-tone from the chip",
+      pill.getAttribute("data-kind") === "file" && pill.getAttribute("data-tone") === "expired",
+    );
+    const bare = renderChip({ id: "x", label: "x", data: null });
+    check(
+      "renderChip leaves data-kind and data-tone off a chip without them",
+      !bare.hasAttribute("data-kind") && !bare.hasAttribute("data-tone"),
+    );
+    const byExtension = renderChip({ id: "notes.md", label: "notes.md", data: null });
+    check(
+      "renderChip picks the icon from the label's extension when none is named",
+      byExtension.querySelector(".ws-mention-chip__icon svg")?.outerHTML !==
+        bare.querySelector(".ws-mention-chip__icon svg")?.outerHTML,
+    );
+    const named = renderChip({ id: "notes.md", label: "notes.md", icon: "folder", data: null });
+    check(
+      "a named icon overrides the extension map",
+      named.querySelector(".ws-mention-chip__icon svg")?.outerHTML !==
+        byExtension.querySelector(".ws-mention-chip__icon svg")?.outerHTML,
+    );
+    check(
+      "an unknown named icon falls back to the extension map",
+      renderChip({ id: "notes.md", label: "notes.md", icon: "no-such-icon", data: null })
+        .querySelector(".ws-mention-chip__icon svg")?.outerHTML ===
+        byExtension.querySelector(".ws-mention-chip__icon svg")?.outerHTML,
+    );
   }
 });
 

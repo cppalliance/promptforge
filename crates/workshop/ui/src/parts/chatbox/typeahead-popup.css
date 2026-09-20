@@ -1,4 +1,4 @@
-/* TypeaheadPopup (src/parts/agent/typeahead-popup.ts): the floating
+/* TypeaheadPopup (src/parts/chatbox/typeahead-popup.ts): the floating
    @-mention suggestion list. The suggestion plugin's managed mount
    appends the popup to document.body and writes position, left, and top
    inline from the cursor rect (Floating UI), so this file owns only the

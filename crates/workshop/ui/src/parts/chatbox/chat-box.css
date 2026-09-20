@@ -102,3 +102,32 @@
   background: var(--bg-hover);
   opacity: 1;
 }
+
+/* renderDraft (src/parts/chatbox/chat-box-view.ts): the read-only
+   rendering of a serialized draft - the attachments strip, then one
+   paragraph per paragraph node. Minimal rules so the fragment stands
+   alone; the feed's own styling arrives with the feature that uses it. */
+.ws-draft-view {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ws-draft-view__strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-block-end: var(--space-1);
+}
+
+/* An empty strip costs no height. */
+.ws-draft-view__strip:empty {
+  display: none;
+}
+
+.ws-draft-view__paragraph {
+  margin: 0;
+}

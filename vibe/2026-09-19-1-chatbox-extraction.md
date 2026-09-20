@@ -513,7 +513,7 @@ Gates: every commit leaves `npm run typecheck` green in `crates/workshop/ui/` (a
 
 <step-2>
 
-### Step 2: Chat box foundation - files, contract, chip model, static renderer
+### Step 2: Chat box foundation - files, contract, chip model, static renderer [completed]
 
 - Component: `chatbox-extraction`
 - Piece: chat box foundation
