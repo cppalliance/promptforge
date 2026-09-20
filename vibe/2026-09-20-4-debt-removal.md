@@ -251,7 +251,7 @@ Six remediation choices are settled. Three were escalated because they change a 
 
 <step-5>
 
-### Step 5: Walled-tier boundary rule in the checker
+### Step 5: Walled-tier boundary rule in the checker [completed]
 
 - Component: debt-removal
 - Add a rule to `crates/build-xtask/src/tidy.rs`: no file outside `crates/gateway/app/src/admin/walled/` may name a `crate::admin::walled::` path. The allowlist is exactly three files, `crates/gateway/app/src/lib.rs` for the `AppState` field types and the router merge, `crates/gateway/app/src/registry.rs` for the route enumeration, and `crates/gateway/app/src/test_support.rs` for the fixture that assembles the same state. Key the allowlist on file paths, never on line numbers, which move with any edit. Too narrow and legitimate assembly fails; too wide and the rule catches nothing.

@@ -45,6 +45,7 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     violations.extend(marker_violations(root));
     violations.extend(file_ceiling_violations(root));
     violations.extend(lint_inheritance_violations(root));
+    violations.extend(walled_tier_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
     violations.extend(crate::harness_bans::harness_clippy_bans(
         &root.join("crates").join("harness"),
@@ -270,6 +271,90 @@ fn carries_marker(dir: &Path) -> bool {
     ["src/lib.rs", "src/main.rs"].iter().any(|candidate| {
         fs::read_to_string(dir.join(candidate)).is_ok_and(|text| text.contains(INVARIANT_MARKER))
     })
+}
+
+/// The crate-relative path the tier's modules are spelled by.
+const WALLED_PATH: &str = "crate::admin::walled::";
+/// The files outside the tier that may name a tier module, keyed on path
+/// because a line number moves with any edit: `lib.rs` for the `AppState`
+/// field types and the router merge, `registry.rs` for the route
+/// enumeration, and `test_support.rs` for the fixture that assembles the
+/// same state. `test_support.rs` is `#[cfg(test)]`-gated, but the rule
+/// reads source text and never sees a cfg, so it is allowlisted by name
+/// like the other two.
+const WALLED_ALLOWLIST: [&str; 3] = [
+    "crates/gateway/app/src/lib.rs",
+    "crates/gateway/app/src/registry.rs",
+    "crates/gateway/app/src/test_support.rs",
+];
+
+/// Checks that only the walled admin tier's own modules and the three
+/// assembly sites in [`WALLED_ALLOWLIST`] name a `crate::admin::walled::`
+/// path, so a module that no walled route needs does not sit in a
+/// directory defined as routes that read secrets, write files, or launch
+/// processes.
+///
+/// The rule protects that directory's meaning, not the wall: wall
+/// enforcement is structural, at the router merge in the gateway app's
+/// `lib.rs`. Its reach is one textual match, so it catches a spelled path
+/// and misses an alias, a `super::` path, a re-export, and any path a
+/// macro generates. It is a tripwire for the common case, not a proof of
+/// the boundary.
+///
+/// A source file the check cannot read is reported rather than skipped: a
+/// file that was never scanned cannot be shown clean.
+#[must_use]
+pub(crate) fn walled_tier_violations(root: &Path) -> Vec<String> {
+    let app_src = root.join("crates").join("gateway").join("app").join("src");
+    let tier = app_src.join("admin").join("walled");
+    let mut violations = Vec::new();
+    for file in rust_files(&app_src) {
+        if file.starts_with(&tier) {
+            continue;
+        }
+        let relative = slash_path(root, &file);
+        if WALLED_ALLOWLIST.contains(&relative.as_str()) {
+            continue;
+        }
+        let text = match fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(error) => {
+                violations.push(format!("{relative}: unreadable source file: {error}"));
+                continue;
+            }
+        };
+        for (index, line) in text.lines().enumerate() {
+            // A doc or line comment naming a route module in prose states
+            // where the other half of a feature lives; it is not a
+            // dependency on it, and failing the build on documentation
+            // would only teach authors to stop writing it.
+            if line.trim_start().starts_with("//") || !line.contains(WALLED_PATH) {
+                continue;
+            }
+            violations.push(format!(
+                "{relative}:{} names {WALLED_PATH}, which only the tier's own modules \
+                 and the assembly sites ({}) may",
+                index + 1,
+                WALLED_ALLOWLIST.join(", ")
+            ));
+        }
+    }
+    violations
+}
+
+/// A file's path relative to the workspace root with `/` separators, so
+/// the allowlist and the violations read the same on every platform.
+///
+/// A component that is not valid UTF-8 is rendered lossily rather than
+/// dropped: dropping it would shorten the path and could make it match an
+/// allowlist entry, exempting a file the rule should report.
+fn slash_path(root: &Path, file: &Path) -> String {
+    file.strip_prefix(root)
+        .unwrap_or(file)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Every `.rs` file under `dir`, recursively.

@@ -271,6 +271,120 @@ fn an_unmarked_crate_outside_the_families_is_left_alone() {
     assert!(file_ceiling_violations(root.path()).is_empty());
 }
 
+/// Writes `text` into `crates/gateway/app/src/<relative>`, creating the
+/// gateway app crate's source tree as needed.
+fn write_app_file(root: &Path, relative: &str, text: &str) {
+    let path = root
+        .join("crates")
+        .join("gateway")
+        .join("app")
+        .join("src")
+        .join(relative);
+    std::fs::create_dir_all(path.parent().expect("the file has a parent"))
+        .expect("the source directory creates");
+    std::fs::write(&path, text).expect("the source file writes");
+}
+
+/// A spelled tier path in code, the shape the rule is meant to catch.
+const NAMES_TIER: &str = "use crate::admin::walled::hf::HfProxy;\n";
+
+#[test]
+fn a_file_outside_the_walled_tier_naming_a_tier_module_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_app_file(root.path(), "speech.rs", NAMES_TIER);
+    let violations = walled_tier_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("speech.rs") && violations[0].contains(WALLED_PATH),
+        "the file and the path it names are reported: {violations:?}"
+    );
+}
+
+#[test]
+fn each_allowlisted_assembly_site_may_name_the_walled_tier() {
+    for allowed in WALLED_ALLOWLIST {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        let relative = allowed
+            .strip_prefix("crates/gateway/app/src/")
+            .expect("the allowlist keys files in the gateway app's source tree");
+        write_app_file(root.path(), relative, NAMES_TIER);
+        let violations = walled_tier_violations(root.path());
+        assert!(
+            violations.is_empty(),
+            "{allowed} assembles the tier's own state and may name it: {violations:?}"
+        );
+    }
+}
+
+#[test]
+fn a_comment_line_that_spells_the_tier_path_is_not_a_dependency() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_app_file(
+        root.path(),
+        "commands-apply.rs",
+        "//! The route side lives in `crate::admin::walled::config_apply`.\n\
+         /// See [`crate::admin::walled::config`].\n\
+         pub(crate) fn apply() {}\n",
+    );
+    let violations = walled_tier_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "prose naming a module path is documentation, not a dependency: {violations:?}"
+    );
+}
+
+#[test]
+fn the_walled_tiers_own_modules_may_name_each_other() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_app_file(root.path(), "admin/walled/system.rs", NAMES_TIER);
+    let violations = walled_tier_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "a module inside the tier is not outside it: {violations:?}"
+    );
+}
+
+/// A name no UTF-8 string can hold: a stray byte on unix, an unpaired
+/// surrogate on windows.
+#[cfg(unix)]
+fn undecodable_name() -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStringExt;
+    std::ffi::OsString::from_vec(b"lib\xff".to_vec())
+}
+
+#[cfg(windows)]
+fn undecodable_name() -> std::ffi::OsString {
+    use std::os::windows::ffi::OsStringExt;
+    std::ffi::OsString::from_wide(&[u16::from(b'l'), u16::from(b'i'), u16::from(b'b'), 0xd800])
+}
+
+#[test]
+fn an_undecodable_path_component_keeps_its_place_in_the_relative_path() {
+    let root = Path::new("root");
+    let file = root
+        .join("crates")
+        .join(undecodable_name())
+        .join("src")
+        .join("lib.rs");
+    let relative = slash_path(root, &file);
+    assert_eq!(
+        relative.split('/').count(),
+        4,
+        "a component that does not decode must not vanish and let the path \
+         collide with an allowlist entry: {relative}"
+    );
+}
+
+#[test]
+fn no_file_outside_the_walled_tier_names_its_modules() {
+    let violations = walled_tier_violations(&workspace_root());
+    assert!(
+        violations.is_empty(),
+        "walled tier violations:\n{}",
+        violations.join("\n")
+    );
+}
+
 #[test]
 fn tier_table_grants_each_tier_only_lower_tiers() {
     assert_eq!(allowed_dependencies("workshop-protocol"), Some(Vec::new()));
