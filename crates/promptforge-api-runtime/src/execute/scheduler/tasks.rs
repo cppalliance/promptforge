@@ -409,7 +409,13 @@ impl Scheduler {
                 }
                 // `Author`, or an origin `promptforge-api-types` adds behind
                 // its `#[non_exhaustive]` `TaskOrigin`: treated as the
-                // author's, like every other `origin == Model` test here.
+                // author's. Both origins as they stand today are driven
+                // through this arm by
+                // `an_ending_owner_leaks_its_author_task_and_never_its_model_task`,
+                // which is the whole of the guarantee: a variant added to
+                // `TaskOrigin` lands here silently until someone extends
+                // that test, because `#[non_exhaustive]` denies this crate
+                // the exhaustive match that would fail the build instead.
                 _ => leaked.push(task),
             }
         }

@@ -124,10 +124,18 @@ pub fn forward(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn D
 
 /// Routes one event to the seam its group belongs to. [`Event`] is
 /// `#[non_exhaustive]` in `promptforge-api-types`, so the match cannot be
-/// total here; the recorder exists to observe every event, so a variant
-/// no group claims panics naming itself rather than passing a suite
-/// vacuously. Adding a variant means adding it to a group's or-pattern
-/// by hand.
+/// total here and no compiler check holds the groups to the enum. What
+/// holds instead is
+/// `tests::every_event_variant_reaches_exactly_one_seam`, which drives one
+/// value of every variant through this function and asserts each reaches
+/// exactly one seam: it covers the variants written into its own list, so
+/// a variant added to `Event` is covered only once someone adds it to a
+/// group's or-pattern and to that list, both by hand.
+///
+/// Within that list the routing is total: a variant no group claims panics
+/// naming itself rather than passing a suite vacuously, and a variant a
+/// group claims but does not destructure records nothing and fails the
+/// test.
 ///
 /// # Panics
 ///

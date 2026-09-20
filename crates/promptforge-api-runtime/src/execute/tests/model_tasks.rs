@@ -3,7 +3,8 @@
 //! allowlist on the section; the `tool_call` arm answers the three by name
 //! before alias lookup, refusing a target outside the allowlist; a model
 //! task the owner outlives is abandoned (never cancelled) with a reason
-//! naming how the owner ended; and the author's `tasks.pending` filter
+//! naming how the owner ended; a chain end holding one task of each origin
+//! leaks the author's alone; and the author's `tasks.pending` filter
 //! tells the model's tasks from the author's. A scripted mock gateway plays
 //! the model.
 
@@ -249,6 +250,86 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
         "an abandoned task is never reported cancelled: {records:?}"
     );
     assert_eq!(AbandonReason::OwnerReturned.why(), "the section ended");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
+    // Both origins live under one owner at one chain end, so the origin
+    // arm in `abandon_owned_tasks` is driven over every `TaskOrigin`
+    // variant in a single settle: the author's id is the whole of
+    // `tasks_live` and the model's is absent, while both slots end
+    // abandoned. Two same-origin tasks could not tell the arm's two sides
+    // apart.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
+        resp_text("bye"),
+    ])
+    .await;
+    let md = owner_prompt(
+        "",
+        "tools.allow_tasks()\n\
+         tasks.spawn('## Child')\n\
+         local msgs = messages.new()\n\
+         msgs:user('go')\n\
+         models.loop(msgs)\n\
+         return 'ok'",
+        PARKED_CHILD,
+    );
+    let prompt = parse(&md);
+    let recorder = Arc::new(TaskRecorder::default());
+    let ctx = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let error = scheduler
+        .drive()
+        .await
+        .expect_err("the live author task fails the owner it outlived");
+
+    match &error {
+        Error::TasksLive { tasks } => assert_eq!(
+            tasks,
+            &[task("0.0")],
+            "only the author-origin task is leaked: {tasks:?}"
+        ),
+        other => panic!("expected tasks_live, got {other:?}"),
+    }
+    for id in ["0.0", "0.1"] {
+        assert_eq!(
+            scheduler.task_state_for_test(&task(id)),
+            Some(TaskState::Abandoned),
+            "both origins ended with their owner as abandoned"
+        );
+    }
+    let records = recorder.records();
+    // `abandon_owned_tasks` stamps `Abandoned` before the effect-backed
+    // branch that skips the origin match, so the state alone would hold
+    // for a slot that never reached the arm. The terminal observation is
+    // emitted only past that branch, one statement above the arm itself.
+    for id in ["0.0", "0.1"] {
+        assert!(
+            records.iter().any(|(section, event)| section == "Child"
+                && *event
+                    == Observation::TaskAbandoned {
+                        task: task(id),
+                        reason: AbandonReason::OwnerReturned,
+                    }),
+            "task {id} reached the origin arm: {records:?}"
+        );
+    }
+    let origins: Vec<(TaskId, TaskOrigin)> = records
+        .iter()
+        .filter_map(|(_, event)| match event {
+            Observation::TaskStarted { task, origin, .. } => Some((task.clone(), *origin)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        origins,
+        vec![
+            (task("0.0"), TaskOrigin::Author),
+            (task("0.1"), TaskOrigin::Model),
+        ],
+        "the settle saw one task of each origin: {records:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

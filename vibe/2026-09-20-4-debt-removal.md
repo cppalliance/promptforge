@@ -213,7 +213,7 @@ Six remediation choices are settled. Three were escalated because they change a 
 
 <step-3>
 
-### Step 3: Event and TaskOrigin exhaustiveness pinned by tests
+### Step 3: Event and TaskOrigin exhaustiveness pinned by tests [completed]
 
 - Component: debt-removal
 - Add a test constructing one value of every `Event` variant and driving each through `forward_one` in `crates/promptforge-api-runtime/src/test_support/recording-forward.rs`, asserting each lands in exactly one recorder group and none reaches the catch-all arm.
