@@ -18,7 +18,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use shared_progress::Activity;
+use gateway_progress::Activity;
 
 use super::confine::{ensure_cache_directory, validate_cache_path, write_synced};
 use super::digest::file_digest_with_progress;

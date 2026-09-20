@@ -11,7 +11,7 @@ description = "Safe Whisper decoder backend for the PromptForge STT engine"
 [dependencies]
 gateway-stt-engine.workspace = true
 gateway-whisper-ffi.workspace = true
-shared-progress.workspace = true
+gateway-progress.workspace = true
 tracing.workspace = true
 workspace-hack.workspace = true
 

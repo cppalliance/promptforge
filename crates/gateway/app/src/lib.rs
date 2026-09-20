@@ -180,11 +180,11 @@ use crate::local::LocalRuntime;
 use crate::routing::Routing;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
+use gateway_progress::ProgressHub;
 #[cfg(feature = "stt")]
 use gateway_stt::SpeechService;
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
-use shared_progress::ProgressHub;
 
 /// Mutable live configuration held behind a lock so the boot load and a
 /// config apply can swap routing without rebuilding the axum router.

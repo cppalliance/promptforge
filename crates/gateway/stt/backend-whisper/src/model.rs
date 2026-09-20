@@ -3,13 +3,13 @@
 use std::io::Read;
 use std::path::Path;
 
+use gateway_progress::Activity;
 use gateway_stt_engine::{
     DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
 };
 use gateway_whisper_ffi::{
     FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState,
 };
-use shared_progress::Activity;
 
 use crate::WhisperConfig;
 use crate::prompt::{GLOSSARY_TOKEN_BUDGET, final_prompt, fit_glossary, sanitize_prompt};
@@ -232,7 +232,7 @@ fn transcribe_blocking(
 mod tests {
     use std::sync::Arc;
 
-    use shared_progress::ProgressHub;
+    use gateway_progress::ProgressHub;
 
     use super::*;
 

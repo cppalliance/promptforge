@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt as _;
 use gateway_api_types::Progress;
-use shared_progress::ProgressHub;
+use gateway_progress::ProgressHub;
 
 use super::{PROGRESS_HEARTBEAT, progress_sse_response};
 use crate::shutdown::ShutdownSignal;

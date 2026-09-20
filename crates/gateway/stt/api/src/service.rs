@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use gateway_config::Config;
-use shared_progress::Activity;
+use gateway_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::SpeechError;

@@ -1,5 +1,5 @@
 [package]
-name = "shared-progress"
+name = "gateway-progress"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

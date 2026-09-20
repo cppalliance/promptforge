@@ -429,7 +429,7 @@ Each step runs only the focused tests listed in it. The full gate set runs once,
 
 <step-5>
 
-### Step 5: Move the machinery into the gateway family and align policy text
+### Step 5: Move the machinery into the gateway family and align policy text [completed]
 
 - Component: gateway-progress
 - Piece: move and policy text

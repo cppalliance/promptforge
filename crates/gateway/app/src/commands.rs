@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use futures_util::future::BoxFuture;
 use gateway_config::ProfileName;
-use shared_progress::{Activity, ProgressHub};
+use gateway_progress::{Activity, ProgressHub};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 

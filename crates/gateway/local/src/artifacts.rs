@@ -31,9 +31,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use gateway_config::LlamaBackend;
+use gateway_progress::Activity;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
-use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::LocalError;

@@ -182,7 +182,7 @@ impl Gateway {
         Self::new_with_hub(
             config,
             profiles,
-            Arc::new(shared_progress::ProgressHub::new()),
+            Arc::new(gateway_progress::ProgressHub::new()),
         )
     }
 
@@ -191,7 +191,7 @@ impl Gateway {
     pub(crate) fn new_with_hub(
         config: &Config,
         profiles: ProfilesContext,
-        hub: Arc<shared_progress::ProgressHub>,
+        hub: Arc<gateway_progress::ProgressHub>,
     ) -> Result<Gateway, StartupError> {
         let routing = Routing::from_config(config).map_err(StartupError::config)?;
         let active = config
@@ -283,7 +283,7 @@ impl Gateway {
         Self::from_config_with_hub(
             config,
             profiles,
-            Arc::new(shared_progress::ProgressHub::new()),
+            Arc::new(gateway_progress::ProgressHub::new()),
         )
     }
 
@@ -293,7 +293,7 @@ impl Gateway {
     pub(crate) fn from_config_with_hub(
         config: &Config,
         profiles: ProfilesContext,
-        hub: Arc<shared_progress::ProgressHub>,
+        hub: Arc<gateway_progress::ProgressHub>,
     ) -> Result<Gateway, StartupError> {
         // Startup provisioning is the hub's first activity: it lives for the
         // provisioning call and ends when the guard drops.
@@ -924,7 +924,7 @@ fn serve_thread(
     };
     let bind = config.bind_addr();
     // Producers own their own log lines; the hub feeds the UIs only.
-    let hub = Arc::new(shared_progress::ProgressHub::new());
+    let hub = Arc::new(gateway_progress::ProgressHub::new());
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use gateway_config::Config;
+use gateway_progress::Activity;
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 #[cfg(feature = "test-fixtures")]
 use gateway_stt_engine::ModelFactory;
 use gateway_stt_engine::{DecodeMode, EnginePolicy};
-use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, PreparedGeneration, SpeechError};

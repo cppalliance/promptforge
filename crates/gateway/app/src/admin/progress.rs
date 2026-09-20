@@ -7,7 +7,7 @@ use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::Response;
 use gateway_api_types::Progress;
-use shared_progress::ProgressHub;
+use gateway_progress::ProgressHub;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
-use shared_progress::Activity;
+use gateway_progress::Activity;
 
 /// Provisioned Whisper runtime, model paths, and optional load progress.
 #[derive(Debug, Clone)]

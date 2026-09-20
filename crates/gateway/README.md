@@ -1,18 +1,18 @@
 # crates/gateway/
 
-`crates/gateway/` is the gateway family's private container - outside crates may name only `gateway-api` and `gateway-api-discovery` at the `crates/` root.
+`crates/gateway/` is the gateway family's private container - outside crates may name only `gateway-api-types` and `gateway-api-discovery` at the `crates/` root.
 
 ## gateway
 
-The inference gateway itself (at `app/`): the always-on OpenAI-shaped service, the only process with an edge to an LLM backend. The workshop shell supervises it and the executor calls models through it. Depends on the whole family (api, api-discovery, config, logging, protocol, routing) plus shared-loopback and shared-progress, with local, stt, web-search, and config-ui behind cargo features.
+The inference gateway itself (at `app/`): the always-on OpenAI-shaped service, the only process with an edge to an LLM backend. The workshop shell supervises it and the executor calls models through it. Depends on the whole family (api-types, api-discovery, config, logging, progress, protocol, routing) plus shared-loopback, with local, stt, web-search, and config-ui behind cargo features.
 
 ## gateway-cloud-providers
 
-The tiered cloud provider registry: per-provider fetch and normalization behind an injected reqwest client, plus the sheet-building binary. Its binary produces the provider model sheet the gateway serves at `/admin/cloud-models`. Depends on gateway-api.
+The tiered cloud provider registry: per-provider fetch and normalization behind an injected reqwest client, plus the sheet-building binary. Its binary produces the provider model sheet the gateway serves at `/admin/cloud-models`. Depends on gateway-api-types.
 
 ## gateway-config
 
-The gateway's configuration: single-file TOML, profile selection, and validation into a typed Config. Every gateway family crate reads its configuration through it. Depends on gateway-api.
+The gateway's configuration: single-file TOML, profile selection, and validation into a typed Config. Every gateway family crate reads its configuration through it. Depends on gateway-api-types.
 
 ## gateway-config-ui
 
@@ -20,15 +20,19 @@ The embedded config SPA served at `/config` behind the loopback wall. The gatewa
 
 ## gateway-local
 
-Local inference: GGUF provisioning, the artifact store, and the llama-server child lifecycle. The gateway runs local models through it in local builds, and the STT runtime shares its artifact store. Depends on gateway-config, gateway-protocol, gateway-routing, and shared-progress.
+Local inference: GGUF provisioning, the artifact store, and the llama-server child lifecycle. The gateway runs local models through it in local builds, and the STT runtime shares its artifact store. Depends on gateway-config, gateway-progress, gateway-protocol, and gateway-routing.
 
 ## gateway-logging
 
 The logging sink: a bounded priority queue, rotation, and a worker-owned file writer behind `MakeWriter`. The gateway installs its subscriber at boot. No workspace dependencies.
 
+## gateway-progress
+
+The live-activity hub (at `progress/`): a producer begins an activity with a text, replaces the text as work moves, and drops the guard when done; the hub publishes the newest live text as a `Progress` busy-and-text snapshot over a `watch` channel. Every slow gateway operation reports through it, and the admin SSE stream, the status endpoint, and the tray read from it. Depends on gateway-api-types; tokio `sync` carries the channel.
+
 ## gateway-protocol
 
-The wire protocol: OpenAI wire types, validation, and the Upstream abstraction with the shared HTTP client policy. Every crate that speaks to a backend goes through it. Depends on gateway-api and gateway-config; reqwest carries the transport.
+The wire protocol: OpenAI wire types, validation, and the Upstream abstraction with the shared HTTP client policy. Every crate that speaks to a backend goes through it. Depends on gateway-api-types and gateway-config; reqwest carries the transport.
 
 ## gateway-routing
 

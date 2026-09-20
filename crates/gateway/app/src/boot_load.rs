@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gateway_config::{Config, ProfileName};
-use shared_progress::Activity;
+use gateway_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;

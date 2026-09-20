@@ -26,9 +26,9 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use gateway_config::{Config, ProfileSelection, load_pending_config, shadow_path, write_atomic};
+use gateway_progress::Activity;
 #[cfg(feature = "web-search")]
 use gateway_web_search::WebSearchState;
-use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;

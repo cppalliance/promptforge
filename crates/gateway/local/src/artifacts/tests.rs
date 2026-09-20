@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use shared_progress::ProgressHub;
+use gateway_progress::ProgressHub;
 use tokio_util::sync::CancellationToken;
 
 use super::archive::{extract_archive, extract_archive_with_progress, safe_archive_path};

@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 
 use gateway_config::{Config, SttRole};
 use gateway_local::artifacts::ArtifactStore;
-use shared_progress::Activity;
+use gateway_progress::Activity;
 
 use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 

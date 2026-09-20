@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use shared_progress::Activity;
+use gateway_progress::Activity;
 
 use super::download::PercentText;
 use super::{INSTALL_MARKER, Result};

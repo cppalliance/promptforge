@@ -1,10 +1,10 @@
 # crates/
 
-`crates/` is the workspace's public and shared layer - the family containers (`promptforge/`, `gateway/`, `workshop/`) are private, and cross-family dependencies resolve only here.
+`crates/` is the workspace's public and shared layer - the family containers (`promptforge/`, `gateway/`, `workshop/`, `harness/`) are private, and cross-family dependencies resolve only here.
 
-## gateway-api
+## gateway-api-types
 
-The gateway's public vocabulary crate: the versioned provider model sheet schema as pure serde data types. The gateway family reads and writes the sheet through it, and it is one of the two gateway crates outside crates may name. No workspace dependencies.
+The gateway's public vocabulary crate: the versioned provider model sheet schema, the model vocabulary, and the `Progress` busy-and-text snapshot, all as pure serde data types. The gateway family reads and writes the sheet through it, the Workshop decodes progress through it, and it is one of the two gateway crates outside crates may name. Types only, no code. No workspace dependencies.
 
 ## gateway-api-discovery
 
@@ -21,10 +21,6 @@ The promptforge public types: untrusted-content guards, cooperative cancellation
 ## shared-loopback
 
 The loopback wall: the `require_loopback` and `require_loopback_host` middleware plus the per-product WebSocket origin policies. The gateway applies it to the admin surface and every loopback-bound build, and config-ui wraps its SPA assets with it. No workspace dependencies; axum is the only third-party crate.
-
-## shared-progress
-
-The progress vocabulary: operation-scoped weighted event trees, the process hub, and coalesced broadcast. Producers across the gateway and workshop families report through it, and hosts forward and render its events. No workspace dependencies.
 
 ## shared-vfs
 

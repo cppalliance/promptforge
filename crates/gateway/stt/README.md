@@ -4,7 +4,7 @@
 
 ## gateway-stt
 
-The gateway-owned speech-to-text runtime and HTTP endpoints (at `api/`): the SpeechService covering artifacts, batch, and Realtime transcription. The gateway mounts its routes in stt builds. Depends on gateway-config, gateway-local, gateway-stt-engine, gateway-stt-backend-whisper, and shared-progress.
+The gateway-owned speech-to-text runtime and HTTP endpoints (at `api/`): the SpeechService covering artifacts, batch, and Realtime transcription. The gateway mounts its routes in stt builds. Depends on gateway-config, gateway-local, gateway-progress, gateway-stt-engine, and gateway-stt-backend-whisper.
 
 ## gateway-stt-engine
 
@@ -12,7 +12,7 @@ Backend-neutral speech decoding: the SttEngine with interim and final workers an
 
 ## gateway-stt-backend-whisper
 
-The safe Whisper decoder backend for the engine. The api crate selects it as the production backend. Depends on gateway-stt-engine and gateway-whisper-ffi.
+The safe Whisper decoder backend for the engine. The api crate selects it as the production backend. Depends on gateway-progress, gateway-stt-engine, and gateway-whisper-ffi.
 
 ## gateway-whisper-ffi
 

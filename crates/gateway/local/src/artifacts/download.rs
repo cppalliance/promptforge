@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use gateway_progress::Activity;
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use sha2::{Digest, Sha256};
-use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use super::Result;

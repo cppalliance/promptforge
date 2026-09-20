@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 
-use shared_progress::Activity;
+use gateway_progress::Activity;
 
 use super::Result;
 use super::assets::ArchiveKind;

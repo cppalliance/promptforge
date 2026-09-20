@@ -26,7 +26,7 @@ use tokio::sync::watch;
 /// # Examples
 ///
 /// ```
-/// use shared_progress::ProgressHub;
+/// use gateway_progress::ProgressHub;
 ///
 /// let hub = ProgressHub::new();
 /// assert!(!hub.current().busy);

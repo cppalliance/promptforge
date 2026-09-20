@@ -1963,6 +1963,7 @@ dependencies = [
  "gateway-config-ui",
  "gateway-local",
  "gateway-logging",
+ "gateway-progress",
  "gateway-protocol",
  "gateway-routing",
  "gateway-stt",
@@ -1982,7 +1983,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "shared-loopback",
- "shared-progress",
  "subtle",
  "sysinfo",
  "tempfile",
@@ -2080,6 +2080,7 @@ dependencies = [
  "async-trait",
  "flate2",
  "gateway-config",
+ "gateway-progress",
  "gateway-protocol",
  "gateway-routing",
  "minijinja",
@@ -2089,7 +2090,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "shared-progress",
  "tar",
  "tempfile",
  "thiserror 2.0.19",
@@ -2107,6 +2107,15 @@ version = "0.3.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",
+ "workspace-hack",
+]
+
+[[package]]
+name = "gateway-progress"
+version = "0.3.0"
+dependencies = [
+ "gateway-api-types",
+ "tokio",
  "workspace-hack",
 ]
 
@@ -2150,6 +2159,7 @@ dependencies = [
  "futures-util",
  "gateway-config",
  "gateway-local",
+ "gateway-progress",
  "gateway-stt",
  "gateway-stt-backend-whisper",
  "gateway-stt-engine",
@@ -2157,7 +2167,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "shared-progress",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -2172,10 +2181,10 @@ dependencies = [
 name = "gateway-stt-backend-whisper"
 version = "0.3.0"
 dependencies = [
+ "gateway-progress",
  "gateway-stt-engine",
  "gateway-whisper-ffi",
  "hound",
- "shared-progress",
  "tempfile",
  "tokio",
  "tracing",
@@ -5927,15 +5936,6 @@ dependencies = [
  "axum",
  "tokio",
  "tower",
- "workspace-hack",
-]
-
-[[package]]
-name = "shared-progress"
-version = "0.3.0"
-dependencies = [
- "gateway-api-types",
- "tokio",
  "workspace-hack",
 ]
 

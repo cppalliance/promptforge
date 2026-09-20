@@ -9,10 +9,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
+use gateway_progress::{Activity, ProgressHub};
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 use gateway_stt_engine::test_fixtures::native::require_fixture;
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
-use shared_progress::{Activity, ProgressHub};
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
 const UNPROMPTED_CLIP_TRANSCRIPT: &str = "country can do for you.";

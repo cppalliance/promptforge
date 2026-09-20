@@ -23,7 +23,7 @@ use serde::Deserialize;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use shared_progress::Activity;
+use gateway_progress::Activity;
 
 use crate::AppState;
 use crate::auth::AuthedCaller;
@@ -341,7 +341,7 @@ fn terminal_line(result: Result<Result<CachedBlob, LocalError>, tokio::task::Joi
 #[cfg(test)]
 mod tests {
     use futures_util::StreamExt as _;
-    use shared_progress::ProgressHub;
+    use gateway_progress::ProgressHub;
 
     use super::*;
 

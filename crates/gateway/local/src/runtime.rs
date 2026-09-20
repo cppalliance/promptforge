@@ -14,10 +14,10 @@ use std::thread;
 use std::time::Duration;
 
 use gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingMode};
+use gateway_progress::Activity;
 use gateway_protocol::ShutdownError;
 use gateway_routing::queue::DominionQueue;
 use gateway_routing::{Endpoint, Model, dominion_queues};
-use shared_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, ArtifactStore, ProvisionedServer, ServerSelection};
@@ -1196,7 +1196,7 @@ endpoints = ["e"]
 "#,
         )
         .expect("config");
-        let hub = shared_progress::ProgressHub::new();
+        let hub = gateway_progress::ProgressHub::new();
         let activity = hub.begin("local-models");
         let runtime = LocalRuntime::start(&config, Some(&activity)).expect("empty local runtime");
         assert_eq!(runtime.child_count(), 0);
@@ -1238,7 +1238,7 @@ context = 512
         ))
         .expect("config");
 
-        let hub = shared_progress::ProgressHub::new();
+        let hub = gateway_progress::ProgressHub::new();
         let activity = hub.begin("local-models");
         let seen = std::sync::Mutex::new(Vec::new());
 
@@ -1328,7 +1328,7 @@ context = 512
         ))
         .expect("config");
 
-        let hub = shared_progress::ProgressHub::new();
+        let hub = gateway_progress::ProgressHub::new();
         let activity = hub.begin("downloading-models");
         let failures = provision_artifacts_impl(
             &config,

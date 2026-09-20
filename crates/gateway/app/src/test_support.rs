@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gateway_config::Config;
-use shared_progress::ProgressHub;
+use gateway_progress::ProgressHub;
 
 use crate::error::GatewayError;
 use crate::routing::Routing;
