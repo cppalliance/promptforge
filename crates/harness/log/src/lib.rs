@@ -33,7 +33,7 @@ mod record;
 mod schema;
 
 pub use append::RunLog;
-pub use error::{DatabaseSource, LogError, PayloadSource};
+pub use error::LogError;
 pub use record::{
     Record, RecordFilter, RecordKind, RunId, RunMeta, RunOutcome, RunRow, Seq, StoredRecord,
 };

@@ -280,7 +280,7 @@ Six remediation choices are settled. Three were escalated because they change a 
 
 <step-7>
 
-### Step 7: harness and workshop newtypes collapsed, and the wide gates
+### Step 7: harness and workshop newtypes collapsed, and the wide gates [completed]
 
 - Component: debt-removal
 - Remove `DatabaseSource` at `crates/harness/log/src/error.rs` and `crates/workshop/workspace/src/workspace_file.rs`, and `JsonSource` at `crates/workshop/user-state/src/error.rs` and `crates/workshop/workspace/src/error.rs`. Fold `PayloadSource`, which wraps `serde_json::Error`, onto the shared JSON type. Repoint `LogError`, `WorkspaceFileError`, `WorkspaceError`, and `UserStateError`, adding `shared-error-source` with only the needed feature to each of the three crates.

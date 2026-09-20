@@ -262,3 +262,20 @@ async fn debug_builds_leak_detail_into_the_live_envelope() {
         "file cannot be read: injected disk failure"
     );
 }
+
+#[test]
+fn the_ui_state_not_json_variant_reaches_the_serde_error_through_the_shared_wrapper() {
+    let Err(json) = serde_json::from_str::<serde_json::Value>("nope") else {
+        panic!("`nope` must not parse as JSON");
+    };
+    let error = WorkspaceError::UiStateNotJson {
+        source: json.into(),
+    };
+    let Some(cause) = std::error::Error::source(&error) else {
+        panic!("the ui-state not-json variant carries its serde cause as source()");
+    };
+    let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
+        panic!("the serde cause is the shared JsonSource");
+    };
+    assert!(wrapper.as_inner().is_syntax());
+}

@@ -14,6 +14,11 @@ use std::io;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+// The JSON cause behind `WorkspaceError::UiStateNotJson`. A caller that
+// needs the parse error itself names `shared_error_source` directly;
+// this crate does not re-export the wrapper, so there is one name for
+// the cause across the workspace rather than one per crate.
+use shared_error_source::JsonSource;
 use workshop_protocol::ErrorEnvelope;
 
 use crate::workspace_file::{UI_STATE_KEYS, WorkspaceFileError};
@@ -180,19 +185,6 @@ pub enum WorkspaceError {
         #[source]
         source: JsonSource,
     },
-}
-
-/// The JSON parse refusal behind [`WorkspaceError::UiStateNotJson`],
-/// owned by this crate so the public error names no JSON library type.
-/// Renders and sources exactly as the serde error does.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct JsonSource(serde_json::Error);
-
-impl From<serde_json::Error> for JsonSource {
-    fn from(source: serde_json::Error) -> Self {
-        Self(source)
-    }
 }
 
 impl From<WorkspaceFileError> for WorkspaceError {

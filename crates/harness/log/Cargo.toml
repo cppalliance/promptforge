@@ -14,6 +14,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 serde_json.workspace = true
+shared-error-source = { workspace = true, features = ["database", "json"] }
 thiserror.workspace = true
 turso.workspace = true
 workspace-hack.workspace = true

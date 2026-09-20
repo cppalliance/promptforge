@@ -2,6 +2,12 @@
 
 use std::io;
 
+// The engine and serde causes behind the variants below. A caller that
+// needs the underlying error names `shared_error_source` directly; this
+// crate does not re-export the wrappers, so there is one name for the
+// cause across the workspace rather than one per crate.
+use shared_error_source::{DatabaseSource, JsonSource};
+
 use crate::RunId;
 
 /// Why a run log operation failed.
@@ -29,7 +35,7 @@ pub enum LogError {
     Payload {
         /// The serde error.
         #[source]
-        source: PayloadSource,
+        source: JsonSource,
     },
     /// No run with this id was ever begun in this log.
     #[error("run log: unknown run {0}")]
@@ -43,24 +49,10 @@ pub enum LogError {
     Corrupt(String),
 }
 
-/// The database engine's error behind [`LogError::Database`], owned by
-/// this crate so the public vocabulary names no third-party type. Renders
-/// and sources exactly as the engine's error does.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct DatabaseSource(turso::Error);
-
-/// The serde error behind [`LogError::Payload`], owned by this crate so
-/// the public vocabulary names no third-party type. Renders and sources
-/// exactly as the serde error does.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct PayloadSource(serde_json::Error);
-
 impl From<turso::Error> for LogError {
     fn from(source: turso::Error) -> Self {
         LogError::Database {
-            source: DatabaseSource(source),
+            source: source.into(),
         }
     }
 }
@@ -68,7 +60,45 @@ impl From<turso::Error> for LogError {
 impl From<serde_json::Error> for LogError {
     fn from(source: serde_json::Error) -> Self {
         LogError::Payload {
-            source: PayloadSource(source),
+            source: source.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use shared_error_source::{DatabaseSource, JsonSource};
+
+    use super::LogError;
+
+    #[test]
+    fn the_database_variant_reaches_the_engine_error_through_the_shared_wrapper() {
+        let error = LogError::from(turso::Error::Corrupt(
+            "page 1 is not a b-tree page".to_owned(),
+        ));
+        let Some(cause) = error.source() else {
+            panic!("the database variant carries its engine cause as source()");
+        };
+        let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
+            panic!("the engine cause is the shared DatabaseSource");
+        };
+        assert!(matches!(wrapper.as_inner(), turso::Error::Corrupt(_)));
+    }
+
+    #[test]
+    fn the_payload_variant_reaches_the_serde_error_through_the_shared_wrapper() {
+        let Err(json) = serde_json::from_str::<u32>("nope") else {
+            panic!("`nope` must not parse as a u32");
+        };
+        let error = LogError::from(json);
+        let Some(cause) = error.source() else {
+            panic!("the payload variant carries its serde cause as source()");
+        };
+        let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
+            panic!("the serde cause is the shared JsonSource");
+        };
+        assert!(wrapper.as_inner().is_syntax());
     }
 }

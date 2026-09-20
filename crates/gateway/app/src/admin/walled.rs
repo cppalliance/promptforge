@@ -70,6 +70,13 @@ pub(crate) fn routes() -> Router<AppState> {
 /// The walled admin routes, as the registry sees them, under the same
 /// feature gates [`routes`] mounts them.
 pub(crate) fn registry() -> Vec<RouteInfo> {
+    #[cfg_attr(
+        not(any(feature = "local", feature = "config-ui")),
+        expect(
+            unused_mut,
+            reason = "nothing extends the list when both gated groups are off"
+        )
+    )]
     let mut routes = [
         shutdown::ROUTES,
         system::ROUTES,

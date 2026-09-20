@@ -34,7 +34,7 @@ pub mod handles;
 mod workspace;
 mod workspace_file;
 
-pub use error::{JsonSource, WorkspaceError};
+pub use error::WorkspaceError;
 pub use handlers::routes;
 pub use handles::{register, register_tasks};
 pub use workspace::{
@@ -42,4 +42,4 @@ pub use workspace::{
 };
 #[cfg(any(test, feature = "test-fixtures"))]
 pub use workspace_file::create_alien_database_for_test;
-pub use workspace_file::{DatabaseSource, WindowState, WorkspaceFileError};
+pub use workspace_file::{WindowState, WorkspaceFileError};

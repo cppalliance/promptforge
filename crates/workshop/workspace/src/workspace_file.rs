@@ -19,6 +19,11 @@ use std::sync::Arc;
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
+// The engine cause behind `WorkspaceFileError::Database`. A caller that
+// needs the engine error itself names `shared_error_source` directly;
+// this crate does not re-export the wrapper, so there is one name for
+// the cause across the workspace rather than one per crate.
+use shared_error_source::DatabaseSource;
 use tokio::sync::{mpsc, oneshot};
 
 #[path = "workspace_file-actor.rs"]
@@ -109,17 +114,10 @@ pub enum WorkspaceFileError {
 impl From<turso::Error> for WorkspaceFileError {
     fn from(source: turso::Error) -> Self {
         Self::Database {
-            source: DatabaseSource(source),
+            source: source.into(),
         }
     }
 }
-
-/// The database engine's failure as the cause of a
-/// [`WorkspaceFileError::Database`], owned by this crate so the public
-/// error names no engine type.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct DatabaseSource(turso::Error);
 
 /// Everything a workspace file carries between sessions.
 #[derive(Debug, Clone)]
@@ -472,11 +470,15 @@ pub(crate) fn io_failure(source: io::Error) -> WorkspaceFileError {
 
 /// Whether an engine failure says the file is not a database at all.
 fn is_not_a_database(error: &WorkspaceFileError) -> bool {
+    // The wrapper's field is private to its own crate, so the engine
+    // error is reached through the accessor rather than by pattern.
     matches!(
         error,
-        WorkspaceFileError::Database {
-            source: DatabaseSource(turso::Error::NotAdb(_) | turso::Error::Corrupt(_))
-        }
+        WorkspaceFileError::Database { source }
+            if matches!(
+                source.as_inner(),
+                turso::Error::NotAdb(_) | turso::Error::Corrupt(_)
+            )
     )
 }
 

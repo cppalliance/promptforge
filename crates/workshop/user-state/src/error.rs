@@ -15,6 +15,11 @@ use std::io;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+// The JSON cause behind `UserStateError::NotJson`. A caller that needs
+// the parse error itself names `shared_error_source` directly; this
+// crate does not re-export the wrapper, so there is one name for the
+// cause across the workspace rather than one per crate.
+use shared_error_source::JsonSource;
 use workshop_protocol::ErrorEnvelope;
 
 use crate::store::USER_STATE_KEYS;
@@ -60,19 +65,6 @@ pub enum UserStateError {
     #[non_exhaustive]
     #[error("user-state file cannot be written")]
     Io(#[source] io::Error),
-}
-
-/// The JSON parse refusal behind [`UserStateError::NotJson`], owned by
-/// this crate so the public error names no JSON library type. Renders and
-/// sources exactly as the serde error does.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct JsonSource(serde_json::Error);
-
-impl From<serde_json::Error> for JsonSource {
-    fn from(source: serde_json::Error) -> Self {
-        Self(source)
-    }
 }
 
 impl UserStateError {
@@ -125,3 +117,7 @@ fn render_message(error: &UserStateError, leak_detail: bool) -> String {
     }
     message
 }
+
+#[cfg(test)]
+#[path = "error-tests.rs"]
+mod tests;

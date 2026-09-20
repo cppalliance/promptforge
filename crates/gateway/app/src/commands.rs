@@ -24,7 +24,10 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
-use crate::error::{GatewayError, blocking};
+use crate::error::GatewayError;
+// Only the local-inference command bodies leave the async executor.
+#[cfg(feature = "local")]
+use crate::error::blocking;
 
 #[path = "commands-apply.rs"]
 pub(crate) mod apply;

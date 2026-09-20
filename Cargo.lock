@@ -2614,6 +2614,7 @@ name = "harness-log"
 version = "0.3.0"
 dependencies = [
  "serde_json",
+ "shared-error-source",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -8626,6 +8627,7 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "serde_json",
+ "shared-error-source",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -8648,6 +8650,7 @@ dependencies = [
  "promptforge-api-runtime",
  "serde",
  "serde_json",
+ "shared-error-source",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
