@@ -131,6 +131,91 @@ fn a_harness_crate_without_the_marker_is_a_violation_and_still_held_to_the_ceili
 }
 
 #[test]
+fn a_harness_crate_whose_manifest_has_no_package_name_is_reported_not_skipped() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "harness/runner",
+        "harness-runner",
+        UNMARKED,
+        MAX_FILE_LINES + 1,
+    );
+    let manifest = root
+        .path()
+        .join("crates")
+        .join("harness")
+        .join("runner")
+        .join("Cargo.toml");
+    std::fs::write(&manifest, "[lints]\nworkspace = true\n").expect("the manifest rewrites");
+    let violations = marker_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("runner") && violations[0].contains("no package name"),
+        "the directory and the failure mode are named: {violations:?}"
+    );
+    let ceiling = file_ceiling_violations(root.path());
+    assert_eq!(
+        ceiling.len(),
+        1,
+        "a crate with no readable name is not exempt from the ceiling: {ceiling:?}"
+    );
+}
+
+#[test]
+fn a_manifest_read_failure_is_reported_once_across_the_checks() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let dir = root.path().join("crates").join("broken");
+    std::fs::create_dir_all(&dir).expect("the crate directory creates");
+    std::fs::write(dir.join("Cargo.toml"), "not [valid toml").expect("the manifest writes");
+    let violations = marker_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("unparseable manifest"),
+        "the marker check owns the walk's read failures: {violations:?}"
+    );
+    assert!(
+        crate::product::product_boundary_violations(root.path()).is_empty(),
+        "the two checks share one walk and report its read failures once"
+    );
+}
+
+#[test]
+fn a_crate_nested_under_a_subsystem_container_is_held_to_the_ceiling() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "gateway/stt/engine",
+        "gateway-stt-engine",
+        MARKED,
+        MAX_FILE_LINES + 1,
+    );
+    let violations = file_ceiling_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("big.rs"),
+        "the walk reaches a crate three levels under crates/: {violations:?}"
+    );
+}
+
+#[test]
+fn the_tidy_checks_and_the_product_checks_enumerate_the_same_crates() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(root.path(), "harness/runner", "harness-runner", MARKED, 1);
+    write_crate(
+        root.path(),
+        "gateway/stt/engine",
+        "gateway-stt-engine",
+        MARKED,
+        1,
+    );
+    assert_eq!(
+        participating_crates(root.path()).len(),
+        crate::product::workspace_crates(root.path()).crates.len(),
+        "the two walks find the same crates"
+    );
+}
+
+#[test]
 fn the_workshop_shell_without_the_marker_passes_and_stays_outside_the_ceiling() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(

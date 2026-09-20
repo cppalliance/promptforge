@@ -17,9 +17,10 @@ fn workspace_respects_the_product_boundary() {
 
 #[test]
 fn workshop_depends_on_workshop_server_api_only() {
-    let (crates, violations) = workspace_crates(&workspace_root());
-    assert!(violations.is_empty(), "{violations:?}");
-    let shell = crates
+    let walk = workspace_crates(&workspace_root());
+    assert!(walk.violations.is_empty(), "{:?}", walk.violations);
+    let shell = walk
+        .crates
         .iter()
         .find(|krate| krate.package == "workshop")
         .expect("the workshop shell crate is a workspace member");
@@ -237,11 +238,15 @@ fn an_unparseable_manifest_is_reported() {
     let dir = root.path().join("crates").join("broken");
     std::fs::create_dir_all(&dir).expect("the crate directory creates");
     std::fs::write(dir.join("Cargo.toml"), "not [valid toml").expect("the manifest writes");
-    let violations = product_boundary_violations(root.path());
+    let violations = workspace_crates(root.path()).violations;
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("unparseable manifest"),
         "the violation reports the parse failure: {violations:?}"
+    );
+    assert!(
+        product_boundary_violations(root.path()).is_empty(),
+        "the read failure belongs to the marker check, not this one"
     );
 }
 

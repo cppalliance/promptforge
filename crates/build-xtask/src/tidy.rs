@@ -8,9 +8,11 @@
 //! enforces the architecture; `cargo xtask tidy` prints the same report
 //! on demand. The file ceiling and lint inheritance checks bind every
 //! `workshop-*` and `harness-*` crate (plus `harness-api`, minus the
-//! `workshop` shell) by package name, and every other crate whose crate
-//! docs carry the `## Invariants` marker; a family crate missing the marker
-//! is itself a violation.
+//! `workshop` shell) by package name, every other crate whose crate
+//! docs carry the `## Invariants` marker, and every crate directory whose
+//! manifest the shared walk could not read, parse, or find a package name
+//! in - a crate with no readable name cannot be shown exempt. Those read
+//! failures are reported by `marker_violations`, their one owner.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -218,17 +220,22 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
 }
 
 /// Check that every crate the families bind by name carries the marker.
+///
+/// A manifest the walk could not read, parse, or find a package name in is
+/// reported as itself, not skipped: a crate with no readable name cannot be
+/// shown exempt from the marker. This check is the one owner of the shared
+/// walk's read failures; the product-boundary check shares the walk and
+/// leaves them here.
 #[must_use]
 pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
-    let mut violations = Vec::new();
-    for dir in workspace_crates(root) {
-        let Some(name) = package_name(&dir) else {
-            continue;
-        };
-        if family_requires_marker(&name) && !carries_marker(&dir) {
+    let walk = crate::product::workspace_crates(root);
+    let mut violations = walk.violations;
+    for krate in &walk.crates {
+        if family_requires_marker(&krate.package) && !carries_marker(&root.join(&krate.dir)) {
             violations.push(format!(
-                "{name}: src/lib.rs lacks the `{INVARIANT_MARKER}` marker required of every \
-                 workshop-* and harness-* crate"
+                "{}: src/lib.rs lacks the `{INVARIANT_MARKER}` marker required of every \
+                 workshop-* and harness-* crate",
+                krate.package
             ));
         }
     }
@@ -243,55 +250,19 @@ fn family_requires_marker(name: &str) -> bool {
 }
 
 /// Crates bound by the file ceiling and lint inheritance checks: the union
-/// of the crates the families bind by name and every crate carrying the
-/// marker.
+/// of the crates the families bind by name, every crate carrying the
+/// marker, and every crate whose manifest the walk could not read - an
+/// unreadable manifest cannot show a crate exempt.
 fn participating_crates(root: &Path) -> Vec<PathBuf> {
-    workspace_crates(root)
-        .into_iter()
-        .filter(|dir| {
-            package_name(dir).is_some_and(|name| family_requires_marker(&name))
-                || carries_marker(dir)
+    let walk = crate::product::workspace_crates(root);
+    walk.crates
+        .iter()
+        .filter(|krate| {
+            family_requires_marker(&krate.package) || carries_marker(&root.join(&krate.dir))
         })
+        .map(|krate| root.join(&krate.dir))
+        .chain(walk.unread.iter().map(|dir| root.join(dir)))
         .collect()
-}
-
-/// Every crate directory under `crates/`. A directory containing a
-/// `Cargo.toml` is a crate and is not descended into; any other directory
-/// is a container and the walk descends one level, so crates nested under
-/// `crates/workshop/` and `crates/harness/` stay visible.
-fn workspace_crates(root: &Path) -> Vec<PathBuf> {
-    let mut crates = Vec::new();
-    let Ok(entries) = fs::read_dir(root.join("crates")) else {
-        return crates;
-    };
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        if dir.join("Cargo.toml").exists() {
-            crates.push(dir);
-        } else if let Ok(inner) = fs::read_dir(&dir) {
-            for entry in inner.flatten() {
-                let sub = entry.path();
-                if sub.is_dir() && sub.join("Cargo.toml").exists() {
-                    crates.push(sub);
-                }
-            }
-        }
-    }
-    crates
-}
-
-/// The `[package] name` declared in a crate directory's manifest.
-fn package_name(dir: &Path) -> Option<String> {
-    let text = fs::read_to_string(dir.join("Cargo.toml")).ok()?;
-    let manifest: toml::Value = toml::from_str(&text).ok()?;
-    manifest
-        .get("package")
-        .and_then(|p| p.get("name"))
-        .and_then(toml::Value::as_str)
-        .map(str::to_owned)
 }
 
 /// Whether a crate's `lib.rs` or `main.rs` crate docs carry the marker.

@@ -71,16 +71,35 @@ fn family(package: &str) -> Family {
 
 /// A workspace crate: its package name, its manifest directory relative to
 /// the workspace root, and its dependency package names.
-struct CrateInfo {
-    package: String,
-    dir: PathBuf,
+pub(crate) struct CrateInfo {
+    pub(crate) package: String,
+    pub(crate) dir: PathBuf,
     deps: Vec<String>,
 }
 
+/// Every crate under `crates/`, as the one enumeration the architecture
+/// checks share.
+pub(crate) struct CrateWalk {
+    /// The crates whose manifests named a package.
+    pub(crate) crates: Vec<CrateInfo>,
+    /// Crate directories, relative to the workspace root, whose manifest
+    /// could not be read, parsed, or named. A crate that cannot be read
+    /// cannot be shown exempt, so the checks that bind by package name
+    /// bind these too.
+    pub(crate) unread: Vec<PathBuf>,
+    /// Every read failure, in walk order.
+    pub(crate) violations: Vec<String>,
+}
+
 /// Checks every workspace manifest against the product-boundary matrix.
+///
+/// The walk's read failures belong to `tidy::marker_violations`, the one
+/// owner: both checks share the walk, so reporting them here too would
+/// name every unreadable manifest twice in `tidy::all_violations`.
 #[must_use]
 pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
-    let (crates, mut violations) = workspace_crates(root);
+    let CrateWalk { crates, .. } = workspace_crates(root);
+    let mut violations = Vec::new();
     for package in &crates {
         for dep_name in &package.deps {
             // Only workspace members are bound by the matrix; a crates.io
@@ -245,25 +264,29 @@ fn container_face(container: &str) -> Option<&'static str> {
 }
 
 /// Every workspace crate's package name, manifest directory, and dependency
-/// package names, plus violations for manifests that could not be read or
-/// parsed. A directory under `crates/` containing a `Cargo.toml` is a crate
-/// and is not descended into; any other directory is a container and the
-/// walk descends, so containers may nest (`crates/gateway/stt/`).
-fn workspace_crates(root: &Path) -> (Vec<CrateInfo>, Vec<String>) {
-    let mut crates = Vec::new();
-    let mut violations = Vec::new();
+/// package names, plus the directories and violations for manifests that
+/// could not be read or parsed. A directory under `crates/` containing a
+/// `Cargo.toml` is a crate and is not descended into; any other directory
+/// is a container and the walk descends, so containers may nest
+/// (`crates/gateway/stt/`).
+pub(crate) fn workspace_crates(root: &Path) -> CrateWalk {
+    let mut walk = CrateWalk {
+        crates: Vec::new(),
+        unread: Vec::new(),
+        violations: Vec::new(),
+    };
     let crates_dir = root.join("crates");
-    walk_crates(root, &crates_dir, &mut crates, &mut violations);
-    (crates, violations)
+    walk_crates(root, &crates_dir, &mut walk);
+    walk
 }
 
 /// Walks one directory level: crates are read, manifestless containers are
 /// descended into.
-fn walk_crates(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: &mut Vec<String>) {
+fn walk_crates(root: &Path, dir: &Path, walk: &mut CrateWalk) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
-            violations.push(format!(
+            walk.violations.push(format!(
                 "{}: unreadable crates directory: {error}",
                 dir.display()
             ));
@@ -274,7 +297,7 @@ fn walk_crates(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations:
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                violations.push(format!(
+                walk.violations.push(format!(
                     "{}: unreadable directory entry: {error}",
                     dir.display()
                 ));
@@ -286,20 +309,23 @@ fn walk_crates(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations:
         }
         let sub = entry.path();
         if sub.join("Cargo.toml").exists() {
-            read_crate(root, &sub, crates, violations);
+            read_crate(root, &sub, walk);
         } else {
-            walk_crates(root, &sub, crates, violations);
+            walk_crates(root, &sub, walk);
         }
     }
 }
 
-/// Reads one crate's manifest into `crates`; failures land in `violations`.
-fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: &mut Vec<String>) {
+/// Reads one crate's manifest into the walk; a failure names the crate in
+/// `unread` and the failure mode in `violations`.
+fn read_crate(root: &Path, dir: &Path, walk: &mut CrateWalk) {
+    let relative = dir.strip_prefix(root).unwrap_or(dir).to_path_buf();
     let manifest_path = dir.join("Cargo.toml");
     let text = match fs::read_to_string(&manifest_path) {
         Ok(text) => text,
         Err(error) => {
-            violations.push(format!(
+            walk.unread.push(relative);
+            walk.violations.push(format!(
                 "{}: unreadable manifest: {error}",
                 manifest_path.display()
             ));
@@ -309,7 +335,8 @@ fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: 
     let manifest = match toml::from_str::<toml::Value>(&text) {
         Ok(manifest) => manifest,
         Err(error) => {
-            violations.push(format!(
+            walk.unread.push(relative);
+            walk.violations.push(format!(
                 "{}: unparseable manifest: {error}",
                 manifest_path.display()
             ));
@@ -321,15 +348,16 @@ fn read_crate(root: &Path, dir: &Path, crates: &mut Vec<CrateInfo>, violations: 
         .and_then(|p| p.get("name"))
         .and_then(toml::Value::as_str)
     else {
-        violations.push(format!(
+        walk.unread.push(relative);
+        walk.violations.push(format!(
             "{}: manifest has no package name",
             manifest_path.display()
         ));
         return;
     };
-    crates.push(CrateInfo {
+    walk.crates.push(CrateInfo {
         package: package.to_owned(),
-        dir: dir.strip_prefix(root).unwrap_or(dir).to_path_buf(),
+        dir: relative,
         deps: manifest_dependencies(&manifest),
     });
 }
