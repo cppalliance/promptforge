@@ -24,8 +24,12 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
-use crate::admin::walled::config_apply::ApplySnapshot;
-use crate::error::GatewayError;
+use crate::error::{GatewayError, blocking};
+
+#[path = "commands-apply.rs"]
+pub(crate) mod apply;
+
+use self::apply::ApplySnapshot;
 
 /// The `ApplyConfig` command's display name: the status bar and tray show
 /// it, and the apply's cancellation error names it.
@@ -638,8 +642,7 @@ async fn run_command(state: AppState, command: Command, activity: Activity) -> O
             crate::boot_load::run(&state, name, activity, &token).await
         }
         Command::ApplyConfig { snapshot, token } => {
-            crate::admin::walled::config_apply::apply_config(&state, snapshot, token, activity)
-                .await
+            apply::apply_config(&state, snapshot, token, activity).await
         }
         Command::ProvisionModel {
             name,
@@ -666,17 +669,16 @@ async fn provision_model(
     let source = source.to_owned();
     let label = format!("provision-model: {name}");
     let worker_token = token.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = blocking(move || {
         let root = crate::local::resolve_cache_root(cache_dir.as_deref())?;
         let store = crate::local::artifacts::ArtifactStore::new(root)?;
         store.ensure_model_with_cancellation(&source, None, Some(&activity), Some(&worker_token))
     })
-    .await;
+    .await?;
     match result {
-        Ok(Ok(_path)) => Ok(format!("provisioned {name}")),
-        Ok(Err(_)) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label)),
-        Ok(Err(error)) => Err(GatewayError::cache(error)),
-        Err(join) => Err(GatewayError::cache(join)),
+        Ok(_path) => Ok(format!("provisioned {name}")),
+        Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label)),
+        Err(error) => Err(GatewayError::cache(error)),
     }
 }
 
@@ -711,12 +713,10 @@ async fn unload_model(state: &AppState, name: &str, activity: Activity) -> Outco
         model
     };
     activity.set_text(format!("Stopping {name}"));
-    let result = tokio::task::spawn_blocking(move || model.endpoint.upstream.shutdown()).await;
-    match result {
-        Ok(Ok(())) => Ok(format!("unloaded {name}")),
-        Ok(Err(error)) => Err(GatewayError::switch_failed("unload-model", error)),
-        Err(join) => Err(GatewayError::switch_failed("unload-model", join)),
-    }
+    blocking(move || model.endpoint.upstream.shutdown())
+        .await?
+        .map_err(|error| GatewayError::switch_failed("unload-model", error))?;
+    Ok(format!("unloaded {name}"))
 }
 
 /// The headless `UnloadModel` body: no local runtime exists to hold models.

@@ -5,14 +5,18 @@ use axum::extract::State;
 use axum::http::Method;
 use axum::routing::get;
 use axum::{Json, Router};
+use gateway_api_types::Progress;
 use gateway_config::ModelKind;
+use serde::Serialize;
 
 use crate::AppState;
+#[cfg(feature = "stt")]
+use crate::admin::walled::system::SpeechSnapshot;
 use crate::auth::AuthedCaller;
 use crate::error::GatewayError;
-use crate::models::endpoint_status;
 #[cfg(feature = "stt")]
 use crate::models::with_speech_endpoint;
+use crate::models::{EndpointStatus, endpoint_status};
 use crate::registry::RouteInfo;
 
 const STATUS: RouteInfo = RouteInfo::open("/admin/status", &[Method::GET]);
@@ -23,6 +27,60 @@ pub(crate) const ROUTES: &[RouteInfo] = &[STATUS];
 /// The status route.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(STATUS.path, get(admin_status))
+}
+
+/// The `GET /admin/status` reply.
+#[derive(Debug, Serialize)]
+pub(crate) struct StatusReply {
+    /// The running profile's name, `null` when none is selected.
+    profile: Option<String>,
+    /// Every model in the live routing table, in catalog order.
+    models: Vec<String>,
+    /// The boot profile's local models whose children are still spawning.
+    loading_models: Vec<String>,
+    /// The process-lifetime identifier the config UI uses to detect a
+    /// restart.
+    config_generation: String,
+    /// The active profile's `models` allowlist, when it declared one.
+    model_allowlist: Option<Vec<String>>,
+    /// Running local children; zero in a headless build.
+    local_children: usize,
+    /// The declared VRAM total of the running local and speech models.
+    vram_gb: f64,
+    /// The hub's current busy flag and text.
+    progress: Progress,
+    /// The command queue's active and waiting commands.
+    queue: QueueReply,
+    /// One readiness entry per capability endpoint.
+    endpoints: Vec<EndpointStatus>,
+    /// Speech lifecycle facts (`stt` builds).
+    #[cfg(feature = "stt")]
+    speech: SpeechSnapshot,
+}
+
+/// The command queue as the status readout reports it.
+#[derive(Debug, Serialize)]
+pub(crate) struct QueueReply {
+    /// The command the worker is running, if any.
+    active: Option<ActiveCommandReply>,
+    /// The commands waiting behind it, in queue order.
+    pending: Vec<PendingCommandReply>,
+}
+
+/// The active command: its display name and when it started, as Unix
+/// epoch seconds.
+#[derive(Debug, Serialize)]
+pub(crate) struct ActiveCommandReply {
+    name: String,
+    started_at: u64,
+}
+
+/// One waiting command: its display name and when it was queued, as Unix
+/// epoch seconds.
+#[derive(Debug, Serialize)]
+pub(crate) struct PendingCommandReply {
+    name: String,
+    queued_at: u64,
 }
 
 /// An `Instant` as Unix epoch seconds for the status wire shape. The
@@ -46,16 +104,16 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
 pub(crate) async fn admin_status(
     State(state): State<AppState>,
     _caller: AuthedCaller,
-) -> Result<Json<serde_json::Value>, GatewayError> {
+) -> Result<Json<StatusReply>, GatewayError> {
     let active = state.commands.active_command();
     let pending = state.commands.pending_commands();
     let progress = state.hub.current();
     let live = state.live.read().await;
-    let models: Vec<&str> = live
+    let models: Vec<String> = live
         .routing
         .models()
         .iter()
-        .map(|m| m.name.as_str())
+        .map(|m| m.name.clone())
         .collect();
     // A headless build has no local runtime; it reports zero children rather
     // than dropping the field from the status response.
@@ -91,46 +149,32 @@ pub(crate) async fn admin_status(
     #[cfg(feature = "stt")]
     let (endpoints, speech) =
         with_speech_endpoint(endpoints, state.speech.status(), command_active);
-    let response = serde_json::json!({
-        "profile": live.profile_name,
-        "models": models,
-        "loading_models": live.loading.iter().collect::<Vec<_>>(),
-        "config_generation": state.config_generation.as_ref(),
-        "model_allowlist": live.model_allowlist,
-        "local_children": local_children,
-        "vram_gb": vram_gb,
-        "progress": progress,
-        "queue": {
-            "active": active.map(|status| serde_json::json!({
-                "name": status.name,
-                "started_at": instant_epoch_seconds(status.started_at),
-            })),
-            "pending": pending
-                .iter()
-                .map(|entry| serde_json::json!({
-                    "name": entry.name,
-                    "queued_at": instant_epoch_seconds(entry.queued_at),
-                }))
-                .collect::<Vec<_>>(),
+    Ok(Json(StatusReply {
+        profile: live.profile_name.clone(),
+        models,
+        loading_models: live.loading.iter().cloned().collect(),
+        config_generation: state.config_generation.to_string(),
+        model_allowlist: live.model_allowlist.clone(),
+        local_children,
+        vram_gb,
+        progress,
+        queue: QueueReply {
+            active: active.map(|status| ActiveCommandReply {
+                name: status.name,
+                started_at: instant_epoch_seconds(status.started_at),
+            }),
+            pending: pending
+                .into_iter()
+                .map(|entry| PendingCommandReply {
+                    name: entry.name,
+                    queued_at: instant_epoch_seconds(entry.queued_at),
+                })
+                .collect(),
         },
-        "endpoints": endpoints
-            .iter()
-            .map(|endpoint| serde_json::json!({
-                "path": endpoint.path,
-                "name": endpoint.name,
-                "ready": endpoint.ready,
-                "provisioning": endpoint.provisioning,
-            }))
-            .collect::<Vec<_>>(),
-    });
-    #[cfg(feature = "stt")]
-    let response = {
-        let mut response = response;
-        response["speech"] =
-            serde_json::json!(crate::admin::walled::system::SpeechSnapshot::from(speech));
-        response
-    };
-    Ok(Json(response))
+        endpoints,
+        #[cfg(feature = "stt")]
+        speech: SpeechSnapshot::from(speech),
+    }))
 }
 
 #[cfg(test)]

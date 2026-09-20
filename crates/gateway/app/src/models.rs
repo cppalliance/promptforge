@@ -106,7 +106,7 @@ pub(crate) async fn list_models(
 /// One capability endpoint's readout in the `GET /admin/status` response:
 /// the route path, a display name, whether the live routing table serves
 /// it, and whether a queue command is provisioning its models.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct EndpointStatus {
     pub(crate) path: &'static str,
     pub(crate) name: &'static str,

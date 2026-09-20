@@ -28,7 +28,7 @@ todos:
     status: completed
   - id: split-config-apply
     content: "GATED on progress plan Step 5: move apply_config command body beside commands; leave thin handlers (Finding 7); type the admin/open/status.rs reply; blocking() in the two commands.rs sites"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -108,12 +108,16 @@ Pure mechanical, no route moves, verified by the existing suite.
 - Gate: the progress plan's Step 5 commit is on `vibe2` and this branch is rebased onto it.
 - Move `apply_config` and its snapshot types beside the other commands (`commands.rs` is already 1,400+ lines, so a `commands-apply.rs` sibling with `#[path]`); `admin/walled/config_apply.rs` keeps two thin handlers. Keep the apply mutex acquisition in the same relative position. This is the one step that can shift behavior.
 - Also in this step, the two pieces deferred from Steps 1 and 4 because their lines are the progress plan's: the two `commands.rs` `spawn_blocking` sites (`provision_model`, `unload_model`) move to `blocking()`, and `admin/open/status.rs` gets a typed `StatusReply` carrying their `progress: gateway_api_types::Progress` field and no `active.fraction`.
+- Gate opened during Step 4: the progress plan's Steps 4 and 5 (`fb44946b`, `52f3e824`) landed on `vibe2`, and this branch was rebased onto them. The rebase cost was as predicted: five conflict hunks, all imports (`lib.rs` two, `admin/open/progress.rs` two, `cache.rs`, `commands.rs`, `config_apply.rs`), plus one rustfmt fixup squashed into the route-move commit. Their Step 4 retired some progress tests, so the suite count is 469 from here.
+- As executed: `commands-apply.rs` (module `commands::apply`, wired with `#[path]`) holds `ShadowCapture`, `ApplySnapshot`, `ApplyPlan`, `RESTART_SECTIONS`, `capture_apply`, `promote_captures`, `apply_config`, and the `apply_snapshot` commit; `admin/walled/config_apply.rs` keeps the two handlers, their replies, and `delete_all_shadows` (the revert body runs inline under the route's lock, not as a command). The apply mutex acquisition is unchanged on both sides. The `capture_apply_flags_restart_for_boot_read_sections_only` test stays in the route module's test block, which owns the fixtures it shares. `StatusReply`, `QueueReply`, `ActiveCommandReply`, `PendingCommandReply` in `status.rs`; `EndpointStatus` in `models.rs` derives `Serialize` so the endpoint entries need no mirror struct. The two `commands.rs` sites now go through `blocking()`, which flattens their three-arm matches to two.
+- Verified: clippy `-D warnings`, fmt, headless check, rustdoc `-D warnings`, nextest 469 passed.
 - Commit: `Move the apply command body beside the other commands`
 
 ## Step 6 (optional): AppState builder (Finding 8) - GATED
 
 - Same gate as Step 5; their Step 4 edits 12 progress sites in `runner.rs`.
 - Only if the test harness churn from Steps 2 and 4 multiplies `from_parts` calls. Confidence low; `runner.rs` is mostly the serve loop, not assembly.
+- Decision: not done. `AppState::from_parts` still has exactly two callers (`runner.rs` and `test_support::state_over`); Steps 2 and 4 added none. The builder would be machinery with no second consumer.
 
 ## Constraints
 
