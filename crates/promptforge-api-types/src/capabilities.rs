@@ -160,6 +160,14 @@ impl std::fmt::Display for CapabilityId {
     }
 }
 
+impl std::str::FromStr for CapabilityId {
+    type Err = CapabilityIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        CapabilityId::parse(s)
+    }
+}
+
 impl serde::Serialize for CapabilityId {
     /// Serializes the identity as its one `namespace/pack` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

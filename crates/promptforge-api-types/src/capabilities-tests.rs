@@ -62,3 +62,18 @@ fn capability_id_serializes_as_its_string_form() {
         "a 3-segment string is a tool id, never a capability id"
     );
 }
+
+#[test]
+fn capability_id_implements_from_str() {
+    use std::str::FromStr;
+    let id = CapabilityId::from_str("promptforge/web").expect("valid capability id");
+    assert_eq!(id.to_string(), "promptforge/web");
+    assert_eq!(
+        "promptforge/web"
+            .parse::<CapabilityId>()
+            .expect("valid capability id")
+            .to_string(),
+        "promptforge/web"
+    );
+    assert!(CapabilityId::from_str("promptforge/web/fetch").is_err());
+}
