@@ -87,7 +87,7 @@ jobs:
         if: matrix.platform == 'macos-x86_64'
         run: >-
           cmake -S whisper.cpp -B build
-          -DBUILD_SHARED_LIBS=OFF
+          -DBUILD_SHARED_LIBS=ON
           -DGGML_METAL=OFF
           -DGGML_NATIVE=OFF
           -DWHISPER_BUILD_EXAMPLES=OFF
