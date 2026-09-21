@@ -23,7 +23,6 @@ use std::fmt::{self, Write as _};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_capabilities::{CapabilityRegistry, RunServices, activate};
 use harness_log::{LogError, Record, RecordKind, RunId, RunMeta, RunOutcome};
@@ -331,13 +330,7 @@ fn prompt_hash(source: &str) -> String {
 }
 
 /// The system clock now as the engine's `Timestamp`: the host's stamp for
-/// a run's `started_at`, since the engine reads no clock of its own. A
-/// clock before the epoch or beyond `i64` milliseconds (neither reachable
-/// on a real host) saturates to the epoch rather than refusing the launch.
+/// a run's `started_at`, since the engine reads no clock of its own.
 fn now_timestamp() -> Timestamp {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
-        .map_or(Timestamp::UNIX_EPOCH, Timestamp::from_unix_millis)
+    Timestamp::now()
 }
