@@ -74,7 +74,7 @@ test("the real worklet emits the shared fixture as exact little-endian PCM16", a
     sample < 0 ? sample / 32_768 : sample / 32_767,
   );
   processor.process([[Float32Array.from(floats.slice(0, 3))]]);
-  assert.equal(messages.length, 0, "a partial block is carried");
+  assert.equal(messages.length, 0, "a partial block is buffered");
   processor.process([[Float32Array.from(floats.slice(3))]]);
 
   assert.equal(messages.length, 1);
@@ -84,7 +84,7 @@ test("the real worklet emits the shared fixture as exact little-endian PCM16", a
   assert.deepEqual(bytesOf(messages[0].value), fixture.bytes);
 });
 
-test("the real worklet clips samples and flushes only the carried partial block", async () => {
+test("the real worklet clips samples and flushes only the buffered partial block", async () => {
   const { processor, messages, port } = await loadProcessor(
     "pcm16-capture",
     { processorOptions: { chunkSamples: 4 } },
@@ -100,7 +100,7 @@ test("the real worklet clips samples and flushes only the carried partial block"
   assert.equal(messages[3].value.type, "flushed");
 });
 
-test("clear resets carried PCM16 before the next flush", async () => {
+test("clear resets buffered PCM16 before the next flush", async () => {
   const { processor, messages, port } = await loadProcessor(
     "pcm16-capture",
     { processorOptions: { chunkSamples: 4 } },

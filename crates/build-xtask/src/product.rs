@@ -103,7 +103,7 @@ pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
     for package in &crates {
         for dep_name in &package.deps {
             // Only workspace members are bound by the matrix; a crates.io
-            // package that happens to carry a product prefix is not.
+            // package that happens to start with a product prefix is not.
             let Some(dep) = crates.iter().find(|krate| &krate.package == dep_name) else {
                 continue;
             };
@@ -127,9 +127,10 @@ const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge-api-runtime", "promptforge-a
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
-/// The harness family's door: the only harness crate workshop crates may
-/// name, and the one outside crate permitted into `crates/harness/`.
-const HARNESS_DOOR: &str = "harness-api";
+/// The harness family's public crate: the only harness crate workshop
+/// crates may name, and the one outside crate permitted into
+/// `crates/harness/`.
+const PUBLIC_HARNESS: &str = "harness-api";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -183,7 +184,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         (Family::Workshop, Family::Gateway) if !public_gateway => {
             Some("workshop crates must not depend on gateway crates")
         }
-        (Family::Workshop, Family::Harness) if dep.package != HARNESS_DOOR => {
+        (Family::Workshop, Family::Harness) if dep.package != PUBLIC_HARNESS => {
             Some("workshop crates may depend on harness-* only through harness-api")
         }
         (Family::Harness, Family::Workshop) => {
@@ -243,7 +244,7 @@ fn parent_scope(container: &str) -> Option<&str> {
 fn container_named_exception(container: &str) -> Option<&'static str> {
     match container {
         "promptforge" => Some("promptforge-api-runtime"),
-        "harness" => Some(HARNESS_DOOR),
+        "harness" => Some(PUBLIC_HARNESS),
         _ => None,
     }
 }

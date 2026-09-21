@@ -238,12 +238,12 @@ async fn two_prepared_runs_draw_different_seeds_and_both_appear_in_runs() {
         let row = log.lock().await.run(prepared.run_id).await.unwrap();
         assert_eq!(
             row.meta.seed, prepared.seed,
-            "the row carries the seed the run was given"
+            "the row stores the seed the run was given"
         );
         assert_eq!(
             row.meta.started_at,
             prepared.started_at.unix_millis(),
-            "the row carries the start the run was given"
+            "the row stores the start the run was given"
         );
         assert_eq!(row.meta.session_id, "session-1");
         assert_eq!(row.meta.agent, "prepare-test");

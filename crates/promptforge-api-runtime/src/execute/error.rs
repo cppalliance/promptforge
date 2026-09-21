@@ -8,7 +8,7 @@ use crate::Error;
 /// A stable, matchable classification of a [`RunError`].
 ///
 /// The variant identifies the phase of the run that failed without exposing the
-/// internal error substrate. It is `#[non_exhaustive]`, so new kinds can be
+/// internal error type. It is `#[non_exhaustive]`, so new kinds can be
 /// added without breaking a caller's `match`.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

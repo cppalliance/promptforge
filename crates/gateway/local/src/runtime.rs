@@ -534,9 +534,9 @@ fn start_impl(
                 interrupted.as_ref(),
             )?;
             let endpoint_id = format!("local-{}", local_model.name());
-            // A non-chat child has no chat completions to dialect-match: like a
-            // remote model, it carries the OpenAI default rather than hard-failing
-            // on template-less `/props` evidence.
+            // A non-chat child has no chat completions to dialect-match:
+            // like a remote model, it takes the OpenAI default rather than
+            // hard-failing on template-less `/props` evidence.
             let tool_dialect = match local_model.kind() {
                 ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
                 _ => "openai",
@@ -1766,7 +1766,7 @@ context = 4096
     #[tokio::test]
     async fn parallel_field_feeds_parallel_arg_and_queue_limit() {
         // A local model with `parallel = 3` launches its child with
-        // `--parallel 3` (launch_options carries the number; the server tests
+        // `--parallel 3` (launch_options holds the number; the server tests
         // prove it renders into the argv) and admits at most 3 concurrent
         // requests through its per-model queue.
         let config = Config::from_toml_str(
@@ -1871,7 +1871,7 @@ dominion = "gpu0"
     #[test]
     fn embedding_kind_sets_the_embeddings_launch_flag() {
         // `kind = "embedding"` maps to the child's `--embeddings` flag
-        // (launch_options carries it; the server tests prove it renders into
+        // (launch_options holds it; the server tests prove it renders into
         // the argv); a chat child launches without it.
         let config = Config::from_toml_str(
             r#"
@@ -1911,7 +1911,7 @@ context = 4096
     #[test]
     fn classifier_kind_sets_the_reranking_launch_flag() {
         // `kind = "classifier"` maps to the child's `--reranking` flag
-        // (launch_options carries it; the server tests prove it renders into
+        // (launch_options holds it; the server tests prove it renders into
         // the argv); a chat child launches without it.
         let config = Config::from_toml_str(
             r#"
@@ -2013,7 +2013,7 @@ context = 4096
         // Each companion resolves through `ensure_model` under its own source
         // identity and its own pin: a shared verification state or a dropped
         // pin breaks the distinct markers, and a wiring slip breaks the
-        // resolved paths or the carried draft maximum.
+        // resolved paths or the draft maximum.
         use crate::testsupport::hex_sha256;
 
         let source_dir = tempfile::TempDir::new().expect("source dir");

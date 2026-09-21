@@ -109,9 +109,9 @@ impl WaitRegistry {
         Self::default()
     }
 
-    /// The registry lock. Zone two: a peer that panicked mid-mutation
-    /// cannot wedge the process, and the recovered list is still
-    /// consistent because every mutation is one push, remove, or retain.
+    /// The registry lock. A peer that panicked mid-mutation cannot
+    /// wedge the process, and the recovered list is still consistent
+    /// because every mutation is one push, remove, or retain.
     fn lock(&self) -> MutexGuard<'_, Vec<Wait>> {
         self.waits.lock().unwrap_or_else(PoisonError::into_inner)
     }

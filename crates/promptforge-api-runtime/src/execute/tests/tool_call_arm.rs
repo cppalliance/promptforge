@@ -130,7 +130,7 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
     );
     assert!(
         out.contains("the tool's own backend failed"),
-        "the wrapped text carries the tool's message, got: {out}"
+        "the wrapped text includes the tool's message, got: {out}"
     );
     let lines = recorder.lines();
     assert!(

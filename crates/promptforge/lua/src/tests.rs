@@ -677,7 +677,7 @@ fn filled_slots_record_exact_aliases_descriptions_identities_and_always_scope() 
         &null_emitter(),
         "Section",
     )
-    .expect("tools.always parks the prompt-wide alias");
+    .expect("tools.always records the prompt-wide alias");
     vm.teardown(&null_emitter(), "Section");
 
     let bindings = set.lock().expect("the shared set locks");
@@ -2332,7 +2332,7 @@ fn store_delete_then_read_raises() {
     let msg = lua_error_message(&err);
     assert!(
         msg.contains("file not found"),
-        "the Lua error must carry the store message, got: {msg}"
+        "the Lua error must include the store message, got: {msg}"
     );
 }
 
@@ -2414,7 +2414,7 @@ fn store_read_start_below_one_raises() {
         let msg = lua_error_message(&err);
         assert!(
             msg.contains("invalid line range"),
-            "the Lua error must carry the range message, got: {msg}"
+            "the Lua error must include the range message, got: {msg}"
         );
     }
 }
@@ -2429,7 +2429,7 @@ fn store_read_end_before_start_raises() {
     let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
-        "the Lua error must carry the range message, got: {msg}"
+        "the Lua error must include the range message, got: {msg}"
     );
 }
 
@@ -2443,7 +2443,7 @@ fn store_read_end_without_start_raises() {
     let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
-        "the Lua error must carry the range message, got: {msg}"
+        "the Lua error must include the range message, got: {msg}"
     );
 }
 
@@ -2516,7 +2516,7 @@ fn store_read_numbered_start_below_one_raises() {
         let msg = lua_error_message(&err);
         assert!(
             msg.contains("invalid line range"),
-            "the Lua error must carry the range message, got: {msg}"
+            "the Lua error must include the range message, got: {msg}"
         );
     }
 }
@@ -2531,7 +2531,7 @@ fn store_read_numbered_end_before_start_raises() {
     let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
-        "the Lua error must carry the range message, got: {msg}"
+        "the Lua error must include the range message, got: {msg}"
     );
 }
 
@@ -2545,7 +2545,7 @@ fn store_read_numbered_end_without_start_raises() {
     let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
-        "the Lua error must carry the range message, got: {msg}"
+        "the Lua error must include the range message, got: {msg}"
     );
 }
 
@@ -2581,7 +2581,7 @@ fn installed_store_read_honors_line_bounds() {
     .expect_err("a start below 1 must raise");
     assert!(
         err.to_string().contains("invalid line range"),
-        "the error must carry the range message, got: {err}"
+        "the error must include the range message, got: {err}"
     );
 }
 
@@ -2626,7 +2626,7 @@ fn installed_store_read_numbered_honors_line_bounds() {
     .expect_err("a start below 1 must raise");
     assert!(
         err.to_string().contains("invalid line range"),
-        "the error must carry the range message, got: {err}"
+        "the error must include the range message, got: {err}"
     );
 }
 
@@ -2652,7 +2652,7 @@ fn store_error_surfaces_as_lua_error() {
     let msg = lua_error_message(&err);
     assert!(
         msg.contains("expected exactly one"),
-        "the Lua error must carry the ambiguity message, got: {msg}"
+        "the Lua error must include the ambiguity message, got: {msg}"
     );
 }
 

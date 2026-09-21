@@ -223,7 +223,7 @@ await assertNoLeaks(lifecycle, async () => {
     const input = new ChatBox({ placeholder: "Message the agent" });
     const empty = editorElement(input).querySelector("p");
     check(
-      "the empty paragraph carries the placeholder decoration",
+      "the empty paragraph has the placeholder decoration",
       empty !== null &&
         empty.classList.contains("is-editor-empty") &&
         empty.getAttribute("data-placeholder") === "Message the agent",
@@ -247,7 +247,7 @@ await assertNoLeaks(lifecycle, async () => {
     pressEnter(editor);
     check("Enter emits send", sink.sends() === 1);
     check(
-      "the send event carries the text untrimmed with no mentions and no attachments",
+      "the send event holds the text untrimmed with empty mentions and attachments",
       sink.events[0]?.text === "hello" &&
         Array.isArray(sink.events[0]?.mentions) &&
         sink.events[0].mentions.length === 0 &&
@@ -636,7 +636,7 @@ await assertNoLeaks(lifecycle, async () => {
         input.props.variant === "expanded",
     );
     check(
-      "the root carries data-variant=expanded with the prop absent",
+      "the root has data-variant=expanded with the prop absent",
       input.element.getAttribute("data-variant") === "expanded",
     );
     check(
@@ -645,7 +645,7 @@ await assertNoLeaks(lifecycle, async () => {
         editorElement(input).getAttribute("contenteditable") === "true",
     );
     check(
-      "the editable region carries the default accessible name",
+      "the editable region has the default accessible name",
       editorElement(input).getAttribute("aria-label") === "Message",
     );
     check(
@@ -874,7 +874,7 @@ await assertNoLeaks(lifecycle, async () => {
     input.element.remove();
   }
 
-  // --- send carries the pills present ------------------------------------------------
+  // --- send includes the pills present -----------------------------------------------
 
   {
     const sink = recordingSink();
@@ -976,7 +976,7 @@ await assertNoLeaks(lifecycle, async () => {
     });
     const draft = source.serialize();
     check(
-      "serialize carries v: 1, the ProseMirror JSON document, and empty attachments",
+      "serialize returns v: 1, the ProseMirror JSON document, and empty attachments",
       draft.v === 1 &&
         draft.doc.type === "doc" &&
         Array.isArray(draft.attachments) &&
@@ -1014,7 +1014,7 @@ await assertNoLeaks(lifecycle, async () => {
         strip.querySelector(".ws-mention-chip__label")?.textContent === "shot.png",
     );
     check(
-      "the restored strip pill carries no remove button",
+      "the restored strip pill omits the remove button",
       strip.querySelector(".ws-mention-chip__remove") === null,
     );
     check(
@@ -1024,7 +1024,7 @@ await assertNoLeaks(lifecycle, async () => {
     );
     sendButton(target).click();
     check(
-      "send after restore carries the restored pill and attachments",
+      "send after restore includes the restored pill and attachments",
       sink.events[0]?.type === "send" &&
         sink.events[0].mentions.length === 1 &&
         sink.events[0].mentions[0].id === "src/main.ts" &&
@@ -1210,7 +1210,7 @@ await assertNoLeaks(lifecycle, async () => {
     );
     const strip = root?.firstElementChild;
     check(
-      "the attachments strip comes first and carries one pill per attachment",
+      "the attachments strip comes first and holds one pill per attachment",
       strip?.classList.contains("ws-draft-view__strip") === true &&
         strip.querySelectorAll(".ws-mention-chip").length === 1 &&
         strip.querySelector(".ws-mention-chip")?.getAttribute("data-kind") === "image" &&
@@ -1241,7 +1241,7 @@ await assertNoLeaks(lifecycle, async () => {
       paragraphs[1]?.childNodes.length === 0 && paragraphs[2]?.textContent === "done",
     );
     check(
-      "the read-only rendering carries no remove buttons and no editor",
+      "the read-only rendering omits the remove buttons and the editor",
       root?.querySelector(".ws-mention-chip__remove") === null &&
         root?.querySelector(".ProseMirror") === null &&
         root?.querySelector('[contenteditable="true"]') === null,

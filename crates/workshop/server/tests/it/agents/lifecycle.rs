@@ -55,7 +55,7 @@ async fn status_frames_fire_in_order_and_a_completed_reply_resets_the_backoff() 
     let _ = state.backoff().next_delay();
     assert!(state.backoff().is_escalated_for_test());
 
-    // Status updates ride the main `/ws` socket as unsolicited frames.
+    // Status updates arrive on the main `/ws` socket as unsolicited frames.
     let mut status = JsonSocket::connect(&format!("{base}/ws")).await;
     let mut socket = connect(&base).await;
     let _session = launch_echo(&mut socket).await;
@@ -163,7 +163,7 @@ error('kaboom')
     assert_eq!(frame["type"], "agent_session");
     let session = frame["session"]
         .as_str()
-        .expect("the acknowledgment carries the session id")
+        .expect("the acknowledgment includes the session id")
         .to_owned();
 
     let token = next_wait_token(&mut socket).await;

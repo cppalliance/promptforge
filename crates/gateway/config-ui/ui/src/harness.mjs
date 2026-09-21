@@ -87,7 +87,7 @@ function cleanDirty() {
 /**
  * A single-file config fixture with remote, local chat, STT, and two
  * profile checklists. Profile selection is not a configuration key: the
- * persisted selection rides the stub's `selected` state instead.
+ * persisted selection is held in the stub's `selected` state instead.
  */
 export function modelsFixture() {
   return {
@@ -422,7 +422,7 @@ export function hfModelFixture() {
 
 /**
  * A cache listing as `GET /v1/cache` emits it: source URL, absolute
- * blob path, sha256, and size - the sidecars carry no timestamp.
+ * blob path, sha256, and size - the sidecars omit the timestamp.
  */
 export function cacheListFixture() {
   return [
@@ -481,7 +481,7 @@ export function chatTemplateCatalogFixture() {
   };
 }
 
-/** A README carrying the XSS vectors the sanitizer must neutralize. */
+/** A README containing the XSS vectors the sanitizer must neutralize. */
 export function readmeFixture() {
   return [
     "---",
@@ -530,12 +530,12 @@ function redactSecrets(view) {
  * stream, and the config surface - running/pending/dirty views, shadow saves
  * (PUT re-points the pending view, redacting secrets to "***" the way
  * the gateway's pending view does, and flips the dirty report; a body
- * carrying `active_profile` is refused the way the gateway refuses it),
+ * with `active_profile` is refused the way the gateway refuses it),
  * apply (outcome overridable through `applyOutcome`), revert, orphans,
  * model-info, reveal, and cache deletes. `onPutConfig` optionally stages
  * a refusal before the stub's own handling. The profile surface:
  * `/admin/status` reports the running profile (`profile`, null for
- * none), `/admin/config-pending` carries the persisted selection as
+ * none), `/admin/config-pending` reports the persisted selection as
  * `profile.active_profile` (`selected`, defaulting to the running
  * profile; null when none is persisted), and `POST /admin/switch-profile`
  * checks the name against the pending checklists, re-points `selected`,
@@ -641,7 +641,7 @@ export function gatewayStub({
   const fetchFn = async (input, init = {}) => {
     const url = String(input);
     calls.push({ url, init });
-    // Hub-served files (README, avatars) carry no gateway bearer.
+    // Hub-served files (README, avatars) skip the gateway bearer.
     if (/^https?:\/\//.test(url)) {
       if (url.endsWith("README.md")) {
         return new Response(readme ?? "# hello", {

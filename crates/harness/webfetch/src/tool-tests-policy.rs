@@ -32,7 +32,7 @@ async fn slow_server_past_total_timeout_yields_timeout() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_carries_no_cookie_or_credential() {
+async fn request_omits_the_cookie_and_authorization_headers() {
     let (port, recorded) = spawn_recording_server().await;
     let tool = loopback_tool(port);
 
@@ -118,8 +118,8 @@ async fn redirect_to_internal_via_injected_lookup_never_contacts_target() {
     let (port, hits) = spawn_server().await;
     let loopback: IpAddr = "127.0.0.1".parse().expect("loopback parses");
     let blocked: IpAddr = "10.0.0.1".parse().expect("private parses");
-    // allowed.test reaches the loopback server; internal.test resolves only
-    // to a blocked address and carries no exact exception.
+    // allowed.test reaches the loopback server and holds the only exact
+    // exception; internal.test resolves only to a blocked address.
     let lookup = MapLookup {
         entries: vec![
             ("allowed.test".to_string(), loopback),
@@ -160,7 +160,7 @@ async fn redirect_to_internal_via_injected_lookup_never_contacts_target() {
 
     let url = format!("http://allowed.test:{redir_port}/go");
     // The outcome may be a hard error (the redirect address is blocked) or a
-    // soft return, but it must never carry the internal target's body.
+    // soft return, but it must never include the internal target's body.
     if let Ok(output) = tool.call(serde_json::json!({ "url": url })).await {
         assert!(
             !output.text().contains("reached the internal target"),

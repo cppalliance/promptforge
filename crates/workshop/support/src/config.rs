@@ -6,9 +6,9 @@
 //! `${VAR}` inside comments or keys is never expanded and an interpolated
 //! value containing a quote, backslash, or newline cannot corrupt the
 //! document. `$$` is a literal `$`. An unset variable interpolates to the
-//! empty string: an empty `gateway.base_url` names no explicit gateway
-//! (endpoint resolution attaches through the gateway discovery file or fails
-//! plainly), and an empty `gateway.api_key` sends no `Authorization`
+//! empty string: an empty `gateway.base_url` leaves the endpoint to
+//! resolution (it attaches through the gateway discovery file or fails
+//! plainly), and an empty `gateway.api_key` omits the `Authorization`
 //! header.
 
 use std::path::{Path, PathBuf};
@@ -124,8 +124,8 @@ impl Config {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct GatewayConfig {
     /// Base URL of the gateway, for example `http://127.0.0.1:8081`. Empty
-    /// names no explicit gateway: endpoint resolution attaches through the
-    /// gateway discovery file, or fails plainly when no live file exists.
+    /// leaves the endpoint to resolution: it attaches through the gateway
+    /// discovery file, or fails plainly when no live file exists.
     pub base_url: String,
     /// Bearer key for the gateway API; supports `${VAR}` interpolation.
     pub api_key: String,

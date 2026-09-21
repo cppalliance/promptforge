@@ -1,7 +1,7 @@
 //! The user-state operation failure type and its wire mapping.
 //!
-//! [`UserStateError`] is the boundary between the store's zone-two
-//! refusals and its caller: a put names the key it refused or the size
+//! [`UserStateError`] is the boundary between the store's refusals
+//! and its caller: a put names the key it refused or the size
 //! it exceeded, and a failed write surfaces the I/O cause. At the route
 //! boundary each variant maps to exactly one status code and one
 //! machine-readable envelope code, rendered through `workshop-protocol`'s

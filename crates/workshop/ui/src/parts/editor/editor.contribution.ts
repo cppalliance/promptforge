@@ -5,7 +5,7 @@
 // type-only `typeof import` below is erased at compile time.
 //
 // Placements follow the catalog: ctrl-based chords bind ctrlcmd so
-// macOS gets Cmd, every keybinding rule carries when: "editorTextFocus"
+// macOS gets Cmd, every keybinding rule sets when: "editorTextFocus"
 // with the menu precondition "activeEditor" ANDed in by the action
 // registry, and editor actions register at EditorContrib so workbench
 // chords outrank them. Rows the catalog shows without a keybinding
@@ -114,13 +114,13 @@ interface EditorToggleRow {
   readonly precondition?: string;
 }
 
-// The four editor settings toggles (plan step 14). Each carries its
+// The four editor settings toggles (plan step 14). Each declares its
 // `toggled` expression naming the config.editor.* key the settings
 // service publishes, and its run body flips the setting - the surfaces
 // follow through their compartments. The Appearance rows target the
 // submenu id the menubar contribution declares; MenuId is a plain
 // string, so the literal is the id. Word Wrap and the render toggles
-// carry no precondition (they toggle global state, no editor needed);
+// skip the precondition (they toggle global state, no editor needed);
 // Column Selection Mode keeps the editor default, activeEditor.
 const editorToggles = [
   { id: "editor.action.toggleColumnSelection", title: "Column Selection Mode", menu: MenuId.MenubarSelectionMenu, group: "4_config", order: 2, setting: "columnSelection", precondition: "activeEditor" },
@@ -242,7 +242,7 @@ for (const row of splitRows) {
   });
 }
 
-// Next/Previous Editor carry two rules each; the first registered owns
+// Next/Previous Editor register two rules each; the first registered owns
 // the menu label, so Ctrl+PageDown/Ctrl+PageUp show and Ctrl+Tab and
 // Ctrl+Shift+Tab keep working beside them.
 addAction({

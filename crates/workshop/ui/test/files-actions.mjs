@@ -277,7 +277,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   for (const [id, title, group, precondition, label] of expected) {
     const command = Commands.lookup(id);
     check(`${id} is registered with its catalog title`, command?.title === title);
-    check(`${id} carries its catalog precondition`, command?.precondition === precondition);
+    check(`${id} declares its catalog precondition`, command?.precondition === precondition);
     const row = fileRows.find((r) => r.command === id);
     check(`${id} sits in the File menu's ${group} group`, row?.group === group);
     check(
@@ -598,7 +598,7 @@ registerService(RECENT_FILES_STORE, () => recentStore);
   recentStore.add("C:\\picked\\notes.txt");
   recentStore.add("C:\\project\\a.txt");
 
-  // Action rows carry no title; the widget falls back to the command's.
+  // Action rows omit the title; the widget falls back to the command's.
   const titles = Menus.getMenuItems("menubar/file/recent").map(
     (r) => r.title ?? Commands.lookup(r.command)?.title,
   );

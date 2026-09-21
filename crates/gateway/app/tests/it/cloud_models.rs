@@ -62,8 +62,8 @@ fn fixture_sheet() -> Sheet {
     }
 }
 
-/// One chat entry with a context window and max output, so the merge
-/// needs no operator-supplied details.
+/// One chat entry with a context window and max output, which is all the
+/// merge needs.
 fn entry(id: &str, display_name: &str) -> ModelEntry {
     ModelEntry {
         id: id.to_owned(),

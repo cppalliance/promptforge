@@ -183,11 +183,10 @@ impl LuaProgram {
     /// observations.
     ///
     /// Internal chunks are crate source, not author prompt source, so like
-    /// [`empty`](Self::empty) the compilation is bookkeeping and emits no
-    /// observations. `location` is the chunk name verbatim; an `@`-prefixed
-    /// name renders as a file path in errors, which the line mapper never
-    /// rewrites (it only touches a section's own `[string "{location}"]:`
-    /// marker).
+    /// [`empty`](Self::empty) the compilation is bookkeeping. `location` is
+    /// the chunk name verbatim; an `@`-prefixed name renders as a file path
+    /// in errors, which the line mapper never rewrites (it only touches a
+    /// section's own `[string "{location}"]:` marker).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created

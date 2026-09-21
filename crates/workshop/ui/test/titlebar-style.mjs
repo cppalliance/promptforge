@@ -45,10 +45,10 @@ if (barEl) {
   const right = barEl.querySelector(":scope > .ws-window-titlebar__right");
   check("the bar splits into left, center, and right regions", left !== null && center !== null && right !== null);
   if (left) {
-    check("the left region carries the program icon", left.querySelector(".ws-window-titlebar__icon") !== null);
+    check("the left region holds the program icon", left.querySelector(".ws-window-titlebar__icon") !== null);
     const nav = left.querySelector(".ws-window-titlebar__menus");
     check(
-      "the left region carries the menubar nav as a menubar landmark",
+      "the left region holds the menubar nav as a menubar landmark",
       nav !== null && nav.getAttribute("role") === "menubar" && nav.getAttribute("aria-label") === "Application menus",
     );
     check("the menubar nav ships empty; the buttons are generated", nav !== null && nav.children.length === 0);
@@ -57,7 +57,7 @@ if (barEl) {
     check("the center region is the drag surface", center.classList.contains("ws-window-titlebar__drag"));
   }
   if (right) {
-    check("the right region carries the window controls", right.querySelector(".ws-window-titlebar__controls") !== null);
+    check("the right region holds the window controls", right.querySelector(".ws-window-titlebar__controls") !== null);
   }
 }
 
@@ -125,7 +125,7 @@ if (barEl) {
     buttons.map((button) => button.textContent).join(",") === "File,Edit,Selection,View,Go,Run,Terminal,Help",
   );
   check(
-    "the buttons carry the last-segment data-menu selectors",
+    "the buttons have the last-segment data-menu selectors",
     buttons.map((button) => button.dataset.menu).join(",") === "file,edit,selection,view,go,run,terminal,help",
   );
 }

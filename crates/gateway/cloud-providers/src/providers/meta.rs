@@ -152,7 +152,7 @@ mod tests {
         for entry in by_id.values() {
             assert!(
                 entry.variant_of.is_none(),
-                "the catalog carries no snapshot suffixes: {}",
+                "the catalog lists base models only: {}",
                 entry.id
             );
         }

@@ -193,7 +193,7 @@ await assertNoLeaks(lifecycle, async () => {
     );
     const list = el?.querySelector('ul[role="listbox"]');
     check(
-      "the popup carries listbox semantics",
+      "the popup has listbox semantics",
       list !== null &&
         list !== undefined &&
         items.every((item) => item.getAttribute("role") === "option"),
@@ -273,7 +273,7 @@ await assertNoLeaks(lifecycle, async () => {
       items[2] !== undefined && selectedItem() === items[2],
     );
     check(
-      "the highlighted row carries aria-selected",
+      "the highlighted row has aria-selected",
       selectedItem()?.getAttribute("aria-selected") === "true",
     );
     await typeText(box.editor, "RE");
@@ -294,7 +294,7 @@ await assertNoLeaks(lifecycle, async () => {
     check("Enter inserts the highlighted mention", mentionInDoc(box.editor));
     const attrs = mentionAttrs(box.editor);
     check(
-      "the inserted mention carries the highlighted item",
+      "the inserted mention holds the highlighted item",
       attrs?.id === "src/main.ts" && attrs?.label === "src/main.ts" && attrs?.kind === "file",
     );
     check("selecting closes the popup", popup() === null);
@@ -318,7 +318,7 @@ await assertNoLeaks(lifecycle, async () => {
     pressKey(box.editorDom, "Tab");
     check("Tab inserts the highlighted mention", mentionInDoc(box.editor));
     check(
-      "the Tab-inserted mention carries the highlighted item",
+      "the Tab-inserted mention holds the highlighted item",
       mentionAttrs(box.editor)?.id === "Cargo.toml",
     );
     check("Tab closes the popup", popup() === null);
@@ -367,7 +367,7 @@ await assertNoLeaks(lifecycle, async () => {
     items[2]?.click();
     check("clicking a row inserts its mention", mentionInDoc(box.editor));
     check(
-      "the clicked mention carries the row's item",
+      "the clicked mention holds the row's item",
       mentionAttrs(box.editor)?.id === "Cargo.toml",
     );
     check("clicking closes the popup", popup() === null);

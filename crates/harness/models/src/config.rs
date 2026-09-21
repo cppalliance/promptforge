@@ -150,7 +150,7 @@ impl GatewayEndpoint {
         }
         if parsed.query().is_some() || parsed.fragment().is_some() {
             return Err(reject(
-                "gateway URL must not carry a query or fragment".to_owned(),
+                "gateway URL must not include a query or fragment".to_owned(),
             ));
         }
         Ok(GatewayEndpoint {

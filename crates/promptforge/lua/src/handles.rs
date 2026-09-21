@@ -194,9 +194,9 @@ impl ToolSet {
 ///
 /// The run context shares the set as `Arc<dyn ToolView>`; section VMs share
 /// the same allocation through concrete `Arc<Mutex<ToolSet>>` handles, with
-/// `tools.always` the only writer (a prompt-wide fact). The trait exposes no
-/// mutation. Every method locks briefly and returns an owned snapshot: a
-/// mutex guard cannot outlive the call.
+/// `tools.always` the only writer (a prompt-wide fact). Every method locks
+/// briefly and returns an owned snapshot: a mutex guard cannot outlive the
+/// call.
 pub trait ToolView: Send + Sync {
     /// Returns an owned snapshot of the bindings in declaration order.
     ///

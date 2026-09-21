@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn the_report_carries_no_secret_material() {
+    fn the_report_omits_secret_material() {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let state_dir = temp.path().join("state");
         let run_dir = state_dir.join("run");
@@ -209,7 +209,7 @@ mod tests {
         let rendered = render(Some(&state_dir), None, Some(&run_dir), false);
         assert!(
             !rendered.contains("the-bearer-key"),
-            "the report never carries the bearer key: {rendered}"
+            "the report omits the bearer key: {rendered}"
         );
         assert_eq!(parse(&rendered)["connection_file"]["exists"], true);
     }

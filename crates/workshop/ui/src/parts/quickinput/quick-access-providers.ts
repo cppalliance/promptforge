@@ -7,7 +7,7 @@
 //
 // The palette reads the CommandPalette menu at every open: a row whose
 // command is unregistered or whose precondition fails is absent, labels
-// are "Category: Title", each row carries the command's keybinding
+// are "Category: Title", each row shows the command's keybinding
 // label, and recently used commands (the COMMANDS_HISTORY service) sort
 // first in recency order with the rest in menu order. Accepting a
 // row records the command in the history and dispatches it; a rejected

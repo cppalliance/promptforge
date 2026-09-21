@@ -95,7 +95,7 @@ fn reply_round(text: &str) -> Answer<Error> {
 #[test]
 fn a_models_loop_round_costs_a_few_hundred_lua_instructions() {
     // The block is the bench prompt's shape: one user message, one loop
-    // call. The coroutine carries a per-instruction counting hook in
+    // call. The coroutine runs a per-instruction counting hook in
     // place of the VM's cancel hook, so the counter reads exactly the Lua
     // instructions the shim executes between two yields. Every round is
     // answered with one tool call so the measured span is the full

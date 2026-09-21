@@ -17,7 +17,7 @@ fn the_database_variant_reaches_the_engine_error_through_the_shared_wrapper() {
         "page 1 is not a b-tree page".to_owned(),
     ));
     let Some(cause) = std::error::Error::source(&error) else {
-        panic!("the database variant carries its engine cause as source()");
+        panic!("the database variant reports its engine cause as source()");
     };
     let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
         panic!("the engine cause is the shared DatabaseSource");

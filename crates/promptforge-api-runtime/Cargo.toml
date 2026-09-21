@@ -57,7 +57,7 @@ reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 # The integration suite and the bench drive runs through the tokio test
-# driver, so both need the feature that carries it.
+# driver, so both need the feature that provides it.
 [[test]]
 name = "suite"
 required-features = ["test-support"]

@@ -47,7 +47,7 @@ function seamExport(seam, variable) {
 /**
  * Scans every dist script for the SEAMS call sites and appends the missing
  * exports, answering a map from seam name to the path of the chunk that
- * carries it. With code splitting a seam may live in any chunk, and two
+ * holds it. With code splitting a seam may live in any chunk, and two
  * seams may share one. Idempotent: dist is not rebuilt between test runs,
  * so a previous run's appended exports may already be there.
  */
@@ -92,7 +92,7 @@ async function appendAtomically(scriptPath, source, exports) {
   // Windows: when two boot tests lose the scan race together, both rename
   // over the chunk, and the loser's rename fails with EPERM while the
   // winner's freshly replaced file is still held open. The append is
-  // idempotent, so a chunk that already carries every export satisfies
+  // idempotent, so a chunk that already holds every export satisfies
   // every concurrent appender; only a chunk still missing one after the
   // retries is a real failure.
   const names = SEAMS.map((seam) => seam.name).filter((name) => exports.some((e) => e.includes(name)));

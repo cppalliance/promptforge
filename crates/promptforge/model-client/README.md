@@ -17,7 +17,7 @@ set (a tool-call batch finished by `length` or `content_filter` fails
 whole, so partial arguments never execute; an empty product is
 `EmptyReply`) and produces the `Completion`.
 
-Each `Completion` carries the call's metadata parsed from the stream:
+Each `Completion` holds the call's metadata parsed from the stream:
 the serving `model`, `usage` token accounting (with cached- and
 reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and the
 `client_timing` (TTFT, mean inter-token latency, end-to-end) the

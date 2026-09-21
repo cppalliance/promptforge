@@ -2,7 +2,7 @@
 // as unknown and is parsed field by field into a narrow type before any
 // consumer touches it; no casts. The tree panel lists directories through
 // fetchTree; the editor panel reads and writes files through fetchFile
-// and writeFile, which carry the server's opaque conflict token. Failures
+// and writeFile, which pass the server's opaque conflict token. Failures
 // throw typed CatalogError variants (services/error-catalog.ts); callers
 // match on the ErrorCatalog code, never on message text. The fetch and
 // JSON mechanics are the shared floor in json-request.ts.

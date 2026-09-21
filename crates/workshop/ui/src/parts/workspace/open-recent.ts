@@ -6,7 +6,7 @@
 // no index. The menu provider is re-read at every open; the quick-access
 // provider re-reads the stores at every getItems.
 //
-// The dynamic rows carry their own groups so they sort with the static
+// The dynamic rows declare their own groups so they sort with the static
 // Reopen Closed Editor (1_editor), More... (y_more), and Clear Recently
 // Opened... (z_clear) rows: recent workspace files (a .pfwork suffix,
 // any case) land in 1_workspaces and dispatch
@@ -112,7 +112,7 @@ export function createRecentMenuProvider(deps: RecentProviderDeps = {}): MenuIte
  * then every file in the tree's fetched listings, deduped by path. The
  * filter is a case-insensitive substring match on the base name or the
  * full path. Accepting dispatches the same command the matching Open
- * Recent row carries: workbench.action.openWorkspace for a .pfwork hit,
+ * Recent row dispatches: workbench.action.openWorkspace for a .pfwork hit,
  * vscode.open otherwise.
  */
 export function createFileQuickAccessProvider(deps: RecentProviderDeps = {}): QuickAccessProvider {

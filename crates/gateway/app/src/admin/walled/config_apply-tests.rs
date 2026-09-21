@@ -238,7 +238,7 @@ async fn apply_with_a_new_model_swaps_the_routing_live_and_promotes_the_shadow()
         std::fs::read_to_string(&config_path)
             .expect("read applied config")
             .contains("gamma-model"),
-        "the real file carries the applied change"
+        "the real file contains the applied change"
     );
     let served = get_json(addr, "admin/config").await;
     assert_eq!(served["model"][2]["name"], "gamma-model");
@@ -272,7 +272,7 @@ async fn apply_publishes_the_document_without_the_persisted_selection() {
     assert!(routes(&state, "gamma-model").await);
     assert!(
         state.live.read().await.config.active_profile().is_none(),
-        "the live document carries no selection"
+        "the live document omits the selection"
     );
     assert_eq!(live_profile(&state).await.as_deref(), Some("alpha"));
     let served = get_json(addr, "admin/config").await;

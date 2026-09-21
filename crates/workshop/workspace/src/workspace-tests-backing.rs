@@ -1,8 +1,8 @@
 //! The optional workspace-file backing: what an ephemeral workspace
 //! persists (nothing), what a file-backed one persists (every grant
 //! mutation and the window state), how open replaces the grant set, how
-//! save-as and duplicate switch files, and the zone-two path where a
-//! failed persist leaves memory standing.
+//! save-as and duplicate switch files, and the path where a failed
+//! persist leaves memory standing.
 
 use super::*;
 
@@ -256,7 +256,7 @@ async fn a_persist_failure_keeps_the_in_memory_grant_and_returns_success() {
 }
 
 #[tokio::test]
-async fn save_as_carries_the_current_grants_and_the_previous_window_state() {
+async fn save_as_copies_the_current_grants_and_the_previous_window_state() {
     let home = tempfile::TempDir::new().expect("tempdir");
     let first_path = home.path().join("first.pfwork");
     let second_path = home.path().join("second.pfwork");

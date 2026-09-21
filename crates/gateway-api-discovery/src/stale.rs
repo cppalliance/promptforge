@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(
             resolution,
             Resolution::Attach(file),
-            "one dropped probe must not condemn a live gateway"
+            "one dropped probe must not reject a live gateway"
         );
         assert!(
             gateway_discovery_file_path(dir.path()).exists(),

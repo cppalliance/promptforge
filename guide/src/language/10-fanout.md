@@ -14,7 +14,7 @@ This runs the worker once per item of the list section. The second parameter mus
 
 ## The collection
 
-Fanout accepts any Lua table as its collection. The array part iterates in order first, then the hash part iterates in undefined order, with each hash member arriving as a pair table carrying `item.key` and `item.value`. Function members and table-keyed members cannot cross into an arm.
+Fanout accepts any Lua table as its collection. The array part iterates in order first, then the hash part iterates in undefined order, with each hash member arriving as a pair table with `item.key` and `item.value`. Function members and table-keyed members cannot cross into an arm.
 
 ## Inside an arm
 

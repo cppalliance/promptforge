@@ -33,7 +33,7 @@ Endpoints bind to remote dominions, and local models bind to local dominions. A 
 
 ## Budget VRAM
 
-A local dominion can carry a `vram_gb` budget, and each profile's selected models must fit within it:
+A local dominion can declare a `vram_gb` budget, and each profile's selected models must fit within it:
 
 ````
 [[dominion]]

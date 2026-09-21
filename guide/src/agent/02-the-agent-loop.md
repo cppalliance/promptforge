@@ -21,11 +21,11 @@ Work through the lines. `models.use('writer')` selects the catalog model named `
 
 Each host call suspends your program with exactly one request in flight. When your program calls `models.infer`, it stops at that line and the host takes over. The host dispatches the one request and resumes your program at the same line with that request's answer as the return value.
 
-Write your program as if each host call were an ordinary synchronous call. There is no callback and no second request to track: the program carries exactly one request in flight, and it always resumes with that request's answer.
+Write your program as if each host call were an ordinary synchronous call. There is no callback and no second request to track: the program keeps exactly one request in flight, and it always resumes with that request's answer.
 
 ## The two round calls
 
-Two calls carry almost every agent. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tools.call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
+Almost every agent is built from two calls. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tools.call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
 
 Both calls follow the loop rule: one request in flight, resumed with the answer. Everything else about them is detail on top of that rule.
 

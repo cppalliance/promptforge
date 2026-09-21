@@ -8,7 +8,7 @@
 // key; the seam for per-DOM-subtree scoping later is this service, not
 // its callers.
 //
-// The change event carries affectsSome so a subscriber (a menu, the
+// The change event includes affectsSome so a subscriber (a menu, the
 // dispatcher) re-evaluates only the expressions that read the keys that
 // actually changed, instead of every expression on every write.
 //

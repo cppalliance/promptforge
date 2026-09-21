@@ -535,26 +535,26 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "every catalog row reaches the palette",
     palette.length === EXPECTED_IDS.length + 4 && EXPECTED_IDS.every((id) => palette.includes(id)),
   );
-  check("find carries the activeEditor precondition", Commands.lookup("actions.find")?.precondition === "activeEditor");
+  check("find declares the activeEditor precondition", Commands.lookup("actions.find")?.precondition === "activeEditor");
   check("commentLine keeps its catalog title", Commands.lookup("editor.action.commentLine")?.title === "Toggle Line Comment");
 
   const selectionMenu = Menus.getMenuItems(MenuId.MenubarSelectionMenu).map((row) => row.command);
   // The thirteen catalog rows plus step 14's Column Selection Mode toggle.
   check(
-    "the Selection menu carries its thirteen rows",
+    "the Selection menu lists its thirteen rows",
     selectionMenu.length === 14 &&
       ["editor.action.smartSelect.expand", "editor.action.smartSelect.shrink"].every((id) => selectionMenu.includes(id)),
   );
   const editMenu = Menus.getMenuItems(MenuId.MenubarEditMenu).map((row) => row.command);
   check(
-    "the Edit menu carries find, replace, and the comment toggles",
+    "the Edit menu lists find, replace, and the comment toggles",
     editMenu.length === 4 &&
       ["actions.find", "editor.action.startFindReplaceAction", "editor.action.commentLine", "editor.action.blockComment"]
         .every((id) => editMenu.includes(id)),
   );
   const goMenu = Menus.getMenuItems(MenuId.MenubarGoMenu).map((row) => row.command);
   check(
-    "the Go menu carries bracket jump, problem navigation, and go-to-line",
+    "the Go menu lists bracket jump, problem navigation, and go-to-line",
     goMenu.length === 4 &&
       ["editor.action.jumpToBracket", "editor.action.marker.nextInFiles", "editor.action.marker.prevInFiles", "workbench.action.gotoLine"]
         .every((id) => goMenu.includes(id)),
@@ -563,7 +563,7 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
   // Updated in step 20: the editor contribution also registers Save and
   // Close Editor (File 4_save / 6_close) when the menu tree assembled.
   check(
-    "the File menu carries New Text File, Save, and Close Editor",
+    "the File menu lists New Text File, Save, and Close Editor",
     fileMenu.length === 3 &&
       ["workbench.action.files.newUntitledFile", "workbench.action.files.save", "workbench.action.closeActiveEditor"].every((id) =>
         fileMenu.includes(id),
@@ -571,10 +571,10 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
   );
   const recentMenu = Menus.getMenuItems(MenuId.MenubarRecentMenu).map((row) => row.command);
   check(
-    "Open Recent carries Reopen Closed Editor",
+    "Open Recent lists Reopen Closed Editor",
     recentMenu.length === 1 && recentMenu.includes("workbench.action.reopenClosedEditor"),
   );
-  check("Go to Line carries the activeEditor precondition", Commands.lookup("workbench.action.gotoLine")?.precondition === "activeEditor");
+  check("Go to Line declares the activeEditor precondition", Commands.lookup("workbench.action.gotoLine")?.precondition === "activeEditor");
   check("New Text File has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.files.newUntitledFile") !== undefined);
   check("Reopen Closed Editor has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.reopenClosedEditor") !== undefined);
   check("Go to Line has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.gotoLine") !== undefined);
@@ -748,7 +748,7 @@ initZones(dock);
   });
   check("a reopened untitled buffer keeps its text", restoredStub.text() === "draft");
   check("a reopened untitled buffer with content is dirty", restoredPanel.isDirty());
-  check("a dirty untitled title carries the dot", restoredTitles.at(-1) === "● Untitled-8");
+  check("a dirty untitled title shows the dot", restoredTitles.at(-1) === "● Untitled-8");
   restoredPanel.dispose();
 }
 

@@ -3,8 +3,8 @@
 //! `https://bedrock.{region}.amazonaws.com` - hand-assembled SigV4
 //! HMAC-SHA256 auth - and normalization of `modelSummaries`:
 //! modalities into kind and input flags, `modelLifecycle` into
-//! `Deprecation`. The endpoint reports no context window, no
-//! max-output field, no pricing, and no release date.
+//! `Deprecation`. No context window, no max-output field, no pricing,
+//! no release date.
 //!
 //! Extra environment variables beyond the descriptor's
 //! `AWS_ACCESS_KEY_ID`: `AWS_SECRET_ACCESS_KEY` (required - the SigV4
@@ -160,8 +160,7 @@ struct ListResponse {
 
 /// One model summary as the wire reports it. `modelArn`,
 /// `providerName`, `responseStreamingSupported`,
-/// `customizationsSupported`, and `inferenceTypesSupported` have no
-/// sheet meaning and are not parsed.
+/// `customizationsSupported`, and `inferenceTypesSupported` are ignored.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireModel {
@@ -412,7 +411,7 @@ mod tests {
             .expect("the request is ASCII");
         assert!(
             request.contains("authorization: AWS4-HMAC-SHA256 Credential=test-access-key/"),
-            "the request carries a SigV4 authorization header: {request}"
+            "the request includes a SigV4 authorization header: {request}"
         );
         assert!(
             request.contains("SignedHeaders=host;x-amz-date"),
@@ -420,7 +419,7 @@ mod tests {
         );
         assert!(
             request.contains("x-amz-date:"),
-            "the request carries the signing date: {request}"
+            "the request is stamped with the signing date: {request}"
         );
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].id, "amazon.nova-pro-v1:0");

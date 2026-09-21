@@ -7,7 +7,7 @@
 // UI-state adapter (test/helpers/ui-storage.mjs) standing in for the
 // workspace bucket. Covers: the layout survives a reload (build the
 // envelope -> restore it), including the tree's close-button-free tab;
-// the envelope carries no lock state; a burst of layout changes coalesces
+// the envelope omits the lock state; a burst of layout changes coalesces
 // into one debounced write; a mid-session restore (the Open path) writes
 // nothing while the next real change still saves; a throwing writer is
 // logged, never escapes;
@@ -320,7 +320,7 @@ const editorA = openInZone("editor", { path: FILE_A });
 await flush();
 check("app placement lands the editor in main", zoneOfPanel(editorA) === "main");
 
-// --- Persistence: the envelope is versioned and carries placement ---------
+// --- Persistence: the envelope is versioned and records placement ---------
 
 const built = buildLayoutEnvelope(dock);
 // The adapter PUTs JSON.stringify(value) and the boot preload hands back
@@ -333,9 +333,9 @@ const built = buildLayoutEnvelope(dock);
 const envelope = JSON.parse(JSON.stringify(built));
 check("the envelope survives the JSON wire round trip",
   isDeepStrictEqual(envelope, withoutUndefined(built)));
-check("the envelope carries the schema version", envelope.version === LAYOUT_SCHEMA_VERSION);
-check("the envelope carries no lock state", !("locked" in envelope));
-check("the envelope carries zones and overrides",
+check("the envelope includes the schema version", envelope.version === LAYOUT_SCHEMA_VERSION);
+check("the envelope omits the lock state", !("locked" in envelope));
+check("the envelope includes zones and overrides",
   typeof envelope.zones === "object" && typeof envelope.overrides === "object");
 check("the envelope records the zone groups",
   typeof envelope.zones.left === "string" && typeof envelope.zones.right === "string" &&
@@ -379,7 +379,7 @@ check("ensuring the tree after restore never duplicates it",
 // Debounced writes off onDidLayoutChange, through the writer the
 // composition root binds to the workspace bucket. A burst of changes
 // inside the debounce window - open B, open C, close C - coalesces into
-// one write carrying the settled layout: B present, C gone.
+// one write holding the settled layout: B present, C gone.
 const storage = createFakeUiStorage();
 startLayoutPersistence(dock2, (value) => storage.set("workspace", KEY, value));
 openInZone("editor", { path: FILE_B });
@@ -391,13 +391,13 @@ check("a burst of layout changes coalesces into one write", storage.sets.length 
 const debounced = storage.get("workspace", KEY);
 check("the debounced write lands on the workspace layout key",
   storage.sets[0]?.bucket === "workspace" && storage.sets[0]?.key === KEY);
-check("the debounced write carries the settled layout",
+check("the debounced write stores the settled layout",
   debounced !== null &&
     Object.keys(debounced.layout.panels).includes(editorBId) &&
     !Object.keys(debounced.layout.panels).includes(editorCId));
-check("the debounced write carries the schema version",
+check("the debounced write includes the schema version",
   debounced !== null && debounced.version === LAYOUT_SCHEMA_VERSION);
-check("the debounced write carries no lock state",
+check("the debounced write omits the lock state",
   debounced !== null && !("locked" in debounced));
 
 // A mid-session restore is not a change to save. Open Workspace applies
@@ -419,7 +419,7 @@ check("the debounced write carries no lock state",
   await new Promise((resolve) => setTimeout(resolve, 400));
   check("a real change after a restore still saves once",
     storage.sets.length === setsBefore + 1);
-  check("the save after a restore carries the live layout, not a stale one",
+  check("the save after a restore stores the live layout, not a stale one",
     Object.keys(storage.sets.at(-1).value.layout.panels).includes(editorBId) &&
       !Object.keys(storage.sets.at(-1).value.layout.panels).includes(editorCId));
   await flush();
@@ -430,7 +430,7 @@ check("the debounced write carries no lock state",
 // The real contribution surface (imported into the bundle above)
 // registered every action and keybinding rule into the shared
 // registries; one dispatcher over them replaces the old shortcuts.ts
-// listener. Chords resolve through event.code, so each press carries
+// listener. Chords resolve through event.code, so each press names
 // the physical key's code.
 const dispatcher = new KeybindingDispatcher();
 const contextKeys = getService(CONTEXT_KEY_SERVICE);

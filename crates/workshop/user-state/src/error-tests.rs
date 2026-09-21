@@ -15,7 +15,7 @@ fn the_not_json_variant_reaches_the_serde_error_through_the_shared_wrapper() {
         source: json.into(),
     };
     let Some(cause) = error.source() else {
-        panic!("the not-json variant carries its serde cause as source()");
+        panic!("the not-json variant reports its serde cause as source()");
     };
     let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
         panic!("the serde cause is the shared JsonSource");

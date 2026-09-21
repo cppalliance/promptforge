@@ -4,11 +4,11 @@
 //! Markdown buffer as a fresh lazy `prose` template through
 //! [`SectionVm::install_lazy_prose`](crate::SectionVm::install_lazy_prose).
 //! The global stays unresolved until its first runtime read, which
-//! snapshots the section state (the `var` clipboard, the live `sys`, and
-//! the bare globals), renders every `{{ }}` substitution once through the
-//! host's callback, and memoizes the string for later reads. Assigning to
-//! `prose` raises, and `{{ prose }}` inside the template is rejected as
-//! recursive.
+//! snapshots the section state (the section's `var` table, the live
+//! `sys`, and the bare globals), renders every `{{ }}` substitution once
+//! through the host's callback, and memoizes the string for later reads.
+//! Assigning to `prose` raises, and `{{ prose }}` inside the template is
+//! rejected as recursive.
 //!
 //! The guard sits on the `_G` metatable: `__index` renders and memoizes
 //! the `prose` key, `__newindex` rejects writes to it, and every other key
@@ -29,14 +29,14 @@ const DELEGATE_NEWINDEX: &str = "__promptforge_prose_delegate_newindex";
 
 /// The section state a `prose` render snapshots at the first read.
 ///
-/// The host's render callback receives the `var` clipboard and the live
-/// `sys` JSON as read at render time, plus a bare-global lookup for
+/// The host's render callback receives the section's `var` table and the
+/// live `sys` JSON as read at render time, plus a bare-global lookup for
 /// `{{ name }}` resolution. The lookup reads the section VM's globals:
 /// `Ok(None)` when unset, the JSON form when set, and an error for a
 /// function, userdata, or thread - or for `prose` itself, which is
 /// rejected as recursive.
 pub struct ProseState<'a> {
-    /// The `var` clipboard read back at the first read.
+    /// The section's `var` table read back at the first read.
     pub var: Json,
     /// The live `sys` JSON at the first read.
     pub sys: Json,
@@ -86,7 +86,7 @@ where
         None => (Value::Nil, Value::Nil),
     };
     let metatable = lua.create_table().map_err(Error::lua)?;
-    // Carry every other field the previous metatable installed (a shared
+    // Copy every other field the previous metatable installed (a shared
     // library's `_G` metatable keeps working), then shadow the index pair
     // with the prose guard.
     if let Some(old) = &old {

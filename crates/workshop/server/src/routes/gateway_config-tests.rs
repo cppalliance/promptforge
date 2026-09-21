@@ -128,7 +128,7 @@ async fn the_proxy_forwards_an_allowlisted_path_with_the_bearer_key() {
     assert_eq!(json["profile"], "default", "the body is relayed verbatim");
     assert_eq!(
         json["authorized"], true,
-        "the forward carries the workshop's bearer key"
+        "the forward sends the workshop's bearer key"
     );
 }
 

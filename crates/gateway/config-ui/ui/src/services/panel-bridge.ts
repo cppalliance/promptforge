@@ -32,7 +32,7 @@ export interface BridgeWindow {
 
 /** Construction options for {@link PanelBridge}. */
 export interface PanelBridgeOptions {
-  /** The window carrying the message events. */
+  /** The window that delivers the message events. */
   win: BridgeWindow;
   /** The pinned workshop origin, from the iframe URL's `bridge` parameter. */
   origin: string;

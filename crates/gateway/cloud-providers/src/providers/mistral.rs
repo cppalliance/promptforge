@@ -4,9 +4,8 @@
 //! `capabilities` object (`completion_chat`, `completion_fim`,
 //! `function_calling`, `vision`, and more), `max_context_length`, and
 //! `deprecation` with `deprecation_replacement_model`. Of the capability
-//! booleans only `function_calling` and `vision` have sheet fields; FIM
-//! and the rest drop out. No pagination, no pricing, no max-output
-//! field.
+//! booleans the sheet reads only `function_calling` and `vision`; FIM and
+//! the rest drop out. No pagination, no pricing, no max-output field.
 //!
 //! Docs: <https://docs.mistral.ai/api/endpoint/models>
 
@@ -64,7 +63,7 @@ pub(crate) async fn fetch(
 
 /// One model as the wire reports it. `owned_by`, `description`,
 /// `aliases`, `default_model_temperature`, and the fine-tuning card
-/// fields have no sheet meaning and are not parsed.
+/// fields are ignored.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,
@@ -76,10 +75,9 @@ struct WireModel {
     deprecation_replacement_model: Option<String>,
 }
 
-/// The capability booleans with sheet meaning. The remaining booleans
+/// The capability booleans the sheet reads. The remaining booleans
 /// (`completion_chat`, `completion_fim`, `fine_tuning`,
-/// `classification`, the audio family, `moderation`, `ocr`) have no
-/// sheet field and drop out.
+/// `classification`, the audio family, `moderation`, `ocr`) drop out.
 #[derive(Debug, Deserialize)]
 struct WireCapabilities {
     function_calling: Option<bool>,
@@ -263,13 +261,13 @@ mod tests {
     }
 
     #[test]
-    fn fim_only_capability_has_no_sheet_field() {
+    fn fim_only_capability_is_ignored() {
         let entry = &entries()[1];
         assert_eq!(entry.id, "codestral-latest");
         assert_eq!(
             entry.kind,
             gateway_api_types::ModelKind::Chat,
-            "completion_fim has no sheet field; the kind stays chat"
+            "completion_fim is ignored; the kind stays chat"
         );
         assert!(!entry.tool_calling);
         assert!(!entry.images);
@@ -388,7 +386,7 @@ mod tests {
         assert_eq!(
             entry.kind,
             gateway_api_types::ModelKind::Speech,
-            "the wire card carries no kind; the name rule supplies it"
+            "the name rule supplies the kind"
         );
     }
 

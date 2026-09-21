@@ -105,8 +105,8 @@ impl ModelRuntime {
 ///
 /// The table reads and writes the run's shared [`ModelSet`]: `models.use`
 /// records the section's own selection in `runtime`, while
-/// `models.default(label)` parks the prompt-wide default in the shared set -
-/// a static prompt-wide fact, conventionally called from H1 but not
+/// `models.default(label)` records the prompt-wide default in the shared
+/// set - a static prompt-wide fact, conventionally called from H1 but not
 /// privileged to it. Re-selecting the same label is a no-op, so a shared
 /// library replayed into every section may name the default; naming a
 /// different label errors. There is no `models.bind`: binding is the
@@ -193,7 +193,7 @@ pub(crate) fn install_models(
             // The Agent-window hack: with the host's raw-id opt-in, an
             // undeclared alias resolves as a raw gateway catalog model id
             // under the fallback context window. The alias grammar does not
-            // apply - gateway ids carry `/`, `.`, and `:` - so the id's own
+            // apply - gateway ids include `/`, `.`, and `:` - so the id's own
             // validation is the only gate.
             if raw_ids {
                 let binding = raw_gateway_binding(&alias)?;

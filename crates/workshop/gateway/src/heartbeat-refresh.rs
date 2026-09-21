@@ -30,7 +30,7 @@ pub async fn refresh_catalog(client: &GatewayClient, push: &Push) -> bool {
         }
     };
     let Some(models) = body.get("data").and_then(serde_json::Value::as_array) else {
-        tracing::warn!("catalog refresh carried no data array");
+        tracing::warn!("catalog refresh is missing its data array");
         return false;
     };
     let selectable = models.iter().any(is_chat_capable);

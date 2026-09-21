@@ -5,7 +5,7 @@
 //! thread and answers every effect the moment it is issued, through a
 //! closure the caller supplies. Nothing there awaits, spawns, or sleeps; a
 //! timer effect is answered however the closure sees fit, so a test's
-//! timeouts take no wall time.
+//! timeouts are instant.
 //!
 //! [`drive_tokio`] is the tokio driver: it performs a run's `Chat`,
 //! `ToolCall`, and `UserInput` effects through the caller's [`Performers`]
@@ -18,7 +18,7 @@
 //! [`RunHost`] bundles the resources the suites used to hand the retired
 //! in-crate loop - an observer, a debug capture, a client, a fixture tool
 //! table, a broker, a delta hook - and [`run_with_host`] is that loop's
-//! zero-burden path over the tokio driver: prepare, refuse or run. The
+//! implicit-prepare path over the tokio driver: prepare, refuse or run. The
 //! tool and broker fixtures implement the stand-in traits in [`tools`]
 //! ([`TestTool`], [`TestBroker`]); the production traits are the harness's,
 //! which no engine crate names. [`recording`] is the suites' recording
@@ -166,7 +166,7 @@ pub fn drive(
     }
 }
 
-/// The retired loop's zero-burden path over the tokio driver: prepares
+/// The retired loop's implicit-prepare path over the tokio driver: prepares
 /// and runs `prompt` with the resources `host` bundles.
 ///
 /// The environment's catalog is what prepare fills slots against; a suite

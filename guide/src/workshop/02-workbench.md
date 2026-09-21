@@ -16,7 +16,7 @@ Below the dock area, a permanent full-width status bar runs along the bottom of 
 
 ## The title bar
 
-Across the top of the window sits a custom title bar. It shows the PromptForge program icon, carries the five application menus (File, Edit, Model, Window, Help), and leaves an empty center region you can grab. On Windows this bar replaces the native window frame; macOS and Linux keep their decorated windows. The bar is always shown, even when you run the Workshop in a plain browser, because it carries the application menus.
+Across the top of the window sits a custom title bar. It shows the PromptForge program icon, holds the five application menus (File, Edit, Model, Window, Help), and leaves an empty center region you can grab. On Windows this bar replaces the native window frame; macOS and Linux keep their decorated windows. The bar is always shown, even when you run the Workshop in a plain browser, because the application menus live there.
 
 To operate the window from the title bar:
 

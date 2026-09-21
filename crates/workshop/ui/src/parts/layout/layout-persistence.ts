@@ -1,5 +1,5 @@
 // Layout persistence: the dock's serialized layout plus the zone
-// registry's placement memory, carried as one versioned envelope under
+// registry's placement memory, stored as one versioned envelope under
 // the workspace bucket's "layout" key (the open .pfwork file, through the
 // UI-state adapter). This module never touches storage itself: the
 // composition root hands restoreLayout the preloaded value and
@@ -19,7 +19,7 @@ import { DisposableStore, toDisposable, type IDisposable } from "../../base/life
 import { resetZones, restoreZoneState, serializeZoneState, withZoneRestore } from "./zones";
 
 // v4: the placeholder panel type is gone - an emptied zone persists as a
-// dockview grid leaf with no views. A v3 snapshot could carry a
+// dockview grid leaf with no views. A v3 snapshot could hold a
 // `placeholder:*` panel, which would now restore as an unknown-panel
 // stub, so v3 falls back to the default layout like v1 and v2 before it.
 export const LAYOUT_SCHEMA_VERSION = 4;
@@ -72,7 +72,7 @@ function parsePersisted(value: unknown): PersistedLayout | null {
 /**
  * Snapshots the live layout as the envelope the workspace bucket stores:
  * the debounced saver writes it, and Save As writes it once so the new
- * file carries the current arrangement.
+ * file gets the current arrangement.
  */
 export function buildLayoutEnvelope(dock: DockviewApi): PersistedLayout {
   const state = serializeZoneState();

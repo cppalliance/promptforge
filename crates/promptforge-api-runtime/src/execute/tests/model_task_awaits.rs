@@ -119,7 +119,7 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
     assert_eq!(
         scheduler.task_state_for_test(&task("0.0")),
         Some(TaskState::Done),
-        "the member's own slot holds its outcome; the notice carried it"
+        "the member's own slot holds its outcome; the notice delivered it"
     );
     assert_eq!(
         recorder.notices().len(),

@@ -14,7 +14,7 @@ export type ViewId =
 export interface RouteMatch {
   /** The destination view. */
   view: ViewId;
-  /** The model name or settings section, when the route carries one. */
+  /** The model name or settings section, when the route includes one. */
   detail?: string;
 }
 
@@ -94,7 +94,7 @@ export type ViewMount = (main: HTMLElement, match: RouteMatch) => void | (() => 
 
 /** Construction options for {@link startRouter}. */
 export interface RouterOptions {
-  /** The window carrying the hash and the hashchange events. */
+  /** The window that owns the hash and the hashchange events. */
   win: RouterWindow;
   /** The `<main>` region the views mount into. */
   main: HTMLElement;

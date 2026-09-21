@@ -59,7 +59,7 @@ fn reexported_types_are_the_contract_types() {
 }
 
 #[test]
-fn reexported_output_carries_the_contract_trust() {
+fn reexported_output_reports_the_contract_trust() {
     let output = crate::tools::ToolOutput::trusted("reexport-ok");
     assert_eq!(output.text(), "reexport-ok");
     assert_eq!(output.trust(), crate::tools::OutputTrust::Trusted);

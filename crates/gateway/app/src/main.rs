@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_parses_and_rides_the_serve_options() {
+    fn browser_parses_and_reaches_the_serve_options() {
         let invocation = parse_args(args(&["--browser"])).expect("parse");
         assert!(
             invocation.serve.browser,

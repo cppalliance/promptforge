@@ -1,5 +1,5 @@
 // Pins the refusal threading every route shares: a refusal from a
-// route other than config-apply throws a GatewayHttpError carrying the
+// route other than config-apply throws a GatewayHttpError that includes the
 // envelope's `error.code` alongside its message, so callers can branch
 // on the code (the way the shell words the apply_cancelled toast).
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ function storageShim() {
   };
 }
 
-test("a putConfig refusal carries the envelope's error code", async () => {
+test("a putConfig refusal includes the envelope's error code", async () => {
   const app = await loadApp();
   const fetchFn = async () =>
     jsonResponse(
@@ -36,7 +36,7 @@ test("a putConfig refusal carries the envelope's error code", async () => {
     assert.ok(error instanceof app.GatewayHttpError, "the refusal throws GatewayHttpError");
     assert.equal(error.status, 422);
     assert.equal(error.message, "unknown field `typo`", "the envelope message is kept");
-    assert.equal(error.code, "config_invalid", "the envelope code rides the error");
+    assert.equal(error.code, "config_invalid", "the error includes the envelope code");
     return true;
   });
 });

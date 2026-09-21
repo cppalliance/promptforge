@@ -23,7 +23,7 @@ use crate::workspace::Workspace;
 
 /// The prompt routes, merged into the subsystem's router by the parent
 /// module so they share its state type, deadline tier, and cross-site
-/// guard. The handlers use no state: the parse is pure.
+/// guard. The parse is pure.
 pub(super) fn routes() -> axum::Router<Workspace> {
     axum::Router::new().route("/prompts/contract", post(contract))
 }

@@ -351,7 +351,7 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
     // then the terminal reply. All three first-round requests reach the
     // gateway before any arm's second round does, so three model rounds
     // are outstanding at once; arms driven one loop at a time would send
-    // `[a, a, b, b, c, c]`. The second-round bodies carry the round-one
+    // `[a, a, b, b, c, c]`. The second-round bodies include the round-one
     // exchange (user, assistant tool call, tool result) so the loop, not a
     // bare infer, is what ran in every arm.
     let gateway = ScriptedGateway::start(vec![
@@ -397,7 +397,7 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         .map(|body| {
             body["messages"]
                 .as_array()
-                .expect("a chat request carries messages")
+                .expect("a chat request includes messages")
                 .len()
         })
         .collect();
@@ -417,7 +417,7 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
     for body in &bodies[3..] {
         let roles: Vec<&str> = body["messages"]
             .as_array()
-            .expect("a chat request carries messages")
+            .expect("a chat request includes messages")
             .iter()
             .map(|message| message["role"].as_str().expect("a message has a role"))
             .collect();

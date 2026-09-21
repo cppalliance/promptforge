@@ -333,7 +333,7 @@ endpoints = ["e"]
     }
 
     #[test]
-    fn from_config_carries_model_kinds() {
+    fn from_config_reads_model_kinds() {
         let toml = r#"
 config-version = 0
 
@@ -368,7 +368,7 @@ endpoints = ["e"]
     }
 
     #[test]
-    fn from_config_carries_tool_dialect() {
+    fn from_config_reads_the_tool_dialect() {
         let toml = r#"
 config-version = 0
 

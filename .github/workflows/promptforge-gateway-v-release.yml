@@ -87,7 +87,7 @@ jobs:
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
         run: |
-          # Intentionally unquoted: the env var carries the argument list.
+          # Intentionally unquoted: the env var holds the argument list.
           dist $DIST_PLAN_COMMAND --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json

@@ -170,9 +170,9 @@ fn an_overflow_chat_answer_resumes_with_overflow_true_and_nothing_else() {
         "an overflow is a successful answer, not a failure envelope"
     );
     assert!(overflow, "the overflow flag must read back as true");
-    assert!(reply_nil, "an overflow carries no reply");
-    assert!(calls_nil, "an overflow carries no tool calls");
-    assert!(finish_nil, "an overflow carries no finish reason");
+    assert!(reply_nil, "an overflow leaves reply nil");
+    assert!(calls_nil, "an overflow leaves tool_calls nil");
+    assert!(finish_nil, "an overflow leaves finish_reason nil");
     assert_eq!(model, "");
 }
 
@@ -339,7 +339,7 @@ fn an_empty_round_chat_answer_resumes_its_detail_beside_the_absent_reply() {
         .call(envelope)
         .expect("the result table reads back through Lua");
     assert!(ok);
-    assert!(reply_nil, "an empty round carries no reply");
+    assert!(reply_nil, "an empty round leaves reply nil");
     assert_eq!(
         detail,
         "empty model reply: reasoning content was present but ignored"

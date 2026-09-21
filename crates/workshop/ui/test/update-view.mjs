@@ -1,7 +1,7 @@
 // Unit test for the update view (src/parts/chrome/update-view.ts): the shared toast
 // stack fires once when an update becomes available, a re-render in the
 // same phase does not re-toast, a failed install toasts the error, and
-// the install overlay carries the shared inline progress bar. Bundles the
+// the install overlay shows the shared inline progress bar. Bundles the
 // view with esbuild and drives it against jsdom with a stub-backend
 // UpdateService and a recording toast stub.
 // Run: node test/update-view.mjs.
@@ -119,7 +119,7 @@ await assertNoLeaks(lifecycle, async () => {
   const overlay = window.document.querySelector(".ws-update-screen");
   check("the install overlay shows", overlay?.hidden === false);
   check(
-    "the overlay carries the shared inline progress bar",
+    "the overlay shows the shared inline progress bar",
     overlay?.querySelector(".progress [class*='progress__fill'], .progress .progress__fill") !==
       null ||
       overlay?.querySelector(".progress")?.getAttribute("role") === "progressbar",

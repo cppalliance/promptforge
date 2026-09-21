@@ -59,7 +59,7 @@
   padding-inline: var(--space-1);
 }
 
-/* Fenced blocks, highlighted (Shiki's pre carries inline colors from the
+/* Fenced blocks, highlighted (Shiki's pre has inline colors from the
    theme) or not (the degraded path's plain pre). */
 .ws-markdown-content pre {
   margin-block: var(--space-2);

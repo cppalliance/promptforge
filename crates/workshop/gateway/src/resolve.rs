@@ -4,7 +4,7 @@
 //! The sidecar gateway writes `gateway.json` after a successful bind (see
 //! `gateway-api-discovery`), so a workshop that finds a live file attaches to
 //! that gateway - loopback, WSL, or LAN become one topology. A stale file
-//! is condemned with its reason (the probe removes it) and explicit config
+//! is removed by the probe with its reason reported, and explicit config
 //! takes over; with no live file and no explicit config there is nothing
 //! to connect to, which is the plain [`ResolveError`].
 
@@ -103,7 +103,7 @@ impl ResolvedGateway {
         self.source
     }
 
-    /// Why a gateway discovery file was condemned on the way to the config
+    /// Why a gateway discovery file was removed on the way to the config
     /// fallback, when one was.
     #[must_use]
     pub fn stale(&self) -> Option<StaleReason> {
@@ -127,13 +127,13 @@ impl ResolvedGateway {
 pub struct ResolveError {
     /// The rendered suffix: the stale-file note and the remedy.
     detail: String,
-    /// Why the gateway discovery file was condemned, when one was.
+    /// Why the gateway discovery file was removed, when one was.
     stale: Option<StaleReason>,
 }
 
 impl ResolveError {
     /// The failure with the stale-file note rendered in, when a file was
-    /// condemned on the way.
+    /// removed on the way.
     fn new(stale: Option<StaleReason>) -> Self {
         let note = stale
             .map(|reason| {
@@ -151,7 +151,7 @@ impl ResolveError {
         }
     }
 
-    /// Why the gateway discovery file was condemned, when one was: a wrong key,
+    /// Why the gateway discovery file was removed, when one was: a wrong key,
     /// a dead pid, and a foreign image are different problems for the
     /// operator.
     #[must_use]
@@ -238,8 +238,8 @@ fn validate_resolved(
     ValidatedConnection::validate(file)
 }
 
-/// Reports the resolution outcome where the house surfaces startup state:
-/// a condemned file's reason and the winning source on the status bus,
+/// Reports the resolution outcome where the shell surfaces startup state:
+/// a removed file's reason and the winning source on the status bus,
 /// the same facts in the log.
 pub fn report(gateway: &ResolvedGateway, push: &Push) {
     if let Some(reason) = gateway.stale() {

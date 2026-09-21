@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn visual_studio_cache_carries_no_compiler_entries() {
+    fn visual_studio_cache_omits_the_compiler_entries() {
         // The Visual Studio generators fix the compiler through the toolset,
         // so their caches omit CMAKE_CXX_COMPILER; the generator parse must
         // not depend on those entries.

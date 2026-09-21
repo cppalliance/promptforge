@@ -17,7 +17,7 @@ jump('## Help')
 store.write('seen.txt', 'should-not-run')  -- never runs
 ````
 
-A jump carries the `var` clipboard across: the target's Lua state is seeded with the jumper's final `var`. Nothing else crosses implicitly, so pass state through `var` or the store.
+A jump moves the `var` table across: the target's Lua state is seeded with the jumper's final `var`. Nothing else crosses implicitly, so pass state through `var` or the store.
 
 A jump to a direct child heading starts a child-level walk over the jumper's children under the same rules, and the parent walk resumes after the jumper when the child level exhausts.
 
@@ -29,7 +29,7 @@ The call `call(heading)` runs a visible section as a contained chain with a fres
 local summary = call('## Research')
 ````
 
-The call clones the caller's `var` into the child chain and discards the child's writes when the chain ends, so a subroutine cannot disturb the caller's clipboard. An optional second parameter supplies an input string that overrides the run's `args` for the chain:
+The call clones the caller's `var` into the child chain and discards the child's writes when the chain ends, so a subroutine cannot disturb the caller's `var`. An optional second parameter supplies an input string that overrides the run's `args` for the chain:
 
 ````lua
 local summary = call('## Research', topic)

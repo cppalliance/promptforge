@@ -96,6 +96,6 @@ fn same_port_and_key_new_boot_still_publishes_a_new_identity() {
     assert_eq!(
         replacement_snapshot.identity.as_ref(),
         Some(&replacement),
-        "the snapshot carries the new validated boot"
+        "the snapshot holds the new validated boot"
     );
 }

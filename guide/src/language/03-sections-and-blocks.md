@@ -44,7 +44,7 @@ return models.infer(prose)
 ```
 ````
 
-A break carries no control-flow meaning. It never ends a section, skips a section, or stops a call, and everything below it - Lua fences included - parses and runs normally. Use breaks to keep commentary inside a section without letting it leak into `prose`.
+A break never ends a section, skips a section, or stops a call, and everything below it - Lua fences included - parses and runs normally. Use breaks to keep commentary inside a section without letting it leak into `prose`.
 
 One formatting rule matters here. A blank line must precede a `---` rule. A prose line directly followed by `---` parses as a setext heading underline, not a rule, so `Some prose` immediately followed by `---` becomes a new section named `Some prose`.
 

@@ -72,12 +72,12 @@ test("a group header renders once per group change and is not a row", () => {
   }
 });
 
-test("a greyed row carries disabled and aria-disabled and is never chosen", () => {
+test("a greyed row has disabled and aria-disabled and is never chosen", () => {
   const { dom, control, rows, changes } = mount(GROUPED, "a");
   const greyed = rows[1];
   assert.equal(greyed.disabled, true);
   assert.equal(greyed.getAttribute("aria-disabled"), "true");
-  assert.equal(rows[0].hasAttribute("aria-disabled"), false, "an enabled row carries no flag");
+  assert.equal(rows[0].hasAttribute("aria-disabled"), false, "an enabled row omits the flag");
   control.trigger.click();
   greyed.click();
   key(dom, greyed, "Enter");

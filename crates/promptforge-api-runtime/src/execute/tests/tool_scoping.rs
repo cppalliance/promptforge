@@ -120,7 +120,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         .expect("host must inject");
 
     // The H2 `tools.add` lands in the section's tool runtime; the scope
-    // snapshot over it carries the added alias.
+    // snapshot over it includes the added alias.
     let add = LuaProgram::compile(
         "tools.add('section_tool')",
         "prologue",

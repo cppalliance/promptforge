@@ -22,8 +22,8 @@
 // the refreshed tree being its own confirmation; a cancelled picker is
 // a no-op.
 //
-// The workspace-scoped UI state (plan step 13) rides the switch too. The
-// .pfwork file carries the dock layout, the tree's expanded folders, and
+// The workspace-scoped UI state (plan step 13) follows the switch too. The
+// .pfwork file holds the dock layout, the tree's expanded folders, and
 // the closed-editor stack in its workspace bucket. Open pulls the file's
 // bucket through the UI-state adapter and applies all three to the live
 // stores with writes suppressed, so a store that writes synchronously on
@@ -178,7 +178,7 @@ async function applyOpenedWorkspaceState(): Promise<void> {
 
 /**
  * Writes the live arrangement into the workspace bucket once each, so a
- * file the server just created from the grants alone carries the
+ * file the server just created from the grants alone gets the
  * current layout, expanded folders, and closed stack too.
  */
 function writeLiveWorkspaceState(): void {
@@ -283,7 +283,7 @@ async function switchThroughSavePicker(
 /**
  * Save Workspace As...: a new file holding the current grants, the switch
  * onto it, then the live UI state written into it (the server's save_as
- * carries grants only).
+ * writes grants only).
  */
 function saveWorkspaceAs(): Promise<void> {
   return switchThroughSavePicker(
@@ -296,7 +296,7 @@ function saveWorkspaceAs(): Promise<void> {
 
 /**
  * Duplicate Workspace...: a copy of the current file and its siblings,
- * then the switch onto it. The copy already carries the file's UI state,
+ * then the switch onto it. The copy already holds the file's UI state,
  * so nothing is written here.
  */
 function duplicateWorkspace(): Promise<void> {

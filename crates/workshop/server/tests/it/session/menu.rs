@@ -1,7 +1,7 @@
 //! Model-menu behavior of the `/ws` workshop socket: `select_model` and
-//! `switch_profile` orchestration, the selection ladder without a
+//! `switch_profile` orchestration, the selection sequence without a
 //! restart, the no-profile selection, and the single-flight refusal. The
-//! sidecar restart ladder sits in the `restart` child.
+//! sidecar restart sequence sits in the `restart` child.
 
 mod restart;
 
@@ -85,11 +85,11 @@ fn busy_frames(frames: &[serde_json::Value]) -> Vec<(String, String)> {
             (
                 frame["label"]
                     .as_str()
-                    .expect("a busy frame carries a label")
+                    .expect("a busy frame has a label")
                     .to_string(),
                 frame["description"]
                     .as_str()
-                    .expect("a busy frame carries a description")
+                    .expect("a busy frame has a description")
                     .to_string(),
             )
         })
@@ -232,7 +232,7 @@ async fn a_selection_served_without_a_restart_completes_after_one_step() {
     assert_eq!(
         settled["profiles"],
         serde_json::json!(["main", "beta"]),
-        "the refetched profile list rides into the snapshot"
+        "the refetched profile list appears in the snapshot"
     );
 
     // The idle push follows the settle; it may already have arrived
@@ -367,7 +367,7 @@ async fn a_declined_selection_restores_the_menu_and_reports_the_gateway_message(
         "readiness returns to its truthful pre-switch state"
     );
 
-    // The failure status and the restored snapshot ride different
+    // The failure status and the restored snapshot are sent on different
     // buses, so their wire order is not pinned; read on if needed.
     let is_failure =
         |frame: &serde_json::Value| frame["type"] == "status" && frame["severity"] == "error";

@@ -1,7 +1,7 @@
 /* Styles for stt.ts, which imports this file; esbuild bundles it into
    dist/app.css. The mic button and its recording fill belong to the chat
    box (chatbox/chat-box.css), which paints them from its mic prop. The
-   .ws-stt-input--recording mark that a take leaves on its target carries
-   no rule of its own today: the chat box frame's border tracks
-   :focus-within, and a textarea target (textareaSttTarget) is unstyled.
-   Dictation currently defines no classes here. */
+   .ws-stt-input--recording mark that a take leaves on its target is
+   unstyled today: the chat box frame's border tracks :focus-within, and
+   a textarea target (textareaSttTarget) is unstyled. Dictation
+   currently defines no classes here. */

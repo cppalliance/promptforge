@@ -1,7 +1,7 @@
 // The Run window's tab renderer: the default chip's structure (same
 // classes, so the theme styles it identically) with a close action,
 // plus the loading shimmer. While its panel is loading, the title span
-// carries shared-ui's .ws-shimmer-text; the negative animation-delay
+// takes shared-ui's .ws-shimmer-text; the negative animation-delay
 // against the module-level epoch keeps the sweep continuous across the
 // re-renders a tab title goes through (the same trick upstream VS Code
 // uses). Tabs register themselves by panel id in the module map below

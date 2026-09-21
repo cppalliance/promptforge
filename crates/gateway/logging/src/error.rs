@@ -106,7 +106,7 @@ mod tests {
         );
         assert!(
             LogError::worker_panicked().source().is_none(),
-            "a worker panic carries no source"
+            "a worker panic ends the source chain"
         );
     }
 }

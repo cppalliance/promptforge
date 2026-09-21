@@ -1,6 +1,6 @@
 //! The system tray: the gateway's only on-screen presence.
 //!
-//! The gateway has no window - its config SPA is its face - so on an
+//! The gateway runs windowless - its config SPA is its face - so on an
 //! installed system the tray icon is the daemon's UI. The tray owns the
 //! main thread through a per-OS backend ([`windows`], [`macos`],
 //! [`linux`]), while the tokio runtime and serving stay on the gateway

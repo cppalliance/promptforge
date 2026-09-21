@@ -90,7 +90,7 @@ check("a repeated setBusy(true) keeps the barberpole shown", shell.barberpole.hi
 shell.setBusy(false);
 check("setBusy(false) hides the barberpole", shell.barberpole.hidden === true);
 check("setBusy(false) leaves the indicators group visible", shell.indicators.hidden === false);
-check("the group still carries the consumer's LED", shell.indicators.contains(led));
+check("the group still holds the consumer's LED", shell.indicators.contains(led));
 check("the shell exposes no renderSlot", typeof shell.renderSlot === "undefined");
 check("the shell exposes no progress element", typeof shell.progress === "undefined");
 
@@ -98,7 +98,7 @@ check("the shell exposes no progress element", typeof shell.progress === "undefi
 
 shell.setText("Downloading model", { tooltip: "1 of 2" });
 check("setText sets the label", shell.text.textContent === "Downloading model");
-check("setText rides the tooltip on the bar", shell.element.title === "1 of 2");
+check("setText sets the tooltip on the bar", shell.element.title === "1 of 2");
 check("the error styling starts off", !shell.text.classList.contains("status-bar__text--error"));
 
 shell.setText("The download failed", { error: true });

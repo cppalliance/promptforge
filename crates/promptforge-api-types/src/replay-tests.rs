@@ -8,7 +8,7 @@ fn flags_start_empty_and_round_trip_their_bits() {
     assert_eq!(Flags::default(), Flags::EMPTY);
     assert_eq!(Flags::EMPTY.bits(), 0);
 
-    // A recorded run may carry a bit this build does not name yet; the set
+    // A recorded run may set a bit this build does not name yet; the set
     // preserves it rather than dropping it, so replay can still see it.
     let recorded = Flags::from_bits(0b101);
     assert!(!recorded.is_empty());

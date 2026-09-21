@@ -53,7 +53,7 @@ fn an_ok_spawn_answer_resumes_the_task_id_as_its_path_text() {
 #[test]
 fn a_task_events_answer_resumes_event_tables_with_absent_fields_nil() {
     // Two events, one lifecycle and one content: the sequence keeps their
-    // order, each table carries the event's serialized shape, and an
+    // order, each table holds the event's serialized shape, and an
     // absent optional field (`finish_reason`, `metrics`) is nil rather
     // than the serde bridge's NULL sentinel, so an author's truth test
     // works. An empty answer is still a sequence.
@@ -178,7 +178,7 @@ fn a_when_any_delivery_of_a_finished_member_retains_nothing() {
     }))
     .into_envelope(&lua)
     .expect("the envelope renders");
-    assert!(retained.is_none(), "a success carries no error to retain");
+    assert!(retained.is_none(), "a success retains nothing");
     let (ok, member_ok, text): (bool, bool, String) = lua
         .load("local ok, _, member_ok, text = ...; return ok, member_ok, text")
         .call(envelope)

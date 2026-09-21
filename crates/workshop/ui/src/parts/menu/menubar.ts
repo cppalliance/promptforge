@@ -6,7 +6,7 @@
 // never tracks dismissal, which the widget owns (Escape, outside
 // pointer, window blur).
 //
-// data-menu carries the menu id's last segment, so the selectors the
+// data-menu holds the menu id's last segment, so the selectors the
 // tests key on ("file", "edit", ...) survive the move from static markup
 // to generated buttons. The shipped nav is empty; the menu feature's
 // bootstrap (parts/menu/index.ts) fills it through this generator at boot.

@@ -946,7 +946,7 @@ mod tests {
                 cached_tokens: None,
                 reasoning_tokens: None,
             }),
-            "flat llama.cpp usage carries no detail fields"
+            "flat llama.cpp usage reports the token counts only"
         );
         assert_eq!(
             metadata.llama_timings,

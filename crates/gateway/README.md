@@ -28,11 +28,11 @@ The logging sink: a bounded priority queue, rotation, and a worker-owned file wr
 
 ## gateway-progress
 
-The live-activity hub (at `progress/`): a producer begins an activity with a text, replaces the text as work moves, and drops the guard when done; the hub publishes the newest live text as a `Progress` busy-and-text snapshot over a `watch` channel. Every slow gateway operation reports through it, and the admin SSE stream, the status endpoint, and the tray read from it. Depends on gateway-api-types; tokio `sync` carries the channel.
+The live-activity hub (at `progress/`): a producer begins an activity with a text, replaces the text as work moves, and drops the guard when done; the hub publishes the newest live text as a `Progress` busy-and-text snapshot over a `watch` channel. Every slow gateway operation reports through it, and the admin SSE stream, the status endpoint, and the tray read from it. Depends on gateway-api-types; tokio `sync` provides the channel.
 
 ## gateway-protocol
 
-The wire protocol: OpenAI wire types, validation, and the Upstream abstraction with the shared HTTP client policy. Every crate that speaks to a backend goes through it. Depends on gateway-api-types and gateway-config; reqwest carries the transport.
+The wire protocol: OpenAI wire types, validation, and the Upstream abstraction with the shared HTTP client policy. Every crate that speaks to a backend goes through it. Depends on gateway-api-types and gateway-config; reqwest implements the transport.
 
 ## gateway-routing
 

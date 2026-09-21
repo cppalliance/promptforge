@@ -1895,7 +1895,7 @@ fn rejects_nonchat_model_with_capability_effort_fields() {
         for (field, extra) in [
             ("effort_levels", "effort_levels = [\"low\"]"),
             (
-                // effort_levels is rejected first; both names carry "effort".
+                // effort_levels is rejected first; both names contain "effort".
                 "effort",
                 "effort_levels = [\"low\"]\ndefault_effort = \"low\"",
             ),

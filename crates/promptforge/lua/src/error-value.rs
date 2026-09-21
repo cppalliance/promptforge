@@ -120,7 +120,7 @@ impl std::fmt::Display for ErrorKind {
 /// kind's own string fields. `Display` supplies `message`.
 ///
 /// The envelope renderer requires this of the driver's error type, so a
-/// failure answered to Lua always has a kind; a substrate that gains a
+/// failure answered to Lua always has a kind; an internal type that gains a
 /// variant classifies it here.
 #[doc(hidden)]
 pub trait ErrorValue: std::fmt::Display {
@@ -171,7 +171,7 @@ impl ErrorValue for Error {
 /// value was an error table (built by the shim's `raise` or by
 /// [`error_table`]) and no retained typed error was substituted for it -
 /// the case for a Lua-side raise. The executor maps it back onto its own
-/// substrate by kind.
+/// internal type by kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct Raised {

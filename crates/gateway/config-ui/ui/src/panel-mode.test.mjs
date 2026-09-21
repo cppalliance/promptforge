@@ -1,6 +1,6 @@
 // Pins the workshop-panel bridge client: with a pinned bridge origin in
 // the URL, boot announces itself, waits for the workshop's context
-// message, and mounts the live shell whose every gateway call rides
+// message, and mounts the live shell whose every gateway call goes through
 // postMessage - no direct gateway fetch, no sessionStorage key, and no
 // progress SSE subscription exist in the frame (the workshop owns
 // progress display). Apply and Revert All are announced to the parent;
@@ -142,12 +142,12 @@ test("panel mode routes every gateway call through the bridge, with no fetch and
     "the bridge-pending banner is gone once the context arrives",
   );
 
-  assert.ok(parent.apiPaths().includes("/admin/config"), "the config load rode the bridge");
+  assert.ok(parent.apiPaths().includes("/admin/config"), "the config load went through the bridge");
   assert.ok(
     parent.apiPaths().includes("/admin/chat-templates"),
-    "the template catalog load rode the bridge",
+    "the template catalog load went through the bridge",
   );
-  assert.ok(parent.apiPaths().includes("/admin/status"), "the status probe rode the bridge");
+  assert.ok(parent.apiPaths().includes("/admin/status"), "the status probe went through the bridge");
   assert.ok(
     root.textContent.includes("qwen-common"),
     "a bridged call resolved: the local list renders the fixture model",
@@ -252,7 +252,7 @@ test("Apply and Revert All are announced to the workshop", async () => {
   );
 });
 
-test("a profile pick rides the Workshop bridge to POST /admin/switch-profile", async (t) => {
+test("a profile pick goes through the Workshop bridge to POST /admin/switch-profile", async (t) => {
   const stub = gatewayStub({ config: modelsFixture(), pending: modelsFixture() });
   t.after(async () => {
     stub.state.configGeneration = "generation-2";
@@ -270,9 +270,9 @@ test("a profile pick rides the Workshop bridge to POST /admin/switch-profile", a
   const pick = parent.posted.find(
     (message) => message.type === "pf-api" && message.path === "/admin/switch-profile",
   );
-  assert.ok(pick, "the switch rode the bridge");
+  assert.ok(pick, "the switch went through the bridge");
   assert.equal(pick.method, "POST");
-  assert.deepEqual(JSON.parse(pick.body), { name: "travel" }, "the body carries the pick");
+  assert.deepEqual(JSON.parse(pick.body), { name: "travel" }, "the body contains the pick");
   assert.deepEqual(stub.state.switchCalls, [{ name: "travel" }], "the gateway received it");
   assert.deepEqual(
     direct.filter((url) => !/^https?:\/\//.test(url)),
@@ -346,7 +346,7 @@ test("staging a Discover model uses config only and sends no download action", a
   await settle();
   assert.ok(
     parent.apiPaths().includes("/admin/config"),
-    "the pending model write rides the authenticated bridge",
+    "the pending model write goes through the authenticated bridge",
   );
   assert.deepEqual(parent.actions(), [], "no separate download lifecycle is announced");
 });

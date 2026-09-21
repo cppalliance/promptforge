@@ -107,8 +107,8 @@ fn toml_document(body: serde_json::Value) -> Result<toml::Value, GatewayError> {
 /// Converts a JSON value into a TOML one. `None` means "absent": TOML has
 /// no null, so a null object member simply drops out (the serializer skips
 /// absent optionals on the way out, and the deserializer defaults them on
-/// the way back in). A null inside an array has no such reading and is an
-/// error, as is a number outside TOML's ranges.
+/// the way back in). A null inside an array is an error, as is a number
+/// outside TOML's ranges.
 fn json_to_toml(value: serde_json::Value) -> Result<Option<toml::Value>, GatewayError> {
     Ok(Some(match value {
         serde_json::Value::Null => return Ok(None),

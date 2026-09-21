@@ -29,7 +29,7 @@ use super::send_error;
 /// inline in the session loop - a map lookup and a broadcast send cost
 /// microseconds between two deltas. A refusal (an unknown model, a
 /// missing field) is answered with an `error` frame and the session
-/// continues (zone two).
+/// continues.
 pub(super) async fn select_model(
     state: &SessionsState,
     id: Option<&serde_json::Value>,
@@ -53,7 +53,7 @@ pub(super) async fn select_model(
 /// pending snapshot (`switching` set, `chat_ready` false) before this
 /// returns, and the selection itself runs on its own task. A refusal (a
 /// switch already in flight, a missing or mistyped `name`) is answered
-/// with an `error` frame and the session continues (zone two).
+/// with an `error` frame and the session continues.
 pub(super) async fn start_switch(
     state: &SessionsState,
     id: Option<&serde_json::Value>,
@@ -97,7 +97,7 @@ pub(super) async fn start_switch(
 /// it until the switch settles with its own terminal frame.
 const SWITCHING_LABEL: &str = "Switching profile...";
 
-/// How often the ladder re-reads the published gateway generation while
+/// How often the sequence re-reads the published gateway generation while
 /// waiting for the relaunched sidecar.
 const REPLACEMENT_POLL: Duration = Duration::from_millis(250);
 
@@ -203,7 +203,7 @@ impl SwitchFailure {
     }
 }
 
-/// Posts the selection and climbs the ladder: `Serving` at once when the
+/// Posts the selection and runs the sequence: `Serving` at once when the
 /// gateway needs no restart, `RestartRequired` when it does but is not a
 /// supervised sidecar, else the shutdown-and-reappear step whose
 /// replacement generation ends up `Serving`.

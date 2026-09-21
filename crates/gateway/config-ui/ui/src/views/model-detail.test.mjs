@@ -58,7 +58,7 @@ test("the local detail pane renders the registry sections with the model's value
   assert.equal(
     gpuRow.querySelector(".readout-suffix").textContent,
     "/ 32",
-    "the readout carries the GGUF layer total from model-info",
+    "the readout shows the GGUF layer total from model-info",
   );
 
   const flash = root.querySelector(".field-row[data-key='flash_attention'] .switch");
@@ -423,11 +423,11 @@ test("Save PUTs the edited payload with untouched secrets redacted, then the pen
   assert.ok(put, "Save PUTs /admin/config");
   const body = JSON.parse(put.init.body);
   const llama = body.local_model.find((entry) => entry.name === "llama-leaf");
-  assert.equal(llama.description, "tuned", "the edited field carries its new value");
+  assert.equal(llama.description, "tuned", "the edited field holds its new value");
   assert.equal(
     body.endpoint[0].api_key,
     "***",
-    "an untouched secret rides back as the redaction, never a real value",
+    "an untouched secret is sent back as the redaction, never a real value",
   );
   assert.equal(body.source_files, undefined, "provenance is stripped from the payload");
   assert.equal(llama.source_file, undefined, "entry provenance is stripped too");
@@ -473,8 +473,8 @@ test("picking the speech kind reveals the voices chips and Save PUTs them", asyn
   );
   assert.ok(put, "Save PUTs /admin/config");
   const model = JSON.parse(put.init.body).model.find((entry) => entry.name === "gpt-remote");
-  assert.equal(model.kind, "speech", "the picked kind carries into the payload");
-  assert.deepEqual(model.voices, ["nova"], "the added chip carries into the payload");
+  assert.equal(model.kind, "speech", "the picked kind reaches the payload");
+  assert.deepEqual(model.voices, ["nova"], "the added chip reaches the payload");
 });
 
 test("switching back from speech hides the voices chips and Save drops them", async () => {
@@ -507,7 +507,7 @@ test("switching back from speech hides the voices chips and Save drops them", as
   );
   assert.ok(put, "Save PUTs /admin/config");
   const model = JSON.parse(put.init.body).model.find((entry) => entry.name === "gpt-remote");
-  assert.equal(model.kind, "chat", "the reverted kind carries into the payload");
+  assert.equal(model.kind, "chat", "the reverted kind reaches the payload");
   assert.equal("voices" in model, false, "the hidden voices stay out of the payload");
 });
 

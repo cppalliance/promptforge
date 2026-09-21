@@ -160,7 +160,7 @@ pub(crate) struct Sources<'a> {
     pub(crate) argv: Option<&'a Value>,
     /// The current fanout arm's item value: `{{ item }}`.
     pub(crate) item: Option<&'a Value>,
-    /// The section's `var` clipboard, read back from its Lua.
+    /// The section's `var` table, read back from its Lua.
     pub(crate) var: &'a Value,
     /// The runtime-provided metadata: `{{ sys.key }}`.
     pub(crate) sys: &'a Value,
@@ -639,7 +639,7 @@ mod tests {
     // --- SUBST-005: typed error kind/offset/source ---------------------------
 
     #[test]
-    fn error_carries_kind_and_offset() {
+    fn error_has_kind_and_offset() {
         let e = err_of("prefix {{ ghost.x }}");
         assert_eq!(e.kind, SubstErrorKind::UnknownNamespace);
         assert_eq!(e.offset, 7, "offset must point at the '{{{{'");

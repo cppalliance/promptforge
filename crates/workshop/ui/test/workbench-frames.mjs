@@ -112,7 +112,7 @@ await assertNoLeaks(lifecycle, async () => {
   fakeSockets[0].message(workbenchFrame());
   check("a workbench push reaches the onWorkbench emitter", snapshots.length === 1);
   check(
-    "the emitted frame carries the wire fields verbatim",
+    "the emitted frame holds the wire fields verbatim",
     snapshots[0]?.active === "main" &&
       snapshots[0]?.selected === "test-model" &&
       snapshots[0]?.switching === null &&
@@ -122,7 +122,7 @@ await assertNoLeaks(lifecycle, async () => {
   );
   fakeSockets[0].message(workbenchFrame({ switch_in_flight: true, chat_ready: false }));
   check(
-    "a no-profile switch in flight carries switch_in_flight beside a null switching",
+    "a no-profile switch in flight reports switch_in_flight beside a null switching",
     snapshots.length === 2 &&
       snapshots[1]?.switching === null &&
       snapshots[1]?.switch_in_flight === true,
@@ -153,7 +153,7 @@ await assertNoLeaks(lifecycle, async () => {
   check("selectModel on a downed socket reports failure", socket.selectModel("gpt-test") === false);
   check("switchProfile on a downed socket reports failure", socket.switchProfile("coding") === false);
   check(
-    "a downed socket carries no event frames",
+    "a downed socket sends nothing",
     fakeSockets[0].sent.length === sentBeforeDrop,
   );
   socket.dispose();

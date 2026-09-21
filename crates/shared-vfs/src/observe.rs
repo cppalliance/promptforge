@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn origin_at_carries_the_explicit_position() {
+    fn origin_at_holds_the_explicit_position() {
         let origin = Origin::at("the section", "the prompt", 42);
         assert_eq!(origin.label, "the section");
         assert_eq!(origin.file, "the prompt");

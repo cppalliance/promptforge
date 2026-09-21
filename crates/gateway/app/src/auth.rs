@@ -270,7 +270,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn the_extractor_carries_the_headers_and_the_planted_peer() {
+    async fn the_extractor_holds_the_headers_and_the_planted_peer() {
         let peer: SocketAddr = "127.0.0.1:50000".parse().expect("a socket address");
         let mut request = Request::builder()
             .header(AUTHORIZATION, "Bearer x")
@@ -422,7 +422,7 @@ mod keyless_loopback_tests {
                 assert_eq!(
                     status,
                     StatusCode::UNAUTHORIZED,
-                    "{method} {path}: Sec-Fetch-Site: {site} marks a page riding the loopback peer"
+                    "{method} {path}: Sec-Fetch-Site: {site} marks a page request from the loopback peer"
                 );
             }
         }
@@ -464,7 +464,7 @@ mod keyless_loopback_tests {
         assert_eq!(
             refused,
             StatusCode::UNAUTHORIZED,
-            "a cross-site page riding the loopback peer never reaches routing"
+            "a cross-site page request from the loopback peer never reaches routing"
         );
 
         let admitted = router

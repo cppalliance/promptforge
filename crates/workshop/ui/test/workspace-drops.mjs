@@ -103,7 +103,7 @@ function scenario({ desktop, responder }) {
     calls.every((call) => call.url === "/workspace/grant" && call.init.method === "POST"),
   );
   check(
-    "grant bodies carry the paths and nothing else",
+    "grant bodies hold the paths and nothing else",
     calls.every(
       (call, index) =>
         Object.keys(call.body).join(",") === "path" && call.body.path === paths[index],
@@ -185,7 +185,7 @@ for (const desktop of [false, true]) {
 
 // --- The WebView2 bridge receives a drop's File objects ----------------------
 
-// A drop carrying files posts them to the shell under the workspace-drop
+// A drop holding files posts them to the shell under the workspace-drop
 // message; without the bridge (plain browser) the same drop is only
 // default-suppressed. jsdom lacks DragEvent and File, so plain markers
 // stand in for the File objects - the module hands them over untouched.
@@ -208,7 +208,7 @@ for (const desktop of [false, true]) {
   window.dispatchEvent(drop);
   check("a file drop posts one workspace-drop message", posted.length === 1);
   check(
-    "the message carries the sentinel and every dropped File",
+    "the message includes the sentinel and every dropped File",
     posted.length === 1 &&
       posted[0].message === "workspace-drop" &&
       posted[0].objects.length === 2 &&
@@ -256,7 +256,7 @@ for (const desktop of [false, true]) {
   const errors = local.filter((entry) => entry.severity === "error");
   check("a failed grant paints one local error", errors.length === 1);
   check(
-    "the local error carries the path and the server message",
+    "the local error names the path and the server message",
     errors.length === 1 &&
       errors[0].label.includes("C:\\blocked") &&
       errors[0].label.includes("path is outside every granted root"),

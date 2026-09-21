@@ -10,8 +10,8 @@ use crate::{assets, require_loopback};
 /// stylesheet, and the program icon at 1x and 2x - with
 /// [`require_loopback`] already applied, so every asset answers 403 to a
 /// non-loopback peer. The gateway nests this router at `/config`; the
-/// index references its assets by relative path, so the mount point
-/// needs no configuration.
+/// index references its assets by relative path, so any mount point
+/// works.
 pub fn routes() -> Router {
     Router::new()
         .route("/", get(ui_index))

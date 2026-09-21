@@ -58,7 +58,7 @@ impl ToolCatalog {
         let mut seen = std::collections::BTreeSet::new();
         for tool in tools {
             // The catalog is the transport boundary: reject a wire name that
-            // is empty or carries a separator/control character (tools.rs F4).
+            // is empty or holds a separator/control character (tools.rs F4).
             if let Err(error) = validate_identifier("wire name", &tool.wire_name) {
                 return Err(ToolCatalogError::InvalidWireName {
                     wire_name: tool.wire_name.clone(),

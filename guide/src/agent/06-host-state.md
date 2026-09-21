@@ -1,6 +1,6 @@
 # Host state
 
-This chapter teaches you what state the host exposes to your agent and how to read it. Two globals carry it: `ui`, a live snapshot of host state, and `sys`, a sealed table. Knowing the difference keeps you from trusting a stale read or poking a table that pushes back.
+This chapter teaches you what state the host exposes to your agent and how to read it. Two globals hold it: `ui`, a live snapshot of host state, and `sys`, a sealed table. Knowing the difference keeps you from trusting a stale read or poking a table that pushes back.
 
 ## Read the UI snapshot
 

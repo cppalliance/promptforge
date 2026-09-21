@@ -143,7 +143,7 @@ fn parse_message(
     };
     if role == MessageRole::Tool && tool_call_id.is_none() {
         return Err(chat_error(format!(
-            "messages[{index}] is a tool message and must carry a string tool_call_id"
+            "messages[{index}] is a tool message and must set a string tool_call_id"
         )));
     }
     let tool_calls = match entry.get("tool_calls") {
@@ -206,7 +206,7 @@ fn parse_content_part(
             Some(serde_json::Value::String(text)) => Ok(ContentPart::Text(text.clone())),
             _ => Err(chat_error(format!(
                 "messages[{index}] content part {part_index} is a text part \
-                 and must carry a string text field"
+                 and must set a string text field"
             ))),
         },
         "image_url" => {
@@ -219,7 +219,7 @@ fn parse_content_part(
                 Some(url) => Ok(ContentPart::ImageUrl(url.to_owned())),
                 None => Err(chat_error(format!(
                     "messages[{index}] content part {part_index} is an image_url \
-                     part and must carry an image_url table with a string url field"
+                     part and must set an image_url table with a string url field"
                 ))),
             }
         }
@@ -248,7 +248,7 @@ fn parse_tool_call_record(
         Some(serde_json::Value::String(id)) => id.clone(),
         _ => {
             return Err(chat_error(format!(
-                "messages[{index}] tool_calls[{call_index}] must carry a string id"
+                "messages[{index}] tool_calls[{call_index}] must set a string id"
             )));
         }
     };
@@ -256,7 +256,7 @@ fn parse_tool_call_record(
         Some(serde_json::Value::String(name)) => name.clone(),
         _ => {
             return Err(chat_error(format!(
-                "messages[{index}] tool_calls[{call_index}] must carry a string name"
+                "messages[{index}] tool_calls[{call_index}] must set a string name"
             )));
         }
     };

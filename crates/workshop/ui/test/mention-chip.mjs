@@ -1,15 +1,15 @@
 // The mention chip (src/parts/chatbox/mention-chip.ts) in jsdom: the
 // configured Mention extension renamed to mentionNode with a vanilla-DOM
 // NodeView pill. Covers: a mention node renders as a pill with icon
-// slot, label, and a labelled remove button; the pill carries the
+// slot, label, and a labelled remove button; the pill has the
 // mention's rendered data-id, data-label, and data-mention-suggestion-char
 // attributes; the label falls back to the
 // id when no label is set; the chip is non-editable; the remove button
 // deletes the node and leaves the surrounding text intact; getJSON
 // serializes the node with type "mentionNode"; ChatBox registers the
 // extension, so chips render and remove inside the real input. The chip
-// model: a pill inserted with a kind carries data-kind and one without
-// carries none; kind, icon, preview, tone, and data survive getJSON, are
+// model: a pill inserted with a kind has data-kind and one without
+// omits it; kind, icon, preview, tone, and data survive getJSON, are
 // null on a chip inserted without them, and are rebuilt by setContent
 // from that JSON; data round-trips byte-for-byte; parsing the pill's
 // rendered HTML (copy and paste) restores data-payload; renderChip
@@ -103,7 +103,7 @@ function mentionJson(editor) {
   return paragraph?.content?.find((node) => node.type === "mentionNode");
 }
 
-// A bare editor with one chip carrying the given attrs at position 1.
+// A bare editor with one chip holding the given attrs at position 1.
 function editorWithChip(attrs) {
   const editor = new Editor({
     element: document.createElement("div"),
@@ -138,7 +138,7 @@ await assertNoLeaks(lifecycle, () => {
       chip?.querySelector(".ws-mention-chip__label")?.textContent === "README.md",
     );
     check(
-      "the pill carries an icon slot",
+      "the pill includes an icon slot",
       chip?.querySelector(".ws-mention-chip__icon") !== null,
     );
     check(
@@ -146,11 +146,11 @@ await assertNoLeaks(lifecycle, () => {
       chip?.getAttribute("contenteditable") === "false",
     );
     check(
-      "the pill carries a labelled remove button",
+      "the pill includes a labelled remove button",
       chip?.querySelector('button.ws-mention-chip__remove[aria-label="Remove"]') !== null,
     );
     check(
-      "the pill carries the mention's rendered data attributes",
+      "the pill has the mention's rendered data attributes",
       chip?.getAttribute("data-id") === "README.md" &&
         chip?.getAttribute("data-label") === "README.md" &&
         chip?.getAttribute("data-mention-suggestion-char") === "@",
@@ -234,7 +234,7 @@ await assertNoLeaks(lifecycle, () => {
   {
     const editor = editorWithChip({ id: "src/main.ts", label: "main.ts", kind: "file" });
     check(
-      "a pill inserted with a kind carries data-kind",
+      "a pill inserted with a kind has data-kind",
       editor.view.dom.querySelector(".ws-mention-chip")?.getAttribute("data-kind") === "file",
     );
     editor.destroy();
@@ -243,7 +243,7 @@ await assertNoLeaks(lifecycle, () => {
   {
     const editor = editorWithChip({ id: "src/main.ts", label: "main.ts" });
     check(
-      "a pill inserted without a kind carries no data-kind",
+      "a pill inserted without a kind omits data-kind",
       editor.view.dom.querySelector(".ws-mention-chip")?.hasAttribute("data-kind") === false,
     );
     editor.destroy();
@@ -313,7 +313,7 @@ await assertNoLeaks(lifecycle, () => {
     // path - and setContent from that HTML runs parseHTML, the paste path.
     const html = editor.getHTML();
     check(
-      "the rendered pill HTML carries a JSON data-payload and the model attributes",
+      "the rendered pill HTML includes a JSON data-payload and the model attributes",
       html.includes('data-kind="file"') &&
         html.includes('data-icon="file-code"') &&
         html.includes('data-preview="pf://preview/1"') &&

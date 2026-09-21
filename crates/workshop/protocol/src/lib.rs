@@ -90,14 +90,14 @@
 //! semantics. The session loops are built on this classification, so no
 //! pushed frame type ships unclassified.
 //!
-//! **Durable** frames are delivered exactly, and coalesce. Where the
+//! **Durable** frames are always delivered, and may coalesce. Where the
 //! data is shared fan-out state, the producer records it and wakes each
 //! connection loop through a `Notify`; the loop compares the shared
 //! revision against its own per-client cursor and sends everything past
 //! the cursor, so a missed wakeup is harmless. A durable frame that answers
 //! the connection's own request (a `launch` acknowledgment) is sent
-//! directly by the loop that owns the socket, which delivers exactly
-//! without any cursor - no shared state exists for a cursor to index.
+//! directly by the loop that owns the socket, without a cursor - no shared
+//! state exists for a cursor to index.
 //!
 //! **Ephemeral** frames may drop under lag. They are sent on bounded
 //! channels (a broadcast where the state fans out); a client too slow

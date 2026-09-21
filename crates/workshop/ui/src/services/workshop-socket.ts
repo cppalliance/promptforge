@@ -1,10 +1,9 @@
-// The persistent workshop socket: one WebSocket to /ws carries the
+// The persistent workshop socket: one WebSocket to /ws delivers the
 // server's downstream JSON - unsolicited status, catalog, and workbench
 // pushes - and the inbound selection events (select_model,
 // switch_profile) the agent toolbar's picker and future profile surfaces
-// send. Chat rides the /agents/ws socket
-// (agent-socket.ts); this connection carries no chat frames. The frame
-// shapes themselves live in protocol.ts.
+// send. Chat goes over the /agents/ws socket (agent-socket.ts). The
+// frame shapes themselves live in protocol.ts.
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
@@ -206,7 +205,7 @@ export class WorkshopSocket extends Disposable {
       return true;
     } catch {
       // A send that throws mid-close is the same failure as a closed
-      // socket; the close handler carries the cleanup.
+      // socket; the close handler runs the cleanup.
       return false;
     }
   }
@@ -216,7 +215,7 @@ export class WorkshopSocket extends Disposable {
     try {
       frame = JSON.parse(String(event.data)) as ServerFrame;
     } catch {
-      // A non-JSON frame carries no push; keep reading.
+      // A non-JSON frame is ignored; keep reading.
       return;
     }
     if (frame.type === "status") {
@@ -231,7 +230,7 @@ export class WorkshopSocket extends Disposable {
     if (frame.type === "workbench") {
       this.deliverPush({ kind: "workbench", frame: frame as unknown as WorkbenchFrame });
     }
-    // Error frames answer menu events; the server's status frames carry
+    // Error frames answer menu events; the server's status frames report
     // the user-visible outcome, so they need no local routing.
   }
 

@@ -51,7 +51,7 @@ pub(crate) async fn admin_orphans(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
 ) -> Result<Json<OrphansReply>, GatewayError> {
-    // The retained running config carries both the `[local].cache_dir` the
+    // The retained running config holds both the `[local].cache_dir` the
     // scan resolves and the catalog it diffs against: every `[[local_model]]`
     // and `[[stt_model]]` the document declares, whether or not the running
     // profile selects it. The catalog does not move on an apply, which

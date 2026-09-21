@@ -1,5 +1,5 @@
 // Markdown rendering for model-authored chat content. marked parses to
-// HTML with three custom renderers carried over from Cursor's markdown
+// HTML with three custom renderers taken from Cursor's markdown
 // pipeline (image dimension suffixes, escaped links that are not
 // draggable, inline-only paragraphs); fenced code blocks highlight
 // through a Shiki core highlighter whose theme is built from the skin's
@@ -149,7 +149,7 @@ function parseImageSource(href: string): {
   };
 }
 
-// A private Marked instance carries the custom renderers, so the global
+// A private Marked instance holds the custom renderers, so the global
 // marked instance is never mutated for a hypothetical other consumer.
 const markedInstance = new Marked({
   renderer: {
@@ -189,7 +189,7 @@ export interface RenderMarkdownOptions {
 
 /**
  * Renders markdown text to a DocumentFragment whose single root element
- * carries the `ws-markdown-content` class (the feed's caret selector and
+ * has the `ws-markdown-content` class (the feed's caret selector and
  * containers target that class). Synchronous; the DOMPurify pass is the
  * last step, so the returned markup is safe to insert as-is.
  */

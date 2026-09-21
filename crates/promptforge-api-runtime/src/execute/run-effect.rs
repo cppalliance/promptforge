@@ -75,9 +75,9 @@ pub enum Effect {
         /// Whether the host forwards the round's live deltas to its delta
         /// hook: `true` for a section's `chat` round (the `models.loop`
         /// rounds the hook is documented for), `false` for a nested
-        /// `models.infer`, whose deltas have no consumer - only the
-        /// completed reply is. Not part of the record: a delta is not an
-        /// event, and the hint changes no request body.
+        /// `models.infer`, where only the completed reply is consumed.
+        /// Not part of the record: a delta is not an event, and the hint
+        /// changes no request body.
         stream: bool,
     },
     /// One bound tool call: `tool` is the stable identity the performer
@@ -118,11 +118,10 @@ pub enum Effect {
     },
     /// One read of a task's reported history: every event whose
     /// provenance names `task` with a sequence number after `last` (all of
-    /// them when `last` is `None`), in sequence order. The engine keeps no
-    /// history of its own, so the host answers from its log - the events
-    /// it was handed by earlier steps, which it commits before performing
-    /// the step's effects, so a task reading its history sees everything
-    /// reported before the read was issued.
+    /// them when `last` is `None`), in sequence order. The host answers
+    /// from its log - the events it was handed by earlier steps, which it
+    /// commits before performing the step's effects, so a task reading its
+    /// history sees everything reported before the read was issued.
     TaskEvents {
         /// The task whose events are read.
         task: TaskId,

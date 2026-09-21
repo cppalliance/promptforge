@@ -45,8 +45,8 @@ impl Prompt {
     /// The first half of the pair is a [`ParseError`] classified `Frontmatter` when the frontmatter
     /// delimiters are missing or the frontmatter is invalid; `Structure` when
     /// the required H1 is missing or the body has no `##` sections; `Fence` when
-    /// the H1 opens with the removed `lua prompt` fence form, a reserved fence
-    /// is not closed exactly, more than one `lua shared` fence exists, or a
+    /// the H1 opens with the removed `lua prompt` fence form, an exact fence
+    /// is not closed, more than one `lua shared` fence exists, or a
     /// `lua shared` fence is outside H1; and `Lua` when the shared library or an
     /// H1 or section Lua block is not valid Lua.
     pub fn parse(

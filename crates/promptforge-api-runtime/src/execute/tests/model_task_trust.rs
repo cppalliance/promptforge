@@ -105,7 +105,7 @@ fn a_finished_tasks_result_reaches_the_model_only_inside_the_runs_envelope() {
 
 #[test]
 fn await_tasks_hands_the_model_the_same_enveloped_result() {
-    // The wait's answer is the queued notice, so it carries the same
+    // The wait's answer is the queued notice, so it has the same
     // envelope the drain path does: the wrap happens once, when the task
     // ends, not per delivery path.
     let (result, events) = drive_scripted(

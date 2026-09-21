@@ -57,7 +57,7 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the gateway discovery file the gateway writes.
 
-A `gateway.toml` carried over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
+A `gateway.toml` left over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 Voice uses the same separation. The gateway owns speech models, worker lifecycle, batch transcription, and the generic Realtime endpoint. The Workshop server contributes only an authenticated same-origin relay, while the browser UI owns microphone capture and transcript presentation.
 
@@ -91,7 +91,7 @@ One protection is worth understanding early: a link to any other local server, e
 
 The Workshop is built so that only you, on your own machine, can reach it.
 
-The window loads its interface only from the local machine, never from a remote address. The Workshop refuses any request a browser marks as coming from another website, and it only answers requests addressed to a loopback host. Requests that change things must declare a JSON body. The live socket that carries chat only upgrades for the Workshop's own loopback origin or a native client.
+The window loads its interface only from the local machine, never from a remote address. The Workshop refuses any request a browser marks as coming from another website, and it only answers requests addressed to a loopback host. Requests that change things must declare a JSON body. The live socket for chat only upgrades for the Workshop's own loopback origin or a native client.
 
 Nothing hangs forever. A stalled request is answered with a timeout error instead of freezing: ordinary routes give up after 10 seconds, and routes that relay a call to the gateway allow up to 35 seconds so a stalled gateway surfaces as a meaningful failure. Live socket sessions are never cut off by a request deadline. A gateway that is down or wedged fails fast in the interface: connections give up after 5 seconds and ordinary requests after 30 seconds.
 

@@ -120,7 +120,7 @@ menu.open("menubar/file", anchor);
 {
   check("one popover is shown", popovers().length === 1);
   const popover = popovers()[0];
-  check("the popover carries role=menu", popover?.getAttribute("role") === "menu");
+  check("the popover has role=menu", popover?.getAttribute("role") === "menu");
   const labels = rowsOf(popover).map((row) => row.querySelector(".ws-window-titlebar__item-label")?.textContent);
   check(
     "rows render in sort order with the command title as the default label",
@@ -146,7 +146,7 @@ menu.open("menubar/file", anchor);
   );
   const recentRow = rowByLabel(popover, "Recent");
   check(
-    "a submenu row carries aria-haspopup and a collapsed state",
+    "a submenu row has aria-haspopup and a collapsed state",
     recentRow?.getAttribute("aria-haspopup") === "menu" && recentRow?.getAttribute("aria-expanded") === "false",
   );
 }

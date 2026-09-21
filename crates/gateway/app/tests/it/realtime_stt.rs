@@ -518,7 +518,7 @@ fn assert_native_incremental_spans(spans: &[(u64, u64, String)]) {
         spans
             .iter()
             .all(|(_, _, transcript)| !transcript.is_empty()),
-        "every emitted native hypothesis carries replacement text"
+        "every emitted native hypothesis includes replacement text"
     );
 }
 

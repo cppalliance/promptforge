@@ -8,10 +8,9 @@
 //! plugin-owned location, owns the geometry: an ephemeral workspace has
 //! nowhere to keep it and the server answers `saved: false`.
 //!
-//! Every failure here logs and continues. Geometry is zone-two
-//! degradation: a window that opens at the default size is a nuisance, a
-//! window that never opens is a boot failure, and nothing in this module
-//! is allowed to cause the second.
+//! Every failure here logs and continues: a window that opens at the
+//! default size is a nuisance, a window that never opens is a boot
+//! failure, and nothing in this module is allowed to cause the second.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};

@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn month_year_snapshots_without_a_canonical_stay_canonical() {
         let by_id = classified();
-        // The 2026-09-14 sheet carries `-MM-YYYY` preview snapshots but
+        // The 2026-09-14 sheet lists `-MM-YYYY` preview snapshots but
         // not their base ids, so nothing collapses and every id keeps a
         // non-empty family.
         for entry in by_id.values() {

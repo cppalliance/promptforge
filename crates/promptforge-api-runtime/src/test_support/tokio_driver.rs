@@ -213,7 +213,7 @@ impl<'a> TokioDriver<'a> {
                 }
                 Step::Pending { effects, events } => {
                     // The run's own word, not a scan of its events: the
-                    // events are a report, and control never rides on them.
+                    // events are a report only.
                     let decided = self.run.decided();
                     self.forward(events);
                     #[cfg(test)]

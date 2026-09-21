@@ -1,6 +1,6 @@
 //! The opaque wire error every HTTP failure answers with.
 //!
-//! [`AppError`] is the boundary between zone-two failures and the HTTP
+//! [`AppError`] is the boundary between the shell's failures and the HTTP
 //! response: one variant per wire failure that exists today, each mapped
 //! to one status code by the central [`IntoResponse`] impl, so the same
 //! failure is built in one place no matter which handler hits it.
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_json_envelope_carries_message_code_and_content_type() {
+    async fn the_json_envelope_has_message_code_and_content_type() {
         let response = AppError::CrossSite.into_response();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         let content_type = response

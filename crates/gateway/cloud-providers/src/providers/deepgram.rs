@@ -3,8 +3,7 @@
 //! that contains STT models and a TTS array, split here into separate
 //! entries with distinct kinds. No pagination. The wire repeats each
 //! model once per language: normalization groups rows by id and collects
-//! the languages. Architectures and tags have no sheet field and are
-//! dropped.
+//! the languages. Architectures and tags are dropped.
 //!
 //! Docs: <https://developers.deepgram.com/reference/get-models>
 
@@ -346,7 +345,7 @@ mod tests {
             assert!(!entry.family.is_empty(), "{} has an empty family", entry.id);
             assert!(
                 entry.variant_of.is_none(),
-                "the catalog carries no snapshot suffixes: {}",
+                "the catalog lists base models only: {}",
                 entry.id
             );
         }

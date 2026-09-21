@@ -187,7 +187,7 @@ await assertNoLeaks(lifecycle, () => {
         user?.querySelector(".ws-agent-item__text")?.textContent === "hi <b>there</b>",
     );
     check(
-      "a reply row carries its model label and renders markdown",
+      "a reply row shows its model label and renders markdown",
       reply?.classList.contains("ws-agent-item--reply") === true &&
         reply.querySelector(".ws-agent-item__meta")?.textContent === "llama-3" &&
         reply.querySelector(".ws-markdown-content")?.textContent === "hello back",
@@ -308,7 +308,7 @@ await assertNoLeaks(lifecycle, () => {
     wire.fire.event("tool_call", "not json at all", { model: "m", reply: 0 });
     const card = rows()[0]?.querySelector("details.ws-tool-call-card");
     check(
-      "an unparsed batch paints a collapsed card carrying its raw text",
+      "an unparsed batch paints a collapsed card holding its raw text",
       card !== null &&
         card?.querySelector(".ws-tool-call-card__raw")?.textContent === "not json at all" &&
         card?.open === false &&
@@ -470,7 +470,7 @@ await assertNoLeaks(lifecycle, () => {
     const { wire, editorEl, dispose } = harness();
     const placeholder = () => editorEl.querySelector("p")?.getAttribute("data-placeholder");
     check(
-      "the input carries Cursor's agent placeholder",
+      "the input shows Cursor's agent placeholder",
       placeholder() === "Plan, Build, / for skills, @ for context",
     );
     wire.fire.inputRequired("tok");

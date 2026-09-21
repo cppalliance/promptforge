@@ -120,8 +120,8 @@ pub enum Request {
     /// `tasks.events(task, opts?)`: the events one task has reported so
     /// far, read from the host's history. Owner-or-self, as `status` is: the
     /// caller may read a task it owns or the task it runs inside. A leaf
-    /// request: the engine holds no history of its own, so the host answers
-    /// it from its log (a test driver from its event buffer).
+    /// request: the host answers it from its log (a test driver from its
+    /// event buffer).
     TaskEvents {
         /// The task whose events are read.
         task: TaskId,
@@ -179,7 +179,7 @@ pub enum Request {
         /// list was given - a section VM's shape - and the driver resolves
         /// the section's current tool scope, local Lua tools included. The
         /// aliases resolve to schemas in the dispatch arm, where the tool
-        /// scope sits; the parse has no catalog.
+        /// scope sits.
         tools: Option<Vec<String>>,
     },
     /// `user_input()`: a direct operator-input request to the run's input

@@ -54,8 +54,7 @@
 //! `timer` the wait shims' internal timeout as an effect-backed slot, and
 //! `test_hooks` (test builds only) the seams the suites inspect the arena
 //! through. A fanout is Lua over those arms (the `fanout` shim spawns one
-//! task per member and waits on the live set), so the scheduler keeps no
-//! fanout state of its own.
+//! task per member and waits on the live set).
 
 mod apply;
 mod await_tasks;
@@ -187,7 +186,7 @@ struct Counters {
 /// The chain owns its per-section frame and adds the chain position (the
 /// sibling slice being walked plus the current index), the coroutine handle
 /// for the in-flight Lua block, and the walk-scoped slots: the pending
-/// Markdown buffer the next Lua fence consumes and the `var` clipboard.
+/// Markdown buffer the next Lua fence consumes and the walk's `var` table.
 /// One section entry is
 /// one frame; the fall-through advance tears the old frame down and the
 /// next entry constructs the next.
@@ -285,7 +284,7 @@ struct Chain {
     /// coroutine starts. Cleared at every section entry; an unconsumed
     /// buffer drops with the section, never evaluated.
     pending_prose: Option<String>,
-    /// The walk's clipboard: seeds each section's VM at entry; the
+    /// The walk's `var` table: seeds each section's VM at entry; the
     /// section's final `var` is read back before teardown and replaces the
     /// slot. A call chain's slot seeds from the caller's snapshot and
     /// is discarded with the chain, so the caller never sees the chain's

@@ -23,7 +23,7 @@ async fn gate_history_accumulates_across_three_turns_byte_exact() {
         assert_eq!(
             role_content_pairs(&requests[0]),
             vec![pair("user", "first ping")],
-            "the first round carries exactly the first input"
+            "the first round sends exactly the first input"
         );
         assert_eq!(
             role_content_pairs(&requests[1]),
@@ -32,7 +32,7 @@ async fn gate_history_accumulates_across_three_turns_byte_exact() {
                 pair("assistant", "echo:first ping"),
                 pair("user", gnarly),
             ],
-            "the second round carries the first exchange plus the new input, \
+            "the second round sends the first exchange plus the new input, \
              the gnarly user text byte-exact and envelope-free"
         );
         assert_eq!(
@@ -44,7 +44,7 @@ async fn gate_history_accumulates_across_three_turns_byte_exact() {
                 pair("assistant", &format!("echo:{gnarly}")),
                 pair("user", "third"),
             ],
-            "the third round carries the whole accumulated conversation"
+            "the third round sends the whole accumulated conversation"
         );
     }
     socket.close().await;

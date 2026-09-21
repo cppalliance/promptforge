@@ -153,7 +153,7 @@ return argv.query\n\
     );
     let out = run_args(md, "broken json")
         .await
-        .expect("the H1 repair carries downstream");
+        .expect("the H1 repair reaches downstream");
     assert_eq!(out, "repaired");
 }
 

@@ -1,4 +1,4 @@
-// Custom window title bar in browser mode: the bar carries the application
+// Custom window title bar in browser mode: the bar holds the application
 // menus, so it must be visible after boot even without the Tauri runtime;
 // only the native window-control cluster hides, and the module never calls
 // into the Tauri window API - the whole test runs with no
@@ -42,10 +42,10 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
         failures.push(`title bar icon srcset is "${icon.getAttribute("srcset")}"; it must name the @2x render`);
       }
       if (icon.getAttribute("alt") !== "") {
-        failures.push("the decorative title bar icon must carry an empty alt");
+        failures.push("the decorative title bar icon must have an empty alt");
       }
       if (!icon.getAttribute("width") || !icon.getAttribute("height")) {
-        failures.push("the title bar icon must carry width and height");
+        failures.push("the title bar icon must set width and height");
       }
     }
     const menuLabels = [...titlebar.querySelectorAll(".ws-window-titlebar__menu")].map(

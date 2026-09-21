@@ -297,7 +297,7 @@ async fn the_auth_handoff_sets_a_cookie_and_redirects_key_free() {
         .headers()
         .get("location")
         .expect("a Location header");
-    assert_eq!(location, "/config/", "the redirect target carries no key");
+    assert_eq!(location, "/config/", "the redirect target omits the key");
     let cookie = response
         .headers()
         .get("set-cookie")
@@ -318,7 +318,7 @@ async fn the_auth_handoff_sets_a_cookie_and_redirects_key_free() {
     );
     assert!(
         !cookie.contains("test-token"),
-        "the cookie never carries the raw key: {cookie}"
+        "the cookie omits the raw key: {cookie}"
     );
 
     // The cookie alone authenticates a subsequent config request from a
@@ -333,7 +333,7 @@ async fn the_auth_handoff_sets_a_cookie_and_redirects_key_free() {
     )
     .await;
     assert_eq!(status.status(), reqwest::StatusCode::OK);
-    // The same cookie presented by a cross-origin rider is refused:
+    // The same cookie presented by a cross-origin page is refused:
     // same-site is not same-origin, since ports are not part of a site.
     let status = send_within(
         client

@@ -71,7 +71,7 @@ async fn the_right_key_sets_the_cookie_and_redirects_key_free() {
     assert_eq!(
         response.headers().get(LOCATION).expect("a Location header"),
         "/config/",
-        "the redirect target carries no key"
+        "the redirect target omits the key"
     );
     let cookie = response
         .headers()
@@ -88,11 +88,11 @@ async fn the_right_key_sets_the_cookie_and_redirects_key_free() {
         .next()
         .and_then(|pair| pair.split_once('='))
         .map(|(_, value)| value)
-        .expect("the cookie carries a value");
+        .expect("the cookie holds a value");
     assert_eq!(
         value,
         hex_encode(&session_token(&state.handoff_salt, b"test-token")),
-        "the cookie carries the session proof, never the key: {cookie}"
+        "the cookie holds the session proof, never the key: {cookie}"
     );
     assert!(
         cookie.contains("HttpOnly"),
@@ -104,7 +104,7 @@ async fn the_right_key_sets_the_cookie_and_redirects_key_free() {
     );
     assert!(
         !cookie.contains("test-token"),
-        "the cookie never carries the raw key: {cookie}"
+        "the cookie omits the raw key: {cookie}"
     );
     assert_eq!(
         response

@@ -23,7 +23,7 @@ import { openInZone, resetZones } from "./zones";
  *
  * The workbench never boots without its anchors: a restored layout that
  * lost the Workshop tree (a stale snapshot from before the tree became
- * non-closable) or carries no agent-session panel gets them back. Both
+ * non-closable) or lost its agent-session panel gets them back. Both
  * panels are singletons, so re-opening an existing one only focuses it.
  */
 export function applyLayoutOrDefault(dock: DockviewApi, envelope: unknown): void {

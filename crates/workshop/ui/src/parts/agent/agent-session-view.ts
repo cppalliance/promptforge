@@ -373,7 +373,7 @@ export class AgentSessionView extends Disposable {
       return;
     }
     // Read before discarding: the discard restores the box to its
-    // pre-take text, and the send carries what was showing.
+    // pre-take text, and the send submits what was showing.
     this.stt.discardIfRecording();
     if (this.service.respond(text)) {
       this.chatBox.clear();

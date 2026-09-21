@@ -5,9 +5,9 @@
 //! its metatable, so the list itself stays a plain array of message records:
 //! serde conversion, prose substitution, and the chat protocol's validation
 //! consume the records as if the author had written the array by
-//! hand. The builders perform no validation of their own; the protocol parse
-//! owns the whole message contract. The chainable builders are the one
-//! deliberate exception to the methodless-handle rule (A9).
+//! hand. The protocol parse owns the whole message contract. The chainable
+//! builders are the one deliberate exception to the methodless-handle rule
+//! (A9).
 //!
 //! The shim is pure Lua with no privileged captures (it never yields), so it
 //! installs with the host tables during host injection, ahead of the shared

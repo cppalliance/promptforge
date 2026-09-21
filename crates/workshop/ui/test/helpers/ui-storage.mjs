@@ -12,7 +12,7 @@
 
 /**
  * Builds a fake adapter. `initial` is `{ user: {...}, workspace: {...} }`;
- * either bucket may be omitted. The returned object carries the adapter
+ * either bucket may be omitted. The returned object has the adapter
  * surface plus `sets`, the recorded `set` calls in order as
  * `{ bucket, key, value }`, and `suppressed`, the workspace writes that
  * `suppressWrites` swallowed.

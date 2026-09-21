@@ -4,7 +4,7 @@ You know the window's regions and panels. This chapter teaches you the command s
 
 ## The five menus
 
-The title bar carries five menus: File, Edit, Model, Window, and Help. Click a menu button to open its popover. Here is what each menu holds.
+The title bar has five menus: File, Edit, Model, Window, and Help. Click a menu button to open its popover. Here is what each menu holds.
 
 The File menu:
 
@@ -50,14 +50,14 @@ Menu rows show the label on the left and the shortcut hint on the right in muted
 
 The Model menu is live. It rebuilds its rows from the catalog every time it opens, and again whenever a workbench snapshot arrives while it stays open, so check marks move without reopening the menu. Clicking a model row sends the selection, and the check mark moves only when the server confirms the new selection. Keyboard focus survives a live rebuild of the open menu: focus stays on the equivalent row and falls back to the first row if the focused row disappears. While a profile selection is in progress, every Model menu row disables, and the target profile shows a pending "..." mark in place of its check until the server confirms. The still-active profile keeps its checkmark.
 
-The same menus work in a plain browser. Only the native window commands (Minimize, Maximize/Restore, Close Window) do nothing there, because no desktop bridge carries them.
+The same menus work in a plain browser. Only the native window commands (Minimize, Maximize/Restore, Close Window) do nothing there, because only the desktop bridge can run them.
 
 ## Context menus
 
 Some panels, such as the Workshop tree, open a context menu of action items from a trigger element. Context menus share one set of behaviors:
 
 - Activating the same trigger a second time closes the menu. At most one menu is open at a time.
-- Items can carry an icon next to the label, a check mark for the selected choice, and a danger style for destructive actions.
+- Items can show an icon next to the label, a check mark for the selected choice, and a danger style for destructive actions.
 - A right-click invocation opens the menu at the pointer position. The menu flips above the trigger or right-aligns when it would overflow the window.
 - Escape dismisses the menu and returns focus to the trigger. ArrowUp, ArrowDown, Home, and End move through the items. Tab closes the menu.
 - Activating an item runs its action and closes the menu immediately.

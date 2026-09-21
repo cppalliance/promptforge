@@ -163,7 +163,7 @@ async fn an_unknown_key_is_refused_and_the_state_stands() {
     assert_eq!(json["error"]["code"], "user_state_key");
     let message = json["error"]["message"]
         .as_str()
-        .expect("the envelope carries a message");
+        .expect("the envelope includes a message");
     assert!(
         message.contains("editor_settings, zoom, recent_files, commands_history"),
         "the refusal names what is allowed: {message}"
@@ -193,7 +193,7 @@ async fn an_over_cap_body_is_refused_and_the_state_stands() {
     assert_eq!(json["error"]["code"], "user_state_too_large");
     let message = json["error"]["message"]
         .as_str()
-        .expect("the envelope carries a message");
+        .expect("the envelope includes a message");
     assert!(
         message.contains(&format!("{} bytes", USER_STATE_VALUE_CAP + 1))
             && message.contains(&format!("{USER_STATE_VALUE_CAP} bytes")),

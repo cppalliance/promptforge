@@ -560,7 +560,7 @@ async fn the_served_config_round_trips_through_the_save_route() {
     let document = get_json(addr, "/admin/config").await;
     assert!(
         document.get("active_profile").is_none(),
-        "the running document carries no active_profile key: {document}"
+        "the running document omits the active_profile key: {document}"
     );
     let save = reqwest::Client::new()
         .put(format!("http://{addr}/admin/config"))

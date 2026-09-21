@@ -26,8 +26,8 @@ fn raised_crate_error_ref(error: &mlua::Error) -> &Error {
     match cause {
         mlua::Error::ExternalError(cause) => cause
             .downcast_ref::<Error>()
-            .expect("the raise must carry the typed crate error, not text"),
-        other => panic!("expected an ExternalError carrying the typed error, got {other:?}"),
+            .expect("the raise must hold the typed crate error, not text"),
+        other => panic!("expected an ExternalError holding the typed error, got {other:?}"),
     }
 }
 
@@ -63,14 +63,14 @@ fn the_omitted_compactor_defaults_to_fail() {
 }
 
 #[test]
-fn fail_invocation_raises_typed_exhaustion_carrying_the_reason() {
+fn fail_invocation_raises_typed_exhaustion_holding_the_reason() {
     for reason in [OverflowReason::Precheck, OverflowReason::Provider] {
         let error = Compactor::Fail.invoke(reason);
         match error {
-            Error::ContextExhausted { reason: carried } => {
+            Error::ContextExhausted { reason: raised } => {
                 assert_eq!(
-                    carried, reason,
-                    "the exhaustion must carry the invoking reason"
+                    raised, reason,
+                    "the exhaustion must hold the invoking reason"
                 );
             }
             other => panic!("expected ContextExhausted, got {other:?}"),
@@ -102,7 +102,7 @@ fn compactors_fail_raises_typed_exhaustion_from_lua() {
         assert_eq!(
             raised_reason(&error),
             expected,
-            "the Lua raise must carry the typed exhaustion with the invocation reason"
+            "the Lua raise must hold the typed exhaustion with the invocation reason"
         );
     }
 }
@@ -132,8 +132,8 @@ fn compactors_fail_rejects_an_unknown_reason() {
 fn the_fail_policy_invokes_as_typed_exhaustion_for_either_reason() {
     for reason in [OverflowReason::Precheck, OverflowReason::Provider] {
         match Compactor::Fail.invoke(reason) {
-            Error::ContextExhausted { reason: carried } => {
-                assert_eq!(carried, reason, "the policy carries the invoking reason");
+            Error::ContextExhausted { reason: raised } => {
+                assert_eq!(raised, reason, "the policy holds the invoking reason");
             }
             other => panic!("expected ContextExhausted, got {other:?}"),
         }
@@ -170,7 +170,7 @@ fn precheck_boundary_admits_an_exact_fit() {
 #[test]
 fn precheck_counts_tool_call_arguments_and_part_text() {
     let context = std::num::NonZeroU32::new(16).expect("non-zero");
-    // An assistant tool-call turn whose visible text is empty still carries
+    // An assistant tool-call turn whose visible text is empty still sends
     // its arguments onto the wire; the estimate must count them.
     let calls = vec![Message::from_validated_parts(
         "assistant",

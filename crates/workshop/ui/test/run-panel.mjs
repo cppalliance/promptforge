@@ -9,7 +9,7 @@
 // application/x-workshop-path and a tree drop loading the prompt; an OS
 // drop granting then loading the first .md; a Browse pick granted then
 // loading to ready; a parse failure rendering the
-// line-numbered error row with Choose Prompt; a contract carrying the
+// line-numbered error row with Choose Prompt; a contract declaring the
 // retired fuzzy tool shape rejected as an unexpected shape; two opens
 // yielding two windows; and a superseded load discarded by the generation
 // counter.
@@ -500,7 +500,7 @@ const brokenEl = runElement(brokenRun);
 const errorRow = brokenEl?.querySelector(".ws-run-panel__error");
 check("a parse failure renders the error row", !!errorRow);
 check(
-  "the error row carries the server's line-numbered message",
+  "the error row shows the server's line-numbered message",
   errorRow?.textContent.includes("line 3: bad YAML key") === true,
 );
 check("the error row is announced as an alert", errorRow?.getAttribute("role") === "alert");
@@ -520,7 +520,7 @@ await flush();
 const fuzzyEl = runElement(fuzzyRun);
 const fuzzyError = fuzzyEl?.querySelector(".ws-run-panel__error");
 check(
-  "a contract carrying a fuzzy tool is rejected as an unexpected shape",
+  "a contract declaring a fuzzy tool is rejected as an unexpected shape",
   fuzzyError?.textContent.includes("unexpected shape") === true &&
     fuzzyEl?.querySelector(".ws-run-panel__rows") === null,
 );

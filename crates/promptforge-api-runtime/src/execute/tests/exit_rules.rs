@@ -121,7 +121,7 @@ async fn missing_version_is_not_a_promptforge_prompt() {
             assert_eq!(
                 name.as_deref(),
                 Some("t"),
-                "the parsed prompt's frontmatter name rides the error"
+                "the error reports the parsed prompt's frontmatter name"
             );
             assert!(
                 message.contains("not a promptforge prompt"),
@@ -141,19 +141,19 @@ async fn store_persists_across_sections() {
     // reads it back - proving the store outlives the context-clearing
     // transition. The read lands in `var`, so it round-trips the value.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
+## Writer\n\n```lua\nstore.write('note.txt', 'handoff text')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
     let store = TestStore::new();
     let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
     assert_eq!(
-        out, "carried across",
+        out, "handoff text",
         "the second section must read what the first wrote"
     );
     // The very same handle still holds the file after the run, confirming
     // both sections shared one store rather than each getting a fresh one.
     assert_eq!(
         store.read("note.txt").expect("read"),
-        "carried across",
+        "handoff text",
         "the run's store must retain the written file"
     );
 }
@@ -323,7 +323,7 @@ async fn empty_turn_without_finish_reason_after_tool_call_fails() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
-    // The raise is pcall-able as the `empty_model_reply` kind carrying the
+    // The raise is pcall-able as the `empty_model_reply` kind holding the
     // finish reason as its field and the client's phrase as its message,
     // and the rejected round leaves the author's list untouched.
     let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;

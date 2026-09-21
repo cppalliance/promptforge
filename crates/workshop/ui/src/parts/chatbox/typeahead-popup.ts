@@ -10,7 +10,7 @@
 // all of that down.
 //
 // The rows are chips: each draws the chip's icon, its label, and its
-// `description` dimmed to the right. Items carrying a `group` are
+// `description` dimmed to the right. Items with a `group` are
 // ordered by group with a non-selectable header at each boundary;
 // keyboard navigation indexes the items only. The plugin's `loading`
 // flag renders a loading row while the source is pending. The popup

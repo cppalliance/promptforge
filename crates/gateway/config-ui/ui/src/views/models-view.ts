@@ -1,5 +1,5 @@
 // The Models view [Unsloth] Model Hub "On Device": a master-detail
-// split. The list side carries the toolbar (debounced search, Local
+// split. The list side holds the toolbar (debounced search, Local
 // type filters, sort), the model rows with status dots and
 // badges, the unconfigured-orphans section, the empty state, and
 // loading skeletons. The detail side renders the selected model's
@@ -186,8 +186,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     if (sort === "kind") {
       entries = [...entries].sort((a, b) => a.kind.localeCompare(b.kind) || byName(a, b));
     } else {
-      // Configured entries carry no file size; the size sort falls back
-      // to name order until sizes are known.
+      // The size sort falls back to name order until the file sizes of
+      // configured entries are known.
       entries = [...entries].sort(byName);
     }
     return entries;

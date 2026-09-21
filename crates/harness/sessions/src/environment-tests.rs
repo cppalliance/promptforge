@@ -42,7 +42,7 @@ fn a_generation_change_rebuilds_the_registry_and_client() {
     assert_eq!(
         *bindings.subscribe_gateway().borrow(),
         Some(2),
-        "the watch carries the rebuilt generation"
+        "the watch holds the rebuilt generation"
     );
 }
 

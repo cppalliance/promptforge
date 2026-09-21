@@ -38,11 +38,11 @@ You can also start the gateway with no config file at all. When no `gateway.toml
 
 ## The system tray
 
-On a desktop system the gateway's face is the system tray. The icon shows the gateway's state, and its menu carries a status line, a Workshop item that launches the Workshop application when the installer laid it beside the gateway, a Settings item that opens the configuration UI in your browser, a Launch at Login toggle, and Quit. A gateway started at login never opens a browser or a window.
+On a desktop system the gateway's face is the system tray. The icon shows the gateway's state, and its menu lists a status line, a Workshop item that launches the Workshop application when the installer laid it beside the gateway, a Settings item that opens the configuration UI in your browser, a Launch at Login toggle, and Quit. A gateway started at login never opens a browser or a window.
 
 For servers and CI, `--no-tray` keeps the plain headless loop. In a tray-less environment, `--print-url` prints the Settings URL to stdout once the gateway is bound. `--browser` opens the Settings page in your default browser once bound; the installer uses it on a Gateway-only install's first run. Launching `promptforge-gateway` while one is already running never starts a second copy: it opens the running gateway's Settings page instead.
 
-After every successful bind the gateway writes a gateway discovery file (`gateway.json` in the run directory under the state directory) carrying its port, bearer key, and process id. PromptForge components read that file to attach to the running gateway instead of starting a second one, and a clean shutdown removes it.
+After every successful bind the gateway writes a gateway discovery file (`gateway.json` in the run directory under the state directory) that records its port, bearer key, and process id. PromptForge components read that file to attach to the running gateway instead of starting a second one, and a clean shutdown removes it.
 
 ## Check that it is healthy
 
@@ -175,7 +175,7 @@ Two field rules are worth memorizing early. A `sha256` pin must be exactly 64 he
 
 By default a caller on the gateway's own machine needs no key. With `trust_loopback = true` (the default, and what the first-run config writes), a request from a loopback peer that presents no credential at all is admitted on every route, the admin surface included. That is what lets `curl http://127.0.0.1:8081/v1/models`, the SDK with only `PROMPTFORGE_GATEWAY_URL` set, and the config UI on its own origin work without a key.
 
-The trust is narrow on purpose. It applies only when the request carries no `Authorization` header: a presented-but-wrong bearer is still rejected with 401, even from loopback, so a stale key is always detected. And it applies only when the request's fetch metadata allows ambient access: no `Sec-Fetch-Site` header (curl, the SDK, any non-browser client) or a value of `same-origin` or `none` (the config UI, a typed URL). A page on another origin sends `cross-site`, and browsers never let a page strip that header, so a web page cannot ride your loopback peer into the admin surface. A request with no peer address fails closed and needs the key.
+The trust is narrow on purpose. It applies only when the request arrives without an `Authorization` header: a presented-but-wrong bearer is still rejected with 401, even from loopback, so a stale key is always detected. And it applies only when the request's fetch metadata allows ambient access: no `Sec-Fetch-Site` header (curl, the SDK, any non-browser client) or a value of `same-origin` or `none` (the config UI, a typed URL). A page on another origin sends `cross-site`, and browsers never let a page strip that header, so a web page cannot use your loopback peer to reach the admin surface. A request with no peer address fails closed and needs the key.
 
 The cost is the shared-machine case. On a machine with more than one OS account, any other account can use your gateway, including reading upstream API keys from the admin config surface. If that describes your machine, set `trust_loopback = false` to require the bearer key from every caller, or bind the gateway off loopback:
 
@@ -237,7 +237,7 @@ Every remote model must list at least one endpoint, and every endpoint it names 
 
 ## Kinds and thinking modes
 
-Every model carries a `kind`: `chat`, `embedding`, `classifier`, or `speech`. The kind scopes which fields are meaningful. Chat-only fields such as `thinking` and `default_max_tokens` are rejected for non-chat kinds at load time.
+Every model declares a `kind`: `chat`, `embedding`, `classifier`, or `speech`. The kind scopes which fields are meaningful. Chat-only fields such as `thinking` and `default_max_tokens` are rejected for non-chat kinds at load time.
 
 Record each chat model's thinking behavior as `never`, `always`, or `switchable`. Switchable means the client may toggle thinking per request.
 
@@ -278,7 +278,7 @@ Callers observe the catalog at GET /v1/models:
 curl -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/v1/models
 ````
 
-Each configured model carries its caller-facing id, its workload kind, its description, its context window size, its thinking mode, and its capability metadata.
+Each configured model is listed with its caller-facing id, its workload kind, its description, its context window size, its thinking mode, and its capability metadata.
 
 When a caller sends a chat, embedding, or rerank request, the gateway forwards it to the backend paths `chat/completions`, `embeddings`, or `rerank` relative to the configured base URL. The public model name is rewritten to the upstream alias. The caller's bearer token is never sent upstream.
 
@@ -356,7 +356,7 @@ sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 draft_max = 4
 ````
 
-The only type is `draft-mtp`, and `draft_max` is bounded to 1 through 16. Attach a multimodal projector with a `[local_model.multimodal_projector]` sub-table carrying a `source` and a `sha256` pin; a model with a projector accepts image inputs.
+The only type is `draft-mtp`, and `draft_max` is bounded to 1 through 16. Attach a multimodal projector with a `[local_model.multimodal_projector]` sub-table that sets a `source` and a `sha256` pin; a model with a projector accepts image inputs.
 
 Companion artifacts follow the main-model source rule: an https URL must be pinned, a local path may be unpinned, and plaintext http and empty sources are rejected. Companions on a non-chat model kind fail validation. Companions are provisioned and pin-verified before the child launches, and any failure aborts the launch.
 
@@ -374,7 +374,7 @@ Startup reports a structured progress tree under the boot load's stages: `loadin
 
 Startup is best-effort. Every model that launched keeps serving, and each model that failed is reported by name with its error. One bad model never blocks the rest. Startup failures are classified as plausibly transient or permanent, and the classification annotates the respawn diagnostics you see in the logs.
 
-Each child server listens only on loopback, and each launch uses a fresh random alias and bearer key, so other processes on the machine cannot ride the local endpoint. Responses still carry your configured model name. Startup waits up to 180 seconds for a child to become ready, and a port collision retries on a fresh port up to four times.
+Each child server listens only on loopback, and each launch uses a fresh random alias and bearer key, so other processes on the machine cannot reach the local endpoint. Responses still report your configured model name. Startup waits up to 180 seconds for a child to become ready, and a port collision retries on a fresh port up to four times.
 
 A child that dies is transparently respawned on the same port, alias, and key, with a 3 second cooldown between attempts so a crash loop cannot storm. Only transport-level deaths trigger a respawn, and an explicitly shut-down child is never respawned. Shutdown cancels and terminates even an in-flight respawn. Teardown is bounded to 5 seconds, so shutdown never hangs.
 
@@ -407,7 +407,7 @@ vram_gb = 1.0
 
 Each entry has a `name`, a `role` of `interim` or `final`, a `source`, an optional `sha256` pin, a `vram_gb` estimate, and an optional `dominion` binding. The interim role transcribes while a take is still recording. The final role crystallizes completed audio.
 
-A profile may select at most one interim and one final STT model. A final model requires an interim partner. Interim-only is a supported degraded mode. You can restore a built-in recommended pair at any time: whisper-base-en for interim and whisper-small-en for final, both carrying canonical whisper.cpp URLs and SHA-256 pins.
+A profile may select at most one interim and one final STT model. A final model requires an interim partner. Interim-only is a supported degraded mode. You can restore a built-in recommended pair at any time: whisper-base-en for interim and whisper-small-en for final, both with canonical whisper.cpp URLs and SHA-256 pins.
 
 ## Tune push-to-talk capture
 
@@ -452,7 +452,7 @@ The server creates a transcription session for the logical model `realtime-trans
 
 Only null noise reduction and turn detection are accepted. Session updates may change the transcription prompt and negotiate the PromptForge extension `item.input_audio_transcription.hypothesis`. Standard clients receive OpenAI-shaped session, item, transcription delta, completed, failed, and error events. Extension clients also receive revisioned replacement snapshots with the complete transcript and its finalized, agreed, and tentative regions; completion remains authoritative.
 
-A continuous Realtime recording remains one provisional item and one logical take for arbitrary duration. Continuous speech forces an accurate boundary every 10 seconds. Each successor carries the preceding 8 seconds for text reconciliation, so every accurate decode contains at most 18 seconds. Finalized text and exact lifetime duration survive source-buffer compaction, and every hypothesis remains a complete replacement snapshot for that same item.
+A continuous Realtime recording remains one provisional item and one logical take for arbitrary duration. Continuous speech forces an accurate boundary every 10 seconds. Each successor repeats the preceding 8 seconds for text reconciliation, so every accurate decode contains at most 18 seconds. Finalized text and exact lifetime duration survive source-buffer compaction, and every hypothesis remains a complete replacement snapshot for that same item.
 
 The 30-second limit is retained ownership, not recording duration. It includes resident, queued, and actively decoding 16 kHz PCM. Arbitrary-duration capture therefore requires steady-state final throughput at least equal to capture. If decoding falls behind until that retained budget is exhausted, the append receives `too_much_unfinalized_audio`; previously accepted audio and text remain valid and may still be committed. One append decodes to at most 15 MiB, committed audio must be at least 100 ms, one connection may have four committed items finalizing concurrently, and the service admits at most eight Realtime sessions. Queue and capacity overloads return explicit errors instead of waiting without limit.
 
@@ -487,7 +487,7 @@ context = 8192
 voices = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
 ````
 
-The entry carries the usual remote-model fields, and the kind scopes which of them are meaningful. Chat-only fields such as `thinking`, the effort knobs, `default_max_tokens`, and `tool_dialect` are rejected on a speech model at load time. The speech-only `voices` list declares the voices the model offers: setting it on any other kind fails at load, entries must be non-empty and unique, and an empty or omitted list means the model exposes no fixed voice list, so the route accepts any voice name. The catalog advertises the kind and the voice list verbatim on GET /v1/models, so clients can shape requests before sending them.
+The entry takes the usual remote-model fields, and the kind scopes which of them are meaningful. Chat-only fields such as `thinking`, the effort knobs, `default_max_tokens`, and `tool_dialect` are rejected on a speech model at load time. The speech-only `voices` list declares the voices the model offers: setting it on any other kind fails at load, entries must be non-empty and unique, and an empty or omitted list means the model exposes no fixed voice list, so the route accepts any voice name. The catalog advertises the kind and the voice list verbatim on GET /v1/models, so clients can shape requests before sending them.
 
 ## Synthesize speech
 
@@ -500,7 +500,7 @@ curl -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/v1/audio/spee
   -o speech.mp3
 ````
 
-The request carries `model` and `input` (both required; the input is non-empty and capped at 4096 characters), `voice` (required; a plain name or the OpenAI object form `{"id": "tara"}`), and four optional fields: `response_format` from the closed set `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`; `speed` between 0.25 and 4.0; `instructions`, the gpt-4o-mini-tts dialect's style-control string; and `stream_format`, `sse` or `audio`. An omitted `response_format` resolves to `mp3` before the request leaves the gateway: OpenAI defaults to mp3 while Together defaults to wav, so the pin lives in the wire type and every forwarded body carries it. Fields the gateway does not name pass through to the provider verbatim, so provider extras such as Together's `sample_rate` ride the same request, and angle-bracket emotion tags such as `<laugh>` in the input reach the provider untouched.
+The request takes `model` and `input` (both required; the input is non-empty and capped at 4096 characters), `voice` (required; a plain name or the OpenAI object form `{"id": "tara"}`), and four optional fields: `response_format` from the closed set `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`; `speed` between 0.25 and 4.0; `instructions`, the gpt-4o-mini-tts dialect's style-control string; and `stream_format`, `sse` or `audio`. An omitted `response_format` resolves to `mp3` before the request leaves the gateway: OpenAI defaults to mp3 while Together defaults to wav, so the pin lives in the wire type and every forwarded body includes it. Fields the gateway does not name pass through to the provider verbatim, so provider extras such as Together's `sample_rate` go out in the same request, and angle-bracket emotion tags such as `<laugh>` in the input reach the provider untouched.
 
 Authentication runs before the body is parsed, so a bad key earns 401 even for a malformed body. Shape failures earn 400: an empty or over-cap `input` or an out-of-range `speed` as `malformed_request`, a non-speech model as `kind_mismatch`, and a voice outside the model's declared list as `invalid_voice` naming the valid voices, judged before queue admission so the rejection never burns a queue slot. A full queue earns 503 with code `queue_full`. An upstream 429 comes back as 429 with code `upstream_rate_limited` and an upstream 503 as 503 with code `upstream_unavailable`, so an OpenAI client sees a retryable rate-limit or server error rather than a generic failure.
 
@@ -540,7 +540,7 @@ name = "travel"
 models = ["qwen3-local"]
 ````
 
-A profile is a checklist of local and speech-to-text models. Membership alone decides which local models spawn and which speech models load; profiles carry no per-field overrides. Every name a profile lists must be a `[[local_model]]` or `[[stt_model]]` entry, and each must exist exactly once. Naming a remote `[[model]]` in a profile fails validation with an error saying the model is remote: remote models are never gated by a profile, because every `[[model]]` in the catalog routes all the time. Duplicate profile names and duplicate members also fail validation.
+A profile is a checklist of local and speech-to-text models. Membership alone decides which local models spawn and which speech models load. Every name a profile lists must be a `[[local_model]]` or `[[stt_model]]` entry, and each must exist exactly once. Naming a remote `[[model]]` in a profile fails validation with an error saying the model is remote: remote models are never gated by a profile, because every `[[model]]` in the catalog routes all the time. Duplicate profile names and duplicate members also fail validation.
 
 Profile names must be a single safe path component: no surrounding whitespace, not empty, not `.` or `..`, and no path separators. One spelling works in URLs, state files, and labels.
 
@@ -577,7 +577,7 @@ curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" \
   http://127.0.0.1:8081/admin/switch-profile
 ````
 
-The request body carries `name`: a profile name, or `null` to select no profile. The gateway checks a named profile against the loaded catalog and refuses an undefined name with the list of defined profiles. It then writes the state file (or deletes it for `null`) and answers plain JSON:
+The request body holds `name`: a profile name, or `null` to select no profile. The gateway checks a named profile against the loaded catalog and refuses an undefined name with the list of defined profiles. It then writes the state file (or deletes it for `null`) and answers plain JSON:
 
 ````
 {"profile": "travel", "restart_required": true}
@@ -587,7 +587,7 @@ The request body carries `name`: a profile name, or `null` to select no profile.
 
 Restart the gateway to load the selection. A gateway the Workshop supervises is restarted by the Workshop when you pick a profile from its Model menu; a gateway you run yourself restarts by hand, and the configuration UI shows a banner reading "Restart the gateway to apply these changes." until the new process comes up.
 
-The selection is not part of the config edit surface. `PUT /admin/config` refuses a document carrying `active_profile`, and `GET /admin/config-dirty` never reports it. `GET /admin/config-pending` reports the persisted selection under `profile.active_profile`, read from the real state file, so a client can show a selection that differs from the running profile or names a profile the config no longer defines.
+The selection is not part of the config edit surface. `PUT /admin/config` refuses a document that sets `active_profile`, and `GET /admin/config-dirty` never reports it. `GET /admin/config-pending` reports the persisted selection under `profile.active_profile`, read from the real state file, so a client can show a selection that differs from the running profile or names a profile the config no longer defines.
 
 ---
 
@@ -626,7 +626,7 @@ Endpoints bind to remote dominions, and local models bind to local dominions. A 
 
 ## Budget VRAM
 
-A local dominion can carry a `vram_gb` budget, and each profile's selected models must fit within it:
+A local dominion can declare a `vram_gb` budget, and each profile's selected models must fit within it:
 
 ````
 [[dominion]]
@@ -674,7 +674,7 @@ Pending admin edits are staged in one shadow file, `gateway.toml.next`, beside t
 
 Stage a full config edit with PUT /admin/config. The request takes the same JSON shape that GET /admin/config returns. Secrets left as the redacted marker `***` are restored from the current values, and a marker with no existing value fails validation. The merged result is validated like a real load before any shadow is written. The reply names the shadow file that was written.
 
-The profile selection is not a config key. A document carrying `active_profile` is refused with a validation error pointing you at POST /admin/switch-profile, which the previous chapter covers.
+The profile selection is not a config key. A document that sets `active_profile` is refused with a validation error pointing you at POST /admin/switch-profile, which the previous chapter covers.
 
 ## Preview before you apply
 
@@ -700,11 +700,11 @@ Applying a pending edit is an explicit promote step:
 curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin/config-apply
 ````
 
-The real file is replaced atomically. On platforms where rename cannot overwrite, a backup-and-restore fallback preserves the old file. The reply carries `applied`, `reloaded`, and `restart_required`.
+The real file is replaced atomically. On platforms where rename cannot overwrite, a backup-and-restore fallback preserves the old file. The reply reports `applied`, `reloaded`, and `restart_required`.
 
-What an apply does depends on which sections changed. The remote-facing sections - `[[model]]`, `[[endpoint]]`, `[[dominion]]`, and `[tools]` - reload live: the gateway rebuilds the remote routing table from the applied config, keeps the running local models under it, and swaps the routing table in one write. Nothing drains, nothing stops, and no child process starts. The boot-owned sections - `[server]`, `[workshop]`, `[[profile]]`, `[[local_model]]`, `[[stt_model]]`, and `[stt]` - promote to disk but take effect at the next start, so the reply carries `restart_required: true`; an env shadow does the same. The gateway's local model set is fixed for the process lifetime, so an edit that adds, removes, or changes a local or speech model, or changes a profile's checklist, always needs a restart. One apply can do both: reload the remote catalog now and report a restart for the rest.
+What an apply does depends on which sections changed. The remote-facing sections - `[[model]]`, `[[endpoint]]`, `[[dominion]]`, and `[tools]` - reload live: the gateway rebuilds the remote routing table from the applied config, keeps the running local models under it, and swaps the routing table in one write. Nothing drains, nothing stops, and no child process starts. The boot-owned sections - `[server]`, `[workshop]`, `[[profile]]`, `[[local_model]]`, `[[stt_model]]`, and `[stt]` - promote to disk but take effect at the next start, so the reply sets `restart_required: true`; an env shadow does the same. The gateway's local model set is fixed for the process lifetime, so an edit that adds, removes, or changes a local or speech model, or changes a profile's checklist, always needs a restart. One apply can do both: reload the remote catalog now and report a restart for the rest.
 
-An apply that changes the config runs as a command on the gateway's command queue, the same queue that runs the boot load. The queue is one serialized pending deque with no fixed capacity: debounce decides what stays pending, and a single worker runs the surviving commands in order. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and its one `applying-config` stage streams on the live progress stream; the config UI's Apply overlay follows it and carries a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply requested while the boot load is still running waits behind it, so a reload never races the boot's publication of local models. An apply that touches only the env file, or only boot-owned sections, needs no reload and runs inline without a command.
+An apply that changes the config runs as a command on the gateway's command queue, the same queue that runs the boot load. The queue is one serialized pending deque with no fixed capacity: debounce decides what stays pending, and a single worker runs the surviving commands in order. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and its one `applying-config` stage streams on the live progress stream; the config UI's Apply overlay follows it and shows a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply requested while the boot load is still running waits behind it, so a reload never races the boot's publication of local models. An apply that touches only the env file, or only boot-owned sections, needs no reload and runs inline without a command.
 
 Promotion happens at the end. The shadow is read into memory when the apply is requested, the new routing table is built, and only then are the captured bytes written to the real file and the shadow removed. A cancelled or failed apply therefore promotes nothing: the shadow stays on disk, the pending count stays where it was, and the next Apply runs the whole thing again. A save that lands while an apply is in flight is kept as the next pending change, never silently lost and never half-applied.
 
@@ -730,7 +730,7 @@ You are protected from half-applied state. Saves, revert, profile selection, and
 
 # The Configuration UI
 
-The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key when the gateway asks for one, and edit every part of the configuration through its views. The UI rides the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
+The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key when the gateway asks for one, and edit every part of the configuration through its views. The UI works through the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
 
 ## Reach the UI
 
@@ -752,7 +752,7 @@ A connection dot in the tab bar shows whether the gateway is reachable. The tab 
 
 Edits move through three states: unsaved edits held in the browser, saved pending shadows on the gateway, and the applied running configuration. When pending changes exist, the tab bar shows an Apply button labeled with the pending file count beside a Revert All button. When a previous session left unapplied changes, a banner offers Review, Apply, and Revert All.
 
-Pressing Apply opens a progress overlay that follows the gateway's live progress stream until the apply finishes or fails; a remote-catalog reload shows as one `applying-config` stage. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart - a change to `[server]`, `[workshop]`, `[stt]`, a profile, a local model, or a speech model, or an env edit - a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation. The same banner is raised by a profile selection that differs from the running profile.
+Pressing Apply opens a progress overlay that follows the gateway's live progress stream until the apply finishes or fails; a remote-catalog reload shows as one `applying-config` stage. The overlay shows a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart - a change to `[server]`, `[workshop]`, `[stt]`, a profile, a local model, or a speech model, or an env edit - a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation. The same banner is raised by a profile selection that differs from the running profile.
 
 Open the Review dialog to list every pending configuration change as a table of path, running value, and pending value. Secret values are never displayed.
 
@@ -770,13 +770,13 @@ The Discover view searches Hugging Face. The search box accepts keywords, a `use
 
 A model's GGUF files are grouped into named quantizations with exact summed byte sizes and the LFS SHA-256 for single-file quants, listed smallest first. Each quant shows a fit badge computed against the gateway's system snapshot: Fits GPU, Partial offload, CPU only, or Too large. One Recommended star marks the largest quant that fully fits free VRAM. A multi-part GGUF cannot be downloaded as one model; the button is disabled with an explaining tooltip. You can read model cards in the view, rendered as sanitized HTML so embedded scripts and event handlers cannot execute.
 
-A Download click stages a pending model entry carrying the hub resolve URL, the LFS digest, and the listing size as `vram_gb`; the transfer happens at the next boot. Staging a discovered model also adds it to the selected profile's checklist, so the restart after Apply provisions and serves it. When no profile is selected, the model is added to the catalog alone and a toast says so; choose it in a profile to run it. The staged entry prefills a mapped built-in chat template when the server-side catalog matches the repo. An STT-filtered download stages a first-class `stt_model` entry with the interim role. Without a configured HF token you see a banner linking to the Secrets view instead of search results.
+A Download click stages a pending model entry with the hub resolve URL, the LFS digest, and the listing size as `vram_gb`; the transfer happens at the next boot. Staging a discovered model also adds it to the selected profile's checklist, so the restart after Apply provisions and serves it. When no profile is selected, the model is added to the catalog alone and a toast says so; choose it in a profile to run it. The staged entry prefills a mapped built-in chat template when the server-side catalog matches the repo. An STT-filtered download stages a first-class `stt_model` entry with the interim role. Without a configured HF token you see a banner linking to the Secrets view instead of search results.
 
 ## Local and Remote
 
-The Local and Remote views show the gateway's own catalog subsets: Local lists your local and speech-to-text entries, and Remote lists your remote entries. STT entries carry a Mic badge so you can pick them out at a glance. Filter chips narrow the list to All, Chat, or STT, a search box filters the rows after a short debounce, and a sort dropdown orders the list by Name, Size, or Kind.
+The Local and Remote views show the gateway's own catalog subsets: Local lists your local and speech-to-text entries, and Remote lists your remote entries. STT entries show a Mic badge so you can pick them out at a glance. Filter chips narrow the list to All, Chat, or STT, a search box filters the rows after a short debounce, and a sort dropdown orders the list by Name, Size, or Kind.
 
-Each model row shows a running-status dot, a kind badge, and capability pills. A quant badge read from the GGUF filename names the quantization, such as Q4_K_M. A model that exists only as a draft carries an "unsaved" badge until you save it.
+Each model row shows a running-status dot, a kind badge, and capability pills. A quant badge read from the GGUF filename names the quantization, such as Q4_K_M. A model that exists only as a draft gets an "unsaved" badge until you save it.
 
 ## Secrets
 
@@ -800,17 +800,17 @@ The About panel shows the medallion, the baked version or "dev", and the Boost S
 
 You edit a local model through sections for GPU, generation, source, and capabilities in the model detail view. An unconfigured optional section offers an Add button. The chat template control offers Auto, a built-in template family, or a custom .jinja path, with a read-only summary naming the effective source, the detected family, and the reason.
 
-The model name edits inline in the detail header, and the header shows the model's status: Unsaved, Running, or Stopped. Each edited field carries a dirty dot and a per-field reset. Each saved-but-unapplied field carries a pending chip whose tooltip shows the running value. Deleting a model confirms a dialog naming the model and every affected profile, and the save removes every dangling profile reference in the same payload. A downloaded model shows its cached size and path with a Delete file action. A path source gets a reveal-in-folder button; URL sources get none. Capability pills show images and thinking mode, and the images pill is implied and locked when a multimodal projector is configured. The `gpu_layers` slider readout carries the GGUF layer total, and typing "Max" maps to the maximum.
+The model name edits inline in the detail header, and the header shows the model's status: Unsaved, Running, or Stopped. Each edited field shows a dirty dot and a per-field reset. Each saved-but-unapplied field gets a pending chip whose tooltip shows the running value. Deleting a model confirms a dialog naming the model and every affected profile, and the save removes every dangling profile reference in the same payload. A downloaded model shows its cached size and path with a Delete file action. A path source gets a reveal-in-folder button; URL sources get none. Capability pills show images and thinking mode, and the images pill is implied and locked when a multimodal projector is configured. The `gpu_layers` slider readout shows the GGUF layer total, and typing "Max" maps to the maximum.
 
 The controls follow the shape of the value. Numeric settings pair a slider with a typed readout, typed values clamp to the allowed range, wide-range settings such as the context window use a logarithmic scale, and some sliders offer a rightmost "Max" detent. List-valued settings such as a model's endpoint list are edited as removable chips. Fields with a fixed choice set accept only the listed values. Boolean settings use an on/off switch. A setting can be disabled until a sibling field holds a required value, or hidden until a predicate passes, so you only see applicable controls.
 
-Retyping a field's original value clears its unsaved edit, and you can reset one field or a whole entry. A new model entry starts as an unsaved draft, and name collisions get auto-suffixed. Every settings save carries the complete single-file configuration, so one section's save never erases another staged section.
+Retyping a field's original value clears its unsaved edit, and you can reset one field or a whole entry. A new model entry starts as an unsaved draft, and name collisions get auto-suffixed. Every settings save sends the complete single-file configuration, so one section's save never erases another staged section.
 
 An orphan section lists unconfigured files on disk with Adopt and Delete actions per file; Delete is disabled when the file has no verified digest. The UI shows whether a model's source file is already downloaded. On gateways built without local-model features, missing orphan and chat-template endpoints degrade to empty lists instead of breaking the UI. You can restore the recommended speech-to-text model pair, digest-pinned, over the existing STT catalog entries from the UI.
 
 ## Panel mode
 
-The configuration UI runs in two modes. Standalone mode runs in a browser tab. Panel mode embeds the UI inside the Workshop with `?mode=panel`. In panel mode your API key never enters the frame; every gateway call rides a postMessage bridge to the Workshop, and the panel only talks to a loopback workshop origin. Bridged calls fail after a 30 second reply deadline rather than hanging. Apply and Revert actions are announced to the workshop's status bar, and the workshop pushes its theme and an initial route into the embedded panel once the bridge is up.
+The configuration UI runs in two modes. Standalone mode runs in a browser tab. Panel mode embeds the UI inside the Workshop with `?mode=panel`. In panel mode your API key never enters the frame; every gateway call goes through a postMessage bridge to the Workshop, and the panel only talks to a loopback workshop origin. Bridged calls fail after a 30 second reply deadline rather than hanging. Apply and Revert actions are announced to the workshop's status bar, and the workshop pushes its theme and an initial route into the embedded panel once the bridge is up.
 
 ---
 
@@ -834,19 +834,19 @@ strip_tracking = true
 
 The provider is locked to `brave`. The `base_url` defaults to the Brave Search endpoint and must be an HTTP(S) URL. The `default_count` must not exceed `max_count`. Freshness and safesearch defaults are closed vocabularies, not free text. The gateway calls the Brave Search API at `{base_url}/web/search` with the configured API key sent in the `X-Subscription-Token` header.
 
-Callers run a web search through POST /v1/tools/web_search. The request body carries a `query` and optional `count`, `freshness`, `country`, `search_lang`, `safesearch`, `include_domains`, and `exclude_domains`. Unknown fields are rejected. The query is trimmed, rejected when empty, and capped at 512 characters. Caller knobs are validated before any provider call: freshness must be `pd`, `pw`, `pm`, `py`, or a date range; safesearch must be `off`, `moderate`, or `strict`; country is a 2-letter code; the search language is a 2 or 3 letter code; each domain entry must be a bare valid domain. The count defaults to `default_count` and clamps into 1 through `max_count`. The gateway over-fetches up to three times the requested count, capped at `max_count`, so post-processing filters still yield enough results. Omitted freshness and safesearch fall back to the configured defaults.
+Callers run a web search through POST /v1/tools/web_search. The request body takes a `query` and optional `count`, `freshness`, `country`, `search_lang`, `safesearch`, `include_domains`, and `exclude_domains`. Unknown fields are rejected. The query is trimmed, rejected when empty, and capped at 512 characters. Caller knobs are validated before any provider call: freshness must be `pd`, `pw`, `pm`, `py`, or a date range; safesearch must be `off`, `moderate`, or `strict`; country is a 2-letter code; the search language is a 2 or 3 letter code; each domain entry must be a bare valid domain. The count defaults to `default_count` and clamps into 1 through `max_count`. The gateway over-fetches up to three times the requested count, capped at `max_count`, so post-processing filters still yield enough results. Omitted freshness and safesearch fall back to the configured defaults.
 
-Results carry `title`, `url`, `site_name`, and `extra_snippets`. Result text is sanitized and capped, results are diversified by host at `max_per_host`, and a result whose URL is not navigable or is over 2048 characters is dropped. When `strip_tracking` is on, known tracking parameters such as `utm_*`, `fbclid`, `gclid`, `mc_cid`, and `mc_eid` are removed from result URLs. Include and exclude domain lists match the host itself or any subdomain.
+Results include `title`, `url`, `site_name`, and `extra_snippets`. Result text is sanitized and capped, results are diversified by host at `max_per_host`, and a result whose URL is not navigable or is over 2048 characters is dropped. When `strip_tracking` is on, known tracking parameters such as `utm_*`, `fbclid`, `gclid`, `mc_cid`, and `mc_eid` are removed from result URLs. Include and exclude domain lists match the host itself or any subdomain.
 
 When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the `[tools.web_search]` section and is replaced live when an applied edit changes it. The provider credential never appears in logs.
 
 ## The deprecated [workshop] section
 
-The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
+The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config left over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 ## Manage the cache
 
-Manage the blob cache through the gateway's cache routes. GET /v1/cache lists entries with source URL, path, SHA-256, and size. Only blobs carrying a `.meta.json` sidecar appear in the listing, and listing reads the sidecar metadata only; it never re-hashes the blobs. POST /v1/cache downloads a blob with an optional pin and streams progress events ending in a ready event. DELETE removes one blob by digest. Cache downloads validate the source URL and the pin before any network access. A cache download lands in the same slot layout that local model provisioning uses, so a cache download is a provisioning cache hit for the same URL, and vice versa.
+Manage the blob cache through the gateway's cache routes. GET /v1/cache lists entries with source URL, path, SHA-256, and size. Only blobs with a `.meta.json` sidecar appear in the listing, and listing reads the sidecar metadata only; it never re-hashes the blobs. POST /v1/cache downloads a blob with an optional pin and streams progress events ending in a ready event. DELETE removes one blob by digest. Cache downloads validate the source URL and the pin before any network access. A cache download lands in the same slot layout that local model provisioning uses, so a cache download is a provisioning cache hit for the same URL, and vice versa.
 
 GET /admin/orphans lists cache files that no `[[local_model]]` or `[[stt_model]]` declared in the catalog references, so leftovers can be adopted or deleted. GET /admin/model-info reports a GGUF file's header summary (architecture, layer count, parameter count, and chat template) without loading the model; only files inside the artifact cache can be inspected, and escaping or missing paths are refused. POST /admin/reveal opens the host's file manager at a model or config file; reveal requests are confined three ways: loopback-only, bearer key required, and the path must canonicalize to strictly inside the artifact cache.
 
@@ -872,12 +872,12 @@ Every request failure reaches the client in the OpenAI error envelope: an object
 
 Outbound calls to any backend have fixed timeouts: 10 seconds to connect and 120 seconds for a whole non-streaming request. Streaming connections are bounded only by the connect timeout. Response bodies the gateway reads are capped: 64 KiB for error bodies and 4 MiB for success JSON bodies.
 
-Malformed client requests are rejected at the boundary. An empty model name, an empty messages array, an unsupported message role, or a message with neither content nor a tool call all fail validation. Request fields the gateway does not name pass through to the backend verbatim, while the reserved keys `model`, `messages`, and `stream` may not be smuggled in twice. Embeddings requests accept one string or a batch of strings, with an optional `encoding_format` of `float` or `base64`; an empty batch is rejected. Rerank requests carry a query, a document set, and an optional `top_n` limit; an empty query or document set is rejected.
+Malformed client requests are rejected at the boundary. An empty model name, an empty messages array, an unsupported message role, or a message with neither content nor a tool call all fail validation. Request fields the gateway does not name pass through to the backend verbatim, while the reserved keys `model`, `messages`, and `stream` may not be smuggled in twice. Embeddings requests accept one string or a batch of strings, with an optional `encoding_format` of `float` or `base64`; an empty batch is rejected. Rerank requests take a query, a document set, and an optional `top_n` limit; an empty query or document set is rejected.
 
 ## Reading failures
 
 The error code distinguishes a connection that never reached the provider from a mid-flight failure. The first is safe to retry; nothing was billed. The second is not safe to retry blindly. A backend's own client-error status, for example 429, passes through to the caller with code `upstream_client_error` instead of a generic 502. A model of the wrong kind is refused with 400 `kind_mismatch` before any upstream call. A request for a workload the resolved model cannot serve is rejected with 400 `model_unavailable`.
 
-When the gateway recovers from a malformed tool fence in an emulated tool dialect, the response message carries a `gateway_warning` extension field. The turn never fails, and protocol junk never appears as final text. Streaming clients still receive tool calls from an emulated-dialect model: the gateway buffers one upstream round trip and re-emits the rewritten response as synthetic chunks, with a trailing summary chunk carrying usage and timings.
+When the gateway recovers from a malformed tool fence in an emulated tool dialect, the response message includes a `gateway_warning` extension field. The turn never fails, and protocol junk never appears as final text. Streaming clients still receive tool calls from an emulated-dialect model: the gateway buffers one upstream round trip and re-emits the rewritten response as synthetic chunks, with a trailing summary chunk holding usage and timings.
 
 A malformed upstream stream chunk is logged and skipped without ending the stream. A mid-stream transport failure ends the stream with an error. An upstream error status fails a streaming request before any chunk is delivered, returned as a JSON 502, never as a stream that dies mid-flight. A client disconnect cancels the upstream request.

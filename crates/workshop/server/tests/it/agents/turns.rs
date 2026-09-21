@@ -53,12 +53,12 @@ async fn a_full_turn_streams_deltas_and_indexed_events_sharing_the_reply_id() {
     assert_eq!(
         indices,
         [0, 1, 2],
-        "durable frames carry monotonically increasing log indices"
+        "durable frames are stamped with monotonically increasing log indices"
     );
     assert_eq!(turn.events[0]["event"]["content"], "ping");
     assert!(
         turn.events[0].get("reply").is_none(),
-        "a user_message settles no deltas and carries no reply id"
+        "a user_message settles no deltas, so its reply id is omitted"
     );
     assert_eq!(
         turn.events[1]["reply"], 0,

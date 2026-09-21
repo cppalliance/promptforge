@@ -148,8 +148,8 @@ fn a_poisoned_lock_recovers_for_appends_and_reads() {
     assert!(panicked.is_err(), "the poisoning thread must panic");
     assert!(log.events.is_poisoned(), "the lock must be poisoned");
 
-    // Zone two: the poison is recovered, not propagated - appends, reads,
-    // and broadcast all keep working.
+    // The poison is recovered, not propagated - appends, reads, and
+    // broadcast all keep working.
     let mut entries = log.subscribe();
     log.append(input("chat", "after the poison"));
     assert_eq!(log.len(), 1);

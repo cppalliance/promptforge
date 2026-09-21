@@ -202,7 +202,7 @@ impl Config {
     /// Returns a clone with `name` selected from the already-loaded catalog,
     /// or with no profile selected when `name` is `None`.
     ///
-    /// This operation performs no file or environment read. Every profile was
+    /// This operation works entirely in memory. Every profile was
     /// validated when the catalog loaded, so selection only derives the
     /// active local and speech-to-text subsets; the remote routing table is
     /// the same for every selection. Selecting `None` leaves both subsets

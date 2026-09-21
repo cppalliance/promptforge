@@ -1,7 +1,7 @@
 //! workshop-status - the status-bar subsystem: a broadcast bus for
 //! status updates from every subsystem to every connected `/ws` session.
 //! Work in flight reaches the bar as a busy frame pushed by whichever
-//! subsystem owns the work; this crate holds no progress machinery.
+//! subsystem owns the work.
 //!
 //! ## Invariants
 //!

@@ -96,7 +96,7 @@ export class ZoneStateService implements IDisposable {
 
   /**
    * Replaces the zone map and overrides from persisted state. Entries
-   * naming unknown zones or carrying non-string values are dropped; stale
+   * naming unknown zones or holding non-string values are dropped; stale
    * group ids self-heal because zones.ts rebuilds a zone whose group no
    * longer exists.
    */

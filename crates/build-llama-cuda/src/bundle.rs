@@ -503,7 +503,7 @@ mod tests {
                                Cuda compilation tools, release 13.3, V13.3.73\n";
     const COMMIT: &str = "fb0e6b621917488d623437349fb5361e0ac21c70";
     // Visual Studio generators fix the compiler through the toolset, so a
-    // real cache carries the generator but no CMAKE_CXX_COMPILER entries.
+    // real cache names the generator but omits CMAKE_CXX_COMPILER entries.
     const CACHE: &str = "CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026\n";
     const COMPILER_CMAKE: &str = "set(CMAKE_CXX_COMPILER \"C:/VS/VC/Tools/MSVC/14.51/bin/Hostx64/x64/cl.exe\")\n\
          set(CMAKE_CXX_COMPILER_VERSION \"19.51.36256.0\")\n";

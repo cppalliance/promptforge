@@ -54,7 +54,7 @@ Everything else is the prompt language, exactly as the Prompt Language set teach
 
 ## The moving parts
 
-Two products carry an agent run. The harness, reached through `harness-api`, owns discovery, launch, and the session extras: the input broker behind `user_input()`, the `ui()` snapshot, and the persisting run log. `promptforge-api-runtime` is the unified runtime that parses and runs the prompt itself. The final chapter of this set walks through the built-in chat program, the one agent every install already has.
+An agent run takes two products. The harness, reached through `harness-api`, owns discovery, launch, and the session extras: the input broker behind `user_input()`, the `ui()` snapshot, and the persisting run log. `promptforge-api-runtime` is the unified runtime that parses and runs the prompt itself. The final chapter of this set walks through the built-in chat program, the one agent every install already has.
 
 ---
 
@@ -81,11 +81,11 @@ Work through the lines. `models.use('writer')` selects the catalog model named `
 
 Each host call suspends your program with exactly one request in flight. When your program calls `models.infer`, it stops at that line and the host takes over. The host dispatches the one request and resumes your program at the same line with that request's answer as the return value.
 
-Write your program as if each host call were an ordinary synchronous call. There is no callback and no second request to track: the program carries exactly one request in flight, and it always resumes with that request's answer.
+Write your program as if each host call were an ordinary synchronous call. There is no callback and no second request to track: the program keeps exactly one request in flight, and it always resumes with that request's answer.
 
 ## The two round calls
 
-Two calls carry almost every agent. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tools.call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
+Almost every agent is built from two calls. `models.chat(messages, opts)` runs one stateless model round over a message list your program builds, and the round is tool-capable. `tools.call(alias, args)` dispatches any tool in the agent's catalog by its wire name, and every tool in the catalog is in scope under its alias.
 
 Both calls follow the loop rule: one request in flight, resumed with the answer. Everything else about them is detail on top of that rule.
 
@@ -107,7 +107,7 @@ local text = models.infer('Give this workshop a one-word name.')
 log(text)
 ````
 
-`models.infer(prompt)` runs one direct, tool-free text completion on a fresh conversation, and the call resumes with the completed text. Every call starts fresh: nothing carries over from one `models.infer` call to the next.
+`models.infer(prompt)` runs one direct, tool-free text completion on a fresh conversation, and the call resumes with the completed text. Every call starts fresh: nothing persists from one `models.infer` call to the next.
 
 Select the model first. `models.use('writer')` selects the catalog model named `writer`. An agent run has no default model, so a bare `models.infer` with no selection fails: "no model is selected: call models.use(...) before models.infer".
 
@@ -143,7 +143,7 @@ A `models.chat` round returns a result table with five fields: `reply`, `tool_ca
 
 Read the outcome from `reply` and `tool_calls`. Exactly one of them is present: the round produced text, or it requested tool calls. Never both. When the round produced text, `result.reply` holds the completed text.
 
-`result.model` names the model that served the round. `result.metrics` carries usage and backend timing. The `metrics` field is absent when nothing was measured, and absent optional fields read back as nil.
+`result.model` names the model that served the round. `result.metrics` reports usage and backend timing. The `metrics` field is absent when nothing was measured, and absent optional fields read back as nil.
 
 Check `finish_reason` for one thing: a value of "length" means the text reply was truncated.
 
@@ -184,7 +184,7 @@ local messages = {
 local result = models.chat(messages, { model = 'writer' })
 ````
 
-Pass `content` as a non-empty array of content parts when a message mixes text and images. A content part has a `type` of `text` or `image_url`. An `image_url` part carries a data-URI, which sends the image to a multimodal model.
+Pass `content` as a non-empty array of content parts when a message mixes text and images. A content part has a `type` of `text` or `image_url`. An `image_url` part holds a data-URI, which sends the image to a multimodal model.
 
 ## Agent-only
 
@@ -218,7 +218,7 @@ end
 
 A round with advertised tools can come back with requested tool calls. The requested calls arrive unexecuted. Running them is your program's decision, never the driver's.
 
-Read each requested call from the 1-based entries of `result.tool_calls`. Each entry carries three fields: `id`, `name`, and `arguments`. The `arguments` field is already a Lua table, so you can pass it straight on.
+Read each requested call from the 1-based entries of `result.tool_calls`. Each entry has three fields: `id`, `name`, and `arguments`. The `arguments` field is already a Lua table, so you can pass it straight on.
 
 ## Dispatch a call
 
@@ -243,7 +243,7 @@ if result.tool_calls then
 end
 ````
 
-The model asked for the call, so the next round must report what happened. Append two messages to your list. First replay the assistant's tool-calling round with an `assistant` message that carries the round's `tool_calls` array. Then answer the call with a `tool` role message that carries the string `tool_call_id` of the call it answers, with the tool's output as its content.
+The model asked for the call, so the next round must report what happened. Append two messages to your list. First replay the assistant's tool-calling round with an `assistant` message that holds the round's `tool_calls` array. Then answer the call with a `tool` role message whose string `tool_call_id` names the call it answers, with the tool's output as its content.
 
 ## Count the dispatches
 
@@ -301,17 +301,17 @@ for _, event in ipairs(fresh) do
 end
 ````
 
-Every event carries `provenance`, a table with `task` and `seq`. The `seq` value is the event's position within its task, and it only ever grows. Pass the highest `seq` you have already seen as `opts.last` and the call returns only later events, so a loop that runs once per turn reads each event exactly once. Store the cursor in `var` and it survives across sections.
+Every event includes `provenance`, a table with `task` and `seq`. The `seq` value is the event's position within its task, and it only ever grows. Pass the highest `seq` you have already seen as `opts.last` and the call returns only later events, so a loop that runs once per turn reads each event exactly once. Store the cursor in `var` and it survives across sections.
 
 ## Reads stay deterministic
 
 The log grows only when the run resumes from a host call, never in the middle of a chunk. The read is itself a host call: what `tasks.events` returns is fixed at the moment it returns, and no entry appears, moves, or changes inside the table afterwards. Two runs given the same inputs and the same answers see the same events in the same order.
 
-## What an entry carries
+## What an entry contains
 
-Every entry carries `kind`, `execution`, `section`, and `provenance`. The `kind` reads as a pinned snake_case label, such as `assistant_reply`, `tool_result`, `user_input`, `lua`, or `task_started`, and the rest of the table is that kind's own fields.
+Every entry has `kind`, `execution`, `section`, and `provenance`. The `kind` reads as a pinned snake_case label, such as `assistant_reply`, `tool_result`, `user_input`, `lua`, or `task_started`, and the rest of the table is that kind's own fields.
 
-A model round leaves `assistant_reply` (with `turn`, `text`, `model`, `finish_reason`, and `metrics`) or `assistant_tool_calls` (with the requested `calls`); a block of reasoning leaves `thinking`. Every dispatched tool call leaves `tool_call_succeeded` or `tool_call_failed`, and a call the model issued also leaves `tool_result` carrying `turn`, `tool_call_id`, `alias`, `content`, and `trusted`. Operator text arrives as `user_input`, and your own `log(...)` checkpoints as `lua` with `message`. Background work leaves `task_started` with its spawn seeds, then one of `task_succeeded`, `task_failed`, `task_cancelled`, or `task_abandoned`.
+A model round leaves `assistant_reply` (with `turn`, `text`, `model`, `finish_reason`, and `metrics`) or `assistant_tool_calls` (with the requested `calls`); a block of reasoning leaves `thinking`. Every dispatched tool call leaves `tool_call_succeeded` or `tool_call_failed`, and a call the model issued also leaves `tool_result` with `turn`, `tool_call_id`, `alias`, `content`, and `trusted`. Operator text arrives as `user_input`, and your own `log(...)` checkpoints as `lua` with `message`. Background work leaves `task_started` with its spawn seeds, then one of `task_succeeded`, `task_failed`, `task_cancelled`, or `task_abandoned`.
 
 An absent optional field, such as a reply with no `finish_reason`, reads as nil, so test presence with a plain truth test.
 
@@ -325,7 +325,7 @@ The `tasks` namespace is part of the prompt language, so the same call works in 
 
 # Host state
 
-This chapter teaches you what state the host exposes to your agent and how to read it. Two globals carry it: `ui`, a live snapshot of host state, and `sys`, a sealed table. Knowing the difference keeps you from trusting a stale read or poking a table that pushes back.
+This chapter teaches you what state the host exposes to your agent and how to read it. Two globals hold it: `ui`, a live snapshot of host state, and `sys`, a sealed table. Knowing the difference keeps you from trusting a stale read or poking a table that pushes back.
 
 ## Read the UI snapshot
 
@@ -466,7 +466,7 @@ if not ok then
 end
 ````
 
-Wrap host calls in `pcall` to catch argument-validation and dispatch failures. These failures come back as the call's answer. They do not fail the run. A failed host call raises a Lua error that carries exactly the host's message, so the value your `pcall` catches is the message the host sent.
+Wrap host calls in `pcall` to catch argument-validation and dispatch failures. These failures come back as the call's answer. They do not fail the run. A failed host call raises a Lua error whose text is exactly the host's message, so the value your `pcall` catches is the message the host sent.
 
 ## Errors that name things
 

@@ -89,7 +89,7 @@ fn chat_parses_messages_model_and_tools() {
 }
 
 #[test]
-fn an_assistant_message_carries_visible_text_plus_multiple_normalized_tool_calls() {
+fn an_assistant_message_holds_visible_text_plus_multiple_normalized_tool_calls() {
     let lua = Lua::new();
     let table = chat_request(
         &lua,
@@ -107,7 +107,7 @@ fn an_assistant_message_carries_visible_text_plus_multiple_normalized_tool_calls
             assert_eq!(
                 messages[0].content,
                 MessageContent::Text("working on it".to_owned()),
-                "visible text rides alongside the calls"
+                "visible text stays on the same turn as the calls"
             );
             assert_eq!(
                 messages[0].tool_calls,
@@ -131,7 +131,7 @@ fn an_assistant_message_carries_visible_text_plus_multiple_normalized_tool_calls
 }
 
 #[test]
-fn correlated_tool_results_carry_the_matching_call_ids() {
+fn correlated_tool_results_hold_the_matching_call_ids() {
     let lua = Lua::new();
     let table = chat_request(
         &lua,
@@ -167,11 +167,11 @@ fn malformed_tool_calls_are_typed_call_errors_naming_the_index() {
         ),
         (
             r#"{ { role = "assistant", content = "", tool_calls = { { name = "echo" } } } }"#,
-            "messages[1] tool_calls[1] must carry a string id",
+            "messages[1] tool_calls[1] must set a string id",
         ),
         (
             r#"{ { role = "assistant", content = "", tool_calls = { { id = "call_1" } } } }"#,
-            "messages[1] tool_calls[1] must carry a string name",
+            "messages[1] tool_calls[1] must set a string name",
         ),
         (
             r#"{ { role = "assistant", content = "", tool_calls = { { id = "call_1", name = "echo", arguments = "raw" } } } }"#,
@@ -190,17 +190,17 @@ fn content_parts_validate_each_variants_payload() {
     let cases: [(&str, &str); 3] = [
         (
             r#"{ { role = "user", content = { { type = "text" } } } }"#,
-            "messages[1] content part 1 is a text part and must carry a string \
+            "messages[1] content part 1 is a text part and must set a string \
              text field",
         ),
         (
             r#"{ { role = "user", content = { { type = "image_url" } } } }"#,
-            "messages[1] content part 1 is an image_url part and must carry an \
+            "messages[1] content part 1 is an image_url part and must set an \
              image_url table with a string url field",
         ),
         (
             r#"{ { role = "user", content = { { type = "image_url", image_url = { detail = "high" } } } } }"#,
-            "messages[1] content part 1 is an image_url part and must carry an \
+            "messages[1] content part 1 is an image_url part and must set an \
              image_url table with a string url field",
         ),
     ];
@@ -226,7 +226,7 @@ fn a_non_string_tool_call_id_is_a_typed_call_error() {
 
 #[test]
 fn chat_without_opts_parses_no_model_and_the_tools_none_shape() {
-    // The `tools: None` shape: a section VM's chat yield carries no tool
+    // The `tools: None` shape: a section VM's chat yield omits the tool
     // list, and the driver resolves the section's current tool scope.
     let lua = Lua::new();
     let table = chat_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
@@ -316,7 +316,7 @@ fn chat_message_validation_names_the_offending_index() {
         ),
         (
             r#"{ { role = "user", content = "ok" }, { role = "tool", content = "r" } }"#,
-            "messages[2] is a tool message and must carry a string tool_call_id",
+            "messages[2] is a tool message and must set a string tool_call_id",
         ),
     ];
     for (messages, expected) in cases {
@@ -378,7 +378,7 @@ fn chat_opts_validation_is_the_calls_error() {
 }
 
 #[test]
-fn chat_with_the_loops_leading_handle_carries_its_frozen_binding() {
+fn chat_with_the_loops_leading_handle_holds_its_frozen_binding() {
     // The loop shim yields its leading handle beside the messages; the
     // binding is cloned out of the userdata at the parse, so the round runs
     // on the handle's model rather than the section default.

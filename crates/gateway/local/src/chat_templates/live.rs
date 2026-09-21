@@ -170,7 +170,7 @@ fn apply_template(
                 .get("prompt")
                 .and_then(serde_json::Value::as_str)
         })
-        .expect("/apply-template JSON must carry the rendered prompt")
+        .expect("/apply-template JSON must include the rendered prompt")
         .to_owned()
 }
 
@@ -189,7 +189,7 @@ fn live_request_body(context_json: &str) -> serde_json::Value {
     ] {
         let value = object
             .remove(key)
-            .expect("golden context must carry every template kwarg");
+            .expect("golden context must supply every template kwarg");
         template_kwargs.insert(key.to_owned(), value);
     }
     object.remove("bos_token");
@@ -209,7 +209,7 @@ fn normalize_dynamic_output(family: Family, prompt: &str) -> String {
     let start = prompt
         .find(marker)
         .map(|index| index + marker.len())
-        .expect("GPT OSS output must carry its current date");
+        .expect("GPT OSS output must contain its current date");
     let end = start + "2026-08-30".len();
     let value = prompt
         .get(start..end)

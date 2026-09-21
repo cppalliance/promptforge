@@ -5,7 +5,7 @@
 // answers its 503 loading indication (no cache yet, download in
 // flight), polls at a short interval until the sheet arrives or the
 // gateway reports the download error, then notifies. `refresh` forces
-// a re-download whose POST answer carries the fresh sheet, stored and
+// a re-download whose POST answer returns the fresh sheet, stored and
 // notified directly.
 
 import { GatewayHttpError } from "./gateway-api";
@@ -61,7 +61,7 @@ export class SheetStore {
 
   /**
    * Forces a re-download regardless of cache age; the POST answer
-   * carries the fresh sheet, which is stored and notified directly. A
+   * returns the fresh sheet, which is stored and notified directly. A
    * failed re-download request records the error state, notifies, and
    * rejects so the caller can surface the failure.
    */

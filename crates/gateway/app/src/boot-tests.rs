@@ -1,4 +1,5 @@
-//! Provisioning-state route behavior: the resolver's miss ladder and the 503s that name the active command.
+//! Provisioning-state route behavior: the resolver's fallback order and
+//! the 503s that name the active command.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,7 +85,7 @@ async fn an_unloaded_but_configured_model_earns_a_503_naming_the_active_command(
     worker.await.expect("the worker exits on shutdown");
 }
 
-/// The resolver's miss ladder: a name in `loading` is `ModelLoading`,
+/// The resolver's fallback order: a name in `loading` is `ModelLoading`,
 /// a name the catalog does not know stays `UnknownModel`.
 #[tokio::test]
 async fn a_routing_miss_on_a_loading_model_is_model_loading_not_not_found() {

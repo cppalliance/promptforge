@@ -26,7 +26,7 @@
 // new path, with a cancel posting nothing and a refusal painting the
 // error; and the client's typed parse of the wire shape (snake_case
 // window_state) with a malformed answer refused. The UI state the switch
-// carries (plan step 13) is covered by test/workspace-switch.mjs; here a
+// moves (plan step 13) is covered by test/workspace-switch.mjs; here a
 // minimal dock is bound through initZones so the actions' state apply and
 // snapshot have something to run against, and the UI-state adapter stays
 // the empty default.
@@ -261,7 +261,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   await flush();
   const post = fetches.at(-1);
   check("a picked file is posted to /workspace/file/open", post?.url === "/workspace/file/open" && post?.method === "POST");
-  check("the post carries the picked path", post?.body?.path === OPENED.path);
+  check("the post sends the picked path", post?.body?.path === OPENED.path);
   check("a successful open fires one workspace-changed invalidation", workspaceChanges === 1);
   const emitted = window.__TAURI_EVENTS__.emitted;
   check(

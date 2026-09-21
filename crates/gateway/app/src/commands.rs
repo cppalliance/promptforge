@@ -1135,7 +1135,7 @@ mod tests {
             Box::pin(async move {
                 activity.set_text("Downloading qwen 45%");
                 let label = command.label();
-                let token = command.token().expect("a load command carries a token");
+                let token = command.token().expect("a load command holds a token");
                 token.cancelled().await;
                 Err(GatewayError::CommandCancelled(label))
             }) as BoxFuture<'static, Outcome>

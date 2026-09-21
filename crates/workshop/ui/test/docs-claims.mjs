@@ -49,7 +49,7 @@ test("AGENTS.md names two UI-state homes, not a TOML config or three buckets", a
 // that landed between the two source fixes cannot slip one phrase through.
 const STALE_GUIDE_PHRASES = ["storage is blocked", "a record only"];
 
-test("the guide sources carry no stale zoom or Open Recent claims", async () => {
+test("the stale zoom and Open Recent claims are gone from the guide sources", async () => {
   const files = await markdownFiles(path.join("guide", "src"));
   assert.ok(files.length > 0, "guide/src holds no markdown; the walk is broken");
   for (const phrase of STALE_GUIDE_PHRASES) {

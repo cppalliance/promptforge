@@ -101,7 +101,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_debug_events_reach_the_run_sink() {
-    // The arm's debug side channel: the fanout's run-context fork carries
+    // The arm's debug side channel: the fanout's run-context fork keeps
     // the run's own debug sink, so an arm's model-turn events land on the
     // run's sink under the worker's section name.
     let gateway = ScriptedGateway::start(vec![resp_text("arm reply")]).await;
@@ -266,7 +266,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     .expect_err("epilog assert on zero count must fail the run");
     assert!(
         error.to_string().contains("search was never called"),
-        "error must carry the assert message: {error}"
+        "error must include the assert message: {error}"
     );
 }
 

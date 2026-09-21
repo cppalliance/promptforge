@@ -122,7 +122,7 @@ dispatch({ type: "pf-bridge-ready" });
 await flush();
 check("the ready announcement is answered", replies.length === 1);
 check(
-  "the answer is a context message carrying theme and initial route",
+  "the answer is a context message holding theme and initial route",
   replies[0]?.message.type === "pf-context" &&
     replies[0]?.message.theme === "dark" &&
     replies[0]?.message.route === "#/local",
@@ -142,7 +142,7 @@ check(
 );
 const apiReply = replies.find((entry) => entry.message.type === "pf-api-result");
 check(
-  "the proxy's answer rides back with the request id, status, and body",
+  "the proxy's answer comes back with the request id, status, and body",
   apiReply !== undefined &&
     apiReply.message.id === "r1" &&
     apiReply.message.status === 200 &&
@@ -200,7 +200,7 @@ check("a disposed bridge answers nothing", replies.length === repliesBefore);
     "the iframe sandbox grants scripts and same-origin only",
     iframe?.getAttribute("sandbox") === "allow-scripts allow-same-origin",
   );
-  check("the iframe carries an accessible title", iframe?.getAttribute("title") === "Gateway Config");
+  check("the iframe has an accessible title", iframe?.getAttribute("title") === "Gateway Config");
   panel.dispose();
 }
 

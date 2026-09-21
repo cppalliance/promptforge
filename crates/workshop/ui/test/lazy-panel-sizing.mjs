@@ -320,7 +320,7 @@ globalThis.__makeSizedPanel = () => ({
 });
 
 const lazy = createPanelComponent({ id: "sized", name: "sized" });
-check("the lazy shell carries its sizing class", lazy.element.className === "ws-panel-lazy");
+check("the lazy shell has its sizing class", lazy.element.className === "ws-panel-lazy");
 check("the lazy shell implements layout", typeof lazy.layout === "function");
 // A resize before the chunk resolves replays at the swap.
 lazy.layout?.(640, 480);

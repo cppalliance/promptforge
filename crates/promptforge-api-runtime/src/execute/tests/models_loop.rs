@@ -121,7 +121,7 @@ async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
          assert(result == nil, 'models.loop returns nil')\n\
          assert(#msgs == 2, 'the loop appended exactly the terminal record')\n\
          assert(msgs[2].role == 'assistant', 'the terminal record is an assistant message')\n\
-         assert(msgs[2].content == 'final answer', 'the terminal record carries the reply text')\n\
+         assert(msgs[2].content == 'final answer', 'the terminal record holds the reply text')\n\
          msgs[#msgs] = nil\n\
          assert(#msgs == 1, 'explicit terminal removal shrinks the list')\n\
          return 'ok'",
@@ -157,7 +157,7 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
          models.loop(msgs)\n\
          assert(#msgs == 6, 'user plus two exchanges plus the terminal record')\n\
          assert(msgs[2].role == 'assistant', 'round one appends the assistant call')\n\
-         assert(msgs[2].tool_calls[1].id == 'call_1', 'the assistant record carries the normalized call')\n\
+         assert(msgs[2].tool_calls[1].id == 'call_1', 'the assistant record holds the normalized call')\n\
          assert(msgs[2].tool_calls[1].name == 'echo', 'the call keeps its wire name')\n\
          assert(msgs[2].tool_calls[1].arguments.value == 'one', 'the call arguments stay parsed')\n\
          assert(msgs[3].role == 'tool', 'the correlated result follows its call')\n\
@@ -179,7 +179,7 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     assert_eq!(bodies.len(), 3, "two tool rounds plus the terminal round");
     let tool_turns: Vec<&str> = bodies[2]["messages"]
         .as_array()
-        .expect("a request body must carry a messages array")
+        .expect("a request body must include a messages array")
         .iter()
         .filter(|message| message["role"] == "tool")
         .map(|message| {
@@ -191,7 +191,7 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     assert_eq!(
         tool_turns,
         ["echoed: one", "echoed: two"],
-        "both exchanges ride the terminal round's conversation: {bodies:?}"
+        "the terminal round's conversation includes both exchanges: {bodies:?}"
     );
 }
 
@@ -343,7 +343,7 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
          assert(#seen == 2, 'both calls in the batch ran')\n\
          assert(seen[1] == 1 and seen[2] == 1, 'each handler saw only the user message')\n\
          assert(#msgs == 5, 'user, the batch record, two results, and the terminal text')\n\
-         assert(msgs[2].role == 'assistant' and #msgs[2].tool_calls == 2, 'one record carries the whole batch')\n\
+         assert(msgs[2].role == 'assistant' and #msgs[2].tool_calls == 2, 'one record holds the whole batch')\n\
          assert(msgs[2].tool_calls[1].id == 'c1' and msgs[2].tool_calls[2].id == 'c2', 'calls keep their order')\n\
          assert(msgs[3].tool_call_id == 'c1' and msgs[3].content == 'grabbed a', 'the first result follows')\n\
          assert(msgs[4].tool_call_id == 'c2' and msgs[4].content == 'grabbed b', 'the second result follows')\n\
@@ -359,9 +359,9 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
     assert_eq!(out, "ok");
     let tool_turns = gateway.requests()[1]["messages"]
         .as_array()
-        .expect("a request body must carry a messages array")
+        .expect("a request body must include a messages array")
         .iter()
         .filter(|message| message["role"] == "tool")
         .count();
-    assert_eq!(tool_turns, 2, "both results ride the terminal round");
+    assert_eq!(tool_turns, 2, "both results appear in the terminal round");
 }

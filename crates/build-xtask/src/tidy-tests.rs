@@ -39,7 +39,7 @@ fn participating_crates_inherit_workspace_lints() {
 }
 
 #[test]
-fn family_crates_carry_the_invariants_marker() {
+fn family_crates_have_the_invariants_marker() {
     let violations = marker_violations(&workspace_root());
     assert!(
         violations.is_empty(),
@@ -85,7 +85,7 @@ const MARKED: &str = "//! Effect loop.\n//!\n//! ## Invariants\n//!\n//! - none\
 const UNMARKED: &str = "//! Effect loop, with no invariants block.\n";
 
 #[test]
-fn a_harness_crate_carrying_the_marker_is_held_to_the_ceiling() {
+fn a_harness_crate_with_the_marker_is_held_to_the_ceiling() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -253,7 +253,7 @@ fn a_marked_crate_outside_the_families_still_participates_in_the_ceiling() {
     );
     assert!(
         marker_violations(root.path()).is_empty(),
-        "a non-family crate is never required to carry the marker"
+        "a non-family crate is never required to have the marker"
     );
 }
 

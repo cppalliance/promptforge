@@ -21,7 +21,7 @@ pub(crate) const GATEWAY_IMAGE_NAME: &str = "promptforge-gateway";
 /// The bearer-gated route used to prove the presented key is accepted.
 const KEY_PROBE_PATH: &str = "/v1/models";
 
-/// Budget for proving health without condemning one transient failure.
+/// Budget for proving health without rejecting one transient failure.
 const LIVENESS_BUDGET: Duration = Duration::from_secs(2);
 
 /// A cancellable validation failure.

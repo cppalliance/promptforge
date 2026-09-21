@@ -13,7 +13,7 @@ use crate::model::CompletionOptions;
 /// empty-choices usage chunk, so token accounting survives the SSE path.
 /// When `tools` is `Some` and non-empty, each schema is wrapped into the
 /// `OpenAI` function shape and sent as the request's `tools` array (with
-/// `tool_choice` set to `auto`); passing `None` or an empty slice sends no
+/// `tool_choice` set to `auto`); passing `None` or an empty slice omits the
 /// `tools` field, preserving the plain chat-completions behavior.
 /// `options.model` names the model on the wire; optional `temperature`,
 /// `max_tokens`, and `thinking` extend the request when present.

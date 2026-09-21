@@ -399,7 +399,7 @@ mod tests {
         for permission in WINDOW_PERMISSIONS {
             assert!(
                 permissions.contains(permission),
-                "the capability carries {permission}"
+                "the capability includes {permission}"
             );
         }
     }

@@ -129,7 +129,7 @@ async fn store_fixture_persists_state_across_fall_through() {
         STORE_FALLTHROUGH,
         "execution/store-fallthrough.md",
         STORE_EXECUTION,
-        "carried value",
+        "handoff value",
         None,
     )
     .await;
@@ -137,12 +137,12 @@ async fn store_fixture_persists_state_across_fall_through() {
         .result
         .expect("the store fall-through fixture must execute offline");
 
-    assert_eq!(result, "carried value");
+    assert_eq!(result, "handoff value");
     assert_eq!(
         run.store
             .read("handoff.txt")
             .expect("the handoff remains stored"),
-        "carried value"
+        "handoff value"
     );
     assert_eq!(
         checkpoints(&run.recorder.records(), STORE_EXECUTION),

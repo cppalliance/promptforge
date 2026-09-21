@@ -188,7 +188,7 @@ async fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn task_started_carries_the_spawn_seeds_and_the_child_sees_them() {
+async fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
     let md = spawner_prompt(
         "var.k = 1\n\
          log('root taskid=' .. sys.taskid)\n\

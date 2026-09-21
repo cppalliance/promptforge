@@ -1,5 +1,5 @@
 // Pins the apply overlay against the gateway's real progress wire: the
-// `GET /admin/progress` stream carries `Progress` snapshots
+// `GET /admin/progress` stream sends `Progress` snapshots
 // (`{"busy": bool, "text": string}`), so a busy snapshot's text becomes
 // the card's activity row, updated in place, and an idle one shows the
 // waiting text; the card's Cancel posts the active-command cancel once,
@@ -67,7 +67,7 @@ async function bootApplying({ cancelReply } = {}) {
 test("a busy snapshot's text drives the activity row in place; an idle one shows the waiting text", async () => {
   const { overlay, progress, settleApply } = await bootApplying();
   const rows = [...overlay.querySelectorAll(".stage")];
-  assert.equal(rows.length, 1, "the card carries one activity row");
+  assert.equal(rows.length, 1, "the card shows one activity row");
   const row = rows[0];
   const label = row.querySelector(".stage-label");
   assert.ok(row.classList.contains("is-active"), "the row is active from the opening");
@@ -152,7 +152,7 @@ test("Cancel posts the active-command cancel once, stays disabled, and the cance
   assert.equal(
     overlay.querySelector(".field-error")?.textContent,
     CANCELLED_TOAST,
-    "the overlay's failure note carries the same wording",
+    "the overlay's failure note uses the same wording",
   );
   progress.end();
 });

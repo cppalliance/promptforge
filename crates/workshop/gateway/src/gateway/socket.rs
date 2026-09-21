@@ -32,7 +32,7 @@ impl GatewayClient {
             scheme => {
                 return Err(GatewayError::Transport(Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("gateway URL scheme {scheme:?} cannot carry a WebSocket"),
+                    format!("gateway URL scheme {scheme:?} cannot be upgraded to a WebSocket"),
                 ))));
             }
         };

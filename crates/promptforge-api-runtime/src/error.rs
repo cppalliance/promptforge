@@ -1,11 +1,11 @@
-//! The crate's internal error substrate.
+//! The crate's internal error type.
 //!
-//! [`Error`] is a `pub(crate)` substrate: it is never part of the public API.
+//! [`Error`] is a `pub(crate)` internal error type, never part of the public API.
 //! Every public boundary returns its own typed error ([`crate::RunError`],
 //! [`crate::ParseError`], [`crate::CompletionError`],
 //! [`promptforge_api_types::tools::ToolError`], [`promptforge_store::StoreError`]); those wrappers
-//! classify this substrate and preserve its source. See the module wrappers for
-//! the `From` bridges that let internal `?` keep flowing through the substrate.
+//! classify this internal type and preserve its source. See the module wrappers for
+//! the `From` bridges that let internal `?` keep flowing through the error type.
 
 use std::borrow::Cow;
 
@@ -14,7 +14,7 @@ use promptforge_lua::Error as LuaError;
 use promptforge_model_client::Error as GatewayClientError;
 use promptforge_parser::Error as ParserError;
 
-/// A type-erased owned error cause used by the internal substrate.
+/// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// Renders task ids as a comma-separated list: the [`Error::TasksLive`]
@@ -27,7 +27,7 @@ fn join_task_ids(tasks: &[TaskId]) -> String {
         .join(", ")
 }
 
-/// The crate's internal error substrate, spanning parsing, HTTP, and execution
+/// The crate's internal error type, spanning parsing, HTTP, and execution
 /// failures.
 ///
 /// This type is `pub(crate)` and never appears in the public API; the public
@@ -522,10 +522,10 @@ impl From<crate::input::InputError> for Error {
     }
 }
 
-/// Maps the gateway-client substrate back onto this substrate variant for
+/// Maps the gateway-client error type back onto this one variant for
 /// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
 /// classification are unchanged by the extraction. The client crate's
-/// substrate is not `#[non_exhaustive]` (the two crates version together), so
+/// error type is not `#[non_exhaustive]` (the two crates version together), so
 /// this match is total.
 impl From<GatewayClientError> for Error {
     fn from(error: GatewayClientError) -> Error {
@@ -562,9 +562,9 @@ impl From<crate::model::CompletionError> for Error {
     }
 }
 
-/// Maps a parse failure back onto this substrate variant for variant, so
+/// Maps a parse failure back onto this internal type variant for variant, so
 /// `Display`, `source()` chains, and `RunError` classification are unchanged
-/// by the parser extraction. The parser crate's substrate is not
+/// by the parser extraction. The parser crate's error type is not
 /// `#[non_exhaustive]` (the two crates version together), so this match is
 /// total.
 impl From<crate::parser::ParseError> for Error {
@@ -602,9 +602,9 @@ impl From<crate::parser::ParseError> for Error {
     }
 }
 
-/// Maps the Lua crate's substrate back onto this substrate variant for
+/// Maps the Lua crate's internal type back onto this one variant for
 /// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
-/// classification are unchanged by the extraction. The Lua crate's substrate
+/// classification are unchanged by the extraction. The Lua crate's error type
 /// is not `#[non_exhaustive]` (the two crates version together), so this match
 /// is total.
 impl From<LuaError> for Error {
@@ -680,7 +680,7 @@ impl Error {
     }
 }
 
-/// The substrate's rendering into the Lua error table: the kind an author
+/// The internal type's rendering into the Lua error table: the kind an author
 /// branches on and the kind's fields. Host-side failures the author cannot
 /// act on (transport, backend, configuration, store, input) render as
 /// `internal`; every Lua-phase failure renders as `lua`.
@@ -749,7 +749,7 @@ impl promptforge_lua::ErrorValue for Error {
     }
 }
 
-/// Crate-internal result alias over the [`Error`] substrate.
+/// Crate-internal result alias over [`Error`].
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
@@ -857,7 +857,7 @@ mod tests {
                     .expect("the original typed Error is preserved, not stringified");
                 assert_eq!(recovered.to_string(), display);
             }
-            other => panic!("expected an ExternalError carrying the typed error, got {other:?}"),
+            other => panic!("expected an ExternalError holding the typed error, got {other:?}"),
         }
         // Re-wrapping through the crate's Lua boundary keeps the chain reachable.
         let wrapped = Error::lua(external);
@@ -865,12 +865,12 @@ mod tests {
     }
 
     #[test]
-    fn config_errors_preserve_their_causes_across_the_substrate_bridge() {
+    fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
         // AUDIT-DISCARDED-SOURCE: a transport's configuration failure (an
         // unusable credential, a bad endpoint URL) arrives as the client
-        // substrate's `Config` variant with its concrete cause attached;
+        // error type's `Config` variant with its concrete cause attached;
         // the cause survives both the public CompletionError::source and
-        // the mapping onto this crate's substrate, classified as Config.
+        // the mapping onto this crate's error type, classified as Config.
         use crate::model::{ClientError, CompletionError, CompletionErrorKind};
 
         let cause = std::io::Error::other("gateway URL is not a valid URL");
@@ -886,7 +886,7 @@ mod tests {
         let bridged = Error::from(completion);
         assert!(
             matches!(bridged, Error::Config { .. }),
-            "the substrate maps Config onto Config, got {bridged:?}"
+            "the error type maps Config onto Config, got {bridged:?}"
         );
         assert!(
             std::error::Error::source(&bridged).is_some(),
@@ -896,7 +896,7 @@ mod tests {
 
     #[test]
     fn frontmatter_locations_surface_through_the_run_error() {
-        // Step 6: the parser's surfaced YAML position crosses the substrate
+        // Step 6: the parser's surfaced YAML position crosses the error-type
         // bridge and lands on `RunError::location` for navigation. A
         // frontmatter failure predates the prompt's name, so the path is
         // the placeholder a host replaces with its own label for the source.
@@ -916,15 +916,15 @@ mod tests {
         assert_eq!(run_error.kind(), crate::RunErrorKind::Parse);
         let location = run_error
             .location()
-            .expect("a parse failure carries a location");
+            .expect("a parse failure reports a location");
         assert_eq!(location.line, Some(5));
         assert_eq!(location.column, Some(5));
         assert_eq!(location.span, None);
     }
 
     #[test]
-    fn structured_locations_carry_the_prompt_name_through_the_run_error() {
-        // Step 6: a post-frontmatter parse failure carries the prompt's
+    fn structured_locations_include_the_prompt_name_through_the_run_error() {
+        // Step 6: a post-frontmatter parse failure reports the prompt's
         // frontmatter name as the location's path, plus the offending
         // span's line and column.
         let source = "---\nname: dup\ndescription: d\n---\n\n# T\n\n## S\n\np\n\n## S\n\nq\n";
@@ -934,7 +934,7 @@ mod tests {
         let run_error = crate::RunError::from(Error::from(parse));
         let location = run_error
             .location()
-            .expect("a structured parse failure carries a location");
+            .expect("a structured parse failure reports a location");
         assert_eq!(location.path, "dup");
         assert_eq!(location.line, Some(12));
         assert_eq!(location.column, Some(1));
@@ -942,14 +942,14 @@ mod tests {
     }
 
     #[test]
-    fn internal_faults_carry_the_rust_file_and_line() {
+    fn internal_faults_report_the_rust_file_and_line() {
         // Step 6: an internal invariant failure locates itself in the Rust
         // source, captured at the construction site.
         let expected_line = line!() + 1;
         let run_error = crate::RunError::from(Error::internal("a test invariant"));
         let location = run_error
             .location()
-            .expect("an internal fault carries a location");
+            .expect("an internal fault reports a location");
         assert!(
             location.path.ends_with("error.rs"),
             "the path is the Rust source file: {}",
@@ -968,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn requirements_unmet_classifies_and_carries_the_notice_as_its_message() {
+    fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
         // Step 10: the refusal notice is the whole Display - it may arrive
         // as tool output when the prompt runs as a sub-run tool - and the
         // kind classifies it for code. Retrying cannot help: the

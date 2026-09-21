@@ -1,9 +1,9 @@
 //! Shared handler state and the composition root that assembles the
 //! per-feature routers into the workshop server.
 //!
-//! [`AppState`] holds no subsystem state by name: each extracted
-//! subsystem owns its state behind a narrow handle registered into the
-//! [`Registry`], and consumers fetch the handles through the registry's
+//! [`AppState`] delegates subsystem state to the [`Registry`]: each
+//! extracted subsystem owns its state behind a narrow handle registered
+//! there, and consumers fetch the handles through the registry's
 //! type-keyed state collection. The harness every agent session runs in
 //! is registered the same way. What remains here is the shell's own
 //! runtime infrastructure - the shared reconnect backoff - plus the
@@ -482,7 +482,7 @@ pub fn router(state: AppState) -> Router {
         .merge(with_deadline(routes::health::routes(), DEFAULT_DEADLINE))
         .merge(api)
         // The outermost layer on the server's own routes: every response
-        // carries the CSP, error envelopes included, so the shell's
+        // is stamped with the CSP, error envelopes included, so the shell's
         // External-origin webview runs under the policy no matter which
         // route answered.
         .layer(axum::middleware::from_fn(crate::csp::header))

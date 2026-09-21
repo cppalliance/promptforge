@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn envelope_carries_message_type_and_code() {
+    fn envelope_has_message_type_and_code() {
         let error = ProtocolError::upstream_status(503, "busy".to_owned());
         let envelope = error.envelope();
         assert_eq!(envelope["error"]["message"], "upstream returned 503");

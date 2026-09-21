@@ -164,7 +164,7 @@ export interface SystemSnapshot {
 
 /**
  * One cached blob from `GET /v1/cache`. The sidecar records no
- * timestamp, so the listing carries no download date.
+ * timestamp, so the listing omits the download date.
  */
 export interface CacheListEntry {
   /** The URL the blob was downloaded from. */
@@ -407,7 +407,7 @@ export class GatewayApi {
    * Probes whether an ambient credential authenticates this session. The
    * `/auth` browser handoff lands on the SPA with an HttpOnly cookie and
    * no stored key; a 200 from `GET /admin/status` with no presented key
-   * means the cookie carried auth, and anything else means the key
+   * means the cookie authenticated, and anything else means the key
    * prompt. Never fires `onUnauthorized` and never throws: a failed probe
    * simply resolves false.
    */
@@ -524,9 +524,9 @@ export class GatewayApi {
 
   /**
    * Fetches the pending (shadow-overlaid) config view. The envelope's
-   * `profile` object carries the persisted selection as `active_profile`;
+   * `profile` object reports the persisted selection as `active_profile`;
    * it is split out here because it is not a configuration key and must
-   * never ride back in a `PUT /admin/config` body.
+   * never be sent back in a `PUT /admin/config` body.
    */
   async getConfigPending(): Promise<PendingView> {
     const data = requireRecord(await this.getJson("/admin/config-pending"), "pending config");
@@ -556,7 +556,7 @@ export class GatewayApi {
   /**
    * Stages `body` (the `GET /admin/config` JSON shape) as the config
    * shadow via `PUT /admin/config`. Untouched secrets stay `"***"`; the
-   * gateway restores their real values. A body carrying `active_profile`
+   * gateway restores their real values. A body with `active_profile`
    * is refused: selection belongs to {@link switchProfile}.
    */
   async putConfig(body: unknown): Promise<void> {
@@ -865,7 +865,7 @@ export class GatewayApi {
           try {
             onEvent(parseProgress(JSON.parse(payload)));
           } catch {
-            // A malformed event is dropped; the stream carries on.
+            // A malformed event is dropped; the stream continues.
           }
         }
       } catch {
@@ -970,7 +970,7 @@ export class GatewayApi {
 
   /**
    * Proxied hub model detail via `GET /admin/hf/model/{owner}/{name}`;
-   * the gateway adds `blobs=true`, so siblings carry exact file sizes.
+   * the gateway adds `blobs=true`, so siblings include exact file sizes.
    */
   async hfModel(repo: string, signal?: AbortSignal): Promise<unknown> {
     const encoded = repo.split("/").map(encodeURIComponent).join("/");
@@ -1066,7 +1066,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Builds the {@link GatewayHttpError} for a refused request, carrying
+ * Builds the {@link GatewayHttpError} for a refused request, including
  * the envelope's `error.code` when the gateway sent one.
  */
 async function refusalError(response: Response): Promise<GatewayHttpError> {

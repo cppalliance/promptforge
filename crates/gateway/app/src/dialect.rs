@@ -933,7 +933,7 @@ mod tests {
     }
 
     #[test]
-    fn json_tool_calls_fence_malformed_arguments_warning_carries_the_decode_error() {
+    fn json_tool_calls_fence_malformed_arguments_warning_names_the_decode_error() {
         // `arguments` is a string, but not JSON: the fence is recognized as
         // tool protocol and the wire warning must name the decode failure
         // from the rejection's source chain, not just the rejection message.
@@ -949,7 +949,7 @@ mod tests {
                 );
                 assert!(
                     warning.contains(&expected_cause),
-                    "warning must carry the decode error {expected_cause:?}: {warning}"
+                    "warning must include the decode error {expected_cause:?}: {warning}"
                 );
             }
             other => panic!("expected malformed, got {}", variant_name(&other)),
@@ -1096,9 +1096,9 @@ mod tests {
         use futures_util::StreamExt as _;
 
         // A fence-rewritten response converted for a stream: true caller. The
-        // delta must carry the tool calls with fragment indices, the finish
-        // reason must ride the chunk choice, and the top-level usage must
-        // arrive on a trailing empty-choices summary chunk.
+        // delta must include the tool calls with fragment indices, the
+        // finish reason must be set on the chunk choice, and the top-level
+        // usage must arrive on a trailing empty-choices summary chunk.
         let mut response = response_with_content("```tool_code\nsearch(query=\"a\")\n```");
         response.rest.insert(
             "usage".to_owned(),
@@ -1125,11 +1125,11 @@ mod tests {
             .delta
             .get("tool_calls")
             .and_then(Value::as_array)
-            .expect("tool calls ride the delta");
+            .expect("the delta includes tool calls");
         assert_eq!(
             calls[0].get("index").and_then(Value::as_u64),
             Some(0),
-            "each delta tool-call entry carries the fragment index"
+            "each delta tool-call entry includes the fragment index"
         );
         assert_eq!(
             calls[0].pointer("/function/name").and_then(Value::as_str),

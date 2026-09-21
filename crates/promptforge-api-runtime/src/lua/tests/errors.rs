@@ -58,10 +58,10 @@ fn a_shim_argument_error_is_a_table_whose_tostring_is_the_message() {
 }
 
 #[test]
-fn a_failure_envelope_raises_a_table_carrying_the_kind_and_fields() {
+fn a_failure_envelope_raises_a_table_holding_the_kind_and_fields() {
     // A Rust-raised error answered through the envelope reaches the
     // author's `pcall` in the same shape as a shim raise: `kind` names the
-    // failure, the kind's fields ride beside it, and `tostring` is the
+    // failure, the kind's fields appear beside it, and `tostring` is the
     // typed error's display text unchanged.
     let vm = scheduler_vm(&ModelSet::default(), None);
     let program = compile_block(
@@ -165,7 +165,7 @@ fn an_authors_plain_table_with_a_kind_is_not_read_back_as_a_raise() {
 #[test]
 fn an_uncaught_lua_kind_shim_raise_keeps_the_mapped_runtime_error() {
     // A `lua`-kind table that propagates out of the block is not kept as a
-    // `Raised`: the mapped runtime error already carries the same message
+    // `Raised`: the mapped runtime error already holds the same message
     // with its source and the prompt line the traceback maps to, which is
     // what an authoring error needs. The block is compiled at prompt line
     // 40 and fails at chunk line 2, so the mapped author frame is line 41.
@@ -228,7 +228,7 @@ fn a_structured_raise_surfacing_as_the_coroutine_failure_keeps_its_table() {
     // Without a retained typed error to substitute (the envelope was
     // rendered ahead of time, as a Lua-side raise would be), the failure
     // still arrives typed: the table the shim raised is kept as a
-    // `Raised` value carrying its kind and fields, never flattened to the
+    // `Raised` value holding its kind and fields, never flattened to the
     // message string.
     let vm = scheduler_vm(&ModelSet::default(), None);
     let program = compile_block("models.infer(\"hi\")");
@@ -260,7 +260,7 @@ fn a_structured_raise_surfacing_as_the_coroutine_failure_keeps_its_table() {
 }
 
 #[test]
-fn a_raised_table_maps_onto_the_executor_substrate_by_kind() {
+fn a_raised_table_maps_onto_the_executor_error_type_by_kind() {
     // The executor's `From<promptforge_lua::Error>` turns a kept table back
     // into the variant its kind names, so a Lua-side raise classifies the
     // same way as the Rust-raised error it replaces.
@@ -296,7 +296,7 @@ fn a_raised_table_maps_onto_the_executor_substrate_by_kind() {
         crate::Error::Interrupted
     ));
     // The empty-reply arm keeps the message the author saw as `detail`
-    // and carries the `finish_reason` field across.
+    // and copies the `finish_reason` field across.
     let empty = promptforge_lua::Raised {
         kind: ErrorKind::EmptyModelReply,
         message: "the model returned an empty turn".to_owned(),
@@ -362,7 +362,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
     );
     assert!(
         !raw.contains("[string \"@crates") && !raw.contains("[string \"crates"),
-        "the shim frame carries no [string \"...\"] wrapper: {raw}"
+        "the shim frame renders bare, outside any [string \"...\"] wrapper: {raw}"
     );
     assert!(
         raw.contains("[string \"section `Test` prologue\"]:2:"),

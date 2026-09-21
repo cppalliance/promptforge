@@ -78,7 +78,7 @@ impl ToolCallOutcome {
 /// routinely finish tool-call rounds with `stop`. Absent optional fields
 /// are simply never set on the resumed table, so they read back as nil;
 /// `overflow` is always set, as a boolean.
-// No `Eq`: `metrics` carries `f64` timings transitively.
+// No `Eq`: `metrics` holds `f64` timings transitively.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
     /// Whether the request was refused as too large before or by the
@@ -188,7 +188,7 @@ pub struct TaskStatus {
 /// The error type is the driver's: the Lua side produces
 /// `Answer<`[`Error`]`>` (argument-validation failures at the yield
 /// boundary), while the executor's scheduler drives `Answer` over its own
-/// substrate so a dispatch failure (a gateway completion error, a binding
+/// error type so a dispatch failure (a gateway completion error, a binding
 /// failure) round-trips typed.
 #[derive(Debug)]
 pub enum Answer<E> {

@@ -1,5 +1,5 @@
 // Custom window title bar. The bar is always shown, in the desktop app
-// and in a plain browser, because it carries the application menus; only
+// and in a plain browser, because it holds the application menus; only
 // the native window controls (drag region, minimize/maximize/close) are
 // desktop-only, since they need the Tauri window API. Every control calls
 // the current window through @tauri-apps/api, which esbuild bundles the
@@ -66,7 +66,7 @@ export function toggleFullScreen(): void {
 }
 
 /**
- * Reveals the custom title bar in every mode: the bar carries the
+ * Reveals the custom title bar in every mode: the bar holds the
  * application menus, so it must show in a plain browser too. The drag
  * region, the window controls, and the maximized-state sync are wired
  * only inside the desktop app; in a browser the control cluster is
@@ -139,7 +139,7 @@ export function setupWindowChrome(): IDisposable {
   // `startDragging` hands the mouse to the OS move loop, so the webview
   // never sees the release and a `dblclick` can never be synthesized.
   // The double-click is therefore read from the press itself: `mousedown`
-  // carries the click count in `detail` (a `pointerdown` always reports
+  // sets the click count in `detail` (a `pointerdown` always reports
   // 0), and the second press toggles maximize instead of starting a drag.
   // This mirrors the drag-region script Tauri injects for
   // `data-tauri-drag-region`.

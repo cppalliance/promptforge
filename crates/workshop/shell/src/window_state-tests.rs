@@ -48,7 +48,7 @@ fn physical_geometry_maps_to_logical_under_the_scale_factor() {
     );
     assert_eq!(identity, state(1024, 768, 40, 60, false));
 
-    // The maximized flag rides along untouched.
+    // The maximized flag passes through untouched.
     let maximized = geometry(
         PhysicalSize::new(3840, 2100),
         PhysicalPosition::new(-8, -8),

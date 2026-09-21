@@ -1,4 +1,4 @@
-//! The sidecar restart ladder of a `switch_profile` event: a selection
+//! The sidecar restart sequence of a `switch_profile` event: a selection
 //! the gateway must restart to load shuts the supervised sidecar down,
 //! waits for the supervisor's replacement generation, and refreshes
 //! through it; a LAN gateway settles with the restart notice instead;
@@ -206,13 +206,13 @@ async fn a_sidecar_restart_climbs_the_ladder_and_refreshes_through_the_replaceme
     let pending = frames.last().expect("the pending snapshot was pushed");
     assert_eq!(
         pending["switch_in_flight"], true,
-        "the switch is marked in flight while the ladder climbs: {pending}"
+        "the switch is marked in flight while the sequence runs: {pending}"
     );
 
     let (_gateway, shutdown_hit) = observe_shutdown(gateway).await;
     assert!(
         shutdown_hit,
-        "the ladder posts the authenticated shutdown to the sidecar identity"
+        "the sequence posts the authenticated shutdown to the sidecar identity"
     );
 
     // The supervisor's relaunch: a higher generation at a different
@@ -236,7 +236,7 @@ async fn a_sidecar_restart_climbs_the_ladder_and_refreshes_through_the_replaceme
     assert_eq!(
         busy_frames(&frames),
         [switching("\"beta\"")],
-        "one busy frame holds the bar up across the whole restart ladder"
+        "one busy frame holds the bar up across the whole restart sequence"
     );
     let catalog = frames
         .iter()

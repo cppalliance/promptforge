@@ -110,7 +110,7 @@ fn validate_message(message: &Value) -> Result<(), &'static str> {
     let has_content = object.contains_key("content");
     let has_call = object.contains_key("tool_calls") || object.contains_key("function_call");
     if !has_content && !has_call {
-        return Err("each message must carry content or a tool/function call");
+        return Err("each message must include content or a tool/function call");
     }
     Ok(())
 }
@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn chat_chunk_round_trips_an_empty_delta() {
-        // The terminal chunk legitimately carries an empty delta plus a
+        // The terminal chunk legitimately contains an empty delta plus a
         // finish_reason; it must survive the round-trip.
         let json = serde_json::json!({
             "model": "backend",

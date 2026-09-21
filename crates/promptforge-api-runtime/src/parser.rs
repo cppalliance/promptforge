@@ -14,7 +14,7 @@
 //! Markdown left after the final `lua` fence is inert trailing
 //! commentary, never an error.
 //!
-//! The parser does no execution. It turns bytes into a [`Prompt`] tree.
+//! The parser turns bytes into a [`Prompt`] tree.
 //!
 //! The implementation sits in the `promptforge-parser` crate and is
 //! re-exported here unchanged, so existing `promptforge_api_runtime::parser::*`

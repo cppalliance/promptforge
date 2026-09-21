@@ -98,8 +98,8 @@ impl GatewayError {
 }
 
 /// Bearer-authenticated client for the gateway's OpenAI-compatible
-/// endpoints. An empty API key sends no `Authorization` header at all, for
-/// gateways running with authentication disabled.
+/// endpoints. An empty API key omits the `Authorization` header entirely,
+/// for gateways running with authentication disabled.
 #[derive(Clone)]
 pub struct GatewayClient {
     http: reqwest::Client,

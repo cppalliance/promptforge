@@ -139,7 +139,7 @@ export class EditorPanel extends WorkshopPart {
     return this.untitled;
   }
 
-  /** The live editor text - what a save or an untitled reopen carries. */
+  /** The live editor text - what a save or an untitled reopen writes. */
   currentText(): string {
     return this.surface.text();
   }

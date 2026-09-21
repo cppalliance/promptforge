@@ -4,7 +4,7 @@
 // session, the transcript, and the pending input wait. The transcript is
 // derived from the durable event stream plus the ephemeral deltas:
 // deltas coalesce into pending items keyed by the reply id stamped on
-// every chunk, and the durable event carrying that id replaces them (the
+// every chunk, and the durable event stamped with that id replaces them (the
 // ACP chunk-vs-upsert rule the wire layer documents). Views subscribe to
 // the change events and read the snapshots; nothing here touches the
 // DOM.
@@ -56,7 +56,7 @@ export interface UserItem {
 export interface ReplyItem {
   readonly kind: "reply";
   readonly text: string;
-  /** The producing model, when the event carried the attribution. */
+  /** The producing model, when the event named the attribution. */
   readonly model: string | null;
   /** True while the item is coalesced deltas awaiting the durable event. */
   readonly pending: boolean;
@@ -397,7 +397,7 @@ export class AgentSessionService extends Disposable {
 
   /**
    * The index of the pending item for one round's channel, or -1. Scans
-   * from the tail: pending items always ride near it, because rounds are
+   * from the tail: pending items always sit near it, because rounds are
    * sequential.
    */
   private findPending(reply: number, kind: StreamKind): number {

@@ -40,7 +40,7 @@ fn a_cause_already_quoted_by_the_outer_text_is_not_appended_twice() {
     let rendered = display_chain(&error);
     assert_eq!(
         rendered, "lua runtime error: disk gone",
-        "a cause whose text the outer message already carries is skipped"
+        "a cause whose text the outer message already includes is skipped"
     );
     assert_eq!(
         rendered.matches("disk gone").count(),

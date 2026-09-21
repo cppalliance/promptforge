@@ -71,7 +71,7 @@ async fn echo_completions(body: String) -> Response {
         .as_array()
         .and_then(|messages| messages.last())
         .and_then(|message| message["content"].as_str())
-        .expect("the request carries a user message");
+        .expect("the request includes a user message");
     let reply = format!("echo:{text}");
     let (first, second) = reply.split_at(reply.len() / 2);
     let chunk = |delta: serde_json::Value, finish: serde_json::Value| {
@@ -165,7 +165,7 @@ fn assert_replacement_request(
     );
     let messages = requests[0]["messages"]
         .as_array()
-        .expect("the request carries a messages array");
+        .expect("the request includes a messages array");
     assert_eq!(
         messages.len(),
         1,
@@ -264,7 +264,7 @@ async fn launch_agent(socket: &mut JsonSocket, agent: &str) -> String {
     assert_eq!(frame["agent"], agent);
     frame["session"]
         .as_str()
-        .expect("the acknowledgment carries the session id")
+        .expect("the acknowledgment includes the session id")
         .to_owned()
 }
 

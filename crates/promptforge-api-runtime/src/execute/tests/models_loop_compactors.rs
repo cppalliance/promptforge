@@ -65,7 +65,7 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_explicit_compactors_fail_invocation_carries_the_provider_reason() {
+async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
     let gateway = ScriptedGateway::start(vec![resp_status(
         400,
         "This model's maximum context length is 4096 tokens.",
@@ -90,7 +90,7 @@ async fn an_explicit_compactors_fail_invocation_carries_the_provider_reason() {
                 reason: OverflowReason::Provider
             }
         ),
-        "the explicit compactors.fail invocation carries the provider reason, got {error:?}"
+        "the explicit compactors.fail invocation reports the provider reason, got {error:?}"
     );
     assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
 }
@@ -178,7 +178,7 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
 async fn a_compactors_own_string_raise_reaches_the_host_with_the_reason_tag() {
     // An author compactor's own untyped raise is re-raised as the value it
     // raised: a bare string passes through the normalizer untouched and
-    // fails the section as the ordinary Lua runtime error carrying the
+    // fails the section as the ordinary Lua runtime error holding the
     // reason tag the compactor was invoked with.
     let gateway = ScriptedGateway::start(vec![resp_status(
         400,

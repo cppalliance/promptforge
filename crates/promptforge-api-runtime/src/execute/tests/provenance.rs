@@ -119,8 +119,8 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
             "arm {arm}'s terminal is stamped with its own task: {arm_kinds:?}"
         );
     }
-    // The spawn itself is the spawner's act: `TaskStarted` rides the
-    // walk's counter.
+    // The spawn itself is the spawner's act: `TaskStarted` is stamped
+    // with the walk's counter.
     let starts: Vec<&TaskId> = events
         .iter()
         .filter_map(|event| match event {
@@ -185,8 +185,8 @@ async fn a_call_child_reports_under_its_callers_task() {
 #[tokio::test]
 async fn the_run_forwards_every_buffered_event_to_the_host_observer_in_order() {
     // The adapter path end to end: a two-section run through `execute::run`
-    // reaches the host's observer with the exact sequence the buffered
-    // events carry, run boundaries included.
+    // reaches the host's observer with the exact sequence of the buffered
+    // events, run boundaries included.
     let (result, records) = run_recorded(TWO_SECTIONS).await;
     assert_eq!(result.unwrap(), "second");
     let observed = events(&records);

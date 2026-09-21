@@ -790,7 +790,7 @@ fn clear_discards_pending_precommit_failure_without_creating_an_item() {
 }
 
 #[tokio::test]
-async fn fixture_finalization_errors_carry_their_operation_and_source() {
+async fn fixture_finalization_errors_report_their_operation_and_source() {
     let mut session = session();
     let error = session
         .finish_finalization("missing")

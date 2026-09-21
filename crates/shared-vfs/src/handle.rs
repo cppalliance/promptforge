@@ -316,7 +316,7 @@ impl VfsRef {
 /// object; every operation canonicalizes the path, checks the policy,
 /// checks the claims tables, fires the op sink, then locks the backend
 /// per call.
-#[must_use = "an acquire dropped immediately is a bug: the capability carries the identity's claims"]
+#[must_use = "an acquire dropped immediately is a bug: the capability holds the identity's claims"]
 pub struct Access {
     id: ExecId,
     /// The caller-supplied observability origin; `None` only on the
@@ -678,7 +678,7 @@ impl Drop for Access {
 /// base's policy and claims under the caller's identity.
 impl Vfs for VfsRef {
     fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-        // The mount forward carries no origin: the outer handle already
+        // The mount forward leaves the origin unset: the outer handle already
         // fired the caller's, and a fabricated one here would double the
         // event with a less precise label.
         Ok(Box::new(HandleAccess(self.acquire_with(id, None)?)))
@@ -1390,7 +1390,7 @@ mod tests {
         access.read("/a.txt")?;
         access.write("/b.txt", b"y")?;
         access.glob("/*.txt")?;
-        // A spawned child's events carry the child's own origin.
+        // A spawned child's events report the child's own origin.
         let child = access.spawn(Origin::at("the arm", "the prompt", 9))?;
         child.append("/b.txt", b"!")?;
         let events = events.lock().unwrap_or_else(PoisonError::into_inner);

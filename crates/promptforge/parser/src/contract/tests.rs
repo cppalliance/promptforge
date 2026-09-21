@@ -51,7 +51,7 @@ fn the_full_contract_declaration_parses_and_round_trips() {
     assert!(caps[0].config().is_none());
     assert_eq!(caps[1].id().to_string(), "io.github.corp/mcp");
     assert!(caps[1].is_optional());
-    let config = caps[1].config().expect("the detailed entry carries config");
+    let config = caps[1].config().expect("the detailed entry has config");
     assert_eq!(
         config["servers"],
         serde_yaml_ng::Value::Sequence(vec![serde_yaml_ng::Value::String("alpha".to_owned())])
@@ -398,7 +398,7 @@ fn a_zero_min_context_is_rejected() {
 }
 
 #[test]
-fn contract_errors_carry_their_frontmatter_line_and_column() {
+fn contract_errors_report_their_frontmatter_line_and_column() {
     // Step 6: the retained serde_yaml_ng location surfaces on the parse
     // error, so a rejection inside a contract key points at its own line
     // and column instead of being a bare message.

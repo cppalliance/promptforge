@@ -97,7 +97,7 @@ window.HTMLElement.prototype.getClientRects = function getClientRects() {
   return { length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] };
 };
 
-// A scripted workspace API. The roots listing carries one directory;
+// A scripted workspace API. The roots listing answers one directory;
 // expanding it returns a folder and two files (folders first, as the
 // server orders them). /workspace/file serves a small text per path so
 // the step-14 editor panels can load; any other route rejects, so an
@@ -312,7 +312,7 @@ treePanel.api.setTitle("Workshop");
 
 // --- The agent session is a singleton: reopening focuses it ----------------
 
-check("the agent tab carries the Agent Session title", agentPanel.title === "Agent Session");
+check("the agent tab shows the Agent Session title", agentPanel.title === "Agent Session");
 check("the agent panel keys by its type name", panelIdFor("agent", {}) === "agent");
 check(
   "reopening the agent session activates the same panel",
@@ -338,7 +338,7 @@ const projectRow = rowByText("project");
 check("the granted root renders as a directory row", !!projectRow);
 check("the root row starts collapsed", projectRow?.getAttribute("aria-expanded") === "false");
 
-// Expand the root: one request carrying the directory path.
+// Expand the root: one request naming the directory path.
 projectRow.click();
 await flush();
 const expandUrl = `/workspace/tree?path=${encodeURIComponent(ROOT)}`;

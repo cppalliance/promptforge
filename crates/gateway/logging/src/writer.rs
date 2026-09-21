@@ -457,7 +457,7 @@ mod tests {
         );
         assert!(
             line.ends_with(TRUNCATION_MARKER),
-            "the valid prefix carries the truncation marker"
+            "the valid prefix ends with the truncation marker"
         );
         assert!(
             !line.contains('\u{fffd}'),
@@ -631,7 +631,7 @@ mod tests {
         );
         assert!(
             batch.records[0].line.contains("an error"),
-            "the record carries the formatted event: {}",
+            "the record contains the formatted event: {}",
             batch.records[0].line
         );
     }

@@ -289,7 +289,7 @@ function paletteSetup(initialHistory) {
 }
 
 {
-  // Palette rows are Category: Title and carry the keybinding label.
+  // Palette rows are Category: Title and show the keybinding label.
   const { commands, menus, keybindings, provider } = paletteSetup();
   let ran = 0;
   commands.register("file.save", { title: "Save", category: "File", run: () => { ran += 1; } });
@@ -298,7 +298,7 @@ function paletteSetup(initialHistory) {
   const rows = provider.getItems("");
   check("the palette lists the palette-menu command", rows.length === 1);
   check("the palette label is Category: Title", rows[0]?.label === "File: Save");
-  check("the palette row carries the keybinding label", rows[0]?.keybinding === "Ctrl+S");
+  check("the palette row shows the keybinding label", rows[0]?.keybinding === "Ctrl+S");
   rows[0]?.accept();
   await Promise.resolve();
   check("accept runs the command through the registry", ran === 1);
@@ -443,8 +443,8 @@ function paletteSetup(initialHistory) {
   const help = createHelpProvider({ registry: helpRegistry, show: (value) => shown.push(value) });
   const rows = help.getItems("");
   check("the help provider lists one row per help entry", rows.map((row) => row.label).join(",") === "Go to File,Show and Run Commands");
-  check("the default mode's row carries no prefix description", rows[0]?.description === undefined);
-  check("a prefixed mode's row carries its prefix", rows[1]?.description === ">");
+  check("the default mode's row omits the prefix description", rows[0]?.description === undefined);
+  check("a prefixed mode's row shows its prefix", rows[1]?.description === ">");
   rows[1]?.accept();
   check("accepting a help row enters its mode", shown.join(",") === ">");
 }

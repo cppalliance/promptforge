@@ -35,7 +35,7 @@ fn catalog_descriptor(id_name: &str, wire_name: &str) -> ToolDescriptor {
 }
 
 #[test]
-fn tool_output_carries_mandatory_trust() {
+fn tool_output_has_mandatory_trust() {
     use super::{OutputTrust, ToolOutput};
     assert_eq!(ToolOutput::trusted("a").trust(), OutputTrust::Trusted);
     assert_eq!(ToolOutput::untrusted("b").trust(), OutputTrust::Untrusted);
@@ -77,7 +77,7 @@ fn tool_error_classifies_and_hides_source() {
 }
 
 #[test]
-fn a_descriptor_carries_the_tools_surface_and_round_trips_through_serde() {
+fn a_descriptor_has_the_tools_surface_and_round_trips_through_serde() {
     // The descriptor is the tool as data: identity, wire name, description,
     // schema, and the output kind, so a catalog built from descriptors holds
     // no implementation and round-trips through serde.

@@ -1264,7 +1264,7 @@ await assertNoLeaks(lifecycle, async () => {
           "hypothesis wins",
         ],
       ],
-      "strict decoded events carry every take transition without service snapshots",
+      "strict decoded events report every take transition without service snapshots",
     );
     assert.deepEqual(errors.at(-1), {
       code: "invalid_server_event",

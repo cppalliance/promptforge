@@ -242,7 +242,7 @@ async fn remote_passthrough_streams_audio_bytes_unchanged() {
             .headers()
             .get(reqwest::header::CONTENT_LENGTH)
             .is_none(),
-        "a streamed audio body never carries Content-Length"
+        "a streamed audio body omits Content-Length"
     );
     let body = bytes_within(response).await;
     assert_eq!(body, CANNED_AUDIO, "audio bytes pass through unchanged");
@@ -495,8 +495,8 @@ async fn voice_validation_precedes_queue_admission() {
     gateway.shutdown().await;
 }
 
-/// A model with an empty catalog `voices` list exposes no fixed voice set:
-/// any voice name passes the route's check and is forwarded verbatim.
+/// A model with an empty catalog `voices` list skips the voice check:
+/// any voice name passes and is forwarded verbatim.
 #[tokio::test]
 async fn an_empty_voices_list_skips_the_voice_check() {
     let (backend, recorder) = recording_speech_backend(Some("audio/mpeg")).await;

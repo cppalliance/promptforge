@@ -86,7 +86,7 @@ async fn put_config(addr: std::net::SocketAddr, body: &serde_json::Value) -> req
 }
 
 #[tokio::test]
-async fn a_save_carrying_active_profile_is_rejected_and_stages_nothing() {
+async fn a_save_setting_active_profile_is_rejected_and_stages_nothing() {
     let (_temp, config, paths) = fixture();
     let config_path = paths.config_path.clone();
     let addr = serve_with_paths(config, paths).await;
@@ -124,7 +124,7 @@ async fn a_save_replies_with_the_config_shadow_alone() {
     assert_eq!(
         reply,
         serde_json::json!({ "shadow": shadow_path(&config_path).display().to_string() }),
-        "the reply carries only the config shadow"
+        "the reply names only the config shadow"
     );
     assert!(shadow_path(&config_path).is_file());
     assert!(!shadow_path(&profile_state_path(&config_path)).exists());

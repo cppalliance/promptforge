@@ -130,7 +130,7 @@ test("the dialog pre-fills from the sheet and stages the merged document", async
     ),
   );
   const added = body.model.find((entry) => entry.upstream === "claude-fable-5-1");
-  assert.ok(added, "the model entry rides along");
+  assert.ok(added, "the model entry is in the payload");
   assert.equal(added.context, 200000);
   assert.equal(
     dom.window.document.querySelector(".cloud-add-overlay"),

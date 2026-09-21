@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_sidecar_carries_a_format_version() {
+    fn rendered_sidecar_records_a_format_version() {
         // SIDECAR-005: the on-disk format is versioned.
         let rendered = render_sidecar(&sample_meta());
         assert!(

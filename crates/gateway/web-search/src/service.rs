@@ -228,9 +228,10 @@ fn clamp_count(requested: u8, max_count: u8) -> u8 {
 
 /// Rejects malformed request-supplied provider knobs at the boundary (TOOLS-004).
 ///
-/// Empty/absent knobs are omitted downstream and need no validation; the config
-/// defaults are already validated at load. This validates only caller-supplied,
-/// non-empty values so an arbitrary string is never forwarded to the provider.
+/// Empty/absent knobs are omitted downstream; the config defaults are
+/// already validated at load. This validates only caller-supplied,
+/// non-empty values so an arbitrary string is never forwarded to the
+/// provider.
 ///
 /// # Errors
 /// Returns [`WebSearchError::MalformedRequest`] for an out-of-vocabulary

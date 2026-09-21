@@ -72,7 +72,7 @@ pub(crate) enum EndpointError {
     #[error("must not embed credentials (user:pass@)")]
     Credentials,
     /// The URL had a query or fragment.
-    #[error("must not carry a query or fragment")]
+    #[error("must not include a query or fragment")]
     QueryOrFragment,
 }
 

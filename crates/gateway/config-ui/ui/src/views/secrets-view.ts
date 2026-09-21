@@ -2,11 +2,11 @@
 // variables as masked password rows with
 // per-row reveal and delete, an Add Variable row, and a Save that
 // stages the section as its own `.env.next` shadow via PUT /admin/env.
-// The global section carries the dedicated HF Token card [Adapted:
+// The global section includes the dedicated HF Token card [Adapted:
 // Unsloth] with show/hide and a Test Connection probe through the
 // gateway's HF proxy. `${VAR}` cross-references [INVENTED] annotate
 // rows the pending config chain points at - computed server-side and
-// carried in the GET /admin/env reply, because the config views arrive
+// returned in the GET /admin/env reply, because the config views arrive
 // interpolated with secrets redacted. Values arrive in plaintext (the
 // route is loopback-and-bearer-guarded); the view masks them by default
 // and never logs them. When the cloud provider sheet is loaded, the
@@ -200,7 +200,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       }
       hfStatus = "Testing\u2026";
       status.textContent = hfStatus;
-      // The probe rides the gateway's HF proxy (there is no whoami
+      // The probe goes through the gateway's HF proxy (there is no whoami
       // route), so it tests the token the running gateway holds - a
       // staged edit counts only after apply plus restart or switch.
       probeController?.abort();

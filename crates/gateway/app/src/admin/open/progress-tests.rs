@@ -75,7 +75,7 @@ async fn an_idle_hub_opens_the_stream_with_the_idle_snapshot() {
 }
 
 #[tokio::test]
-async fn the_stream_carries_one_line_per_change_in_order() {
+async fn the_stream_sends_one_line_per_change_in_order() {
     let hub = Arc::new(ProgressHub::new());
     let response = progress_sse_response(&hub, ShutdownSignal::default());
     let mut frames = response.into_body().into_data_stream();

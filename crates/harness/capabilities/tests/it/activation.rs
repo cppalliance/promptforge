@@ -61,7 +61,7 @@ const READS_ACTIVATION_MARKER: &str = concat!(
 fn a_missing_required_capability_is_reported() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     // No registry: activation reports the declared required capability
-    // absent, and the merged prepare report carries it.
+    // absent, and the merged prepare report includes it.
     let (_ctx, requirements, _) = prepare_activated(
         Environment::new(),
         None,

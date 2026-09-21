@@ -106,7 +106,7 @@ fn tool_call_parses_alias_and_args() {
         } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
-            assert_eq!(call_id, None, "a script call carries no call id");
+            assert_eq!(call_id, None, "a script call omits the call id");
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }
@@ -115,7 +115,7 @@ fn tool_call_parses_alias_and_args() {
 #[test]
 fn tool_call_with_a_call_id_parses_it_as_a_model_issued_call() {
     // The loop shim sets `call_id` from the model's tool call; the request
-    // carries it so the driver resumes with content and fires ToolResult
+    // stores it so the driver resumes with content and fires ToolResult
     // under that id.
     let lua = Lua::new();
     let table = request_table(&lua, "tool_call");
@@ -177,7 +177,7 @@ fn a_tool_call_with_a_tool_object_alias_decodes_to_its_alias() {
 
 #[test]
 fn a_tool_call_with_a_non_alias_alias_is_the_calls_error() {
-    // The author-facing argument error rides back as the call's answer,
+    // The author-facing argument error returns as the call's answer,
     // framed byte-identically with the other author-argument failures.
     let lua = Lua::new();
     let table = request_table(&lua, "tool_call");
@@ -288,7 +288,7 @@ fn an_unknown_op_is_rejected() {
 
 #[test]
 fn an_infer_with_a_missing_or_non_string_prompt_is_the_calls_error() {
-    // The author-facing argument error rides back as the call's answer,
+    // The author-facing argument error returns as the call's answer,
     // so the shim raises it at the call site (pcall-able), exactly as
     // the legacy callback's conversion error surfaced.
     let lua = Lua::new();

@@ -61,7 +61,7 @@ pub enum GatewayStartupError {
 pub(crate) fn decide(resolution: &gateway_api_discovery::Resolution) -> Relaunch {
     match resolution {
         gateway_api_discovery::Resolution::Attach(file) => {
-            // The file carries the real port of the loopback bind; URLs
+            // The file records the real port of the loopback bind; URLs
             // normalize to a literal 127.0.0.1, never localhost.
             Relaunch::OpenSettings(crate::auth::primitives::auth_url(
                 &format!("http://127.0.0.1:{}", file.port),

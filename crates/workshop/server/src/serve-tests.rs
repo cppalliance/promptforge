@@ -28,7 +28,7 @@ async fn readiness_means_the_health_endpoint_answers() {
     let url = server.url().to_string();
     assert!(
         url.starts_with("http://127.0.0.1:"),
-        "the URL carries the bound loopback address: {url}"
+        "the URL names the bound loopback address: {url}"
     );
 
     let response = reqwest::get(format!("{url}/health"))

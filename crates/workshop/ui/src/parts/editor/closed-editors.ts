@@ -65,7 +65,7 @@ function stackFromPaths(value: unknown): ClosedEditor[] {
 
 /**
  * Narrows the persisted payload to the stack: it must be an object
- * carrying a `paths` array. Anything else reads as an empty stack.
+ * with a `paths` array. Anything else reads as an empty stack.
  */
 function readInitial(initial: unknown): ClosedEditor[] {
   return isRecord(initial) ? stackFromPaths(initial.paths) : [];

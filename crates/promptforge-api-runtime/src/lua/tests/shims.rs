@@ -43,7 +43,7 @@ fn call_yields_target_input_and_the_var_snapshot() {
 #[test]
 fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
     // The fanout shim is Lua over the task protocol: its first yield is the
-    // `spawn` of the first member, carrying the worker as the target, the
+    // `spawn` of the first member, including the worker as the target, the
     // member as the `item` seed, its 1-based position as `index`, the
     // caller's `var` snapshot, the author origin, and the fanout mark.
     let vm = scheduler_vm(&ModelSet::default(), None);
@@ -63,7 +63,7 @@ fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
             assert_eq!(index, Some(1));
             assert_eq!(var, json!({}));
             assert_eq!(origin, TaskOrigin::Author);
-            assert!(fanout, "an arm's spawn carries the fanout mark");
+            assert!(fanout, "an arm's spawn sets the fanout mark");
         }
         other => panic!("expected a spawn request, got {other:?}"),
     }
@@ -134,8 +134,8 @@ fn tasks_spawn_resumes_with_a_methodless_task_table() {
         .resume((true, "0.3"))
         .expect("the shim returns the task table");
     assert_eq!(id, "0.3");
-    assert!(methodless, "the task table carries no metatable");
-    assert!(single_field, "the task table carries exactly one field");
+    assert!(methodless, "the task table is a plain table");
+    assert!(single_field, "the task table holds exactly one field");
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn tools_call_yields_a_well_formed_request() {
         } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
-            assert_eq!(call_id, None, "a script tools.call carries no call id");
+            assert_eq!(call_id, None, "a script call leaves the call id unset");
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }
@@ -263,7 +263,7 @@ fn captured_model_aliases_install_as_plain_handles() {
 }
 
 #[test]
-fn handles_carry_no_colon_methods() {
+fn handles_reject_colon_methods() {
     // Namespace-only invocation: a handle is a frozen, inspectable value,
     // so the old `handle:infer` method is gone - reading `infer` off the
     // userdata fails, and the one invocation form is the leading handle

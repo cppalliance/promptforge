@@ -1,7 +1,7 @@
 // The markdown renderer (src/parts/agent/markdown-render.ts) in jsdom: marked
 // output lands under a .ws-markdown-content root with the right elements for
 // headings, paragraphs, emphasis, links, lists, blockquotes, tables, and
-// images (including the =WxH dimension suffix); fenced code blocks carry
+// images (including the =WxH dimension suffix); fenced code blocks get
 // Shiki's theme colors once markdownReady resolves; and model-authored
 // attacks - javascript: hrefs, <script> tags, inline event handlers -
 // are stripped by the DOMPurify pass inside renderMarkdown. highlightCode
@@ -69,7 +69,7 @@ function render(text, options) {
 
 {
   const root = render("# Title\n\nA paragraph of prose.");
-  check("the rendered fragment's root carries the ws-markdown-content class",
+  check("the rendered fragment's root has the ws-markdown-content class",
     root?.classList.contains("ws-markdown-content"));
   check("a level-1 heading renders as an h1 with its text",
     root?.querySelector("h1")?.textContent === "Title");
@@ -165,7 +165,7 @@ function render(text, options) {
   const pre = root?.querySelector("pre");
   check("a fenced code block renders through Shiki once ready",
     pre?.classList.contains("shiki") === true);
-  check("a keyword in the block carries the theme's keyword color",
+  check("a keyword in the block gets the theme's keyword color",
     pre?.innerHTML.includes("color:#82D2CE") === true);
   check("the block's text content survives highlighting",
     pre?.textContent?.includes("fn main()") === true);

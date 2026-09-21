@@ -78,7 +78,7 @@ fn from_env_missing_gateway_key_is_fine_for_a_loopback_gateway() {
             .unwrap_or_else(|err| panic!("a loopback URL needs no key, got {err:?} for {url}"));
         assert!(
             !client.has_key(),
-            "the client built for {url} must carry no key"
+            "the client built for {url} must leave the key unset"
         );
         let empty_key = from_env_with(lookup_from(&[
             ("PROMPTFORGE_GATEWAY_URL", url),

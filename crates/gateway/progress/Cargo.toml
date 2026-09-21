@@ -10,7 +10,7 @@ description = "PromptForge gateway live-activity hub: a busy flag and producer-o
 
 [dependencies]
 gateway-api-types.workspace = true
-# `sync` carries the hub's watch channel; nothing else of tokio is used.
+# `sync` supplies the hub's watch channel; nothing else of tokio is used.
 tokio = { workspace = true, features = ["sync"] }
 workspace-hack.workspace = true
 

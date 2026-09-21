@@ -353,7 +353,7 @@ impl Tool for WebSearch {
             }
         }
 
-        // Success bodies carry third-party content: bound them (rejecting cap
+        // Success bodies hold third-party content: bound them (rejecting cap
         // overflow), then validate the promised JSON shape before returning it.
         let body = read_capped(response, MAX_RESPONSE_BODY).await?;
         let parsed: GatewayResults = serde_json::from_str(&body).map_err(|source| {

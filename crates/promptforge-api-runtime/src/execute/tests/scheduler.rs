@@ -616,7 +616,7 @@ async fn var_persists_across_a_jump() {
         ```lua\nerror('the jump must skip B')\n```\n\n\
         ## C\n\n\
         ```lua\n\
-        assert(var.from_a == 'a', 'the jump carries the jumper writes')\n\
+        assert(var.from_a == 'a', 'the jump keeps the jumper writes')\n\
         var.from_c = 'c'\n\
         ```\n\n\
         ## D\n\n\
@@ -1493,7 +1493,7 @@ async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
     );
     assert!(
         error.to_string().contains("the gate cannot hold"),
-        "the notice carries the assertion's message: {error}"
+        "the notice includes the assertion's message: {error}"
     );
     assert!(
         store.read("later.txt").is_err(),
@@ -1565,7 +1565,7 @@ async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
     // The other half of the remap's boundary: the shared replay is
     // machinery around the prompt's chunk, not the chunk itself, so its
     // failure is a prompt bug under the Lua kind, never the H1 gate's
-    // RequirementsUnmet. The context carries the prompt's real compiled
+    // RequirementsUnmet. The context holds the prompt's real compiled
     // shared library, not the empty stand-in the other H1 tests use.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
@@ -1626,7 +1626,7 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutive_child_ids() {
     // The H1 pass and the walk that follows it are one root chain, so the
-    // hand-off carries the pass's child counter into the walk: a `call`
+    // hand-off copies the pass's child counter into the walk: a `call`
     // the pass made is child `0.0`, and the walk's first `call` is child
     // `0.1`, not a second `0.0`. Were the counter copy dropped at the
     // hand-off, both calls would read `0.0.0`. The walk's own entry
@@ -1921,10 +1921,10 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     let requests = gateway.requests();
     let first_prose = requests[0]["messages"][0]["content"]
         .as_str()
-        .expect("the first request carries a user message");
+        .expect("the first request includes a user message");
     let second_prose = requests[1]["messages"][0]["content"]
         .as_str()
-        .expect("the second request carries a user message");
+        .expect("the second request includes a user message");
     assert!(
         first_prose.contains("h1 prose turn"),
         "the first completion is the H1 prose: {first_prose}"
@@ -2075,7 +2075,7 @@ pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
         .map(|body| {
             body["messages"][0]["content"]
                 .as_str()
-                .expect("an infer request carries a user message")
+                .expect("an infer request includes a user message")
                 .to_owned()
         })
         .collect()
@@ -2216,7 +2216,7 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
     // plus the structured-result shape of `fanout_returns_structured_results`:
     // each arm is a child chain of the caller (`0.0`, `0.1`) whose worker
     // entry is `0.K.0`, `sys.index` is the
-    // 1-based per-fanout position, and the packed sequence carries `.ok`
+    // 1-based per-fanout position, and the packed sequence holds `.ok`
     // and `.item` with `__tostring` driving `table.concat`. The ids log is
     // arm-scoped (the pattern the claims model teaches): every store op is
     // a leaf yield now, so two arms appending one path would genuinely race
@@ -2228,7 +2228,7 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
         ```lua\n\
         local r = fanout('### Worker', {'a', 'b'})\n\
         assert(r[1].ok and r[2].ok, 'both arms succeed')\n\
-        assert(r[2].item == 'b', 'the item rides the result object')\n\
+        assert(r[2].item == 'b', 'the result object holds the item')\n\
         store.append('ids.txt', 'parent:' .. sys.id .. '\\n')\n\
         return table.concat(r, ',')\n\
         ```\n\n\
@@ -2362,7 +2362,7 @@ async fn the_shared_replay_sees_the_arm_item() {
     // Mirror of the legacy `the_shared_replay_sees_the_arm_item`: the `item`
     // global installs before `replay_shared`, so the shared library's
     // top-level code may read `item`; moving the install after the replay
-    // would capture nil in the arm and fail this test. The context carries
+    // would capture nil in the arm and fail this test. The context holds
     // the prompt's real compiled shared library, not the empty stand-in the
     // other scheduler tests use.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -2531,7 +2531,7 @@ async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
     // The A9 seal on a result object: an assignment raises, `setmetatable`
     // is refused (the guard cannot be swapped out), `getmetatable` hands
     // back a decoy that exposes no `__index` (so the hidden fields table
-    // cannot be reached and mutated), and the decoy still carries
+    // cannot be reached and mutated), and the decoy still exposes
     // `__tostring` so the hardened `table.concat` renders the result. The
     // fields and `tostring` read as before.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -2658,7 +2658,7 @@ async fn fanout_depth_cap_reads_the_chain_field() {
     // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong calls
     // down the chain stack, and the chain that lands at depth 8 calls
     // fanout - each arm would run one level deeper, so the cap fires from
-    // the requesting chain's call-depth field. The arm's spawn carries the
+    // the requesting chain's call-depth field. The arm's spawn sets the
     // fanout mark, so the spawn arm names the cap after `fanout` in the
     // typed error itself; the shim re-raises that table and the retained
     // typed `Lua` error is substituted back at every `call` level, so the
@@ -3171,7 +3171,7 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sequential_fanouts_may_write_one_path() {
-    // Mirror of the legacy case of the same name: a later fanout carries a
+    // Mirror of the legacy case of the same name: a later fanout takes a
     // fresh write token, so its write overwrites the earlier fanout's
     // registry record instead of racing against it.
     let store = TestStore::new();
@@ -3804,7 +3804,7 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
     );
     assert!(
         out.contains("echoed: hi"),
-        "the wrapped block must still carry the tool output, got: {out}"
+        "the wrapped block must still include the tool output, got: {out}"
     );
 }
 

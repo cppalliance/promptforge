@@ -29,7 +29,7 @@ A Lua block that exhausts a host resource quota fails with a typed quota error n
 
 A run failure is classified into one stable kind: parse, version, binding, completion, tool, store, lua, quota, context_exhausted, input, substitution, cancelled, or internal. The kind tells you which layer rejected the run before you read the message.
 
-Parse failures carry a stable classification kind and, when known, the location of the offending region. Lua compile errors name the prompt region and map back to the original source line numbers, so the error points at your file, not at generated code.
+Parse failures report a stable classification kind and, when known, the location of the offending region. Lua compile errors name the prompt region and map back to the original source line numbers, so the error points at your file, not at generated code.
 
 ## Retrying and cancelling
 

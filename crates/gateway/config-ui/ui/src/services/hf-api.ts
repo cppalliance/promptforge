@@ -165,7 +165,7 @@ export function paramsFromName(name: string): string | null {
 
 /**
  * The quant tag of a GGUF filename, tolerating multi-part suffixes
- * (`-00001-of-00002`); null when the name carries no recognizable tag.
+ * (`-00001-of-00002`); null for an unrecognized name.
  */
 function quantOf(filename: string): string | null {
   const base = filename

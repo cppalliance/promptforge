@@ -60,7 +60,7 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
 fn allowed_dependencies(name: &str) -> Option<Vec<&'static str>> {
     let allowed = if name == "workshop-registry" {
         // The proxy slots speak the wire types: the status push-channel
-        // slot carries `workshop-protocol`'s `StatusBarUpdate`.
+        // slot holds `workshop-protocol`'s `StatusBarUpdate`.
         vec!["workshop-protocol"]
     } else if VOCABULARY.contains(&name) {
         Vec::new()
@@ -232,7 +232,7 @@ pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
     let walk = crate::product::workspace_crates(root);
     let mut violations = walk.violations;
     for krate in &walk.crates {
-        if family_requires_marker(&krate.package) && !carries_marker(&root.join(&krate.dir)) {
+        if family_requires_marker(&krate.package) && !has_marker(&root.join(&krate.dir)) {
             violations.push(format!(
                 "{}: src/lib.rs lacks the `{INVARIANT_MARKER}` marker required of every \
                  workshop-* and harness-* crate",
@@ -259,7 +259,7 @@ fn participating_crates(root: &Path) -> Vec<PathBuf> {
     walk.crates
         .iter()
         .filter(|krate| {
-            family_requires_marker(&krate.package) || carries_marker(&root.join(&krate.dir))
+            family_requires_marker(&krate.package) || has_marker(&root.join(&krate.dir))
         })
         .map(|krate| root.join(&krate.dir))
         .chain(walk.unread.iter().map(|dir| root.join(dir)))
@@ -267,7 +267,7 @@ fn participating_crates(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Whether a crate's `lib.rs` or `main.rs` crate docs have the marker.
-fn carries_marker(dir: &Path) -> bool {
+fn has_marker(dir: &Path) -> bool {
     ["src/lib.rs", "src/main.rs"].iter().any(|candidate| {
         fs::read_to_string(dir.join(candidate)).is_ok_and(|text| text.contains(INVARIANT_MARKER))
     })

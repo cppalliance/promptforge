@@ -1,7 +1,7 @@
 // Unit test for the lucide-backed icon strings (src/parts/shared/icons.ts).
 // Bundles the module with esbuild, imports it via a data URL under jsdom
 // (lucide's createElement needs a document at module load), and asserts
-// every exported icon is a parseable inline SVG string carrying the
+// every exported icon is a parseable inline SVG string holding the
 // dimensions and stroke attributes the tree panel's CSS sizes against -
 // the panel assigns these strings to innerHTML.
 // Run: node test/icons.mjs

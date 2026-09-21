@@ -5,7 +5,7 @@
 // execCommand fallback otherwise; cut, copy, and paste are always the
 // native path, refocused onto the remembered editable so CodeMirror
 // and ProseMirror serve them through their clipboard events. Every
-// row carries the textInputFocus precondition, which the action
+// row declares the textInputFocus precondition, which the action
 // registry also ANDs into the keybinding rule, so the chords fire only
 // while a text control holds focus. The rows are workbench-level: no
 // weight, so the WorkbenchContrib default applies.

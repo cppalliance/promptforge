@@ -50,7 +50,7 @@ pub(super) fn infer_prompt(effect: &Effect) -> String {
     };
     messages[0]["content"]
         .as_str()
-        .expect("an infer round carries one user message")
+        .expect("an infer round includes one user message")
         .to_owned()
 }
 

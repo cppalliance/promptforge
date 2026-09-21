@@ -143,7 +143,7 @@ await assertNoLeaks(lifecycle, async () => {
     isDeepStrictEqual(events, [fixture.agent_event_minimal, fixture.agent_event_stamped]),
   );
   check(
-    "the minimal event omits reply and the stamped event carries it, as the fixture does",
+    "the minimal event omits reply and the stamped event includes it, as the fixture does",
     events[0] !== undefined &&
       !("reply" in events[0]) &&
       events[1] !== undefined &&

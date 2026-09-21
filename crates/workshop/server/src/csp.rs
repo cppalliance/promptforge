@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn every_response_carries_the_policy() {
+    async fn every_response_is_stamped_with_the_policy() {
         // The UI document, its asset, the health probe, and an API error
         // envelope: the header is stamped at the composition root, so no
         // response class escapes it.
@@ -92,8 +92,8 @@ mod tests {
             let value = response
                 .headers()
                 .get(header::CONTENT_SECURITY_POLICY)
-                .unwrap_or_else(|| panic!("{uri} carries the policy"));
-            assert_eq!(value, POLICY, "{uri} carries the exact policy");
+                .unwrap_or_else(|| panic!("{uri} is stamped with the policy"));
+            assert_eq!(value, POLICY, "{uri} is stamped with the exact policy");
         }
     }
 
@@ -109,7 +109,7 @@ mod tests {
         let value = response
             .headers()
             .get(header::CONTENT_SECURITY_POLICY)
-            .expect("the proxied config route carries the policy");
+            .expect("the proxied config route is stamped with the policy");
         assert_eq!(value, POLICY_FRAMEABLE, "self-framing for the panel");
     }
 

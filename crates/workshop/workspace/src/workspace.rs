@@ -9,7 +9,7 @@
 //! stream names) and then
 //! canonicalized and prefix-matched against the canonical grants before any
 //! filesystem operation, so traversal, symlink escapes, and UNC aliases
-//! cannot reach outside a grant. This is the same jail shape as the
+//! cannot reach outside a grant. This is the same confinement as the
 //! gateway's artifact-cache `confine.rs`, with canonicalization performing
 //! the resolution that module's component walk performs by hand.
 

@@ -2,9 +2,9 @@
 // inside the title bar's center drag region with the no-drag marker
 // (window-chrome.ts starts a native drag only when the pointer lands on
 // the region itself, so any child element is already exempt; the class
-// documents the intent and carries the styling hook). The toolbar's
+// documents the intent and is the styling hook). The toolbar's
 // built-in item is the pill: two sibling buttons styled as one control.
-// The body carries the search icon and the window title and dispatches
+// The body shows the search icon and the window title and dispatches
 // the menu's first command row (workbench.action.quickOpenWithModes,
 // registered by the quickinput contribution); the ? chevron runs
 // workbench.action.quickOpenHelp. Any further command rows render as

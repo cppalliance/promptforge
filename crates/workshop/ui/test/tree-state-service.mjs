@@ -9,7 +9,7 @@
 // working default; the singleton surviving across lookups; the initial
 // expanded set applied from `{ expanded: [...] }` (a malformed value reads
 // as empty); expansion tracking; a burst of expand/collapse coalescing
-// into one writer call carrying the same shape; a throwing writer leaving
+// into one writer call with the same shape; a throwing writer leaving
 // the in-memory set intact; replaceExpanded replacing the set, firing
 // onDidChange, cancelling a pending write, and writing nothing itself;
 // the listing cache; root invalidation dropping only the roots listing;
@@ -139,7 +139,7 @@ for (const [label, malformed] of [
   await settle();
   check("a later change writes again", storage.sets.length === 2);
   check(
-    "the second write carries the reduced set",
+    "the second write records the reduced set",
     JSON.stringify(storage.sets[1]?.value) === JSON.stringify({ expanded: [SRC] }),
   );
 

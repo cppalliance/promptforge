@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn non_file_attachments_are_skipped() {
-        // The collection object itself rides along as a non-file IUnknown.
+        // The collection object itself is included as a non-file IUnknown.
         let not_a_file: IUnknown = ICoreWebView2ObjectCollectionView::from(FakeObjects {
             objects: Vec::new(),
         })

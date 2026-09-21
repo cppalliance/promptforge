@@ -7,7 +7,7 @@
 // closing the last agent panel keeps the right zone; dragging a zone's
 // last panel out leaves the zone alive and empty; relocating a zone's
 // group keeps exactly one group for the zone; the layout envelope is v4
-// and carries no placeholder panel; a relaunch restores the empty zones
+// and omits placeholder panels; a relaunch restores the empty zones
 // at their recorded widths with no panels; a mid-session restore and a
 // reset create no extra groups; an unrelated mutation never creates a
 // zone that was never opened; and nothing in the document reads
@@ -326,11 +326,11 @@ check("the main zone survives the editor's close as an empty group", zoneGroup(d
 const envelope = JSON.parse(JSON.stringify(buildLayoutEnvelope(dock)));
 check("the envelope reports schema version 4", envelope.version === 4);
 check(
-  "the envelope's panels carry no placeholder",
+  "the envelope's panels omit placeholder ids",
   !Object.keys(envelope.layout.panels).some((id) => id.startsWith("placeholder:")),
 );
 check(
-  "the envelope's grid views carry no placeholder",
+  "the envelope's grid views omit placeholder ids",
   !gridViewIds(envelope.layout.grid.root).some((id) => id.startsWith("placeholder:")),
 );
 check("the envelope's only panel is the tree", Object.keys(envelope.layout.panels).join(",") === "tree");

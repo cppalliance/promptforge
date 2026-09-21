@@ -206,7 +206,7 @@ fn workspace_file_failures_map_to_their_wire_codes() {
 }
 
 #[tokio::test]
-async fn the_json_envelope_carries_message_code_and_content_type() {
+async fn the_json_envelope_has_message_code_and_content_type() {
     let response = WorkspaceError::OutsideGrants.into_response();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let content_type = response
@@ -231,7 +231,7 @@ fn production_messages_stay_at_the_variant_text() {
     assert_eq!(
         render_message(&read, false),
         "file cannot be read",
-        "production bodies carry no source detail"
+        "production bodies omit the source detail"
     );
 }
 
@@ -272,7 +272,7 @@ fn the_ui_state_not_json_variant_reaches_the_serde_error_through_the_shared_wrap
         source: json.into(),
     };
     let Some(cause) = std::error::Error::source(&error) else {
-        panic!("the ui-state not-json variant carries its serde cause as source()");
+        panic!("the ui-state not-json variant reports its serde cause as source()");
     };
     let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
         panic!("the serde cause is the shared JsonSource");

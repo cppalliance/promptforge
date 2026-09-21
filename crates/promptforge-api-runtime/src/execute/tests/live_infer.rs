@@ -27,8 +27,8 @@ async fn live_h1_infer_runs_once() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_hosts_client_serves_a_run_the_context_never_names() {
-    // The context is the engine's input and carries no client; the host's
-    // `RunHost` does, and `Environment::run` performs the run's completions
+    // The context is the engine's input; the client lives on the host's
+    // `RunHost`, and `Environment::run` performs the run's completions
     // with it. Nothing about the gateway crosses the engine's boundary.
     let gateway = ScriptedGateway::start(vec![resp_text("host answer")]).await;
     let addr = gateway.addr();
@@ -446,10 +446,10 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     let requests = gateway.requests();
     let first_prose = requests[0]["messages"][0]["content"]
         .as_str()
-        .expect("the first request carries a user message");
+        .expect("the first request includes a user message");
     let second_prose = requests[1]["messages"][0]["content"]
         .as_str()
-        .expect("the second request carries a user message");
+        .expect("the second request includes a user message");
     assert!(
         first_prose.contains("h1 prose turn"),
         "the first completion is the H1 prose: {first_prose}"

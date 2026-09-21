@@ -48,7 +48,7 @@ console.warn = (...args) => {
 const isStateGet = (entry) =>
   entry.method === "GET" && (entry.url === USER_STATE || entry.url === WORKSPACE_STATE);
 const stateGets = (fetchLog) => fetchLog.filter(isStateGet);
-// The first service resolution of the boot; `url` carries the token id.
+// The first service resolution of the boot; `url` holds the token id.
 const firstResolve = (fetchLog) => fetchLog.find((entry) => entry.method === "RESOLVE");
 
 // Both state GETs recorded once each, both before the first getService.

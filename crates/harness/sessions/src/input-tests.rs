@@ -195,7 +195,7 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     assert_eq!(
         outcome,
         InputOutcome::Text(GNARLY.to_owned()),
-        "the operator's text rides back byte-exact"
+        "the operator's text returns byte-exact"
     );
     assert!(
         matches!(

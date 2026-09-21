@@ -42,7 +42,7 @@ pub enum CompletionErrorKind {
 /// Holds a stable [`kind`](CompletionError::kind) classifier plus the
 /// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
 /// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`
-/// and constructible outside the crate only from the hidden substrate.
+/// and constructible outside the crate only from the hidden internal type.
 ///
 /// # Examples
 ///

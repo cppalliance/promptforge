@@ -490,7 +490,7 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
     );
     // The SPA asset router arrives with the same loopback wall already
     // applied inside `routes()`; `nest_service` because the asset router
-    // carries no gateway state.
+    // runs without gateway state.
     #[cfg(feature = "config-ui")]
     let router = router.nest_service("/config/", gateway_config_ui::routes());
     #[cfg(feature = "stt")]

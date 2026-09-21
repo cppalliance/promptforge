@@ -2,14 +2,14 @@
 //!
 //! The harness spawns only through one instrumented wrapper in
 //! `harness-runner` that tags each task with its `EffectId` and
-//! `Provenance`, so every crate under `crates/harness/` and the door crate
-//! `crates/harness-api/` has a `clippy.toml` whose `disallowed-methods`
+//! `Provenance`, so every crate under `crates/harness/` and the public
+//! crate `crates/harness-api/` has a `clippy.toml` whose `disallowed-methods`
 //! names `tokio::spawn` and `tokio::task::spawn_blocking`. Clippy reads the
 //! nearest `clippy.toml` above each crate's manifest directory, so the file
 //! must sit in the crate itself, not only at the workspace root.
 //!
 //! The check is vacuously true while the container is empty or absent and
-//! while the door directory is absent.
+//! while the public crate's directory is absent.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,24 +17,24 @@ use std::path::{Path, PathBuf};
 /// The methods every harness `clippy.toml` must disallow.
 const BANNED: [&str; 2] = ["tokio::spawn", "tokio::task::spawn_blocking"];
 
-/// Checks every crate under `container` and, when it exists, the `door`
-/// crate directory for a complete clippy ban list.
+/// Checks every crate under `container` and, when it exists, the
+/// `public_crate` directory for a complete clippy ban list.
 #[must_use]
-pub(crate) fn harness_clippy_bans(container: &Path, door: &Path) -> Vec<String> {
-    harness_crates(container, door)
+pub(crate) fn harness_clippy_bans(container: &Path, public_crate: &Path) -> Vec<String> {
+    harness_crates(container, public_crate)
         .iter()
         .filter_map(|dir| check_crate(dir))
         .collect()
 }
 
 /// The crate directories the ban check covers: every crate under
-/// `container` plus the `door` crate when its directory exists.
+/// `container` plus `public_crate` when its directory exists.
 #[must_use]
-pub(crate) fn harness_crates(container: &Path, door: &Path) -> Vec<PathBuf> {
+pub(crate) fn harness_crates(container: &Path, public_crate: &Path) -> Vec<PathBuf> {
     let mut crates = Vec::new();
     collect_crates(container, &mut crates);
-    if door.is_dir() {
-        crates.push(door.to_path_buf());
+    if public_crate.is_dir() {
+        crates.push(public_crate.to_path_buf());
     }
     crates
 }
@@ -67,7 +67,7 @@ fn check_crate(dir: &Path) -> Option<String> {
         Ok(text) => text,
         Err(error) => {
             return Some(format!(
-                "{}: {}; every harness crate carries a clippy.toml whose disallowed-methods names {}",
+                "{}: {}; every harness crate has a clippy.toml whose disallowed-methods names {}",
                 path.display(),
                 if path.exists() {
                     format!("unreadable clippy.toml: {error}")

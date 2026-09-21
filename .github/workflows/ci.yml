@@ -175,7 +175,7 @@ jobs:
         run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe
 
       # workshop-server-api is the shell's re-export view of workshop-server,
-      # so it rides in this partition with the crates it fronts and stays
+      # so it runs in this partition with the crates it fronts and stays
       # out of the workspace-wide jobs like them.
       - name: Clippy (workshop)
         run: cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings

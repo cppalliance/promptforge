@@ -159,7 +159,7 @@ function check(name, condition) {
   ]);
   check("one button per submenu row", buttons.length === 2 && nav.children.length === 2);
   check(
-    "data-menu carries the menu id's last segment",
+    "data-menu holds the menu id's last segment",
     buttons[0].dataset.menu === "file" && buttons[1].dataset.menu === "appearance",
   );
   check(
@@ -200,7 +200,7 @@ function check(name, condition) {
     buttons.map((button) => button.textContent).join(",") === "File,Edit,View",
   );
   check(
-    "the generated buttons carry the last-segment selectors",
+    "the generated buttons have the last-segment selectors",
     buttons.map((button) => button.dataset.menu).join(",") === "file,edit,view",
   );
   menubar.dispose();

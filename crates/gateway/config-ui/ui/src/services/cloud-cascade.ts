@@ -85,7 +85,7 @@ export function familiesFor(slice: CloudProviderSlice, kind: string): string[] {
 
 /**
  * The table rows for one provider: canonical entries of `kind` (a
- * family selection narrows them), each carrying its snapshot variants
+ * family selection narrows them), each paired with its snapshot variants
  * for the "+N snapshots" disclosure.
  */
 export function canonicalRows(
@@ -112,7 +112,7 @@ export function canonicalRows(
 }
 
 /**
- * The name cell rule: the display name is primary; the id rides beneath
+ * The name cell rule: the display name is primary; the id renders beneath
  * it in monospace when they differ, since the id is what `upstream`
  * receives. Providers reporting no display name show the id once.
  */

@@ -20,8 +20,8 @@ use crate::{FetchError, Provider};
 #[path = "openrouter-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
-/// The OpenRouter provider descriptor: keyless - the model-list
-/// endpoint needs no credential.
+/// The OpenRouter provider descriptor: the model-list endpoint is
+/// keyless.
 pub const PROVIDER: Provider = Provider {
     name: "openrouter",
     display_name: "OpenRouter",
@@ -56,8 +56,7 @@ pub(crate) async fn fetch(
 
 /// One model as the wire reports it. `canonical_slug`, `description`,
 /// `per_request_limits`, `supported_parameters`, `default_parameters`,
-/// `supported_voices`, and `links` have no sheet meaning and are not
-/// parsed.
+/// `supported_voices`, and `links` are ignored.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,
@@ -80,17 +79,17 @@ struct WireArchitecture {
 }
 
 /// The pricing object: prompt and completion prices in USD per token,
-/// as strings. The cache, image, audio, and request price variants have
-/// no sheet field and are not parsed.
+/// as strings. The cache, image, audio, and request price variants are
+/// ignored.
 #[derive(Debug, Deserialize)]
 struct WirePricing {
     prompt: Option<String>,
     completion: Option<String>,
 }
 
-/// The top-provider object: only `max_completion_tokens` has a sheet
-/// field. Its `context_length` duplicates the top-level field and
-/// `is_moderated` has no sheet field.
+/// The top-provider object: the sheet reads only `max_completion_tokens`.
+/// Its `context_length` duplicates the top-level field and `is_moderated`
+/// is ignored.
 #[derive(Debug, Deserialize)]
 struct WireTopProvider {
     max_completion_tokens: Option<u32>,

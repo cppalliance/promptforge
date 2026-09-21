@@ -3,7 +3,7 @@
 // and esbuild hoists CSS reachable through dynamic imports into the
 // entry's app-*.css - no eager re-import in main.ts is needed or wanted.
 // This test builds for real and asserts over the build output: the entry
-// stylesheet must carry one marker class per lazy directory, so a future
+// stylesheet must include one marker class per lazy directory, so a future
 // esbuild behavior change (or an accidental import-graph cut) that drops
 // a lazy directory's CSS fails here instead of shipping unstyled panels.
 // The build goes to a scratch directory through build.mjs --out: the

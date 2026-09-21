@@ -753,7 +753,7 @@ mod tests {
         );
         assert!(
             config.workshop().is_none(),
-            "the generated config carries no [workshop] section"
+            "the generated config omits the [workshop] section"
         );
         let key = config.server().api_key().expose();
         assert_eq!(key.len(), API_KEY_LENGTH);
@@ -761,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn the_generated_config_carries_the_recommended_stt_pair_by_default() {
+    fn the_generated_config_includes_the_recommended_stt_pair_by_default() {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let path = generate_default(&temp.path().join(CONFIG_FILE_NAME), InstallerStt::Included)
             .expect("generates");
@@ -780,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn the_generated_config_carries_the_diagnostics_hint_as_a_comment() {
+    fn the_generated_config_writes_the_diagnostics_hint_as_a_comment() {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let path = generate_default(&temp.path().join(CONFIG_FILE_NAME), InstallerStt::Included)
             .expect("generates");
@@ -808,7 +808,7 @@ mod tests {
         );
         assert!(
             !raw.contains("stt_model"),
-            "the file carries no STT text at all: {raw}"
+            "the file omits STT text entirely: {raw}"
         );
         assert!(raw.contains("models = []"), "the profile selects nothing");
         assert_eq!(config.server().bind().to_string(), "127.0.0.1:0");

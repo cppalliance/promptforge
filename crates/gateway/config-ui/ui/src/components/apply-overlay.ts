@@ -1,13 +1,13 @@
 // Full-screen apply overlay [Adapted: Unsloth]: a dimmed layer centering
 // a card that shows the gateway's live activity while an apply runs - a
 // spinner beside the `Progress` text the `GET /admin/progress` stream
-// carries ("Downloading qwen 45%", "Applying configuration"), fed
+// sends ("Downloading qwen 45%", "Applying configuration"), fed
 // through `observe` - a check once the apply passed, and an error mark
-// when it died. The card carries a Cancel button (the overlay hides the
+// when it died. The card shows a Cancel button (the overlay hides the
 // status bar's own cancel control) that fires the caller's cancel hook
 // once. The terminal event closes the overlay - instantly on success,
 // after a short hold on failure so the failed state is seen (the toast
-// carries the message onward).
+// shows the message from there on).
 
 import { Check, X, createElement as lucideElement } from "lucide";
 

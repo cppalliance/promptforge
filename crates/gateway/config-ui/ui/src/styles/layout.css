@@ -130,7 +130,7 @@
 		border-left-color: var(--danger);
 	}
 
-	/* Toast stack, bottom-right: shared-ui/toast.css carries the rules;
+	/* Toast stack, bottom-right: shared-ui/toast.css defines the rules;
 	   the stack element comes from createToastStack. */
 
 	/* Modal scaffolding: dimmed full-screen overlay centering a card. */
@@ -289,7 +289,7 @@
 		background: var(--accent-subtle);
 	}
 
-	/* Apply overlay activity: the one row carries the spinner and the
+	/* Apply overlay activity: the one row holds the spinner and the
 	   gateway's activity text while the apply runs, the check once it
 	   finished, the error mark when it failed. */
 	.stage-list {
@@ -1421,7 +1421,7 @@
 }
 
 /* Bottom status bar [VS Code]: the shared shell (shared-ui/status-bar)
-   carries the bar, the text, the slot's progress/indicators swap, and
+   provides the bar, the text, the slot's progress/indicators swap, and
    the extras region; this file pins it to the viewport bottom and adds
    the gateway's own content - the endpoint LED strip in the indicators
    group, and the model/VRAM summary plus the pending-queue controls in

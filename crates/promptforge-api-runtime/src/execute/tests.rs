@@ -356,7 +356,7 @@ async fn run(
         env = env.tools(catalog);
         host = host.tools(table);
     }
-    // The host pattern: the context carries the current model, and
+    // The host pattern: the context holds the current model, and
     // prepare's trivial fill binds every declared role to it.
     if let Some(model) = test.models.models().first() {
         ctx = ctx.model(model.clone());
@@ -476,7 +476,7 @@ fn fixture_tools(
     let table = TestToolTable::from_tools(tools);
     let catalog = table
         .catalog()
-        .expect("the fixture tools carry legal wire names and distinct ids");
+        .expect("the fixture tools have legal wire names and distinct ids");
     (catalog, table)
 }
 
@@ -747,7 +747,7 @@ impl TestTool for FailingTool {
     }
 
     async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        // Carry an inner cause so the executor's error can be checked for source
+        // Attach an inner cause so the executor's error can be checked for source
         // preservation (item 4): the tool error must not be flattened to a string.
         let cause = std::io::Error::other("upstream socket reset");
         Err(
@@ -1365,7 +1365,7 @@ fn last_tool_turn_content(bodies: &[Value]) -> String {
     let last = bodies.last().expect("the loop must send a second request");
     last["messages"]
         .as_array()
-        .expect("a request body must carry a messages array")
+        .expect("a request body must include a messages array")
         .iter()
         .find(|m| m["role"] == "tool")
         .expect("the re-sent conversation must include the tool turn")["content"]
@@ -1379,7 +1379,7 @@ fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
     let last = bodies.last().expect("the loop must send a final request");
     last["messages"]
         .as_array()
-        .expect("a request body must carry a messages array")
+        .expect("a request body must include a messages array")
         .iter()
         .filter(|m| m["role"] == "tool")
         .filter_map(|m| m["content"].as_str())

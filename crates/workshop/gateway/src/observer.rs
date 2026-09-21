@@ -31,7 +31,7 @@ const BROADCAST_CAPACITY: usize = 256;
 /// valid and its entry never changes.
 ///
 /// A lock poisoned by a panicking peer recovers the value rather than
-/// wedging the process (the crate's zone-two posture).
+/// wedging the process.
 pub struct WorkshopObserver {
     /// The append-only in-memory log; an index once valid stays valid.
     events: RwLock<Vec<Event>>,
@@ -133,7 +133,7 @@ impl WorkshopObserver {
     }
 
     /// The read guard, recovering a lock poisoned by a panicking peer
-    /// rather than wedging the process (the crate's zone-two policy).
+    /// rather than wedging the process.
     fn read(&self) -> RwLockReadGuard<'_, Vec<Event>> {
         self.events.read().unwrap_or_else(PoisonError::into_inner)
     }

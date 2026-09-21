@@ -2,7 +2,7 @@
 //! map on the backing, read from the file at open and updated on every
 //! accepted put, mirrored into the file through the actor. Memory is
 //! the source of truth, as it is for grants and window state: a persist
-//! that fails is logged and the value stands (zone two).
+//! that fails is logged and the value stands.
 
 use std::collections::BTreeMap;
 use std::sync::PoisonError;

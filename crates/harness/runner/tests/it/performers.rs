@@ -185,7 +185,7 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
 }
 
 #[tokio::test]
-async fn the_vfs_store_performs_the_operation_the_effect_carries() {
+async fn the_vfs_store_performs_the_operation_the_effect_names() {
     let (log, run_id) = begun_log().await;
     let mut performers = unused();
     performers.store = Arc::new(VfsStore);
@@ -255,7 +255,7 @@ async fn task_events_returns_the_tasks_slice_and_last_narrows_it_to_later_events
         "`last` drops exactly the events already seen"
     );
     assert_eq!(none, 0, "`last` at the final event reads nothing new");
-    assert_eq!(parts[4], "true", "every event carries the child's task");
+    assert_eq!(parts[4], "true", "every event names the child's task");
 }
 
 #[tokio::test]

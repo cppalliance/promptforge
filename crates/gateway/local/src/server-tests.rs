@@ -357,7 +357,7 @@ fn launch_args_omit_companions_when_unconfigured() {
 fn companion_args_are_byte_identical_across_respawn_and_shutdown() {
     // The owned paths in `LaunchOptions` are the whole respawn state: the
     // respawn argv must equal the initial argv byte for byte, and an explicit
-    // shutdown still terminates the companion-carrying child.
+    // shutdown still terminates the child launched with companions.
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
     let mut select_port = || {
@@ -438,7 +438,7 @@ fn companion_args_are_byte_identical_across_respawn_and_shutdown() {
     guard.shutdown().expect("shutdown should succeed");
     assert!(
         !process_is_alive(pid),
-        "shutdown must terminate the companion-carrying child"
+        "shutdown must terminate the child launched with companions"
     );
 }
 
@@ -1488,7 +1488,7 @@ fn production_command_child_runs_at_below_normal_priority() {
     // The workspace forbids unsafe_code, so a windows-sys GetPriorityClass
     // probe cannot compile in this crate; instead the child reports its own
     // priority class on stdout, which breaks if creation_flags is dropped or
-    // carries the wrong value.
+    // holds the wrong value.
     let args = [
         OsString::from("-NoProfile"),
         OsString::from("-Command"),

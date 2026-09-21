@@ -1,6 +1,6 @@
 /* ChatBox (src/parts/chatbox/chat-box.ts): the bar, the framed rich-text
    prompt box, and the box's mic and send buttons. The bar is the card;
-   the frame sits in it; the inner ProseMirror contenteditable carries the
+   the frame sits in it; the inner ProseMirror contenteditable takes the
    type and the JS-driven height, clamped between the min/max tokens. */
 
 .ws-agent-session__bar {

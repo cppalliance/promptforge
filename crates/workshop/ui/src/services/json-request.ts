@@ -21,7 +21,7 @@ export function errorMessage(body: unknown, status: number, route: string): stri
   return `${route} answered ${status}`;
 }
 
-/** The server's machine-readable error code, when the body carries one. */
+/** The server's machine-readable error code, when the body includes one. */
 export function errorCode(body: unknown): string | null {
   if (isRecord(body) && isRecord(body.error) && typeof body.error.code === "string") {
     return body.error.code;
@@ -32,7 +32,7 @@ export function errorCode(body: unknown): string | null {
 /**
  * Performs one fetch, wrapping a transport failure as a typed error.
  * `route` labels the failure (for example "GET /workspace/tree") and may
- * differ from `url` when the URL carries a query string.
+ * differ from `url` when the URL ends in a query string.
  */
 export async function request(url: string, route: string, init?: RequestInit): Promise<Response> {
   try {

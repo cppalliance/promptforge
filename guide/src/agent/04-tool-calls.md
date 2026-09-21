@@ -24,7 +24,7 @@ end
 
 A round with advertised tools can come back with requested tool calls. The requested calls arrive unexecuted. Running them is your program's decision, never the driver's.
 
-Read each requested call from the 1-based entries of `result.tool_calls`. Each entry carries three fields: `id`, `name`, and `arguments`. The `arguments` field is already a Lua table, so you can pass it straight on.
+Read each requested call from the 1-based entries of `result.tool_calls`. Each entry has three fields: `id`, `name`, and `arguments`. The `arguments` field is already a Lua table, so you can pass it straight on.
 
 ## Dispatch a call
 
@@ -49,7 +49,7 @@ if result.tool_calls then
 end
 ````
 
-The model asked for the call, so the next round must report what happened. Append two messages to your list. First replay the assistant's tool-calling round with an `assistant` message that carries the round's `tool_calls` array. Then answer the call with a `tool` role message that carries the string `tool_call_id` of the call it answers, with the tool's output as its content.
+The model asked for the call, so the next round must report what happened. Append two messages to your list. First replay the assistant's tool-calling round with an `assistant` message that holds the round's `tool_calls` array. Then answer the call with a `tool` role message whose string `tool_call_id` names the call it answers, with the tool's output as its content.
 
 ## Count the dispatches
 

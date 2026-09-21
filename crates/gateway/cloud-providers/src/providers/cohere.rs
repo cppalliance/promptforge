@@ -1,10 +1,10 @@
 //! Cohere provider: the public descriptor plus the private variance of
 //! `GET /v1/models` under `https://api.cohere.com` - Bearer auth,
 //! `page_token` pagination, and normalization of `context_length`,
-//! `endpoints`, `features`, and `is_deprecated` into `ModelEntry`. The
-//! endpoint reports no pricing, no max-output field, and no release
-//! date; `tokenizer_url`, `finetuned`, `default_endpoints`, and
-//! `sampling_defaults` have no sheet meaning and are not parsed.
+//! `endpoints`, `features`, and `is_deprecated` into `ModelEntry`. No
+//! pricing, no max-output field, no release date; `tokenizer_url`,
+//! `finetuned`, `default_endpoints`, and `sampling_defaults` are
+//! ignored.
 //!
 //! Docs: <https://docs.cohere.com/reference/list-models>
 
@@ -126,8 +126,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     let features = model.features.as_deref().unwrap_or_default();
     entry.kind = model_kind(endpoints);
     entry.context_window = model.context_length.map(|length| length.round() as u32);
-    // The known feature flags; the rest of the free-form list has no
-    // sheet field.
+    // The known feature flags; the rest of the free-form list is ignored.
     entry.tool_calling = features.iter().any(|f| f == "tools");
     entry.images = features.iter().any(|f| f == "vision");
     if model.is_deprecated.unwrap_or(false) {

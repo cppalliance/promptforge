@@ -12,12 +12,11 @@
 //! so a session that connects later sends the current menu immediately -
 //! the delivery contract's resend-on-reconnect for ephemeral frames.
 //!
-//! Mutation is zone two throughout: a refused mutation (an unknown model
-//! id, a second switch while one runs) is a value returned to the caller,
-//! and a missing, unreadable, or corrupt memory file means "no memory
-//! yet" - logged and tolerated, never fatal. The memory file holds server
-//! state only; the UI's panel layout is view state and stays in the
-//! webview's localStorage.
+//! A refused mutation (an unknown model id, a second switch while one
+//! runs) is a value returned to the caller, and a missing, unreadable,
+//! or corrupt memory file means "no memory yet" - logged and tolerated,
+//! never fatal. The memory file holds server state only; the UI's panel
+//! layout is view state and stays in the webview's localStorage.
 
 #[path = "menu-memory.rs"]
 mod memory;
@@ -141,8 +140,7 @@ impl MenuState {
 }
 
 /// A refused menu mutation. A refusal is a state to report, not an error
-/// to escalate (zone two): the caller relays it and the applied state is
-/// untouched.
+/// to escalate: the caller relays it and the applied state is untouched.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum MenuRefusal {
@@ -180,7 +178,7 @@ impl MenuBus {
     /// Creates a bus with no subscribers, an empty ring, and no snapshot,
     /// loading the per-profile model memory from `state_dir` when one is
     /// given. A missing, unreadable, or corrupt memory file means "no
-    /// memory yet": logged and tolerated (zone two), never fatal.
+    /// memory yet": logged and tolerated, never fatal.
     #[must_use]
     pub fn new(catalog: CatalogBus, state_dir: Option<&Path>) -> Self {
         let memory_path = state_dir.map(|dir| dir.join(WORKSHOP_STATE_FILE));
@@ -263,11 +261,10 @@ impl MenuBus {
     /// [`SwitchOutcome::Completed`] the target becomes the active
     /// selection and the model selection moves to the remembered model
     /// for the target profile when the catalog still holds that model,
-    /// else to the first catalog model; a switch to no profile has no
-    /// memory to consult and selects the first catalog model. On
-    /// [`SwitchOutcome::Deferred`] and [`SwitchOutcome::Failed`] the
-    /// previous profile stays active. A finish with no switch in flight
-    /// is logged and ignored (zone two).
+    /// else to the first catalog model; a switch to no profile selects
+    /// the first catalog model. On [`SwitchOutcome::Deferred`] and
+    /// [`SwitchOutcome::Failed`] the previous profile stays active. A
+    /// finish with no switch in flight is logged and ignored.
     pub fn finish_switch(&self, outcome: SwitchOutcome) {
         let mut state = self.lock_state();
         let Some(target) = state.switching.take() else {
@@ -372,7 +369,7 @@ impl MenuBus {
     }
 
     /// The state guard, recovering a lock poisoned by a panicking peer
-    /// rather than wedging the process (the crate's zone-two policy).
+    /// rather than wedging the process.
     fn lock_state(&self) -> MutexGuard<'_, MenuState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }

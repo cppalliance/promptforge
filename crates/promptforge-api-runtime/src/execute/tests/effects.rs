@@ -144,7 +144,7 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
     );
     assert!(
         matches!(&records[2], EffectRecord::Chat { messages, .. } if messages.len() == 3),
-        "the second round carries the assistant and tool records: {:?}",
+        "the second round includes the assistant and tool records: {:?}",
         records[2]
     );
     assert_round_trips(&records);
@@ -225,7 +225,7 @@ async fn a_store_operation_issues_exactly_one_store_effect() {
                 },
             },
         ],
-        "each store call is one store effect carrying its validated op"
+        "each store call is one store effect holding its validated op"
     );
     assert_round_trips(&records);
 }

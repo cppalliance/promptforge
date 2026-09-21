@@ -124,7 +124,7 @@ function menubarScenario() {
     buttons.map((b) => b.textContent).join(",") === "File,Edit,View",
   );
   check(
-    "the buttons carry last-segment data-menu selectors and the popup state",
+    "the buttons have last-segment data-menu selectors and the popup state",
     buttons.every(
       (b) => b.getAttribute("aria-haspopup") === "menu" && b.getAttribute("aria-expanded") === "false",
     ) && button("file") !== null && button("edit") !== null && button("view") !== null,

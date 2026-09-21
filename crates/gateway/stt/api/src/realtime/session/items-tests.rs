@@ -142,7 +142,7 @@ async fn blocked_interim_keeps_exact_budget_until_worker_retirement_and_commit_r
                 };
                 assert!(
                     !source.to_string().is_empty(),
-                    "the restored chain carries the engine failure"
+                    "the restored chain reports the engine failure"
                 );
                 assert_eq!(
                     probe.retained_samples(),

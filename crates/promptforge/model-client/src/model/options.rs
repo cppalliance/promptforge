@@ -87,7 +87,7 @@ pub struct ModelInvocation {
 // No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
 
 /// One prompt-local alias bound to a model identity and frozen invocation.
-// No `Eq`: the frozen invocation carries an `f64` temperature.
+// No `Eq`: the frozen invocation holds an `f64` temperature.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelBinding {
     alias: String,
@@ -262,7 +262,7 @@ impl CompletionOptions {
 
 /// The run's model set: the prompt-level bindings produced by live H1
 /// execution plus the prompt-wide `default` alias.
-// No `Eq`: bindings carry `f64` temperatures transitively.
+// No `Eq`: bindings hold `f64` temperatures transitively.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModelSet {
     /// The bindings in declaration order.
@@ -299,10 +299,9 @@ impl ModelSet {
 ///
 /// The run context shares the set as `Arc<dyn ModelView>`; the live H1 pass
 /// writes through its own concrete `Arc<Mutex<ModelSet>>` handle, and once
-/// that VM is dropped no write handle remains. The trait exposes no
-/// mutation, so post-H1 frozenness is structural. Every method locks
-/// briefly and returns an owned snapshot: a mutex guard cannot outlive the
-/// call.
+/// that VM is dropped no write handle remains. The trait is read-only, so
+/// post-H1 frozenness is structural. Every method locks briefly and returns
+/// an owned snapshot: a mutex guard cannot outlive the call.
 pub trait ModelView: Send + Sync {
     /// Returns an owned snapshot of the bindings in declaration order.
     ///
@@ -365,7 +364,7 @@ mod tests {
 
     #[test]
     fn completion_options_equality_is_not_reflexive_for_nan() {
-        // `CompletionOptions` carries an `Option<Temperature>` (an `f64` newtype)
+        // `CompletionOptions` has an `Option<Temperature>` (an `f64` newtype)
         // temperature, so it must not implement `Eq`: a NaN temperature is not
         // equal to itself. This assertion documents the violated reflexivity
         // contract even though Rust permits a manual `Eq` implementation.

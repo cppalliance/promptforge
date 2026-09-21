@@ -125,13 +125,13 @@ function provider(prefix, options = {}) {
   registry.registerQuickAccessProvider(provider(">", { helpEntries: [{ description: "Show and Run Commands", prefix: ">" }] }));
   registry.registerQuickAccessProvider(provider("?", { helpEntries: [{ description: "Show Help", prefix: "?" }] }));
   const providers = registry.getQuickAccessProviders();
-  check("the listing carries every provider", providers.length === 3);
+  check("the listing includes every provider", providers.length === 3);
   check(
-    "the listing carries help entries",
+    "the listing includes help entries",
     providers.some((entry) => entry.helpEntries.some((help) => help.description === "Show and Run Commands" && help.prefix === ">")),
   );
   check(
-    "the listing carries placeholders",
+    "the listing includes placeholders",
     providers.every((entry) => typeof entry.placeholder === "string" && entry.placeholder.length > 0),
   );
   const stale = registry.registerQuickAccessProvider(provider("@"));

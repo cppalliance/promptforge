@@ -441,7 +441,7 @@ impl Gateway {
         listener: TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), ServeError> {
-        // The configured bind may carry port 0; the bound address is what
+        // The configured bind may specify port 0; the bound address is what
         // the host-authority wall allowlists.
         let bound = listener.local_addr().map_err(ServeError::io)?;
         let state = self.state;
@@ -937,7 +937,7 @@ fn serve_thread(
     };
     // The bind runs on this plain thread, apart from the serve future, so
     // the bound address is known before serving starts: the readiness
-    // signal and the gateway discovery file both carry the real port.
+    // signal and the gateway discovery file both report the real port.
     let listener = match runtime.block_on(TcpListener::bind(bind)) {
         Ok(listener) => listener,
         Err(error) => {
@@ -945,7 +945,7 @@ fn serve_thread(
             return Ok(());
         }
     };
-    // The configured bind may carry port 0; the bound local_addr is the
+    // The configured bind may specify port 0; the bound local_addr is the
     // real address the readiness signal must report.
     let address = match listener.local_addr() {
         Ok(address) => address,
@@ -1445,7 +1445,7 @@ models = []
 
     #[test]
     fn a_workshop_section_still_loads_and_earns_the_deprecation_warning() {
-        // Existing configs carry `[workshop]` from the hosted-workshop
+        // Existing configs include `[workshop]` from the hosted-workshop
         // era; they must keep parsing, with the warning discharging the
         // no-silent-ignore rule for the now-inert hosting fields.
         let temp = tempfile::TempDir::new().expect("temp dir");
@@ -1463,10 +1463,10 @@ models = []
         let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
 
         let (config, _) = load_startup_with_environment(&path, &options, None)
-            .expect("a config carrying [workshop] still loads");
+            .expect("a config that includes [workshop] still loads");
 
         let warning = workshop_section_deprecation(&config)
-            .expect("a carried [workshop] section earns the deprecation warning");
+            .expect("a [workshop] section earns the deprecation warning");
         assert!(
             warning.contains("[workshop]"),
             "the warning names the section: {warning}"

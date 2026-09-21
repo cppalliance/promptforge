@@ -195,7 +195,7 @@ export type AgentDeltaKind = "text" | "reasoning";
 
 /**
  * One live streaming chunk of an agent's model round. Ephemeral: deltas
- * ride a bounded broadcast and may drop under lag; the completed-reply
+ * go out on a bounded broadcast and may drop under lag; the completed-reply
  * event is the repair path. Every delta is stamped with the `reply` id of
  * the durable event that will supersede it, so the SPA coalesces chunks by
  * that id and replaces them when the event arrives (the ACP messageId

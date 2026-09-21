@@ -87,11 +87,11 @@ await assertNoLeaks(lifecycle, async () => {
       trigger.element.tagName === "BUTTON" && trigger.element.type === "button",
     );
     check(
-      "the trigger carries the ws-model-picker-trigger class",
+      "the trigger has the ws-model-picker-trigger class",
       trigger.element.classList.contains("ws-model-picker-trigger"),
     );
     check("no selection shows the placeholder label", labelOf(trigger) === "Select model");
-    check("no selection carries no tooltip", trigger.element.getAttribute("title") === null);
+    check("no selection omits the tooltip", trigger.element.getAttribute("title") === null);
     service.applySelected("alpha");
     check("the trigger shows the current model id", labelOf(trigger) === "alpha");
     trigger.dispose();

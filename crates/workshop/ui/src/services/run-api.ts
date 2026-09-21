@@ -30,7 +30,7 @@ export interface RunContractTool {
   readonly path: string;
 }
 
-/** The declared arg types the wire format carries. */
+/** The declared arg types the wire format allows. */
 export type RunContractArgType = "string" | "boolean" | "integer" | "number";
 
 /** One declared arg. */
@@ -44,7 +44,7 @@ export interface RunContractArg {
   readonly description: string | null;
 }
 
-/** The typed args declaration; implicit carries the single prose field. */
+/** The typed args declaration; implicit names the single prose field. */
 export interface RunContractArgs {
   readonly implicit: boolean;
   readonly fields: readonly RunContractArg[];
@@ -257,7 +257,7 @@ function parseContract(body: unknown): RunContract | null {
 
 /**
  * Throws the typed failure for one non-OK response. A 422 parse failure
- * carries the server's parse_<kind> code ahead of its line-numbered
+ * reports the server's parse_<kind> code ahead of its line-numbered
  * message, so the panel's error row shows both.
  */
 function httpFailure(body: unknown, status: number, route: string): never {

@@ -345,7 +345,7 @@ export class SpeechCaptureService extends Disposable {
   }
 
   /**
-   * Drops carried worklet audio while leaving the owner's microphone open.
+   * Drops buffered worklet audio while leaving the owner's microphone open.
    * A non-owner's clear is a no-op success.
    */
   clear(owner: symbol): SpeechCaptureOutcome {

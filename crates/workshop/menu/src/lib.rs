@@ -16,9 +16,9 @@
 //!   a lagging session skips ahead - every push is a complete snapshot, so
 //!   an overwritten one loses nothing. Both buses retain the newest push,
 //!   so a session connecting later receives the current state immediately.
-//! - Mutation is zone two throughout: a refused mutation is a value
-//!   returned to the caller, and a missing, unreadable, or corrupt memory
-//!   file means "no memory yet" - logged and tolerated, never fatal.
+//! - A refused mutation is a value returned to the caller, and a
+//!   missing, unreadable, or corrupt memory file means "no memory yet" -
+//!   logged and tolerated, never fatal.
 
 pub mod catalog;
 pub mod handles;

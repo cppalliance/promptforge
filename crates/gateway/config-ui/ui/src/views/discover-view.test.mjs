@@ -91,7 +91,7 @@ test("the search debounces to one proxied call and renders result rows", async (
   const rows = [...root.querySelectorAll(".result-row")];
   assert.equal(rows.length, 2, "every fixture repo renders a row");
   assert.equal(rows[0].querySelector(".model-name").textContent, REPO);
-  assert.ok(rows[0].querySelector(".result-avatar"), "the row carries the publisher avatar");
+  assert.ok(rows[0].querySelector(".result-avatar"), "the row shows the publisher avatar");
   assert.equal(rows[0].querySelector(".result-params").textContent, "8B");
   assert.match(rows[0].textContent, /1\.2M/, "downloads render compact");
   assert.match(rows[0].textContent, /3d ago/, "the updated time renders relative");
@@ -318,10 +318,10 @@ test("Download stages a pending model without touching the cache", async () => {
   assert.equal(
     entry.source,
     `https://huggingface.co/${REPO}/resolve/main/Qwen3-Test-8B-Q4_K_M.gguf`,
-    "the pending entry carries the hub resolve URL",
+    "the pending entry records the hub resolve URL",
   );
-  assert.equal(entry.sha256, "1".repeat(64), "the pending entry carries the LFS digest");
-  assert.equal(entry.vram_gb, 10, "the pending entry carries the listing size as VRAM");
+  assert.equal(entry.sha256, "1".repeat(64), "the pending entry records the LFS digest");
+  assert.equal(entry.vram_gb, 10, "the pending entry records the listing size as VRAM");
   assert.equal(entry.kind, "chat");
   // This stub defines no profiles, so the persisted "default" is stale
   // and the model can only join the catalog.
@@ -432,7 +432,7 @@ test("workload toggles fan out pipeline tags and merge them as OR filters", asyn
       ["sentence-similarity"],
       ["automatic-speech-recognition"],
     ],
-    "each upstream request carries one tag because Hugging Face intersects repeats",
+    "each upstream request sends one tag because Hugging Face intersects repeats",
   );
   assert.equal(
     root.querySelectorAll(".result-row").length,

@@ -39,7 +39,7 @@ test("Local and Remote tabs render only their catalog subsets", async () => {
   assert.equal(root.querySelector(".orphan-section"), null, "Remote never shows local files");
 });
 
-test("STT entries carry the Mic badge and implicit non-editable kind", async () => {
+test("STT entries show the Mic badge and implicit non-editable kind", async () => {
   const { dom, root } = await open();
   const row = [...root.querySelectorAll(".model-row")].find((entry) =>
     entry.textContent.includes("whisper-base-en"),

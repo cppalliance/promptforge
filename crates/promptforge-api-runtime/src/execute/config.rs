@@ -30,8 +30,8 @@ use super::bindings::{ModelBindings, ToolBindings};
 /// the host's; the engine reports events and issues effects as values and
 /// never reaches for a host seam.
 ///
-/// The engine reads no clock and draws no randomness of its own: the
-/// run's `seed` and `started_at` are inputs the host supplies to
+/// The engine takes its clock and randomness from the host: the run's
+/// `seed` and `started_at` are inputs the host supplies to
 /// [`new`](RunContext::new) (a harness draws both, records both, and a
 /// replay hands back the recorded values), so given the same inputs and
 /// the same answers a run reproduces its nonces, `sys.when`, effects, and

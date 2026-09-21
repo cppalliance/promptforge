@@ -130,8 +130,8 @@ pub(super) fn loop_owner(tail: &str) -> String {
 #[tokio::test(flavor = "current_thread")]
 async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     // Round 1 starts the task; the child runs and ends while the owner is
-    // between its drain and its round-2 chat, so round 2 carries no notice
-    // and round 3 carries exactly one, appended as a user record.
+    // between its drain and its round-2 chat, so the notice misses round 2
+    // and lands in round 3 as one user record.
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "task_status", "{\"id\":\"0.0\"}"),
@@ -171,7 +171,7 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
         "round 2 was issued before the notice existed: {round_2:?}"
     );
     let round_3 = bodies[2]["messages"].as_array().expect("messages");
-    assert_eq!(round_3.len(), 6, "round 3 carries the notice: {round_3:?}");
+    assert_eq!(round_3.len(), 6, "round 3 holds the notice: {round_3:?}");
     assert_eq!(round_3[5]["role"], "user");
     let notices = recorder.notices();
     assert_eq!(notices.len(), 1, "one notice is reported: {notices:?}");
@@ -181,7 +181,7 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
         notices[0]
             .2
             .starts_with("Task id=0.0 (## Child) completed: "),
-        "the report carries the text the model reads: {}",
+        "the report is the text the model reads: {}",
         notices[0].2
     );
 }
@@ -404,7 +404,7 @@ async fn notice_texts_name_how_a_task_ended() {
     assert_eq!(failed.len(), 1, "a failed task is one notice: {failed:?}");
     assert!(
         failed[0].2.starts_with("Task id=0.0 (## Child) failed: ") && failed[0].2.contains("boom"),
-        "the failure notice carries the task's error: {}",
+        "the failure notice reports the task's error: {}",
         failed[0].2
     );
 }

@@ -76,9 +76,9 @@ const handle = openModal({
 
 const overlay = host.querySelector(".confirm-overlay");
 check("the overlay mounts into the host", overlay !== null);
-check("the overlay carries the shared base class", overlay?.classList.contains("modal-overlay"));
+check("the overlay has the shared base class", overlay?.classList.contains("modal-overlay"));
 const dialog = host.querySelector(".confirm");
-check("the dialog carries the shared base class", dialog?.classList.contains("modal-dialog"));
+check("the dialog has the shared base class", dialog?.classList.contains("modal-dialog"));
 check("the dialog is an alertdialog", dialog?.getAttribute("role") === "alertdialog");
 check("the dialog is modal", dialog?.getAttribute("aria-modal") === "true");
 check("the dialog labels by the title", dialog?.getAttribute("aria-labelledby") === "confirm-title");
@@ -88,7 +88,7 @@ check(
 );
 check("the title renders", host.querySelector(".confirm__title")?.textContent === "Delete the model?");
 check("the message renders", host.querySelector(".confirm__line")?.textContent === "This removes the model.");
-check("the actions carry the prefix class", host.querySelector(".confirm__actions") !== null);
+check("the actions have the prefix class", host.querySelector(".confirm__actions") !== null);
 check("focus lands on the first button", window.document.activeElement?.textContent === "Cancel");
 
 // --- The duplicate guard ----------------------------------------------------------

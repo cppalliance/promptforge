@@ -10,7 +10,7 @@ local text = models.infer('Give this workshop a one-word name.')
 log(text)
 ````
 
-`models.infer(prompt)` runs one direct, tool-free text completion on a fresh conversation, and the call resumes with the completed text. Every call starts fresh: nothing carries over from one `models.infer` call to the next.
+`models.infer(prompt)` runs one direct, tool-free text completion on a fresh conversation, and the call resumes with the completed text. Every call starts fresh: nothing persists from one `models.infer` call to the next.
 
 Select the model first. `models.use('writer')` selects the catalog model named `writer`. An agent run has no default model, so a bare `models.infer` with no selection fails: "no model is selected: call models.use(...) before models.infer".
 
@@ -46,7 +46,7 @@ A `models.chat` round returns a result table with five fields: `reply`, `tool_ca
 
 Read the outcome from `reply` and `tool_calls`. Exactly one of them is present: the round produced text, or it requested tool calls. Never both. When the round produced text, `result.reply` holds the completed text.
 
-`result.model` names the model that served the round. `result.metrics` carries usage and backend timing. The `metrics` field is absent when nothing was measured, and absent optional fields read back as nil.
+`result.model` names the model that served the round. `result.metrics` reports usage and backend timing. The `metrics` field is absent when nothing was measured, and absent optional fields read back as nil.
 
 Check `finish_reason` for one thing: a value of "length" means the text reply was truncated.
 
@@ -87,7 +87,7 @@ local messages = {
 local result = models.chat(messages, { model = 'writer' })
 ````
 
-Pass `content` as a non-empty array of content parts when a message mixes text and images. A content part has a `type` of `text` or `image_url`. An `image_url` part carries a data-URI, which sends the image to a multimodal model.
+Pass `content` as a non-empty array of content parts when a message mixes text and images. A content part has a `type` of `text` or `image_url`. An `image_url` part holds a data-URI, which sends the image to a multimodal model.
 
 ## Agent-only
 

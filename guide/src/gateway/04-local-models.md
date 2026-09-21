@@ -70,7 +70,7 @@ sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 draft_max = 4
 ````
 
-The only type is `draft-mtp`, and `draft_max` is bounded to 1 through 16. Attach a multimodal projector with a `[local_model.multimodal_projector]` sub-table carrying a `source` and a `sha256` pin; a model with a projector accepts image inputs.
+The only type is `draft-mtp`, and `draft_max` is bounded to 1 through 16. Attach a multimodal projector with a `[local_model.multimodal_projector]` sub-table that sets a `source` and a `sha256` pin; a model with a projector accepts image inputs.
 
 Companion artifacts follow the main-model source rule: an https URL must be pinned, a local path may be unpinned, and plaintext http and empty sources are rejected. Companions on a non-chat model kind fail validation. Companions are provisioned and pin-verified before the child launches, and any failure aborts the launch.
 
@@ -88,7 +88,7 @@ Startup reports a structured progress tree under the boot load's stages: `loadin
 
 Startup is best-effort. Every model that launched keeps serving, and each model that failed is reported by name with its error. One bad model never blocks the rest. Startup failures are classified as plausibly transient or permanent, and the classification annotates the respawn diagnostics you see in the logs.
 
-Each child server listens only on loopback, and each launch uses a fresh random alias and bearer key, so other processes on the machine cannot ride the local endpoint. Responses still carry your configured model name. Startup waits up to 180 seconds for a child to become ready, and a port collision retries on a fresh port up to four times.
+Each child server listens only on loopback, and each launch uses a fresh random alias and bearer key, so other processes on the machine cannot reach the local endpoint. Responses still report your configured model name. Startup waits up to 180 seconds for a child to become ready, and a port collision retries on a fresh port up to four times.
 
 A child that dies is transparently respawned on the same port, alias, and key, with a 3 second cooldown between attempts so a crash loop cannot storm. Only transport-level deaths trigger a respawn, and an explicitly shut-down child is never respawned. Shutdown cancels and terminates even an in-flight respawn. Teardown is bounded to 5 seconds, so shutdown never hangs.
 

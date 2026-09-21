@@ -1,6 +1,6 @@
 //! The workspace operation failure type and its wire mapping.
 //!
-//! [`WorkspaceError`] is the boundary between the jail's zone-two
+//! [`WorkspaceError`] is the boundary between a workspace operation's
 //! failures and the HTTP response: each variant maps to exactly one
 //! status code and one machine-readable envelope code, rendered through
 //! `workshop-protocol`'s [`ErrorEnvelope`] at the route boundary.

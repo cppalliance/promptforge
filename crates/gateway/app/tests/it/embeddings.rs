@@ -182,7 +182,7 @@ async fn remote_passthrough_rewrites_model_and_relays_response() {
     assert_eq!(
         body.get("model").and_then(Value::as_str),
         Some("embed-model"),
-        "response carries the caller's model name, not the backend's"
+        "response reports the caller's model name, not the backend's"
     );
     assert_eq!(
         body.pointer("/data/0/index").and_then(Value::as_u64),

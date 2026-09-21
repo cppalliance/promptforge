@@ -76,7 +76,7 @@ fn gate_completions(captured: &CapturedRequests, body: &str) -> Response {
         .as_array()
         .and_then(|messages| messages.last())
         .and_then(|message| message["content"].as_str())
-        .expect("the request carries a user message")
+        .expect("the request includes a user message")
         .to_owned();
     if last == "fail" {
         return (StatusCode::INTERNAL_SERVER_ERROR, "injected model failure").into_response();
@@ -262,7 +262,7 @@ async fn launch_chat(socket: &mut JsonSocket) -> String {
     assert_eq!(frame["agent"], "chat");
     frame["session"]
         .as_str()
-        .expect("the acknowledgment carries the session id")
+        .expect("the acknowledgment includes the session id")
         .to_owned()
 }
 
@@ -279,7 +279,7 @@ async fn assert_chat_quiet(socket: &mut JsonSocket, duration: Duration) {
 fn role_content_pairs(request: &serde_json::Value) -> Vec<(String, String)> {
     request["messages"]
         .as_array()
-        .expect("a captured request carries a messages array")
+        .expect("a captured request includes a messages array")
         .iter()
         .map(|message| {
             (
@@ -289,7 +289,7 @@ fn role_content_pairs(request: &serde_json::Value) -> Vec<(String, String)> {
                     .to_owned(),
                 message["content"]
                     .as_str()
-                    .expect("every message carries string content")
+                    .expect("every message has string content")
                     .to_owned(),
             )
         })

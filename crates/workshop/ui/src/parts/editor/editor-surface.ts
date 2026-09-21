@@ -74,7 +74,7 @@ export interface EditorDocument {
  */
 export const externalUpdate = Annotation.define<boolean>();
 
-/** Whether a transaction carries server-originated content (see {@link externalUpdate}). */
+/** Whether a transaction holds server-originated content (see {@link externalUpdate}). */
 export function isExternalUpdate(tr: Transaction): boolean {
   return tr.annotation(externalUpdate) === true;
 }
@@ -113,7 +113,7 @@ export interface EditorSurface {
 }
 
 // The dark theme skins from the same :root tokens as the rest of the UI;
-// every var() carries the token's stock value as fallback.
+// every var() names the token's stock value as fallback.
 const promptforgeTheme = EditorView.theme(
   {
     "&": {

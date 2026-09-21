@@ -20,7 +20,7 @@
 //! refusals when the frame included one. A frame that is not a
 //! well-formed menu event is answered with an `error` frame and the
 //! session continues. Chat itself is on the `/agents/ws` socket
-//! ([`super::socket`]); this endpoint has no chat frames.
+//! ([`super::socket`]).
 //!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer
@@ -217,7 +217,7 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
                 Some(Ok(Message::Text(text))) => {
                     handle_frame(&state, &text, &mut socket).await;
                 }
-                // Binary frames carry no meaning here; pings and pongs are
+                // Binary frames are ignored here; pings and pongs are
                 // answered by axum itself.
                 Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => {}
                 Some(Ok(Message::Close(_))) | None => break,

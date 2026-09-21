@@ -163,7 +163,7 @@ fn render_env(vars: &BTreeMap<String, String>) -> Result<String, GatewayError> {
         }
         let rendered = render_value(value).ok_or_else(|| {
             GatewayError::ConfigWriteRejected(format!(
-                "env variable {key} has a value no dotenv quoting can carry \
+                "env variable {key} has a value no dotenv quoting can encode \
                  (an embedded newline, or a single quote mixed with $, \", or \\)"
             ))
         })?;

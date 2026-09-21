@@ -9,7 +9,7 @@ use harness_api::LaunchError;
 use super::*;
 
 #[test]
-fn a_refused_launch_frame_carries_the_cause_text() {
+fn a_refused_launch_frame_includes_the_cause_text() {
     let cause = "agents directory is locked by another process";
     let refusal = LaunchRefusal::Refused(LaunchError::SessionState {
         source: io::Error::new(io::ErrorKind::PermissionDenied, cause),

@@ -24,7 +24,7 @@ export interface GatewayConfigBridgeOptions {
   readonly statusBar: BridgeStatusSink;
   /** Transport for the API-forward proxy; the global fetch in production. */
   readonly fetchFn?: FetchLike;
-  /** The window whose message events carry the bridge; the global one in production. */
+  /** The window whose message events feed the bridge; the global one in production. */
   readonly win?: Pick<Window, "addEventListener" | "removeEventListener">;
   /**
    * Reply seam: posts `message` back to the event's source window at

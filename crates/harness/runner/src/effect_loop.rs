@@ -165,9 +165,9 @@ impl<'a> Driver<'a> {
                 }
                 Step::Pending { effects, events } => {
                     // The run's own word, not a scan of its events: the
-                    // events are a report, and control never rides on
-                    // them. A cancel that fired before this step is
-                    // handed to the run here so its next step observes it.
+                    // events are a report, not a control channel. A cancel
+                    // that fired before this step is handed to the run here
+                    // so its next step observes it.
                     if self.cancel.is_cancelled() {
                         self.run.cancel();
                     }

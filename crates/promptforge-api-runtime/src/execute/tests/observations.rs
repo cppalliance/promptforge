@@ -49,7 +49,7 @@ fn event_trace(event: &Event) -> (String, String) {
     let value = serde_json::to_value(event).expect("an event serializes");
     let kind = value["kind"]
         .as_str()
-        .expect("a serialized event carries its kind tag");
+        .expect("a serialized event includes its kind tag");
     (event.section().to_owned(), kind.to_owned())
 }
 

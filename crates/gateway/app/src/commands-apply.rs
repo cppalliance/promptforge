@@ -3,7 +3,7 @@
 //!
 //! The `POST /admin/config-apply` route takes the census under
 //! the apply lock and calls [`capture_apply`] to turn it into an
-//! [`ApplyPlan`]: an inline promotion for shadows that need no reload, or
+//! [`ApplyPlan`]: an inline promotion for shadows that skip the reload, or
 //! an [`ApplySnapshot`] that is queued as `Command::ApplyConfig` and
 //! runs through [`apply_config`]. The snapshot vocabulary and the
 //! promotion step sit here beside the command that consumes them, so the

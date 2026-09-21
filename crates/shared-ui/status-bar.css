@@ -1,13 +1,13 @@
 /* Styles for status-bar.ts, which imports this file; esbuild bundles it
    into the consuming UI's app.css. Themed values come from the :root
-   tokens in tokens.css. Carries the bar itself, the text/extras/right
+   tokens in tokens.css. Styles the bar itself, the text/extras/right
    regions, the busy barberpole, and the generic status LED primitive
    (idle lens, lit modifiers, and the pulse/decay transitions). Rules
    live in the components layer so a consumer's own rules (the gateway's
    fixed positioning) override these. */
 
 /* The status bar: a permanent full-width footer below the shell. The
-   left text carries the current label; the extras region holds consumer
+   left text shows the current label; the extras region holds consumer
    controls; the right group holds the barberpole and then the slot with
    the consumer's LED indicators group. The barberpole hides while idle
    (the hidden attribute); the indicators never hide. min-height rather
@@ -89,7 +89,7 @@
 		display: none;
 	}
 
-	/* The busy barberpole: a thin rounded track carrying diagonal green
+	/* The busy barberpole: a thin rounded track painted with diagonal green
 	   stripes that slide while work is in flight. One fill stripe plus one
 	   track gap spans one period horizontally, and the period is twice the
 	   bar height so each stripe is as wide as the bar is tall. The tile is

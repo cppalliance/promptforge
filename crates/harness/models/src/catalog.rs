@@ -336,7 +336,7 @@ mod tests {
         use axum::routing::get;
 
         // A gateway with speech-to-text lists its transcription models beside
-        // the inference models, and those entries carry no `context` or
+        // the inference models, and those entries omit `context` and
         // `thinking` (they answer no completion request). The fetch must keep
         // the inference descriptors instead of rejecting the whole list,
         // otherwise every host on such a gateway binds under a fallback

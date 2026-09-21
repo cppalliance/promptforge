@@ -56,7 +56,7 @@ export interface KeybindingDispatcherDependencies {
 }
 
 /**
- * The status-bar-backed sink. Local messages ride showLocal, which the
+ * The status-bar-backed sink. Local messages go through showLocal, which the
  * next observer frame overwrites; clear restores the idle text. With no
  * composition root (a widget test) the messages go to the console so a
  * swallowed failure stays loud.

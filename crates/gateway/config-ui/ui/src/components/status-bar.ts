@@ -120,7 +120,7 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
       document.body.classList.add("has-status-bar");
       void poll();
       timer = setInterval(() => void poll(), options.pollMs ?? STATUS_POLL_MS);
-      // Node's interval carries `unref`; the browser's numeric handle does
+      // Node's interval provides `unref`; the browser's numeric handle does
       // not, so a test process never hangs on the bar's poll loop.
       (timer as unknown as { unref?: () => void }).unref?.();
     },

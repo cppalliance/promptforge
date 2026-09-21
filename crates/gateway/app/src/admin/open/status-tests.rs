@@ -84,14 +84,14 @@ fn the_endpoint_readiness_mapping() {
 }
 
 #[tokio::test]
-async fn the_status_response_carries_the_queue_and_endpoint_shape() {
+async fn the_status_response_has_the_queue_and_endpoint_shape() {
     let body = get_status(state()).await;
     assert_eq!(body["queue"]["active"], serde_json::Value::Null);
     assert_eq!(body["queue"]["pending"], serde_json::json!([]));
     assert_eq!(
         body["progress"],
         serde_json::json!({ "busy": false, "text": "" }),
-        "an idle gateway carries the idle Progress snapshot at the top level: {body}"
+        "an idle gateway reports the idle Progress snapshot at the top level: {body}"
     );
     assert_eq!(
         body["loading_models"],
@@ -162,11 +162,11 @@ async fn the_status_response_reports_the_active_and_pending_commands() {
     );
     assert!(
         body["queue"]["active"].get("fraction").is_none(),
-        "the active command carries no fraction: {body}"
+        "the active command omits the fraction: {body}"
     );
     assert!(
         body["queue"]["active"]["started_at"].is_u64(),
-        "the active command carries its start time as epoch seconds: {body}"
+        "the active command reports its start time as epoch seconds: {body}"
     );
     assert_eq!(
         body["progress"],

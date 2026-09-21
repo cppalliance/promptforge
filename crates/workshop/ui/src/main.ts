@@ -113,14 +113,14 @@ registerService(
     ),
 );
 
-// One persistent socket carries the server's downstream JSON - status
+// One persistent socket delivers the server's downstream JSON - status
 // updates the status bar renders as they arrive, catalog pushes, and
-// workbench snapshots. Chat rides the agent panel's own /agents/ws
+// workbench snapshots. Chat goes over the agent panel's own /agents/ws
 // socket, composed inside the panel. The status bar builds its own
 // shell (shared-ui) and appends it as the body's full-width footer.
 const statusBar = disposables.add(new StatusBar());
 const updates = disposables.add(new UpdateService());
-// The shared toast stack carries the update notifications; the workshop
+// The shared toast stack shows the update notifications; the workshop
 // keeps it clear of the status bar via --toast-inset-block-end.
 const toasts = createToastStack();
 document.body.append(toasts.element);
@@ -147,7 +147,7 @@ const workshopSocket = disposables.add(new WorkshopSocket());
 // The model catalog and selection live in the ModelService, not module
 // state: the agent toolbar's picker resolves the service from the
 // registry and observes its change events. Selecting a model is a
-// command the socket carries to the server; the selection itself changes
+// command the socket sends to the server; the selection itself changes
 // only when a workbench snapshot arrives. The service subscribes itself
 // to the socket's catalog push, so a gateway returning after an outage
 // heals a boot-time empty catalog in place.

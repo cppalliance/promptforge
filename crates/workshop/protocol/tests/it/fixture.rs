@@ -146,7 +146,7 @@ fn server_to_client_agent_frames_match_the_shared_fixture() {
         serde_json::to_value(AgentEventFrame::new(4, Some(1), &stamped_fixture_event()))
             .expect("the frame serializes"),
         fixture["agent_event_stamped"],
-        "the event rides in its wire shape, metrics and all"
+        "the event serializes in its wire shape, metrics and all"
     );
     assert_eq!(
         serde_json::to_value(AgentDeltaFrame::new(

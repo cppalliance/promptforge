@@ -102,7 +102,7 @@ function parseWorkspaceFile(body: unknown): WorkspaceFileResponse | null {
 /**
  * Performs one request and reads its JSON body, wrapping transport
  * failures, non-JSON answers, and non-OK statuses as typed errors. Every
- * route here answers a plain HttpStatus on refusal; none carries a
+ * route here answers a plain HttpStatus on refusal; none reports a
  * distinguished code the way the write route's modified_conflict does.
  */
 async function requestJson(route: string, init?: RequestInit): Promise<unknown> {

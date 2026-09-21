@@ -79,7 +79,7 @@ pub(crate) fn install_frozen(lua: &Lua, argv: Option<&Json>) -> Result<()> {
         None => (Value::Nil, Value::Nil),
     };
     let metatable = lua.create_table().map_err(Error::lua)?;
-    // Carry every other field the previous metatable installed, then shadow
+    // Copy every other field the previous metatable installed, then shadow
     // the index pair with the argv guard.
     if let Some(old) = &old {
         for pair in old.clone().pairs::<Value, Value>() {

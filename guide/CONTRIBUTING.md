@@ -1,6 +1,6 @@
 # Contributing to the guide
 
-The guide has four documentation sets, one per audience: `src/workshop/`, `src/gateway/`, `src/language/`, and `src/agent/`. Chapters inside a set carry a numeric prefix that fixes the reading order.
+The guide has four documentation sets, one per audience: `src/workshop/`, `src/gateway/`, `src/language/`, and `src/agent/`. Chapters inside a set start with a numeric prefix that fixes the reading order.
 
 ## Ownership
 

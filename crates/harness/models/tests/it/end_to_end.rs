@@ -388,7 +388,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     assert_eq!(body["model"], "m", "the round names the bound model");
     let asked = body["messages"]
         .as_array()
-        .expect("the request carries messages")
+        .expect("the request includes messages")
         .iter()
         .any(|message| {
             message["content"]

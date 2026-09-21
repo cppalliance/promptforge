@@ -16,7 +16,7 @@ name = "travel"
 models = ["qwen3-local"]
 ````
 
-A profile is a checklist of local and speech-to-text models. Membership alone decides which local models spawn and which speech models load; profiles carry no per-field overrides. Every name a profile lists must be a `[[local_model]]` or `[[stt_model]]` entry, and each must exist exactly once. Naming a remote `[[model]]` in a profile fails validation with an error saying the model is remote: remote models are never gated by a profile, because every `[[model]]` in the catalog routes all the time. Duplicate profile names and duplicate members also fail validation.
+A profile is a checklist of local and speech-to-text models. Membership alone decides which local models spawn and which speech models load. Every name a profile lists must be a `[[local_model]]` or `[[stt_model]]` entry, and each must exist exactly once. Naming a remote `[[model]]` in a profile fails validation with an error saying the model is remote: remote models are never gated by a profile, because every `[[model]]` in the catalog routes all the time. Duplicate profile names and duplicate members also fail validation.
 
 Profile names must be a single safe path component: no surrounding whitespace, not empty, not `.` or `..`, and no path separators. One spelling works in URLs, state files, and labels.
 
@@ -53,7 +53,7 @@ curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" \
   http://127.0.0.1:8081/admin/switch-profile
 ````
 
-The request body carries `name`: a profile name, or `null` to select no profile. The gateway checks a named profile against the loaded catalog and refuses an undefined name with the list of defined profiles. It then writes the state file (or deletes it for `null`) and answers plain JSON:
+The request body holds `name`: a profile name, or `null` to select no profile. The gateway checks a named profile against the loaded catalog and refuses an undefined name with the list of defined profiles. It then writes the state file (or deletes it for `null`) and answers plain JSON:
 
 ````
 {"profile": "travel", "restart_required": true}
@@ -63,4 +63,4 @@ The request body carries `name`: a profile name, or `null` to select no profile.
 
 Restart the gateway to load the selection. A gateway the Workshop supervises is restarted by the Workshop when you pick a profile from its Model menu; a gateway you run yourself restarts by hand, and the configuration UI shows a banner reading "Restart the gateway to apply these changes." until the new process comes up.
 
-The selection is not part of the config edit surface. `PUT /admin/config` refuses a document carrying `active_profile`, and `GET /admin/config-dirty` never reports it. `GET /admin/config-pending` reports the persisted selection under `profile.active_profile`, read from the real state file, so a client can show a selection that differs from the running profile or names a profile the config no longer defines.
+The selection is not part of the config edit surface. `PUT /admin/config` refuses a document that sets `active_profile`, and `GET /admin/config-dirty` never reports it. `GET /admin/config-pending` reports the persisted selection under `profile.active_profile`, read from the real state file, so a client can show a selection that differs from the running profile or names a profile the config no longer defines.

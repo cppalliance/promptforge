@@ -84,10 +84,10 @@ function setup() {
   check("a valid action registers ok", result.ok === true);
   const command = commands.lookup("file.save");
   check("the command is registered", command !== undefined);
-  check("the command carries its metadata", command?.title === "Save" && command?.category === "File" && command?.precondition === "editorTextFocus" && command?.toggled === "editorDirty");
+  check("the command records its metadata", command?.title === "Save" && command?.category === "File" && command?.precondition === "editorTextFocus" && command?.toggled === "editorDirty");
   const fileRows = menus.getMenuItems(MenuId.MenubarFileMenu);
   check("the menu entry lands in its menu", fileRows.length === 1 && fileRows[0]?.command === "file.save" && fileRows[0]?.group === "1_save");
-  check("the menu entry carries its args", fileRows[0]?.args?.[0] === "quiet");
+  check("the menu entry records its args", fileRows[0]?.args?.[0] === "quiet");
   const shareRows = menus.getMenuItems("menubar/file/share");
   check("a second menu entry lands in its own menu", shareRows.length === 1 && shareRows[0]?.when === "hasProfile");
   const paletteRows = menus.getMenuItems(MenuId.CommandPalette);

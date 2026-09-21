@@ -709,7 +709,7 @@ fn backend_ctor_classifies_and_hides_source() {
 #[test]
 fn the_facade_is_send_and_sync() {
     // The facade is shared across spawned tasks that outlive the caller,
-    // so the assertion carries the promised bounds.
+    // so the assertion states the promised bounds.
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Store<'static>>();
 }

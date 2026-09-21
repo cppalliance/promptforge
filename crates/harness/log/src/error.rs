@@ -79,7 +79,7 @@ mod tests {
             "page 1 is not a b-tree page".to_owned(),
         ));
         let Some(cause) = error.source() else {
-            panic!("the database variant carries its engine cause as source()");
+            panic!("the database variant reports its engine cause as source()");
         };
         let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
             panic!("the engine cause is the shared DatabaseSource");
@@ -94,7 +94,7 @@ mod tests {
         };
         let error = LogError::from(json);
         let Some(cause) = error.source() else {
-            panic!("the payload variant carries its serde cause as source()");
+            panic!("the payload variant reports its serde cause as source()");
         };
         let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
             panic!("the serde cause is the shared JsonSource");

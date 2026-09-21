@@ -8,7 +8,7 @@
 // Backspace shortcut all read this.name, so they follow the rename
 // automatically. (The rename must happen in extend: configure() merges
 // its argument into the options and explicitly keeps the parent name.)
-// The node carries the chip model beyond upstream's id and label: kind,
+// The node holds the chip model beyond upstream's id and label: kind,
 // icon, preview, tone, and the opaque host payload `data`, each written
 // to and read from a data attribute so the pill survives the clipboard
 // (copy renders HTML, paste parses it) and JSON persistence alike.
@@ -185,7 +185,7 @@ export const MentionChip = Mention.extend({
       for (const [name, value] of Object.entries(HTMLAttributes)) {
         // The chip owns its class; the remaining rendered attributes
         // (data-id, data-label, data-mention-suggestion-char, and the
-        // chip model's data-*) carry over.
+        // chip model's data-*) copy over.
         if (name === "class") {
           continue;
         }

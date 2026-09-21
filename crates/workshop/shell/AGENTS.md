@@ -2,7 +2,7 @@
 
 This crate owns the desktop shell and its product lifecycle.
 
-- Unsafe is confined to the Windows bridge (`src/bridge.rs`): dense working COM with documented failure modes and the crate's only unsafe code; its module-level `#[expect(unsafe_code)]` is deliberate, and every unsafe block carries a `// SAFETY:` comment on the immediately preceding line. Do not restructure it casually, and never edit it without running its tests. No other module contains unsafe code.
+- Unsafe is confined to the Windows bridge (`src/bridge.rs`): dense working COM with documented failure modes and the crate's only unsafe code; its module-level `#[expect(unsafe_code)]` is deliberate, and every unsafe block has a `// SAFETY:` comment on the immediately preceding line. Do not restructure it casually, and never edit it without running its tests. No other module contains unsafe code.
 - Discovery, server-spawn, health-wait, window, and webview boot failures surface loudly with their full error chain.
 - The running event loop degrades and reports recoverable bridge failures instead of crashing the window.
 - Gateway launch is detached from the shell through the gateway-api-discovery launch contract. The shell never hosts the Gateway in-process.

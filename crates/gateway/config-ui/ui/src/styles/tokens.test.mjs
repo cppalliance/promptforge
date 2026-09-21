@@ -1,5 +1,5 @@
 // Pins the CSS wiring end to end: the esbuild bundle must emit
-// dist/app.css carrying the shared Cursor Dark design tokens
+// dist/app.css containing the shared Cursor Dark design tokens
 // (shared-ui/tokens.css) and the cascade layer order, and
 // dist/index.html must link that stylesheet - a dropped import in
 // main.ts or a dropped <link> would ship an unstyled UI without any

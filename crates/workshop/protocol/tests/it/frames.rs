@@ -49,7 +49,7 @@ fn busy_and_the_remaining_variants_serialize() {
     assert_eq!(
         frame["busy"],
         serde_json::json!(true),
-        "the busy flag rides the frame as a plain boolean, never a progress object"
+        "the busy flag appears on the frame as a plain boolean, never a progress object"
     );
     assert!(
         frame.get("progress").is_none(),
@@ -160,7 +160,7 @@ fn an_agent_session_frame_serializes_its_id_and_agent() {
 }
 
 #[test]
-fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
+fn an_agent_event_frame_has_its_log_index_and_optional_reply_id() {
     use promptforge_api_types::event::Event;
     use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
     let event = Event::UserInput {
@@ -177,7 +177,7 @@ fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
     )
     .expect("the frame serializes");
     assert_eq!(plain["type"], "agent_event");
-    assert_eq!(plain["index"], 3, "the frame carries the entry's log index");
+    assert_eq!(plain["index"], 3, "the frame reports the entry's log index");
     assert!(
         plain.get("reply").is_none(),
         "an absent reply id is omitted from the wire, not serialized as null"
@@ -187,7 +187,7 @@ fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
         serde_json::json!({
             "kind": "user_message", "section": "chat", "turn": 0, "content": "hi",
         }),
-        "the entry rides in its ACP-labelled wire shape"
+        "the entry serializes in its ACP-labelled wire shape"
     );
     let stamped = serde_json::to_value(
         AgentEventFrame::new(4, Some(1), &event).expect("a user-input event frames"),
@@ -195,7 +195,7 @@ fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
     .expect("the frame serializes");
     assert_eq!(
         stamped["reply"], 1,
-        "a superseding event is stamped with the reply id its deltas carried"
+        "a superseding event is stamped with the same reply id as its deltas"
     );
 }
 
@@ -269,7 +269,7 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
             "kind": "agent_thought", "section": "chat", "turn": 2,
             "content": "weighing the options", "model": "llama-3",
         }),
-        "a thinking block keeps its model and carries no tool-call id"
+        "a thinking block keeps its model and omits the tool-call id"
     );
 
     let result = Event::ToolResult {
@@ -292,7 +292,7 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
             "kind": "tool_call_update", "section": "chat", "turn": 2,
             "content": "the file's text", "tool_call_id": "call_7",
         }),
-        "a tool result keeps the id it answers and its content, and carries no model"
+        "a tool result keeps the id it answers and its content, and omits the model"
     );
 }
 

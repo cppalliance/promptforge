@@ -95,7 +95,7 @@ function check(name, condition) {
   await commands.execute("test.run");
   check("disposing the stale registration leaves the upsert in place", runs === 21);
   const current = commands.lookup("test.run");
-  check("the upsert carries no stale metadata", current.category === undefined && current.precondition === undefined);
+  check("the upsert drops the stale metadata", current.category === undefined && current.precondition === undefined);
 
   const disposable = commands.register("test.gone", { run: () => {} });
   disposable.dispose();
@@ -106,7 +106,7 @@ function check(name, condition) {
 
 {
   check(
-    "the MenuId const object carries the well-known ids",
+    "the MenuId const object defines the well-known ids",
     MenuId.MenubarMainMenu === "menubar" && MenuId.MenubarFileMenu === "menubar/file" && MenuId.CommandPalette === "commandPalette",
   );
 

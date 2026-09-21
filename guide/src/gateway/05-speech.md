@@ -17,7 +17,7 @@ vram_gb = 1.0
 
 Each entry has a `name`, a `role` of `interim` or `final`, a `source`, an optional `sha256` pin, a `vram_gb` estimate, and an optional `dominion` binding. The interim role transcribes while a take is still recording. The final role crystallizes completed audio.
 
-A profile may select at most one interim and one final STT model. A final model requires an interim partner. Interim-only is a supported degraded mode. You can restore a built-in recommended pair at any time: whisper-base-en for interim and whisper-small-en for final, both carrying canonical whisper.cpp URLs and SHA-256 pins.
+A profile may select at most one interim and one final STT model. A final model requires an interim partner. Interim-only is a supported degraded mode. You can restore a built-in recommended pair at any time: whisper-base-en for interim and whisper-small-en for final, both with canonical whisper.cpp URLs and SHA-256 pins.
 
 ## Tune push-to-talk capture
 
@@ -62,7 +62,7 @@ The server creates a transcription session for the logical model `realtime-trans
 
 Only null noise reduction and turn detection are accepted. Session updates may change the transcription prompt and negotiate the PromptForge extension `item.input_audio_transcription.hypothesis`. Standard clients receive OpenAI-shaped session, item, transcription delta, completed, failed, and error events. Extension clients also receive revisioned replacement snapshots with the complete transcript and its finalized, agreed, and tentative regions; completion remains authoritative.
 
-A continuous Realtime recording remains one provisional item and one logical take for arbitrary duration. Continuous speech forces an accurate boundary every 10 seconds. Each successor carries the preceding 8 seconds for text reconciliation, so every accurate decode contains at most 18 seconds. Finalized text and exact lifetime duration survive source-buffer compaction, and every hypothesis remains a complete replacement snapshot for that same item.
+A continuous Realtime recording remains one provisional item and one logical take for arbitrary duration. Continuous speech forces an accurate boundary every 10 seconds. Each successor repeats the preceding 8 seconds for text reconciliation, so every accurate decode contains at most 18 seconds. Finalized text and exact lifetime duration survive source-buffer compaction, and every hypothesis remains a complete replacement snapshot for that same item.
 
 The 30-second limit is retained ownership, not recording duration. It includes resident, queued, and actively decoding 16 kHz PCM. Arbitrary-duration capture therefore requires steady-state final throughput at least equal to capture. If decoding falls behind until that retained budget is exhausted, the append receives `too_much_unfinalized_audio`; previously accepted audio and text remain valid and may still be committed. One append decodes to at most 15 MiB, committed audio must be at least 100 ms, one connection may have four committed items finalizing concurrently, and the service admits at most eight Realtime sessions. Queue and capacity overloads return explicit errors instead of waiting without limit.
 

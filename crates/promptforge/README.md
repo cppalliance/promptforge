@@ -20,4 +20,4 @@ The promptforge VFS policy: the `/_promptforge` mount layout, the stock empty ha
 
 ## promptforge-model-client
 
-The gateway model client: OpenAI-shaped chat-completions transport, wire types, and the model catalog and binding vocabulary. The runtime and the Lua host call models through it. Depends on promptforge-api-types; reqwest carries the transport.
+The gateway model client: OpenAI-shaped chat-completions transport, wire types, and the model catalog and binding vocabulary. The runtime and the Lua host call models through it. Depends on promptforge-api-types; reqwest implements the transport.

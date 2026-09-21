@@ -4,7 +4,7 @@
 // pill looks the same wherever it appears: an icon slot, a truncated
 // label, and optionally a remove button. The NodeView asks for the
 // button and wires it; the strip and the read-only renderer pass
-// `removable: false` and get a pill without one. The pill carries the
+// `removable: false` and get a pill without one. The pill renders the
 // chip's kind and tone as data attributes for the skin; icons come from
 // the chip's named icon, then the label's extension, then a generic
 // glyph.

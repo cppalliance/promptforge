@@ -162,7 +162,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).expect("the body is JSON");
         json["error"]["code"]
             .as_str()
-            .expect("the envelope carries a code")
+            .expect("the envelope includes a code")
             .to_owned()
     }
 

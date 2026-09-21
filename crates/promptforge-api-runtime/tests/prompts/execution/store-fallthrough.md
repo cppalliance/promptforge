@@ -1,6 +1,6 @@
 ---
 name: store_fallthrough
-description: Carry explicit store state across isolated fall-through sections
+description: Write store state in one section and read it in the next
 promptforge: 0
 ---
 

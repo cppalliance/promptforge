@@ -65,7 +65,7 @@ function readPaths(value: unknown): Set<string> {
 
 /**
  * Narrows the persisted payload to the expanded set: it must be an object
- * carrying an `expanded` array. Anything else reads as nothing expanded.
+ * with an `expanded` array. Anything else reads as nothing expanded.
  */
 function readExpanded(initial: unknown): Set<string> {
   return isRecord(initial) ? readPaths(initial.expanded) : new Set();

@@ -53,7 +53,7 @@ return prose\n\
 
 #[tokio::test]
 async fn unread_prose_never_evaluates_and_never_errors() {
-    // The template carries an unclosed `{{` and a missing key; a block
+    // The template contains an unclosed `{{` and a missing key; a block
     // that never reads `prose` runs clean because neither is evaluated.
     let md = prose_prompt!(
         "## Only\n\n\

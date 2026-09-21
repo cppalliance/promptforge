@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/harness-web-search)](https://docs.rs/harness-web-search)
 [![License](https://img.shields.io/crates/l/harness-web-search)](LICENSE)
 
-A web-search tool for language models. It POSTs the model's query to the PromptForge gateway's `/tools/web_search` endpoint with a shared bearer token, so the vendor search credential never leaves the server. Arguments are validated and bounded before any network I/O, every request carries a fixed deadline, response bodies are capped and rejected on overflow, and the token is redacted from all diagnostics.
+A web-search tool for language models. It POSTs the model's query to the PromptForge gateway's `/tools/web_search` endpoint with a shared bearer token, so the vendor search credential never leaves the server. Arguments are validated and bounded before any network I/O, every request sets a fixed deadline, response bodies are capped and rejected on overflow, and the token is redacted from all diagnostics.
 
 ## Usage
 

@@ -75,12 +75,12 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
         let index = position + 1;
         if record.role != MessageRole::Assistant && !record.tool_calls.is_empty() {
             return Err(Error::Lua(format!(
-                "messages[{index}] carries tool_calls but is not an assistant message"
+                "messages[{index}] sets tool_calls but is not an assistant message"
             )));
         }
         if record.role != MessageRole::Tool && record.tool_call_id.is_some() {
             return Err(Error::Lua(format!(
-                "messages[{index}] carries a tool_call_id but is not a tool message"
+                "messages[{index}] sets a tool_call_id but is not a tool message"
             )));
         }
         match record.role {
@@ -197,8 +197,8 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
                 };
                 last.content = merge_content(&last.content, &record.content, separator);
             }
-            // Visible text rides the tool-call turn it precedes rather than
-            // breaking provider alternation as a lone assistant message.
+            // Visible text merges into the tool-call turn it precedes rather
+            // than breaking provider alternation as a lone assistant message.
             Some(last)
                 if last.role == MessageRole::Assistant
                     && last.tool_calls.is_empty()

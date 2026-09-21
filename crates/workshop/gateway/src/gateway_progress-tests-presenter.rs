@@ -52,7 +52,7 @@ async fn a_busy_snapshot_pushes_only_once_the_show_delay_has_passed() {
     assert_eq!(
         recorder.pushed(),
         [("Downloading model".to_owned(), true)],
-        "the delay lapsing pushes one busy frame carrying the gateway text"
+        "the delay lapsing pushes one busy frame holding the gateway text"
     );
     assert_eq!(
         presenter.next_wake(),

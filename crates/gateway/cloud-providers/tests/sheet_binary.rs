@@ -124,9 +124,9 @@ fn empty_home(test: &str) -> PathBuf {
 
 /// Runs the binary with every provider key stripped from the environment,
 /// so no host credential can turn a fixture run into a live fetch.
-/// Keyless providers (no `key_env`) have no credential to strip: they
-/// still fetch live, so their slice status depends on egress and the
-/// universal `unavailable` assertions below exempt them.
+/// Keyless providers (no `key_env`) still fetch live, so their slice
+/// status depends on egress and the universal `unavailable` assertions
+/// below exempt them.
 fn run_binary(output: &PathBuf, previous_url: Option<&str>) -> Output {
     let mut command = Command::new(BIN);
     command.arg(output);
@@ -328,7 +328,7 @@ fn binary_reports_each_failed_keyed_provider_on_stderr() {
         let note = format!("note: {} fetch failed", provider.name);
         assert!(
             stderr.contains(&note),
-            "stderr must carry one note per failed keyed provider (`{}`): {stderr}",
+            "stderr must include one note per failed keyed provider (`{}`): {stderr}",
             provider.name
         );
     }

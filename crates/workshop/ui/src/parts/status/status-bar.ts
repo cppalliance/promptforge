@@ -2,7 +2,7 @@
 // persistent socket and paints them into the shared status bar shell
 // (shared-ui/status-bar), which owns the bar, the text region, and the
 // busy barberpole beside the indicators. Info and error frames set the
-// text (the description rides as the tooltip) and drive the barberpole;
+// text (the description shows as the tooltip) and drive the barberpole;
 // debug frames are internal instrumentation: they never touch the text
 // or the barberpole, but they do pulse the LED. The workshop's
 // indicators group holds the recording and activity LEDs; the shell's
@@ -37,7 +37,7 @@ export class StatusBar extends Disposable {
     super();
     this.visibleKey = getService(CONTEXT_KEY_SERVICE).createKey("statusBarVisible", true);
     this.shell = createStatusBarShell();
-    // The workshop's indicators: the recording LED carries the --rec
+    // The workshop's indicators: the recording LED has the --rec
     // marker; the activity LED is the unmarked one.
     this.rec = document.createElement("span");
     this.rec.className = "status-bar__led status-bar__led--rec";

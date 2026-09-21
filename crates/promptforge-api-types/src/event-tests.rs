@@ -35,7 +35,7 @@ fn one_variant_of_each_group_round_trips_through_serde() {
         section: "Gather".to_owned(),
         provenance: provenance("0", 0),
     });
-    // Lifecycle, message-carrying.
+    // Lifecycle, with a message.
     round_trips(&Event::Lua {
         execution: "run-1".to_owned(),
         section: "Gather".to_owned(),

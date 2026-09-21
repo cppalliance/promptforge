@@ -86,7 +86,7 @@ The built-in `RECOMMENDED_STT_MODELS` pair is `base.en` for interim and `small.e
 
 ## Pending edits
 
-`save_config_shadow` accepts the pending admin document and writes it to `gateway.toml.next`, the only shadow. A document carrying `active_profile` fails validation with a message pointing at `POST /admin/switch-profile`: the selection is state, never staged. `load_pending_config(config_path, selection)` reads the config shadow when present and resolves the profile exactly as `Config::load` does, from the ephemeral selection and the real `gateway.state.toml`. `pending_report` lists only the config shadow. No save touches a real file until `promote_shadow` renames the shadow into place, or a caller holding the intended contents commits them with `write_atomic`, the replace-through-rename primitive the shadow and `persist_profile_state` build on.
+`save_config_shadow` accepts the pending admin document and writes it to `gateway.toml.next`, the only shadow. A document that sets `active_profile` fails validation with a message pointing at `POST /admin/switch-profile`: the selection is state, never staged. `load_pending_config(config_path, selection)` reads the config shadow when present and resolves the profile exactly as `Config::load` does, from the ephemeral selection and the real `gateway.state.toml`. `pending_report` lists only the config shadow. No save touches a real file until `promote_shadow` renames the shadow into place, or a caller holding the intended contents commits them with `write_atomic`, the replace-through-rename primitive the shadow and `persist_profile_state` build on.
 
 ## License
 

@@ -193,7 +193,7 @@ mod tests {
         }
         let legacy = deprecation_of(Some("Legacy"), None).expect("Legacy is a sunset label");
         assert_eq!(legacy.status, "legacy");
-        assert_eq!(legacy.date, None, "a sunset label alone carries no date");
+        assert_eq!(legacy.date, None, "only a retirement date sets the date");
         let dated = deprecation_of(Some("Preview"), Date::from_ordinal_date(2027, 1).ok())
             .expect("a retirement date deprecates whatever the label says");
         assert_eq!(

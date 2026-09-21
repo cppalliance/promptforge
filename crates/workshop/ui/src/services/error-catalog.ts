@@ -2,7 +2,7 @@
 // Result for operations whose callers branch on the outcome (grantPath),
 // and CatalogError for the throw-based HTTP boundaries (workspace-api),
 // where the ErrorCatalog code - never the message text - is what callers
-// match on. Both carry the same stable codes, so a failure's meaning
+// match on. Both share the same stable codes, so a failure's meaning
 // survives the trip from the fetch boundary to the status bar.
 
 /** The outcome of one fallible operation: a value, or a typed error. */

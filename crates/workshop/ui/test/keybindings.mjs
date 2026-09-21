@@ -127,7 +127,7 @@ check("a trailing plus is a parse error", !parseKeybinding("ctrl+s+", "windows")
 check("a space inside a chord is a parse error", !parseKeybinding("ctrl + s", "windows").ok);
 {
   const result = parseKeybinding("ctrl+banana", "windows");
-  check("a parse error carries a message and offset", !result.ok && typeof result.error.message === "string" && typeof result.error.offset === "number");
+  check("a parse error reports a message and offset", !result.ok && typeof result.error.message === "string" && typeof result.error.offset === "number");
 }
 
 // --- KeyboardEvent mapping through event.code ----------------------------------------
@@ -241,7 +241,7 @@ const ctrlMO = [chord(true, false, false, false, "m"), chord(true, false, false,
 
 // --- The registry ---------------------------------------------------------------------------
 
-check("KeybindingWeight carries the VS Code tiers", KeybindingWeight.EditorCore === 0 && KeybindingWeight.EditorContrib === 100 && KeybindingWeight.WorkbenchContrib === 200 && KeybindingWeight.BuiltinExtension === 300 && KeybindingWeight.ExternalExtension === 400);
+check("KeybindingWeight defines the VS Code tiers", KeybindingWeight.EditorCore === 0 && KeybindingWeight.EditorContrib === 100 && KeybindingWeight.WorkbenchContrib === 200 && KeybindingWeight.BuiltinExtension === 300 && KeybindingWeight.ExternalExtension === 400);
 
 {
   const registry = createKeybindingsRegistry("windows");

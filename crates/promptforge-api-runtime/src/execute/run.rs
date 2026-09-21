@@ -250,12 +250,12 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result
     }
     // Section startup replays the shared library unconditionally; a prompt
     // without one replays an empty compiled chunk instead, so the startup
-    // sequence carries no `Option` branch.
+    // sequence always has a program to replay.
     let shared = match prompt.replay() {
         Some(program) => program.clone(),
         None => crate::lua::LuaProgram::empty()?,
     };
-    // The stock handle carries the store mount; a hand-built router lacking
+    // The stock handle includes the store mount; a hand-built router lacking
     // it gets a fresh memory store overlaid as a defensive fallback, so a
     // run never fails for want of the mount. A mounted-but-failing backend
     // is never shadowed by the throwaway overlay: its error fails the run.

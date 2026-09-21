@@ -399,7 +399,7 @@ async fn spawn_recording_server() -> (u16, Arc<Mutex<Vec<HeaderMap>>>) {
 
 fn split_header(out: &str) -> (&str, &str) {
     out.split_once("\n\n")
-        .expect("the return must carry a header and a blank-line separator")
+        .expect("the return must include a header and a blank-line separator")
 }
 
 #[path = "tool-tests-body.rs"]

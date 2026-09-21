@@ -16,4 +16,4 @@ The safe Whisper decoder backend for the engine. The api crate selects it as the
 
 ## gateway-whisper-ffi
 
-Runtime-loaded safe bindings for the pinned whisper.cpp C API. Only the Whisper backend uses it. No workspace dependencies; libloading carries the dynamic loading.
+Runtime-loaded safe bindings for the pinned whisper.cpp C API. Only the Whisper backend uses it. No workspace dependencies; libloading performs the dynamic loading.

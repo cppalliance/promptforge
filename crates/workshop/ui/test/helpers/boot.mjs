@@ -69,7 +69,7 @@ function uiStateOptions(uiState = {}) {
  * app's own boot tree is exempt by construction (the tracker installs after
  * boot settles); it lives for the page lifetime by design.
  *
- * `ctx` carries the window, the scripted-socket registry, the status bar
+ * `ctx` holds the window, the scripted-socket registry, the status bar
  * elements, the fetch log, and the push helpers; `run` records failed
  * expectations by pushing plain-English messages onto ctx.failures.
  * `options.uiState` scripts the two UI-state buckets (see uiStateOptions).
@@ -310,7 +310,7 @@ export async function bootWorkbench(name, run, options = {}) {
 
   // The bundle's test-only seams (the disposable tracker, the service
   // observer) are tree-shaken out of the entry; bundle-seams.mjs reattaches
-  // them as appended exports and answers the chunk path carrying each.
+  // them as appended exports and answers the chunk path holding each.
   const seams = await attachSeams();
   // The service observer must be live before the entry evaluates: the
   // resolutions it records happen during boot itself. Importing the seam's
@@ -449,7 +449,7 @@ export async function bootWorkbench(name, run, options = {}) {
   // workbench snapshot on connect, in that order (session.rs) - the app
   // makes no HTTP state fetches at boot. Mirror all three pushes here:
   // the status seeds the status bar, the catalog populates the agent
-  // toolbar's model picker, and the snapshot carries the selection.
+  // toolbar's model picker, and the snapshot names the selection.
   emitStatus();
   emitModels([{ id: "test-model", description: "scripted" }]);
   emitWorkbench();

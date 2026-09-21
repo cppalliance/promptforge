@@ -84,7 +84,7 @@ fn spawn_without_options_parses_every_seed_as_absent() {
 
 #[test]
 fn spawn_seed_shape_errors_are_the_calls_error() {
-    // `item` and `index` are author options: a wrong shape rides back as
+    // `item` and `index` are author options: a wrong shape returns as
     // the call's answer so `tasks.spawn` raises it at the call site.
     let lua = Lua::new();
     let table = request_table(&lua, "spawn");
@@ -186,7 +186,7 @@ fn timer_parses_a_non_negative_finite_seconds_value() {
 #[test]
 fn timer_seconds_out_of_domain_are_the_calls_error() {
     // `seconds` is the author's `opts.timeout`: a negative, non-finite,
-    // out-of-range, or non-numeric value rides back as the call's answer
+    // out-of-range, or non-numeric value returns as the call's answer
     // so the wait shim raises it at the call site and starts no timer.
     let lua = Lua::new();
     let cases: [(Value, &str); 5] = [
@@ -246,7 +246,7 @@ fn task_events_parses_the_task_and_the_optional_last_bound() {
 #[test]
 fn task_events_last_out_of_domain_is_the_calls_error() {
     // `last` is the author's `opts.last`: a negative, fractional, or
-    // non-numeric value rides back as the call's answer so the shim raises
+    // non-numeric value returns as the call's answer so the shim raises
     // it at the call site; a malformed id is the id's own error.
     let lua = Lua::new();
     for (value, needle) in [

@@ -137,7 +137,7 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// registry for [`install_section_loop_shim`], so agent VMs - which run
 /// this prelude too - never receive it. `max_tool_iterations` is the
 /// loop's round cap, the run's resolved value, captured by the chunk so
-/// the shim needs no host call to read it.
+/// the shim reads it without a host call.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table

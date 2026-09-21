@@ -19,7 +19,7 @@ pub(crate) struct ListResponse<M> {
     pub data: Vec<M>,
 }
 
-/// Fetches the whole list in one request; the dialect has no pagination.
+/// Fetches the whole list in one request.
 pub(crate) async fn fetch_list<M: DeserializeOwned>(
     client: &reqwest::Client,
     url: &str,
@@ -39,8 +39,7 @@ pub(crate) async fn fetch_list<M: DeserializeOwned>(
 /// The conservative base entry for one listed model: chat kind, every
 /// capability false, every optional field empty. Provider files overwrite
 /// the fields their endpoint actually reports; an IDs-only endpoint
-/// yields this entry unchanged. The dialect reports no display name, so
-/// the id doubles as the display name.
+/// yields this entry unchanged. The id doubles as the display name.
 pub(crate) fn base_entry(id: &str, created: Option<i64>) -> ModelEntry {
     ModelEntry {
         id: id.to_owned(),

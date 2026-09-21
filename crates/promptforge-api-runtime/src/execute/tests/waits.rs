@@ -327,7 +327,7 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
          local _, ok, err = tasks.when_any({ t })\n\
          assert(not ok and err.kind == 'cancelled', tostring(err))\n\
          assert(err.task == t.task, tostring(err.task))\n\
-         assert(err.reason == nil, 'a cancelled delivery carries no reason field')\n\
+         assert(err.reason == nil, 'a cancelled delivery leaves reason nil')\n\
          assert(#tasks.pending() == 0, 'nothing is pending')\n\
          return 'done'",
         &[("Child", "store.write('child-park', 'x')\nreturn 'never'")],

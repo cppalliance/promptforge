@@ -9,7 +9,7 @@ Each placeholder names a namespace and, for most of them, a key:
 - `{{ args }}` inserts the run's input string, exactly as passed.
 - `{{ argv }}` inserts the parsed form of the input as compact JSON, and `{{ argv.key }}` indexes into it.
 - `{{ item }}` inserts the current member when the section runs as an arm of a fanout.
-- `{{ var.key }}` inserts a field of the `var` clipboard.
+- `{{ var.key }}` inserts a field of the `var` table.
 - `{{ sys.key }}` inserts runtime metadata.
 - A bare name, such as `{{ kind }}`, inserts a section-local Lua global.
 

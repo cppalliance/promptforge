@@ -217,7 +217,7 @@ mod tests {
         };
         let error = FetchError::from(transport);
         let Some(cause) = std::error::Error::source(&error) else {
-            panic!("the http variant carries its transport cause as source()");
+            panic!("the http variant returns its transport cause from source()");
         };
         let Some(wrapper) = cause.downcast_ref::<HttpSource>() else {
             panic!("the transport cause is the shared HttpSource");
@@ -550,7 +550,7 @@ mod tests {
     struct OverSilent(#[source] Silent);
 
     #[test]
-    fn a_cause_the_outer_message_already_carries_renders_once() {
+    fn a_cause_the_outer_message_already_contains_renders_once() {
         let error = Copying {
             message: "connection reset".to_owned(),
             source: Leaf,
@@ -558,7 +558,7 @@ mod tests {
         let rendered = error_chain(&error);
         assert_eq!(
             rendered, "model sheet unavailable: connection reset",
-            "a cause whose text the outer message already carries is skipped"
+            "a cause whose text the outer message already contains is skipped"
         );
         assert_eq!(
             rendered.matches("connection reset").count(),

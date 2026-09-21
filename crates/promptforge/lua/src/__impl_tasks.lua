@@ -14,7 +14,7 @@
 -- A Task handle is a plain methodless table `{ task = id }` (A9): every
 -- operation here is a namespace function that accepts the handle or the
 -- bare id string, so a handle stored in `var` survives the serde boundary
--- unchanged, and a `when_all` result entry (which carries `task`) is
+-- unchanged, and a `when_all` result entry (which includes `task`) is
 -- itself a handle.
 local yield, var_snapshot, helpers = ...
 
@@ -146,7 +146,7 @@ end
 -- tasks.when_all(set, opts?) -> results, timed_out: Lua over when_any.
 -- Waits for every member and returns `{ task, ok, result }` per member in
 -- input order; each entry is itself a Task handle. It never raises
--- because a member failed - the failed member's entry carries `ok = false`
+-- because a member failed - the failed member's entry holds `ok = false`
 -- and the error value - so no caller is forced into a cancel-or-leak
 -- choice for the members still running. A member named twice is waited
 -- on once and fills every position it was named at, so the result

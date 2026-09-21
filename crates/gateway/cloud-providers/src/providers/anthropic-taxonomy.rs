@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn dated_snapshots_without_a_canonical_stay_canonical() {
         let by_id = classified();
-        // The 2026-09-14 sheet carries the dated snapshots but not their
+        // The 2026-09-14 sheet lists the dated snapshots but not their
         // base ids, so nothing collapses.
         for entry in by_id.values() {
             assert!(

@@ -7,7 +7,7 @@
    it from a stylesheet loaded after); no rule below hardcodes a color or
    a themed length.
 
-   This file carries only the resets and the global scrollbars. Component
+   This file has only the resets and the global scrollbars. Component
    rules live in per-component CSS files colocated with their owning TS
    modules under src/, which esbuild bundles into dist/app.css.
    ========================================================================== */
@@ -21,7 +21,7 @@
    a transparent track, so the bar reads as an overlay on whatever surface
    scrolls. WebView2 is Chromium, so the ::-webkit-scrollbar pseudoelements
    are the styled surface; the standard `scrollbar-width`/`scrollbar-color`
-   pair carries the same intent to any future non-Chromium host. Widths and
+   pair applies the same intent to any future non-Chromium host. Widths and
    colors are variables so a skin can retune them from the token sheet.
    -------------------------------------------------------------------------- */
 * {

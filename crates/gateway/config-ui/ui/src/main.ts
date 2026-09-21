@@ -1,6 +1,6 @@
 // Composition root for the gateway config SPA. Boot detects the mode:
 // the workshop panel (`?mode=panel`) mounts the shell without medallion
-// or key prompt - its API access rides the postMessage bridge to the
+// or key prompt - its API access goes through the postMessage bridge to the
 // workshop, which forwards calls with the bearer key attached, so the
 // key never enters this frame - while standalone mounts the key prompt
 // first (when no key is stored) and then the live shell: tab bar,
@@ -110,8 +110,8 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
     showShell();
   } else {
     // The `/auth` handoff lands here with an HttpOnly cookie and no
-    // stored key: probe once, mounting the shell when the cookie carries
-    // auth and the key prompt otherwise.
+    // stored key: probe once, mounting the shell when the cookie
+    // authenticates and the key prompt otherwise.
     void api.hasAmbientAuth().then((authenticated) => {
       if (authenticated) {
         showShell();
@@ -147,7 +147,7 @@ function mountPanelMode(
     post: options.bridgePost,
     timeoutMs: options.bridgeTimeoutMs,
   });
-  // Whether the iframe URL itself carried a route, read before the
+  // Whether the iframe URL itself included a route, read before the
   // pending shell's router normalizes an empty hash to #/local: an
   // explicit hash outranks the workshop's initial-route context.
   const hadInitialHash = win.location.hash !== "";
@@ -475,9 +475,10 @@ function mountLiveShell(
  * Mounts the inert panel-mode shell: the same chrome minus the
  * medallion and key prompt, with no network calls at all. It shows
  * until the workshop's context message arrives (and for good when the
- * iframe URL carries no usable bridge origin); the profile switcher is
- * an inert placeholder and a banner says so. Returns the teardown that
- * stops its router, so the live shell can replace it cleanly.
+ * iframe URL's bridge origin is missing or unusable); the profile
+ * switcher is an inert placeholder and a banner says so. Returns the
+ * teardown that stops its router, so the live shell can replace it
+ * cleanly.
  */
 function mountPanelPending(root: HTMLElement, win: BootWindow): () => void {
   const placeholder = document.createElement("button");

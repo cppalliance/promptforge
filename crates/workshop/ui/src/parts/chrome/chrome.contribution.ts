@@ -9,7 +9,7 @@
 // Help menu's z_about. Reset Zoom's second chord (ctrlcmd+0) and the two
 // per-OS overrides (Full Screen's ctrl+meta+f on macOS, Close Window's
 // meta+shift+w) are separate registerKeybindingRule calls: the action
-// descriptor's keybinding carries no mac field, so those rules register
+// descriptor's keybinding omits the mac field, so those rules register
 // directly with the precondition ANDed in by hand. Zoom In also binds
 // ctrlcmd+shift+= - the shifted plus is the same physical key, and both
 // are the conventional zoom-in chord. The first rule registered for a

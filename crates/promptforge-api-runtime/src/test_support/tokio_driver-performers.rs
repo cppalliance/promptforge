@@ -22,7 +22,7 @@ pub type Performer = Box<dyn FnMut(Effect) -> BoxFuture<EffectAnswer> + Send>;
 /// A struct of boxed async closures, so a caller supplies behavior
 /// without implementing anything from this module. The
 /// engine-internal kinds (`Store`, `Timer`, `TaskEvents`) are the driver's
-/// own and have no slot here.
+/// own.
 ///
 /// [`Performers::refusing`] answers every kind with its refusal: a `Chat`
 /// with a disabled-gateway completion error, a `ToolCall` with a

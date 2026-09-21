@@ -76,7 +76,7 @@ pub(super) static CONTROL_MARKUP: &[DelimiterGroup] = &[
         names: &["tool", "tool_call", "tool_response"],
     },
     // Kimi K2 / Moonshot wrap history in a section and each call in a
-    // begin/end pair; a paste carrying one fabricates a historical call.
+    // begin/end pair; a paste holding one fabricates a historical call.
     DelimiterGroup {
         family: "kimi k2 tool sections",
         shape: Shape::Pipe,
@@ -99,7 +99,7 @@ pub(super) static CONTROL_MARKUP: &[DelimiterGroup] = &[
         names: &["end", "end_of_turn", "end_of_text"],
     },
     // Document boundaries: Llama-3.1 / Llama-4's BOS and the GPT-2-lineage
-    // EOS that Qwen, Phi, gpt-oss, and GLM-4.5 still carry. A pasted copy
+    // EOS that Qwen, Phi, gpt-oss, and GLM-4.5 still include. A pasted copy
     // lands mid-conversation as a document break the template never opened.
     DelimiterGroup {
         family: "document boundaries",
@@ -241,7 +241,7 @@ pub(super) static CONTROL_MARKUP: &[DelimiterGroup] = &[
         shape: Shape::BareTag,
         names: &["arg_key", "arg_value", "function", "parameter", "param"],
     },
-    // Opening halves carrying `=value`; the whitespace in the `name=` forms
+    // Opening halves with `=value`; the whitespace in the `name=` forms
     // is any run, matched by `attribute_len`.
     DelimiterGroup {
         family: "function attribute openers",

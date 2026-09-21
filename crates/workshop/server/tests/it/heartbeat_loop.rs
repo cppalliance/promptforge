@@ -290,7 +290,7 @@ async fn a_reconnect_pushes_the_refreshed_catalog() {
             .as_array()
             .expect("the fixture is an array")
             .clone(),
-        "the push carries every chat-capable gateway model"
+        "the push includes every chat-capable gateway model"
     );
     heartbeat.shutdown().await;
 }

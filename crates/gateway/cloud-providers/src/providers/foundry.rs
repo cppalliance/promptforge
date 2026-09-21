@@ -3,15 +3,14 @@
 //! `https://api.catalog.azureml.ms` - no auth, a JSON body with
 //! filters, ordering, and paging, and a card richer than most keyed
 //! endpoints: context window, max output tokens, modalities, capability
-//! labels, languages, lifecycle, and the inference retirement date. It
-//! reports no pricing.
+//! labels, languages, lifecycle, and the inference retirement date.
+//! No pricing.
 //!
 //! Keyless and global, unlike Foundry's inference surface, which is
 //! per-resource (`https://<resource>.services.ai.azure.com`) and lists
 //! only the deployments an operator created there - so a subscription
 //! with nothing deployed yields an empty list. Cataloguing what Foundry
-//! offers needs no subscription, no deployed resource, and no
-//! credential, so the descriptor declares no environment variables.
+//! offers is anonymous, so the descriptor leaves `env_vars` empty.
 //!
 //! Two filters keep the response to the models Azure hosts itself:
 //! `Labels=latest` drops superseded versions and
@@ -36,10 +35,10 @@ use crate::{FetchError, Provider};
 #[path = "foundry-taxonomy.rs"]
 pub(crate) mod taxonomy;
 
-/// The Azure AI Foundry provider descriptor: keyless - the catalog
-/// endpoint needs no credential. `openai_base_url` stays `None`
-/// because inference remains per-resource, so there is no fixed chat
-/// URL to publish even though the catalog has one.
+/// The Azure AI Foundry provider descriptor: the catalog endpoint is
+/// keyless. `openai_base_url` stays `None` because inference remains
+/// per-resource, so there is no fixed chat URL to publish even though
+/// the catalog has one.
 pub const PROVIDER: Provider = Provider {
     name: "foundry",
     display_name: "Azure AI Foundry",
@@ -129,7 +128,7 @@ struct Page {
 /// One model card as the wire reports it. `assetId`, `registryName`,
 /// `version`, `summary`, `keywords`, `license`, `popularity`,
 /// `deploymentOptions`, `playgroundLimits`, `fineTuningTasks`, and the
-/// variant and quota blocks have no sheet meaning and are not parsed.
+/// variant and quota blocks are ignored.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireModel {
@@ -146,7 +145,7 @@ struct WireModel {
 }
 
 /// The limits block: token limits, modalities, and languages.
-/// `otherLimits` is an untyped bag with no sheet field.
+/// `otherLimits` is an untyped bag and is ignored.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireLimits {
@@ -172,8 +171,8 @@ struct WireDeprecation {
     inference_retirement_date: Option<String>,
 }
 
-/// Normalizes one wire card into a sheet entry. The catalog reports no
-/// pricing, so that field stays empty.
+/// Normalizes one wire card into a sheet entry; the pricing field stays
+/// empty.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.name, None);
     if let Some(display_name) = &model.display_name {
@@ -219,7 +218,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 }
 
 /// Parses a wire timestamp into a calendar date; an unparseable value
-/// keeps no date.
+/// yields `None`.
 fn parse_wire_date(value: &str) -> Option<Date> {
     OffsetDateTime::parse(value, &Rfc3339)
         .ok()
@@ -357,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn request_body_omits_the_token_on_the_first_page_and_carries_it_after() {
+    fn request_body_omits_the_token_on_the_first_page_and_includes_it_after() {
         let first = request_body(None);
         assert!(
             first.get("continuationToken").is_none(),
@@ -474,7 +473,7 @@ mod tests {
         }
         assert!(
             second.contains("page-2"),
-            "the second request carries the token: {second}"
+            "the second request includes the token: {second}"
         );
         assert_eq!(entries.len(), 5, "both pages land in one list");
         assert_eq!(entries[4].id, "gpt-5.4");

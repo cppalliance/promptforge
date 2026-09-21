@@ -71,7 +71,7 @@ await assertNoLeaks(lifecycle, async () => {
     const ring = new TokenRing();
     document.body.appendChild(ring.element);
     check(
-      "the ring is an svg carrying the ws-token-ring class",
+      "the ring is an svg with the ws-token-ring class",
       ring.element.tagName === "svg" &&
         ring.element.getAttribute("class") === "ws-token-ring",
     );
@@ -96,7 +96,7 @@ await assertNoLeaks(lifecycle, async () => {
       ),
     );
     check(
-      "only the progress circle carries the dash wiring",
+      "only the progress circle gets the dash wiring",
       background?.getAttribute("stroke-dasharray") === null &&
         closeTo(Number(progress?.getAttribute("stroke-dasharray")), CIRCUMFERENCE),
     );

@@ -30,12 +30,11 @@ pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
 /// six shared fields in one construction. A driver with an extra field
 /// (`index`, on a fanout arm or a spawned chain) inserts it at its own call
 /// site. `when` is the run's `started_at` rendered as RFC 3339, the same
-/// string in every section because the engine reads no clock; `id` is the
-/// section entry's hierarchical id (the entering chain's id extended by its
-/// local entry counter), rendered as a dot-separated path; `taskid` is the
-/// id of the nearest enclosing task (the main walk is task `0`; a `call`
-/// child reports its caller's task), the handle a chain passes to `tasks.*`
-/// to speak about itself.
+/// string in every section; `id` is the section entry's hierarchical id
+/// (the entering chain's id extended by its local entry counter), rendered
+/// as a dot-separated path; `taskid` is the id of the nearest enclosing
+/// task (the main walk is task `0`; a `call` child reports its caller's
+/// task), the handle a chain passes to `tasks.*` to speak about itself.
 pub(crate) fn sys_json(
     when: &str,
     id: &str,

@@ -107,7 +107,7 @@ fn capability_error_classifies_and_hides_its_cause() {
     assert_eq!(error.to_string(), "activation failed");
     assert!(
         std::error::Error::source(&error).is_some(),
-        "the cause rides behind Error::source, out of the model-readable message"
+        "the cause stays behind Error::source, out of the model-readable message"
     );
 
     let cancelled = CapabilityError::message("stopped").with_kind(CapabilityErrorKind::Cancelled);

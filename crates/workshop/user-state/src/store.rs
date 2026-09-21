@@ -45,7 +45,7 @@ pub struct UserStateStore {
 impl UserStateStore {
     /// Opens the store over `state_dir/ui-state.json`, reading the file
     /// tolerantly: a missing, unreadable, or corrupt file means "no state
-    /// yet" - logged and tolerated (zone two). Nothing is created until
+    /// yet" - logged and tolerated. Nothing is created until
     /// the first put.
     #[must_use]
     pub fn new(state_dir: &Path) -> Self {

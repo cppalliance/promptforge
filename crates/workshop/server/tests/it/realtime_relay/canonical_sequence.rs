@@ -164,7 +164,7 @@ async fn hour_equivalent_one_take_crosses_the_opaque_relay() {
         let item_id = event["item_id"]
             .as_str()
             .or_else(|| event["item"]["id"].as_str())
-            .expect("every item event carries its owner");
+            .expect("every item event names its owner");
         item_ids.push(item_id.to_owned());
         if expected.ends_with("completed") {
             assert_eq!(event["usage"]["seconds"], 3_600.0);

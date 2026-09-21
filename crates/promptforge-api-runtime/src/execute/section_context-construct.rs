@@ -37,7 +37,7 @@ impl SectionContext {
     /// section's `sys.id`: the entering chain's hierarchical id extended
     /// by its local entry counter, allocated by the scheduler; `task_id`
     /// is the entering chain's `sys.taskid`. `var` is the walk's current
-    /// clipboard, seeded into the section's VM. `seed` holds a spawned
+    /// `var` table, seeded into the section's VM. `seed` holds a spawned
     /// chain's `item` and `sys.index` on its first entry and is empty on
     /// every other entry.
     ///

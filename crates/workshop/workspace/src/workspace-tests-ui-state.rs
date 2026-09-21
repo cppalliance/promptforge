@@ -64,7 +64,7 @@ async fn put_while_ephemeral_returns_false_and_writes_nothing() {
     assert_eq!(
         workspace.ui_state(),
         empty_ui_state(),
-        "an ephemeral workspace carries every key with no value"
+        "an ephemeral workspace has every key unset"
     );
 
     for (key, value) in sample_values() {
@@ -343,7 +343,7 @@ async fn a_failed_persist_leaves_the_in_memory_value_standing() {
 }
 
 #[tokio::test]
-async fn save_as_starts_empty_and_duplicate_carries_the_live_values() {
+async fn save_as_starts_empty_and_duplicate_keeps_the_live_values() {
     let home = tempfile::TempDir::new().expect("tempdir");
     let first_path = home.path().join("first.pfwork");
     let second_path = home.path().join("second.pfwork");
@@ -390,6 +390,6 @@ async fn save_as_starts_empty_and_duplicate_carries_the_live_values() {
             .cloned()
             .flatten(),
         Some(layout),
-        "the copied file carries the row too"
+        "the copied file stores the row too"
     );
 }

@@ -1,26 +1,26 @@
-//! The crate's internal error substrate.
+//! The crate's internal error type.
 //!
-//! [`Error`] mirrors the role `promptforge-api-runtime`'s substrate plays there: it is
-//! never part of the documented API. Every public boundary returns its own
-//! typed error ([`crate::model::CompletionError`],
-//! [`crate::model::ModelIdError`]); those wrappers classify this substrate and
-//! preserve its source. The substrate is `#[doc(hidden)]` and re-exported only
-//! so `promptforge-api-runtime` can map every variant back onto its own substrate
-//! verbatim, and so the transport that performs a round (the harness's
-//! gateway client, reaching it through that crate) can build the
-//! [`CompletionError`](crate::model::CompletionError) it answers with; it is
-//! not a stable API and is not marked `#[non_exhaustive]`, so that mapping
-//! stays total.
+//! [`Error`] mirrors the role `promptforge-api-runtime`'s internal error
+//! type plays there: it is never part of the documented API. Every public
+//! boundary returns its own typed error ([`crate::model::CompletionError`],
+//! [`crate::model::ModelIdError`]); those wrappers classify this internal
+//! type and preserve its source. The internal type is `#[doc(hidden)]` and
+//! re-exported only so `promptforge-api-runtime` can map every variant back
+//! onto its own internal type verbatim, and so the transport that performs
+//! a round (the harness's gateway client, reaching it through that crate)
+//! can build the [`CompletionError`](crate::model::CompletionError) it
+//! answers with; it is not a stable API and is not marked
+//! `#[non_exhaustive]`, so that mapping stays total.
 
-/// A type-erased owned error cause used by the internal substrate.
+/// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// The crate's internal error substrate, spanning completion transport and
+/// The crate's internal error type, spanning completion transport and
 /// catalog transport failures.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
 /// companion `promptforge-api-runtime` crate can convert it back onto its own
-/// substrate variant-for-variant, and so a transport can construct the
+/// internal type variant-for-variant, and so a transport can construct the
 /// failure it reports. It is not host API.
 #[derive(Debug, thiserror::Error)]
 #[doc(hidden)]
@@ -160,5 +160,5 @@ impl Error {
 #[doc(hidden)]
 pub struct Timeout(#[source] pub BoxedSource);
 
-/// Crate-internal result alias over the [`Error`] substrate.
+/// Crate-internal result alias over [`Error`].
 pub(crate) type Result<T> = std::result::Result<T, Error>;

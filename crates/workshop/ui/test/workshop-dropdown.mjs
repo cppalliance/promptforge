@@ -4,7 +4,7 @@
 // renders a role=menu of menuitem buttons and wires the trigger's
 // aria-haspopup/expanded/controls; activating an item runs its action,
 // closes the menu, and restores the trigger's prior aria attributes; a
-// danger item carries the modifier class and an iconHtml renders inside
+// danger item has the modifier class and an iconHtml renders inside
 // the item; Escape closes and returns focus to the trigger; an outside
 // pointer press closes while an inside press does not; showing from the
 // same trigger toggles the menu closed and showing from another trigger
@@ -90,7 +90,7 @@ dropdown.show(trigger, [
 {
   const menu = menuEl();
   check("showing appends one menu to the document", menu !== null);
-  check("the menu carries role=menu", menu?.getAttribute("role") === "menu");
+  check("the menu has role=menu", menu?.getAttribute("role") === "menu");
   const items = itemsOf(menu);
   check("the menu renders one button per item", items.length === 2);
   check(
@@ -108,7 +108,7 @@ dropdown.show(trigger, [
     items[0]?.querySelector(".menu-item__icon svg") !== null,
   );
   check(
-    "a danger item carries the danger modifier class",
+    "a danger item has the danger modifier class",
     items[1]?.classList.contains("menu-item--danger") === true &&
       items[0]?.classList.contains("menu-item--danger") === false,
   );
@@ -207,7 +207,7 @@ dropdown.show(trigger, [
 
 // --- The menu's stylesheet ships in the bundle -------------------------------
 // Whitespace-tolerant: the packaged bundle minifies to `.x{` while the debug
-// build that `cargo build` writes emits `.x {`; both must carry the rules.
+// build that `cargo build` writes emits `.x {`; both must include the rules.
 
 {
   // The bundled stylesheet's name is content-hashed; the build's manifest
@@ -215,8 +215,8 @@ dropdown.show(trigger, [
   const distDir = path.join(uiDir, "..", "dist");
   const manifest = JSON.parse(await readFile(path.join(distDir, "manifest.json"), "utf8"));
   const appCss = await readFile(path.join(distDir, manifest["app.css"]), "utf8");
-  check("the bundled app.css carries the menu surface rules", /\.menu-item\s*\{/.test(appCss));
-  check("the bundled app.css carries the popup menu's rules", /\.menu-popup\s*\{/.test(appCss));
+  check("the bundled app.css includes the menu surface rules", /\.menu-item\s*\{/.test(appCss));
+  check("the bundled app.css includes the popup menu's rules", /\.menu-popup\s*\{/.test(appCss));
 }
 
 if (failures.length > 0) {

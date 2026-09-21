@@ -5,8 +5,8 @@
 //! normalization of the per-locale base models: the trailing UUID of
 //! `self` as the id, `displayName`, `createdDateTime`, and
 //! `properties.deprecationDates.transcription` into `Deprecation`. The
-//! locale populates `languages` and the family; the feature flags have
-//! no sheet meaning and drop out.
+//! locale populates `languages` and the family; the feature flags are
+//! ignored.
 //!
 //! Extra environment variables beyond the descriptor's
 //! `AZURE_SPEECH_KEY`: `AZURE_SPEECH_REGION` (required - the endpoint
@@ -129,7 +129,7 @@ struct Page {
 
 /// One base model as the wire reports it. `description`, `kind`,
 /// `status`, `lastActionDateTime`, `features`, and `customProperties`
-/// have no sheet meaning and are not parsed.
+/// are ignored.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireModel {
@@ -142,15 +142,15 @@ struct WireModel {
     properties: Option<WireProperties>,
 }
 
-/// The properties block: only the deprecation dates have sheet meaning.
+/// The properties block: the sheet reads only the deprecation dates.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireProperties {
     deprecation_dates: Option<WireDeprecationDates>,
 }
 
-/// The per-feature deprecation dates; only transcription has a sheet
-/// meaning for this provider.
+/// The per-feature deprecation dates; for this provider the sheet
+/// reads only transcription.
 #[derive(Debug, Deserialize)]
 struct WireDeprecationDates {
     transcription: Option<String>,
@@ -184,7 +184,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 }
 
 /// Parses a wire timestamp into a calendar date; an unparseable value
-/// keeps no date.
+/// yields `None`.
 fn parse_wire_date(value: &str) -> Option<Date> {
     OffsetDateTime::parse(value, &Rfc3339)
         .ok()
@@ -382,7 +382,7 @@ mod tests {
         assert_eq!(
             entries[0].languages,
             ["en-US"],
-            "the per-locale base model carries its locale as its language"
+            "the per-locale base model lists its locale as its language"
         );
         apply_taxonomy(&mut entries);
         assert_eq!(entries[0].family, "en-US", "the locale is the family");
@@ -469,7 +469,7 @@ mod tests {
             .expect("the request is ASCII");
         assert!(
             request.contains("ocp-apim-subscription-key: test-key"),
-            "the request carries the subscription key header: {request}"
+            "the request includes the subscription key header: {request}"
         );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "9f8e7d6c-5b4a-3c2d-1e0f-9a8b7c6d5e4f");

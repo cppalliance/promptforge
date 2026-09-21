@@ -38,7 +38,7 @@ test("the idle bar maps each endpoint to its LED state plus the model summary", 
   assert.equal(
     bar.querySelector(".status-bar-summary").textContent,
     "2 models, 4.1 GB",
-    "the summary carries the model count and declared VRAM",
+    "the summary shows the model count and declared VRAM",
   );
   assert.equal(bar.querySelector(".status-bar__barberpole").hidden, true, "no barberpole idle");
   assert.equal(bar.querySelector("progress"), null, "no <progress> element remains");

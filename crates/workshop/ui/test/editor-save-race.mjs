@@ -187,7 +187,7 @@ await assertNoLeaks(lifecycle, async () => {
     writer.puts.length === 2 && writer.puts.at(-1).text === "AB",
   );
   check(
-    "the second save carries the token from the first write",
+    "the second save sends the token from the first write",
     writer.puts.at(-1).expectedToken === "t200",
   );
   writer.release();

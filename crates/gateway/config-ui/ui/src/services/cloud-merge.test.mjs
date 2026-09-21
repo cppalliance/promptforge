@@ -78,7 +78,7 @@ test("an existing endpoint is reused, not duplicated", () => {
   assert.equal(config.endpoint[0].api_key, "***", "the existing endpoint is untouched");
 });
 
-test("a keyless provider's endpoint carries no api_key", () => {
+test("a keyless provider's endpoint omits api_key", () => {
   const config = {};
   app.mergeCloudModel(config, "acme", sheet.providers.acme, sheet.providers.acme.models[0], {
     name: "acme",

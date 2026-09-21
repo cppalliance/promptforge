@@ -1,5 +1,5 @@
 // The tool-call card (src/parts/agent/tool-call-card.ts) in jsdom: a
-// <details>/<summary> card whose header carries the batch's tool name
+// <details>/<summary> card whose header shows the batch's tool name
 // with a call-count badge and a status indicator, whose body shows each
 // call's arguments as Shiki-highlighted JSON (through Step 2's
 // highlightCode) and the matched tool result as a scrollable <pre> fed
@@ -89,7 +89,7 @@ function makeItem(overrides = {}) {
     summary?.querySelector(".ws-tool-call-card__count")?.textContent === "2",
   );
   check(
-    "the header carries a status indicator with a text state for assistive tech",
+    "the header includes a status indicator with a text state for assistive tech",
     summary?.querySelector(".ws-tool-call-card__status") !== null &&
       summary?.querySelector(".ws-tool-call-card__sr")?.textContent === "Completed",
   );

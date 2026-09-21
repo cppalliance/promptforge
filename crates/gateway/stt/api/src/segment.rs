@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn first_natural_boundary_carries_then_resets_forced_overlap_ownership() {
+    fn first_natural_boundary_keeps_then_resets_forced_overlap_ownership() {
         let buffer = take(&[speech(10), speech(1), silence(3), speech(10)]);
         let mut segmenter = Segmenter::new();
         assert!(matches!(
@@ -394,7 +394,7 @@ mod tests {
             .poll(&buffer, 0)
             .expect("the first natural boundary retains forced overlap")
         else {
-            panic!("the forced successor carries reconciliation metadata");
+            panic!("the forced successor holds reconciliation metadata");
         };
         assert_eq!(natural.overlap(), Some(32_000..160_000));
         assert_eq!(natural.new_audio().start, 160_000);

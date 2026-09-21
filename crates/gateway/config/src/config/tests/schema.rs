@@ -62,7 +62,7 @@ fn file_fixture() -> (TempDir, std::path::PathBuf) {
 }
 
 #[test]
-fn version_zero_schema_carries_profiles_and_stt_models() {
+fn version_zero_schema_has_profiles_and_stt_models() {
     let config = Config::from_toml_str(CATALOG).expect("schema parses");
 
     assert_eq!(config.config_version(), 0);

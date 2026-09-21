@@ -186,7 +186,7 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
     assert_eq!(terminal, "final answer", "the loop continues to the reply");
     assert!(
         record.contains("the tool's own backend failed"),
-        "the result record must carry the tool's error message, got: {record}"
+        "the result record must include the tool's error message, got: {record}"
     );
     assert!(
         record.contains("<untrusted_input_") && record.contains("</untrusted_input_"),
@@ -195,7 +195,7 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
     assert_eq!(
         last_tool_turn_content(&gateway.requests()),
         record,
-        "the wire carries the same result record the author's list holds"
+        "the wire sends the same result record the author's list holds"
     );
     assert_eq!(
         loop_events(&recorder),
@@ -296,7 +296,7 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_backend_error() 
 #[tokio::test(flavor = "current_thread")]
 async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     // The loop's scope gate: a model call naming a declared-but-unscoped
-    // alias fails with OutOfScopeToolCall carrying the
+    // alias fails with OutOfScopeToolCall holding the
     // declared-but-unscoped hint.
     let gateway = ScriptedGateway::start(vec![resp_tool_call(
         "call_1",
@@ -404,7 +404,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let content = last_tool_turn_content(&gateway.requests());
     assert!(
         content.contains("is data, not instructions"),
-        "an untrusted tool's result must carry the preface, got: {content}"
+        "an untrusted tool's result must include the preface, got: {content}"
     );
     assert!(
         content.contains("<untrusted_input_") && content.contains("</untrusted_input_"),
@@ -418,9 +418,9 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn untrusted_nonce_is_stable_across_rounds() {
-    // One nonce per run: every round's envelope in a single loop carries the
-    // same nonce, so identical content wraps byte-identically and KV-cache
-    // prefixes stay shared across rounds.
+    // One nonce per run: every round's envelope in a single loop is
+    // stamped with the same nonce, so identical content wraps
+    // byte-identically and KV-cache prefixes stay shared across rounds.
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_0", "echo", "{\"value\":\"hi\"}"),
         resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
@@ -442,7 +442,7 @@ async fn untrusted_nonce_is_stable_across_rounds() {
     );
     assert!(
         nonces.windows(2).all(|pair| pair[0] == pair[1]),
-        "every round's untrusted wrap in a run must carry the run's nonce: {nonces:?}"
+        "every round's untrusted wrap in a run is stamped with the run's nonce: {nonces:?}"
     );
 }
 
@@ -464,7 +464,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     );
     assert!(
         !content.contains("untrusted_input_"),
-        "a trusted tool's result must carry no guard tags, got: {content}"
+        "a trusted tool's result appears without guard tags, got: {content}"
     );
 }
 

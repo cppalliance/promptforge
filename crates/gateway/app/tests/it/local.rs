@@ -75,7 +75,7 @@ flash_attention = false
     assert_eq!(
         body.get("model").and_then(Value::as_str),
         Some("bge-tiny"),
-        "response carries the caller's model name: {body}"
+        "response reports the caller's model name: {body}"
     );
     assert_eq!(
         body.pointer("/data/0/index").and_then(Value::as_u64),
@@ -162,7 +162,7 @@ flash_attention = false
     assert_eq!(
         body.get("model").and_then(Value::as_str),
         Some("jina-tiny"),
-        "response carries the caller's model name: {body}"
+        "response reports the caller's model name: {body}"
     );
     let results = body
         .get("results")
@@ -173,7 +173,7 @@ flash_attention = false
         results
             .iter()
             .all(|result| result.get("relevance_score").is_some_and(Value::is_number)),
-        "every result carries a relevance score: {body}"
+        "every result includes a relevance score: {body}"
     );
     server.shutdown().await;
 }

@@ -61,7 +61,7 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the gateway discovery file the gateway writes.
 
-A `gateway.toml` carried over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
+A `gateway.toml` left over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 Voice uses the same separation. The gateway owns speech models, worker lifecycle, batch transcription, and the generic Realtime endpoint. The Workshop server contributes only an authenticated same-origin relay, while the browser UI owns microphone capture and transcript presentation.
 
@@ -95,7 +95,7 @@ One protection is worth understanding early: a link to any other local server, e
 
 The Workshop is built so that only you, on your own machine, can reach it.
 
-The window loads its interface only from the local machine, never from a remote address. The Workshop refuses any request a browser marks as coming from another website, and it only answers requests addressed to a loopback host. Requests that change things must declare a JSON body. The live socket that carries chat only upgrades for the Workshop's own loopback origin or a native client.
+The window loads its interface only from the local machine, never from a remote address. The Workshop refuses any request a browser marks as coming from another website, and it only answers requests addressed to a loopback host. Requests that change things must declare a JSON body. The live socket for chat only upgrades for the Workshop's own loopback origin or a native client.
 
 Nothing hangs forever. A stalled request is answered with a timeout error instead of freezing: ordinary routes give up after 10 seconds, and routes that relay a call to the gateway allow up to 35 seconds so a stalled gateway surfaces as a meaningful failure. Live socket sessions are never cut off by a request deadline. A gateway that is down or wedged fails fast in the interface: connections give up after 5 seconds and ordinary requests after 30 seconds.
 
@@ -123,7 +123,7 @@ Below the dock area, a permanent full-width status bar runs along the bottom of 
 
 ## The title bar
 
-Across the top of the window sits a custom title bar. It shows the PromptForge program icon, carries the five application menus (File, Edit, Model, Window, Help), and leaves an empty center region you can grab. On Windows this bar replaces the native window frame; macOS and Linux keep their decorated windows. The bar is always shown, even when you run the Workshop in a plain browser, because it carries the application menus.
+Across the top of the window sits a custom title bar. It shows the PromptForge program icon, holds the five application menus (File, Edit, Model, Window, Help), and leaves an empty center region you can grab. On Windows this bar replaces the native window frame; macOS and Linux keep their decorated windows. The bar is always shown, even when you run the Workshop in a plain browser, because the application menus live there.
 
 To operate the window from the title bar:
 
@@ -184,7 +184,7 @@ You know the window's regions and panels. This chapter teaches you the command s
 
 ## The five menus
 
-The title bar carries five menus: File, Edit, Model, Window, and Help. Click a menu button to open its popover. Here is what each menu holds.
+The title bar has five menus: File, Edit, Model, Window, and Help. Click a menu button to open its popover. Here is what each menu holds.
 
 The File menu:
 
@@ -230,14 +230,14 @@ Menu rows show the label on the left and the shortcut hint on the right in muted
 
 The Model menu is live. It rebuilds its rows from the catalog every time it opens, and again whenever a workbench snapshot arrives while it stays open, so check marks move without reopening the menu. Clicking a model row sends the selection, and the check mark moves only when the server confirms the new selection. Keyboard focus survives a live rebuild of the open menu: focus stays on the equivalent row and falls back to the first row if the focused row disappears. While a profile selection is in progress, every Model menu row disables, and the target profile shows a pending "..." mark in place of its check until the server confirms. The still-active profile keeps its checkmark.
 
-The same menus work in a plain browser. Only the native window commands (Minimize, Maximize/Restore, Close Window) do nothing there, because no desktop bridge carries them.
+The same menus work in a plain browser. Only the native window commands (Minimize, Maximize/Restore, Close Window) do nothing there, because only the desktop bridge can run them.
 
 ## Context menus
 
 Some panels, such as the Workshop tree, open a context menu of action items from a trigger element. Context menus share one set of behaviors:
 
 - Activating the same trigger a second time closes the menu. At most one menu is open at a time.
-- Items can carry an icon next to the label, a check mark for the selected choice, and a danger style for destructive actions.
+- Items can show an icon next to the label, a check mark for the selected choice, and a danger style for destructive actions.
 - A right-click invocation opens the menu at the pointer position. The menu flips above the trigger or right-aligns when it would overflow the window.
 - Escape dismisses the menu and returns focus to the trigger. ArrowUp, ArrowDown, Home, and End move through the items. Tab closes the menu.
 - Activating an item runs its action and closes the menu immediately.
@@ -354,13 +354,13 @@ The gateway loads its local models once, when it starts, so changing the profile
 2. Find the Profiles section at the bottom. It appears whenever the gateway defines at least one profile. "No profile" is the first entry, and the active profile is checked.
 3. Click the profile you want, or "No profile" to run remote models only.
 
-The selection climbs a ladder of up to three labeled stages shown in order with determinate counts: "Selecting profile..." (1 of 3), "Restarting gateway..." (2 of 3), "Loading models..." (3 of 3). The status bar names the profile being selected while progress is shown. The first stage persists the selection on the gateway. When the gateway is already running the chosen profile, the ladder stops there and the menu settles at once. Otherwise, for a supervised sidecar, the Workshop asks the gateway to shut down and waits up to 90 seconds for its relaunched replacement to come up serving the chosen profile; the replacement's boot then loads the profile's models, which can take minutes while weights load into VRAM.
+The selection runs a sequence of up to three labeled stages shown in order with determinate counts: "Selecting profile..." (1 of 3), "Restarting gateway..." (2 of 3), "Loading models..." (3 of 3). The status bar names the profile being selected while progress is shown. The first stage persists the selection on the gateway. When the gateway is already running the chosen profile, the sequence stops there and the menu settles at once. Otherwise, for a supervised sidecar, the Workshop asks the gateway to shut down and waits up to 90 seconds for its relaunched replacement to come up serving the chosen profile; the replacement's boot then loads the profile's models, which can take minutes while weights load into VRAM.
 
 When the gateway is one you configured on another machine, the Workshop never stops it. The selection persists on that gateway and the status bar reads "Profile selected" with a notice that you must restart the gateway by hand to load it; the running profile stays active until you do.
 
 While a selection runs, the menu shows a pending state and chat input is disabled. Only one selection runs at a time; starting a second while one is in flight is refused with an error.
 
-When a selection completes, the application selects the model last used on that profile, or the first catalog model when none is remembered. Chat becomes ready again and the status bar returns to idle. When a selection fails, you see a "Profile switch failed" notification carrying the gateway's own error message; if the gateway still serves, the selected model and chat readiness are restored. A sidecar that was shut down and did not return in time reports "gateway did not return after restart", and the Workshop's supervisor keeps looking for it and repopulates the menu when it appears. After any selection that leaves a gateway serving, the profile list and model catalog are refreshed, so the menu reflects the gateway's real state. If the connection is down when you try to select, a local error appears on the status bar: "Could not switch to <name>: the workshop socket is down".
+When a selection completes, the application selects the model last used on that profile, or the first catalog model when none is remembered. Chat becomes ready again and the status bar returns to idle. When a selection fails, you see a "Profile switch failed" notification with the gateway's own error message; if the gateway still serves, the selected model and chat readiness are restored. A sidecar that was shut down and did not return in time reports "gateway did not return after restart", and the Workshop's supervisor keeps looking for it and repopulates the menu when it appears. After any selection that leaves a gateway serving, the profile list and model catalog are refreshed, so the menu reflects the gateway's real state. If the connection is down when you try to select, a local error appears on the status bar: "Could not switch to <name>: the workshop socket is down".
 
 The application remembers the selected model per profile and restores it across restarts. The memory lives in a `workshop-state.json` file in the server's state directory. A missing, unreadable, or corrupt memory file never blocks startup; the application starts with no memory and selects the first catalog model.
 
@@ -404,7 +404,7 @@ The session reads as a scrolling feed of rows, one row per transcript entry, wit
 
 Your own messages appear under a muted "You" label as plain text, right-aligned as bubbles. Text you send is never interpreted as markup, so pasted or typed HTML cannot inject formatting or scripts.
 
-Agent replies render as formatted Markdown with a muted line above naming the model that produced the reply. Replies and reasoning that are still streaming carry a visible pending style and a blinking caret at the live tail. While a reply streams, you see the answer text arrive chunk by chunk. The status bar shows "Running agent turn" while the agent thinks, "Streaming response..." while the reply streams, and "Ready" when the turn completes. The model's reasoning streams live on its own side channel, separate from the answer text, and appears in a collapsible block titled "Reasoning" or "Reasoning (model)". It stays open while it streams and collapses once it settles.
+Agent replies render as formatted Markdown with a muted line above naming the model that produced the reply. Replies and reasoning that are still streaming are drawn with a visible pending style and a blinking caret at the live tail. While a reply streams, you see the answer text arrive chunk by chunk. The status bar shows "Running agent turn" while the agent thinks, "Streaming response..." while the reply streams, and "Ready" when the turn completes. The model's reasoning streams live on its own side channel, separate from the answer text, and appears in a collapsible block titled "Reasoning" or "Reasoning (model)". It stays open while it streams and collapses once it settles.
 
 Tool calls appear as collapsible cards with a clickable header. The header shows the tool's name (or a generic "Tool call" / "Tool calls" label), a count badge for multi-call batches, and a status dot. A card opens on its own while the call runs and closes when the result arrives. A card you opened by hand stays open. Each call's arguments render as syntax-highlighted JSON. The result appears as a preformatted block labeled with the id of the call it answers. A batch that cannot be parsed still renders as raw text instead of vanishing.
 
@@ -442,7 +442,7 @@ The chat shows both sides of the conversation back to the model each turn, rebui
 
 You can cancel a running turn. Cancellation is a stop reason, never an error. Pending prompts close as cancelled, and the relaunched agent returns to waiting over its retained history. The chat is immediately usable again.
 
-The chat survives a transport failure: the session surfaces the failure and returns to waiting for the next message. When a single model round fails, you see an error message naming the agent; the agent survives the failure and returns to waiting for input. When a run fails outright, you see an "Agent failed" notification carrying the error text. If stream chunks are dropped on a slow connection, the completed transcript event repairs the text. Late chunks that arrive after a cancel are discarded, so you never see duplicate or orphaned streaming text.
+The chat survives a transport failure: the session surfaces the failure and returns to waiting for the next message. When a single model round fails, you see an error message naming the agent; the agent survives the failure and returns to waiting for input. When a run fails outright, you see an "Agent failed" notification with the error text. If stream chunks are dropped on a slow connection, the completed transcript event repairs the text. Late chunks that arrive after a cancel are discarded, so you never see duplicate or orphaned streaming text.
 
 Closing a session ends the agent run for good with no relaunch. The saved transcript stays on disk.
 
@@ -545,7 +545,7 @@ You can converse with an agent. This chapter teaches you to give the agent files
 The fastest way to grant a folder is drag and drop. In the desktop application, drop a folder onto the window and it becomes a workspace root. Dropping a single file grants the application access to the file's parent folder instead of just the file. On Windows you can drop files or folders straight from Explorer, and the application receives the real OS paths of the dropped items. Each successfully dropped path is confirmed on the status bar with a message naming the path. When one dropped path cannot be opened, the status bar shows an error for that path and the remaining dropped paths are still added.
 
 - Dropping a file onto the window never by itself gives the application access to the file's bytes. The page grants each dropped path through the workspace API first.
-- Dropping files onto the window never navigates the page away from your session. In-page drags such as panel tab drags keep their normal behavior; only drags carrying OS files are intercepted.
+- Dropping files onto the window never navigates the page away from your session. In-page drags such as panel tab drags keep their normal behavior; only drags of OS files are intercepted.
 
 You can also add a folder without dragging. Click the header "+" button labeled "Add Folder to Workspace...", or right-click empty space in the panel and choose the same item. In the desktop application you pick a folder through the native folder picker. In a plain browser you type the path into an "Add Folder to Workspace" dialog. The drop-to-grant feature is desktop only; in a plain browser, dropping files keeps the normal HTML drag/drop behavior of reading file contents and never grants workspace access.
 
@@ -557,7 +557,7 @@ Folder grants are held in memory. Until you save a workspace they last only for 
 
 The Workshop tree lists the granted workspace roots and browses one directory at a time. When no folder is selected, the panel shows the granted folders as the top level of the tree. When no folders are granted, you see the hint "Drop a folder onto the window to browse it here."
 
-Each granted folder row shows the folder's own name rather than the full path, with the full path available as the row tooltip. A drive root shows its path. Directory listings show folders before files, each group sorted alphabetically by name. Each entry carries its name, full path, kind (directory or file), byte size, and modification time. Browsing is paths only: the tree lists names and never reads file contents.
+Each granted folder row shows the folder's own name rather than the full path, with the full path available as the row tooltip. A drive root shows its path. Directory listings show folders before files, each group sorted alphabetically by name. Each entry includes its name, full path, kind (directory or file), byte size, and modification time. Browsing is paths only: the tree lists names and never reads file contents.
 
 To browse:
 
@@ -729,7 +729,7 @@ Load and save failures appear as an alert bar above the editor. The newest error
 
 ## Conflicts
 
-When you save a file that changed on disk since it was read, the save is refused with a conflict instead of silently overwriting. Each save carries the version token from the previous successful write, so the editor never silently overwrites a file that changed elsewhere. You get a "File changed on disk" dialog with two choices:
+When you save a file that changed on disk since it was read, the save is refused with a conflict instead of silently overwriting. Each save sends the version token from the previous successful write, so the editor never silently overwrites a file that changed elsewhere. You get a "File changed on disk" dialog with two choices:
 
 - Reload discards the editor's text and loads the on-disk text.
 - Overwrite writes your changes over the file on disk, re-reading the fresh token first so the write succeeds.

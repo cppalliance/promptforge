@@ -62,7 +62,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     let bodies = gateway.requests();
     assert_eq!(
         bodies[0]["messages"][0]["content"], "Summarize in one word: quantum",
-        "the infer round carries the substituted lazy prose: {bodies:?}"
+        "the infer round sends the substituted lazy prose: {bodies:?}"
     );
     assert_eq!(
         bodies[1]["messages"][0]["role"], "system",
@@ -78,7 +78,7 @@ async fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     );
     let tool_turn = bodies[2]["messages"]
         .as_array()
-        .expect("a request body carries a messages array")
+        .expect("a request body includes a messages array")
         .iter()
         .find(|message| message["role"] == "tool")
         .expect("the second loop round answers the tool call");

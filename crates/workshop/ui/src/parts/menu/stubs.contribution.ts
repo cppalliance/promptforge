@@ -9,8 +9,8 @@
 // its shortcut label.
 //
 // Rows Cursor shows checked that cannot be backed (Menu Bar, Panel)
-// carry a constant-true toggled; the other checkable stubs (Auto Save,
-// Minimap, Sticky Scroll, and the radio flyouts) carry constant
+// declare a constant-true toggled; the other checkable stubs (Auto Save,
+// Minimap, Sticky Scroll, and the radio flyouts) declare constant
 // expressions with one default checked per radio group. Cursor-only
 // rows with no public id (Open Browser, the Add Symbol rows, Give
 // Feedback, Online Services Settings) use ids under the
@@ -215,7 +215,7 @@ for (const row of stubRows) {
 }
 
 // Second placements: one command, two menus. Appended directly so each
-// row keeps its own label - the action registry's menu entries carry no
+// row keeps its own label - the action registry's menu entries omit the
 // title, and the two placements' labels differ (Tasks) or the row sorts
 // under another menu's group (Extensions). Same pattern as the
 // quickinput contribution's Show All Commands row.

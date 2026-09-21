@@ -61,7 +61,7 @@ fn shared_models(bindings: Vec<ModelBinding>) -> Arc<Mutex<ModelSet>> {
     Arc::new(Mutex::new(ModelSet::from_parts(bindings, None)))
 }
 
-/// Shares an empty tool set (these fixtures declare no tool slots).
+/// Shares an empty tool set.
 fn shared_tools() -> Arc<Mutex<ToolSet>> {
     Arc::new(Mutex::new(ToolSet::default()))
 }

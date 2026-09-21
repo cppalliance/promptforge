@@ -67,9 +67,9 @@ const jsonResponse = (status, body) => ({
 
 {
   const success = catalog.ok(42);
-  check("ok carries the value", success.ok === true && success.value === 42);
+  check("ok holds the value", success.ok === true && success.value === 42);
   const failure = catalog.err(new CatalogError(ErrorCatalog.Transport, "down"));
-  check("err carries the error", failure.ok === false && failure.error.code === "transport");
+  check("err holds the error", failure.ok === false && failure.error.code === "transport");
 }
 
 // --- The CatalogError shape ---------------------------------------------------
@@ -80,8 +80,8 @@ const jsonResponse = (status, body) => ({
   });
   check("a catalog error is an Error", error instanceof Error);
   check("a catalog error keeps its message", error.message === "GET /x answered 500");
-  check("a catalog error carries its code", error.code === ErrorCatalog.HttpStatus);
-  check("a catalog error carries the HTTP status", error.status === 500);
+  check("a catalog error keeps its code", error.code === ErrorCatalog.HttpStatus);
+  check("a catalog error keeps the HTTP status", error.status === 500);
   check("a catalog error names itself", error.name === "CatalogError");
   check(
     "isCatalogError narrows by code",
@@ -119,7 +119,7 @@ await withFetch(new Error("connection refused"), async () => {
   }
   check("a transport failure throws a CatalogError", caught instanceof CatalogError);
   check(
-    "a transport failure carries the transport code",
+    "a transport failure reports the transport code",
     caught !== null && caught.code === ErrorCatalog.Transport,
   );
   check(
@@ -139,7 +139,7 @@ await withFetch(
     }
     check("an HTTP failure throws a CatalogError", caught instanceof CatalogError);
     check(
-      "an HTTP failure carries the http_status code and status",
+      "an HTTP failure reports the http_status code and status",
       caught !== null && caught.code === ErrorCatalog.HttpStatus && caught.status === 500,
     );
     check(
@@ -157,7 +157,7 @@ await withFetch(jsonResponse(200, { unexpected: true }), async () => {
     caught = error;
   }
   check(
-    "a shape failure carries the unexpected_shape code",
+    "a shape failure reports the unexpected_shape code",
     caught instanceof CatalogError && caught.code === ErrorCatalog.UnexpectedShape,
   );
 });
@@ -214,7 +214,7 @@ await withFetch(
     const result = await grantPath("/tmp/blocked");
     check("a refused grant resolves err, never throws", result.ok === false);
     check(
-      "a refused grant carries the grant_refused code",
+      "a refused grant reports the grant_refused code",
       result.ok === false && result.error.code === ErrorCatalog.GrantRefused,
     );
     check(

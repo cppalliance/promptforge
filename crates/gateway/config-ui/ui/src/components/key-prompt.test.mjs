@@ -29,7 +29,7 @@ test("a verified key is stored in sessionStorage and the shell mounts", async ()
   const { dom, root } = await bootApp({ stub });
 
   const label = root.querySelector("label[for='gateway-api-key']");
-  assert.equal(label?.textContent, "API key", "the input carries a real label");
+  assert.equal(label?.textContent, "API key", "the input has a real label");
 
   submitKey(dom, root, "sesame");
   await settle();

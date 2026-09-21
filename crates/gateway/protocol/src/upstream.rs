@@ -1234,8 +1234,8 @@ mod tests {
 
     #[tokio::test]
     async fn speech_forwards_the_bearer_credential() {
-        // The endpoint credential rides the audio request exactly as it does
-        // the chat and embeddings requests.
+        // The endpoint credential is sent on the audio request exactly as it
+        // is on the chat and embeddings requests.
         let (base, handle) = serve_audio(Some("audio/mpeg"), b"fake-mp3");
         let upstream = OpenAiUpstream::new(&base, Secret::new("test-key".to_owned()));
         let _streamed = upstream

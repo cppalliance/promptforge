@@ -171,7 +171,7 @@ async fn a_cache_miss_answers_a_download_stream() {
                 path: PathBuf::from("/cache/ggml.bin")
             },
         ],
-        "the stream carries progress samples then the terminal ready"
+        "the stream emits progress samples then the terminal ready"
     );
 }
 

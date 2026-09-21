@@ -5,7 +5,7 @@ use super::*;
 
 #[tokio::test]
 async fn models_use_forwards_binding_completion_options_to_the_gateway() {
-    // models.use -> completion_options -> GatewayClient::complete must carry
+    // models.use -> completion_options -> GatewayClient::complete must set
     // the binding's model and the hard-keyword thinking switch on the chat
     // body. (v1 roles declare no sampling fields; the thinking switch is the
     // one invocation parameter with a frontmatter source.)
@@ -508,7 +508,7 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
         .as_array()
         .and_then(|messages| messages.first())
         .and_then(|message| message["content"].as_str())
-        .expect("first message must carry substituted prose");
+        .expect("first message must hold substituted prose");
     assert!(
         user_content.contains("Item: [7,\"x\"]."),
         "a table member must render as compact JSON, got: {user_content}"

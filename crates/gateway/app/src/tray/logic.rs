@@ -502,7 +502,7 @@ mod tests {
         assert_eq!(
             status_label(TrayPhase::Running, Some("load-profile: main"), 2, 4.1),
             "Running - load-profile: main",
-            "the activity text outranks the model count and carries no percent of its own"
+            "the activity text outranks the model count and the percent"
         );
     }
 
@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_spec_carries_the_workshop_and_login_states() {
+    fn the_menu_spec_sets_the_workshop_and_login_states() {
         let spec = menu_spec("Running", false, true, true);
         assert!(
             matches!(spec[1], MenuItemSpec::Workshop { enabled: false }),
@@ -628,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn the_login_command_quotes_the_exe_and_carries_the_login_flag() {
+    fn the_login_command_quotes_the_exe_and_appends_the_login_flag() {
         assert_eq!(
             run_key_command(Path::new(
                 "C:\\Program Files\\PromptForge\\promptforge-gateway.exe"
@@ -869,7 +869,7 @@ mod tests {
                  Comment=PromptForge inference gateway\n\
                  Exec=\"/opt/Prompt Forge/promptforge-gateway\" --login\n\
                  Terminal=false\n",
-                "the Exec line carries the quoted exe and --login; Terminal=false"
+                "the Exec line is the quoted exe plus --login; Terminal=false"
             );
         }
 

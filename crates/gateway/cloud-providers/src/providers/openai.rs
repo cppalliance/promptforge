@@ -52,23 +52,22 @@ pub(crate) async fn fetch(
     Ok(entries)
 }
 
-/// One model as the wire reports it; `owned_by` appears on the wire but
-/// has no sheet field.
+/// One model as the wire reports it; `owned_by` is ignored.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,
     created: Option<i64>,
 }
 
-/// Normalizes one wire model: the endpoint reports no capabilities, so
-/// the entry is the conservative base plus the name-based kind.
+/// Normalizes one wire model: the endpoint is IDs-only, so the entry is
+/// the conservative base plus the name-based kind.
 fn normalize_model(model: &WireModel) -> ModelEntry {
     let mut entry = base_entry(&model.id, model.created);
     entry.kind = kind_of(&model.id);
     entry
 }
 
-/// The workload, inferred from the name: the endpoint reports no kinds.
+/// The workload, inferred from the name, since the endpoint is IDs-only.
 /// Segment matches keep `tts` and `audio` from matching inside unrelated
 /// words.
 fn kind_of(id: &str) -> ModelKind {

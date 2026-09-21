@@ -52,7 +52,7 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 /// Loads operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
-/// overriding the process environment so local runs need no exported keys.
+/// overriding the process environment so local runs read keys from the file.
 ///
 /// A missing file or unresolvable home produces a stderr note and a
 /// malformed file a stderr warning; the run continues with the
@@ -258,7 +258,7 @@ mod tests {
         );
         assert!(
             err.to_string().contains("500"),
-            "the error must carry the transport cause from the source chain: {err}"
+            "the error must include the transport cause from the source chain: {err}"
         );
     }
 

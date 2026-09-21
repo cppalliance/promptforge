@@ -24,7 +24,7 @@ use crate::config::{GatewayEndpoint, SecretString};
 ///
 /// The key is optional: a gateway on the same machine admits keyless
 /// loopback callers by default, and a client built without a key
-/// ([`GatewayClient::keyless`]) sends no `Authorization` header at all.
+/// ([`GatewayClient::keyless`]) omits the `Authorization` header entirely.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct GatewayClient {
@@ -49,9 +49,9 @@ enum GatewayTransport {
     Disabled,
 }
 
-/// Wraps a transport-layer failure into the client substrate, marking a
-/// timeout so [`CompletionError::is_timeout`] holds through the type
-/// erasure.
+/// Wraps a transport-layer failure into the client's internal error type,
+/// marking a timeout so [`CompletionError::is_timeout`] holds through the
+/// type erasure.
 pub(crate) fn http(error: reqwest::Error) -> Error {
     Error::Http(transport_source(error))
 }
@@ -59,7 +59,7 @@ pub(crate) fn http(error: reqwest::Error) -> Error {
 /// Boxes a transport-layer failure as an error-chain source, wrapped in
 /// the vocabulary's timeout marker when it was one.
 ///
-/// Every substrate variant that erases a `reqwest::Error` (`Http`,
+/// Every internal error variant that erases a `reqwest::Error` (`Http`,
 /// `BackendBodyRead`) boxes it through here, so `is_timeout` holds under
 /// each of them and the marker cannot be forgotten on one path.
 pub(crate) fn transport_source(error: reqwest::Error) -> Box<dyn std::error::Error + Send + Sync> {
@@ -238,11 +238,11 @@ impl GatewayClient {
     /// - Key: `PROMPTFORGE_GATEWAY_API_KEY`, the gateway's shared bearer.
     ///   Required unless the URL's host is loopback (`127.0.0.1`, `::1`,
     ///   `localhost`); a loopback gateway trusts keyless same-machine callers
-    ///   by default, so the client is then built keyless and sends no
-    ///   `Authorization` header. An empty value counts as unset. That trust
-    ///   also admits every other OS account on a shared machine, so an
-    ///   operator there sets `trust_loopback = false`; then set the key, or
-    ///   a keyless client's requests fail with a `Backend` 401.
+    ///   by default, so the client is then built keyless. An empty value
+    ///   counts as unset. That trust also admits every other OS account on a
+    ///   shared machine, so an operator there sets `trust_loopback = false`;
+    ///   then set the key, or a keyless client's requests fail with a
+    ///   `Backend` 401.
     ///
     /// # Errors
     /// Returns a [`CompletionError`] with `Config` kind when
@@ -275,8 +275,8 @@ impl GatewayClient {
     ///
     /// When `tools` is `Some` and non-empty, each schema is wrapped into the
     /// `OpenAI` function shape and sent as the request's `tools` array (with
-    /// `tool_choice` set to `auto`); passing `None` or an empty slice sends no
-    /// `tools` field, preserving the plain chat-completions behavior.
+    /// `tool_choice` set to `auto`); passing `None` or an empty slice omits
+    /// the `tools` field, preserving the plain chat-completions behavior.
     ///
     /// `options.model` names the model on the wire. Optional `temperature`,
     /// `max_tokens`, and `thinking` extend the request when present.

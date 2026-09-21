@@ -55,11 +55,11 @@
 //! The engine is a pure state machine (`run::Run`). Section Lua yields
 //! request messages to the chain-stack scheduler, which turns each leaf
 //! request into an effect value the host performs and answers, so a run
-//! needs no runtime at all - the host's loop performs on whatever it
-//! likes, and the serial driver in `test_support` runs any prompt on the
-//! calling thread, host calls included. Concurrency (a fanout's arms)
-//! comes from interleaving chains at their effect boundaries rather than
-//! from worker threads.
+//! works without a runtime of its own - the host's loop performs on whatever
+//! it likes, and the serial driver in `test_support` runs any prompt on the
+//! calling thread, host calls included. Concurrency (a fanout's arms) comes
+//! from interleaving chains at their effect boundaries rather than from
+//! worker threads.
 //!
 //! # Module layout
 //!

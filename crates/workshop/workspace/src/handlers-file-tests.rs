@@ -206,7 +206,7 @@ async fn an_alien_database_is_refused_and_current_still_shows_the_prior_grants()
     assert_eq!(json["error"]["code"], "workspace_file_refused");
     let message = json["error"]["message"]
         .as_str()
-        .expect("the envelope carries a message");
+        .expect("the envelope includes a message");
     assert!(
         message.contains("is not a promptforge workspace file"),
         "the refusal names what was required: {message}"

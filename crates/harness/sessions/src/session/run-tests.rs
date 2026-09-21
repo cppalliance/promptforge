@@ -9,7 +9,7 @@ use harness_runner::prepare::PrepareError;
 use super::RunFailure;
 
 #[test]
-fn a_prepare_failure_pushed_to_the_client_carries_its_cause_chain() {
+fn a_prepare_failure_pushed_to_the_client_keeps_its_cause_chain() {
     let failure = RunFailure::Prepare(PrepareError::Read {
         path: PathBuf::from("agent.md"),
         source: io::Error::other("disk gone"),

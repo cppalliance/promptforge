@@ -329,7 +329,7 @@ async fn a_catalog_with_different_models_retires_the_run() {
 
     // Different models: the frozen bindings are stale, so the run is
     // retired and the program relaunched under the new catalog. The entry
-    // still carries no `id`, so the relaunch binds no model and never
+    // still omits `id`, so the relaunch binds no model and never
     // contacts the gateway.
     harness.set_catalog(CatalogBinding {
         generation: 3,

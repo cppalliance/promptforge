@@ -14,8 +14,7 @@ use serde::Deserialize;
 use crate::providers::openai_shape::{ListResponse, base_entry};
 use crate::{FetchError, Provider};
 
-/// The NVIDIA provider descriptor: keyless - the model-list endpoint
-/// needs no credential.
+/// The NVIDIA provider descriptor: the model-list endpoint is keyless.
 pub const PROVIDER: Provider = Provider {
     name: "nvidia",
     display_name: "NVIDIA",
@@ -48,10 +47,10 @@ pub(crate) async fn fetch(
     Ok(entries)
 }
 
-/// One model as the wire reports it. Only the id has sheet meaning:
+/// One model as the wire reports it. The sheet reads only the id:
 /// `created` is a constant placeholder on every entry and is never
 /// parsed, so it cannot leak into `released_at`; `owned_by`,
-/// `permission`, `root`, and `parent` have no sheet meaning.
+/// `permission`, `root`, and `parent` are ignored.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,

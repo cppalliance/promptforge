@@ -80,7 +80,7 @@
   display: flex;
   gap: var(--space-md);
   justify-content: flex-end;
-  /* The shared modal's actions row carries a 1rem top margin; the line
+  /* The shared modal's actions row sets a 1rem top margin; the line
      above already supplies this dialog's spacing. */
   margin-block-start: 0;
 }

@@ -131,7 +131,7 @@ impl Default for SystemSampler {
     }
 }
 
-// Manual because `Nvml` carries no `Debug` implementation.
+// Manual because `Nvml` does not implement `Debug`.
 impl fmt::Debug for SystemSampler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SystemSampler")
@@ -187,8 +187,8 @@ fn sample(sampler: &Mutex<SystemSampler>, cache_root: Option<&Path>) -> SystemSn
     }
     if !guard.nvml_probed {
         // A failed init means no NVIDIA driver on this machine; the endpoint
-        // degrades to an absent `gpu` field by design, so the error carries
-        // no information worth returning.
+        // degrades to an absent `gpu` field by design, so the error is
+        // discarded.
         guard.nvml = Nvml::init().ok();
         guard.nvml_probed = true;
     }
@@ -267,7 +267,7 @@ fn disk_metrics(cache_root: &Path) -> Option<DiskMetrics> {
 
 /// Name and VRAM of NVML device 0, or `None` when the device or any reading
 /// is unavailable - the UI hides the GPU card rather than erroring, so a
-/// partial reading contains no information worth returning.
+/// partial reading is dropped.
 fn gpu_metrics(nvml: &Nvml) -> Option<GpuMetrics> {
     let device = nvml.device_by_index(0).ok()?;
     let memory = device.memory_info().ok()?;

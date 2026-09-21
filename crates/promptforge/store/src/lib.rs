@@ -565,7 +565,7 @@ fn number_lines_from(lines: &[&str], start: usize) -> String {
             out.push('\n');
         }
         let number = start + index;
-        // Writing to a String is infallible; the result carries no information.
+        // Writing to a String is infallible, so the result is discarded.
         let _ = write!(out, "{number:>width$}| {line}");
     }
     out

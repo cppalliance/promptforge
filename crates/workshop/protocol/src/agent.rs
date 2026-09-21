@@ -70,7 +70,7 @@ impl AgentSessionFrame {
 /// | [`UserInput`](Self::UserInput) | `user_message` |
 ///
 /// Exactly the engine's content [`Event`] variants a transcript renders;
-/// lifecycle, task, and debug events have no wire label and never frame.
+/// lifecycle, task, and debug events never frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub enum AgentEventKind {

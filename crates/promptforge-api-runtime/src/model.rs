@@ -17,7 +17,7 @@
 //! protocol seams the transport that performs a round (the harness's
 //! gateway client) shares with the engine's own test client: the request
 //! body builder, the SSE reassembly, the read loop over a transport's
-//! chunk source, and the error substrate it builds a [`CompletionError`]
+//! chunk source, and the internal error type it builds a [`CompletionError`]
 //! from. The engine itself never performs a completion.
 
 pub use promptforge_api_types::models::{

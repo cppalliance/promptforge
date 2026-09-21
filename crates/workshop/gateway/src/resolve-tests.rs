@@ -172,7 +172,7 @@ fn no_file_and_no_explicit_config_is_the_plain_error() {
             .contains("no gateway configured or running"),
         "the error says it plainly: {error}"
     );
-    assert_eq!(error.stale(), None, "no file existed to condemn");
+    assert_eq!(error.stale(), None, "no file existed to remove");
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn an_explicitly_configured_default_url_is_honored() {
 }
 
 #[test]
-fn a_stale_file_with_no_explicit_config_carries_the_reason_into_the_error() {
+fn a_stale_file_with_no_explicit_config_names_the_reason_in_the_error() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let port = fixture_gateway("right");
     live_file(port, "wrong")
@@ -214,7 +214,7 @@ fn a_stale_file_with_no_explicit_config_carries_the_reason_into_the_error() {
     );
     assert!(
         message.contains("key was rejected"),
-        "the condemned file's reason is named: {message}"
+        "the removed file's reason is named: {message}"
     );
 }
 
@@ -241,7 +241,7 @@ fn a_probe_io_failure_degrades_to_the_config_fallback() {
         .expect("a probe failure never fails startup on its own");
     assert_eq!(resolved.source(), GatewaySource::Config);
     assert_eq!(resolved.base_url(), "http://gateway.lan:9999");
-    assert_eq!(resolved.stale(), None, "nothing was condemned");
+    assert_eq!(resolved.stale(), None, "nothing was removed");
 }
 
 #[test]
@@ -259,7 +259,11 @@ fn a_probe_io_failure_with_no_explicit_config_is_the_plain_error() {
             .contains("no gateway configured or running"),
         "the error says it plainly: {error}"
     );
-    assert_eq!(error.stale(), None, "a probe failure is not a condemnation");
+    assert_eq!(
+        error.stale(),
+        None,
+        "a probe failure does not remove the file"
+    );
 }
 
 #[test]
@@ -287,7 +291,7 @@ fn no_run_directory_skips_discovery() {
 }
 
 #[test]
-fn the_report_names_the_winning_source_and_a_condemned_file() {
+fn the_report_names_the_winning_source_and_a_removed_file() {
     // A recording status sink stands in for the status bus: the report's
     // frames land on it through the registry's push facade.
     let registry = workshop_registry::Registry::new();

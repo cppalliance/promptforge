@@ -64,7 +64,7 @@ async fn status_updates_reach_connected_sessions_as_status_frames() {
         .await
         .expect("connect to /ws");
     // A malformed frame's error reply proves the session loop is
-    // running (the connect snapshot rides ahead of it and is skipped).
+    // running (the connect snapshot arrives ahead of it and is skipped).
     socket
         .send(tungstenite::Message::Text("not json".into()))
         .await
@@ -91,7 +91,7 @@ async fn status_updates_reach_connected_sessions_as_status_frames() {
             "severity": "info",
             "activity": "generating",
         }),
-        "the update arrives as one status frame carrying the busy flag"
+        "the update arrives as one status frame with the busy flag set"
     );
     socket.close(None).await.expect("close the socket");
 }

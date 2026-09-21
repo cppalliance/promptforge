@@ -4,8 +4,8 @@
 // per model and field; *pending* is a saved shadow, visible as the
 // difference between the pending and running views; *applied* is the
 // running config itself. Save builds the full PUT /admin/config payload
-// from the pending view plus one model's edits - untouched secrets ride
-// through as the "***" the gateway sent, so no real secret ever leaves
+// from the pending view plus one model's edits - untouched secrets are
+// sent back as the "***" the gateway sent, so no real secret ever leaves
 // or re-enters the browser. Profile selection is not a configuration
 // key: it is persisted through POST /admin/switch-profile, read back
 // from the pending envelope, and never staged.
@@ -104,8 +104,8 @@ function sameValue(a: unknown, b: unknown): boolean {
 /**
  * Drops fields the server accepts on one model kind only. A kind switch
  * hides the voices control without clearing its value, and the server
- * rejects a non-speech model carrying `voices`, so the payload must not
- * keep the stale list.
+ * rejects a non-speech model that includes `voices`, so the payload must
+ * not keep the stale list.
  */
 function stripKindBoundFields(data: EntryData): void {
   if (data["kind"] !== "speech") {
@@ -564,12 +564,12 @@ export class ConfigStore {
     return readPath(entry.data, key);
   }
 
-  /** Whether the field carries an unsaved edit. */
+  /** Whether the field has an unsaved edit. */
   isEdited(entry: ModelEntry, key: string): boolean {
     return this.edits.get(entryKey(entry))?.has(key) ?? false;
   }
 
-  /** Whether the entry carries any unsaved edit (drafts always do). */
+  /** Whether the entry has any unsaved edit (drafts always do). */
   hasEdits(entry: ModelEntry): boolean {
     return entry.draft || (this.edits.get(entryKey(entry))?.size ?? 0) > 0;
   }
@@ -771,8 +771,7 @@ export class ConfigStore {
    * action: every path whose pending value differs from the running one,
    * as rows of `path | running | pending`. Keyed-array entries match by
    * identity (`endpoint[openai].base_url`); other arrays diff wholesale
-   * as one row. Both views arrive with secrets redacted to `"***"`, so
-   * no row ever carries credential material.
+   * as one row. Both views arrive with secrets redacted to `"***"`.
    */
   pendingDiff(): DiffRow[] {
     const keyed = new Map<string, string>(KEYED_ARRAYS);

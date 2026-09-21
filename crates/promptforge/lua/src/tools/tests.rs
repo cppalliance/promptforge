@@ -225,9 +225,9 @@ fn allow_tasks_records_the_section_allowlist_and_rejects_bad_targets() {
 }
 
 #[test]
-fn the_tools_namespace_carries_scoping_and_no_bind_or_call() {
+fn the_tools_namespace_exposes_scoping_without_bind_or_call() {
     // `call` is absent here on purpose: it suspends, so the coroutine shim
-    // prelude installs it - this table carries exactly the non-suspending
+    // prelude installs it - this table exposes exactly the non-suspending
     // operations. `bind` is gone entirely: binding is the frontmatter's.
     let lua = lua_with_tools();
     let (has_add, has_add_local, has_always, call_is_nil, bind_is_nil): (

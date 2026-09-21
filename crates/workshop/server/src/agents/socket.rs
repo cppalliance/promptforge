@@ -94,9 +94,9 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
         return;
     }
     let mut attached: Option<Attached> = None;
-    // The subscriptions ride beside the attachment (not inside it) so the
-    // select! arms below can borrow them while the inbound arm borrows
-    // `attached`; attach() and the arms keep them all in step.
+    // The subscriptions are stored beside the attachment (not inside it)
+    // so the select! arms below can borrow them while the inbound arm
+    // borrows `attached`; attach() and the arms keep them all in step.
     let mut events_rx: Option<broadcast::Receiver<SessionEvent>> = None;
     let mut deltas_rx: Option<broadcast::Receiver<Delta>> = None;
     let mut input_rx: Option<broadcast::Receiver<WaitFrame>> = None;

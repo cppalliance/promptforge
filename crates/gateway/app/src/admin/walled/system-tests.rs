@@ -70,7 +70,7 @@ async fn admin_system_reports_plausible_cpu_ram_and_disk() {
     if let Some(gpu) = body.get("gpu") {
         assert!(
             gpu["name"].as_str().is_some_and(|name| !name.is_empty()),
-            "a reported GPU carries its device name"
+            "a reported GPU has a device name"
         );
         assert!(
             gpu["vram_total_bytes"].as_u64().expect("vram total") > 0,

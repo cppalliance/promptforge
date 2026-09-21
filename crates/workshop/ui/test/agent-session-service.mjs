@@ -123,11 +123,11 @@ await assertNoLeaks(lifecycle, () => {
       isDeepStrictEqual(kinds, ["user", "reasoning", "reply", "tool-call", "tool-result"]),
     );
     check(
-      "the user item carries the byte-exact text",
+      "the user item holds the byte-exact text",
       service.items[0].text === "hi there",
     );
     check(
-      "reply and reasoning items carry their model label",
+      "reply and reasoning items record their model label",
       service.items[1].model === "llama-3" && service.items[2].model === "llama-3",
     );
     check(
@@ -266,7 +266,7 @@ await assertNoLeaks(lifecycle, () => {
     check("a foreign token's cancellation leaves the pin", service.pendingInputToken === "tok1");
     check("respond sends the pinned token with the text byte-exact", service.respond("hi  ") === true);
     check(
-      "the response carried token and text",
+      "the response sent token and text",
       isDeepStrictEqual(wire.responses, [["tok1", "hi  "]]),
     );
     check("a spent token unpins", service.pendingInputToken === null);
@@ -304,7 +304,7 @@ await assertNoLeaks(lifecycle, () => {
     const sessions = [];
     service.onDidChangeSession((frame) => sessions.push(frame.session));
     // A refused launch folds a pre-session error; the session that then
-    // starts must not carry it into its feed.
+    // starts leaves it out of its feed.
     wire.fire.error("unknown agent: bad");
     wire.fire.inputRequired("tok1");
     wire.fire.session("s1");

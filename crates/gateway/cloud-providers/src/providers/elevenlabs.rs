@@ -2,8 +2,8 @@
 //! of `GET /v1/models` - the `xi-api-key` header over a rich list
 //! response (per-model languages, capability flags, character rates). No
 //! pagination. The per-model languages collect into the entry;
-//! character-cost rates have no sheet field and are dropped; the
-//! capability flags select the entry kind.
+//! character-cost rates are dropped; the capability flags select the
+//! entry kind.
 //!
 //! Docs: <https://elevenlabs.io/docs/api-reference/models/list>
 
@@ -71,8 +71,8 @@ struct WireModel {
     languages: Vec<WireLanguage>,
 }
 
-/// One language as the wire reports it; only the code has sheet
-/// meaning, the display name is dropped.
+/// One language as the wire reports it; the sheet reads only the code,
+/// the display name is dropped.
 #[derive(Debug, Deserialize)]
 struct WireLanguage {
     language_id: String,
@@ -99,8 +99,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 
 /// The entry's family: the id without its trailing `_v<version>` run
 /// (`eleven_multilingual_v2` -> `eleven_multilingual`,
-/// `eleven_turbo_v2_5` -> `eleven_turbo`), and the whole id when it
-/// has no version suffix.
+/// `eleven_turbo_v2_5` -> `eleven_turbo`), and the whole id otherwise.
 fn family_of(id: &str) -> String {
     let segments: Vec<&str> = id.split('_').collect();
     for (index, segment) in segments.iter().enumerate().skip(1) {

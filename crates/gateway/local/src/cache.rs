@@ -262,8 +262,8 @@ impl BlobCache {
         ensure_cache_directory(&self.root, parent)?;
         validate_cache_path(&self.root, &staging)?;
         // A failed transfer keeps the staged partial for resume. The blob
-        // cache routes carry no cancellation token, so the transfer runs to
-        // its own end.
+        // cache routes pass `None` for the cancellation token, so the
+        // transfer runs to its own end.
         let actual = download_with_progress(&self.client, source, &staging, progress, None)?;
         if let Some(expected) = expected.as_deref()
             && actual != expected

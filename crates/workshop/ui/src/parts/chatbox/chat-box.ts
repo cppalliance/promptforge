@@ -250,7 +250,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
         }),
         Placeholder.configure({
           placeholder: props.placeholder ?? "",
-          // The gated (non-editable) box still carries its placeholder,
+          // The gated (non-editable) box still shows its placeholder,
           // same as a disabled textarea: the gate's "the agent is
           // working" message IS the non-editable state.
           showOnlyWhenEditable: false,
@@ -307,7 +307,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     // prosemirror-view drops keydown events for a non-editable editor
     // before any handleKeyDown prop runs (its editHandlers gate), so the
     // submit above never fires while a dictation take holds the box
-    // read-only - yet an Enter there is still a send, carrying what the
+    // read-only - yet an Enter there is still a send, submitting what the
     // box shows. Listen at the frame for exactly that case; the editable
     // case belongs to the editorProps handler.
     this.frame.addEventListener("keydown", (event) => {

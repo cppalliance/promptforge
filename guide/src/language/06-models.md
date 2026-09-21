@@ -14,7 +14,7 @@ models:
     description: careful analysis
 ````
 
-Each key is a prompt-local label. A role carries a keyword set, an optional `min_context` token floor, and a description.
+Each key is a prompt-local label. A role declares a keyword set, an optional `min_context` token floor, and a description.
 
 The keyword vocabulary is closed, and split in two. The hard keywords, `thinking` and `no-thinking`, are checked at prepare against the filled model's descriptor, as is the context minimum: a role requiring `min_context: 200000` filled with a 32k model, or requiring `thinking` filled with a model that never thinks, is reported as an unmet requirement naming the role, required versus actual. The soft keywords - `frontier`, `fast`, `small`, `creative`, and `chat` - document author intent for the day a smarter fill can shop for them. An unknown keyword fails the parse; adding a keyword is a language change.
 
@@ -101,4 +101,4 @@ models:
 models.default('analyst')
 ````
 
-The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements ride `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.
+The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements move into `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.

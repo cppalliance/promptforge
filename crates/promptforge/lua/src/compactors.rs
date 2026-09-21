@@ -194,9 +194,8 @@ pub fn is_context_overflow(status: u16, body: &str) -> bool {
 /// downcastable rather than flattened to text (LUA-012); the loop shim,
 /// which invokes the selected compactor on an overflow round, normalizes
 /// that raise into the structured error table before re-raising it, so
-/// the kind reaches author code and the host alike. The namespace needs no
-/// privileged captures, so it installs with the host tables during host
-/// injection, beside `messages`.
+/// the kind reaches author code and the host alike. The namespace installs
+/// with the host tables during host injection, beside `messages`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the function or the global install fails.

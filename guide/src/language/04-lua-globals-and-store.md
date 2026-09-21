@@ -28,7 +28,7 @@ The executor reads the value back when the H1 pass completes, and every later se
 
 ## sys: runtime metadata
 
-Every section receives a `sys` JSON value carrying `when`, `id`, `taskid`, `section_name`, `execution`, and `section_count`.
+Every section receives a `sys` JSON value with `when`, `id`, `taskid`, `section_name`, `execution`, and `section_count`.
 
 The `sys.when` value is the run's start time as a UTC RFC 3339 string. The host stamps it once when the run begins, so every section agrees on when the run began, and two runs given the same start time read the same value.
 
@@ -44,15 +44,15 @@ Once the section has dispatched its first model or tool call, `sys.model` reads 
 
 Call `log(...)` from any section's Lua block to emit a checkpoint. Checkpoints are reported as events under the current section name, which makes them the simplest way to trace a run.
 
-## var: the per-run clipboard
+## var: the per-run scratch table
 
-The `var` table is a per-run clipboard. It is seeded into each section's Lua state on entry and read back before teardown, so the next section sees the updates:
+The `var` table is a per-run scratch table. It is seeded into each section's Lua state on entry and read back before teardown, so the next section sees the updates:
 
 ````lua
 var.topic = 'governance'
 ````
 
-Two rules keep the clipboard safe. Reassigning the `var` global itself fails the run; you mutate its fields, never replace it. And assigning a non-JSON value to a field fails, naming the field and the type: `var.f = function() end` errors because a function is not JSON data.
+Two rules keep `var` safe. Reassigning the `var` global itself fails the run; you mutate its fields, never replace it. And assigning a non-JSON value to a field fails, naming the field and the type: `var.f = function() end` errors because a function is not JSON data.
 
 ## prose: the pending Markdown
 

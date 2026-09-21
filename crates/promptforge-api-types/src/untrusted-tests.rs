@@ -123,7 +123,7 @@ fn display_renders_32_lowercase_hex() {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
         "Display renders lowercase hex, got {rendered}"
     );
-    // The rendered value is exactly the nonce the envelope carries.
+    // The rendered value is exactly the nonce the envelope stamps.
     assert_eq!(rendered, nonce.as_str());
     assert!(
         nonce
@@ -196,7 +196,10 @@ fn one_nonce_wraps_every_envelope_with_identical_tags() {
     for _ in 0..1000 {
         let out = nonce.wrap("data");
         let (seen, _) = parts(&out);
-        assert_eq!(seen, tag, "every wrap in the run carries the run nonce");
+        assert_eq!(
+            seen, tag,
+            "every wrap in the run is stamped with the run nonce"
+        );
         assert_eq!(out, first, "same nonce and content wrap identically");
     }
 }

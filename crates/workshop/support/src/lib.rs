@@ -11,7 +11,7 @@
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - A lock poisoned by a panicking peer recovers the value rather than
-//!   wedging the process (the zone-two error policy).
+//!   wedging the process.
 
 mod atomic;
 mod backoff;

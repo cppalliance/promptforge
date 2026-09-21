@@ -1,17 +1,17 @@
-//! The crate's internal error substrate.
+//! The crate's internal error type.
 //!
-//! [`Error`] mirrors the role `promptforge-api-runtime`'s substrate plays there: it
+//! [`Error`] mirrors `promptforge-api-runtime`'s own internal error type: it
 //! is never part of the documented API. The executor's public boundary
-//! (`promptforge_api_runtime::RunError`) wraps and classifies core's own substrate,
+//! (`promptforge_api_runtime::RunError`) wraps and classifies core's own error type,
 //! which maps this one back variant-for-variant through
-//! `From<promptforge_lua::Error>`. The substrate is `#[doc(hidden)]` and
+//! `From<promptforge_lua::Error>`. The internal type is `#[doc(hidden)]` and
 //! re-exported only so `promptforge-api-runtime` can perform that mapping verbatim;
 //! it is not a stable API and is not marked `#[non_exhaustive]`, so the
 //! mapping stays total.
 
 use promptforge_model_client::Error as GatewayClientError;
 
-/// A type-erased owned error cause used by the internal substrate.
+/// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// A cloneable, shareable error cause.
@@ -48,12 +48,12 @@ impl std::error::Error for SharedSource {
     }
 }
 
-/// The crate's internal error substrate, spanning sandbox construction, host
+/// The crate's internal error type, spanning sandbox construction, host
 /// bridging, capability binding, and Lua compile/runtime failures.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
 /// companion `promptforge-api-runtime` crate can convert it back onto its own
-/// substrate variant-for-variant. It is not host API.
+/// internal type variant-for-variant. It is not host API.
 #[derive(Debug, thiserror::Error)]
 #[doc(hidden)]
 pub enum Error {
@@ -153,7 +153,7 @@ pub enum Error {
     /// A structured error table raised in Lua surfaced as a block
     /// coroutine's failure with no retained typed error to substitute: the
     /// table's kind, message, and fields, kept rather than flattened to the
-    /// message string. The executor maps it back onto its own substrate by
+    /// message string. The executor maps it back onto its own error type by
     /// kind, so a shim raise classifies as the Rust-raised error it stands
     /// in for.
     #[error("{0}")]
@@ -204,7 +204,7 @@ impl Error {
     }
 }
 
-/// Maps the gateway-client substrate onto this substrate. `ModelSetLock`
+/// Maps the gateway-client error type onto this one. `ModelSetLock`
 /// flattens to [`Error::Lua`], matching the mapping `promptforge-api-runtime`
 /// has always applied. Any remaining transport variant is unreachable on the
 /// model-resolution path and degrades to its display string rather than
@@ -218,5 +218,5 @@ impl From<GatewayClientError> for Error {
     }
 }
 
-/// Crate-internal result alias over the [`Error`] substrate.
+/// Crate-internal result alias over [`Error`].
 pub(crate) type Result<T> = std::result::Result<T, Error>;

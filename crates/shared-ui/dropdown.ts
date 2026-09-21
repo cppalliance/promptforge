@@ -95,7 +95,7 @@ export class DropdownMenu {
     }
 
     // The trigger's popup wiring is restored on close, so a trigger that
-    // carried its own aria state gets it back.
+    // had its own aria state gets it back.
     const previousHasPopup = trigger.getAttribute("aria-haspopup");
     const previousExpanded = trigger.getAttribute("aria-expanded");
     const previousControls = trigger.getAttribute("aria-controls");

@@ -200,9 +200,9 @@ impl<E: ErrorValue> Answer<E> {
                 vec![lua.to_value(&json)?]
             }
             Answer::Chat(Ok(result)) => vec![Value::Table(chat_result_table(lua, *result)?)],
-            // The availability flag rides beside the text as a third resume
-            // value, so the shim returns both and the broker's fixed
-            // fallback sentence stays unspoofable by identical human text.
+            // The availability flag is a third resume value beside the text,
+            // so the shim returns both and the broker's fixed fallback
+            // sentence stays unspoofable by identical human text.
             Answer::UserInput(Ok(outcome)) => vec![
                 Value::String(lua.create_string(&outcome.text)?),
                 Value::Boolean(outcome.available),

@@ -59,7 +59,7 @@ test("families are distinct and scoped to the selected kind and provider", () =>
   assert.deepEqual(app.familiesFor(sheet.providers.deepgram, "transcription"), ["nova"]);
 });
 
-test("canonical rows carry their variant counts; the family filter narrows them", () => {
+test("canonical rows include their variant counts; the family filter narrows them", () => {
   const sheet = cloudSheetFixture();
   const rows = app.canonicalRows(sheet.providers.anthropic, "chat", null);
   assert.deepEqual(

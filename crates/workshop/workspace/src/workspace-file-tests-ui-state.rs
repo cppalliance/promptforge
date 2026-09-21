@@ -48,7 +48,7 @@ fn the_allow_list_names_exactly_the_three_workspace_keys() {
     assert_eq!(UI_STATE_KEYS, ["layout", "tree", "closed_editors"]);
     assert_eq!(UI_STATE_VALUE_CAP, 1 << 20);
     let empty = empty_ui_state();
-    assert_eq!(empty.len(), 3, "the empty map still carries every key");
+    assert_eq!(empty.len(), 3, "the empty map still has every key");
     assert!(empty.values().all(Option::is_none));
 }
 

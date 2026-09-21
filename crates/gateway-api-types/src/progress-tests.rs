@@ -19,7 +19,7 @@ fn a_busy_snapshot_round_trips_through_json() {
 fn the_default_snapshot_is_idle_with_empty_text() {
     let snapshot = Progress::default();
     assert!(!snapshot.busy, "an idle snapshot is not busy");
-    assert_eq!(snapshot.text, "", "an idle snapshot carries no text");
+    assert_eq!(snapshot.text, "", "an idle snapshot has empty text");
     let wire = serde_json::to_string(&snapshot).expect("the default must serialize");
     assert_eq!(wire, r#"{"busy":false,"text":""}"#);
 }

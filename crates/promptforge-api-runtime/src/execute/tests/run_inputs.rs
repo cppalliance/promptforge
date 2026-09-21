@@ -31,7 +31,7 @@ fn run_seeded(md: &str, seed: u64) -> RunResult {
 /// The nonce between `<untrusted_input_` and `>` in a wrapped envelope.
 fn nonce_in(text: &str) -> String {
     let marker = "<untrusted_input_";
-    let start = text.find(marker).expect("the text carries an envelope") + marker.len();
+    let start = text.find(marker).expect("the text includes an envelope") + marker.len();
     let end = text[start..].find('>').expect("the open tag closes") + start;
     text[start..end].to_owned()
 }
@@ -120,8 +120,8 @@ fn sys_when_is_timestamp_to_rfc3339_for_any_started_at() {
 }
 
 #[test]
-fn flags_ride_on_the_context_and_start_empty() {
-    // `Flags` is a run input like the seed: empty from `new`, carried
+fn the_context_holds_the_flags_and_starts_them_empty() {
+    // `Flags` is a run input like the seed: empty from `new`, kept
     // verbatim when the host sets it (a replay hands back the recorded
     // set), and readable beside the other inputs.
     let fresh = test_context(EXECUTION);
@@ -130,7 +130,7 @@ fn flags_ride_on_the_context_and_start_empty() {
 
     let recorded = Flags::from_bits(0b101);
     let ctx = RunContext::new(EXECUTION, 42, STARTED_AT).flags(recorded);
-    assert_eq!(ctx.run_flags(), recorded, "the host's flags are carried");
+    assert_eq!(ctx.run_flags(), recorded, "the host's flags are kept");
     assert_eq!(ctx.seed(), 42);
     assert_eq!(ctx.started_at(), STARTED_AT);
 }

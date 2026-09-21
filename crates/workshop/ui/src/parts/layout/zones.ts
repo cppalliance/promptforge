@@ -61,7 +61,7 @@ export { ZONE_NAMES } from "../../services/zone-state-service";
 export type { PanelType } from "../../services/panel-registry";
 export type { ZoneName, ZoneState } from "../../services/zone-state-service";
 
-/** Parameters carried into a panel open; editor opens carry { path }. */
+/** Parameters passed into a panel open; editor opens pass { path }. */
 export type PanelParams = Record<string, unknown>;
 
 let dock: DockviewApi | null = null;
@@ -390,7 +390,7 @@ export function serializeZoneState(): ZoneState {
 
 /**
  * Replaces the zone map and overrides from persisted state. Entries
- * naming unknown zones or carrying non-string values are dropped; stale
+ * naming unknown zones or holding non-string values are dropped; stale
  * group ids self-heal because openInZone rebuilds a zone whose group no
  * longer exists.
  */

@@ -32,7 +32,7 @@ export const UNIFIED_MODES = {
 /** An agent interaction mode. */
 export type UnifiedMode = (typeof UNIFIED_MODES)[keyof typeof UNIFIED_MODES];
 
-/** The document-level event a mode selection fires; `detail` carries the mode. */
+/** The document-level event a mode selection fires; `detail` names the mode. */
 export const AGENT_MODE_CHANGED_EVENT = "agent-mode-changed";
 
 // The labels in menu order, derived from UNIFIED_MODES so the dropdown

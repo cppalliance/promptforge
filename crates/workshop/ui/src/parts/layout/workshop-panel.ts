@@ -370,7 +370,7 @@ export class WorkshopTreePanel extends WorkshopPart {
   /**
    * The dropdown anchor for a context menu: the pointer position for a
    * mouse invocation, the row (or panel) itself for a keyboard one,
-   * whose contextmenu event carries no coordinates.
+   * whose contextmenu event reports zero coordinates.
    */
   private menuAnchor(event: MouseEvent, fallback: HTMLElement): HTMLElement {
     if (event.clientX === 0 && event.clientY === 0) {

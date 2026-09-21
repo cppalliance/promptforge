@@ -7,7 +7,7 @@ You can converse with an agent. This chapter teaches you to give the agent files
 The fastest way to grant a folder is drag and drop. In the desktop application, drop a folder onto the window and it becomes a workspace root. Dropping a single file grants the application access to the file's parent folder instead of just the file. On Windows you can drop files or folders straight from Explorer, and the application receives the real OS paths of the dropped items. Each successfully dropped path is confirmed on the status bar with a message naming the path. When one dropped path cannot be opened, the status bar shows an error for that path and the remaining dropped paths are still added.
 
 - Dropping a file onto the window never by itself gives the application access to the file's bytes. The page grants each dropped path through the workspace API first.
-- Dropping files onto the window never navigates the page away from your session. In-page drags such as panel tab drags keep their normal behavior; only drags carrying OS files are intercepted.
+- Dropping files onto the window never navigates the page away from your session. In-page drags such as panel tab drags keep their normal behavior; only drags of OS files are intercepted.
 
 You can also add a folder without dragging. Click the header "+" button labeled "Add Folder to Workspace...", or right-click empty space in the panel and choose the same item. In the desktop application you pick a folder through the native folder picker. In a plain browser you type the path into an "Add Folder to Workspace" dialog. The drop-to-grant feature is desktop only; in a plain browser, dropping files keeps the normal HTML drag/drop behavior of reading file contents and never grants workspace access.
 
@@ -19,7 +19,7 @@ Folder grants are held in memory. Until you save a workspace they last only for 
 
 The Workshop tree lists the granted workspace roots and browses one directory at a time. When no folder is selected, the panel shows the granted folders as the top level of the tree. When no folders are granted, you see the hint "Drop a folder onto the window to browse it here."
 
-Each granted folder row shows the folder's own name rather than the full path, with the full path available as the row tooltip. A drive root shows its path. Directory listings show folders before files, each group sorted alphabetically by name. Each entry carries its name, full path, kind (directory or file), byte size, and modification time. Browsing is paths only: the tree lists names and never reads file contents.
+Each granted folder row shows the folder's own name rather than the full path, with the full path available as the row tooltip. A drive root shows its path. Directory listings show folders before files, each group sorted alphabetically by name. Each entry includes its name, full path, kind (directory or file), byte size, and modification time. Browsing is paths only: the tree lists names and never reads file contents.
 
 To browse:
 

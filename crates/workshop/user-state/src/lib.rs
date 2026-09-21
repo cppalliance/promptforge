@@ -18,9 +18,9 @@
 //! - One writer: every put updates the in-memory map under one mutex and
 //!   rewrites the whole file through the shared atomic-write helper, so
 //!   a crash leaves the old document or the new, never a truncation.
-//! - Zone two throughout: a missing, unreadable, or corrupt file reads as
-//!   "no state yet" - logged and tolerated; a refused put is a value
-//!   returned to the caller and writes nothing.
+//! - A missing, unreadable, or corrupt file reads as "no state yet" -
+//!   logged and tolerated; a refused put is a value returned to the
+//!   caller and writes nothing.
 //! - The crate maps its own [`UserStateError`] to the wire envelope at
 //!   its route boundary; no shell error type appears here.
 

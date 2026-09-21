@@ -1077,7 +1077,7 @@ await assertNoLeaks(lifecycle, async () => {
     mic.click();
     send.click();
     check(
-      "a send in the stop window carries the interim",
+      "a send in the stop window submits the interim",
       isDeepStrictEqual(wire.responses, [["tok2", "sent as shown"]]) && socket?.closed === false,
     );
     check(
@@ -1104,7 +1104,7 @@ await assertNoLeaks(lifecycle, async () => {
     dispose();
   }
 
-  // A stop keeps routing the worklet's carried block until flush completes.
+  // A stop keeps routing the worklet's buffered block until flush completes.
 
   {
     const { wire, mic, startTake, dispose } = await harness();
@@ -1124,7 +1124,7 @@ await assertNoLeaks(lifecycle, async () => {
       event.type.startsWith("input_audio_buffer."),
     );
     check(
-      "stop sends the worklet's carried PCM block before commit",
+      "stop sends the worklet's buffered PCM block before commit",
       speechEvents.length === 2 &&
         speechEvents[0].type === "input_audio_buffer.append" &&
         speechEvents[0].audio === "AQACAA==" &&
@@ -1147,7 +1147,7 @@ await assertNoLeaks(lifecycle, async () => {
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     check("the recording LED is lit before the send", status.recording);
     send.click();
-    check("the send carries the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
+    check("the send submits the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
     check("the send dims the recording LED", !status.recording);
     check("the send keeps the reusable Realtime socket open", !socket.closed);
     check(

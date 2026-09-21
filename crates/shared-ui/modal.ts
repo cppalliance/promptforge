@@ -5,10 +5,10 @@
 // gateway's confirm-modal and the workshop's editor-dialog so the two
 // behaviors never diverge.
 //
-// Class contract: the overlay carries `modal-overlay` plus
-// `${classPrefix}-overlay`; the dialog carries `modal-dialog` plus
+// Class contract: the overlay has `modal-overlay` plus
+// `${classPrefix}-overlay`; the dialog has `modal-dialog` plus
 // `${classPrefix}`; the title, message, field, label, input, actions, and
-// buttons carry `${classPrefix}__title` / `__line` / `__field` / `__label`
+// buttons have `${classPrefix}__title` / `__line` / `__field` / `__label`
 // / `__input` / `__actions` / `__button` (with a `--danger` modifier).
 // modal.css skins the base classes inside the components layer, so a
 // consumer's own per-prefix rules always win.

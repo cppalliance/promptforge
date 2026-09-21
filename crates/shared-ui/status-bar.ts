@@ -35,7 +35,7 @@ export interface StatusBarShell {
   /** Sets the left text, its error styling, and the bar tooltip. */
   setText(label: string, options?: StatusBarText): void;
   /**
-   * Shows or hides the barberpole. The toggle rides the `hidden`
+   * Shows or hides the barberpole. The toggle sets the `hidden`
    * attribute on the barberpole alone and never touches the indicators
    * group or its contents, so a live LED keeps glowing beside it.
    */

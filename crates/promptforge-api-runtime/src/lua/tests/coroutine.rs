@@ -17,8 +17,8 @@ use super::{compile_block, scheduler_vm};
 fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
     // Spike (a): instruction hooks are per-coroutine in PUC Lua, so the
     // main-state hook installed at construction cannot bite here. The
-    // block coroutine carries the VM's hook via `Thread::set_hook`; no
-    // instruction ceiling remains, so if that install regressed, this
+    // VM installs its hook on the block coroutine via `Thread::set_hook`;
+    // no instruction ceiling remains, so if that install regressed, this
     // pre-cancelled loop would hang the test instead of aborting.
     let handle = CancelHandle::new();
     handle.cancel();
@@ -35,7 +35,7 @@ fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
 }
 
 #[test]
-fn every_block_coroutine_carries_the_cancellation_hook() {
+fn every_block_coroutine_has_the_cancellation_hook() {
     // One VM installs the hook on every block coroutine it starts, not
     // only the first: under a cancelled run, each block's first hook
     // firing aborts it. A thread that missed the install would let the
@@ -131,7 +131,7 @@ fn at_named_chunk_errors_render_verbatim_through_resume() {
     );
     assert!(
         !raw.contains("[string \"@"),
-        "the chunk name carries no [string \"...\"] wrapper: {raw}"
+        "the chunk name renders bare, outside any [string \"...\"] wrapper: {raw}"
     );
 }
 

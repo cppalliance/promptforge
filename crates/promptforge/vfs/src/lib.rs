@@ -145,7 +145,7 @@ mod tests {
     use super::{Mode, ModePolicy, STORE_MOUNT, empty};
 
     #[test]
-    fn empty_carries_the_store_mount() -> Result<(), VfsError> {
+    fn empty_has_the_store_mount() -> Result<(), VfsError> {
         let vfs = empty();
         let access = vfs.acquire(Origin::new("empty store mount test"))?;
         let path = format!("{STORE_MOUNT}/paper.md");

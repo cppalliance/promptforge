@@ -216,17 +216,17 @@ const contextKeys = getService(CONTEXT_KEY_SERVICE);
   const titles = (rows) => rows.map((row) => Commands.lookup(row.command)?.title);
   const appearance = titles(Menus.getMenuItems("menubar/view/appearance"));
   check(
-    "Appearance carries the step-19 rows in group order",
+    "Appearance lists the step-19 rows in group order",
     appearance.join(",") ===
       "Full Screen,Primary Side Bar,Secondary Side Bar,Status Bar,Zoom In,Zoom Out,Reset Zoom",
   );
   const file = titles(Menus.getMenuItems("menubar/file"));
   check(
-    "File carries New Agents Window and Close Window",
+    "File lists New Agents Window and Close Window",
     file.includes("New Agents Window") && file.includes("Close Window"),
   );
   const help = titles(Menus.getMenuItems("menubar/help"));
-  check("Help carries About", help.includes("About"));
+  check("Help lists About", help.includes("About"));
 
   const palette = new Set(Menus.getMenuItems("commandPalette").map((row) => row.command));
   const f1Ids = [

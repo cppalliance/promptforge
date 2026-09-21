@@ -10,9 +10,9 @@
 // !isWeb), Save As and Revert File need an active editor, and Open
 // Folder / Add Folder to Workspace share the tree's Add Folder flow.
 // vscode.open and vscode.openFolder are the provider-backed commands:
-// the Open Recent dynamic rows and the "" quick-access rows carry their
+// the Open Recent dynamic rows and the "" quick-access rows set their
 // own titles and pass the path as args[0], which the run bodies narrow
-// to string, never cast. Neither is f1 - a palette row cannot carry a
+// to string, never cast. Neither is f1 - a palette row cannot supply a
 // path argument, and Go to File... already owns that surface.
 
 import type { IDisposable } from "../../base/lifecycle";

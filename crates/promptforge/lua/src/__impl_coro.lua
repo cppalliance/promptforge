@@ -41,7 +41,7 @@ end
 -- Every failure that reaches author code is one error table: `tostring`
 -- gives exactly the message, and a caller that branches reads `kind` and
 -- the kind's fields. Level 0 suppresses the position prefix (a table never
--- gets one, but a string fallback would), so a shim-raised error carries
+-- gets one, but a string fallback would), so a shim-raised error shows
 -- exactly the host's message.
 local function raise(kind, fields)
   error(error_value(kind, fields), 0)
@@ -127,7 +127,7 @@ end
 -- attached to its tool call. The driver always resumes it with content (a
 -- tool's own failure becomes untrusted failure text) and fires ToolResult
 -- under the id. Shim-internal: the loop shim calls it per requested tool
--- call; authors never see it, and a hand-built yield carrying `call_id` is
+-- call; authors never see it, and a hand-built yield including `call_id` is
 -- refused as a malformed request when its shape is wrong.
 local function tools_call_as_model(call_id, alias_or_tool, args)
   local ok, result = yield({
@@ -171,8 +171,8 @@ local function drain_task_notices(messages)
   end
 end
 
--- The message the exit rules raise for an empty round when the round
--- carried no phrase of its own.
+-- The message the exit rules raise for a round that ends with neither
+-- tool calls nor reply text.
 local EMPTY_MODEL_REPLY = "empty model reply"
 
 -- Invokes the selected compactor on an overflow round with the reason tag.

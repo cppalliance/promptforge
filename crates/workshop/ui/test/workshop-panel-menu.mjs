@@ -142,15 +142,15 @@ await flush();
   const live = rowByName(panelA, "project");
   check("both granted roots render as rows", !!gone && !!live);
   check(
-    "a missing root carries the strikethrough/danger modifier class",
+    "a missing root has the strikethrough/danger modifier class",
     gone?.classList.contains("ws-workshop-tree__row--missing") === true,
   );
   check(
-    'a missing root carries a "missing" text label beside its name',
+    'a missing root shows a "missing" text label beside its name',
     gone?.querySelector(".ws-workshop-tree__missing")?.textContent === "missing",
   );
   check(
-    "a live root carries neither the modifier class nor the label",
+    "a live root omits the modifier class and the label",
     live?.classList.contains("ws-workshop-tree__row--missing") === false &&
       live?.querySelector(".ws-workshop-tree__missing") === null,
   );

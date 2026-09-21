@@ -52,7 +52,7 @@ fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
     assert_eq!(
         fs::read_to_string(&path).expect("read real"),
         "config-version = 3\n",
-        "the real file carries the written contents"
+        "the real file holds the written contents"
     );
     assert_eq!(
         fs::read_to_string(shadow_path(&path)).expect("read shadow"),

@@ -3,7 +3,7 @@
 // thunks, the feature chunk loads on first activation, the directory's
 // register() runs exactly once no matter how many panels open, and the
 // real panel swaps into the dockview renderer element when the chunk
-// resolves. Bundles the modules with esbuild (the built-in thunks ride
+// resolves. Bundles the modules with esbuild (the built-in thunks come
 // along but are never triggered) and drives the registry against jsdom
 // with a synthetic lazy feature (test/helpers/lazy-feature.mjs). Covers:
 // the four built-in panel types' metadata (zone affinity, title, tab

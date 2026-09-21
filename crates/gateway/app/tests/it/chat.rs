@@ -271,7 +271,7 @@ async fn models_catalog_returns_configured_entries() {
 }
 
 #[tokio::test]
-async fn models_catalog_carries_model_kinds() {
+async fn models_catalog_reports_model_kinds() {
     let backend = fake_backend().await;
     let toml = format!(
         r#"
@@ -765,12 +765,12 @@ async fn gemma_stream_true_emulates_tool_calls_over_sse() {
     let calls = choice
         .pointer("/delta/tool_calls")
         .and_then(Value::as_array)
-        .expect("tool calls ride the delta");
+        .expect("the delta includes tool calls");
     assert_eq!(calls.len(), 1);
     assert_eq!(
         calls[0].get("index").and_then(Value::as_u64),
         Some(0),
-        "delta tool-call entries carry the fragment index"
+        "delta tool-call entries include the fragment index"
     );
     assert_eq!(
         calls[0].pointer("/function/name").and_then(Value::as_str),

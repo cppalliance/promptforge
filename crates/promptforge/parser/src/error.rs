@@ -1,19 +1,20 @@
-//! The parser's error substrate and its public classification.
+//! The parser's internal error type and its public classification.
 //!
-//! [`Error`] is the internal substrate every parsing module returns through
-//! [`Result`]. [`ParseError`] is the host-facing wrapper returned by
-//! [`Prompt::parse`](crate::Prompt::parse): it classifies the substrate into
-//! a stable [`ParseErrorKind`] and surfaces the failure's location fields.
+//! [`Error`] is the internal error type every parsing module returns
+//! through [`Result`]. [`ParseError`] is the host-facing wrapper returned
+//! by [`Prompt::parse`](crate::Prompt::parse): it classifies the internal
+//! type into a stable [`ParseErrorKind`] and surfaces the failure's
+//! location fields.
 
-/// A type-erased owned error cause used by the internal substrate.
+/// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// The parser's internal error substrate, classified into [`ParseError`] at
+/// The parser's internal error type, classified into [`ParseError`] at
 /// the public boundary.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
 /// companion `promptforge-api-runtime` crate can convert it back onto its own
-/// substrate variant-for-variant. It is not host API.
+/// internal type variant-for-variant. It is not host API.
 #[derive(Debug, thiserror::Error)]
 #[doc(hidden)]
 pub enum Error {
@@ -57,8 +58,8 @@ pub enum Error {
     },
 
     /// A Lua region failed to compile at parse time, preserved as the
-    /// `promptforge-lua` substrate so the compiler diagnostic chain survives
-    /// unchanged.
+    /// `promptforge-lua` internal error type so the compiler diagnostic
+    /// chain survives unchanged.
     #[error(transparent)]
     Lua(#[from] promptforge_lua::Error),
 
@@ -68,7 +69,7 @@ pub enum Error {
     Internal(&'static str),
 }
 
-/// The parser's internal result type over the [`Error`] substrate.
+/// The parser's internal result type over [`Error`].
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
@@ -152,7 +153,8 @@ pub enum ParseErrorKind {
     Frontmatter,
     /// The document structure was invalid (missing/duplicate H1, no sections).
     Structure,
-    /// A reserved `lua`/`lua shared` fence was misplaced or not closed exactly.
+    /// A reserved `lua`/`lua shared` fence was misplaced, or an exact fence
+    /// was not closed.
     Fence,
     /// A list-only section contained non-list or empty items.
     List,
@@ -176,8 +178,8 @@ pub struct ParseError {
     inner: Box<Error>,
 }
 
-/// The classified parts of a substrate error: the stable kind plus the
-/// location fields the substrate holds (the source span, the prompt's
+/// The classified parts of an internal error: the stable kind plus the
+/// location fields the internal error holds (the source span, the prompt's
 /// frontmatter name when the failure postdates the frontmatter, and the
 /// 1-based line/column - surfaced from the retained YAML failure, or
 /// computed from the span).
@@ -189,7 +191,7 @@ struct Classification {
     column: Option<u32>,
 }
 
-/// Classifies a substrate error into its stable kind and location fields.
+/// Classifies an internal error into its stable kind and location fields.
 fn classify_parse_error(inner: &Error) -> Classification {
     const NONE: Classification = Classification {
         kind: ParseErrorKind::Structure,
@@ -269,10 +271,11 @@ impl ParseError {
         self.column
     }
 
-    /// Unwraps the internal substrate error.
+    /// Unwraps the internal error.
     ///
-    /// `#[doc(hidden)]`: cross-crate seam for `promptforge-api-runtime`'s own error
-    /// substrate, mirroring the `promptforge-lua` precedent. Not host API.
+    /// `#[doc(hidden)]`: cross-crate seam for `promptforge-api-runtime`'s
+    /// own internal error type, mirroring the `promptforge-lua` precedent.
+    /// Not host API.
     #[doc(hidden)]
     #[must_use]
     pub fn into_inner(self) -> Error {

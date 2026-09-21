@@ -45,7 +45,7 @@ fn a_join_keeps_a_retained_outage_while_the_gateway_is_down() {
 }
 
 #[test]
-fn a_join_replays_a_retained_frame_carrying_real_work() {
+fn a_join_replays_a_retained_frame_describing_real_work() {
     let health = GatewayHealth::new();
     let working = Some(StatusBarUpdate {
         label: "Downloading model".to_owned(),

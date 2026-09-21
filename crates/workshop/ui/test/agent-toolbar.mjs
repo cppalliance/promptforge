@@ -71,7 +71,7 @@ await assertNoLeaks(lifecycle, async () => {
     const toolbar = new AgentToolbar(service);
     document.body.appendChild(toolbar.element);
     check(
-      "the toolbar carries the ws-agent-toolbar class",
+      "the toolbar has the ws-agent-toolbar class",
       toolbar.element.classList.contains("ws-agent-toolbar"),
     );
     check(

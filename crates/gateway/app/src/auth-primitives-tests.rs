@@ -180,16 +180,16 @@ async fn check_auth_accepts_the_cookie_as_the_bearer_keys_ambient_form() {
 }
 
 #[tokio::test]
-async fn the_cookie_carries_a_session_proof_never_the_key() {
+async fn the_cookie_holds_a_session_proof_never_the_key() {
     let state = test_token_state();
-    // The key's own hex - what a key-carrying cookie would present -
+    // The key's own hex - what a cookie holding the key would present -
     // must not authenticate.
     let bare = same_origin_with(&format!("{AUTH_COOKIE}={}", hex(b"test-token")));
     assert!(
         crate::auth::check_auth(&state, &peerless(bare))
             .await
             .is_err(),
-        "the cookie carries a derived proof, so the key itself is refused"
+        "the cookie holds a derived proof, so the key itself is refused"
     );
     // A proof minted under another process's salt is refused: a
     // restart revokes every minted cookie.
@@ -208,7 +208,7 @@ async fn the_cookie_carries_a_session_proof_never_the_key() {
 #[tokio::test]
 async fn the_cookie_path_requires_same_origin_fetch_metadata() {
     let state = test_token_state();
-    // A cross-origin rider on another loopback port is same-site
+    // A cross-origin page on another loopback port is same-site
     // (ports are not part of a site), so SameSite does not stop it;
     // the fetch metadata it cannot strip does.
     for site in ["same-site", "cross-site"] {
@@ -225,7 +225,7 @@ async fn the_cookie_path_requires_same_origin_fetch_metadata() {
             crate::auth::check_auth(&state, &peerless(headers))
                 .await
                 .is_err(),
-            "Sec-Fetch-Site: {site} marks a cross-origin rider"
+            "Sec-Fetch-Site: {site} marks a cross-origin request"
         );
     }
     // No metadata at all: non-browser clients authenticate with the

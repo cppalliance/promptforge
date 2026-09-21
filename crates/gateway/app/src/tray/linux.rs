@@ -4,7 +4,7 @@
 //!
 //! Runtime shape: serving stays on the gateway thread's runtime spawned by
 //! [`crate::spawn`], and the tray drives ksni from its own current-thread
-//! runtime on the main thread - the house one-runtime-per-thread pattern,
+//! runtime on the main thread - the standard one-runtime-per-thread pattern,
 //! same as the Ctrl-C handler. ksni's async-io build runs the D-Bus
 //! service on its own executor thread, so tray callbacks never depend on
 //! which runtime polls them (ksni's default `tokio` feature couples the

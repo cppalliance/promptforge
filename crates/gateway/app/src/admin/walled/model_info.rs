@@ -55,7 +55,7 @@ pub(crate) async fn admin_model_info(
     _caller: LoopbackCaller,
     WireQuery(query): WireQuery<ModelInfoQuery>,
 ) -> Result<Json<gguf::ModelInfo>, GatewayError> {
-    // The retained running config carries the `[local].cache_dir` the path
+    // The retained running config holds the `[local].cache_dir` the path
     // is confined to, so the boundary and the store agree on the root.
     let config = state.config().await;
     let info = blocking(move || {

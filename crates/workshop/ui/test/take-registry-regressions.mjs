@@ -252,7 +252,7 @@ test("audio flushed while capture stops remains owned by the stopping take", () 
     stopped.effects.some(
       (effect) => effect.domain === "wire" && effect.command === "commit",
     ),
-    "the carried append is followed by commit after capture flushes",
+    "the append is followed by commit after capture flushes",
   );
 });
 

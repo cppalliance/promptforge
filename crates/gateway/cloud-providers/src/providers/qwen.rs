@@ -69,9 +69,9 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
     entry
 }
 
-/// The workload, inferred from the name: the compatible-mode endpoint
-/// reports no kinds. Segment matches keep `tts` and `asr` from matching
-/// inside unrelated words.
+/// The workload, inferred from the name, since the compatible-mode
+/// endpoint is IDs-only. Segment matches keep `tts` and `asr` from
+/// matching inside unrelated words.
 fn kind_of(id: &str) -> ModelKind {
     let segments: Vec<&str> = id.split('-').collect();
     let has = |names: &[&str]| segments.iter().any(|segment| names.contains(segment));

@@ -61,7 +61,7 @@ test("selecting posts switch-profile, stages nothing, and raises the banner on r
   assert.equal(stub.state.active, "default", "the running profile is untouched");
   assert.ok(
     putBodies(stub).every((body) => !("active_profile" in body)),
-    "no config PUT carries active_profile",
+    "every config PUT omits active_profile",
   );
   assert.equal(
     root.querySelector(".banner-restart").hidden,
@@ -101,7 +101,7 @@ test("No profile is checked when the envelope reports null and sends null when p
   root.querySelector(".profile-switcher button").click();
   await settle();
 
-  // Move to travel and back to No profile: the null selection rides the wire.
+  // Move to travel and back to No profile: the null selection is posted.
   await pick(root, "travel");
   await pick(root, "No profile");
   assert.deepEqual(
@@ -126,7 +126,7 @@ test("a profile name containing a quote selects and leaves the rows enabled", as
 
   await pick(root, quoted);
 
-  assert.deepEqual(stub.state.switchCalls, [{ name: quoted }], "the quoted name rides the wire");
+  assert.deepEqual(stub.state.switchCalls, [{ name: quoted }], "the quoted name is posted");
   assert.match(root.querySelector(".profile-switcher > button").textContent, /say "hi"/);
   root.querySelector(".profile-switcher button").click();
   await settle();

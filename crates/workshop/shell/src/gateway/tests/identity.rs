@@ -26,7 +26,7 @@ fn an_explicit_config_attachment_holds_no_local_sidecar_identity() {
     assert_eq!(
         config.sidecar_identity(),
         None,
-        "a LAN Gateway from explicit config carries no local sidecar identity"
+        "a LAN Gateway from explicit config reports None for the sidecar identity"
     );
 }
 

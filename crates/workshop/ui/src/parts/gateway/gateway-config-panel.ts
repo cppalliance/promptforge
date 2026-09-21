@@ -3,7 +3,7 @@
 // same-origin through the workshop server. The panel only hosts; all
 // traffic between the iframe and the workshop flows through the
 // window-level bridge in gateway-config-bridge.ts. The workshop's own
-// origin rides along in the iframe URL's `bridge` parameter, so the
+// origin is passed in the iframe URL's `bridge` parameter, so the
 // iframe can pin its postMessage targetOrigin to the real parent
 // instead of "*".
 

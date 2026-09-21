@@ -90,7 +90,7 @@ test("Set Active posts switch-profile, stages nothing, and raises the restart ba
     stub.calls
       .filter((call) => call.url.endsWith("/admin/config") && call.init.method === "PUT")
       .every((call) => !("active_profile" in JSON.parse(call.init.body))),
-    "no config PUT carries active_profile",
+    "every config PUT omits active_profile",
   );
   assert.equal(root.querySelector(".banner-restart").hidden, false, "the banner is raised");
   assert.equal(root.querySelector(".set-active").disabled, true, "the row is now selected");
@@ -149,7 +149,7 @@ test("a persisted name absent from the profiles shows the Stale pill until a Set
   const stale = root.querySelector(".profile-stale");
   assert.ok(stale, "the stale notice renders");
   assert.match(stale.textContent, /retired/, "the notice names the missing profile");
-  assert.ok(stale.querySelector(".pill-stale"), "the notice carries the Stale pill");
+  assert.ok(stale.querySelector(".pill-stale"), "the notice shows the Stale pill");
   assert.equal(root.querySelector(".set-active").disabled, false, "Set Active is offered");
 
   root.querySelector(".set-active").click();

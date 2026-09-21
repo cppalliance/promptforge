@@ -20,7 +20,7 @@ fn an_outside_crate_depending_into_the_private_container_is_reported() {
         violations[0].contains("workshop-sessions depends on promptforge-lua")
             && violations[0].contains("crates/promptforge is private to its family")
             && violations[0].contains("promptforge-api-runtime"),
-        "the violation carries the container privacy message: {violations:?}"
+        "the violation includes the container privacy message: {violations:?}"
     );
 }
 
@@ -74,7 +74,7 @@ fn an_outside_crate_depending_into_the_gateway_container_is_reported() {
         violations[0].contains("promptforge-api-runtime depends on gateway-protocol")
             && violations[0].contains("crates/gateway is private to its family")
             && violations[0].contains("no outside crate"),
-        "the violation carries the gateway container privacy message: {violations:?}"
+        "the violation includes the gateway container privacy message: {violations:?}"
     );
 }
 
@@ -111,7 +111,7 @@ fn an_outside_crate_depending_into_the_workshop_container_is_reported() {
         violations[0].contains("outside-tool depends on workshop-protocol")
             && violations[0].contains("crates/workshop is private to its family")
             && violations[0].contains("no outside crate"),
-        "the violation carries the workshop container privacy message: {violations:?}"
+        "the violation includes the workshop container privacy message: {violations:?}"
     );
 }
 
@@ -164,7 +164,7 @@ fn a_workshop_crate_depending_into_the_gateway_container_is_reported() {
     assert!(
         violations[0].contains("workshop-server depends on gateway-local")
             && violations[0].contains("crates/gateway is private to its family"),
-        "the violation carries the gateway container privacy message: {violations:?}"
+        "the violation includes the gateway container privacy message: {violations:?}"
     );
 }
 
@@ -221,12 +221,12 @@ fn an_outside_crate_depending_into_the_harness_container_is_reported() {
         violations[0].contains("workshop-server depends on harness-runner")
             && violations[0].contains("crates/harness is private to its family")
             && violations[0].contains("harness-api"),
-        "the violation carries the harness container privacy message: {violations:?}"
+        "the violation includes the harness container privacy message: {violations:?}"
     );
 }
 
 #[test]
-fn the_harness_door_depending_into_the_harness_container_passes() {
+fn the_public_harness_crate_depending_into_the_harness_container_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),

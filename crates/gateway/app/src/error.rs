@@ -807,11 +807,11 @@ mod tests {
     }
 
     #[test]
-    fn only_a_loading_model_carries_retry_after() {
+    fn only_a_loading_model_sets_retry_after() {
         // A loading model is a 503 the client should wait out, so its
         // response names the wait; the other 503s (a full queue, a model
         // still provisioning) promise nothing about when they clear and
-        // carry none.
+        // set none.
         let response = GatewayError::ModelLoading("local-model".to_owned()).into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
@@ -833,7 +833,7 @@ mod tests {
                     .headers()
                     .get(axum::http::header::RETRY_AFTER)
                     .is_none(),
-                "{} carries no Retry-After",
+                "{} omits Retry-After",
                 response.status()
             );
         }
@@ -1071,7 +1071,7 @@ mod tests {
     struct OverSilent(#[source] Silent);
 
     #[test]
-    fn a_cause_the_outer_message_already_carries_renders_once() {
+    fn a_cause_the_outer_message_already_includes_renders_once() {
         let error = Copying {
             message: "disk full".to_owned(),
             source: Leaf,
@@ -1079,7 +1079,7 @@ mod tests {
         let rendered = error_chain(&error);
         assert_eq!(
             rendered, "config write rejected: disk full",
-            "a cause whose text the outer message already carries is skipped"
+            "a cause whose text the outer message already includes is skipped"
         );
         assert_eq!(
             rendered.matches("disk full").count(),

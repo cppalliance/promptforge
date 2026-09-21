@@ -139,7 +139,7 @@
   color: var(--text-muted);
 }
 
-/* Shiki's pre carries inline colors from the theme; the plain-fallback
+/* Shiki's pre has inline colors from the theme; the plain-fallback
    pre and the raw/result blocks pick up the same shape from here. */
 .ws-tool-call-card__args pre,
 .ws-tool-call-card__raw,

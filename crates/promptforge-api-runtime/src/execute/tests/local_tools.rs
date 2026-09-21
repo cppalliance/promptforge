@@ -91,7 +91,7 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     let bodies = gateway.requests();
     let tool_turns = bodies[1]["messages"]
         .as_array()
-        .expect("a request body must carry a messages array")
+        .expect("a request body must include a messages array")
         .iter()
         .filter(|m| m["role"] == "tool")
         .count();

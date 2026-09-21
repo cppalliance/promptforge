@@ -97,7 +97,7 @@ test("the Review diff is empty when pending equals running while a profile runs"
   assert.match(overlay.textContent, /No visible value changes/);
 });
 
-test("the persisted selection never rides a config PUT", async () => {
+test("the persisted selection never appears in a config PUT", async () => {
   const { stub } = await stageFirstQuant("travel");
   const puts = stub.calls.filter(
     (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",

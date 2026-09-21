@@ -29,9 +29,9 @@ const SHELL_BIND: &str = "127.0.0.1:0";
 /// directory - supplies the `[gateway]` connection and the path
 /// settings; the listener settings are forced to the shell's own. With
 /// no file, the default config anchors its state in the profile's
-/// `.promptforge` directory and has no explicit gateway, so endpoint
-/// resolution attaches through the gateway's gateway discovery file or fails
-/// plainly.
+/// `.promptforge` directory and leaves the gateway to endpoint
+/// resolution, which attaches through the gateway discovery
+/// file or fails plainly.
 ///
 /// # Errors
 /// Returns an error when a discovered file cannot be loaded or the

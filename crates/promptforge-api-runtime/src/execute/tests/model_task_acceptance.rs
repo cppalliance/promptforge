@@ -95,7 +95,7 @@ pub(super) fn model_starts(records: &[(String, Observation)]) -> Vec<(TaskId, St
 fn message_count(gateway: &ScriptedGateway, round: usize) -> usize {
     gateway.requests()[round]["messages"]
         .as_array()
-        .expect("a chat request carries messages")
+        .expect("a chat request includes messages")
         .len()
 }
 
@@ -134,7 +134,7 @@ pub(super) fn two_child_prompt(
 #[tokio::test(flavor = "current_thread")]
 async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     // Round 1 starts the task; the child ends between round 2's drain and
-    // its chat, so round 2's status read sees it done and round 3 carries
+    // its chat, so round 2's status read sees it done and round 3 includes
     // its notice as a user record ahead of the reply. The author's list
     // holds the whole exchange in order, each tool record correlated to
     // its call, and the task starts once and succeeds once.
@@ -184,16 +184,16 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     assert!(
         lines[2].starts_with("Task id=0.0 (## Child) completed: ")
             && lines[2].contains("child result"),
-        "the notice ahead of round 3 carries the task's result: {}",
+        "the notice ahead of round 3 reports the task's result: {}",
         lines[2]
     );
     assert_eq!(gateway.requests().len(), 3);
     assert_eq!(message_count(&gateway, 1), 3, "round 2 predates the notice");
-    assert_eq!(message_count(&gateway, 2), 6, "round 3 carries the notice");
+    assert_eq!(message_count(&gateway, 2), 6, "round 3 holds the notice");
     assert_eq!(
         scheduler.task_state_for_test(&task("0.0")),
         Some(TaskState::Done),
-        "the model's task holds its outcome; the notice carried it"
+        "the model's task holds its outcome; the notice delivered it"
     );
     let records = recorder.events();
     assert_eq!(
@@ -292,8 +292,8 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
     // waits with no timeout. The first wait answers with `Quick`'s notice
     // alone (the wait wakes on the first end, not on both), the second
     // with `Slow`'s alone (a delivered notice is never drained again), and
-    // the reply round carries nothing beyond the answered calls. Neither
-    // wait allocates a timer.
+    // the reply round holds only the answered calls. Neither wait
+    // allocates a timer.
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Quick\"}"),
         resp_tool_call("call_2", "task", "{\"target\":\"## Slow\"}"),

@@ -169,7 +169,7 @@ impl StreamAccumulator {
             let message = envelope
                 .get("message")
                 .and_then(Value::as_str)
-                .unwrap_or("stream error envelope carried no message");
+                .unwrap_or("stream error envelope omitted its message");
             return Err(Error::Http(Box::new(std::io::Error::other(format!(
                 "completion stream reported an error: {}",
                 escape_controls(message, 2000)
@@ -198,15 +198,13 @@ impl StreamAccumulator {
                 ));
             }
         };
-        let mut carried_delta = false;
+        let mut held_delta = false;
         for choice in choices {
             if self.apply_choice(choice, on_delta)? {
-                carried_delta = true;
+                held_delta = true;
             }
         }
-        Ok(Applied::Chunk {
-            delta: carried_delta,
-        })
+        Ok(Applied::Chunk { delta: held_delta })
     }
 
     /// Applies one streamed choice, returning whether it held content.
@@ -239,18 +237,18 @@ impl StreamAccumulator {
                 ));
             }
         };
-        let mut carried = false;
+        let mut held = false;
         if let Some(text) = append_string_fragment(delta, "content", &mut self.content, "content")?
             && !text.is_empty()
         {
-            carried = true;
+            held = true;
             on_delta(StreamDelta::Text(text));
         }
         for key in ["reasoning_content", "reasoning", "thinking"] {
             if let Some(text) = append_string_fragment(delta, key, &mut self.reasoning, key)?
                 && !text.is_empty()
             {
-                carried = true;
+                held = true;
                 on_delta(StreamDelta::Reasoning(text));
             }
         }
@@ -261,7 +259,7 @@ impl StreamAccumulator {
                     self.apply_tool_fragment(fragment)?;
                 }
                 if !fragments.is_empty() {
-                    carried = true;
+                    held = true;
                 }
             }
             Some(_) => {
@@ -270,7 +268,7 @@ impl StreamAccumulator {
                 ));
             }
         }
-        Ok(carried)
+        Ok(held)
     }
 
     /// Merges one tool-call fragment into its index-keyed buffer.

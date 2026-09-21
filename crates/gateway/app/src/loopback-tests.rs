@@ -88,7 +88,7 @@ async fn config_without_a_trailing_slash_redirects_to_the_mount() {
         response
             .headers()
             .get(axum::http::header::LOCATION)
-            .expect("a redirect carries a Location header"),
+            .expect("a redirect sets a Location header"),
         "/config/",
         "the redirect lands on the trailing-slash mount so relative asset paths resolve"
     );
@@ -196,7 +196,7 @@ async fn the_host_wall_admits_the_bound_and_localhost_authorities() {
 }
 
 #[tokio::test]
-async fn the_router_seam_without_a_bound_address_carries_no_host_wall() {
+async fn the_router_seam_without_a_bound_address_skips_the_host_wall() {
     let (_temp, state) = walled_fixture();
     let response = build_router(state, None)
         .oneshot(

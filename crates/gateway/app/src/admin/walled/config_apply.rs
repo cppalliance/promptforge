@@ -3,8 +3,8 @@
 //!
 //! Apply captures the pending state under the apply lock - a census of the
 //! shadows, the parsed shadow-preferred config, and every shadow's current
-//! contents - then releases the lock. A change that needs no reload (an env
-//! shadow alone) is promoted inline. A config shadow runs as an
+//! contents - then releases the lock. An env shadow alone applies without
+//! a reload and is promoted inline. A config shadow runs as an
 //! `ApplyConfig` command on the command queue: the command rebuilds the
 //! remote routing table from the pending config, merges the running local
 //! models under it, promotes the captured shadows under the apply lock, and

@@ -80,7 +80,7 @@ fn streamed_accumulation_matches_the_buffered_fixture_byte_for_byte() {
 }
 
 #[test]
-fn finish_normalizes_the_turn_and_carries_the_metadata() {
+fn finish_normalizes_the_turn_and_returns_the_metadata() {
     let accumulator = accumulate(&[
         content_chunk("Hel"),
         content_chunk("lo!"),
@@ -160,7 +160,7 @@ fn finish_returns_truncated_text_with_its_finish_reason() {
 
 #[test]
 fn finish_hard_fails_on_an_empty_model_reply() {
-    // A stream that carries only reasoning and a stop finish has no
+    // A stream that holds only reasoning and a stop finish has no
     // product; the accumulated turn must fail exactly like the buffered
     // equivalent, with the finish_reason surviving.
     let error = accumulate(&[
@@ -284,7 +284,7 @@ fn error_envelope_fails_the_stream_with_the_escaped_message() {
         .expect_err("an error envelope must fail the stream");
     assert_eq!(error.kind(), CompletionErrorKind::Transport);
     let source = std::error::Error::source(&error)
-        .expect("the envelope message rides as the cause")
+        .expect("the envelope message is the cause")
         .to_string();
     assert!(source.contains("upstream\\ndied"), "escaped: {source}");
 }

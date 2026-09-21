@@ -95,7 +95,7 @@ fn chaining_returns_the_same_list_table() {
 }
 
 #[test]
-fn assistant_carries_tool_calls_only_when_given() {
+fn assistant_sets_tool_calls_only_when_given() {
     let lua = lua_with_messages();
     let without = eval_json(&lua, "messages.new():assistant('working on it')");
     assert_eq!(
@@ -119,7 +119,7 @@ fn assistant_carries_tool_calls_only_when_given() {
 }
 
 #[test]
-fn tool_records_carry_the_call_id() {
+fn tool_records_set_the_call_id() {
     let lua = lua_with_messages();
     let json = eval_json(&lua, "messages.new():tool('echoed: hi', 'call_1')");
     assert_eq!(

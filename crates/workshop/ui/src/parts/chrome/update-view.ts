@@ -1,6 +1,6 @@
 // Update banner and installation overlay. Native I/O and state stay in the
 // service; this view only translates snapshots into DOM. Transient update
-// notifications ride the shared toast stack (shared-ui/toast); the banner
+// notifications feed the shared toast stack (shared-ui/toast); the banner
 // keeps the actionable "available" state and the overlay the install
 // progress (the shared inline progress bar).
 

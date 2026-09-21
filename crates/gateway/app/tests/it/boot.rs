@@ -277,7 +277,7 @@ models = ["missing-model"]
 
     // The eager assembly provisions inline, so the absent source fails it:
     // the failure is what proves provisioning runs on this path at all. The
-    // call rides a plain thread because the failed store's blocking HTTP
+    // call runs on a plain thread because the failed store's blocking HTTP
     // client cannot drop inside the test's async context.
     let eager = body.clone();
     let text = std::thread::spawn(move || {
@@ -646,11 +646,11 @@ fn headless_serve_bookends_the_log_file() {
     );
 }
 
-/// The bare invocation needs no subcommand: with no `--config` the gateway
-/// runs boot discovery, generates the first-run config into the redirected
-/// profile, and serves - proved by the gateway discovery file written after the
-/// bind. The child is killed once the file lands, before the generated
-/// config's boot command can provision anything.
+/// The bare invocation is the whole command line: with no `--config` the
+/// gateway runs boot discovery, generates the first-run config into the
+/// redirected profile, and serves - proved by the gateway discovery file
+/// written after the bind. The child is killed once the file lands,
+/// before the generated config's boot command can provision anything.
 #[test]
 fn the_root_invocation_serves_with_boot_discovery() {
     let temp = tempfile::tempdir().unwrap();
@@ -782,7 +782,7 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
         &std::fs::read_to_string(&connection).expect("read the gateway discovery file"),
     )
     .expect("the gateway discovery file is JSON");
-    let port = file["port"].as_u64().expect("the file carries a port");
+    let port = file["port"].as_u64().expect("the file holds a port");
 
     // The second launch: the handoff prints the running gateway's URL and
     // exits. A regression to a normal boot would serve instead, so the
@@ -1154,11 +1154,11 @@ fn diagnostics_reports_without_serving_or_mutating() {
     assert_eq!(report["connection_file"]["exists"], false);
     assert!(
         report["version"].as_str().is_some(),
-        "the report carries the version"
+        "the report includes the version"
     );
     assert!(
         !stdout.contains("api_key"),
-        "the report carries no key material: {stdout}"
+        "the report omits key material: {stdout}"
     );
 
     assert_eq!(

@@ -93,7 +93,7 @@ await assertNoLeaks(lifecycle, async () => {
       chip.element.tagName === "BUTTON" && chip.element.type === "button",
     );
     check(
-      "the chip carries the ws-mode-chip class",
+      "the chip has the ws-mode-chip class",
       chip.element.classList.contains("ws-mode-chip"),
     );
     check("the chip starts on the agent mode", chip.mode === "agent");
@@ -124,7 +124,7 @@ await assertNoLeaks(lifecycle, async () => {
         labels.join(",") === "Agent,Plan,Debug,Multitask,Ask",
     );
     check(
-      "the current mode row carries Cursor's trailing check",
+      "the current mode row shows Cursor's trailing check",
       items[0]?.querySelector(".menu-item__check")?.textContent === "✓",
     );
     check(

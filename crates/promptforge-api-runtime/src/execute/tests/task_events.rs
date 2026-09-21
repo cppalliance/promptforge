@@ -69,7 +69,7 @@ fn an_owner_reads_its_tasks_history_and_last_narrows_it_to_later_events() {
         all - 1,
         "`last` drops exactly the events already seen"
     );
-    assert_eq!(parts[3], "true", "every event carries the child's task");
+    assert_eq!(parts[3], "true", "every event names the child's task");
     assert!(
         events
             .iter()
@@ -136,7 +136,7 @@ async fn the_tokio_driver_answers_a_history_read_from_its_own_events() {
     );
     assert!(
         text.ends_with("|true"),
-        "every event carries the child's task: {text}"
+        "every event names the child's task: {text}"
     );
 }
 
@@ -199,7 +199,7 @@ fn the_task_events_builtin_answers_the_model_with_the_history_nonce_wrapped() {
     );
     assert!(
         text.contains("\"kind\":\"task_succeeded\"") && text.contains("\"task\":\"0.0\""),
-        "the history carries the child's terminal as JSON: {text}"
+        "the history includes the child's terminal as JSON: {text}"
     );
     let trusted = events
         .iter()

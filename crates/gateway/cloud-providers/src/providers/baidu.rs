@@ -61,7 +61,7 @@ pub(crate) async fn fetch(
 /// One model as the wire reports it. Every field is documented as
 /// optional. `max_completions_tokens` (the reasoning-plus-output
 /// ceiling) and `prompt_tokens` (the settable input ceiling) duplicate
-/// what `context_length` already states and are not parsed.
+/// what `context_length` already states, so they are ignored.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,
@@ -83,8 +83,7 @@ struct WireArchitecture {
 
 /// The pricing object: prompt and completion prices in CNY per
 /// thousand tokens, each either a single price string or a tiered
-/// array of `{up_to, price}` rows. The per-image `image` price has no
-/// sheet field and is not parsed.
+/// array of `{up_to, price}` rows. The per-image `image` price is ignored.
 #[derive(Debug, Deserialize)]
 struct WirePricing {
     prompt: Option<WirePrice>,
@@ -406,7 +405,7 @@ mod tests {
         for entry in by_id.values() {
             assert!(
                 entry.variant_of.is_none(),
-                "the catalog carries no snapshot suffixes: {}",
+                "the catalog lists base models only: {}",
                 entry.id
             );
         }

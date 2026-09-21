@@ -1570,8 +1570,8 @@ return models.infer(models.get('ghost'), 'ping')\n\
 /// A collection larger than the old default item cap (1024) runs through the
 /// prompt-level path: the parent's Lua builds the table,
 /// `collection_to_items` converts it, and `fanout` dispatches every member.
-/// The worker is pure Lua with an immediate return, so the run needs no
-/// client and stays fast.
+/// The worker is pure Lua with an immediate return, so the run works
+/// without a client and stays fast.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_accepts_a_prompt_built_collection_over_the_old_default_cap() {
     let md = flow_prompt!(
@@ -1725,7 +1725,7 @@ return item\n\
     assert_eq!(out, "ab");
 }
 
-/// `var` is the walk's clipboard: H1's writes seed the top-level walk, and
+/// The walk's `var` table persists: H1's writes seed the top-level walk, and
 /// one section's writes reach the next across both fall-through and a jump.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn var_persists_across_sections_fallthrough_and_jump() {
@@ -1748,7 +1748,7 @@ error('the jump must skip B')\n\
 ## C\n\n\
 ```lua\n\
 assert(var.from_h1 == 'seed', 'the jump shares the walk var')\n\
-assert(var.from_a == 'a', 'the jump carries the jumper writes')\n\
+assert(var.from_a == 'a', 'the jump keeps the jumper writes')\n\
 var.from_c = 'c'\n\
 ```\n\n\
 ## D\n\n\
@@ -2281,7 +2281,7 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     // run, so the run's store writes land on the overlay (readable across
     // sections) instead of failing for want of the mount, and the
     // caller's backend stays untouched. (`Environment::run` never needs
-    // the fallback: its prepare pass builds a router that always carries
+    // the fallback: its prepare pass builds a router that always includes
     // the store mount.)
     let md = flow_prompt!(
         "# Test prompt\n\n\
@@ -2342,7 +2342,7 @@ async fn default_environment_runs_a_capability_free_prompt() {
 }
 
 #[tokio::test]
-async fn default_run_context_store_handle_carries_the_stock_mount() {
+async fn default_run_context_store_handle_has_the_stock_mount() {
     // `RunContext` absorbs the store handle with a `promptforge_vfs::empty()`
     // default: a store-using run needs no host-supplied handle.
     let md = flow_prompt!(
@@ -2361,7 +2361,7 @@ async fn default_run_context_store_handle_carries_the_stock_mount() {
     )
     .await
     else {
-        panic!("the default store handle carries the stock mount");
+        panic!("the default store handle has the stock mount");
     };
     assert_eq!(out, "stock");
 }

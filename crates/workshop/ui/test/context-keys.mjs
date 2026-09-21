@@ -115,7 +115,7 @@ check("dotted and dashed keys parse", evaluate("config.editor.wordWrap == 'on'",
   const bare = ContextKeyExpr.deserialize("==");
   check("an operator with no key is a parse error", !bare.ok);
   const withOffset = ContextKeyExpr.deserialize("a && )");
-  check("a parse error carries a numeric offset", !withOffset.ok && typeof withOffset.error.offset === "number");
+  check("a parse error reports a numeric offset", !withOffset.ok && typeof withOffset.error.offset === "number");
 }
 
 // --- The service -------------------------------------------------------------------

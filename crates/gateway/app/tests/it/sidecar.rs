@@ -46,7 +46,7 @@ fn spawn_writes_the_gateway_discovery_file_and_shutdown_removes_it() {
 
     let gateway = spawn(&options).expect("the gateway boots");
 
-    // The file exists the moment spawn returns, carrying the real bind.
+    // The file exists the moment spawn returns, holding the real bind.
     let file = gateway_api_discovery::GatewayDiscoveryFile::read(&run_dir)
         .expect("the gateway discovery file reads")
         .expect("the gateway discovery file exists after the bind");
@@ -56,8 +56,8 @@ fn spawn_writes_the_gateway_discovery_file_and_shutdown_removes_it() {
         .strip_prefix("http://127.0.0.1:")
         .expect("the gateway bound loopback")
         .parse()
-        .expect("the url carries a port");
-    assert_eq!(file.port, port, "the file carries the bound port");
+        .expect("the url includes a port");
+    assert_eq!(file.port, port, "the file records the bound port");
     assert_eq!(file.api_key, "test-token");
     assert_eq!(file.version, env!("CARGO_PKG_VERSION"));
     assert!(file.epoch > 0);

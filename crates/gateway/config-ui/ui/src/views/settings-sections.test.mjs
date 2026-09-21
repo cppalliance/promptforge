@@ -1,5 +1,5 @@
 // Pins the Settings view's editable panels: the Gateway card's
-// single-config save (untouched secrets ride through as "***", a typed
+// single-config save (untouched secrets are sent back as "***", a typed
 // key leaves the DOM after the save, the restart and new-key notes),
 // the Workshop Enable flow with restart-bound STT tuning, dominion cards
 // (kind-dependent vram_gb, used-by chips, dependent-naming delete, the
@@ -60,7 +60,7 @@ test("a Gateway save PUTs the global shadow with the untouched api_key as ***", 
   assert.match(
     root.querySelector(".restart-note").textContent,
     /Restart required/,
-    "the restart-bound card carries the restart note",
+    "the restart-bound card shows the restart note",
   );
   assert.match(
     root.querySelector(".configui-url").textContent,
@@ -81,7 +81,7 @@ test("a Gateway save PUTs the global shadow with the untouched api_key as ***", 
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
   assert.equal(bodies[0].server.bind, "0.0.0.0:9999");
-  assert.equal(bodies[0].server.api_key, "***", "the untouched secret rides through redacted");
+  assert.equal(bodies[0].server.api_key, "***", "the untouched secret is sent back redacted");
 });
 
 test("the Trust loopback toggle defaults on, names the caveat, and round-trips through the [server] save", async () => {
@@ -91,7 +91,7 @@ test("the Trust loopback toggle defaults on, names the caveat, and round-trips t
   navigate(dom, "#/settings/gateway");
   await settle();
   const row = root.querySelector(".field-row[data-key='trust_loopback']");
-  assert.ok(row, "the [server] card carries the trust_loopback field");
+  assert.ok(row, "the [server] card shows the trust_loopback field");
   assert.equal(row.querySelector("label").textContent, "Trust loopback connections");
   const toggle = row.querySelector(".switch");
   assert.equal(
@@ -112,8 +112,8 @@ test("the Trust loopback toggle defaults on, names the caveat, and round-trips t
 
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
-  assert.equal(bodies[0].server.trust_loopback, false, "the toggle rides in the [server] section");
-  assert.equal(bodies[0].server.bind, "127.0.0.1:8081", "the other [server] fields ride along");
+  assert.equal(bodies[0].server.trust_loopback, false, "the toggle saves in the [server] section");
+  assert.equal(bodies[0].server.bind, "127.0.0.1:8081", "the other [server] fields are saved too");
   assert.equal(bodies[0].server.api_key, "***", "the untouched secret stays redacted");
   assert.equal(
     root
@@ -216,14 +216,14 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
   assert.equal(
     bodies[0].workshop?.bind,
     undefined,
-    "a fresh section carries no inert hosting bind",
+    "a fresh section omits the inert hosting bind",
   );
   assert.equal(bodies[0].stt.window_seconds, 15);
   assert.equal(bodies[0].workshop?.stt, undefined, "the UI never writes legacy workshop.stt");
   assert.equal(
     bodies[0].server.bind,
     "127.0.0.1:8081",
-    "a Workshop save still carries the global [server] section",
+    "a Workshop save still includes the global [server] section",
   );
 
   root.querySelector(".apply-button").click();
@@ -375,10 +375,10 @@ test("a Storage save PUTs the global shadow with the new cache_dir", async () =>
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
   assert.equal(bodies[0].local.cache_dir, "D:/pf-cache");
-  assert.equal(bodies[0].dominion.length, 1, "the keyed arrays ride through the payload");
+  assert.equal(bodies[0].dominion.length, 1, "the keyed arrays stay in the payload");
 });
 
-test("every settings save carries the complete single-file configuration", async () => {
+test("every settings save sends the complete single-file configuration", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -397,7 +397,7 @@ test("every settings save carries the complete single-file configuration", async
 
 test("one global section save does not erase another staged section", async () => {
   // Stage a [server] edit, then save [local]. The pending view must
-  // keep both edits, and a later Workshop save must carry them.
+  // keep both edits, and a later Workshop save must include them.
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -438,7 +438,7 @@ test("one global section save does not erase another staged section", async () =
   assert.equal(
     globalBodies[globalBodies.length - 1].server.bind,
     "0.0.0.0:9999",
-    "a Workshop-only save carries the staged [server] edit, not a stale copy",
+    "a Workshop-only save sends the staged [server] edit, not a stale copy",
   );
 });
 
@@ -474,7 +474,7 @@ test("an endpoint's api_key stays *** through a save and Change reveals the inpu
   assert.equal(
     bodies[0].endpoint[0].api_key,
     "***",
-    "the untouched endpoint secret rides through redacted",
+    "the untouched endpoint secret is sent back redacted",
   );
 
   const reopened = root.querySelector(".entry-card[data-entry='endpoint:openai']");
@@ -551,7 +551,7 @@ test("the restart banner clears when config generation advances", async () => {
   assert.ok(banner.hidden, "the restart banner starts hidden");
   // The hidden property alone does not prove the banner is off screen:
   // the .banner class sets an explicit display, which beats the UA
-  // [hidden] rule unless the stylesheet carries a [hidden] counterpart.
+  // [hidden] rule unless the stylesheet defines a [hidden] counterpart.
   assert.equal(
     await bundledDisplay(banner),
     "none",

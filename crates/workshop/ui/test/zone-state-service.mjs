@@ -76,7 +76,7 @@ service.setGroup("main", "g9");
 service.setOverride("agent", "main");
 const snapshot = service.serialize();
 check(
-  "serialize carries the zones and overrides records",
+  "serialize returns the zones and overrides records",
   snapshot.zones.main === "g9" && snapshot.overrides.agent === "main",
 );
 

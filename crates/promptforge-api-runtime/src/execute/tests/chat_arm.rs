@@ -180,7 +180,7 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
          local r = models.chat(msgs)\n\
          assert(r.overflow == false, 'a served round is not an overflow')\n\
          assert(r.reply == 'final answer', 'the reply text resumes')\n\
-         assert(r.tool_calls == nil, 'a text round carries no calls')\n\
+         assert(r.tool_calls == nil, 'a text round leaves tool_calls nil')\n\
          assert(r.finish_reason == 'stop', 'the finish reason resumes')\n\
          assert(r.model == 'served-model', 'the serving model resumes')\n\
          assert(r.metrics ~= nil, 'the usage metrics resume')\n\
@@ -204,7 +204,7 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
         reference
             .iter()
             .any(|line| line.contains("reply") && line.contains("text=final answer")),
-        "the reference sequence carries the reply report: {reference:?}"
+        "the reference sequence includes the reply report: {reference:?}"
     );
     assert_eq!(
         chat_recorder.lines(),
@@ -227,7 +227,7 @@ async fn a_chat_round_resumes_the_requested_tool_calls_unexecuted() {
          msgs:user('call the tool')\n\
          local r = models.chat(msgs)\n\
          assert(r.overflow == false, 'a served round is not an overflow')\n\
-         assert(r.reply == nil, 'a tool round carries no reply')\n\
+         assert(r.reply == nil, 'a tool round leaves reply nil')\n\
          assert(#r.tool_calls == 1, 'one call resumes')\n\
          assert(r.tool_calls[1].id == 'call_1', 'the call keeps its id')\n\
          assert(r.tool_calls[1].name == 'echo', 'the call keeps its wire name')\n\

@@ -80,7 +80,7 @@ fn other_workshop_crates_may_depend_on_workshop_server() {
 }
 
 #[test]
-fn an_outside_crate_reaching_past_the_one_door_is_reported() {
+fn an_outside_crate_reaching_past_the_one_public_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -299,7 +299,7 @@ fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the promptforge door, the gateway public pair, and shared-* are legal for harness crates: {violations:?}"
+        "the promptforge public pair, the gateway public pair, and shared-* are legal for harness crates: {violations:?}"
     );
 }
 
@@ -343,7 +343,7 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
 }
 
 #[test]
-fn a_harness_crate_reaching_past_the_promptforge_door_is_reported() {
+fn a_harness_crate_reaching_past_the_promptforge_public_pair_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -356,7 +356,7 @@ fn a_harness_crate_reaching_past_the_promptforge_door_is_reported() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("harness-runner depends on promptforge-lua:"),
-        "the one-door rule binds harness crates: {violations:?}"
+        "the single-public-crate rule binds harness crates: {violations:?}"
     );
 }
 
@@ -373,7 +373,7 @@ fn a_workshop_crate_depending_on_harness_api_passes() {
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "harness-api is the harness door for workshop crates: {violations:?}"
+        "harness-api is the harness public crate for workshop crates: {violations:?}"
     );
 }
 
@@ -392,7 +392,7 @@ fn a_workshop_crate_depending_on_a_harness_crate_other_than_harness_api_is_repor
     assert!(
         violations[0].starts_with("workshop-server depends on harness-runner:")
             && violations[0].contains("harness-api"),
-        "the violation names the workshop crate and the harness door: {violations:?}"
+        "the violation names the workshop crate and the harness public crate: {violations:?}"
     );
 }
 
@@ -416,7 +416,7 @@ fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
             violations
                 .iter()
                 .any(|v| v.starts_with(&format!("{package} depends on harness-api:"))),
-            "{package} depending on the harness door is reported: {violations:?}"
+            "{package} depending on the harness public crate is reported: {violations:?}"
         );
     }
 }

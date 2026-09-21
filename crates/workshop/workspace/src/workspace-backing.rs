@@ -3,7 +3,7 @@
 //! save-as, duplicate, and window-state operations that swap or write
 //! it. The grant set stays the confinement source of truth and nothing
 //! here is consulted on a request path; a persist that fails is logged
-//! degradation that leaves memory unchanged (zone two).
+//! degradation that leaves memory unchanged.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -358,9 +358,9 @@ impl Workspace {
 
     /// Stops the backing file's actor while leaving the backing in place,
     /// so every later persist fails with a closed file and the file
-    /// itself can be reopened elsewhere. Exposes the zone-two path to
-    /// tests; unlike [`Workspace::close_backing`], the workspace still
-    /// reports the file as its backing afterwards.
+    /// itself can be reopened elsewhere. Exposes the logged-and-continue
+    /// path to tests; unlike [`Workspace::close_backing`], the workspace
+    /// still reports the file as its backing afterwards.
     #[cfg(any(test, feature = "test-fixtures"))]
     pub async fn close_backing_for_test(&self) {
         if let Some(file) = self.backing_file() {

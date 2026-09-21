@@ -4,7 +4,7 @@
 // boolean settings from the UI-state adapter's user bucket behind a
 // shape check, writes every change back through the adapter, publishes
 // them as the config.editor.* context keys, and fires onDidChange; the
-// CodeMirror surface carries one Compartment per setting and follows
+// CodeMirror surface holds one Compartment per setting and follows
 // the service in place - no state rebuild. The contribution's four
 // toggle actions are asserted on the shared registries. Bundles the
 // modules with esbuild and drives them in jsdom with the same
@@ -360,7 +360,7 @@ function serviceOver(initial, contextKeys = null) {
   ];
   for (const [id, toggled] of TOGGLES) {
     check(`${id} is a registered command`, Commands.lookup(id) !== undefined);
-    check(`${id} carries its toggled expression`, Commands.lookup(id)?.toggled === toggled);
+    check(`${id} declares its toggled expression`, Commands.lookup(id)?.toggled === toggled);
   }
   const palette = Menus.getMenuItems(MenuId.CommandPalette).map((row) => row.command);
   check(

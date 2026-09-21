@@ -30,8 +30,8 @@ use axum::response::{IntoResponse, Response};
 ///
 /// The URI authority (HTTP/2, absolute-form) wins over the `Host` header.
 /// A request naming no authority at all fails closed with `403 Forbidden`:
-/// browsers, the house's HTTP clients, and the gateway-discovery-file health
-/// probe all send the bound address as `Host`, so an authority-less
+/// browsers, the application's HTTP clients, and the gateway-discovery-file
+/// health probe all send the bound address as `Host`, so an authority-less
 /// request is nothing the wall was built to admit. No route is exempt,
 /// `/health` included, which keeps the probe honest against the same check
 /// a browser must pass.

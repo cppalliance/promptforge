@@ -121,7 +121,7 @@ mod tests {
             source: json.into(),
         };
         let Some(cause) = error.source() else {
-            panic!("the parse variant carries its JSON cause as source()");
+            panic!("the parse variant returns its JSON cause from source()");
         };
         let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
             panic!("the JSON cause is the shared JsonSource");

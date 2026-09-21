@@ -116,9 +116,9 @@ async fn build_sheet_with(
             Err(err) => {
                 // Surface the failure cause: the sheet records only
                 // stale/unavailable, so the stderr note is the run report.
-                // `FetchError`'s chain carries provider names, env var
-                // names, URLs, and reqwest errors only - never key material,
-                // which travels in request headers reqwest does not echo.
+                // `FetchError`'s chain holds provider names, env var names,
+                // URLs, and reqwest errors only - never key material, which
+                // travels in request headers reqwest does not echo.
                 eprintln!(
                     "shared-cloud-providers: note: {} fetch failed: {}",
                     provider.name,
@@ -173,8 +173,8 @@ fn env_vars(provider: &Provider) -> Vec<EnvVar> {
 
 /// The compiled-in model list for a Niche provider: one JSON file per
 /// provider in the repo, pulled in with `include_str!` and parsed as
-/// `Vec<ModelEntry>`. v1 ships no Niche providers, so the match has no
-/// production arms yet.
+/// `Vec<ModelEntry>`. The Niche tier is empty in v1, so the only arm is
+/// the test fixture.
 fn static_json(name: &str) -> Option<&'static str> {
     match name {
         #[cfg(test)]
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(slice.status, SliceStatus::Ok);
         assert_eq!(slice.display_name, "Test OK");
         assert_eq!(slice.tier, Tier::Prime);
-        let fetched_at = slice.fetched_at.expect("an ok slice must carry fetched_at");
+        let fetched_at = slice.fetched_at.expect("an ok slice must set fetched_at");
         assert!(
             before <= fetched_at && fetched_at <= after,
             "fetched_at must be this run's time"
@@ -638,7 +638,7 @@ mod tests {
         // The variant renders only its own message; the stderr note walks
         // the chain so the transport cause still reaches the run report.
         let cause = std::error::Error::source(&err)
-            .expect("the Http variant carries its transport cause")
+            .expect("the Http variant returns its transport cause")
             .to_string();
         assert!(!err.to_string().contains(&cause));
         assert!(

@@ -15,7 +15,7 @@ capabilities:
     optional: true
 ````
 
-A bare id declares a required capability: when it is absent from the host's registry or fails to activate, the run cannot start, and the preflight report names it. The map form with `optional: true` declares a capability the run skips with a log line when absent, so one prompt runs with or without an enhancement; the optional `config` key carries prompt-side data to the capability. User-specific configuration such as credentials is host-supplied and never named in the prompt.
+A bare id declares a required capability: when it is absent from the host's registry or fails to activate, the run cannot start, and the preflight report names it. The map form with `optional: true` declares a capability the run skips with a log line when absent, so one prompt runs with or without an enhancement; the optional `config` key passes prompt-side data to the capability. User-specific configuration such as credentials is host-supplied and never named in the prompt.
 
 ## Declaring a tool slot
 

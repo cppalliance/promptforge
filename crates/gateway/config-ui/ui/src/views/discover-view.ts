@@ -1,5 +1,5 @@
 // The Discover view [Unsloth] Model Hub Discover tab: a master-detail
-// split. The list side carries the debounced search bar (keywords,
+// split. The list side holds the debounced search bar (keywords,
 // user/repo, pasted hub URLs), the locked GGUF filter chip, the sort
 // dropdown, and the result rows (publisher avatar, name, params,
 // downloads, likes, relative updated time). The detail side renders

@@ -191,7 +191,7 @@ dbg_macro = "warn"
 doc_markdown = "allow"
 
 # Release packaging through cargo-dist (see dist-workspace.toml): the
-# sample systemd unit rides in the archive.
+# sample systemd unit is included in the archive.
 [package.metadata.dist]
 dist = true
 include = ["packaging/gateway.service"]

@@ -54,7 +54,7 @@ async fn relay(
             received = errors.recv() => match received {
                 Ok(failure) => on_error(&failure, &push),
                 // Reports are ephemeral like the deltas; a lagged receiver
-                // missed a failure the error frame already carried.
+                // missed a failure the error frame already reported.
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             },

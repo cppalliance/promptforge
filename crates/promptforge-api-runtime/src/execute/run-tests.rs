@@ -144,7 +144,7 @@ fn a_store_effect_records_its_operation_and_drops_the_access_handle() {
     let text = serde_json::to_string(&record).expect("a record serializes");
     assert!(
         !text.contains("access"),
-        "the store record carries no handle: {text}"
+        "the store record is the operation alone: {text}"
     );
     assert_eq!(round_trip(&record), record);
 }
@@ -379,7 +379,7 @@ fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
         panic!("the hook aborts the loop and nothing is outstanding, got {step:?}");
     };
     assert!(matches!(result, RunResult::Cancelled), "got {result:?}");
-    assert!(ended(&events), "the end boundary rides the final step");
+    assert!(ended(&events), "the end boundary is on the final step");
 }
 
 #[test]

@@ -1,5 +1,5 @@
 // Unit test for the shared toast stack (shared-ui/toast.ts), which the
-// workshop's update notifications now ride: show() appends a kind-classed
+// workshop's update notifications now feed: show() appends a kind-classed
 // toast to the polite live region, and the toast dismisses itself after
 // its four-second lifetime. Bundles the module with esbuild and drives it
 // against jsdom with mocked timers.
@@ -53,7 +53,7 @@ toasts.show("PromptForge 1.2.3 is available", "info");
 toasts.show("Update failed: boom", "error");
 const shown = [...toasts.element.querySelectorAll(".toast")];
 check("show appends one toast per call", shown.length === 2);
-check("the toast carries its kind class", shown[0]?.classList.contains("toast-info") && shown[1]?.classList.contains("toast-error"));
+check("the toast has its kind class", shown[0]?.classList.contains("toast-info") && shown[1]?.classList.contains("toast-error"));
 check("the toast renders its message", shown[0]?.textContent === "PromptForge 1.2.3 is available");
 
 mock.timers.tick(3999);

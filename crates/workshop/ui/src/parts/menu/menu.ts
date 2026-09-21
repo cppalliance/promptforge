@@ -176,7 +176,7 @@ export class Menu extends Disposable {
       const popover = document.createElement("div");
       popover.className = "ws-window-titlebar__popover";
       if (this.parentRow !== null) {
-        // A flyout opens beside its parent row; the class carries the
+        // A flyout opens beside its parent row; the class sets the
         // alignment offset (window-menu.css).
         popover.classList.add("ws-window-titlebar__popover--flyout");
       }

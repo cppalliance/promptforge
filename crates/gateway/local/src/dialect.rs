@@ -292,7 +292,7 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
     // authoritative capability source when present; only its absence falls
     // back to the /v1/models probe. When the server was launched with
     // `--jinja` and the template declares tool support, the /v1/models
-    // response carries `meta.has_tool_call_capability`. A probe failure is
+    // response includes `meta.has_tool_call_capability`. A probe failure is
     // surfaced (the server just passed readiness, so it is an anomaly), while
     // a reachable response whose field is absent yields `None` rather than a
     // bogus definitive `false`. (MOD-003)

@@ -128,7 +128,7 @@ const json = (body, status = 200) => ({
   );
 }
 
-// --- Absent sections narrow to null; implicit args carry the prose field ----
+// --- Absent sections narrow to null; implicit args name the prose field ----
 
 {
   scriptFetch(() =>
@@ -159,7 +159,7 @@ const json = (body, status = 200) => ({
       contract.output === null,
   );
   check(
-    "the implicit args declaration carries the single prose field",
+    "the implicit args declaration names the single prose field",
     contract.args.implicit === true &&
       contract.args.fields.length === 1 &&
       contract.args.fields[0].name === "prose" &&

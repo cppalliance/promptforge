@@ -770,7 +770,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
    * The Change-reveal secret control: an untouched `"***"` renders as a
    * masked readout with a Change button; only after Change (or for a
    * never-saved secret) does the password input render. Leaving the input
-   * empty keeps the existing value - the payload still carries `"***"`.
+   * empty keeps the existing value - the payload still sends `"***"`.
    */
   function secretControl(card: Card, spec: FieldSpec, id: string): HTMLElement {
     const wrap = document.createElement("div");
@@ -843,7 +843,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     return { card, body };
   }
 
-  /** The per-card Save button, enabled while the card carries edits. */
+  /** The per-card Save button, enabled while the card has edits. */
   function saveButton(card: Card, onSave: () => Promise<void>): HTMLElement {
     const actions = document.createElement("div");
     actions.className = "detail-actions";

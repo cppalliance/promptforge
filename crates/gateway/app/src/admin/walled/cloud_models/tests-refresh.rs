@@ -81,7 +81,7 @@ fn ok_sheet(sheet: &Sheet) -> (StatusCode, String) {
 fn body_model_id(body: &serde_json::Value) -> &str {
     body["providers"]["test"]["models"][0]["id"]
         .as_str()
-        .expect("the sheet body carries the model id")
+        .expect("the sheet body includes the model id")
 }
 
 /// Polls until the stub has received `expected` requests.

@@ -224,7 +224,7 @@ mod tests {
         assert!(is_version_token("3"));
         assert!(is_version_token("4.20"));
         assert!(!is_version_token(""), "an empty token is no version");
-        assert!(!is_version_token("."), "dots alone carry no digit");
+        assert!(!is_version_token("."), "a version token needs a digit");
         assert!(!is_version_token("4o"), "a letter is not a version byte");
     }
 
@@ -232,7 +232,10 @@ mod tests {
     fn version_token_o_tolerates_one_trailing_o() {
         assert!(is_version_token_o("4o"), "the gpt-4o naming style");
         assert!(is_version_token_o("5.1"));
-        assert!(!is_version_token_o("o"), "the o alone carries no digit");
+        assert!(
+            !is_version_token_o("o"),
+            "the o suffix needs a digit before it"
+        );
         assert!(
             !is_version_token_o("4o5"),
             "the o is a suffix, not an infix"

@@ -11,7 +11,7 @@ if not ok then
 end
 ````
 
-Wrap host calls in `pcall` to catch argument-validation and dispatch failures. These failures come back as the call's answer. They do not fail the run. A failed host call raises a Lua error that carries exactly the host's message, so the value your `pcall` catches is the message the host sent.
+Wrap host calls in `pcall` to catch argument-validation and dispatch failures. These failures come back as the call's answer. They do not fail the run. A failed host call raises a Lua error whose text is exactly the host's message, so the value your `pcall` catches is the message the host sent.
 
 ## Errors that name things
 

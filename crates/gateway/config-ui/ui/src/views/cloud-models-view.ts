@@ -6,7 +6,7 @@
 // variants. The add action opens the confirm-details dialog, merges
 // into the pending config document, and stages it through
 // PUT /admin/config; Apply promotes it. Loading, loaded, and
-// unreachable states ride the sheet store's subscription, so a view
+// unreachable states arrive through the sheet store's subscription, so a view
 // open when the sheet lands re-renders in place.
 
 import type { ToastStack } from "shared-ui/toast";

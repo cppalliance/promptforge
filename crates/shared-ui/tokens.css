@@ -13,7 +13,7 @@
    color-mix() formulas intact (never encode premultiplied RGB as
    straight-alpha hex).
 
-   The first block is the workshop's original :root sheet, carried over
+   The first block is the workshop's original :root sheet, copied over
    verbatim. The "Generic aliases" block at the end maps the names the
    gateway config UI's components consume onto the same Cursor Dark
    values, so both UIs read one sheet.

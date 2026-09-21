@@ -11,7 +11,7 @@
 // default per group).
 //
 // Two catalog rows are wired but deliberately not f1 and are excluded
-// from the palette check: vscode.open (a palette row cannot carry its
+// from the palette check: vscode.open (a palette row cannot supply its
 // path argument) and workbench.action.quickOpenWithModes /
 // quickOpenHelp (the command-center pill's rows, not menu-spec rows).
 //
@@ -412,7 +412,7 @@ for (const rows of Object.values(SPEC)) {
   }
 }
 
-// Wired rows that deliberately carry no f1: menu-only commands. New Run
+// Wired rows that deliberately omit f1: menu-only commands. New Run
 // Window is one menu row by design (no palette row, no keybinding).
 const WIRED_WITHOUT_F1 = new Set(["workbench.action.newRunWindow"]);
 
@@ -435,7 +435,7 @@ for (const id of stubIds) {
 for (const rows of Object.values(SPEC)) {
   for (const [id, , kind, , toggled] of rows) {
     if (kind === "stub" && toggled !== undefined) {
-      check(`stub '${id}' carries toggled '${toggled}'`, Commands.lookup(id)?.toggled === toggled);
+      check(`stub '${id}' declares toggled '${toggled}'`, Commands.lookup(id)?.toggled === toggled);
     }
   }
 }

@@ -277,7 +277,7 @@ fn a_text_fragment_merges_into_a_following_tool_call_turn() {
             { "role": "tool", "content": "echoed", "tool_call_id": "call_1" },
             { "role": "assistant", "content": "done" },
         ]),
-        "visible text rides the tool-call turn rather than breaking alternation"
+        "visible text merges into the tool-call turn rather than breaking alternation"
     );
 }
 
@@ -307,13 +307,13 @@ fn malformed_records_fail_at_projection_naming_the_index() {
     with_calls.tool_calls = vec![call("call_1", "echo")];
     assert_eq!(
         projection_error(&[with_calls]),
-        "messages[1] carries tool_calls but is not an assistant message"
+        "messages[1] sets tool_calls but is not an assistant message"
     );
     let mut with_id = user("hi");
     with_id.tool_call_id = Some("call_1".to_owned());
     assert_eq!(
         projection_error(&[with_id]),
-        "messages[1] carries a tool_call_id but is not a tool message"
+        "messages[1] sets a tool_call_id but is not a tool message"
     );
     assert_eq!(
         projection_error(&[user("hi"), system("late")]),
@@ -403,7 +403,7 @@ fn an_unanswered_tool_call_is_rejected() {
 
 #[test]
 fn secrets_in_stripped_fields_never_reach_the_wire() {
-    // Regression: an author record carrying a credential in a field outside
+    // Regression: an author record holding a credential in a field outside
     // the contract must not leak it into the provider request.
     let lua = Lua::new();
     let records = lua_parse(

@@ -69,7 +69,7 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog() {
 
     healthy.store(true, Ordering::Relaxed);
     // The next probe lands within the 5 s heartbeat interval and the
-    // catalog rides behind the "Connected to gateway" status frame.
+    // catalog arrives behind the "Connected to gateway" status frame.
     let frame = socket
         .recv_until(Duration::from_secs(30), |frame| frame["type"] == "models")
         .await;

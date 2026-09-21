@@ -508,7 +508,7 @@ mod tests {
         };
         let client = LocalError::HttpClient(transport.into());
         let Some(cause) = client.source() else {
-            panic!("the http-client variant carries its transport cause as source()");
+            panic!("the http-client variant returns its transport cause from source()");
         };
         let Some(wrapper) = cause.downcast_ref::<HttpSource>() else {
             panic!("the transport cause is the shared HttpSource");
@@ -523,7 +523,7 @@ mod tests {
             source: json.into(),
         };
         let Some(cause) = decode.source() else {
-            panic!("the dialect-decode variant carries its JSON cause as source()");
+            panic!("the dialect-decode variant returns its JSON cause from source()");
         };
         let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
             panic!("the JSON cause is the shared JsonSource");

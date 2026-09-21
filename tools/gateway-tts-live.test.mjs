@@ -244,7 +244,7 @@ test("skips with exit 0 when TOGETHER_API_KEY is absent from the environment", a
   assert.match(lines.join("\n"), /SKIP: TOGETHER_API_KEY is not set/);
 });
 
-test("never prints the key and the config carries only the interpolation reference", async (t) => {
+test("never prints the key and the config contains only the interpolation reference", async (t) => {
   const { lines, deps, sinkPath } = makeHarness(t, "ok");
   const code = await runProbe(deps);
   assert.equal(code, 0);
@@ -256,7 +256,7 @@ test("never prints the key and the config carries only the interpolation referen
   assert.ok(!config.includes(CANARY), "the config never contains the key value");
   assert.ok(
     config.includes('api_key = "${TOGETHER_API_KEY}"'),
-    "the config carries only the interpolation reference",
+    "the config contains only the interpolation reference",
   );
   assert.equal(readFileSync(sinkPath, "utf8"), "match");
 });

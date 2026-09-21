@@ -44,7 +44,7 @@ async fn gate_model_switch_takes_effect_on_the_next_run_with_attribution() {
     let reply = turn.events.last().expect("the third turn completes");
     assert_eq!(
         reply["event"]["model"], "model-b",
-        "the relaunched run binds the new selection; the reply event carries its id"
+        "the relaunched run binds the new selection; the reply event reports its id"
     );
     {
         let requests = server.captured.lock().expect("the capture lock is healthy");
@@ -242,13 +242,13 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
                 Some("input_required") => {
                     let token = frame["token"]
                         .as_str()
-                        .expect("the wait carries its token")
+                        .expect("the wait includes its token")
                         .to_owned();
                     announced.push(token.clone());
                     answer(&mut socket, &token, "after replacement").await;
                 }
                 Some("input_cancelled") => {
-                    let token = frame["token"].as_str().expect("the cancel carries its token");
+                    let token = frame["token"].as_str().expect("the cancel includes its token");
                     assert!(
                         announced.iter().any(|announced| announced == token),
                         "only an announced wait is cancelled: {token}"

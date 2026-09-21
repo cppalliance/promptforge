@@ -215,7 +215,7 @@ impl Scheduler {
         let chain_id = self.allocate_child_id(id)?;
         let task = TaskId::from(chain_id.clone());
         // The task's context reports under its own task id with its own
-        // turn counter, so its events carry its provenance and its turns
+        // turn counter, so its events report its provenance and its turns
         // count against its own cap.
         let child_ctx = child_ctx.with_task(task.clone(), Arc::new(AtomicU32::new(0)));
         let child = self.start_chain(
@@ -245,9 +245,9 @@ impl Scheduler {
                 outcome: None,
             },
         );
-        // The start carries the spawn seeds: everything a host needs to
+        // The start includes the spawn seeds: everything a host needs to
         // start the same chain again under the same id. The spawn is the
-        // spawner's act, so it rides the spawner's task sequence.
+        // spawner's act, so it is sent on the spawner's task sequence.
         spawner_emitter.emit(&spawner_section, |execution, section, provenance| {
             Event::TaskStarted {
                 execution,

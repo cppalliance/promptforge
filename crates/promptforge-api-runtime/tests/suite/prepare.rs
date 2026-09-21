@@ -322,8 +322,8 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
 async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
     let env = Environment::new();
-    // The zero-burden path: no explicit prepare call, and the declared
-    // role's requirements are met by the current model.
+    // `run_with_host` prepares implicitly, and the declared role's
+    // requirements are met by the current model.
     let result = run_with_host(
         &env,
         &prompt,

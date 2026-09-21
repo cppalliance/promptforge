@@ -123,7 +123,7 @@ async fn a_cloned_handle_propagates_cancel_across_a_spawn_boundary() {
 async fn current_reports_absent_and_present_context() {
     // PF-CANCEL-003: an absent cancellation context is representable as
     // `None` (not a silent forever-pending), and an installed scope exposes
-    // the explicit handle for carrying across a spawn boundary.
+    // the explicit handle to pass across a spawn boundary.
     assert!(current().is_none(), "no scope installed => no handle");
     let handle = CancelHandle::new();
     let probe = handle.clone();

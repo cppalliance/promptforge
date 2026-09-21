@@ -75,8 +75,8 @@ struct VerboseJsonTranscription {
     pub text: String,
     /// Clip-level segments when segment granularity was requested.
     pub segments: Vec<TranscriptionSegment>,
-    /// Word timestamps. The current engine exposes no word alignment, so this
-    /// array stays empty when word granularity is requested.
+    /// Word timestamps. The current engine produces segments only, so
+    /// this array stays empty when word granularity is requested.
     pub words: Vec<serde_json::Value>,
 }
 

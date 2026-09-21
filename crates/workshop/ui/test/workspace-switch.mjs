@@ -1,4 +1,4 @@
-// Unit test for the workspace switch carrying UI state (plan step 13:
+// Unit test for the workspace switch moving UI state (plan step 13:
 // src/parts/workspace-files/workspace-files.contribution.ts over the
 // UI-state adapter, the dock, the tree state, and the closed-editor
 // stack). Bundles the contribution with esbuild - the Tauri dialog and
@@ -17,7 +17,7 @@
 // rather than hidden by the apply's synchronous suppression; a real
 // layout change after the Open still saves; a refused Open reloads and
 // applies nothing; after a
-// successful Save As exactly three workspace writes carry the live
+// successful Save As exactly three workspace writes store the live
 // layout envelope, expanded set, and closed stack; a cancelled or
 // refused Save As writes nothing; and Duplicate writes nothing. The fake
 // dock hosts a real WorkshopTreePanel as its "tree" panel and a real
@@ -447,7 +447,7 @@ const FILE_CLOSED = ["C:\\beta\\docs\\readme.md", "C:\\beta\\notes.md"];
   check("a refused open writes nothing", storage.sets.length === setsBefore);
 }
 
-// --- Save As: the new file carries the live arrangement ---------------------------
+// --- Save As: the new file gets the live arrangement ------------------------------
 
 const SAVED_PATH = "C:\\work\\Gamma.pfwork";
 {
@@ -481,9 +481,9 @@ const SAVED_PATH = "C:\\work\\Gamma.pfwork";
       layout?.layout?.grid === FILE_LAYOUT.layout.grid &&
       Object.keys(layout?.layout?.panels ?? {}).sort().join(",") === "agent,tree",
   );
-  check("the tree write carries the live expanded set", isDeepStrictEqual(sets.find((entry) => entry.key === "tree")?.value, { expanded: liveExpanded }));
+  check("the tree write stores the live expanded set", isDeepStrictEqual(sets.find((entry) => entry.key === "tree")?.value, { expanded: liveExpanded }));
   check(
-    "the closed_editors write carries the live file stack, untitled buffers excluded",
+    "the closed_editors write stores the live file stack, untitled buffers excluded",
     isDeepStrictEqual(sets.find((entry) => entry.key === "closed_editors")?.value, liveClosed) &&
       liveClosed.paths[0] === "C:\\beta\\src\\main.rs",
   );

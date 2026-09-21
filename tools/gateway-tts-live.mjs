@@ -9,7 +9,7 @@
 // Invariant A19: the script never calls a vendor directly. The vendor key
 // comes from the process environment only (no dotenv parsing, no .env
 // reading) and is ferried only to the gateway subprocess environment; the
-// throwaway config carries the `api_key = "${TOGETHER_API_KEY}"`
+// throwaway config contains the `api_key = "${TOGETHER_API_KEY}"`
 // interpolation reference. The key is never printed and never written to
 // any file by this script.
 //
@@ -336,7 +336,8 @@ async function runSpeechSurface({
   );
 
   // `instructions` is a named optional wire field; `sample_rate` and the
-  // bogus field ride the verbatim passthrough. All three must come back 2xx.
+  // bogus field exercise the verbatim passthrough. All three must come
+  // back 2xx.
   for (const [field, value] of [
     ["instructions", "Speak with a calm tone."],
     ["sample_rate", 44100],

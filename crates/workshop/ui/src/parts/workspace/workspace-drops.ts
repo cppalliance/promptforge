@@ -12,7 +12,7 @@
 // The shell never touches the OS drop itself (WebView2's own drop target
 // is what keeps HTML5 drag-and-drop alive for Dockview), so the page must
 // suppress the browser's default file-drop action - navigating away to
-// the dropped file - itself. Only drags carrying files are suppressed;
+// the dropped file - itself. Only drags of OS files are suppressed;
 // in-page drags (Dockview tabs) are untouched.
 
 import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
@@ -88,7 +88,7 @@ function postDroppedFiles(event: DragEvent): void {
 /**
  * Reads the dropped paths out of the native event. The detail arrives as
  * `unknown` and is validated field by field; anything that is not an
- * object carrying a `paths` array of plain strings is rejected.
+ * object with a `paths` array of plain strings is rejected.
  */
 function readDroppedPaths(event: Event): readonly string[] | null {
   if (!(event instanceof CustomEvent)) {
@@ -178,7 +178,7 @@ async function grantDroppedPaths(
   }
 }
 
-/** True when a drag carries OS files rather than an in-page payload. */
+/** True when a drag holds OS files rather than an in-page payload. */
 function isFileDrag(event: DragEvent): boolean {
   const types = event.dataTransfer?.types;
   return types !== undefined && Array.from(types).includes("Files");

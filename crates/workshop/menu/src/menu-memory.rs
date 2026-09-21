@@ -29,7 +29,7 @@ struct StoredState {
 }
 
 /// Loads the per-profile model memory. A missing, unreadable, or corrupt
-/// file means "no memory yet": logged and tolerated (zone two).
+/// file means "no memory yet": logged and tolerated.
 pub(super) fn load_memory(path: &Path) -> HashMap<String, String> {
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
@@ -75,7 +75,7 @@ pub(super) fn store_pending(pending: Option<PendingWrite>) {
 /// Writes one per-profile model-memory snapshot through the shared
 /// atomic-write helper, so a crash mid-write cannot leave a truncated
 /// [`WORKSHOP_STATE_FILE`]. A failed write costs the memory, not the
-/// process (zone two): logged and tolerated.
+/// process: logged and tolerated.
 fn store_memory(pending: &PendingWrite) {
     if let Err(error) = workshop_support::write_atomic(&pending.path, &pending.bytes) {
         tracing::warn!(

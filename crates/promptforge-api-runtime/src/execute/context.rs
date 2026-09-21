@@ -93,17 +93,17 @@ pub(crate) struct RunState {
     /// the startup sequence needs no `Option` branch.
     shared: Arc<LuaProgram>,
     /// The run's tool set as a read-only view: built from the prepared
-    /// bindings at construction. The trait exposes no write methods; the
-    /// only writer is `tools.always` (a prompt-wide fact) through the
-    /// concrete handle the section VMs share.
+    /// bindings at construction. The only writer is `tools.always` (a
+    /// prompt-wide fact) through the concrete handle the section VMs
+    /// share.
     tools: Arc<dyn ToolView>,
     /// The concrete handle behind `tools`, shared with every section VM
     /// (H1 included). Readers outside the VM layer go through the view.
     tool_set: Arc<Mutex<ToolSet>>,
     /// The run's model set as a read-only view: built from the prepared
-    /// bindings at construction. The trait exposes no write methods; the
-    /// only writer is `models.default` (a prompt-wide fact) through the
-    /// concrete handle the section VMs share.
+    /// bindings at construction. The only writer is `models.default` (a
+    /// prompt-wide fact) through the concrete handle the section VMs
+    /// share.
     models: Arc<dyn ModelView>,
     /// The concrete handle behind `models`, shared with every section VM
     /// (H1 included). Readers outside the VM layer go through the view.

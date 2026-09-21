@@ -38,7 +38,7 @@ CREATE TABLE kv (
 );
 ```
 
-`meta` carries `format` (always `promptforge-workspace`), `version` (`1`), `name` (the display name; absent means the file stem), and `created_at`. `grants.position` and `added_at` record insertion order from both producers: a `grant()` on the live workspace assigns one past the current maximum and the current time, and Save As writes the in-memory grants with the `position` and `added_at` they were loaded or granted with, so the new file carries the true history rather than a renumbering. Removal never renumbers. The tree still lists grants in canonical path order, so the columns record history and do not change display. The table names `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`, and `documents` are reserved for follow-on projects and unused.
+`meta` holds `format` (always `promptforge-workspace`), `version` (`1`), `name` (the display name; absent means the file stem), and `created_at`. `grants.position` and `added_at` record insertion order from both producers: a `grant()` on the live workspace assigns one past the current maximum and the current time, and Save As writes the in-memory grants with the `position` and `added_at` they were loaded or granted with, so the new file records the true history rather than a renumbering. Removal never renumbers. The tree still lists grants in canonical path order, so the columns record history and do not change display. The table names `agent_windows`, `run_presets`, `runs`, `run_events`, `agents`, and `documents` are reserved for follow-on projects and unused.
 
 #### The `kv` table
 
@@ -73,7 +73,7 @@ Registered through `workshop_registry::Registry` beside the tree and file routes
 
 Every write to the file, the state keys included, funnels through the one actor task, so there is a single writer per `.pfwork`. Save As copies grants and window state into the new file but not the state keys; the SPA writes them after the switch so that fact has one writer too.
 
-Failures reach the wire through the crate's `WorkspaceError` envelope: a refused file is a client error carrying the required-versus-actual text with grants unchanged, a missing path is the ordinary not-found, a path already taken is a conflict. A state put with an unknown key or a body that is not JSON is `400`, a body over the cap is `413`; either changes nothing, ephemeral or not.
+Failures reach the wire through the crate's `WorkspaceError` envelope: a refused file is a client error reporting the required-versus-actual text with grants unchanged, a missing path is the ordinary not-found, a path already taken is a conflict. A state put with an unknown key or a body that is not JSON is `400`, a body over the cap is `413`; either changes nothing, ephemeral or not.
 
 ### The last-workspace pointer
 

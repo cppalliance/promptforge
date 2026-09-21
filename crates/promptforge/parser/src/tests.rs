@@ -38,7 +38,7 @@ fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
 }
 
 #[test]
-fn frontmatter_syntax_errors_carry_a_position_and_no_name() {
+fn frontmatter_syntax_errors_report_a_position_without_a_name() {
     // Step 6: a malformed-YAML frontmatter surfaces the retained
     // serde_yaml_ng position (1-based, file-absolute); the failure predates
     // the prompt's name, so none is reported.
@@ -54,9 +54,9 @@ fn frontmatter_syntax_errors_carry_a_position_and_no_name() {
 }
 
 #[test]
-fn structured_errors_carry_the_prompt_name_and_source_position() {
+fn structured_errors_report_the_prompt_name_and_source_position() {
     // Step 6: a structured failure postdates the frontmatter, so the parse
-    // error carries the prompt's frontmatter name plus the offending
+    // error reports the prompt's frontmatter name plus the offending
     // span's 1-based line and column, computed against the source.
     let src = concat!(
         "---\nname: dup\ndescription: d\n---\n", // lines 1-4
@@ -824,10 +824,10 @@ fn duplicate_sibling_section_names_are_rejected() {
         message.contains("first declared at line 8") && message.contains("again at line 12"),
         "both duplicate locations must be reported, got: {message}"
     );
-    // PF-PARSER-008: a structured parse error carries a stable kind and a
+    // PF-PARSER-008: a structured parse error reports a stable kind and a
     // byte span rather than inferring them from the message.
     assert_eq!(err.kind(), ParseErrorKind::Structure);
-    let (start, end) = err.span().expect("duplicate section carries a span");
+    let (start, end) = err.span().expect("duplicate section has a span");
     assert!(
         start < end,
         "span must be a non-empty range, got {start}..{end}"
@@ -1186,9 +1186,8 @@ fn frontmatter_without_input_output_still_parses() {
 
 #[test]
 fn leading_break_resets_prose_and_content_below_parses() {
-    // A `---` rule as a section's first content carries no control meaning:
-    // it only resets the pending buffer, and the content below the break
-    // parses and runs normally.
+    // A `---` rule as a section's first content only resets the pending
+    // buffer, and the content below the break parses and runs normally.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```lua\nvar.x = 1\n```\n\nBelow the break.\n\n## Plain\n\np\n";
     let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];

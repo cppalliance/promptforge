@@ -31,7 +31,7 @@ fn a_missing_required_contribution_fails_boot_naming_it() {
     // The composition error renders only its own frame; the absent
     // contribution is named by its `source()`.
     let cause = std::error::Error::source(&error)
-        .expect("the composition failure carries the registry's cause");
+        .expect("the composition failure reports the registry's cause");
     assert!(
         cause.to_string().contains("MenuHandles"),
         "the failure's cause names the missing contribution: {error}: {cause}"

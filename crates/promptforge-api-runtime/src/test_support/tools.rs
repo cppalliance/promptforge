@@ -144,7 +144,7 @@ impl TestToolTable {
         self.tools.get(id).map(Arc::clone)
     }
 
-    /// Returns whether the table holds no implementation.
+    /// Returns whether the table is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()

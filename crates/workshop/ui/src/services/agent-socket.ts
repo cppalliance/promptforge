@@ -16,7 +16,7 @@
 //   half of the durable cursor-and-replay promise, which is also how a
 //   reattach's replay stays duplicate-free for consumers.
 // - `agent_delta` frames are ephemeral: they may drop under lag and are
-//   never buffered here; each carries the `reply` id of the durable event
+//   never buffered here; each names the `reply` id of the durable event
 //   that will supersede it, so the renderer coalesces chunks by that id
 //   and the completed-reply event is the repair path.
 // - `input_required` / `input_cancelled` are durable through the server's
@@ -24,7 +24,7 @@
 //   consumer re-pins from the resent set after each session acknowledgment
 //   and a stale prompt vanishes by its token's absence.
 //
-// No boot queue rides here: the WorkshopSocket queue guards the app-boot
+// This socket skips the boot queue: WorkshopSocket's queue guards the app-boot
 // race where the server's first pushes beat handler wiring, but this
 // socket is constructed and subscribed by its owning view before
 // `connect()` is called, so no push can precede its handlers.
@@ -53,7 +53,7 @@ const RECONNECT_MAX_MS = 30_000;
 
 /**
  * The loosely-typed inbound frame: exactly the fields routing reads,
- * narrowed per `type` before delivery. The full payloads ride through as
+ * narrowed per `type` before delivery. The full payloads are delivered as
  * their protocol.ts types once the envelope checks pass.
  */
 interface AgentServerFrame {
@@ -226,7 +226,7 @@ export class AgentSocket extends Disposable {
       return true;
     } catch {
       // A send that throws mid-close is the same failure as a closed
-      // socket; the close handler carries the cleanup.
+      // socket; the close handler runs the cleanup.
       return false;
     }
   }
@@ -253,7 +253,7 @@ export class AgentSocket extends Disposable {
     try {
       frame = JSON.parse(String(event.data)) as AgentServerFrame;
     } catch {
-      // A non-JSON frame carries no agent event; keep reading.
+      // A non-JSON frame is ignored; keep reading.
       return;
     }
     if (frame.type === "agents") {

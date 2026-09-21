@@ -25,7 +25,7 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
     use axum::Router;
     use axum::routing::post;
 
-    // A non-success body carrying control characters and a would-be secret.
+    // A non-success body holding control characters and a would-be secret.
     async fn handler() -> (axum::http::StatusCode, String) {
         (
             axum::http::StatusCode::BAD_GATEWAY,
@@ -44,7 +44,7 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
     assert!(shown.contains("502"), "status must appear, got {shown}");
     assert!(
         !shown.contains("super-secret") && !shown.contains('\n'),
-        "the raw body must not ride in Display, got {shown}"
+        "the raw body must not appear in Display, got {shown}"
     );
     // The bounded, control-escaped body is available only via the opt-in.
     let body = err
@@ -177,7 +177,7 @@ async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
 
 #[tokio::test]
 async fn complete_refuses_a_malformed_stream_chunk() {
-    // F14: a 200 whose stream carries an undecodable chunk is
+    // F14: a 200 whose stream holds an undecodable chunk is
     // MalformedResponse, and the decode failure is preserved as the
     // error-chain source.
     let base = spawn_raw_gateway(axum::http::StatusCode::OK, "data: { not json\n\n").await;
@@ -197,7 +197,7 @@ async fn complete_refuses_a_malformed_stream_chunk() {
 
 #[tokio::test]
 async fn complete_refuses_malformed_tool_call_fragments_at_the_boundary() {
-    // F14: a well-formed HTTP 200 whose streamed tool-call fragment carries
+    // F14: a well-formed HTTP 200 whose streamed tool-call fragment has
     // non-string arguments is rejected at the client boundary, not passed on.
     let client = sse_client(sse_body(&[serde_json::json!({
         "choices": [{ "index": 0, "delta": { "tool_calls": [{

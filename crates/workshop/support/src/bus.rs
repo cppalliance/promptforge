@@ -52,7 +52,7 @@ impl<T: Clone> RetainedBus<T> {
     #[must_use]
     pub fn latest(&self) -> Option<T> {
         // A lock poisoned by a panicking peer recovers the value rather
-        // than wedging the process (the zone-two error policy).
+        // than wedging the process.
         self.latest
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

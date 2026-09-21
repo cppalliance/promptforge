@@ -30,7 +30,7 @@ local setmetatable = setmetatable
 -- the result is the arm's record, not the author's scratch space. The
 -- seal has three parts: the fields live in a hidden `__index` table the
 -- author cannot reach, `__newindex` refuses every assignment, and
--- `__metatable` hands `getmetatable` a decoy (carrying only `__tostring`,
+-- `__metatable` hands `getmetatable` a decoy (containing only `__tostring`,
 -- so the hardened `table.concat` still recognizes the result as
 -- renderable) and makes `setmetatable` refuse to replace the guard. The
 -- one remaining bypass would be `rawset`, which the VM's hardening pass

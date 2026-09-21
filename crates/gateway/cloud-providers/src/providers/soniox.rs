@@ -4,8 +4,8 @@
 //! speech-to-text, so the transcription kind is set; the per-model
 //! `languages` list contributes its codes to the entry, while
 //! `aliased_model_id`, `context_version`, `transcription_mode`, and the
-//! `supports_*` capability flags have no sheet fields and are not
-//! parsed. No pagination, no token limits, no pricing.
+//! `supports_*` capability flags are ignored. No pagination, no token
+//! limits, no pricing.
 //!
 //! Docs: <https://soniox.com/docs/stt/models> (OpenAPI:
 //! <https://soniox.com/docs/openapi.yaml>)
@@ -78,8 +78,8 @@ struct WireModel {
     languages: Vec<WireLanguage>,
 }
 
-/// One language as the wire reports it; only the code has sheet
-/// meaning, the display name is dropped.
+/// One language as the wire reports it; the sheet reads only the code,
+/// the display name is dropped.
 #[derive(Debug, Deserialize)]
 struct WireLanguage {
     code: String,

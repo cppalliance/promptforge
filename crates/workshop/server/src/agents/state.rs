@@ -22,12 +22,11 @@ use super::{AgentSessions, bindings, relay, session, socket};
 
 /// The shared state of the sessions subsystem's routes: the subsystem
 /// registry every handle is read through, and the shell's WebSocket
-/// origin policy. The subsystem holds no typed bus fields of its own:
-/// the agent-session opener, the gateway endpoint binding and
-/// reachability flag, and the catalog and menu buses are read through
-/// the registry's type-keyed state collection at the point of use, each
-/// an `Option` whose `None` degrades the feature the way the status
-/// channel's absence always has.
+/// origin policy. The agent-session opener, the gateway endpoint binding
+/// and reachability flag, and the catalog and menu buses are read
+/// through the registry's type-keyed state collection at the point of
+/// use, each an `Option` whose `None` degrades the feature the way the
+/// status channel's absence always has.
 ///
 /// The origin policy is injected by the shell as a plain function: the
 /// cross-site guard is the shell's security boundary (its `cross_site`

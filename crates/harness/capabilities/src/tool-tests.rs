@@ -103,7 +103,7 @@ fn structured_output_defaults_to_plain_text() {
 }
 
 #[test]
-fn a_descriptor_carries_the_tools_surface_and_never_the_implementation() {
+fn a_descriptor_has_the_tools_surface_and_never_the_implementation() {
     // The descriptor is the tool as data: identity, wire name, description,
     // schema, and the output kind, so a catalog built from descriptors holds
     // no implementation.

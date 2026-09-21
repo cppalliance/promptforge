@@ -38,7 +38,7 @@ The parser is strict here. A leading UTF-8 byte-order mark is dropped. Malformed
 
 Four optional frontmatter keys declare what the prompt needs from its host. Together they form the prompt's contract, and the host satisfies it before anything runs (see [The Run](02-the-run.md)):
 
-- `capabilities:` lists the capabilities the prompt activates, by global id. A capability id has exactly two segments, `namespace/pack`. A bare id declares a required capability; the map form, `{ ref: namespace/pack, optional: true }`, declares one the run skips when absent, and may carry prompt-side `config` data. See [Tools](07-tools.md).
+- `capabilities:` lists the capabilities the prompt activates, by global id. A capability id has exactly two segments, `namespace/pack`. A bare id declares a required capability; the map form, `{ ref: namespace/pack, optional: true }`, declares one the run skips when absent, and may pass prompt-side `config` data. See [Tools](07-tools.md).
 - `tools:` declares the run's tool slots, keyed by a prompt-local alias. Each value is a string holding an exact global tool path (`namespace/pack/name`, exactly three segments), filled by identity at prepare; a map value fails the parse. See [Tools](07-tools.md).
 - `models:` declares the run's model roles, keyed by a prompt-local label, each with a keyword set, an optional `min_context` token floor, and a description. See [Models](06-models.md).
 - `args:` declares the run's typed input fields, each with a `type` (`string`, `boolean`, `integer`, or `number`), an `optional` flag, an optional `default`, and a description. A prompt with no `args:` key gets the default declaration: one optional string field named `prose`. See [Lua Globals and the Store](04-lua-globals-and-store.md).
@@ -103,15 +103,15 @@ Prose is data, not an implicit model turn. The prose written between a heading o
 
 A scalar `return` from a section's Lua block ends the run early with that value. When the first section returns `"first"`, a later section's own `return "unreached"` is never reached. A run in which no section returns finishes with the generic completion "done".
 
-The host sees one of three outcomes. A completed run yields its final text. A cancelled run reports cancellation distinctly, so an interrupted run is never mistaken for a failed one. A failure carries a typed error whose kind classifies the fault - parse, binding, completion, tool, and so on - with a message written to be read and, when the failure has a source position, the prompt name and line to navigate to. Domain outcomes, including the prompt declining to answer, are ordinary result text, not failures.
+The host sees one of three outcomes. A completed run yields its final text. A cancelled run reports cancellation distinctly, so an interrupted run is never mistaken for a failed one. A failure reports a typed error whose kind classifies the fault - parse, binding, completion, tool, and so on - with a message written to be read and, when the failure has a source position, the prompt name and line to navigate to. Domain outcomes, including the prompt declining to answer, are ordinary result text, not failures.
 
-## What carries between sections
+## What crosses between sections
 
-Sections are isolated in Lua, but three things roll forward through the walk. The `var` table is a per-run clipboard: it is seeded into each section's Lua state on entry and read back before teardown, so the next section sees the updates. The run-scoped `store` persists bulk state as virtual files addressed by logical string paths, shared across every section of the run. And everything else moves explicitly: `call(heading, input)` hands a subroutine its input and returns its result, so the author chooses what crosses a section boundary.
+Sections are isolated in Lua, but three things roll forward through the walk. The `var` table is a per-run scratch table: it is seeded into each section's Lua state on entry and read back before teardown, so the next section sees the updates. The run-scoped `store` persists bulk state as virtual files addressed by logical string paths, shared across every section of the run. And everything else moves explicitly: `call(heading, input)` hands a subroutine its input and returns its result, so the author chooses what crosses a section boundary.
 
 ## Moving control between sections
 
-Fall-through is only the default. A running section can also call `call(heading)` to run another section as a contained chain and get its return value back, `jump(heading)` to transfer control outright, and `fanout(worker, collection)` to run a worker section once per collection member concurrently. For now, hold the picture of the walk: preamble first, then sections in file order, with the clipboard, the store, and explicit call results rolling forward.
+Fall-through is only the default. A running section can also call `call(heading)` to run another section as a contained chain and get its return value back, `jump(heading)` to transfer control outright, and `fanout(worker, collection)` to run a worker section once per collection member concurrently. For now, hold the picture of the walk: preamble first, then sections in file order, with `var`, the store, and explicit call results rolling forward.
 
 ---
 
@@ -161,7 +161,7 @@ return models.infer(prose)
 ```
 ````
 
-A break carries no control-flow meaning. It never ends a section, skips a section, or stops a call, and everything below it - Lua fences included - parses and runs normally. Use breaks to keep commentary inside a section without letting it leak into `prose`.
+A break never ends a section, skips a section, or stops a call, and everything below it - Lua fences included - parses and runs normally. Use breaks to keep commentary inside a section without letting it leak into `prose`.
 
 One formatting rule matters here. A blank line must precede a `---` rule. A prose line directly followed by `---` parses as a setext heading underline, not a rule, so `Some prose` immediately followed by `---` becomes a new section named `Some prose`.
 
@@ -220,7 +220,7 @@ The executor reads the value back when the H1 pass completes, and every later se
 
 ## sys: runtime metadata
 
-Every section receives a `sys` JSON value carrying `when`, `id`, `taskid`, `section_name`, `execution`, and `section_count`.
+Every section receives a `sys` JSON value with `when`, `id`, `taskid`, `section_name`, `execution`, and `section_count`.
 
 The `sys.when` value is the run's start time as a UTC RFC 3339 string. The host stamps it once when the run begins, so every section agrees on when the run began, and two runs given the same start time read the same value.
 
@@ -236,15 +236,15 @@ Once the section has dispatched its first model or tool call, `sys.model` reads 
 
 Call `log(...)` from any section's Lua block to emit a checkpoint. Checkpoints are reported as events under the current section name, which makes them the simplest way to trace a run.
 
-## var: the per-run clipboard
+## var: the per-run scratch table
 
-The `var` table is a per-run clipboard. It is seeded into each section's Lua state on entry and read back before teardown, so the next section sees the updates:
+The `var` table is a per-run scratch table. It is seeded into each section's Lua state on entry and read back before teardown, so the next section sees the updates:
 
 ````lua
 var.topic = 'governance'
 ````
 
-Two rules keep the clipboard safe. Reassigning the `var` global itself fails the run; you mutate its fields, never replace it. And assigning a non-JSON value to a field fails, naming the field and the type: `var.f = function() end` errors because a function is not JSON data.
+Two rules keep `var` safe. Reassigning the `var` global itself fails the run; you mutate its fields, never replace it. And assigning a non-JSON value to a field fails, naming the field and the type: `var.f = function() end` errors because a function is not JSON data.
 
 ## prose: the pending Markdown
 
@@ -323,7 +323,7 @@ Each placeholder names a namespace and, for most of them, a key:
 - `{{ args }}` inserts the run's input string, exactly as passed.
 - `{{ argv }}` inserts the parsed form of the input as compact JSON, and `{{ argv.key }}` indexes into it.
 - `{{ item }}` inserts the current member when the section runs as an arm of a fanout.
-- `{{ var.key }}` inserts a field of the `var` clipboard.
+- `{{ var.key }}` inserts a field of the `var` table.
 - `{{ sys.key }}` inserts runtime metadata.
 - A bare name, such as `{{ kind }}`, inserts a section-local Lua global.
 
@@ -373,7 +373,7 @@ models:
     description: careful analysis
 ````
 
-Each key is a prompt-local label. A role carries a keyword set, an optional `min_context` token floor, and a description.
+Each key is a prompt-local label. A role declares a keyword set, an optional `min_context` token floor, and a description.
 
 The keyword vocabulary is closed, and split in two. The hard keywords, `thinking` and `no-thinking`, are checked at prepare against the filled model's descriptor, as is the context minimum: a role requiring `min_context: 200000` filled with a 32k model, or requiring `thinking` filled with a model that never thinks, is reported as an unmet requirement naming the role, required versus actual. The soft keywords - `frontier`, `fast`, `small`, `creative`, and `chat` - document author intent for the day a smarter fill can shop for them. An unknown keyword fails the parse; adding a keyword is a language change.
 
@@ -460,7 +460,7 @@ models:
 models.default('analyst')
 ````
 
-The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements ride `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.
+The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements move into `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.
 
 ---
 
@@ -481,7 +481,7 @@ capabilities:
     optional: true
 ````
 
-A bare id declares a required capability: when it is absent from the host's registry or fails to activate, the run cannot start, and the preflight report names it. The map form with `optional: true` declares a capability the run skips with a log line when absent, so one prompt runs with or without an enhancement; the optional `config` key carries prompt-side data to the capability. User-specific configuration such as credentials is host-supplied and never named in the prompt.
+A bare id declares a required capability: when it is absent from the host's registry or fails to activate, the run cannot start, and the preflight report names it. The map form with `optional: true` declares a capability the run skips with a log line when absent, so one prompt runs with or without an enhancement; the optional `config` key passes prompt-side data to the capability. User-specific configuration such as credentials is host-supplied and never named in the prompt.
 
 ## Declaring a tool slot
 
@@ -610,7 +610,7 @@ jump('## Help')
 store.write('seen.txt', 'should-not-run')  -- never runs
 ````
 
-A jump carries the `var` clipboard across: the target's Lua state is seeded with the jumper's final `var`. Nothing else crosses implicitly, so pass state through `var` or the store.
+A jump moves the `var` table across: the target's Lua state is seeded with the jumper's final `var`. Nothing else crosses implicitly, so pass state through `var` or the store.
 
 A jump to a direct child heading starts a child-level walk over the jumper's children under the same rules, and the parent walk resumes after the jumper when the child level exhausts.
 
@@ -622,7 +622,7 @@ The call `call(heading)` runs a visible section as a contained chain with a fres
 local summary = call('## Research')
 ````
 
-The call clones the caller's `var` into the child chain and discards the child's writes when the chain ends, so a subroutine cannot disturb the caller's clipboard. An optional second parameter supplies an input string that overrides the run's `args` for the chain:
+The call clones the caller's `var` into the child chain and discards the child's writes when the chain ends, so a subroutine cannot disturb the caller's `var`. An optional second parameter supplies an input string that overrides the run's `args` for the chain:
 
 ````lua
 local summary = call('## Research', topic)
@@ -674,7 +674,7 @@ A Lua block that exhausts a host resource quota fails with a typed quota error n
 
 A run failure is classified into one stable kind: parse, version, binding, completion, tool, store, lua, quota, context_exhausted, input, substitution, cancelled, or internal. The kind tells you which layer rejected the run before you read the message.
 
-Parse failures carry a stable classification kind and, when known, the location of the offending region. Lua compile errors name the prompt region and map back to the original source line numbers, so the error points at your file, not at generated code.
+Parse failures report a stable classification kind and, when known, the location of the offending region. Lua compile errors name the prompt region and map back to the original source line numbers, so the error points at your file, not at generated code.
 
 ## Retrying and cancelling
 
@@ -700,7 +700,7 @@ This runs the worker once per item of the list section. The second parameter mus
 
 ## The collection
 
-Fanout accepts any Lua table as its collection. The array part iterates in order first, then the hash part iterates in undefined order, with each hash member arriving as a pair table carrying `item.key` and `item.value`. Function members and table-keyed members cannot cross into an arm.
+Fanout accepts any Lua table as its collection. The array part iterates in order first, then the hash part iterates in undefined order, with each hash member arriving as a pair table with `item.key` and `item.value`. Function members and table-keyed members cannot cross into an arm.
 
 ## Inside an arm
 

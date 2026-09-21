@@ -15,7 +15,7 @@ test-fixtures = ["dep:tempfile"]
 arc-swap.workspace = true
 futures-util.workspace = true
 # The gateway's public wire vocabulary: the progress snapshot the
-# `GET /admin/progress` stream carries.
+# `GET /admin/progress` stream sends.
 gateway-api-types.workspace = true
 promptforge-api-types.workspace = true
 reqwest.workspace = true

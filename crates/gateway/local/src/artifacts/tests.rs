@@ -288,8 +288,8 @@ fn failed_publication_keeps_the_partial_without_its_marker() {
 #[test]
 fn stale_staging_part_is_cleaned_before_publish() {
     // ART-007: a pre-existing `.part` from an interrupted prior run at the
-    // destination slot carries no provenance marker, so the new download
-    // truncates and replaces it before publishing.
+    // destination slot has unknown provenance, so the new download truncates
+    // and replaces it before publishing.
     let body = b"good-artifact-bytes";
     let digest = hex_sha256(body);
     let server = FakeServer::new(body);
@@ -1298,7 +1298,7 @@ fn second_verification_hits_marker_without_rehash() {
 #[test]
 fn ensure_model_with_progress_writes_the_download_text_and_a_cache_hit_writes_nothing() {
     // A URL source flows through `ensure_blob`: the transfer writes its
-    // percent into the activity, and the pin check rides the inline digest,
+    // percent into the activity, and the pin check reads the inline digest,
     // so no verify text follows the download.
     let body = b"model-bytes";
     let server = FakeServer::new(body);
@@ -1396,7 +1396,7 @@ fn extract_failure_leaves_the_extracting_text_and_propagates() {
     assert_eq!(
         hub.current().text,
         "Extracting evil.zip",
-        "the stage was named before the unsafe entry stopped it; the error carries the failure"
+        "the stage was named before the unsafe entry stopped it; the error reports the failure"
     );
 }
 
@@ -1680,7 +1680,7 @@ fn verify_blob_names_the_hash_pass_before_a_digest_mismatch() {
     assert_eq!(
         hub.current().text,
         "Verifying m.gguf 100%",
-        "the hash pass ran to its end; the mismatch error carries the failure"
+        "the hash pass ran to its end; the mismatch error reports the failure"
     );
 }
 

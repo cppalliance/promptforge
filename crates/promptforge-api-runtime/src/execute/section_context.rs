@@ -66,7 +66,7 @@ pub(crate) struct SectionContext {
     /// The section's `sys` JSON, enriched in place by the walk (the model
     /// binding).
     sys: serde_json::Value,
-    /// The walk's clipboard: seeded into the VM at construction, read back
+    /// The walk's `var` table: seeded into the VM at construction, read back
     /// out of it before teardown so the walk rolls it forward.
     var: serde_json::Value,
     /// A spawned chain's `item` seed (a fanout arm's collection member) for

@@ -4,8 +4,8 @@
 //! single-page `custom_models` envelope of public platform models
 //! (`id`, `name`, `description`). Every listed model is image
 //! generation, so the image kind is set; `description`, `featured`,
-//! `nsfw`, and `generated_image` have no sheet fields and are not
-//! parsed. No pagination, no token limits, no pricing.
+//! `nsfw`, and `generated_image` are ignored. No pagination, no token
+//! limits, no pricing.
 //!
 //! Docs: <https://docs.leonardo.ai/v1.0/reference/listplatformmodels>
 
@@ -90,7 +90,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 
 /// Sets every entry's family: platform model ids are UUIDs, so the
 /// display name - the catalog's only stable label - is the family,
-/// falling back to the id when the wire reports no name. There is no
+/// falling back to the id when the wire omits the name. There is no
 /// snapshot collapse.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

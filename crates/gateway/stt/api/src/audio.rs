@@ -81,8 +81,8 @@ impl AudioBuffer {
                 maximum_seconds: MAX_BUFFERED_SECONDS,
             });
         }
-        let carried = usize::from(self.odd_byte.is_some());
-        let complete_samples = (bytes.len() + carried) / BYTES_PER_SAMPLE;
+        let held = usize::from(self.odd_byte.is_some());
+        let complete_samples = (bytes.len() + held) / BYTES_PER_SAMPLE;
         let _ = self
             .input_samples
             .checked_add(u64::try_from(complete_samples).map_err(|_| {
@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_base64_carries_the_decode_failure_as_its_source() {
+    fn invalid_base64_returns_the_decode_failure_as_its_source() {
         use std::error::Error as _;
 
         let error = decode_base64("%%%").expect_err("invalid Base64 is rejected");
@@ -317,12 +317,12 @@ mod tests {
             error
                 .source()
                 .is_some_and(<dyn std::error::Error + 'static>::is::<base64::DecodeError>),
-            "the error chain carries the decoder failure"
+            "the error chain includes the decoder failure"
         );
     }
 
     #[test]
-    fn odd_byte_carry_and_resampling_match_unsplit_input() {
+    fn held_odd_byte_and_resampling_match_unsplit_input() {
         let input = (0..MIN_COMMIT_SAMPLES + 5)
             .map(|index| i16::try_from(index % 1024).expect("fixture sample fits") - 512)
             .collect::<Vec<_>>();
@@ -404,7 +404,7 @@ mod tests {
         bytes.push(0xaa);
         audio
             .append_base64(&encoded(&bytes))
-            .expect("append carries the odd byte");
+            .expect("append holds the odd byte");
         assert!((audio.buffered_duration_seconds() - 0.1).abs() < f64::EPSILON);
         assert_eq!(audio.commit(), Err(AudioError::IncompletePcm16Sample));
     }
@@ -472,7 +472,7 @@ mod tests {
         let mut expected = coarse.take_resampled();
         coarse
             .append_base64(&encoded(&bytes[coarse_split..]))
-            .expect("coarse carry completes");
+            .expect("the coarse odd byte completes its sample");
         let committed = coarse.commit().expect("coarse stream commits");
         expected.extend_from_slice(committed.samples());
 
@@ -503,21 +503,21 @@ mod tests {
         };
         near_limit
             .append_base64(&encoded(&bytes[..1]))
-            .expect("the odd byte is carried at the lifetime boundary");
+            .expect("the odd byte is held at the lifetime boundary");
         assert!(near_limit.take_resampled().is_empty());
         near_limit
             .append_base64(&encoded(&bytes[1..]))
-            .expect("the carried sample reaches the exact lifetime limit");
+            .expect("the held byte's sample reaches the exact lifetime limit");
         let actual = near_limit.take_resampled();
 
         let mut ordinary = AudioBuffer::default();
         ordinary
             .append_base64(&encoded(&bytes[..1]))
-            .expect("ordinary odd byte is carried");
+            .expect("ordinary odd byte is held");
         assert!(ordinary.take_resampled().is_empty());
         ordinary
             .append_base64(&encoded(&bytes[1..]))
-            .expect("ordinary carried samples append");
+            .expect("the ordinary held byte's sample appends");
         assert_eq!(actual, ordinary.take_resampled());
         assert_eq!(near_limit.input_samples, u64::MAX);
         assert_eq!(

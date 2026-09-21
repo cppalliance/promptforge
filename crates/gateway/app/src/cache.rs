@@ -290,7 +290,7 @@ fn sse_response(
                             ));
                         }
                         // The reporter dropped with the download task;
-                        // the join result carries the outcome.
+                        // the join result holds the outcome.
                         Err(_) => (&mut join).await,
                     },
                     result = &mut join => result,

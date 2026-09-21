@@ -125,7 +125,7 @@ async fn the_sse_stream_derives_from_byte_samples_and_ends_with_the_join_result(
     assert_eq!(
         last["bytes"],
         body.len() as u64,
-        "the final sample carries every byte: {text}"
+        "the final sample reports every byte: {text}"
     );
     assert_eq!(last["total"], body.len() as u64);
     assert!(

@@ -52,7 +52,7 @@ async fn complete_sends_completion_options_and_stream_flags_on_the_wire() {
 
 #[tokio::test]
 async fn complete_hard_fails_on_empty_model_reply() {
-    // A stream that carries only reasoning and a stop finish has no
+    // A stream that holds only reasoning and a stop finish has no
     // product; the accumulated turn must fail exactly like the buffered
     // equivalent, with the finish_reason surviving.
     let client = sse_client(sse_body(&[
@@ -77,7 +77,7 @@ async fn complete_hard_fails_on_empty_model_reply() {
 #[tokio::test]
 async fn streamed_text_usage_timings_and_client_timing_accumulate() {
     // The llama.cpp streamed shape: content fragments, a finish chunk, and
-    // the include_usage summary chunk carrying usage plus timings. The
+    // the include_usage summary chunk holding usage plus timings. The
     // accumulated completion must match the buffered equivalent while the
     // deltas reach the callback in order, and the client's own clock must
     // populate ClientTiming.
@@ -284,7 +284,7 @@ async fn mid_stream_error_envelope_is_a_transport_failure() {
         .expect_err("an error envelope must fail the completion");
     assert_eq!(err.kind(), CompletionErrorKind::Transport);
     let source = std::error::Error::source(&err)
-        .expect("the envelope message must ride as the cause")
+        .expect("the envelope message must be the cause")
         .to_string();
     assert!(source.contains("upstream died"), "cause: {source}");
 }

@@ -183,8 +183,8 @@ impl Scheduler {
     /// Resumes a jump-suspended parent position when a child level
     /// exhausts, returning `false` when the chain holds no suspended
     /// position - meaning its own root slice exhausted and the chain ends.
-    /// The `var` slot needs no handling: the child walk shared
-    /// it, so it already holds the child level's last value.
+    /// The child walk shared the `var` slot, so it already holds the
+    /// child level's last value.
     fn pop_position(&mut self, id: ChainIndex) -> bool {
         let chain = &mut self.chains[id.index()];
         let Some((slice, jumper)) = chain.positions.pop() else {
@@ -196,7 +196,7 @@ impl Scheduler {
     }
 
     /// Falls the chain through at its section's end: the section's final
-    /// `var` replaces the chain's clipboard, read back while the VM is
+    /// `var` replaces the chain's `var` table, read back while the VM is
     /// live; the frame's drop is
     /// the teardown boundary, firing `SECTION_FINISHED` for this completed
     /// section; then the walk advances to the next section.

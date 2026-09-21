@@ -24,7 +24,7 @@ Load and save failures appear as an alert bar above the editor. The newest error
 
 ## Conflicts
 
-When you save a file that changed on disk since it was read, the save is refused with a conflict instead of silently overwriting. Each save carries the version token from the previous successful write, so the editor never silently overwrites a file that changed elsewhere. You get a "File changed on disk" dialog with two choices:
+When you save a file that changed on disk since it was read, the save is refused with a conflict instead of silently overwriting. Each save sends the version token from the previous successful write, so the editor never silently overwrites a file that changed elsewhere. You get a "File changed on disk" dialog with two choices:
 
 - Reload discards the editor's text and loads the on-disk text.
 - Overwrite writes your changes over the file on disk, re-reading the fresh token first so the write succeeds.

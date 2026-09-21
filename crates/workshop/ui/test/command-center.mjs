@@ -1,6 +1,6 @@
 // Unit test for the command center (src/parts/chrome/command-center.ts): the
 // title-bar toolbar over MenuId.CommandCenter, mounted inside the center
-// drag region with the no-drag marker. The built-in pill carries the
+// drag region with the no-drag marker. The built-in pill shows the
 // search icon and window title and dispatches the menu's first command
 // row; the ? chevron runs workbench.action.quickOpenHelp; further
 // command rows render as toolbar buttons. Also covers the pill's
@@ -86,7 +86,7 @@ await flush();
 const container = center.querySelector(".ws-command-center");
 check("the command center mounts inside the center drag region", container !== null);
 check(
-  "the command center carries the no-drag marker",
+  "the command center has the no-drag marker",
   container?.classList.contains("ws-window-titlebar__no-drag") === true,
 );
 
@@ -94,7 +94,7 @@ const pill = container.querySelector(".ws-command-center__pill");
 check("the pill is a button", pill?.tagName === "BUTTON");
 check("the pill is a type=button control", pill?.type === "button");
 check(
-  "the pill carries its aria-label",
+  "the pill has its aria-label",
   pill?.getAttribute("aria-label") === "Search files, commands, and more",
 );
 check(

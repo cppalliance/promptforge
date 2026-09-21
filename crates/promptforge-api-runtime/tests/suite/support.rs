@@ -14,8 +14,8 @@ use promptforge_store::{StoreError, StoreExt};
 use shared_vfs::{Origin, VfsRef};
 
 /// A [`RunContext`] for the run `name` under the fixed host inputs every
-/// fixture shares: the engine draws no seed and reads no clock of its own,
-/// and no fixture here asserts on the nonce or `sys.when`.
+/// fixture shares: the engine takes its seed and clock from the host, and
+/// no fixture here asserts on the nonce or `sys.when`.
 pub(super) fn context(name: impl Into<String>) -> RunContext {
     RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
 }
