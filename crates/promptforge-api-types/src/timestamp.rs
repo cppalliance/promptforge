@@ -52,6 +52,19 @@ impl Timestamp {
         self.0
     }
 
+    /// The instant `time` represents, saturated to [`Timestamp::UNIX_EPOCH`]
+    /// if `time` is before the epoch or beyond `i64` milliseconds.
+    #[must_use]
+    pub fn from_system_time(time: std::time::SystemTime) -> Self {
+        Self::from(time)
+    }
+
+    /// The current system clock as a [`Timestamp`].
+    #[must_use]
+    pub fn now() -> Self {
+        Self::from(std::time::SystemTime::now())
+    }
+
     /// The instant as an RFC 3339 UTC string: `2024-02-29T12:34:56.789Z`.
     ///
     /// The fraction is omitted when the millisecond count is zero and
@@ -85,6 +98,18 @@ impl Timestamp {
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_rfc3339())
+    }
+}
+
+impl From<std::time::SystemTime> for Timestamp {
+    /// Converts a [`std::time::SystemTime`] into a [`Timestamp`], saturating to
+    /// [`Timestamp::UNIX_EPOCH`] if `time` is before the Unix epoch or beyond
+    /// `i64` milliseconds.
+    fn from(time: std::time::SystemTime) -> Self {
+        time.duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+            .map_or(Timestamp::UNIX_EPOCH, Timestamp::from_unix_millis)
     }
 }
 
