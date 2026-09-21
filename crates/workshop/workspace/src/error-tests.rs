@@ -246,7 +246,7 @@ fn debug_messages_append_the_source_chain() {
     );
 }
 
-/// Tests run under debug assertions, so the live envelope must carry
+/// Tests run under debug assertions, so the live envelope must include
 /// the detail the debug side of the boundary promises.
 #[cfg(debug_assertions)]
 #[tokio::test]

@@ -11,7 +11,7 @@ use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 
-/// The model set an input test's run carries: `writer` (the prompt-wide
+/// The model set an input test's run uses: `writer` (the prompt-wide
 /// default, model `test-model`), so `models.loop` resolves a binding.
 fn input_models() -> ModelSet {
     ModelSet {

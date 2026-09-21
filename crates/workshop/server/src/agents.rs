@@ -8,10 +8,10 @@
 //! [`Harness`] from `harness-api` and registers it like every other
 //! subsystem handle; this module reaches it through the registry and opens
 //! every session through it. Everything the harness knows about the shell
-//! arrives as data pushed across its door (`bindings`): the gateway
-//! endpoint and bearer, the chat-capable catalog, and the host snapshot
-//! (the menu's selection and the workspace's granted roots). Status-bar
-//! reporting stays on this side of the door (`status`): a per-session
+//! arrives as data pushed through its public API (`bindings`): the
+//! gateway endpoint and bearer, the chat-capable catalog, and the host
+//! snapshot (the menu's selection and the workspace's granted roots).
+//! Status-bar reporting stays in the shell (`status`): a per-session
 //! relay derives it from the session's events, deltas, and error reports.
 //!
 //! **Registry carve-out.** Sessions survive socket disconnect and sockets
@@ -44,13 +44,13 @@ pub(crate) use state::{SessionsState, register, register_tasks};
 const HARNESS_STATE_DIR: &str = "harness";
 
 /// The harness every agent session runs in, built for `config` with the
-/// shell's current state already pushed across its door: the gateway
-/// endpoint and bearer, the chat catalog, and the host snapshot, each read
-/// through `registry` from the subsystems registered before it. The
-/// composition root registers the returned handle and the forwarder task
-/// ([`register_tasks`]) that keeps the bindings current from the buses
-/// once the shell serves. Nothing touches the filesystem here: the run
-/// log opens under the state directory on the first launch.
+/// shell's current state already pushed through its public API: the
+/// gateway endpoint and bearer, the chat catalog, and the host snapshot,
+/// each read through `registry` from the subsystems registered before it.
+/// The composition root registers the returned handle and the forwarder
+/// task ([`register_tasks`]) that keeps the bindings current from the
+/// buses once the shell serves. Nothing touches the filesystem here: the
+/// run log opens under the state directory on the first launch.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
     let harness = Arc::new(Harness::new(HarnessConfig {
         agents_path: config.agents.path.clone(),

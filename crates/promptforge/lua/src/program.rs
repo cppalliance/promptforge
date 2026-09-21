@@ -46,8 +46,8 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// accessor, not a value to log at info level, echo to untrusted sinks, or place
 /// in a model-facing message. [`location`](Self::location) and
 /// [`source_line`](Self::source_line) are safe positional metadata (a chunk name
-/// and a line number) and carry no source text. The crate itself never logs the
-/// retained source; compilation observations carry only fixed strings.
+/// and a line number) and hold no source text. The crate itself never logs the
+/// retained source; compilation observations contain only fixed strings.
 ///
 /// # Examples
 /// A program is obtained from the parser (which compiles it at parse time)
@@ -94,7 +94,7 @@ impl LuaProgram {
     ///
     /// `location` identifies the source region in diagnostics. Compilation
     /// reports contain only fixed strings and never include `source` or
-    /// `location`; each carries the emitter's coordinates.
+    /// `location`; each is stamped with the emitter's coordinates.
     ///
     /// # Errors
     /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
@@ -162,9 +162,8 @@ impl LuaProgram {
     /// Returns a compiled empty chunk standing in for an absent shared library.
     ///
     /// Section startup replays the shared library unconditionally; a prompt
-    /// without a `lua shared` fence replays this chunk instead, so the
-    /// startup sequence carries no `Option` branch. The compilation is
-    /// internal bookkeeping and emits no observations.
+    /// without a `lua shared` fence replays this chunk instead. The
+    /// compilation is internal bookkeeping and emits no observations.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created.

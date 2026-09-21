@@ -178,7 +178,7 @@ impl Tool for FixtureTool {
 }
 
 /// A fixture tool whose wire name is transport-illegal: identity is a
-/// valid contained id, but the advertised name carries a `/` separator.
+/// valid contained id, but the advertised name contains a `/` separator.
 pub(super) struct BadWireTool {
     pub(super) id: ToolId,
     pub(super) wire: String,

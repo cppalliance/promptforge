@@ -167,8 +167,8 @@ pub(crate) mod fixture {
         id: String,
     }
 
-    /// A minimal entry carrying an id and nothing else, for taxonomy
-    /// tests that need a list without a wire payload.
+    /// A minimal entry that sets only the id, for taxonomy tests that
+    /// need a list without a wire payload.
     pub(crate) fn entry(id: &str) -> ModelEntry {
         ModelEntry {
             id: id.to_owned(),
@@ -198,7 +198,7 @@ pub(crate) mod fixture {
         }
     }
 
-    /// Minimal entries carrying the real ids from a trimmed 2026-09-14
+    /// Minimal entries built from the real ids in a trimmed 2026-09-14
     /// sheet excerpt.
     pub(crate) fn entries(json: &str) -> Vec<ModelEntry> {
         let fixture: Fixture = serde_json::from_str(json).expect("the fixture must parse");

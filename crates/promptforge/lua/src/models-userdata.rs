@@ -2,8 +2,8 @@
 //! `models.get`.
 //!
 //! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields
-//! to Lua. Invocation is namespace-only (A9): the handle carries no methods,
-//! and `models.infer(handle?, prompt)` takes it as an optional leading
+//! to Lua. Invocation is namespace-only (A9), so
+//! `models.infer(handle?, prompt)` takes the handle as an optional leading
 //! argument.
 
 use std::sync::Arc;
@@ -38,7 +38,7 @@ impl LuaModelHandle {
         }
     }
 
-    /// Returns the frozen binding carried by this handle.
+    /// Returns the frozen binding this handle holds.
     #[must_use]
     pub(crate) fn binding(&self) -> &ModelBinding {
         &self.binding

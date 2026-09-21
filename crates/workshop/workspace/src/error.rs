@@ -23,7 +23,7 @@ use workshop_protocol::ErrorEnvelope;
 
 use crate::workspace_file::{UI_STATE_KEYS, WorkspaceFileError};
 
-/// Whether wire bodies carry internal failure detail. Debug builds append
+/// Whether wire bodies include internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at
 /// the variant's own message.
 const LEAK_DETAIL: bool = cfg!(debug_assertions);
@@ -90,7 +90,7 @@ pub enum WorkspaceError {
     #[error("path is outside every granted root")]
     OutsideGrants,
 
-    /// The path carries a `..` or an alternate data stream name.
+    /// The path contains a `..` or an alternate data stream name.
     #[error("path contains a forbidden component")]
     ForbiddenComponent,
 

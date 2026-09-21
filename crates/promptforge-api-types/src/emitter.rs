@@ -11,7 +11,7 @@
 //! (the main walk is task `0`; a `call` child shares its caller's emitter,
 //! so it reports under the caller's task; a spawned chain gets its own
 //! through [`Emitter::for_task`]) and stamps every event it pushes with
-//! that task's next `seq`. The counters live in the buffer, under its one
+//! that task's next `seq`. The counters sit in the buffer, under its one
 //! lock, so a task's sequence is dense from zero however its chains and
 //! the run's leaf tasks interleave.
 //!
@@ -127,7 +127,7 @@ impl EventSink {
     }
 
     /// Allocates `task`'s next provenance without pushing an event: the
-    /// stamp an issued effect carries, drawn from the same counter as the
+    /// stamp on an issued effect, drawn from the same counter as the
     /// task's events so effects and events from one task share one dense
     /// sequence.
     fn allocate(&self, task: &TaskId) -> Provenance {
@@ -161,7 +161,7 @@ pub struct Emitter {
     sink: EventSink,
     /// The nearest enclosing task of the chain this emitter serves.
     task: TaskId,
-    /// The caller-chosen run identifier every event carries.
+    /// The caller-chosen run identifier stamped on every event.
     execution: Arc<str>,
     /// Whether the host asked for raw request/response capture: the model
     /// rounds emit `Request` and `Response` only when [`DebugMode::On`],
@@ -211,7 +211,7 @@ impl Emitter {
         &self.task
     }
 
-    /// The caller-chosen run identifier every event carries.
+    /// The caller-chosen run identifier stamped on every event.
     #[must_use]
     pub fn execution(&self) -> &str {
         &self.execution
@@ -232,7 +232,7 @@ impl Emitter {
 
     /// Pushes one event built from this task's next coordinates: the
     /// general form every named report below is a case of, for the
-    /// payload-carrying variants that have no dedicated method.
+    /// variants with a payload and no dedicated method.
     pub fn emit(&self, section: &str, build: impl FnOnce(String, String, Provenance) -> Event) {
         let execution = self.execution.to_string();
         let section = section.to_owned();
@@ -312,7 +312,7 @@ impl Emitter {
         });
     }
 
-    /// Reports the result of one dispatched tool call. The event carries
+    /// Reports the result of one dispatched tool call. The event records
     /// `trust` as its `trusted` flag: `true` only for
     /// [`OutputTrust::Trusted`].
     pub fn tool_result(

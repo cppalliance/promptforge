@@ -1,7 +1,7 @@
 //! Regression coverage for the `promptforge_api_runtime::tools` compatibility
-//! re-exports: the contract vocabulary lives in `promptforge-api-types`'s
-//! `tools` module, and these tests pin that the re-exported path is the
-//! same types, not a lookalike.
+//! re-exports: the contract vocabulary sits in `promptforge-api-types`'s
+//! `tools` module, and these tests pin that the re-exported path resolves
+//! to the same types rather than a lookalike.
 
 use serde_json::json;
 

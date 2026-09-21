@@ -20,8 +20,8 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Both tools are built once at construction from the gateway root,
@@ -72,7 +72,7 @@ pub struct Web {
 impl Web {
     /// Builds the capability over the default fetch policy.
     ///
-    /// `base_url` is the gateway's OpenAI-shaped API root (for example
+    /// `base_url` is the gateway's OpenAI-compatible API root (for example
     /// `https://gateway.example.com/v1`) and `token` the shared bearer token;
     /// both are validated here.
     ///

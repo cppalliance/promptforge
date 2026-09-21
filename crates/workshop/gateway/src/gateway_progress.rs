@@ -13,9 +13,9 @@
 //! `Presenter`, which decides when the bar shows and when it rests.
 //! When the subscription drops - a lost connection or an unreachable
 //! verdict - the bar returns to rest, because progress from a gateway
-//! the workshop can no longer hear is stale, not informative; a bar that
-//! only just appeared still waits out its minimum visible time first,
-//! so a dropped stream cannot flash it.
+//! the workshop can no longer hear is stale; a bar that only just
+//! appeared still waits out its minimum visible time first, so a
+//! dropped stream cannot flash it.
 
 #[path = "gateway_progress-presenter.rs"]
 mod presenter;
@@ -231,7 +231,7 @@ async fn run(
 /// deadline armed beside it. A control signal ends the wait early with
 /// its [`Ended`]; a presenter deadline ticks the presenter and keeps
 /// waiting, so a minimum-visible hold lapses on time even while the loop
-/// is between subscriptions. Both watch senders live in `AppState` for
+/// is between subscriptions. Both watch senders sit in `AppState` for
 /// the process lifetime, so a closed watch means shutdown.
 async fn until<F: Future>(
     future: F,

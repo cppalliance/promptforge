@@ -13,7 +13,7 @@
 //! produced. [`fetch_model_catalog`] reads the gateway's typed model list
 //! for host-side concerns (the Workshop dropdown and its selection
 //! resolution). The client holds only the gateway's URL and the shared
-//! key; the vendor credential lives in the gateway, so no host ever sees
+//! key; the vendor credential sits in the gateway, so no host ever sees
 //! it. [`GatewayChatPerformer`] is the client as the effect loop performs
 //! a `Chat` effect through it: one round per effect, with a section's own
 //! round streaming its deltas to a [`DeltaSink`] the session drains.
@@ -21,8 +21,8 @@
 //! This is a Gateway model client, not a universal transport: it speaks
 //! the one protocol the gateway serves. Everything it exchanges is the
 //! engine's vocabulary, reached through the `promptforge-api-runtime`
-//! door; the metrics it reports are the canonical
-//! `promptforge-api-types` ones, never a parallel model.
+//! crate; the metrics it reports are the canonical
+//! `promptforge-api-types` ones.
 //!
 //! ## Invariants
 //!
@@ -31,8 +31,8 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - A gateway bearer key is never written to logs or `Debug` output.

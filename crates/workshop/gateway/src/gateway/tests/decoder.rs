@@ -69,9 +69,10 @@ fn decoder_drops_events_without_data() {
     assert!(decoder.pop().is_none());
 }
 
-/// A realistic delta stream whose payloads carry multi-byte UTF-8
+/// A realistic delta stream whose payloads contain multi-byte UTF-8
 /// (2-, 3-, and 4-byte codepoints), so a byte split can land inside a
-/// codepoint; mixed CRLF/LF endings and a multi-line event ride along.
+/// codepoint; the wire also mixes CRLF and LF endings and includes a
+/// multi-line event.
 const MULTIBYTE_WIRE: &str = concat!(
     "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"h\u{e9}llo \u{1f914} w\u{f6}rld\"}}]}\r\n\r\n",
     "data: {\"choices\":[{\"delta\":{\"content\":\"\u{65e5}\u{672c}\u{8a9e}\"}}]}\n\n",

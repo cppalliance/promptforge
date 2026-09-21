@@ -283,7 +283,7 @@ fn validate_search_value(
 
 /// The `GET /admin/hf/model/{owner}/{name}` route: bearer-authed, proxies
 /// the hub's model detail for an `owner/name` repo with `blobs=true`, so
-/// the sibling list carries the exact file sizes the quant picker needs.
+/// the sibling list includes the exact file sizes the quant picker needs.
 pub(crate) async fn admin_hf_model(
     State(state): State<AppState>,
     _caller: LoopbackCaller,
@@ -330,7 +330,7 @@ fn validate_repo(repo: &str) -> Result<(), GatewayError> {
 }
 
 /// Whether one repo segment is non-empty, hub-legal, and not a dot run
-/// (`.` and `..` are path traversal, not names).
+/// (`.` and `..` are path traversal).
 fn is_repo_segment(segment: &str) -> bool {
     !segment.is_empty()
         && !segment.bytes().all(|byte| byte == b'.')

@@ -166,7 +166,7 @@ impl ResolveError {
 ///
 /// # Errors
 /// Returns [`ResolveError`] when no live gateway discovery file exists and the
-/// config carries no explicit gateway.
+/// config names no explicit gateway.
 pub fn resolve(config: &GatewayConfig) -> Result<ResolvedGateway, ResolveError> {
     resolve_with(
         gateway_api_discovery::default_run_dir().as_deref(),

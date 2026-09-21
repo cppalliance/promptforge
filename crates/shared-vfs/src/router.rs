@@ -586,8 +586,8 @@ mod tests {
         }
     }
 
-    /// The routing tests never observe origins, so they acquire under
-    /// one blanket label.
+    /// The routing tests ignore origins, so they acquire under one
+    /// blanket label.
     fn test_origin() -> Origin {
         Origin::new("router test")
     }

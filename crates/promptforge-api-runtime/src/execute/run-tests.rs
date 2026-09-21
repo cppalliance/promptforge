@@ -214,7 +214,7 @@ fn only_effect(step: Step) -> (EffectId, Effect) {
     (id, effect)
 }
 
-/// Whether `events` carry the run's end boundary.
+/// Whether `events` include the run's end boundary.
 fn ended(events: &[Event]) -> bool {
     events
         .iter()

@@ -10,7 +10,7 @@ use crate::parser::Prompt;
 use super::super::config::RunContext;
 
 /// Builds the run's shared tool set from the prepared bindings: every
-/// filled slot becomes a binding carrying the tool's descriptor data (its
+/// filled slot becomes a binding with the tool's descriptor data (its
 /// schema, description, and output kind), so run-time execution never
 /// consults the catalog again and never holds an implementation. Unfilled
 /// slots produce no binding: advertising or calling the alias fails at run
@@ -46,7 +46,7 @@ fn keyword_name(keyword: ModelKeyword) -> &'static str {
 }
 
 /// Builds the run's shared model set from the prepared bindings: every
-/// filled role becomes a binding under its label, carrying the role's
+/// filled role becomes a binding under its label, holding the role's
 /// keyword set (the handle's `capabilities`) and the hard-keyword thinking
 /// switch as the frozen invocation. Unfilled roles produce no binding:
 /// `models.use` on the label fails at run time.

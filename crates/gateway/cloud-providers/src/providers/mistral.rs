@@ -1,6 +1,6 @@
 //! Mistral provider: the public descriptor plus the private variance of
 //! `GET /v1/models` under `https://api.mistral.ai` - Bearer auth and the
-//! OpenAI list envelope carrying Mistral's `BaseModelCard`: a
+//! OpenAI list envelope around Mistral's `BaseModelCard`: a
 //! `capabilities` object (`completion_chat`, `completion_fim`,
 //! `function_calling`, `vision`, and more), `max_context_length`, and
 //! `deprecation` with `deprecation_replacement_model`. Of the capability
@@ -64,7 +64,7 @@ pub(crate) async fn fetch(
 
 /// One model as the wire reports it. `owned_by`, `description`,
 /// `aliases`, `default_model_temperature`, and the fine-tuning card
-/// fields carry no sheet meaning and are not parsed.
+/// fields have no sheet meaning and are not parsed.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,

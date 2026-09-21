@@ -16,7 +16,7 @@
 //! [`EffectRecord`], the effect minus its handles, which round-trips
 //! through serde: a run log stores records, and a later replay compares a
 //! re-executed run's records against them. An [`EffectAnswer`] likewise
-//! carries values a log cannot hold whole (a completion's bodies, an
+//! contains values a log cannot hold whole (a completion's bodies, an
 //! error's boxed cause); [`EffectAnswer::record`] projects it onto an
 //! [`AnswerRecord`], the answer's outcome as a log stores it.
 
@@ -83,7 +83,7 @@ pub enum Effect {
     /// One bound tool call: `tool` is the stable identity the performer
     /// resolves to an implementation (a host against its activated
     /// capabilities, the engine's internal table against the run's
-    /// catalog), `alias` the prompt-local name it was called by, carried
+    /// catalog), `alias` the prompt-local name it was called by, kept
     /// for the record.
     ToolCall {
         /// The tool's stable live identity.
@@ -186,7 +186,7 @@ impl Effect {
 /// effect and what a replay compares a re-issued effect against.
 ///
 /// The `Chat` record flattens the binding to what identifies the round -
-/// the model, the alias, and the frozen invocation - and carries the
+/// the model, the alias, and the frozen invocation - and stores the
 /// messages in their wire form, so the record reads the same as the
 /// request body the host would build from it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -249,7 +249,7 @@ pub enum EffectRecord {
 #[derive(Debug)]
 pub enum EffectAnswer {
     /// The model round's completion or its failure. Boxed: a completion
-    /// carries both request and response bodies, and the box keeps every
+    /// holds both request and response bodies, and the box keeps every
     /// other answer's size from being set by this one.
     Chat(std::result::Result<Box<Completion>, CompletionError>),
     /// The tool's own output or its own failure, before the engine's
@@ -310,7 +310,7 @@ impl EffectAnswer {
 }
 
 /// An [`EffectAnswer`] as a run log stores it: one variant per answer
-/// kind, each carrying its outcome with every failure rendered to its
+/// kind, each holding its outcome with every failure rendered to its
 /// display text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AnswerRecord {

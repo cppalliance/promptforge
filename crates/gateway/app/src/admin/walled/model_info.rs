@@ -4,7 +4,7 @@
 //!
 //! The header parse is blocking filesystem work, so it goes through
 //! [`crate::error::blocking`] like every store operation (Amendment D).
-//! The parser itself lives in the local crate beside the blob cache, which
+//! The parser itself sits in the local crate beside the blob cache, which
 //! owns GGUF domain knowledge.
 
 use std::path::PathBuf;

@@ -91,11 +91,11 @@ pub enum AgentEventKind {
     UserInput,
 }
 
-/// One content [`Event`] in the shape the `/agents/ws` wire carries: the
+/// One content [`Event`] in the shape the `/agents/ws` wire uses: the
 /// ACP-labelled `kind`, the reporting `section`, the model-turn counter,
 /// the kind-specific `content` string (a tool-call batch renders as the
 /// JSON array of its calls), and the model, tool-call id, finish reason,
-/// and metrics where the kind carries them. `content` and every other
+/// and metrics where the kind includes them. `content` and every other
 /// free-text field is untrusted model-, tool-, or user-authored data. An
 /// [`Event`] locates itself by its provenance (the task and sequence),
 /// which the wire does not yet expose.
@@ -202,7 +202,7 @@ fn render_tool_calls(calls: &[ToolCallEvent]) -> String {
 ///
 /// Delivery: durable - `index` is the entry's position in the session's
 /// event log, the per-client cursor recovers everything past it on
-/// reconnect, and a future `replayFrom` cursor rides the same field.
+/// reconnect, and a future `replayFrom` cursor is stored in the same field.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AgentEventFrame {
     #[serde(rename = "type")]
@@ -250,7 +250,7 @@ pub enum AgentDeltaKind {
 /// will supersede it, so the SPA coalesces chunks by that id and replaces
 /// them when the event arrives (the ACP messageId chunk-vs-upsert rule).
 ///
-/// Delivery: ephemeral - deltas ride a bounded broadcast and may drop
+/// Delivery: ephemeral - deltas are sent on a bounded broadcast and may drop
 /// under lag; the completed-reply event is the repair path, which is why
 /// agent deltas never enter the event log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -267,7 +267,7 @@ pub struct AgentDeltaFrame {
 }
 
 impl AgentDeltaFrame {
-    /// Builds a delta frame carrying `content` on `channel`, stamped with
+    /// Builds a delta frame holding `content` on `channel`, stamped with
     /// the superseding `reply` id.
     #[must_use]
     pub fn new(channel: AgentDeltaKind, content: String, reply: u64) -> Self {

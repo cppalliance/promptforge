@@ -1,6 +1,6 @@
 //! The privacy pass every queued record goes through.
 //!
-//! No log record may carry credentials, cookies, authorization headers,
+//! No log record may contain credentials, cookies, authorization headers,
 //! environment values, request bodies, audio, transcript text, prompts, or
 //! full local model paths. Classified tracing fields are suppressed before
 //! their values are formatted. The bounded text pass remains at the queue
@@ -168,7 +168,7 @@ impl RedactedLine {
     }
 }
 
-/// Masks the sensitive shapes `text` could carry without permitting any
+/// Masks the sensitive shapes `text` could contain without permitting any
 /// intermediate output buffer to exceed `capacity`.
 pub(crate) fn redact_line_bounded(text: &str, capacity: usize) -> RedactedLine {
     let mut out = RedactedLine::new(capacity);
@@ -182,7 +182,7 @@ pub(crate) fn redact_line_bounded(text: &str, capacity: usize) -> RedactedLine {
     out
 }
 
-/// Masks the sensitive shapes `text` could carry and returns the result.
+/// Masks the sensitive shapes `text` could contain and returns the result.
 /// Tests use this convenience path; production supplies its strict record
 /// capacity through [`redact_line_bounded`].
 #[cfg(test)]

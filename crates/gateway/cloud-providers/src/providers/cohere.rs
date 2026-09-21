@@ -4,7 +4,7 @@
 //! `endpoints`, `features`, and `is_deprecated` into `ModelEntry`. The
 //! endpoint reports no pricing, no max-output field, and no release
 //! date; `tokenizer_url`, `finetuned`, `default_endpoints`, and
-//! `sampling_defaults` carry no sheet meaning and are not parsed.
+//! `sampling_defaults` have no sheet meaning and are not parsed.
 //!
 //! Docs: <https://docs.cohere.com/reference/list-models>
 
@@ -142,7 +142,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 
 /// The entry's family: the `command-a` and `command-r` lines by prefix
 /// (`command-r7b` belongs to the `command-r` line), `aya` for any id
-/// carrying the segment (the `c4ai-aya-*` and `tiny-aya-*` spellings),
+/// containing the segment (the `c4ai-aya-*` and `tiny-aya-*` spellings),
 /// and the whole id otherwise.
 fn family_of(id: &str) -> String {
     for line in ["command-a", "command-r"] {

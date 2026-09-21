@@ -1,4 +1,4 @@
-//! The observer: a broadcast bus carrying status bar updates from every
+//! The observer: a broadcast bus for status bar updates from every
 //! subsystem to every connected `/ws` session.
 //!
 //! Anything with user-visible latency - startup phases, gateway round
@@ -10,7 +10,7 @@
 //! at the oldest retained update. Sending never blocks, so instrumenting a
 //! hot path cannot stall the subsystem it observes.
 //!
-//! On the wire each update rides the workshop socket as an unsolicited
+//! On the wire each update is sent on the workshop socket as an unsolicited
 //! `{"type":"status",...}` frame (see [`StatusBarUpdate::frame`]). The
 //! bus also retains the newest update, so a session that connects later
 //! sends the current status immediately - the delivery contract's

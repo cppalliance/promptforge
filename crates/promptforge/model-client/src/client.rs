@@ -2,8 +2,8 @@
 //! with no transport attached.
 //!
 //! The wire types ([`Message`], [`ToolSchema`], [`ToolCall`],
-//! [`Completion`], [`CompletionResult`]) are what a `Chat` effect carries
-//! out of the engine and what its answer carries back. Beside them sit the
+//! [`Completion`], [`CompletionResult`]) go out of the engine in a `Chat`
+//! effect and come back in its answer. Beside them sit the
 //! protocol pieces every transport shares, all `#[doc(hidden)]`
 //! cross-crate seams: the request body builder, so one JSON shape leaves
 //! for the gateway no matter who sends it; the SSE reassembly (scanner,

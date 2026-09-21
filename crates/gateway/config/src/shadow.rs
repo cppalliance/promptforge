@@ -59,7 +59,7 @@ pub struct PendingShadows {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PendingReport {
-    /// Real config files that carry shadows: the config path when
+    /// Real config files that have shadows: the config path when
     /// `gateway.toml.next` exists, otherwise empty.
     pub shadowed_files: Vec<PathBuf>,
     /// Changed top-level config keys, sorted.
@@ -300,16 +300,16 @@ pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError>
 /// Validates and stages one pending admin document.
 ///
 /// The document is the global config alone. Profile selection is not a
-/// configuration key: a document carrying `active_profile` is refused, so
+/// configuration key: a document with `active_profile` is refused, so
 /// the Config UI cannot stage a selection that `POST /admin/switch-profile`
 /// owns. Redacted secrets are restored from the current pending config
 /// before validation. The persisted selection is not checked against the
 /// document: a state file naming a profile the document drops degrades to
-/// "no profile" at the next load, exactly as [`Config::load`] treats it.
+/// "no profile" at the next load, the same way [`Config::load`] treats it.
 ///
 /// # Errors
 /// Returns [`ConfigError`](crate::ConfigError) when the document is malformed
-/// or carries `active_profile`, a secret cannot be restored, the config is
+/// or contains `active_profile`, a secret cannot be restored, the config is
 /// invalid, or the shadow cannot be written.
 ///
 /// # Examples
@@ -349,7 +349,7 @@ pub fn save_config_shadow(
     Ok(PendingShadows { config })
 }
 
-/// Loads the shadow-preferred config, resolving the profile exactly as
+/// Loads the shadow-preferred config, resolving the profile the same way
 /// [`Config::load`] does against the real state file.
 ///
 /// Command-line and environment inputs outrank the state file and must name

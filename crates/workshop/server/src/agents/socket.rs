@@ -43,8 +43,8 @@ use super::session::{cross_site_refusal, send_error, send_frame};
 use super::state::SessionsState;
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
-/// foreign `Origin` is refused with 403, exactly as the workbench
-/// socket's upgrade is.
+/// foreign `Origin` is refused with 403, as the workbench socket's
+/// upgrade is.
 pub(crate) async fn upgrade(
     State(state): State<SessionsState>,
     headers: HeaderMap,
@@ -226,7 +226,7 @@ fn input_frame(frame: WaitFrame) -> InputFrame {
 }
 
 /// Renders a harness delta as the protocol's delta frame, the reply stamp
-/// carried through; `None` for a side channel the wire has no label for,
+/// passed through; `None` for a side channel the wire has no label for,
 /// dropped like a lagged delta because the completed-reply event repairs
 /// the transcript.
 fn delta_frame(delta: Delta) -> Option<AgentDeltaFrame> {
@@ -371,7 +371,7 @@ async fn handle_open(
 }
 
 /// The text of the error frame reporting a refused launch: the refusal
-/// and its cause chain. A refusal's `Display` carries only its own
+/// and its cause chain. A refusal's `Display` is only its own
 /// message, so a run log that cannot open would otherwise reach the
 /// client as the bare "run log database" with the engine's diagnosis gone.
 fn refusal_text(refusal: &LaunchRefusal) -> String {
@@ -429,9 +429,9 @@ async fn on_event_wake(
 }
 
 /// Sends every transcript entry past the client's cursor as a durable
-/// `agent_event` frame carrying its wire index and, on the model-round
-/// content kinds, the reply stamp its deltas carried. A `false` return
-/// means the client is gone.
+/// `agent_event` frame stamped with its wire index and, on the
+/// model-round content kinds, the reply stamp its deltas had. A `false`
+/// return means the client is gone.
 async fn drain_events(attached: &mut Attached, socket: &mut WebSocket) -> bool {
     let transcript = match attached.session.transcript(attached.cursor).await {
         Ok(transcript) => transcript,

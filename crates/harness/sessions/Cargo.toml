@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness sessions: agent discovery, session state, input waits, and the supervisor state machine behind the harness door"
+description = "PromptForge harness sessions: agent discovery, session state, input waits, and the supervisor state machine behind the harness public API"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "sessions"]
 categories = ["development-tools", "api-bindings"]
@@ -28,7 +28,7 @@ harness-runner.workspace = true
 # The first-party `promptforge/web` capability (fetch and search): this
 # crate is the one place a provider crate is named, at registration.
 harness-web.workspace = true
-# The engine door: the input outcome and error vocabulary a `UserInput`
+# The engine's public API: the input outcome and error vocabulary a `UserInput`
 # effect is answered with, the run context, and the run limits.
 promptforge-api-runtime.workspace = true
 promptforge-api-types.workspace = true

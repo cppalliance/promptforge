@@ -41,7 +41,7 @@ use token::{current_token, file_token};
 use token::{hash_token, mtime_token};
 
 /// The largest file the workspace reads or accepts for a write: the editor
-/// targets source text, not media, so one MiB is generous.
+/// targets source text, so one MiB is generous.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Whether a tree entry is a directory or a regular file.
@@ -215,7 +215,7 @@ impl Workspace {
     /// the grant into the backing file.
     ///
     /// # Errors
-    /// Returns [`WorkspaceError::ForbiddenComponent`] when the path carries
+    /// Returns [`WorkspaceError::ForbiddenComponent`] when the path contains
     /// a `..` or stream name, [`WorkspaceError::ResolveGrant`] when it
     /// cannot be canonicalized, and [`WorkspaceError::NotFound`] when a
     /// file path has no parent directory.
@@ -265,7 +265,7 @@ impl Workspace {
     /// its next operation.
     ///
     /// # Errors
-    /// Returns [`WorkspaceError::ForbiddenComponent`] when the path carries
+    /// Returns [`WorkspaceError::ForbiddenComponent`] when the path contains
     /// a `..` or stream name, [`WorkspaceError::ResolveGrant`] when
     /// canonicalization fails for a reason other than absence, and
     /// [`WorkspaceError::NotGranted`] when the resolved path is not a

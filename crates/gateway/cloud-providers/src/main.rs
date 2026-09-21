@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use gateway_api_types::Sheet;
 
-/// Environment variable carrying the previous release's sheet URL.
+/// Environment variable holding the previous release's sheet URL.
 const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
 
 /// The sheet's default output filename.
@@ -54,7 +54,7 @@ fn home_dir() -> Option<PathBuf> {
 /// Loads operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
 /// overriding the process environment so local runs need no exported keys.
 ///
-/// A missing file or unresolvable home earns a stderr note and a
+/// A missing file or unresolvable home produces a stderr note and a
 /// malformed file a stderr warning; the run continues with the
 /// environment either way.
 fn load_secrets() {
@@ -167,8 +167,8 @@ async fn previous_sheet(
 mod tests {
     use super::*;
 
-    /// Serves one HTTP response with `status` carrying `body`, returning
-    /// the URL to request.
+    /// Serves one HTTP response with the given `status` and `body`,
+    /// returning the URL to request.
     fn serve_once(status: &'static str, body: &'static str) -> String {
         use std::io::{Read as _, Write as _};
 

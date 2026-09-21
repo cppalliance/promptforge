@@ -1,12 +1,13 @@
 //! A UTC instant in milliseconds, rendered to RFC 3339 over std alone.
 //!
-//! The engine reads no clock: a run's `started_at` is an input the host
-//! draws, recorded in the run log, and replayed verbatim. [`Timestamp`] is
-//! the value that crosses that boundary. Its one rendering,
-//! [`to_rfc3339`](Timestamp::to_rfc3339), is what a prompt reads as
-//! `sys.when`; it is written over std so the engine carries no clock or
-//! calendar dependency, and it agrees byte for byte with the `time` crate's
-//! RFC 3339 rendering of the same instant (the tests hold it to that).
+//! A run's `started_at` is an input the host draws, recorded in the run
+//! log, and replayed verbatim; the clock belongs to the host.
+//! [`Timestamp`] is the value that crosses that boundary. Its one
+//! rendering, [`to_rfc3339`](Timestamp::to_rfc3339), is what a prompt
+//! reads as `sys.when`; it is written over std so the engine takes no
+//! clock or calendar dependency, and it agrees byte for byte with the
+//! `time` crate's RFC 3339 rendering of the same instant (the tests hold
+//! it to that).
 
 use std::fmt;
 

@@ -1,5 +1,5 @@
 //! The answer vocabulary: one dispatched request's outcome and the payload
-//! types its variants carry.
+//! types its variants hold.
 
 use promptforge_api_types::event::Event;
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
@@ -9,8 +9,8 @@ use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};
 
 /// The outcome of one dispatched store operation: the value the shim
-/// returns to its caller. Mutating ops carry `Unit` (the shim returns
-/// nil), exactly as the legacy closures returned nil.
+/// returns to its caller. Mutating ops produce `Unit` (the shim returns
+/// nil), as the legacy closures returned nil.
 #[derive(Debug)]
 pub enum StoreOutcome {
     /// The operation succeeded with no return value.
@@ -27,7 +27,7 @@ pub enum StoreOutcome {
 /// binding's declared [`ToolOutputKind`] so the envelope resumes the right
 /// Lua shape: a plain binding's text resumes as a Lua string, a structured
 /// binding's parsed JSON resumes as a Lua table through the serde boundary.
-/// Scripts never see a JSON codec; the host performs the one conversion.
+/// The host performs the one conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallOutcome {
     /// A plain binding's output text, resumed as a Lua string - every
@@ -112,7 +112,7 @@ pub struct ChatResult {
 ///
 /// `available` is `true` when `text` is the operator's own input and
 /// `false` when the host had no input to give and `text` is the broker's
-/// fixed fallback sentence. The flag rides beside the text - never encoded
+/// fixed fallback sentence. The flag sits beside the text - never encoded
 /// into it - so a human typing exactly the fallback sentence cannot spoof
 /// the unavailable state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,14 +177,13 @@ pub struct TaskStatus {
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
 /// at resume time.
 ///
-/// The typed error is never flattened into the envelope: on failure the
-/// envelope carries only the display string for the shim to raise, and
-/// [`into_envelope`](Answer::into_envelope) hands the typed error back to the
-/// driver, which retains it against the pending request and substitutes it
-/// when the shim-raised error surfaces as the coroutine's failure. This holds
-/// uniformly for leaf and structural answers: the enum owns the typed error
-/// until the envelope is rendered, so a `Call` or `WhenAny` failure
-/// round-trips with its structure intact, never stringified.
+/// On failure the envelope holds only the display string for the shim to
+/// raise, and [`into_envelope`](Answer::into_envelope) hands the typed
+/// error back to the driver, which retains it against the pending request
+/// and substitutes it when the shim-raised error surfaces as the
+/// coroutine's failure. This holds uniformly for leaf and structural
+/// answers: the enum owns the typed error until the envelope is rendered,
+/// so a `Call` or `WhenAny` failure round-trips with its structure intact.
 ///
 /// The error type is the driver's: the Lua side produces
 /// `Answer<`[`Error`]`>` (argument-validation failures at the yield
@@ -239,7 +238,7 @@ pub enum Answer<E> {
 }
 
 impl<E> Answer<E> {
-    /// Maps the carried error type, leaving every success value untouched.
+    /// Maps the error type, leaving every success value untouched.
     pub fn map_error<F>(self, map: impl FnOnce(E) -> F) -> Answer<F> {
         match self {
             Answer::Infer(result) => Answer::Infer(result.map_err(map)),

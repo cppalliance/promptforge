@@ -9,9 +9,9 @@
 //! rejected as a normalization collision: punctuation twins would be
 //! indistinguishable to a model reading a catalog.
 //!
-//! The tool prefix-containment check is not here: tools exist only after
-//! [`Capability::create`], so containment is checked when a run's catalog
-//! is assembled, not at registration.
+//! Tools exist only after [`Capability::create`], so tool
+//! prefix-containment is checked when a run's catalog is assembled, not
+//! at registration.
 //!
 //! # Examples
 //!

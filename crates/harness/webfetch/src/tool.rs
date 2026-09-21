@@ -3,8 +3,8 @@
 //! `WebFetch` composes the URL-admission policy, the guarded DNS resolver, the
 //! per-hop redirect policy, and the bounded body reads into one safe fetch. The
 //! client is built with no ambient proxy, no automatic `Referer`, no cookie
-//! store, and no default credentials, so no request carries an ambient identity
-//! on any hop.
+//! store, and no default credentials, so no request includes an ambient
+//! identity on any hop.
 
 use std::sync::Arc;
 
@@ -176,9 +176,9 @@ fn body_read_outcome(err: &FetchError) -> ToolOutput {
 
 /// Maps a reqwest send error into either a soft tool result or a hard `Err`.
 ///
-/// A refusal produced by the resolver or redirect policy is carried as a
-/// [`FetchError`] in the error source chain; its [`Disposition`] decides the
-/// outcome. A bare transport failure with no such source is soft.
+/// A refusal produced by the resolver or redirect policy appears as a
+/// [`FetchError`] in the error source chain; its [`Disposition`] determines
+/// the outcome. A bare transport failure with no such source is soft.
 fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> CallResult {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(current) = source {

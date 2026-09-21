@@ -204,11 +204,11 @@ pub struct OpenAiUpstream {
     /// whole-request timeout covers the body read and would kill any
     /// long-lived SSE stream, so streams never use `http`.
     http_stream: reqwest::Client,
-    /// Client for the speech path: like `http_stream` it carries no
+    /// Client for the speech path: like `http_stream` it has no
     /// whole-request timeout, and it adds TCP keepalive so a silently dead
-    /// peer surfaces. It carries no `read_timeout`: reqwest arms that during
-    /// the wait for response headers, so the speech path applies its own
-    /// split deadlines in `send_speech` instead.
+    /// peer surfaces. It has no `read_timeout` either: reqwest arms that
+    /// during the wait for response headers, so the speech path applies its
+    /// own split deadlines in `send_speech` instead.
     http_audio: reqwest::Client,
 }
 
@@ -310,7 +310,7 @@ impl OpenAiUpstream {
 
 /// Parses an upstream SSE byte stream into validated [`ChatChunk`]s.
 ///
-/// Each `data:` line carries one JSON chunk; blank lines, comments, and the
+/// Each `data:` line holds one JSON chunk; blank lines, comments, and the
 /// `event:`/`id:`/`retry:` fields are skipped, and the terminal `[DONE]`
 /// sentinel - which is not JSON - ends the stream without being yielded and
 /// without ever reaching the malformed-chunk log. Every chunk's model is
@@ -396,7 +396,7 @@ pub fn sse_chunks(response: reqwest::Response, requested: String) -> StreamedChu
 
 /// Deadline for the upstream's first response bytes (headers) on the speech
 /// path: a maximum-length batch generation can legitimately take longer to
-/// first byte than the per-read body idle budget, so time-to-headers carries
+/// first byte than the per-read body idle budget, so time-to-headers has
 /// its own, larger budget. reqwest's `read_timeout` cannot express the split
 /// because it also governs the header wait, so the deadline is applied here
 /// rather than on the client.

@@ -19,7 +19,7 @@ use tokio::sync::watch;
 
 /// The process-wide activity broker, one per gateway.
 ///
-/// Cheap to clone through an `Arc`; the hub lives in the host's
+/// Cheap to clone through an `Arc`; the hub sits in the host's
 /// application state for the process lifetime and activities register
 /// and remove themselves by their own lifetimes.
 ///

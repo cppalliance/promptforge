@@ -46,7 +46,7 @@ fn status_adapter() -> TestBus {
     }
 }
 
-/// A status update carrying only a label.
+/// A status update with only a label.
 fn update(label: &str) -> StatusBarUpdate {
     StatusBarUpdate {
         label: label.to_string(),

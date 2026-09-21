@@ -122,7 +122,7 @@ pub(crate) fn read_sidecar(gguf: &Path) -> Result<Option<SidecarMeta>, io::Error
 /// The content is written to a *uniquely named* temp file in the same directory
 /// and renamed into place, so concurrent writers never collide on a shared
 /// `.tmp` name and a reader never observes a half-written sidecar (SIDECAR-004).
-/// The temp file is removed on every failure path, not just a failed rename.
+/// The temp file is removed on every failure path.
 pub(crate) fn write_sidecar(gguf: &Path, meta: &SidecarMeta) -> Result<(), io::Error> {
     let path = sidecar_path(gguf);
     let content = render_sidecar(meta);
@@ -289,7 +289,7 @@ fn extract_section_text(body: &str, heading: &str) -> Option<String> {
 ///
 /// Attempts to resolve the repo/revision from the download URL and fetch
 /// `tokenizer_config.json` (read with a byte cap, SIDECAR-002). `Ok(None)`
-/// means the response was valid but carried no usable template.
+/// means the response was valid but contained no usable template.
 ///
 /// # Errors
 /// Returns a [`SidecarError`] the caller can log and deliberately downgrade

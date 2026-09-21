@@ -5,7 +5,7 @@
 //! The report is read-only by contract: it never initializes logging,
 //! never rotates a log, never parses configuration, and never mutates the
 //! state directory - a stale gateway discovery file reads as not-running and
-//! stays on disk for the next launch to clean. It never carries the
+//! stays on disk for the next launch to clean. It never includes the
 //! bearer key, environment values, config contents, or log contents.
 
 use std::fmt::Write as _;

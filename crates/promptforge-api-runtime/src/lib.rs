@@ -9,14 +9,14 @@
 //! [`types::event::Event`] value the host logs. The engine performs no I/O
 //! and reads no clock; the harness is its production host. The
 //! host-facing vocabulary a run is configured with - the model and tool
-//! catalogs, the tool contract, the event enum - lives in the
+//! catalogs, the tool contract, the event enum - sits in the
 //! `promptforge-api-types` crate, re-exported here as [`types`]
 //! (`types::event`, `types::models`, `types::tools`), so a host depends on
-//! this one crate alone; the chat vocabulary a `Chat` effect carries and
+//! this one crate alone; the chat vocabulary a `Chat` effect holds and
 //! its answer returns is [`model`]. The store handle a host seeds or
 //! extracts comes from `shared-vfs` and `promptforge-vfs`. No model client
-//! lives here: the harness owns the transport that performs a round and
-//! reaches the vocabulary through this door.
+//! is defined here: the harness owns the transport that performs a round
+//! and reaches the vocabulary through this crate.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
@@ -46,7 +46,7 @@
 //!
 //! Executing a parsed prompt builds a [`Run`] over a [`RunContext`]
 //! prepared by an [`Environment`] (which holds the host roots and the
-//! catalog of tools the host activated); the store handle rides on the
+//! catalog of tools the host activated); the store handle sits on the
 //! context, defaulting to the stock in-memory mount. The host then loops:
 //! [`Run::step`] returns the effects to perform and the events to log,
 //! and [`Run::resume`] hands each effect's answer back. A prompt that

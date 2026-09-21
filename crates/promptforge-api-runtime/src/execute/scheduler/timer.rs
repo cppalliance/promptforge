@@ -2,14 +2,14 @@
 //! `opts.timeout`, or the model's `await_tasks { timeout }`), as an
 //! effect-backed task slot.
 //!
-//! A timer is the one task whose work is not a chain: its backing is an
-//! in-flight leaf request that sleeps and posts back, and its slot lives
-//! in the task arena beside the chain-backed ones so the wait machinery
-//! needs no second primitive - the shim lists the timer's id in its
-//! `when_any` set, and the timer's firing completes its slot and wakes the
-//! waiter exactly as a task chain's end does. Cancel is the ordinary
-//! cancel arm: the slot moves to `Cancelled` and the sleep is dropped
-//! through the shared in-flight abort path.
+//! A timer is the one task backed by an in-flight leaf request rather than
+//! a chain: the request sleeps and posts back, and its slot sits in the
+//! task arena beside the chain-backed ones so the wait machinery needs no
+//! second primitive - the shim lists the timer's id in its `when_any` set,
+//! and the timer's firing completes its slot and wakes the waiter exactly
+//! as a task chain's end does. Cancel is the ordinary cancel arm: the slot
+//! moves to `Cancelled` and the sleep is dropped through the shared
+//! in-flight abort path.
 //!
 //! The timer is never author-visible. The shim keeps its id, `pending`
 //! and a status table's `tasks` list omit effect-backed slots, and no task

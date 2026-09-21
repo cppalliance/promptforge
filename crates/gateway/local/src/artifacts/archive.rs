@@ -287,7 +287,7 @@ fn apply_archive_mode(_path: &Path, _mode: Option<u32>) -> Result<()> {
     Ok(())
 }
 
-/// Verifies the staged `path` carries an executable bit (tar.gz installs).
+/// Verifies the staged `path` has an executable bit (tar.gz installs).
 ///
 /// # Errors
 /// Returns [`LocalError`] when the file lacks an executable bit or cannot be read.

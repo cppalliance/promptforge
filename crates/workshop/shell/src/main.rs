@@ -94,7 +94,7 @@ fn main() -> ExitCode {
 /// `promptforge-workshop --version`: print the version and exit, without
 /// booting the server or opening a window. The release workflows smoke-test
 /// the installed package with it. The release build is GUI-subsystem on
-/// Windows, but a piped or inherited stdout still carries the line.
+/// Windows, but a piped or inherited stdout still receives the line.
 fn print_version() -> ExitCode {
     println!("promptforge-workshop {}", env!("CARGO_PKG_VERSION"));
     ExitCode::SUCCESS

@@ -46,7 +46,7 @@ pub use refresh::{refresh_catalog, refresh_profiles};
 pub const CONNECTED_LABEL: &str = "Connected to gateway";
 /// The status line announcing that the gateway does not answer.
 pub const UNREACHABLE_LABEL: &str = "Gateway unreachable";
-/// The description riding the unreachable announcement.
+/// The description sent with the unreachable announcement.
 pub const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its health probe";
 
 /// The status frame a joining session hears first: the bus's retained
@@ -54,7 +54,7 @@ pub const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its healt
 /// announcements. A transition describes a past moment, not the current
 /// state - the boot-time "Connected to gateway" outlives itself within
 /// seconds - so the line is recomputed from the current probe. A retained
-/// frame carrying real work (a download's progress, a chat's activity)
+/// frame that reports real work (a download's progress, a chat's activity)
 /// replays as-is.
 #[must_use]
 pub fn join_status(
@@ -95,7 +95,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// The flag starts optimistic (`true`): until the first probe lands, a
 /// request flows to the gateway and fails or succeeds on its own merits,
 /// which keeps a server running without a heartbeat (every router-only
-/// test) behaving exactly as it did before the heartbeat existed.
+/// test) behaving as it did before the heartbeat existed.
 #[derive(Debug, Clone)]
 pub struct GatewayHealth {
     reachable: watch::Sender<bool>,

@@ -2,7 +2,7 @@
 //! variance of `GET /v2/models` under `https://qianfan.baidubce.com` -
 //! Bearer auth (console-issued `bce-v3/ALTAK-...` key; the legacy V1
 //! AK/SK OAuth exchange does not apply) and the OpenAI list envelope
-//! carrying Qianfan's rich card: `type`, `context_length`,
+//! around Qianfan's rich card: `type`, `context_length`,
 //! `max_tokens`, an `architecture` modality object, and `pricing` in
 //! CNY per thousand tokens, normalized to per-million-token units with
 //! `currency: "CNY"`. Tiered pricing normalizes to its base (first)
@@ -166,7 +166,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 
 /// The entry's family: the `ernie-<version>` prefix for the numbered
 /// lines (`ernie-5.0`, `ernie-4.5-turbo-128k`, the `x`-prefixed
-/// `ernie-x1.1`), and the whole id otherwise. The catalog carries no
+/// `ernie-x1.1`), and the whole id otherwise. The catalog has no
 /// snapshot suffixes, so there is no collapse pass.
 fn family_of(id: &str) -> String {
     if let Some(rest) = id.strip_prefix("ernie-") {

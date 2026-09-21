@@ -34,7 +34,7 @@ pub struct ToolDescriptor {
     /// into the script as data rather than as a string.
     pub structured_output: bool,
     /// The capabilities the contributing capability cannot be activated
-    /// with; carried for the record, checked by the host before activation.
+    /// with; stored for the record, checked by the host before activation.
     pub conflicts: Vec<CapabilityId>,
 }
 

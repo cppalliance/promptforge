@@ -6,7 +6,7 @@ use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
 
 use super::*;
 
-/// A user-input event under `section` carrying `text`, stamped with the
+/// A user-input event under `section` containing `text`, stamped with the
 /// root task's zeroth sequence: the payload is what these tests read back.
 fn input(section: &str, text: &str) -> Event {
     Event::UserInput {

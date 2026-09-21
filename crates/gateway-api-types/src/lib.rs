@@ -20,16 +20,17 @@ pub use progress::Progress;
 
 /// The sheet schema version this reader accepts: the writer in
 /// `gateway-cloud-providers` stamps it and the gateway reader gates on it.
-/// Bump only on removals and renames; additive fields carry
+/// Bump only on removals and renames; additive fields are marked
 /// `#[serde(default)]` so a lagging reader survives them.
 pub const ACCEPTED_SHEET_SCHEMA_VERSION: u32 = 1;
 
 /// The sheet envelope: one atomic snapshot of every provider's models.
-/// Future additive fields carry `#[serde(default)]` so a lagging reader
-/// survives them; `schema_version` bumps only on removals and renames.
+/// Future additive fields are marked `#[serde(default)]` so a lagging
+/// reader survives them; `schema_version` bumps only on removals and
+/// renames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
-    /// Bumped on breaking change. Stays 1: additive fields carry
+    /// Bumped on breaking change. Stays 1: additive fields are marked
     /// `#[serde(default)]`; the bump is reserved for removals and renames.
     pub schema_version: u32,
     /// RFC 3339; always this run's time.
@@ -41,14 +42,14 @@ pub struct Sheet {
 
 /// One provider's slice of the sheet. Self-describing: the descriptor's
 /// public fields are copied in at build time so consumers can render a
-/// provider dropdown from the sheet alone. Future additive fields carry
-/// `#[serde(default)]`; the schema version bump is reserved for removals
-/// and renames.
+/// provider dropdown from the sheet alone. Future additive fields are
+/// marked `#[serde(default)]`; the schema version bump is reserved for
+/// removals and renames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSlice {
     /// UI-facing name, e.g. "Anthropic".
     pub display_name: String,
-    /// Curated product opinion, not a vendor fact.
+    /// The provider's tier, a curated product opinion.
     pub tier: Tier,
     /// Freshness of this slice.
     pub status: SliceStatus,
@@ -82,7 +83,7 @@ pub struct EnvVar {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum EnvRole {
-    /// A credential: the variable carries API key material.
+    /// A credential: the variable holds API key material.
     Key,
     /// Configuration: the variable selects a region, endpoint, or similar.
     Config,
@@ -118,7 +119,7 @@ pub enum SliceStatus {
     Static,
 }
 
-/// One normalized model entry. Future additive fields carry
+/// One normalized model entry. Future additive fields are marked
 /// `#[serde(default)]`; the schema version bump is reserved for removals
 /// and renames.
 #[expect(

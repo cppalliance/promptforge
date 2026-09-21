@@ -2,7 +2,7 @@
 //! `switch_profile` frame handling, plus the profile-selection task that
 //! persists the selection on the gateway, restarts a supervised sidecar
 //! to load it, and holds the status bar busy until it settles. The menu
-//! state and bus live in the menu subsystem (`workshop-menu`); this
+//! state and bus sit in the menu subsystem (`workshop-menu`); this
 //! module is only the session's orchestration of them.
 
 use std::sync::Arc;
@@ -175,7 +175,7 @@ enum Settled {
 
 /// Why one profile selection did not complete. The display text is the
 /// user-facing description pushed with the failure status, so each
-/// variant renders exactly the message the stringly channel carried.
+/// variant renders exactly the message the stringly channel reported.
 #[derive(Debug, thiserror::Error)]
 enum SwitchFailure {
     /// The selection request failed in transit; the client's typed error
@@ -309,7 +309,7 @@ fn describe(name: Option<&str>) -> String {
 }
 
 /// The failure description of a buffered switch refusal: the gateway's
-/// own error message when its envelope carries one, else the status.
+/// own error message when its envelope has one, else the status.
 fn switch_refusal(refusal: &GatewayResponse) -> String {
     value_from_bytes(&refusal.body)
         .get("error")

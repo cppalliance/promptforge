@@ -7,12 +7,12 @@
 //! it mints outlives that gate - [`crate::auth::check_auth`] accepts it in
 //! every build as an alternative to the `Authorization` header - so the
 //! cookie's name, its session proof, and the Fetch Metadata rules that
-//! admit it live in [`crate::auth::primitives`], and only the minting
-//! routes are here.
+//! admit it are defined in [`crate::auth::primitives`], and only the
+//! minting routes are here.
 //!
 //! `SameSite=Lax` keeps the cookie off cross-site requests, and the
 //! loopback host wall keeps a rebound hostname from reaching the surface
-//! at all. The cookie never carries the key itself; the proof is ambient,
+//! at all. The cookie never contains the key itself; the proof is ambient,
 //! so [`crate::auth::check_auth`] accepts it only with Fetch Metadata a
 //! cross-origin page cannot strip: `SameSite=Lax` does not cover same-site
 //! requests, since ports are not part of a site.
@@ -38,8 +38,8 @@ pub(crate) const ROUTES: &[RouteInfo] = &[CONFIG_REDIRECT, AUTH];
 
 /// The browser entry onto the config SPA: the `/auth` handoff and the
 /// `/config` redirect onto the SPA mount. Neither takes an auth extractor:
-/// the handoff is how the browser earns its credential, and the redirect
-/// carries nothing but a location. Both sit in the walled tier because
+/// the handoff is how the browser obtains its credential, and the
+/// redirect sets nothing but a location. Both sit in the walled tier because
 /// they exist only for the surface the wall protects.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -73,8 +73,8 @@ pub(crate) struct AuthQuery {
 /// config surface it fronts.
 ///
 /// A wrong or missing key answers `401 Unauthorized` indistinguishably.
-/// The right key answers `302 Found` to `/config/` - a clean URL carrying
-/// no key - with the key's session proof set as an HttpOnly,
+/// The right key answers `302 Found` to `/config/` - a clean, key-free
+/// URL - with the key's session proof set as an HttpOnly,
 /// `SameSite=Lax` session cookie and `Cache-Control: no-store` so the
 /// handoff response itself is never reused from cache.
 pub(crate) async fn auth_handoff(

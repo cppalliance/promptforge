@@ -3,7 +3,7 @@
 //! save-as, duplicate, and window-state operations that swap or write
 //! it. The grant set stays the confinement source of truth and nothing
 //! here is consulted on a request path; a persist that fails is logged
-//! degradation that leaves memory exactly as it is (zone two).
+//! degradation that leaves memory unchanged (zone two).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -32,7 +32,7 @@ pub(crate) const EPHEMERAL_NAME: &str = "Untitled";
 pub(super) struct Backing {
     /// The workspace-file actor (single writer, channel-fed).
     file: WorkspaceFile,
-    /// Where the file lives on disk.
+    /// Where the file sits on disk.
     path: PathBuf,
     /// The opaque ui-state values, read from the file at open and
     /// updated on every accepted put; what [`Workspace::ui_state`]
@@ -44,7 +44,7 @@ impl Workspace {
     /// Registers `path` as a granted root and mirrors the grant into the
     /// backing file when one is open. Memory is updated first and stands
     /// whatever the file does: a persist that fails is logged, and the
-    /// grant still returns success. The row carries the order and time
+    /// grant still returns success. The row holds the order and time
     /// memory assigned; the file assigns its own stored position on
     /// insert, and the in-memory one is what a later save-as writes.
     ///
@@ -165,9 +165,9 @@ impl Workspace {
     /// and the previous backing's window state, and makes it the backing.
     /// The previous file, if any, keeps its contents and is closed; its
     /// siblings stay where they are. Save-as moves preferences to a new
-    /// name, not the world. The ui-state keys are not carried, in the
-    /// file or in memory: the SPA is their one writer and writes them
-    /// after a save-as itself.
+    /// name. The ui-state keys start empty, in the file and in memory:
+    /// the SPA is their one writer and writes them after a save-as
+    /// itself.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileTaken`] when something
@@ -210,7 +210,7 @@ impl Workspace {
 
     /// Copies the backing file and its siblings to `path`, then makes the
     /// copy the backing; the original is closed and left as it was. The
-    /// in-memory ui-state values carry over unchanged, as the grants do:
+    /// in-memory ui-state values transfer unchanged, as the grants do:
     /// the copy holds the same rows, and memory stays the source of
     /// truth. An ephemeral workspace has no file to copy, so its
     /// duplicate is a [`Workspace::save_as`]: the current grants land in

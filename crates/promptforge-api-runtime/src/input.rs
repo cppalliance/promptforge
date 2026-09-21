@@ -4,12 +4,12 @@
 //! resumes with `(text, available)`: `available` is `true` for real
 //! operator text and `false` when the host had no input, in which case
 //! `text` is the fixed [`INPUT_UNAVAILABLE_FALLBACK`] sentence. The flag
-//! rides beside the text, so a human typing exactly the fallback sentence
+//! sits beside the text, so a human typing exactly the fallback sentence
 //! can never spoof the unavailable state. No `user_input` tool is
-//! advertised to the model: a `models.loop` scope carries exactly the
+//! advertised to the model: a `models.loop` scope includes exactly the
 //! tools the prompt adds.
 //!
-//! The host policies live behind the effect: a blocking host parks the
+//! The host policies sit behind the effect: a blocking host parks the
 //! wait until the operator delivers (the section's VM and message history
 //! stay intact), an [`InputOutcome::Unavailable`] answer is the
 //! unavailable-fallback policy, and an [`InputError`] is the failure
@@ -22,7 +22,7 @@
 
 use std::fmt;
 
-/// The fixed sentence a `user_input` call carries when the host has no
+/// The fixed sentence a `user_input` call returns when the host has no
 /// input to give.
 ///
 /// The sentence is deliberately unremarkable: the availability flag, not
@@ -57,7 +57,7 @@ pub struct InputError {
 }
 
 impl InputError {
-    /// Builds a failure carrying only a message.
+    /// Builds a failure with only a message.
     ///
     /// # Examples
     /// ```

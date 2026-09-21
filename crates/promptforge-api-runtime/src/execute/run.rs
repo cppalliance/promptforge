@@ -24,7 +24,7 @@
 //! effect it abandons with [`EffectAnswer::Dropped`].
 //!
 //! The effect vocabulary itself - [`Effect`], its serializable
-//! [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - lives in the
+//! [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is defined in the
 //! `effect` child module and is re-exported here.
 
 use std::sync::Arc;
@@ -54,7 +54,7 @@ use super::scheduler::Scheduler;
 /// What one [`Run::step`] produced.
 #[derive(Debug)]
 pub enum Step {
-    /// The run is not over. `effects` are the leaf effects this step
+    /// The run continues. `effects` are the leaf effects this step
     /// issued, in issue order, each with the provenance of the task that
     /// built it; an empty list means every chain waits on an effect
     /// already issued. `events` are the reports the step made, in order.
@@ -211,7 +211,7 @@ impl Run {
     /// reported (or it never started) and every effect still out is an
     /// orphan whose answer only `Done` waits on. A host reads this after
     /// a `Pending` step to learn it may drop what it holds, so control
-    /// never rides on the events, which are a report and not a decision.
+    /// never depends on the events, which are a report and not a decision.
     #[must_use]
     pub fn decided(&self) -> bool {
         self.scheduler.as_ref().is_none_or(Scheduler::decided)

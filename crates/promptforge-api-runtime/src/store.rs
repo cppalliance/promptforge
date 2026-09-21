@@ -1,7 +1,7 @@
 //! Run-scoped virtual files, shared by Lua and the model.
 //!
 //! A prompt run keeps its bulk state in virtual files addressed by logical
-//! string paths. The run's [`VfsRef`] handle carries the store mount; the
+//! string paths. The run's [`VfsRef`] handle holds the store mount; the
 //! [`Store`] facade (behind the `StoreExt` extension trait's
 //! `vfs.store(&access)` call shape) scopes logical paths onto it, and every
 //! operation is attributed to the [`Access`] capability's identity, so a
@@ -15,7 +15,7 @@
 //! `untrusted` Lua global). Edits are anchor-based ([`Store::str_replace`])
 //! rather than offset-based, the shape that works for a model.
 //!
-//! The implementation lives in the `promptforge-store` and `shared-vfs`
+//! The implementation sits in the `promptforge-store` and `shared-vfs`
 //! crates. This module is the crate-internal import surface for them; hosts
 //! that seed or extract the store depend on `shared-vfs` directly.
 

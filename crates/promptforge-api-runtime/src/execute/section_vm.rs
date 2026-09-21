@@ -94,9 +94,9 @@ pub(crate) struct SectionVmSetup<'a> {
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
 ///
-/// The sequence is fixed and shared: host injection carrying the driver's
+/// The sequence is fixed and shared: host injection with the driver's
 /// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
-/// seed carries one, the control surface
+/// seed includes one, the control surface
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
 /// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
 /// suspending calls, which the scheduler drives as yield shims),

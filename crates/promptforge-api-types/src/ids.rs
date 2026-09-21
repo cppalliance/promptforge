@@ -1,14 +1,13 @@
 //! Hierarchical, deterministic identity for the engine's chains and tasks.
 //!
-//! A run holds no run-global id counter. Every chain (the main walk, a
-//! `call` child, a spawned task) is named by a path: its parent chain's id
-//! extended by the parent's local child counter, which `call` children and
-//! spawned tasks share. The main walk is the root chain `0`. A task's id is
-//! its chain's id. A section entry's id (`sys.id` in Lua) is its chain's
-//! id extended by the chain's local entry counter. Two runs of the same
-//! prompt with the same inputs allocate the same ids regardless of how
-//! their chains interleave, because every counter is local to the chain
-//! that advances it.
+//! Every chain (the main walk, a `call` child, a spawned task) is named by
+//! a path: its parent chain's id extended by the parent's local child
+//! counter, which `call` children and spawned tasks share. The main walk
+//! is the root chain `0`. A task's id is its chain's id. A section entry's
+//! id (`sys.id` in Lua) is its chain's id extended by the chain's local
+//! entry counter. Two runs of the same prompt with the same inputs
+//! allocate the same ids regardless of how their chains interleave,
+//! because every counter is local to the chain that advances it.
 //!
 //! The encoding is a dot-separated path of decimal components (`0`,
 //! `0.2`, `0.2.0`), chosen over a packed integer because the depth and the
@@ -17,7 +16,7 @@
 //!
 //! [`TaskOrigin`] names the principal that started a task - the prompt's
 //! author through `tasks.spawn`, or the model through its `task` tool -
-//! and rides beside the task's id wherever the task is reported.
+//! and appears beside the task's id wherever the task is reported.
 //! [`AbandonReason`] names how a task's owner ended while the task was
 //! still live, for the `abandoned` terminal state. [`Provenance`] extends a
 //! task's id with a per-task sequence number: the replay key stamped on

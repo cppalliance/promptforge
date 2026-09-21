@@ -12,7 +12,7 @@
 //! [`sink`](RunHost::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. None of it reaches the
 //! engine; a production host builds its own [`Performers`] and sink, and
-//! activates its capabilities on its own side of the door.
+//! activates its own capabilities.
 
 use std::fmt;
 use std::sync::Arc;

@@ -21,7 +21,7 @@ use crate::error::LocalError;
 /// Magic bytes opening every GGUF file.
 const GGUF_MAGIC: [u8; 4] = *b"GGUF";
 
-/// Ceiling on metadata key-value entries; real models carry a few dozen.
+/// Ceiling on metadata key-value entries; real models have a few dozen.
 const MAX_METADATA_ENTRIES: u64 = 65_536;
 
 /// Ceiling on tensor-info entries; the largest real models stay in the

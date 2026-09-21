@@ -87,9 +87,9 @@ pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
 /// whole lifecycle. The closure captures an owned clone of the run's nonce -
 /// mlua's `create_function` requires `Fn + Send + 'static`, so no borrow can
 /// cross the install - and every wrap the VM performs shares that one nonce.
-/// Every string input succeeds, so the install needs no emitter, no budget,
-/// and no [`mlua::Scope`]; a non-string argument fails through mlua's
-/// automatic type error.
+/// Every string input succeeds, so the install needs no emitter, budget, or
+/// [`mlua::Scope`]; a non-string argument fails through mlua's automatic
+/// type error.
 pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
     let nonce = nonce.clone();
     let untrusted = lua
@@ -146,7 +146,7 @@ impl StoreReporter {
 ///
 /// No `start` reads the whole file; a present `start` slices a 1-based
 /// inclusive line range. A negative bound converts to 0, which
-/// [`Store::read_range`] rejects with the same error a zero bound earns,
+/// [`Store::read_range`] rejects with the same error a zero bound produces,
 /// and an `end` without a `start` is refused rather than silently ignored.
 fn read_store_bounded(
     store: &Store,
@@ -358,15 +358,14 @@ pub(crate) fn install_store_table(
 /// implementation behind both the legacy direct closures and the
 /// executor's leaf-yield dispatch, so the two paths cannot drift. The
 /// bounded-read argument rules (a negative bound converts to 0, an `end`
-/// without a `start` is refused) live in the shared `read_store_bounded`
-/// helper above; the read ops route through their named wrappers exactly
-/// as the closures do.
+/// without a `start` is refused) sit in the shared `read_store_bounded`
+/// helper above; the read ops route through their named wrappers as the
+/// closures do.
 ///
 /// # Errors
 /// Returns the [`StoreError`](promptforge_store::StoreError) the facade
 /// produces for the operation: path validation, not-found, anchor, range,
-/// write-race, or backend failure, exactly as the legacy closures
-/// surfaced it.
+/// write-race, or backend failure, as the legacy closures surfaced it.
 pub fn run_store_op(
     store: &Store,
     op: crate::protocol::StoreOp,

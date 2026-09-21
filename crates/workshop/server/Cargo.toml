@@ -16,7 +16,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 axum.workspace = true
 futures-util.workspace = true
-# The harness door: agent sessions run in the harness, which the
+# The harness public API: agent sessions run in the harness, which the
 # composition root constructs, registers, and pushes the shell's gateway
 # binding, chat catalog, and host snapshot into as data.
 harness-api.workspace = true

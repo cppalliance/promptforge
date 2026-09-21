@@ -2,9 +2,8 @@
 //! declared capabilities into the run's [`ToolCatalog`] and the
 //! implementations behind it.
 //!
-//! The engine never activates anything. Before a run is prepared, the host
-//! resolves the prompt's declarations against its
-//! [`CapabilityRegistry`], checks the present capabilities for
+//! Before a run is prepared, the host resolves the prompt's declarations
+//! against its [`CapabilityRegistry`], checks the present capabilities for
 //! co-activation conflicts, activates each survivor with the run's
 //! [`RunServices`], and assembles the contributions into two things: the
 //! [`ToolCatalog`] of descriptors [`Environment::prepare`] fills slots
@@ -55,7 +54,7 @@ impl ToolTable {
         self.tools.get(id).map(Arc::clone)
     }
 
-    /// Returns whether the table holds no implementation.
+    /// Returns whether the table is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
@@ -107,9 +106,9 @@ pub struct Activation {
 /// The activated contributions are assembled into the catalog in
 /// declaration order, with tool prefix-containment enforced at assembly: a
 /// contributed tool whose id escapes its capability's id, repeats an
-/// earlier contribution, or carries a transport-illegal wire name is
-/// rejected - logged and never admitted. Every admitted descriptor carries
-/// its capability's declared conflicts for the record.
+/// earlier contribution, or has a transport-illegal wire name is
+/// rejected - logged and never admitted. Every admitted descriptor
+/// includes its capability's declared conflicts for the record.
 #[must_use]
 pub fn activate(
     registry: Option<&CapabilityRegistry>,

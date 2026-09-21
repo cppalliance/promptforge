@@ -365,7 +365,7 @@ fn path_attribute(original: &[char], start: usize, end: usize) -> Option<String>
 
 /// The index just past an optional `pub` or `pub(...)` visibility
 /// qualifier at `i` and the whitespace after it; `i` itself when the item
-/// carries none.
+/// has none.
 fn skip_visibility(code: &[char], i: usize) -> usize {
     let keyword: String = code
         .get(i..i + 3)

@@ -350,7 +350,7 @@ pub enum LocalError {
         model: String,
     },
 
-    /// A local model named a dominion that is not defined.
+    /// A local model named an undefined dominion.
     ///
     /// Configuration validation rejects an unknown or wrong-kind dominion
     /// first; this is the defensive second check at runtime wiring.

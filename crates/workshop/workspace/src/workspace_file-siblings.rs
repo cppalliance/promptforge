@@ -1,5 +1,5 @@
 //! The siblings a workspace grows beside its file and how a duplicate
-//! carries them: which names travel, the refusal that keeps one
+//! copies them: which names travel, the refusal that keeps one
 //! workspace's siblings from being merged into another's, and the copy
 //! and cleanup of a planned set.
 
@@ -71,7 +71,7 @@ pub(super) fn copy_siblings_or_clean_up(
     Ok(())
 }
 
-/// An `AlreadyExists` I/O refusal carrying `message`: the shape both
+/// An `AlreadyExists` I/O refusal holding `message`: the shape both
 /// create and duplicate use to refuse a path that is already taken.
 pub(super) fn already_taken(message: &'static str) -> WorkspaceFileError {
     WorkspaceFileError::Io {

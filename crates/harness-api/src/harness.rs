@@ -1,7 +1,8 @@
 //! The harness handle, its configuration, and the bindings a client
-//! pushes across the door: the gateway, the chat catalog, and the host
-//! snapshot. Defined in `harness-sessions`, which owns the sessions the
-//! harness serves, and named here so clients reach them through the door.
+//! pushes through the public API: the gateway, the chat catalog, and the
+//! host snapshot. Defined in `harness-sessions`, which owns the sessions
+//! the harness serves, and named here so clients reach them through this
+//! crate.
 //!
 //! The client calls [`Harness::set_gateway`] at startup and on every
 //! gateway replacement; the harness rebuilds its capability registry and

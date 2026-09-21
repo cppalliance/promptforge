@@ -50,8 +50,7 @@ impl WorkbenchSnapshot {
 /// never as omitted keys: every push is the complete menu state.
 ///
 /// Delivery: ephemeral - every push is a complete snapshot of the menu
-/// state, retained and resent on reconnect, exactly like the catalog
-/// frame.
+/// state, retained and resent on reconnect, like the catalog frame.
 #[derive(Debug, Serialize)]
 pub struct WorkbenchFrame<'a> {
     #[serde(rename = "type")]

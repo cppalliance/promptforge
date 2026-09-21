@@ -1,5 +1,5 @@
 //! The embedded config UI assets and the file-serving helper; the routes
-//! that expose them live in [`crate::routes`].
+//! that expose them are defined in [`crate::routes`].
 
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};

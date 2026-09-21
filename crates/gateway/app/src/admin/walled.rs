@@ -3,15 +3,15 @@
 //! the shared loopback wall from `shared-loopback` in every build, so a
 //! non-loopback peer is refused with 403 before bearer auth even runs.
 //! `POST /shutdown` kills the process and `GET /auth` mints the key's
-//! ambient cookie, so both live here with the config surface they serve.
+//! ambient cookie, so both sit here with the config surface they serve.
 //!
 //! Every bearer-authed handler in this tier extracts
 //! [`crate::auth::LoopbackCaller`] rather than `AuthedCaller`: the wall is
 //! the enforcement, the extractor is the handler's own statement of the
 //! tier it belongs to, and a handler that is ever mounted without the wall
 //! still refuses a LAN peer. The two `handoff` routes take no caller at
-//! all: `/auth` is how a browser earns its credential, and `/config` only
-//! redirects.
+//! all: `/auth` is how a browser obtains its credential, and `/config`
+//! only redirects.
 
 #[cfg(feature = "local")]
 pub(crate) mod chat_templates;

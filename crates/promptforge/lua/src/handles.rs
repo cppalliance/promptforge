@@ -10,7 +10,7 @@ use super::{Error, Json, Mutex, Result, ToolId, Value};
 /// Declared on the binding, not the tool implementation, so a host decides
 /// per binding how scripts receive the output. Every existing tool is
 /// [`Plain`](ToolOutputKind::Plain); the model tool loop never consults the
-/// kind (its results always ride the conversation as text).
+/// kind (its results are always added to the conversation as text).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ToolOutputKind {
     /// The output text resumes as a Lua string - every existing tool,
@@ -22,7 +22,7 @@ pub enum ToolOutputKind {
     Structured,
 }
 
-/// One prompt-local alias bound to one stable live tool identity, carrying
+/// One prompt-local alias bound to one stable live tool identity, holding
 /// the tool's data - its schema, description, output kind, and the
 /// contributing capability's conflicts - and never its implementation.
 ///
@@ -49,7 +49,7 @@ pub struct ToolBinding {
     /// the model tool loop ignores it.
     pub output_kind: ToolOutputKind,
     /// The co-activation conflicts of the capability that contributed the
-    /// tool, carried for the record.
+    /// tool, kept for the record.
     pub conflicts: Vec<CapabilityId>,
 }
 

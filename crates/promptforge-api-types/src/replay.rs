@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 #[path = "replay-tests.rs"]
 mod tests;
 
-/// The behavior flags recorded with a run: a bitset that is exactly one
-/// `u32` on the wire and in the run record.
+/// The behavior flags recorded with a run: a bitset that is one `u32` on
+/// the wire and in the run record.
 ///
 /// Numbering is reserve-forever: each flag a future change introduces is an
 /// associated constant `Flags(1 << n)` whose bit `n` is assigned once and

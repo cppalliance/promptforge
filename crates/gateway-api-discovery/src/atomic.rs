@@ -4,14 +4,14 @@
 //! contents or the new, never a truncation. The pattern mirrors
 //! workshop-server's `atomic.rs`; this crate reimplements it rather than
 //! depending on a server crate, and adds the owner-only permission the
-//! bearer-carrying gateway discovery file needs.
+//! gateway discovery file needs for the bearer key it holds.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Suffix every atomic-write temp file carries.
+/// The suffix on every atomic-write temp file.
 const TEMP_SUFFIX: &str = ".pf-tmp";
 
 /// Process-wide counter making each temp name unique, so two concurrent
@@ -35,7 +35,7 @@ fn temp_path(path: &Path) -> Option<PathBuf> {
 /// On failure the temp file is removed and the target keeps its previous
 /// contents.
 ///
-/// On Windows there are no mode bits; the file lives under the user
+/// On Windows there are no mode bits; the file sits under the user
 /// profile, whose ACL already restricts it to the owner. Best-effort by
 /// design.
 pub(crate) fn write_atomic_owner_only(path: &Path, bytes: &[u8]) -> io::Result<()> {

@@ -1,5 +1,5 @@
 //! The host-authority wall and the config SPA mount through the real
-//! router. The per-route loopback wall sweeps live beside the registry
+//! router. The per-route loopback wall sweeps sit beside the registry
 //! (`registry-tests.rs`), driven by the declared tiers; this file pins
 //! what the registry does not enumerate: the nested SPA asset router, the
 //! `config-ui` feature's two states, and the host wall over every route.

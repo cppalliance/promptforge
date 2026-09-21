@@ -8,7 +8,7 @@
 //! A received `mcp` request is the protocol's typed reserved error. The
 //! `tool_call`, `chat`, `spawn`, `timer`, `task_events`,
 //! `drain_task_notices`, and task wait, inspection, note, and cancel arms
-//! live in their own modules.
+//! are defined in their own modules.
 
 use std::sync::Arc;
 
@@ -109,10 +109,10 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
 /// claims-model conflict becomes the fatal determinism violation: the
 /// driver intercepts it at the answer boundary and ends the run on the
 /// spot rather than resuming it into Lua, so no author `pcall` can catch
-/// it. Every other failure rides back as the call's answer carrying the
-/// store's own message, exactly as the legacy closure's external error
-/// surfaced at the call site (and classified `Lua` if it aborts the chunk
-/// uncaught, exactly as then).
+/// it. Every other failure returns as the call's answer with the store's
+/// own message, exactly as the legacy closure's external error surfaced at
+/// the call site (and classified `Lua` if it aborts the chunk uncaught, as
+/// the legacy path did).
 pub(super) fn classify_store_failure(error: &StoreError) -> Error {
     if let Some(detail) = error.conflict_detail() {
         return Error::Determinism(detail.to_owned());
@@ -272,12 +272,12 @@ impl Scheduler {
     /// `UserInput` effect exactly as a leaf I/O round does, so a blocking
     /// wait parks its chain - the section's VM and message history intact -
     /// without blocking the run, and a cancel drops it with every other
-    /// outstanding effect. The engine does not know whether the host has
-    /// an operator to ask: every request is issued, and a host without one
-    /// answers with the unavailable-fallback policy (the fixed fallback
-    /// sentence with `available` false). The wait is reported here; a
-    /// delivered response is reported when its answer is applied; an
-    /// unavailable answer records no input.
+    /// outstanding effect. Every request is issued whether or not the host
+    /// has an operator to ask: a host without one answers with the
+    /// unavailable-fallback policy (the fixed fallback sentence with
+    /// `available` false). The wait is reported here; a delivered response
+    /// is reported when its answer is applied; an unavailable answer
+    /// records no input.
     fn dispatch_user_input(&mut self, id: ChainIndex) {
         let chain = &self.chains[id.index()];
         let execution = chain.ctx.execution().to_owned();

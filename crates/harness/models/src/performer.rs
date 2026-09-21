@@ -1,11 +1,11 @@
 //! The `Chat` performer: one model round through the gateway client, with
 //! the round's live deltas streamed to the session as they arrive.
 //!
-//! Deltas are not events. The run's `Event` sink receives what the engine
-//! reports once it applies the round's answer (the turn, the reply, the
-//! tool calls); the deltas are the live view of the reply forming, and they
-//! travel on their own channel so a session can render them without the
-//! run log ever seeing a fragment.
+//! The run's `Event` sink receives what the engine reports once it applies
+//! the round's answer (the turn, the reply, the tool calls); the deltas
+//! are the live view of the reply forming, and they travel on their own
+//! channel so a session can render them without a fragment ever reaching
+//! the run log.
 
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use promptforge_api_runtime::model::{
@@ -29,7 +29,7 @@ pub type DeltaSink = mpsc::UnboundedSender<StreamDelta>;
 ///
 /// The client arrives configured: the caller applies the run's request
 /// limits before constructing the performer, because a `Chat` effect
-/// carries no limits of its own.
+/// has no limits of its own.
 #[derive(Clone, Debug)]
 pub struct GatewayChatPerformer {
     client: GatewayClient,

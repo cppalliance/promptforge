@@ -20,7 +20,7 @@ use crate::spawn::Tag;
 /// # Panics
 ///
 /// Panics when the fixture prompt fails to parse or does not park on an
-/// input wait, which would be a regression in the engine, not the caller.
+/// input wait, which would be a regression in the engine.
 #[must_use]
 pub fn mock_tag() -> Tag {
     let source = "---\nname: mock\ndescription: a mock server's tag\npromptforge: 0\n---\n\n\

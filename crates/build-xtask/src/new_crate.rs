@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Scaffold `crates/<name>/` with a manifest, a facade `lib.rs` carrying the
-/// invariant docs, and the crate's integration-test binary.
+/// Scaffold `crates/<name>/` with a manifest, a facade `lib.rs` holding
+/// the invariant docs, and the crate's integration-test binary.
 ///
 /// # Errors
 ///

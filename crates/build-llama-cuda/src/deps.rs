@@ -2,7 +2,7 @@
 //!
 //! The bundle ships every llama.cpp/GGML runtime file the build emits.
 //! Windows system DLLs and declared CUDA Toolkit DLLs stay external: the
-//! runtime host must carry the same compatible CUDA Toolkit.
+//! runtime host must have the same compatible CUDA Toolkit.
 
 /// Classification of one imported DLL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

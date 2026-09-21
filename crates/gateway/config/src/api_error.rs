@@ -1,7 +1,7 @@
 //! Opaque, source-preserving public error type for configuration loading.
 //!
 //! The public [`ConfigError`] is a thin wrapper over a private representation.
-//! The representation carries the underlying cause via
+//! The representation exposes the underlying cause via
 //! [`std::error::Error::source`] and never appears in a public signature, so no
 //! dependency type (toml, io) leaks into the crate's semver surface. Callers
 //! classify failures with the `kind()` method instead of matching private
@@ -60,7 +60,7 @@ impl ConfigError {
         }
     }
 
-    /// A semantic validation failure carrying `message`.
+    /// A semantic validation failure reporting `message`.
     ///
     /// For consumers that build on a validated [`Config`](crate::Config) and
     /// need to report a referential-integrity failure of their own (for

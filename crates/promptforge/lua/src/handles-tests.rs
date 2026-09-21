@@ -1,5 +1,5 @@
 //! Tests for the tool binding built from a catalog descriptor: the
-//! descriptor's data is carried verbatim and its structured-output flag
+//! descriptor's data is copied verbatim and its structured-output flag
 //! selects the binding's output kind.
 
 use promptforge_api_types::capabilities::CapabilityId;

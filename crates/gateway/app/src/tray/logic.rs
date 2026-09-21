@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 /// The tray icon's visual phases: grayed while starting, steady while
-/// running, distinct on error. The status label and tooltip carry the
+/// running, distinct on error. The status label and tooltip use the
 /// matching word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TrayPhase {
@@ -186,7 +186,7 @@ pub(crate) fn run_key_command(exe: &Path) -> String {
 }
 
 /// Sets or clears the OS autostart entry, returning the state now in
-/// effect. The command is the caller's platform-shaped login command
+/// effect. The command is the login command for the caller's platform
 /// (`run_key_command` on Windows, `linux::exec_command` on Linux);
 /// macOS's store ignores it.
 ///
@@ -389,8 +389,9 @@ pub(crate) mod linux {
 
     /// The first-run notification's sentinel: written after the no-watcher
     /// notification is posted, so the once-per-install message never
-    /// repeats. Lives beside the profile config, not in the run directory -
-    /// it records user-facing state, not a runtime fact.
+    /// repeats. Sits beside the profile config rather than in the run
+    /// directory, because it records user-facing state rather than a
+    /// runtime fact.
     pub(crate) fn notification_marker(home: &Path) -> PathBuf {
         home.join(".promptforge").join("tray-notification-sent")
     }

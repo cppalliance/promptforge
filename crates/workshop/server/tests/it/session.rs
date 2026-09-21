@@ -1,6 +1,6 @@
 //! Characterization tests for the `/ws` workshop socket: the boot
 //! snapshots (status, catalog, workbench), the unsolicited status frames
-//! riding the socket, and the Model-menu events, pinned end to end.
+//! sent on the socket, and the Model-menu events, pinned end to end.
 //!
 //! The root holds the shared harness - mock gateways, the server fixture,
 //! frame readers - and each child module pins one behavior area of the

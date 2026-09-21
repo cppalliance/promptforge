@@ -12,8 +12,8 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - [`spawn::spawn_tagged`], [`spawn::spawn_blocking_tagged`],
@@ -26,8 +26,8 @@
 //!   effects are issued, each effect before its performer starts, each
 //!   answer before the run resumes with it. Every effect record has
 //!   exactly one answer record; a dropped effect's answer is `Dropped`.
-//! - The loop never reads an event to decide anything; control rides on
-//!   the run's own word (`Step`, `Run::decided`) and the cancel flag.
+//! - The loop never reads an event to decide anything; control comes
+//!   from the run's own word (`Step`, `Run::decided`) and the cancel flag.
 //! - [`cancel::CancelHandle`] is the awaitable token a host selects over;
 //!   the engine observes only the polled flag in
 //!   `promptforge_api_types::cancel`, and a host bridges the one to the

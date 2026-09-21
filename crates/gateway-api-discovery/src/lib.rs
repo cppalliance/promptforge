@@ -3,7 +3,7 @@
 //!
 //! The gateway writes `gateway.json` into the run directory
 //! (`<home>/.promptforge/run`) after a successful bind, Jupyter-style: the
-//! file carries the loopback port, the bearer key, the pid, the boot epoch,
+//! file holds the loopback port, the bearer key, the pid, the boot epoch,
 //! the version, and the start time, so a reader (the workshop shell,
 //! workshop-server) can attach to an already-running gateway instead of
 //! launching a second one. The crate is synchronous and runtime-agnostic:
@@ -17,9 +17,9 @@
 //!    owner) and removes it on clean shutdown with [`remove_if_mine`].
 //! 2. A reader ([`resolve`]) attaches only when the file is live: the pid
 //!    is alive, one OS process boot with a `promptforge-gateway` image
-//!    brackets a same-socket health and bearer proof, and the file carries
-//!    a boot identity. Anything else is stale and the file is deleted.
-//!    [`ValidatedConnection`] carries that point-in-time proof without
+//!    brackets a same-socket health and bearer proof, and the file
+//!    includes a boot identity. Anything else is stale and the file is
+//!    deleted. [`ValidatedConnection`] holds that point-in-time proof without
 //!    exposing a forgeable constructor.
 //! 3. Launch races take [`launch_or_attach`]: the `gateway.json.lock`
 //!    advisory lock elects one parent launcher; losers attach to the winner.

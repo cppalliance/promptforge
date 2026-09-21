@@ -109,7 +109,7 @@ fn sample_contents() -> WorkspaceContents {
     }
 }
 
-/// Builds a v1-shaped database at `path` with the given meta rows and
+/// Builds a v1-schema database at `path` with the given meta rows and
 /// nothing else, so tests can shape the meta table by hand.
 async fn seed_schema_with_meta(path: &Path, meta: &[(&str, &str)]) {
     let conn = open_database(path).await.expect("seed database opens");

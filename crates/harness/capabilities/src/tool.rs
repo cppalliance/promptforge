@@ -1,7 +1,7 @@
 //! The [`Tool`] trait: the implementation contract behind a
 //! [`ToolDescriptor`] the engine binds against.
 //!
-//! The engine never holds an implementation. Its catalog is descriptors
+//! The engine's catalog is descriptors
 //! ([`ToolCatalog`](promptforge_api_types::tools::ToolCatalog)), and a
 //! `ToolCall` effect names a [`ToolId`]; the harness resolves the id in
 //! its [`ToolTable`](crate::ToolTable) and calls the implementation here.
@@ -125,7 +125,8 @@ pub trait Tool: Send + Sync {
     /// `false`: plain text. Structured output is honored for trusted
     /// output only - an untrusted result is nonce-wrapped before any
     /// parse, so the wrapped text no longer parses as JSON and the call
-    /// fails rather than smuggling attacker-shaped data past the guard.
+    /// fails rather than smuggling attacker-influenceable data past the
+    /// guard.
     fn structured_output(&self) -> bool {
         false
     }
@@ -146,7 +147,7 @@ pub trait Tool: Send + Sync {
 
     /// Executes the tool with the given JSON arguments and returns its output.
     ///
-    /// The returned [`ToolOutput`] carries its own
+    /// The returned [`ToolOutput`] includes its own
     /// [`OutputTrust`](promptforge_api_types::tools::OutputTrust), so trust
     /// is mandatory and cannot be forgotten: an
     /// [`OutputTrust::Untrusted`](promptforge_api_types::tools::OutputTrust::Untrusted)

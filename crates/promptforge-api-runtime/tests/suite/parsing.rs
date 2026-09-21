@@ -1,5 +1,6 @@
-//! Public-parser contracts: valid fixtures expose their author-shaped structure
-//! and invalid fixtures report their exact [`ParseErrorKind`] and message.
+//! Public-parser contracts: valid fixtures expose the structure their author
+//! wrote and invalid fixtures report their exact [`ParseErrorKind`] and
+//! message.
 
 use std::num::NonZeroU32;
 

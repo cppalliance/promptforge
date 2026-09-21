@@ -8,7 +8,7 @@ use promptforge_api_types::capabilities::CapabilityId;
 use super::{CapabilityRegistry, RegistryErrorKind};
 use crate::{Capability, CapabilityError, Contribution, RunServices};
 
-/// A minimal capability carrying a fixed id and description.
+/// A minimal capability with a fixed id and description.
 struct Stub {
     id: CapabilityId,
     description: String,

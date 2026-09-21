@@ -78,7 +78,7 @@ pub(crate) struct RevertReply {
 /// The reply is plain JSON - `{"applied": [...], "reloaded": bool,
 /// "restart_required": bool}` - not SSE: the reload runs as a command on
 /// the queue, so its `"Applying configuration"` text reaches
-/// `GET /admin/progress` subscribers, and the response carries the outcome.
+/// `GET /admin/progress` subscribers, and the response reports the outcome.
 /// `applied` names the promoted real files relative to the config root,
 /// sorted. `reloaded` is true when a config shadow applied successfully.
 /// `restart_required` is true for an env shadow or a change to a section

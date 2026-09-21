@@ -7,14 +7,13 @@
 //! `[[local_model]]`, and registers each as a normal OpenAI-routed
 //! [`Model`](gateway_routing::Model). Dropping the runtime kills
 //! the children. The blob cache store behind the gateway's `/v1/cache` routes
-//! lives in [`cache`]; the artifact store and download machinery in
+//! sits in [`cache`]; the artifact store and download machinery in
 //! [`artifacts`]; chat-template metadata in [`chat_templates`]; bounded GGUF
 //! header inspection in [`gguf`].
 //!
 //! Failures are reported as [`LocalError`]; an explicit teardown failure is
 //! reported as [`ShutdownError`](gateway_protocol::ShutdownError).
-//! The crate contains no HTTP routing and no error envelopes; those live in
-//! the gateway crate.
+//! HTTP routing and error envelopes belong to the gateway crate.
 
 /// Windows `CREATE_NO_WINDOW` flag: suppresses console windows for child
 /// processes spawned from a GUI-subsystem parent.

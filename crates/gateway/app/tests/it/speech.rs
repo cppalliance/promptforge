@@ -439,8 +439,8 @@ async fn unknown_voice_is_rejected_naming_the_valid_voices() {
 
 /// The voice check runs before dominion queue admission: with the only
 /// concurrency slot held and the pool on the fail-fast `reject` policy, a
-/// bad voice still earns 400 rather than the pool's 429, while a valid
-/// voice earns the 429 - proving the pool really was full.
+/// bad voice still receives 400 rather than the pool's 429, while a valid
+/// voice receives the 429 - proving the pool really was full.
 #[tokio::test]
 async fn voice_validation_precedes_queue_admission() {
     let (backend, mut arrivals) = gated_audio_backend().await;
@@ -553,8 +553,8 @@ async fn voice_object_form_is_validated_by_id_and_forwarded() {
     gateway.shutdown().await;
 }
 
-/// The speech handler admits through the model's dominion queue exactly
-/// like chat: with one in-flight slot and one waiting slot, the third
+/// The speech handler admits through the model's dominion queue the same
+/// way chat does: with one in-flight slot and one waiting slot, the third
 /// request is 503 `queue_full`.
 #[tokio::test]
 async fn queue_full_returns_503_when_waiting_slots_exhausted() {
@@ -1107,10 +1107,10 @@ async fn upstream_503_maps_to_unavailable() {
     gateway.shutdown().await;
 }
 
-/// An upstream error body carries provider internals - stack text, internal
-/// hosts, request ids - and none of it may reach the client: the envelope
-/// message is the gateway's own fixed string on both the speech-only
-/// variants and the shared protocol arm.
+/// An upstream error body contains provider internals - stack text,
+/// internal hosts, request ids - and none of it may reach the client: the
+/// envelope message is the gateway's own fixed string on both the
+/// speech-only variants and the shared protocol arm.
 #[tokio::test]
 async fn upstream_error_bodies_never_reach_the_client() {
     const INTERNALS: &str = "java.lang.IllegalStateException: voice clone failed\n\
@@ -1173,7 +1173,7 @@ async fn unauthenticated_speech_is_refused_before_the_body_is_parsed() {
 }
 
 /// An unknown model on the speech route is a 404 `model_not_found`
-/// envelope, exactly as on the chat route, and never reaches the backend.
+/// envelope, as on the chat route, and never reaches the backend.
 #[tokio::test]
 async fn unknown_model_on_the_speech_route_returns_model_not_found() {
     let (backend, recorder) = recording_speech_backend(Some("audio/mpeg")).await;
@@ -1203,8 +1203,8 @@ async fn unknown_model_on_the_speech_route_returns_model_not_found() {
     gateway.shutdown().await;
 }
 
-/// `stream_format` rides the verbatim passthrough: the provider sees the
-/// framing selector exactly as the client sent it.
+/// `stream_format` is forwarded verbatim: the provider sees the framing
+/// selector exactly as the client sent it.
 #[tokio::test]
 async fn stream_format_sse_is_forwarded_to_the_upstream_body() {
     let (backend, recorder) = recording_speech_backend(Some("audio/mpeg")).await;

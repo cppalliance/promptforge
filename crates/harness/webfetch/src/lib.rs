@@ -9,11 +9,11 @@
 //! URL-policy, and error machinery are crate-private implementation details.
 //!
 //! `WebFetch` performs a GET, routes the response on its `Content-Type`, and
-//! refuses a type it cannot render. An HTML page has its main article content
-//! extracted with [`readabilityrs`] and rendered to markdown; a page that is not
-//! article-shaped falls back to a whole-page HTML-to-markdown conversion with
-//! [`htmd`]. A non-HTML text body (JSON, XML, plain text) is returned decoded,
-//! with no extraction.
+//! refuses a type it cannot render. An HTML page has its main article
+//! content extracted with [`readabilityrs`] and rendered to markdown; a page
+//! with no article to extract falls back to a whole-page HTML-to-markdown
+//! conversion with [`htmd`]. A non-HTML text body (JSON, XML, plain text) is
+//! returned decoded, with no extraction.
 //!
 //! ## Invariants
 //!
@@ -22,14 +22,14 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Every model- or tool-selected URL and every resolved address is
 //!   revalidated on each redirect hop; a non-global address is denied
 //!   unless the fetch policy grants an exact host-and-address exception.
-//! - No request carries an ambient identity on any hop: the client has
+//! - No request includes an ambient identity on any hop: the client has
 //!   no proxy, no cookie store, no automatic `Referer`, and no default
 //!   credentials.
 //! - Nothing in this crate spawns a tokio task directly; the harness

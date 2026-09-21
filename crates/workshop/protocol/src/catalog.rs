@@ -23,7 +23,7 @@ impl CatalogPush {
 /// The serialized shape of a catalog push on the socket, matching the
 /// workshop protocol's frame taxonomy.
 ///
-/// Delivery: ephemeral - the newest push carries the whole catalog and
+/// Delivery: ephemeral - the newest push holds the whole catalog and
 /// supersedes every older one; the catalog is resent on reconnect.
 #[derive(Debug, Serialize)]
 pub struct CatalogFrame<'a> {
@@ -35,7 +35,7 @@ pub struct CatalogFrame<'a> {
 /// Whether one gateway catalog row can back a chat model binding.
 ///
 /// This is wire semantics - it interprets the gateway's catalog shape -
-/// so it lives here rather than in any one subsystem: the menu filters
+/// so it sits here rather than in any one subsystem: the menu filters
 /// its picker by it, and the gateway subsystem's catalog refresh reads
 /// readiness from it.
 #[must_use]

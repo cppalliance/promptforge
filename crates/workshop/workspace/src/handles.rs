@@ -45,9 +45,9 @@ pub fn register(
 /// [`ShutdownHandle`] the shell awaits inside its graceful-shutdown
 /// closure, where [`Workspace::close_backing`] folds the WAL into the
 /// file and removes the sidecar before the runtime tears down. The
-/// shell's grace window bounds the whole drain, so the close carries no
-/// timeout of its own. The returned guard keeps the registration alive;
-/// the composition root holds it for the process lifetime.
+/// shell's grace window bounds the whole drain and is the close's only
+/// timeout. The returned guard keeps the registration alive; the
+/// composition root holds it for the process lifetime.
 pub fn register_tasks(registry: &Registry, workspace: &Workspace) -> Registration {
     registry.register_task(Arc::new(BackgroundTaskAdapter::new({
         let workspace = workspace.clone();

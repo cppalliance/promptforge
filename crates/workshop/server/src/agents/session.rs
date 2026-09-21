@@ -1,10 +1,10 @@
-//! The `/ws` WebSocket endpoint: one persistent socket carrying the
+//! The `/ws` WebSocket endpoint: one persistent socket for the
 //! workshop's downstream JSON - unsolicited status updates from the
 //! observer, model catalog pushes, and workbench snapshots - plus the
 //! inbound Model-menu events.
 //!
-//! A client upgrades `GET /ws` once. The socket carries the Model-menu
-//! events inbound. `{"type":"select_model","model":"..."}` selects the
+//! A client upgrades `GET /ws` once. The Model-menu events arrive on
+//! that socket. `{"type":"select_model","model":"..."}` selects the
 //! chat model: the menu validates the id against the retained catalog and
 //! publishes the fresh workbench snapshot, handled inline because a map
 //! lookup and a broadcast send cost microseconds; an unknown model is
@@ -17,10 +17,10 @@
 //! determinate status-bar progress, refetches the profile state and model
 //! catalog, and settles the menu. A second switch while one runs is
 //! refused with an `error` frame. Both events echo an `id` on their
-//! refusals when the frame carried one. A frame that is not a
+//! refusals when the frame included one. A frame that is not a
 //! well-formed menu event is answered with an `error` frame and the
-//! session continues. Chat itself lives on the `/agents/ws` socket
-//! ([`super::socket`]); this endpoint carries no chat frames.
+//! session continues. Chat itself is on the `/agents/ws` socket
+//! ([`super::socket`]); this endpoint has no chat frames.
 //!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer
@@ -58,7 +58,7 @@ use self::menu::{select_model, start_switch};
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 /// Logs the session close when the connection task ends, however it ends,
-/// so the session loop's exit paths carry no cleanup calls.
+/// so the session loop's exit paths need no cleanup calls.
 struct SessionLog {
     session: u64,
 }
@@ -232,7 +232,7 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
 
 /// Handles one inbound text frame: `select_model` and `switch_profile`
 /// drive the Model menu, and anything else is answered with an `error`
-/// frame. Refusals echo the frame's `id` when it carried one.
+/// frame. Refusals echo the frame's `id` when it included one.
 async fn handle_frame(state: &SessionsState, text: &str, socket: &mut WebSocket) {
     let frame: serde_json::Value = match serde_json::from_str(text) {
         Ok(frame) => frame,
@@ -273,7 +273,7 @@ pub(crate) async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, fram
     socket.send(Message::Text(text.into())).await.is_ok()
 }
 
-/// Sends one `error` frame carrying `message`, tagged with the request's
+/// Sends one `error` frame with `message`, tagged with the request's
 /// `id` when there is one, ignoring a dead client. Shared with the
 /// agent-session socket, its second production consumer.
 pub(crate) async fn send_error(

@@ -4,7 +4,7 @@
 //! of a round and the `await_tasks` answer) and in the `TaskNotice` the log
 //! keeps; a result that forges the envelope's close tag or a template
 //! control delimiter is neutralized inside the envelope; and the model's
-//! `task_events` read wraps a history that carries such a forgery the same
+//! `task_events` read wraps a history that includes such a forgery the same
 //! way, under the reader's run nonce. The serial driver plays the model.
 
 use promptforge_api_types::event::Event;

@@ -6,7 +6,7 @@
 //! NVIDIA driver, not the CUDA Toolkit), emits a canonical versioned
 //! manifest, and packs everything into a release zip with a checksum.
 //!
-//! The command-line entry point lives in `main.rs`; the pipeline here is
+//! The command-line entry point sits in `main.rs`; the pipeline here is
 //! library code so its tests can drive it through the [`probe`] seam.
 
 pub mod arch;

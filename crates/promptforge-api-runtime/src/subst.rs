@@ -21,10 +21,10 @@
 //!
 //! A backslash escapes the following character when it is `{`, `}`, or `\\`:
 //! the backslash is consumed and the next character is emitted literally.
-//! Everywhere else a backslash is an ordinary literal. This lets prose carry a
-//! literal opening delimiter (`\{{` emits `{{`), a literal closing delimiter
-//! (`\}}` emits `}}`), and a literal backslash (`\\` emits `\`). Escapes
-//! compose, so adjacent escaped delimiters resolve independently.
+//! Everywhere else a backslash is an ordinary literal. This lets prose
+//! include a literal opening delimiter (`\{{` emits `{{`), a literal closing
+//! delimiter (`\}}` emits `}}`), and a literal backslash (`\\` emits `\`).
+//! Escapes compose, so adjacent escaped delimiters resolve independently.
 //!
 //! Substitution is a single left-to-right pass over the *input* prose only:
 //! resolved output is appended to a separate buffer and never rescanned, so a
@@ -65,7 +65,7 @@ pub(crate) enum SubstErrorKind {
 
 /// A typed substitution failure.
 ///
-/// Carries a stable [`kind`](SubstitutionError::kind), the byte
+/// Holds a stable [`kind`](SubstitutionError::kind), the byte
 /// [`offset`](SubstitutionError::offset) of the offending placeholder within
 /// the prose, a `message` that embeds a bounded, control-escaped preview of the
 /// placeholder path, and - for the serialization case - the preserved
@@ -170,8 +170,8 @@ pub(crate) struct Sources<'a> {
 
 /// Resolves every `{{ path }}` in `prose` against the [`Sources`].
 ///
-/// This function receives prose only and does not transform either compiled
-/// Lua phase.
+/// This function receives prose only; the compiled Lua phases are
+/// untouched.
 ///
 /// # Errors
 /// Returns [`Error::Substitution`](crate::Error::Substitution) for an unclosed

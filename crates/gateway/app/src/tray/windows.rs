@@ -68,8 +68,7 @@ thread_local! {
 
 /// Spawns the gateway, then runs the tray on the main thread until Quit.
 /// A tray that cannot start degrades to the headless Ctrl-C loop: the
-/// gateway is already serving and the tray is its face, not its life
-/// support.
+/// gateway is already serving, and the tray is only its user interface.
 pub(super) fn run(options: &ServeOptions) -> Result<(), StartupError> {
     let handle = spawn(options)?;
     let tray = match Tray::build(&handle) {

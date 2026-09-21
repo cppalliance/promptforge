@@ -11,7 +11,7 @@
 //! unchanged. The payload-free lifecycle variants have named constructors
 //! in [`lifecycle`] for the engine's emit sites.
 //!
-//! Every variant carries three coordinates before its payload: `execution`
+//! Every variant includes three coordinates before its payload: `execution`
 //! (the caller-chosen run identifier), `section` (the reporting H2 heading
 //! or agent name), and `provenance` (the [`Provenance`] replay key: the
 //! nearest enclosing task and the item's position within it). A host writes
@@ -19,11 +19,11 @@
 //! without inspecting the payload.
 //!
 //! # Sensitivity
-//! Lifecycle variants carry no payload beyond their coordinates, and the
+//! Lifecycle variants have no payload beyond their coordinates, and the
 //! coordinates themselves are author-controlled (`execution` is caller
 //! chosen, `section` is prompt-authored heading text). Content variants
-//! carry model-, tool-, or user-authored text; task variants carry the
-//! author's spawn seeds; debug variants carry the verbatim request and
+//! hold model-, tool-, or user-authored text; task variants hold the
+//! author's spawn seeds; debug variants hold the verbatim request and
 //! response bodies. A host that persists or forwards events owns treating
 //! all of it as untrusted.
 //!
@@ -141,8 +141,8 @@ events! {
     /// through [`Lua`](Self::Lua)) mark operational boundaries; the
     /// payload-free ones have constructors in [`lifecycle`]. Task
     /// variants report a task chain's start and end. Content variants
-    /// carry what a model, tool, or user produced. Debug variants carry the
-    /// raw model-turn bodies. Every variant carries `execution`, `section`,
+    /// hold what a model, tool, or user produced. Debug variants hold the
+    /// raw model-turn bodies. Every variant has `execution`, `section`,
     /// and `provenance` ahead of its payload; see the module docs.
     pub enum Event {
         // Lifecycle: parse and run.
@@ -391,7 +391,7 @@ events! {
         },
         // Debug.
         /// The JSON body sent to the chat-completions endpoint for one
-        /// model turn: raw, unredacted, and carrying the full prompt.
+        /// model turn: raw, unredacted, and including the full prompt.
         Request {
             /// The 1-based model-turn number within the run.
             turn: u32,

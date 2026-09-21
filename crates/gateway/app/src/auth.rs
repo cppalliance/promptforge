@@ -171,8 +171,8 @@ mod loopback_caller_tests;
 ///    key's ambient form, accepted anywhere the bearer header is. Two
 ///    guards shape this path that the bearer path does not need: the
 ///    proof is recomputed from the process-lifetime salt and the live key
-///    (the cookie never carries the key itself), and the request must
-///    carry Fetch Metadata a cross-origin page cannot strip, since an
+///    (the cookie never holds the key itself), and the request must
+///    include Fetch Metadata a cross-origin page cannot strip, since an
 ///    ambient credential would otherwise answer to any same-site loopback
 ///    page (ports are not part of a site).
 /// 3. Loopback trust: `[server] trust_loopback` is on, the server recorded
@@ -184,8 +184,8 @@ mod loopback_caller_tests;
 /// refused even on loopback: absence of credentials is what loopback
 /// trusts, and a caller presenting wrong ones meant to authenticate - the
 /// gateway-discovery-file liveness probe relies on that to detect a stale key.
-/// And a request with no recorded peer address earns no trust: it needs
-/// a credential, the same fail-closed posture as the loopback wall.
+/// And a request with no recorded peer address receives no trust: it
+/// needs a credential, the same fail-closed posture as the loopback wall.
 pub(crate) async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), GatewayError> {
     let authorization = caller.get(AUTHORIZATION);
     let presented = authorization
@@ -311,7 +311,7 @@ mod keyless_loopback_tests {
     //! credential-free loopback caller is admitted on every route class
     //! unless its Fetch Metadata marks a cross-origin page, a wrong
     //! bearer is still refused on loopback, a LAN or peerless caller
-    //! earns no trust, and `trust_loopback = false` restores strict
+    //! receives no trust, and `trust_loopback = false` restores strict
     //! bearer auth.
 
     use std::net::SocketAddr;
@@ -330,7 +330,7 @@ mod keyless_loopback_tests {
 
     /// One route from each class - the inference surface, the any-source
     /// admin surface, and the walled shutdown route - with the status an
-    /// admitted empty-bodied request earns on it.
+    /// admitted empty-bodied request receives on it.
     fn routes() -> Vec<(Method, &'static str, StatusCode)> {
         vec![
             (Method::GET, "/v1/models", StatusCode::OK),
@@ -432,7 +432,7 @@ mod keyless_loopback_tests {
     /// page would actually target: a well-formed chat request from a
     /// loopback peer is refused when `Sec-Fetch-Site: cross-site` marks it
     /// as another origin's page, and reaches routing (404: no such model)
-    /// when the same request carries no fetch metadata.
+    /// when the same request includes no fetch metadata.
     #[tokio::test]
     async fn cross_site_fetch_metadata_refuses_a_keyless_loopback_chat_completion() {
         let state = loopback_state(None);

@@ -331,7 +331,7 @@ impl LocalRuntime {
 
 /// Shared body of [`LocalRuntime::provision_artifacts_with_cancellation`]
 /// with the pinned-server provision injectable, so a test can drive it over
-/// a mock layout exactly as [`start_impl`] is driven.
+/// a mock layout the same way [`start_impl`] is driven.
 fn provision_artifacts_impl(
     config: &Config,
     progress: Option<&Activity>,
@@ -651,7 +651,7 @@ impl LocalRuntime {
     /// the model so the caller can tear the child down through the
     /// [`Upstream`](gateway_protocol::upstream::Upstream) seam (which disables
     /// respawn before killing the process). Returns `None` when no started
-    /// model carries `name`.
+    /// model is named `name`.
     ///
     /// The caller owns the teardown: `shutdown` on the returned model's
     /// endpoint upstream blocks on the child's exit, so async callers run it

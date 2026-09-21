@@ -1,5 +1,5 @@
 //! Status and snapshot behavior of the `/ws` workshop socket: status
-//! frames riding the socket, the retained status, catalog, and workbench
+//! frames sent on the socket, the retained status, catalog, and workbench
 //! snapshots on connect, the malformed- and unknown-frame refusals, and
 //! the catalog push on reconnect.
 

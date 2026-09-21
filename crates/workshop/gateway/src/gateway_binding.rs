@@ -137,7 +137,7 @@ impl GatewayBinding {
         })
     }
 
-    /// Builds a binding around a client carrying test-specific timeouts.
+    /// Builds a binding around a client with test-specific timeouts.
     #[must_use]
     pub fn from_client(client: GatewayClient) -> Self {
         let base_url = client.base_url.clone();

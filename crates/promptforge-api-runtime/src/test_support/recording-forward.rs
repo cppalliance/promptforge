@@ -7,7 +7,7 @@
 //! capture pair. The order of the batch is the order the observer sees.
 //!
 //! The `on_*` hooks take a `chain_id` and `depth` an [`Event`] does not
-//! carry - its provenance names the task instead - so the adapter passes
+//! have - its provenance names the task instead - so the adapter passes
 //! zero for both; a suite that needs the grouping reads `provenance.task`
 //! off the events themselves.
 
@@ -81,7 +81,7 @@ lifecycle_pairs! {
     UserInputWaitStarted,
 }
 
-/// The payload-carrying lifecycle and task variants
+/// The lifecycle and task variants with payloads, the ones
 /// [`forward_lifecycle`] owns.
 macro_rules! task_lifecycle_variants {
     () => {
@@ -157,7 +157,7 @@ pub fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&dyn Deb
     }
 }
 
-/// The payload-carrying lifecycle and task variants, as observations.
+/// The lifecycle and task variants with payloads, as observations.
 fn forward_lifecycle(event: Event, observer: &dyn Observer) {
     match event {
         Event::Lua {

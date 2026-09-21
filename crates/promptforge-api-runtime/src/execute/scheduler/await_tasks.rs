@@ -1,6 +1,6 @@
 //! The model's `await_tasks { timeout? }` built-in: its one wait.
 //!
-//! The model has no `when_any`; what it has is a tool call that parks its
+//! In place of a `when_any`, the model gets a tool call that parks its
 //! section until one of the tasks it started ends. The arm reuses the
 //! author wait's machinery - the chain's `waiting_on` set and the wake a
 //! member's end or a timer's firing performs - and diverts the wake: the

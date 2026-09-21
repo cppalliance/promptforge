@@ -1,6 +1,6 @@
 //! Deepgram provider: the public descriptor plus the private variance of
 //! `GET /v1/models` - the `Authorization: Token` prefix over one payload
-//! that carries STT models and a TTS array, split here into separate
+//! that contains STT models and a TTS array, split here into separate
 //! entries with distinct kinds. No pagination. The wire repeats each
 //! model once per language: normalization groups rows by id and collects
 //! the languages. Architectures and tags have no sheet field and are
@@ -116,7 +116,7 @@ fn normalize_list(response: &ListResponse) -> Vec<ModelEntry> {
 
 /// Merges one row into the grouped list: the first row for an id pushes
 /// the entry; later rows for the same id contribute only the languages
-/// the entry does not already carry.
+/// the entry does not already list.
 fn absorb(
     entries: &mut Vec<ModelEntry>,
     index: &mut std::collections::HashMap<String, usize>,
@@ -156,7 +156,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Sets every entry's family. Deepgram's catalog carries no snapshot
+/// Sets every entry's family. Deepgram's catalog has no snapshot
 /// suffixes, so there is no collapse pass.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

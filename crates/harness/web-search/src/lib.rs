@@ -1,11 +1,11 @@
 //! The `web_search` tool: proxy a search query through the gateway.
 //!
-//! This crate is the concrete search provider. It does not talk to a search
-//! vendor directly; it POSTs the query to the gateway's
-//! `POST /v1/tools/web_search` endpoint with the shared bearer token, so the
-//! vendor credential never leaves the server. The gateway's JSON results are
-//! validated for shape and returned as untrusted output, ready to hand back to
-//! the model.
+//! This crate is the concrete search provider. It POSTs the query to the
+//! gateway's `POST /v1/tools/web_search` endpoint with the shared bearer
+//! token instead of calling a search vendor directly, so the vendor
+//! credential never leaves the server. The gateway's JSON results are
+//! validated for shape and returned as untrusted output, ready to hand
+//! back to the model.
 //!
 //! The whole supported surface is [`WebSearch`]; the endpoint validation and
 //! the redacted bearer token are crate-private implementation details. The
@@ -20,8 +20,8 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - The gateway bearer token is never written to logs or `Debug` output;

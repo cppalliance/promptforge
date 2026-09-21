@@ -48,7 +48,7 @@ mod tests {
     /// The zero-dependency rule is load-bearing: this crate compiles alone
     /// and never rebuilds for a dependency rev, so the manifest must never
     /// declare a dependency. This test reads the crate's own Cargo.toml and
-    /// fails if any dependency table carries an entry.
+    /// fails if any dependency table has an entry.
     #[test]
     fn the_manifest_declares_no_dependencies() -> Result<(), std::io::Error> {
         let manifest = std::fs::read_to_string(

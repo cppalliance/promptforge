@@ -13,7 +13,7 @@
 //!
 //! This file names only external crates so the bench target can include
 //! it by `#[path]` beside the in-crate suites; it is not part of the
-//! `test-support` feature, which carries no HTTP.
+//! `test-support` feature, which has no HTTP.
 
 use std::net::SocketAddr;
 use std::num::NonZeroU64;

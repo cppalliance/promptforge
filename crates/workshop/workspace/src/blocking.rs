@@ -5,7 +5,7 @@
 //! work through one of the two helpers here so a tokio executor thread
 //! never waits on I/O. Turso's own database I/O is async-native and does
 //! not come through here. A worker that panics, or is cancelled at
-//! runtime shutdown, surfaces as an `io::Error` carrying the join
+//! runtime shutdown, surfaces as an `io::Error` holding the join
 //! failure, the same shape `workshop-user-state` gives its atomic write.
 
 use std::io;

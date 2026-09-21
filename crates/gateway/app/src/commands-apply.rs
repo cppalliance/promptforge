@@ -4,9 +4,9 @@
 //! The `POST /admin/config-apply` route takes the census under
 //! the apply lock and calls [`capture_apply`] to turn it into an
 //! [`ApplyPlan`]: an inline promotion for shadows that need no reload, or
-//! an [`ApplySnapshot`] that rides onto the queue as `Command::ApplyConfig`
-//! and runs through [`apply_config`]. The snapshot vocabulary and the
-//! promotion step live here beside the command that consumes them, so the
+//! an [`ApplySnapshot`] that is queued as `Command::ApplyConfig` and
+//! runs through [`apply_config`]. The snapshot vocabulary and the
+//! promotion step sit here beside the command that consumes them, so the
 //! route module holds only the two handlers and their replies.
 
 use std::path::{Path, PathBuf};
@@ -48,7 +48,7 @@ pub(crate) struct ShadowCapture {
     pub(crate) contents: String,
 }
 
-/// What one reloading apply carries onto the command queue: the parsed
+/// What one reloading apply puts onto the command queue: the parsed
 /// pending config and every captured shadow.
 #[derive(Debug)]
 pub(crate) struct ApplySnapshot {
@@ -205,7 +205,7 @@ fn apply_cancelled() -> GatewayError {
 /// captures land in their real files first (a failed promotion changes
 /// nothing live), and one live write swaps the routing, config, and
 /// web-search state. The running local children are never touched; their
-/// routing entries carry over under the new remote catalog.
+/// routing entries persist under the new remote catalog.
 async fn apply_snapshot(
     state: &AppState,
     config: Config,

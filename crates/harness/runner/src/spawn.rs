@@ -3,11 +3,11 @@
 //! Every tokio task the harness starts passes through [`spawn_tagged`],
 //! [`spawn_blocking_tagged`], [`spawn_session`], or
 //! [`spawn_blocking_launch`]. The first two open a `tracing` span
-//! carrying the effect the task performs - its [`EffectId`] and
+//! stamped with the effect the task performs - its [`EffectId`] and
 //! [`Provenance`] - so a run's tasks trace as a group and slice by task.
 //! The last two cover the work that performs no effect: a session's
-//! supervisor, whose span carries the session id, and a launch's
-//! filesystem probes, whose span carries the agent name. Each is a
+//! supervisor, whose span records the session id, and a launch's
+//! filesystem probes, whose span records the agent name. Each is a
 //! permitted caller of the raw tokio method it wraps, and no other
 //! harness code is.
 
@@ -22,10 +22,10 @@ pub type Tag = (EffectId, Provenance);
 
 /// Spawns `fut` on the tokio runtime inside a span tagged `tag`.
 ///
-/// The span is named `spawn` and carries the effect id under `effect`,
+/// The span is named `spawn` and records the effect id under `effect`,
 /// the task path under `task`, and the task-local sequence under `seq`.
 /// The future runs to completion or until its [`JoinHandle`] is aborted,
-/// exactly as with `tokio::spawn`.
+/// just as with `tokio::spawn`.
 ///
 /// # Panics
 ///
@@ -50,7 +50,7 @@ where
 }
 
 /// Spawns a session's supervisor `fut` inside a span named `session` that
-/// carries the session id under `session`.
+/// records the session id under `session`.
 ///
 /// A supervisor performs no effect, so it has no [`Tag`]; it is the one
 /// long-lived task the harness starts per session, and the tasks it starts
@@ -75,10 +75,10 @@ where
 
 /// Runs `f` on tokio's blocking pool inside a span tagged `tag`.
 ///
-/// The span is named `spawn_blocking` and carries the same fields as
+/// The span is named `spawn_blocking` and records the same fields as
 /// [`spawn_tagged`]'s; it is entered for the whole of `f`. The closure
 /// runs to completion even if its [`JoinHandle`] is aborted or dropped,
-/// exactly as with `tokio::task::spawn_blocking`.
+/// just as with `tokio::task::spawn_blocking`.
 ///
 /// # Panics
 ///
@@ -107,13 +107,13 @@ where
 }
 
 /// Runs `f`, a launch's filesystem work, on tokio's blocking pool inside
-/// a span named `launch` that carries the agent name under `agent`.
+/// a span named `launch` that records the agent name under `agent`.
 ///
 /// A launch walks the agents directory and reads the agent's source
 /// before any run or session exists, so the work has no [`Tag`] and no
 /// session id; the agent name is what ties it to the launch that asked.
 /// The closure runs to completion even if its [`JoinHandle`] is aborted
-/// or dropped, exactly as with `tokio::task::spawn_blocking`.
+/// or dropped, just as with `tokio::task::spawn_blocking`.
 ///
 /// # Panics
 ///

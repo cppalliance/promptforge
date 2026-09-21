@@ -147,8 +147,8 @@ struct State {
 }
 
 /// Records and already-built summaries that could not be delivered before
-/// the shutdown budget expired. The counters live in queue state from
-/// construction, so recording a timeout never needs to allocate.
+/// the shutdown budget expired. The counters sit in queue state from
+/// construction, so recording a timeout never allocates.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ShutdownLoss {
     pub(crate) abandoned_records: u64,
@@ -728,7 +728,7 @@ impl LogQueue {
         }
     }
 
-    /// Whether the queue holds no records. Test seam for the writer's
+    /// Whether the queue is empty. Test seam for the writer's
     /// drop-to-enqueue contract.
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {

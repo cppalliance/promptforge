@@ -28,7 +28,7 @@ fn fresh_access() -> Arc<Access> {
     )
 }
 
-/// Returns the message carried by either Lua-category error representation.
+/// Returns the message held by either Lua-category error representation.
 fn lua_error_message(error: &Error) -> &str {
     match error {
         Error::Lua(message) | Error::LuaRuntime { message, .. } => message,

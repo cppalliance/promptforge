@@ -22,8 +22,8 @@ pub struct SwitchProfileFrame {
 
 /// Deserializes a nullable string whose key must be present: serde's
 /// derive treats a missing `Option` field as `None` unless the field
-/// names its own deserializer, and this one does exactly that so an
-/// absent `name` fails instead of selecting no profile.
+/// names its own deserializer, and this field names one, so an absent
+/// `name` fails instead of selecting no profile.
 fn required_nullable<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,

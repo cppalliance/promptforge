@@ -1,5 +1,5 @@
 //! The ambient-credential primitives [`check_auth`](super::check_auth)
-//! reads: the handoff cookie's name, the session proof it carries, the
+//! reads: the handoff cookie's name, the session proof it holds, the
 //! Fetch Metadata rules that gate ambient access, and the hex codec
 //! between them.
 //!
@@ -10,10 +10,11 @@
 //! they sit beside the auth rules that read them rather than inside the
 //! walled route module that writes them.
 //!
-//! The cookie never carries the key. Cookies are not port-isolated (RFC
+//! The cookie never holds the key. Cookies are not port-isolated (RFC
 //! 6265), so every local server the browser visits on the same address
-//! receives them, and a key-carrying cookie would hand any local process
-//! the gateway discovery file's long-term secret on a single navigation.
+//! receives them, and a cookie holding the key would hand any local
+//! process the gateway discovery file's long-term secret on a single
+//! navigation.
 //! The value is instead the hex of a session proof - SHA-256 over a
 //! process-lifetime random salt and the live key - so a harvested cookie
 //! authenticates only until a restart or key rotation and reveals
@@ -22,10 +23,10 @@
 use axum::http::header::COOKIE;
 use axum::http::{HeaderMap, HeaderName};
 
-/// The cookie carrying the session proof for browser sessions.
+/// The cookie holding the session proof for browser sessions.
 pub(crate) const AUTH_COOKIE: &str = "promptforge-gateway-session";
 
-/// The `Sec-Fetch-Site` header name; the locked `http` crate carries no
+/// The `Sec-Fetch-Site` header name; the locked `http` crate has no
 /// constant for it.
 const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
 
@@ -34,7 +35,7 @@ const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
 /// the key-free `/config/`, so the key never sits in browser history. The
 /// tray's Settings item, the relaunch handoff, and `--print-url` all build
 /// their URL here. The key is percent-encoded: a generated key is hex and
-/// passes through unchanged, but a configured key can carry query-special
+/// passes through unchanged, but a configured key can contain query-special
 /// characters (`/auth` decodes through serde_urlencoded).
 pub(crate) fn auth_url(base_url: &str, key: &str) -> String {
     let key: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
@@ -42,7 +43,7 @@ pub(crate) fn auth_url(base_url: &str, key: &str) -> String {
 }
 
 /// Reads the handoff cookie's presented session proof, when the request
-/// carries a well-formed one.
+/// includes a well-formed one.
 pub(crate) fn presented_cookie_proof(headers: &HeaderMap) -> Option<Vec<u8>> {
     let header = headers.get(COOKIE)?.to_str().ok()?;
     header.split(';').map(str::trim).find_map(|pair| {
@@ -55,7 +56,7 @@ pub(crate) fn presented_cookie_proof(headers: &HeaderMap) -> Option<Vec<u8>> {
     })
 }
 
-/// The session proof the cookie carries for `key` under `salt`: SHA-256
+/// The session proof the cookie holds for `key` under `salt`: SHA-256
 /// over the process-lifetime salt and the live key. The proof, never the
 /// key, crosses into the browser, so a harvested cookie authenticates only
 /// until a restart or key rotation and reveals nothing about the key.
@@ -69,8 +70,8 @@ pub(crate) fn session_token(salt: &[u8; 32], key: &[u8]) -> [u8; 32] {
 
 /// Whether the request's Fetch Metadata permits cookie authentication.
 /// The cookie is ambient - no `Authorization` header to require - so a
-/// cross-origin page on another loopback port could otherwise ride it
-/// into state-changing routes: `SameSite=Lax` does not cover same-site
+/// cross-origin page on another loopback port could otherwise use it
+/// to reach state-changing routes: `SameSite=Lax` does not cover same-site
 /// requests, since ports are not part of a site. Every supported browser
 /// attaches `Sec-Fetch-Site` to page-initiated requests, and a page
 /// cannot strip or forge it; bearer clients (the shell, the tray,
@@ -87,9 +88,9 @@ pub(crate) fn fetch_metadata_allows_cookie(headers: &HeaderMap) -> bool {
 /// Whether the request's Fetch Metadata permits ambient, credential-free
 /// access from a loopback peer. Unlike the cookie rule, an absent header
 /// is admitted: non-browser clients (curl, the SDK, the workshop) never
-/// send `Sec-Fetch-Site`, and they are exactly who keyless loopback is
+/// send `Sec-Fetch-Site`, and they are who keyless loopback is
 /// for. A browser always sends it, so `cross-site` and `same-site` - a
-/// page on any other origin riding the user's loopback peer into
+/// page on any other origin using the user's loopback peer to reach
 /// `POST /admin/shutdown` - are refused, as is any value the header
 /// grammar does not name. `same-origin` (the config SPA) and `none` (a
 /// typed URL) pass.

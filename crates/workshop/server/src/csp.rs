@@ -46,7 +46,7 @@ const POLICY_FRAMEABLE: &str = "default-src 'self'; script-src 'self'; \
 
 /// Middleware stamping `Content-Security-Policy` on every response,
 /// including error envelopes. The proxied config SPA (`/gateway/config/`)
-/// carries the self-frameable variant; everything else forbids framing.
+/// receives the self-frameable variant; everything else forbids framing.
 pub(crate) async fn header(request: Request, next: Next) -> Response {
     let frameable = request.uri().path().starts_with("/gateway/config/");
     let mut response = next.run(request).await;

@@ -42,18 +42,18 @@ use crate::blocking::{blocking, try_blocking};
 
 /// Meta key naming the file format; always [`FORMAT_NAME`].
 pub(crate) const META_FORMAT: &str = "format";
-/// Meta key carrying the schema version; always [`SUPPORTED_VERSION`]
+/// Meta key holding the schema version; always [`SUPPORTED_VERSION`]
 /// for files this build writes.
 pub(crate) const META_VERSION: &str = "version";
-/// Meta key carrying the display name; absent means "use the file stem".
+/// Meta key holding the display name; absent means "use the file stem".
 pub(crate) const META_NAME: &str = "name";
-/// Meta key carrying the RFC 3339 creation time.
+/// Meta key holding the RFC 3339 creation time.
 pub(crate) const META_CREATED_AT: &str = "created_at";
 /// The kv key holding the shell's saved geometry as JSON; the other kv
 /// keys are the opaque ui-state values in [`UI_STATE_KEYS`].
 pub(crate) const KV_WINDOW: &str = "window";
 
-/// The value every workspace file carries under [`META_FORMAT`].
+/// The value every workspace file stores under [`META_FORMAT`].
 pub(crate) const FORMAT_NAME: &str = "promptforge-workspace";
 /// The schema version this build reads and writes, as both the `meta`
 /// text and the `user_version` pragma.
@@ -119,7 +119,7 @@ impl From<turso::Error> for WorkspaceFileError {
     }
 }
 
-/// Everything a workspace file carries between sessions.
+/// Everything a workspace file holds between sessions.
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceContents {
     /// Display name (meta 'name'); defaults to the file stem.
@@ -371,8 +371,8 @@ async fn initialize(
 /// Opens the database at `path`, creating the file when absent, and
 /// returns one connection to it.
 ///
-/// The connection keeps the database alive; the caller owns nothing else.
-/// The parent directory must already exist: this creates exactly the
+/// The connection is the caller's only handle on the database and keeps
+/// it alive. The parent directory must already exist: this creates the
 /// file, never a directory.
 pub(crate) async fn open_database(path: &Path) -> Result<turso::Connection, WorkspaceFileError> {
     // turso addresses databases by string, so a path that is not UTF-8
@@ -403,7 +403,7 @@ pub async fn create_alien_database_for_test(path: &Path) -> Result<(), Workspace
 }
 
 /// Checks the stamp of an opened database without writing anything:
-/// the `meta` table must exist and carry the format name, and both the
+/// the `meta` table must exist and hold the format name, and both the
 /// `user_version` pragma and `meta.version` must be the supported version.
 async fn validate(conn: &turso::Connection, path: &Path) -> Result<(), WorkspaceFileError> {
     let refused = || WorkspaceFileError::NotAWorkspace {
@@ -463,7 +463,7 @@ async fn has_meta_table(conn: &turso::Connection) -> Result<bool, WorkspaceFileE
     }
 }
 
-/// An I/O failure as the file error that carries it.
+/// An I/O failure as the file error that wraps it.
 pub(crate) fn io_failure(source: io::Error) -> WorkspaceFileError {
     WorkspaceFileError::Io { source }
 }

@@ -28,13 +28,13 @@ pub enum Error {
         #[source]
         source: BoxedSource,
         /// The 1-based file line of the YAML failure, surfaced from the
-        /// retained cause's location when it carries one.
+        /// retained cause's location when it has one.
         line: Option<u32>,
         /// The 1-based file column of the YAML failure, when known.
         column: Option<u32>,
     },
 
-    /// A structurally-classified parse failure carrying a stable kind and an
+    /// A structurally-classified parse failure with a stable kind and an
     /// optional source byte span, so [`ParseError`] can expose the
     /// classification and location from stored fields instead of inferring
     /// them from message text.
@@ -56,7 +56,7 @@ pub enum Error {
         column: Option<u32>,
     },
 
-    /// A Lua region failed to compile at parse time, carried as the
+    /// A Lua region failed to compile at parse time, preserved as the
     /// `promptforge-lua` substrate so the compiler diagnostic chain survives
     /// unchanged.
     #[error(transparent)]
@@ -85,10 +85,10 @@ impl Error {
     }
 
     /// Stamps a structured parse failure with the prompt's frontmatter name
-    /// and, when the failure carries a source span, the span's 1-based
+    /// and, when the failure has a source span, the span's 1-based
     /// file line and byte column. Every other variant passes through
     /// unchanged: a frontmatter failure predates the name, and a Lua
-    /// compile failure already carries its own position.
+    /// compile failure already reports its own position.
     pub(crate) fn with_prompt_context(
         self,
         name: &str,
@@ -162,7 +162,7 @@ pub enum ParseErrorKind {
 
 /// The error returned by [`Prompt::parse`](crate::Prompt::parse).
 ///
-/// Carries a stable [`kind`](ParseError::kind) classifier and preserves the
+/// Holds a stable [`kind`](ParseError::kind) classifier and preserves the
 /// underlying cause through [`std::error::Error::source`]. `#[non_exhaustive]`
 /// and not constructible outside the crate.
 #[derive(Debug)]
@@ -177,7 +177,7 @@ pub struct ParseError {
 }
 
 /// The classified parts of a substrate error: the stable kind plus the
-/// location fields the substrate carries (the source span, the prompt's
+/// location fields the substrate holds (the source span, the prompt's
 /// frontmatter name when the failure postdates the frontmatter, and the
 /// 1-based line/column - surfaced from the retained YAML failure, or
 /// computed from the span).
@@ -237,7 +237,7 @@ impl ParseError {
     /// Returns the byte span of the offending region, when one is available.
     ///
     /// Structural failures that can locate the offending region (for example a
-    /// duplicate sibling section) carry a byte span; others return `None`.
+    /// duplicate sibling section) have a byte span; others return `None`.
     #[must_use]
     pub fn span(&self) -> Option<(usize, usize)> {
         self.span
@@ -257,7 +257,7 @@ impl ParseError {
     /// Returns the 1-based file line of the failure, when known.
     ///
     /// Frontmatter failures surface the retained YAML error's position;
-    /// structured failures with a source span carry the span's start line.
+    /// structured failures with a source span report the span's start line.
     #[must_use]
     pub fn line(&self) -> Option<u32> {
         self.line

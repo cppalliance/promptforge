@@ -2,7 +2,7 @@
 
 /// Whether a tool's output is trusted or must be treated as untrusted data.
 ///
-/// Trust is mandatory and carried in [`ToolOutput`] so it cannot be forgotten:
+/// Trust is mandatory and stored in [`ToolOutput`] so it cannot be forgotten:
 /// an [`OutputTrust::Untrusted`] result is nonce-wrapped before it can reach
 /// model input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +15,7 @@ pub enum OutputTrust {
 }
 
 /// The result of a successful tool call (the harness's `Tool::call`),
-/// carrying its text and trust.
+/// with its text and trust.
 ///
 /// Trust travels with the value so the executor never has to remember a
 /// separate flag; construct with [`ToolOutput::trusted`] or
@@ -120,7 +120,7 @@ pub struct ToolError {
 }
 
 impl ToolError {
-    /// Builds a model-safe error carrying only a message (kind `Other`).
+    /// Builds a model-safe error with only a message (kind `Other`).
     ///
     /// # Examples
     /// ```

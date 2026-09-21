@@ -180,7 +180,7 @@ pub async fn prepare_run(
     prepare_source(&source, prompt_path, args, services).await
 }
 
-/// Prepares prompt text already in hand, exactly as [`prepare_run`] does
+/// Prepares prompt text already in hand, just as [`prepare_run`] does
 /// after its read: for a prompt that has no file of its own (an embedded
 /// built-in) or one the caller read itself. `prompt_path` is the path the
 /// source is attributed to in [`PrepareError::Parse`].

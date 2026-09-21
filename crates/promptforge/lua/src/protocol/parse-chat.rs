@@ -24,10 +24,10 @@ fn chat_error(message: impl Into<String>) -> FieldFailure {
 }
 
 /// Parses a `chat` request: the loop shim's optional leading `handle`, the
-/// author-supplied `messages` list, and the optional `opts` table carrying
+/// author-supplied `messages` list, and the optional `opts` table holding
 /// `model` and `tools`.
 ///
-/// The whole messages/opts validation lives here, once - the driver
+/// The whole messages/opts validation happens here, once - the driver
 /// converts the validated records without re-checking. Every
 /// author-argument failure is the call's error, raised at the
 /// `models.chat` or `models.loop` call site so a program `pcall` catches
@@ -67,7 +67,7 @@ pub(super) fn parse_chat(
 /// `tool_calls` is an array of normalized `{id, name, arguments}` records.
 /// The empty list is rejected, and every error names the offending 1-based
 /// index (the list is Lua-authored). Entry fields beyond the four a record
-/// carries (`role`, `content`, `tool_call_id`, `tool_calls`) are accepted
+/// holds (`role`, `content`, `tool_call_id`, `tool_calls`) are accepted
 /// and dropped. Cross-record checks - unique call IDs, complete
 /// call-result pairing, provider-required alternation - belong to the
 /// per-dispatch projection ([`crate::projection`]), not this parse.
@@ -168,7 +168,7 @@ fn parse_message(
 }
 
 /// Parses one message's content-parts array: each part is a table whose
-/// `type` names a known part kind, carrying that kind's required payload.
+/// `type` names a known part kind, with that kind's required payload.
 fn parse_content_parts(
     index: usize,
     parts: &[serde_json::Value],
@@ -180,8 +180,8 @@ fn parse_content_parts(
         .collect()
 }
 
-/// Parses one content part into its typed variant: a `text` part carries a
-/// string `text` field; an `image_url` part carries an `image_url` table
+/// Parses one content part into its typed variant: a `text` part has a
+/// string `text` field; an `image_url` part has an `image_url` table
 /// with a string `url` field.
 fn parse_content_part(
     index: usize,

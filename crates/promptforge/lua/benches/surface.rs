@@ -36,7 +36,7 @@ fn emitter() -> Emitter {
 }
 
 /// A section VM with host values injected, so the `messages` namespace is
-/// installed exactly as the executor installs it.
+/// installed as the executor installs it.
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(1),

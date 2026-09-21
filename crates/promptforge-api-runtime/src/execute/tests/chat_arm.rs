@@ -131,7 +131,7 @@ pub(super) fn chat_context(
     ctx
 }
 
-/// A text reply carrying everything a round can report: a model name, a
+/// A text reply with everything a round can report: a model name, a
 /// reasoning side channel, a finish reason, and usage metrics.
 fn rich_text_reply(content: &str) -> GatewayReply {
     GatewayReply::Json(json!({

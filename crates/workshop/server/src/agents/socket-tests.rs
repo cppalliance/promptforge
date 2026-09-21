@@ -1,5 +1,6 @@
 //! The agent socket's rendering of a refused launch: the error frame's
-//! text carries the refusal's cause chain, not just its outermost message.
+//! text includes the refusal's cause chain, not just its outermost
+//! message.
 
 use std::io;
 

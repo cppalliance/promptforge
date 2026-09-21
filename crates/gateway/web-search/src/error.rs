@@ -15,8 +15,8 @@ pub enum WebSearchError {
     MalformedRequest(String),
 
     /// A transport- or protocol-level failure from the provider call. The
-    /// variants live in [`ProtocolError`]; the service propagates them so the
-    /// gateway renders one envelope shape.
+    /// variants are defined in [`ProtocolError`]; the service propagates
+    /// them so the gateway renders one envelope shape.
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
 }

@@ -24,7 +24,7 @@ use workshop_protocol::ErrorEnvelope;
 
 use crate::store::USER_STATE_KEYS;
 
-/// Whether wire bodies carry internal failure detail. Debug builds append
+/// Whether wire bodies include internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at
 /// the variant's own message.
 const LEAK_DETAIL: bool = cfg!(debug_assertions);

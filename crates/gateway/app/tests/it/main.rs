@@ -1,5 +1,5 @@
 //! End-to-end Gateway route tests against fake OpenAI backends. Cross-product
-//! model-client compatibility lives in the boundary-neutral integration crate.
+//! model-client compatibility sits in the boundary-neutral integration crate.
 //!
 //! Determinism: the gateway is served on a caller-owned ephemeral listener
 //! (no port race), shutdown is driven by a rendezvous `TestServer` fixture,
@@ -7,7 +7,7 @@
 //! handles instead of sleeps.
 //!
 //! The suite is split into cohesive area modules (IT-007): shared scaffolding
-//! lives in [`support`]; tests are grouped by surface into [`chat`],
+//! sits in [`support`]; tests are grouped by surface into [`chat`],
 //! [`embeddings`], [`rerank`], [`speech`], [`web_search`], [`queue`],
 //! [`profiles`], and [`local`]. The `cuda` module holds the opt-in live CUDA
 //! proof, and the Windows-only `icon` module pins the exe's embedded program

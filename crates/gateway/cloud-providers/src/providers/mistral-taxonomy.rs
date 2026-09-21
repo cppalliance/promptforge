@@ -1,6 +1,6 @@
 //! Mistral taxonomy: the product line is the family, and `-YYMM`
 //! snapshot suffixes collapse onto their canonical entry when the base
-//! id is in the same list. Mistral's rules live in this sibling module
+//! id is in the same list. Mistral's rules sit in this sibling module
 //! so the provider file stays under the workspace's 500-line ceiling.
 
 use gateway_api_types::ModelEntry;

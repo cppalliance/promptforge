@@ -1615,7 +1615,7 @@ base_url = "https://"
 }
 
 /// A catalog with one endpoint and one model of the given kind; `extra`
-/// carries the model's variable field lines.
+/// supplies the model's variable field lines.
 fn catalog_with_model_kind(kind: &str, extra: &str) -> String {
     format!(
         r#"
@@ -1642,7 +1642,7 @@ endpoints = ["e"]
     )
 }
 
-/// A catalog with one local model of the given kind; `extra` carries the
+/// A catalog with one local model of the given kind; `extra` supplies the
 /// model's variable field lines.
 fn catalog_with_local_model_kind(kind: &str, extra: &str) -> String {
     format!(

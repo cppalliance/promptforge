@@ -25,8 +25,8 @@
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-user-state`,
-//!   `workshop-workspace`), the harness door `harness-api`, and the
-//!   engine's vocabulary `promptforge-api-types`. Read `AGENTS.md`
+//!   `workshop-workspace`), the harness's public API `harness-api`, and
+//!   the engine's vocabulary `promptforge-api-types`. Read `AGENTS.md`
 //!   before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
@@ -34,11 +34,11 @@
 //!   frames and writes every outbound frame itself - no outbox channel,
 //!   no writer task. Agent sessions are the documented carve-out: they
 //!   outlive sockets on purpose, and the harness keeps their table.
-//! - The harness reads the shell's state as data pushed across its door
-//!   (the gateway binding, the chat catalog, the host snapshot); the
-//!   shell never hands it a bus, a registry, or a callback into itself.
-//!   Status-bar reporting for a session is derived on this side from the
-//!   session's events, deltas, and error reports.
+//! - The harness reads the shell's state as data pushed through its
+//!   public API (the gateway binding, the chat catalog, the host
+//!   snapshot); the shell never hands it a bus, a registry, or a
+//!   callback into itself. Status-bar reporting for a session is derived
+//!   in the shell from the session's events, deltas, and error reports.
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.

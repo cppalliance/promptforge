@@ -1,4 +1,4 @@
-//! Tests that run failures pushed to the client carry their cause chain.
+//! Tests that run failures pushed to the client keep their cause chain.
 
 use std::io;
 use std::path::PathBuf;

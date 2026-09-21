@@ -26,9 +26,9 @@ type BoxFetch = Pin<Box<dyn Future<Output = Result<Vec<ModelEntry>, FetchError>>
 /// A failed fetch never fails the build: a provider with a previous
 /// slice is copied verbatim with `status` rewritten to `stale`, and a
 /// provider with no previous slice records `unavailable` with an empty
-/// `models` array. Niche providers are never fetched and take nothing
-/// from `previous`; their `static` slice is read from a per-provider
-/// JSON file compiled into the binary.
+/// `models` array. A Niche provider's `static` slice comes from a
+/// per-provider JSON file compiled into the binary rather than from the
+/// network or `previous`.
 pub async fn build_sheet(
     client: &reqwest::Client,
     previous: Option<Sheet>,
@@ -183,10 +183,9 @@ fn static_json(name: &str) -> Option<&'static str> {
     }
 }
 
-/// A Niche provider's slice: never fetched, and nothing taken from the
-/// previous sheet. The hand-curated models are compiled into the binary
-/// from the provider's JSON file; `fetched_at` is always absent because
-/// the slice has never been fresh.
+/// A Niche provider's slice, built entirely from the hand-curated models
+/// compiled into the binary from the provider's JSON file. `fetched_at`
+/// is always absent because the slice has never been fresh.
 fn static_slice(provider: &Provider) -> ProviderSlice {
     let models = static_json(provider.name).map_or_else(Vec::new, |json| {
         serde_json::from_str(json).unwrap_or_else(|err| {
@@ -215,7 +214,7 @@ mod tests {
     use super::*;
     use crate::EnvVarSpec;
 
-    /// The descriptor env vars every test provider carries: one key-role
+    /// The descriptor env vars every test provider lists: one key-role
     /// entry and one config-role entry with a default.
     const TEST_ENV_VARS: &[EnvVarSpec] = &[
         EnvVarSpec {

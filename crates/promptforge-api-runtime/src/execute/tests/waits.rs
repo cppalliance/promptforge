@@ -15,8 +15,8 @@ use super::scheduler::{GateObserver, StoreGate, gated_store, scheduler_context_o
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 
-/// A recorder that keeps the typed observation, so a payload-carrying
-/// variant can be matched whole. Shared with the timeout suite, which
+/// A recorder that keeps the typed observation, so a variant with a
+/// payload can be matched whole. Shared with the timeout suite, which
 /// exercises the same wait shims under `opts.timeout`.
 #[derive(Default)]
 pub(super) struct WaitRecorder(Mutex<Vec<(String, Observation)>>);

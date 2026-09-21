@@ -13,9 +13,8 @@ use crate::commands::Command;
 use crate::test_support::{app_state, fake_chat_backend, parking_executor, wait_until};
 use crate::{AppState, build_router};
 
-/// A state whose catalog declares a local model the routing table never
-/// holds: `app_state` routes only the remote catalog, so `slow-model`
-/// stays configured-but-unloaded for the test's whole run.
+/// `app_state` routes only the remote catalog, so the catalog's local
+/// `slow-model` stays configured-but-unloaded for the test's whole run.
 fn state() -> AppState {
     let config = Config::from_toml_str(
         "config-version = 0\n\

@@ -30,7 +30,7 @@ use crate::error::AppError;
 /// Refuses cross-site requests, rebound hosts, and non-JSON bodies on the
 /// API router.
 ///
-/// A request carrying `Sec-Fetch-Site: cross-site` or naming a
+/// A request with `Sec-Fetch-Site: cross-site` or naming a
 /// non-loopback `Host` answers 403; a POST, PUT, or PATCH whose
 /// `Content-Type` is not `application/json` answers 415. Everything else
 /// passes through.
@@ -55,7 +55,7 @@ pub async fn guard(request: Request, next: Next) -> Response {
 /// Whether the request's authority is loopback, closing DNS rebinding: a
 /// page on a rebound hostname reaches this server with same-origin
 /// Sec-Fetch metadata and a freely chosen content type, but its `Host`
-/// still carries the attacker's name. The URI authority (HTTP/2,
+/// still holds the attacker's name. The URI authority (HTTP/2,
 /// absolute-form) wins over the `Host` header. A request naming no
 /// authority at all passes - browsers always send `Host`, so that is a
 /// native client.

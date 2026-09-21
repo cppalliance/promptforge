@@ -67,7 +67,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 }
 
 /// The entry's family: the `deepseek-v<N>` version prefix for the
-/// numbered line, and the whole id otherwise. The catalog carries no
+/// numbered line, and the whole id otherwise. The catalog has no
 /// snapshot suffixes, so there is no collapse pass.
 fn family_of(id: &str) -> String {
     if let Some(rest) = id.strip_prefix("deepseek-v") {

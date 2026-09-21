@@ -87,7 +87,7 @@ enum SwitchTarget {
 
 impl SwitchTarget {
     /// The target as the optional profile name the wire and the active
-    /// state carry.
+    /// state hold.
     fn name(&self) -> Option<&str> {
         match self {
             Self::Profile(name) => Some(name),
@@ -238,7 +238,7 @@ impl MenuBus {
     /// Marks a switch to profile `name` - or to no profile, for `None` -
     /// as in flight and publishes a fresh snapshot; `chat_ready` is false
     /// until the switch finishes. The wire snapshot names the target
-    /// profile while one is being selected and carries `null` for a
+    /// profile while one is being selected and holds `null` for a
     /// switch to no profile; `switch_in_flight` is true for either.
     ///
     /// # Errors
@@ -335,9 +335,9 @@ impl MenuBus {
     /// Records the gateway's profile list and active profile and
     /// publishes a fresh snapshot. The boot and reconnect paths feed
     /// this from the gateway's profile endpoints; a gateway without
-    /// profile support feeds an empty list - a state, not an error.
-    /// The selection is untouched: catalog reconciliation owns
-    /// selection validity, not the profile list.
+    /// profile support feeds an empty list. The selection is untouched:
+    /// catalog reconciliation owns selection validity, not the profile
+    /// list.
     pub fn set_profiles(&self, profiles: Vec<String>, active: Option<String>) {
         let mut state = self.lock_state();
         state.profiles = profiles;

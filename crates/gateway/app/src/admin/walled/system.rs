@@ -267,7 +267,7 @@ fn disk_metrics(cache_root: &Path) -> Option<DiskMetrics> {
 
 /// Name and VRAM of NVML device 0, or `None` when the device or any reading
 /// is unavailable - the UI hides the GPU card rather than erroring, so a
-/// partial reading carries no information worth returning.
+/// partial reading contains no information worth returning.
 fn gpu_metrics(nvml: &Nvml) -> Option<GpuMetrics> {
     let device = nvml.device_by_index(0).ok()?;
     let memory = device.memory_info().ok()?;

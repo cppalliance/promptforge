@@ -3,7 +3,7 @@
 use super::{GatewaySnapshot, GatewayUpdater};
 
 impl GatewaySnapshot {
-    /// Whether this generation is a supervised local sidecar: it carries
+    /// Whether this generation is a supervised local sidecar: it holds
     /// a validated local Gateway boot, so the Workshop may shut it down
     /// and its supervisor relaunches the sibling. An explicitly configured
     /// endpoint (a LAN gateway) never is.
@@ -34,7 +34,7 @@ impl GatewaySnapshot {
 
 impl GatewayUpdater {
     /// Requests shutdown from the validated local Gateway in the current
-    /// consumer snapshot, exactly as that snapshot's
+    /// consumer snapshot, as that snapshot's
     /// [`GatewaySnapshot::request_shutdown`] does.
     ///
     /// Returns `Ok(false)` without sending a request when the current Gateway

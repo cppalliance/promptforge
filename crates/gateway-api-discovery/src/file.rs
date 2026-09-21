@@ -75,8 +75,7 @@ impl GatewayDiscoveryFile {
     }
 
     /// Reads and validates the gateway discovery file in `run_dir`,
-    /// returning
-    /// `None` when no file exists.
+    /// returning `None` when no file exists.
     ///
     /// # Errors
     /// Returns [`SidecarError::Read`] when the file exists but cannot be

@@ -3,7 +3,7 @@
 //!
 //! A file is live when one OS process boot with a `promptforge-gateway`
 //! image is unchanged across a same-socket health and bearer proof, and
-//! the file carries a boot identity. Anything else is stale - the Jupyter
+//! the file includes a boot identity. Anything else is stale - the Jupyter
 //! phantom-server bug class - and the file is deleted so the next reader
 //! relaunches instead of retrying a corpse.
 
@@ -43,7 +43,7 @@ pub enum StaleReason {
     /// binary (a reused pid).
     #[error("the recorded pid belongs to another process image")]
     ImageMismatch,
-    /// The gateway discovery file does not carry a usable boot identity.
+    /// The gateway discovery file has no usable boot identity.
     #[error("the gateway discovery file has no usable boot identity")]
     BootIdentityInvalid,
     /// The pid changed process boot while validation was in progress.

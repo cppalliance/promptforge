@@ -3,20 +3,19 @@
 //! [`SectionContext`] is born at a section entry and dies at its teardown.
 //! It owns the section VM plus the state the block walk reads and writes -
 //! the `sys` JSON, the seeded `var`, a spawned chain's `item`, and the
-//! tool-call counts - and it
-//! carries the frame's effective reporting handles (the task-scoped event
-//! emitter and the turn counter) seeded out of the run context; a task
-//! chain's context is the spawn's fork, so the handles reach the frame and
-//! the task's nested chains through the one value. Each driver is one
-//! construct-run-teardown cycle: the constructor absorbs the VM
-//! construction and setup preamble ([`SectionContext::new`] for a walked
-//! section, [`SectionContext::new_live_h1`] for the live H1 pass; the two
-//! live in the `construct` sibling), the scheduler's chain steps run the
-//! blocks, and the frame's [`Drop`] impl is the single teardown boundary.
+//! tool-call counts - and it holds the frame's effective reporting handles
+//! (the task-scoped event emitter and the turn counter) seeded out of the
+//! run context; a task chain's context is the spawn's fork, so the handles
+//! reach the frame and the task's nested chains through the one value.
+//! Each driver is one construct-run-teardown cycle: the constructor
+//! absorbs the VM construction and setup preamble ([`SectionContext::new`]
+//! for a walked section, [`SectionContext::new_live_h1`] for the live H1
+//! pass; the two sit in the `construct` sibling), the scheduler's chain
+//! steps run the blocks, and the frame's [`Drop`] impl is the single
+//! teardown boundary.
 //!
-//! The run-scoped inputs
-//! (bindings, models, limits, the shared tools) arrive through the
-//! [`RunState`].
+//! The run-scoped inputs (bindings, models, limits, the shared tools)
+//! arrive through the [`RunState`].
 
 #[path = "section_context-construct.rs"]
 mod construct;
@@ -31,7 +30,7 @@ use promptforge_api_types::event::lifecycle;
 use super::context::RunState;
 use promptforge_api_types::emitter::Emitter;
 
-/// The seeds a spawned task chain's first section entry carries beyond the
+/// The seeds a spawned task chain's first section entry receives beyond the
 /// shared host contract: `tasks.spawn`'s `opts.item` (installed as the
 /// `item` global and the `{{ item }}` substitution source) and `opts.index`
 /// (reported as `sys.index`). Empty for every other entry.
@@ -55,7 +54,7 @@ pub(crate) struct SectionContext {
     /// The frame's engine: the owned section VM, `Some` from construction
     /// until the frame's `Drop` takes it for the teardown boundary.
     /// `SectionVm` stays a standalone type in `lua/` with its own test
-    /// suite - composition, not merger.
+    /// suite.
     vm: Option<SectionVm>,
     /// The section's own name, retained so `Drop` reports the teardown
     /// boundary and the completion observation without a parameter.

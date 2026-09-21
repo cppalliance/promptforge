@@ -2,9 +2,9 @@
 //!
 //! A host builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a
 //! pinned offline entry) and names catalog entries by their validated
-//! [`ModelId`]. These types carry no transport, binding, or invocation
-//! machinery; they are the shared vocabulary every promptforge crate and
-//! host may name.
+//! [`ModelId`]. These types are the shared vocabulary every promptforge
+//! crate and host may name, with no transport, binding, or invocation
+//! machinery.
 
 use std::num::NonZeroU32;
 
@@ -309,7 +309,7 @@ impl ModelCatalog {
         &self.models
     }
 
-    /// Returns whether the catalog has no entries.
+    /// Returns whether the catalog is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.models.is_empty()

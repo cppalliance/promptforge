@@ -3,10 +3,9 @@
 //! ([`queue`]) that both the gateway's routing table and the local inference
 //! crate build on.
 //!
-//! This crate holds only the shared data plane: it resolves no model names,
-//! serves no HTTP, and constructs no upstreams. The gateway's routing table
-//! (`Routing`) and its error envelopes live in the gateway crate; local
-//! provisioning and the `llama-server` lifecycle live in
+//! This crate holds only the shared data plane. The gateway's routing
+//! table (`Routing`) and its error envelopes sit in the gateway crate;
+//! local provisioning and the `llama-server` lifecycle sit in
 //! `gateway-local`.
 //!
 //! The `test-helpers` feature exposes the `DominionQueue` observation seams

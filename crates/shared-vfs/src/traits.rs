@@ -1,7 +1,7 @@
 //! The backend traits, the policy hook, and execution identity.
 //!
 //! `Vfs` is one backend behind the virtual namespace; `VfsAccess` is one
-//! identity's session with it, carrying every filesystem operation.
+//! identity's session with it and declares every filesystem operation.
 //! `Policy` is the per-handle hook consulted before the claims check, and
 //! `ExecId` is the identity every operation is attributed to.
 
@@ -62,7 +62,7 @@ pub trait Vfs: Send {
 /// Paths arrive validated, canonicalized, and interned; backends never
 /// re-validate.
 pub trait VfsAccess: Send {
-    /// Reads the file at `path` exactly as stored.
+    /// Reads the file at `path` as stored.
     ///
     /// # Errors
     ///

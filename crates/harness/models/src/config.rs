@@ -82,7 +82,7 @@ impl fmt::Display for SecretString {
     }
 }
 
-/// A validated gateway API base URL (the OpenAI-shaped `/v1` root).
+/// A validated gateway API base URL (the OpenAI-compatible `/v1` root).
 ///
 /// Construction rejects a URL without an `http`/`https` scheme or host, so a
 /// client can never be pointed at an unusable endpoint. A trailing slash is
@@ -102,7 +102,7 @@ impl GatewayEndpoint {
     /// # Errors
     /// Returns a `Config`-kind [`CompletionError`] when `url` is not a valid
     /// absolute URL, does not use an `http`/`https` scheme, names no host,
-    /// embeds credentials (a `user:pass@` component), or carries a query or
+    /// embeds credentials (a `user:pass@` component), or has a query or
     /// fragment (an API root is a bare path). Parsing goes through a strict URL
     /// type (F12) rather than a hand-rolled prefix/host scan.
     ///

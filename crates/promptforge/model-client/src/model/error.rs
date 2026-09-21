@@ -37,9 +37,9 @@ pub enum CompletionErrorKind {
 
 /// The error a model round or a catalog fetch fails with: what the
 /// transport that performed it (the harness's gateway client) reports, and
-/// what a `Chat` effect's answer carries back into the engine.
+/// what comes back into the engine in a `Chat` effect's answer.
 ///
-/// Carries a stable [`kind`](CompletionError::kind) classifier plus the
+/// Holds a stable [`kind`](CompletionError::kind) classifier plus the
 /// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
 /// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`
 /// and constructible outside the crate only from the hidden substrate.
@@ -104,7 +104,7 @@ impl CompletionError {
     /// was a non-success backend status.
     ///
     /// This is an explicit opt-in diagnostic channel (F5): the raw body never
-    /// rides in the public [`Display`](std::fmt::Display), so a hostile or
+    /// appears in the public [`Display`](std::fmt::Display), so a hostile or
     /// sensitive payload cannot forge log lines or leak into an error message.
     /// The returned text is bounded and has its control characters escaped.
     #[must_use]
@@ -115,7 +115,7 @@ impl CompletionError {
         }
     }
 
-    /// Returns the backend HTTP status carried by a status or body-read failure.
+    /// Returns the backend HTTP status from a status or body-read failure.
     ///
     /// `BackendBodyRead` failures are classified as
     /// [`CompletionErrorKind::Transport`] but still retain the response status.

@@ -11,7 +11,7 @@
 //! Recovery discipline: the gateway is terminal with no fallback, so a
 //! recognized-but-malformed fence never fails the turn and never masquerades
 //! as final text - the choice's content is emptied and a `gateway_warning`
-//! field carries the reason (also logged at warn). A malformed fence is a
+//! field holds the reason (also logged at warn). A malformed fence is a
 //! post-receipt parse failure, kept distinct from pre-call translation
 //! errors (a non-array `tools` request field is a malformed request, rejected
 //! before the upstream call).
@@ -113,9 +113,9 @@ pub(crate) fn apply_response(response: &mut ChatResponse, model: &str) {
 ///
 /// The tool-code fence can only be parsed from the whole reply, so the
 /// streaming path buffers one upstream round trip and re-emits the rewritten
-/// response: one chunk carries each choice's message as its delta (tool-call
+/// response: one chunk holds each choice's message as its delta (tool-call
 /// entries gain the fragment `index` streaming clients merge by), and a
-/// trailing empty-choices summary chunk carries the response's top-level
+/// trailing empty-choices summary chunk includes the response's top-level
 /// `usage`/`timings`/`metrics` passthrough fields, so
 /// `stream_options.include_usage` semantics survive the buffered round trip.
 pub(crate) fn response_chunks(response: ChatResponse) -> StreamedChunks {
@@ -303,7 +303,7 @@ fn peel_tool_code_fence<'a>(input: &'a str, next_id: &mut usize) -> Peel<'a> {
 /// Peels one leading ` ```json ` / ` ``` ` fence that holds OpenAI `tool_calls`.
 ///
 /// A code fence is only tool protocol when its body decodes to a JSON object
-/// carrying a non-empty `tool_calls` array; anything else is an ordinary data
+/// with a non-empty `tool_calls` array; anything else is an ordinary data
 /// fence ([`Peel::NotAFence`]) that stays text. Once the fence *is* recognized
 /// as tool protocol, malformed calls are [`Peel::Malformed`] and preserve the
 /// concrete decode error rather than falling back to text.
@@ -379,7 +379,7 @@ enum ToolCallRejection {
 /// Parses the OpenAI `message.tool_calls` array into [`ParsedCall`]s.
 ///
 /// Each call must be an object with a nonblank string `id`, a `type` of
-/// `"function"`, an object `function` carrying a nonblank string `name`, and
+/// `"function"`, an object `function` with a nonblank string `name`, and
 /// an `arguments` field that is present, a JSON-encoded string, and decodes
 /// to a JSON object. Blank identifiers, duplicate ids within the turn, missing
 /// or null arguments, and arguments that do not decode to an object are all
@@ -510,9 +510,9 @@ fn is_identifier(s: &str) -> bool {
 
 /// Parses one `name(args)` call line into a [`ParsedCall`].
 ///
-/// The name must be an identifier, the arguments live between the first `(` and
-/// the final `)`, and the `)` must end the non-whitespace input so trailing text
-/// after the call is rejected rather than silently ignored.
+/// The name must be an identifier, the arguments sit between the first `(`
+/// and the final `)`, and the `)` must end the non-whitespace input so
+/// trailing text after the call is rejected rather than silently ignored.
 fn parse_tool_code_call(line: &str, index: usize) -> Option<ParsedCall> {
     let line = line.trim();
     let open = line.find('(')?;
@@ -646,7 +646,7 @@ fn scan_top_level<T>(
 }
 
 /// Byte offset of the first top-level `=` in `part`, outside quotes and nested
-/// delimiters, or `None` when the part carries no top-level assignment.
+/// delimiters, or `None` when the part has no top-level assignment.
 fn top_level_assignment(part: &str) -> Option<usize> {
     scan_top_level(part, false, |idx, ch| (ch == '=').then_some(idx))
         .ok()
@@ -743,8 +743,8 @@ fn render_signature(function: &Value, name: &str) -> String {
     }
 }
 
-/// Renders a system guide from OpenAI-shaped `tools`, or `None` when the list is
-/// empty or lists no usable tool.
+/// Renders a system guide from the OpenAI `tools` array, or `None` when the
+/// list is empty or lists no usable tool.
 fn render_tool_guide(list: &[Value]) -> Option<String> {
     if list.is_empty() {
         return None;

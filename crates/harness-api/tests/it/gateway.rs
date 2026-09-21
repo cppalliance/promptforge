@@ -1,4 +1,4 @@
-//! The gateway binding the client pushes across the door.
+//! The gateway binding the client pushes through the public API.
 
 use std::path::PathBuf;
 

@@ -12,7 +12,7 @@
 //! trusted output ([`ToolOutput`], [`OutputTrust`]), the model-safe
 //! [`ToolError`], and the contract errors. The implementation trait behind a
 //! descriptor (`Tool`) is the harness's, in `harness-capabilities`, beside
-//! the concrete tool crates; the prompt parser and the executor live in their
+//! the concrete tool crates; the prompt parser and the executor sit in their
 //! own crates and depend on `promptforge-api-types`.
 
 mod descriptor;

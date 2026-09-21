@@ -2067,7 +2067,7 @@ fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState
     )
 }
 
-/// The prompt each gateway request carried, in arrival order.
+/// The prompt in each gateway request, in arrival order.
 pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
     gateway
         .requests()
@@ -3562,7 +3562,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
 // --- Script-initiated tools.call dispatch ---
 
 /// Arms the run's shared tool set with `bindings`, every alias in the
-/// prompt-wide `always` scope, so a section's effective scope carries them
+/// prompt-wide `always` scope, so a section's effective scope includes them
 /// without an H1 pass; the implementations go to the driver's host table.
 fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>) {
     arm_tools(ctx, bindings);

@@ -13,9 +13,9 @@ use super::requirements::Requirements;
 /// What exists in this deployment and its standing policy: the host roots,
 /// the nesting cap, and the catalog of tools the host has made available.
 ///
-/// Safe to share across concurrent runs (`Sync`) and holds nothing live:
-/// everything that can change per run rides the [`RunContext`], and the
-/// tool implementations stay with the host (the harness's activation, in
+/// Safe to share across concurrent runs (`Sync`): everything that can
+/// change per run sits on the [`RunContext`], and the tool implementations
+/// stay with the host (the harness's activation, in
 /// `harness-capabilities`). Model-free: the gateway's model list is a
 /// host-UI concern and never crosses this interface.
 ///
@@ -23,11 +23,11 @@ use super::requirements::Requirements;
 /// `base_vfs`, fills the prompt's tool slots by identity against the
 /// catalog, and fills the model bindings from the context's current model;
 /// the `max_depth` guard lands with the sub-run adapter in the deferred
-/// prompt-pack work and is carried, not consulted, until then.
+/// prompt-pack work and is stored but not consulted until then.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// Host roots the per-run router mounts at `/`; never carries the
+    /// Host roots the per-run router mounts at `/`; never includes the
     /// store mount (prepare adds a fresh per-run memory backend there).
     base_vfs: VfsRef,
     /// Maximum model-orchestrated prompt-tool nesting, copied into every
@@ -52,7 +52,7 @@ impl Environment {
     }
 
     /// Sets the host roots the per-run router mounts at `/`. Consulted by
-    /// [`prepare`](Environment::prepare); the base must carry host roots
+    /// [`prepare`](Environment::prepare); the base must hold host roots
     /// only, never the store mount.
     #[must_use]
     pub fn base_vfs(mut self, vfs: VfsRef) -> Environment {
@@ -62,7 +62,7 @@ impl Environment {
 
     /// Sets the maximum model-orchestrated prompt-tool nesting depth.
     /// Consulted by the sub-run adapter when it lands with the
-    /// prompt-pack; carried inert until then.
+    /// prompt-pack; stored inert until then.
     #[must_use]
     pub fn max_depth(mut self, max_depth: u32) -> Environment {
         self.max_depth = max_depth;

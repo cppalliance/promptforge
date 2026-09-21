@@ -49,8 +49,8 @@ pub type SsePayloadStream = Pin<Box<dyn Stream<Item = Result<String, GatewayErro
 /// client methods.
 #[non_exhaustive]
 pub enum CacheResponse {
-    /// The gateway is downloading the blob; `payloads` carries the SSE
-    /// stream of [`CacheEvent`] JSON documents.
+    /// The gateway is downloading the blob; `payloads` is the SSE stream
+    /// of [`CacheEvent`] JSON documents.
     Download {
         /// The gateway's success status.
         status: reqwest::StatusCode,
@@ -83,7 +83,7 @@ impl std::fmt::Debug for CacheResponse {
 /// One event of the gateway cache API: a download progress sample, or the
 /// terminal state of a cache-ensure call.
 ///
-/// The `path` a `Ready` event carries names a file on the gateway host, so
+/// The `path` in a `Ready` event names a file on the gateway host, so
 /// the cache API is only meaningful to a workshop sharing the gateway's
 /// filesystem - the standard local deployment, where both run on loopback.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

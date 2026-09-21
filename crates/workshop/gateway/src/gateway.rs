@@ -73,7 +73,7 @@ pub enum GatewayError {
         body: String,
     },
 
-    /// A gateway event stream carried a block that could not be decoded,
+    /// A gateway event stream contained a block that could not be decoded,
     /// one that grew past its size bound without terminating, or a
     /// success answer whose body was not the documented JSON shape.
     #[non_exhaustive]
@@ -126,7 +126,7 @@ impl GatewayClient {
     /// Builds a client for `base_url` authenticating with `api_key`.
     ///
     /// A trailing slash on `base_url` is trimmed so route joins stay clean.
-    /// An empty `api_key` disables authentication: requests then carry no
+    /// An empty `api_key` disables authentication: requests then omit the
     /// `Authorization` header.
     ///
     /// # Errors
@@ -196,8 +196,8 @@ impl GatewayClient {
     /// with the client's bearer key. Only the wait for the response
     /// headers is bounded - a forwarded cache download or config apply
     /// legitimately runs for minutes - and the whole body is buffered
-    /// for relay. A non-success status is relayed in the
-    /// returned [`ForwardedResponse`], not reported as an error.
+    /// for relay. A non-success status is relayed in the returned
+    /// [`ForwardedResponse`].
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
@@ -241,7 +241,7 @@ impl GatewayClient {
     ///
     /// Returns `true` only when the gateway answers with a success status:
     /// a transport failure, a probe timeout, or a non-success answer all
-    /// read as unreachable. The request never carries the client's API key
+    /// read as unreachable. The request never includes the client's API key
     /// (the endpoint is unauthenticated by design) and is capped at the
     /// probe bound (`HEALTH_PROBE_TIMEOUT` by default).
     pub async fn health(&self) -> bool {
@@ -257,8 +257,7 @@ impl GatewayClient {
 
     /// Fetches the gateway's model catalog from `GET /v1/models`.
     ///
-    /// A non-success status is relayed in the returned
-    /// [`GatewayResponse`], not reported as an error.
+    /// A non-success status is relayed in the returned [`GatewayResponse`].
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
@@ -276,8 +275,7 @@ impl GatewayClient {
 
     /// Fetches the gateway's profile list from `GET /admin/profiles`.
     ///
-    /// A non-success status is relayed in the returned
-    /// [`GatewayResponse`], not reported as an error.
+    /// A non-success status is relayed in the returned [`GatewayResponse`].
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
@@ -294,10 +292,9 @@ impl GatewayClient {
     }
 
     /// Fetches the gateway's live status from `GET /admin/status`, which
-    /// carries the active profile's name.
+    /// reports the active profile's name.
     ///
-    /// A non-success status is relayed in the returned
-    /// [`GatewayResponse`], not reported as an error.
+    /// A non-success status is relayed in the returned [`GatewayResponse`].
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
@@ -320,8 +317,7 @@ impl GatewayClient {
     /// The gateway persists the selection and answers one JSON document,
     /// returned as [`SwitchResponse::Selected`], reporting whether it
     /// must restart to serve the selection; the caller decides how that
-    /// restart happens. A non-success answer is buffered and returned,
-    /// not reported as an error.
+    /// restart happens. A non-success answer is buffered and returned.
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
@@ -358,9 +354,9 @@ impl GatewayClient {
     /// ([`CacheResponse::Buffered`] on a success status); a miss answers
     /// `text/event-stream` and returns [`CacheResponse::Download`], whose
     /// payload stream ends in a terminal `ready` or `error` event. Only
-    /// the wait for the response headers is bounded; a download stream
-    /// itself carries no deadline. A non-success status is buffered and
-    /// returned, not reported as an error.
+    /// the wait for the response headers is bounded, so a download stream
+    /// runs without a deadline. A non-success status is buffered and
+    /// returned.
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
@@ -388,10 +384,10 @@ impl GatewayClient {
     /// sends, beginning with the snapshot replay of the operations live
     /// at connect time. Heartbeat comment lines and other non-`data:`
     /// lines are skipped. Intermediate events are lossy at the source,
-    /// so the stream promises no completeness; detect completion only
-    /// from `Finished` events, never from a fraction reaching 1.0. Only
-    /// the wait for the response headers is bounded: the subscription is
-    /// long-lived by design, so the stream itself carries no deadline.
+    /// so the stream can drop samples; detect completion only from
+    /// `Finished` events, never from a fraction reaching 1.0. Only the
+    /// wait for the response headers is bounded: the subscription is
+    /// long-lived by design, so the stream itself runs without a deadline.
     /// The stream ends when the gateway closes the body; whether to
     /// resubscribe is the caller's decision.
     ///

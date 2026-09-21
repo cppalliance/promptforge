@@ -2,7 +2,7 @@
 //!
 //! An emit site names a boundary (`lifecycle::RUN_STARTED`) and hands it
 //! to [`Emitter::report`](crate::emitter::Emitter::report), which stamps
-//! the run's coordinates on it. Each constant is exactly the constructor
+//! the run's coordinates on it. Each constant is the constructor
 //! of the matching [`Event`] variant, declared once from one list so a
 //! boundary cannot gain a constant without gaining a variant.
 //!
@@ -13,7 +13,7 @@ use super::Event;
 use crate::ids::Provenance;
 
 /// A payload-free lifecycle boundary: the constructor of one [`Event`]
-/// variant that carries only the three coordinates.
+/// variant that takes only the three coordinates.
 pub type Lifecycle = fn(String, String, Provenance) -> Event;
 
 /// Declares one constant per payload-free lifecycle variant, each the

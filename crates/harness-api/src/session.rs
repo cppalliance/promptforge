@@ -7,7 +7,7 @@
 //!
 //! The wait frames a session announces its input waits with, and the
 //! error a refused answer returns, are the wait registry's own. A
-//! session's failure reports carry a [`FailureKind`] a client matches on
+//! session's failure reports include a [`FailureKind`] a client matches on
 //! beside the display message; the sentence is never the classifier.
 
 pub use harness_sessions::input::{WaitError, WaitFrame};

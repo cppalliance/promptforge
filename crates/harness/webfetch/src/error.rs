@@ -4,9 +4,9 @@
 //! failure mode: the URL and address policies, redirects, DNS, the size caps,
 //! the timeouts, the body read, and the content-type and decoding refusals. It
 //! is never public; the `Tool::call` boundary maps it to a narrow `ToolError`
-//! through [`FetchError::classify`]. It carries a model-facing rendering that
-//! withholds internal detail, and preserves dependency and I/O causes behind
-//! `#[source]` fields so a log can inspect the chain.
+//! through [`FetchError::classify`]. It provides a model-facing rendering
+//! that withholds internal detail, and preserves dependency and I/O causes
+//! behind `#[source]` fields so a log can inspect the chain.
 
 use std::net::IpAddr;
 
@@ -39,8 +39,9 @@ pub(crate) struct SafeUrl(String);
 impl SafeUrl {
     /// Builds a redacted URL, dropping userinfo, query, and fragment.
     ///
-    /// A string that does not parse as a URL is kept verbatim, since it carries
-    /// no parseable query to redact (for example the redirect origin sentinel).
+    /// A string that does not parse as a URL is kept verbatim, since it
+    /// has no parseable query to redact (for example the redirect origin
+    /// sentinel).
     #[must_use]
     pub(crate) fn new(raw: &str) -> SafeUrl {
         match url::Url::parse(raw) {
@@ -86,7 +87,7 @@ pub(crate) enum FetchError {
     #[error("scheme not allowed: {0}")]
     BlockedScheme(String),
 
-    /// The URL carries userinfo (a `user:pass@` component).
+    /// The URL contains userinfo (a `user:pass@` component).
     #[error("url must not contain userinfo")]
     Userinfo,
 
@@ -165,18 +166,18 @@ pub(crate) enum FetchError {
         "content type {content_type} from {url} cannot be returned as text; try an HTML version of the page or a different URL"
     )]
     UnsupportedContentType {
-        /// The URL whose response carried the unsupported type.
+        /// The URL whose response declared the unsupported type.
         url: SafeUrl,
         /// The unsupported content type, verbatim from the response header.
         content_type: String,
     },
 
-    /// The response carried no `Content-Type` header.
+    /// The response had no `Content-Type` header.
     #[error(
         "response from {url} declared no content type; refusing to guess its format; try a different URL"
     )]
     NoContentType {
-        /// The URL whose response carried no content type.
+        /// The URL whose response declared no content type.
         url: SafeUrl,
     },
 

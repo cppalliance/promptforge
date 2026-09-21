@@ -147,7 +147,7 @@ impl InputPerformer for TextInput {
     }
 }
 
-/// Never answers: the wait an operator never returns from.
+/// Stays pending forever: the wait an operator never returns from.
 pub(crate) struct PendingInput;
 
 impl InputPerformer for PendingInput {

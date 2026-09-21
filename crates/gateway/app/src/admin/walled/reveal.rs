@@ -211,7 +211,7 @@ fn reveal_command(target: &Path) -> RevealCommand {
 /// `fs::canonicalize` returns verbatim (`\\?\`) paths on Windows and
 /// explorer.exe does not accept that prefix
 /// (<https://github.com/rust-lang/rust/issues/42869>), so the command
-/// carries `C:\...` or `\\server\share\...` instead.
+/// uses `C:\...` or `\\server\share\...` instead.
 #[cfg(windows)]
 fn strip_verbatim(path: &Path) -> OsString {
     let text = path.to_string_lossy();

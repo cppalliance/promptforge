@@ -2,11 +2,11 @@
 //! activated [`ToolTable`] and calls the implementation.
 //!
 //! The engine binds tool slots against descriptors and issues a call as a
-//! [`ToolId`]; the implementations live on this side of the door, in the
-//! table activation assembled for the run. An id the table does not hold
-//! is a host-side fault (the engine bound a slot the catalog advertised,
-//! so the table should hold it), answered as the call's own failure so the
-//! run reports it at the author's call site rather than stalling.
+//! [`ToolId`]; the implementations sit on the harness side, in the table
+//! activation assembled for the run. An id the table does not hold is a
+//! host-side fault (the engine bound a slot the catalog advertised, so the
+//! table should hold it), answered as the call's own failure so the run
+//! reports it at the author's call site rather than stalling.
 
 use std::fmt;
 

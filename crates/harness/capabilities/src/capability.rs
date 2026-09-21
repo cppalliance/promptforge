@@ -4,7 +4,7 @@
 //! makes services available to the run. Capabilities are delivered in packs
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
 //! [`CapabilityId`] - kind is encoded by arity, so a capability id is
-//! `namespace/pack` and every tool it contributes lives under
+//! `namespace/pack` and every tool it contributes sits under
 //! `namespace/pack/name`. Before a run is prepared, the harness activates
 //! each declared capability by calling [`Capability::create`] with the
 //! run's [`RunServices`]; the returned [`Contribution`] is v1 tools-only
@@ -69,7 +69,7 @@ mod tests;
 ///
 /// - [`id`](Capability::id) returns the same value on every call; it is the
 ///   registry key and must be unique within a registry.
-/// - Every contributed tool's id lives under the capability's own id:
+/// - Every contributed tool's id sits under the capability's own id:
 ///   `namespace/pack/name` for a `namespace/pack` capability. Containment is
 ///   total and is checked when the run's catalog is assembled.
 /// - [`create`](Capability::create) must not panic and should return
@@ -201,7 +201,7 @@ pub struct CapabilityError {
 }
 
 impl CapabilityError {
-    /// Builds a model-safe error carrying only a message (kind `Other`).
+    /// Builds a model-safe error with only a message (kind `Other`).
     ///
     /// # Examples
     /// ```

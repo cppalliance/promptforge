@@ -43,7 +43,7 @@ pub(super) fn tool_call_reply(call_id: &str, name: &str, arguments: Value) -> Ef
 }
 
 /// The first user message of a `Chat` effect, read off its record: the
-/// prompt a `models.infer` round carries.
+/// prompt a `models.infer` round sends.
 pub(super) fn infer_prompt(effect: &Effect) -> String {
     let EffectRecord::Chat { messages, .. } = effect.record() else {
         panic!("a chat effect records its messages: {effect:?}");

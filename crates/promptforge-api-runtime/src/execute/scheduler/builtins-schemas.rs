@@ -3,7 +3,7 @@
 //! engine's own: the descriptions name what each call does and what the
 //! answer looks like, and the `task` description names the allowlisted
 //! targets so the model copies a heading the arm will accept. The arms
-//! that answer the calls live in the parent module.
+//! that answer the calls are defined in the parent module.
 
 use std::collections::BTreeMap;
 

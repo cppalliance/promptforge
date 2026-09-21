@@ -1,6 +1,6 @@
 //! Anthropic taxonomy: the model line is the family, and `-YYYYMMDD`
 //! dated snapshots collapse onto their canonical entry when the base id
-//! is in the same list. Anthropic's rules live in this sibling module so
+//! is in the same list. Anthropic's rules sit in this sibling module so
 //! the provider file stays under the workspace's 500-line ceiling.
 
 use gateway_api_types::ModelEntry;

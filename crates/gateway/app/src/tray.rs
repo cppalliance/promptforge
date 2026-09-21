@@ -6,8 +6,8 @@
 //! [`linux`]), while the tokio runtime and serving stay on the gateway
 //! thread spawned by [`crate::spawn`]. The platform-independent rules -
 //! the menu layout, the status label, the icon phase machine, the
-//! launch-at-login entry - live in [`logic`] so the idiom cannot drift
-//! between platforms, and the muda menu materialization lives in [`menu`]
+//! launch-at-login entry - sit in [`logic`] so the idiom cannot drift
+//! between platforms, and the muda menu materialization sits in [`menu`]
 //! for the same reason (Linux materializes through ksni's own menu API).
 //!
 //! [`run_with_tray`] is the binary's default main loop; `--no-tray` keeps

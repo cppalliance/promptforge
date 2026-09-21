@@ -1,8 +1,8 @@
 //! Gateway response handling: a refused connection or a stalled gateway is
-//! a transport error with its source, a wrong-shaped or empty-url success
-//! body is a backend error, an oversized success body is rejected rather
-//! than truncated, and an error body is bounded, sanitized, and keeps a
-//! mid-read failure as the error source.
+//! a transport error with its source, a success body with the wrong shape
+//! or an empty url is a backend error, an oversized success body is
+//! rejected rather than truncated, and an error body is bounded,
+//! sanitized, and keeps a mid-read failure as the error source.
 
 use super::*;
 

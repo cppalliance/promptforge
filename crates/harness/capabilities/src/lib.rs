@@ -5,12 +5,11 @@
 //! The engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge_api_types::tools::ToolCatalog`]) and issues every tool
 //! call as an effect naming an id; the implementations behind those ids
-//! live here, on the harness side of the door. A host
-//! builds one [`CapabilityRegistry`] of installed capabilities, calls
-//! [`activate`] per run to turn a prompt's declarations into the run's
-//! catalog and its [`ToolTable`] of implementations, hands the catalog to
-//! the engine's `Environment`, and resolves each `ToolCall` effect in the
-//! table.
+//! are defined here, in the harness. A host builds one
+//! [`CapabilityRegistry`] of installed capabilities, calls [`activate`]
+//! per run to turn a prompt's declarations into the run's catalog and its
+//! [`ToolTable`] of implementations, hands the catalog to the engine's
+//! `Environment`, and resolves each `ToolCall` effect in the table.
 //!
 //! ## Invariants
 //!
@@ -19,8 +18,8 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - This crate depends on no capability provider: the provider crates
 //!   depend on it for the traits, never the reverse.
 //! - Every file in this crate stays under 500 lines; split first, then

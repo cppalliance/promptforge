@@ -7,7 +7,7 @@
 //! the frozen value: reads work (absent fields read nil), and any
 //! assignment - `argv = ...` or `argv.field = ...` at any depth - raises.
 //!
-//! The freeze rides on the `_G` metatable, the same composition the lazy
+//! The freeze sits on the `_G` metatable, the same composition the lazy
 //! `prose` guard uses: `argv` is never a raw global in a frozen section, so
 //! every read and every write of the name crosses the guard, and every
 //! other key delegates to whatever metatable was installed first (the

@@ -1,6 +1,6 @@
-//! Route deadlines: the wall-clock tiers every HTTP route group carries
+//! Route deadlines: the wall-clock tiers HTTP route groups run under
 //! and the middleware that enforces them. The composition root applies
-//! the default tier; the gateway-relay routes carry the longer tier so
+//! the default tier; the gateway-relay routes take the longer tier so
 //! the gateway client's own timeout fires first.
 
 use std::time::Duration;
@@ -11,8 +11,8 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 
-/// Deadline for ordinary HTTP routes: local, fast work that should never
-/// run long. A response not produced in time answers 408.
+/// Deadline for ordinary HTTP routes: local, fast work. A response not
+/// produced in time answers 408.
 pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Deadline for routes that relay a buffered gateway call: longer than the

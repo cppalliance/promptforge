@@ -1,12 +1,12 @@
 //! Validation of the gateway API root the provider POSTs search requests to.
 
-/// A validated gateway API base URL (the OpenAI-shaped `/v1` root).
+/// A validated gateway API base URL (the OpenAI-compatible `/v1` root).
 ///
 /// Construction rejects a URL without an `http`/`https` scheme or host, one
-/// that embeds credentials, or one carrying a query or fragment, so the tool
-/// can never be pointed at an unusable endpoint or one whose address itself
-/// carries a secret. A trailing slash is trimmed so request paths join
-/// cleanly.
+/// that embeds credentials, or one with a query or fragment, so the tool
+/// can never be pointed at an unusable endpoint or one whose address
+/// itself contains a secret. A trailing slash is trimmed so request paths
+/// join cleanly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Endpoint {
     url: String,
@@ -21,7 +21,7 @@ impl Endpoint {
     /// # Errors
     /// Returns an [`EndpointError`] when `url` is not a valid absolute URL,
     /// does not use an `http`/`https` scheme, names no host, embeds
-    /// credentials (a `user:pass@` component), or carries a query or fragment
+    /// credentials (a `user:pass@` component), or has a query or fragment
     /// (an API root is a bare path).
     pub(crate) fn new(url: &str) -> Result<Endpoint, EndpointError> {
         let trimmed = url.trim();
@@ -71,7 +71,7 @@ pub(crate) enum EndpointError {
     /// The URL embedded credentials.
     #[error("must not embed credentials (user:pass@)")]
     Credentials,
-    /// The URL carried a query or fragment.
+    /// The URL had a query or fragment.
     #[error("must not carry a query or fragment")]
     QueryOrFragment,
 }

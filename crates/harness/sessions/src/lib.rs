@@ -10,12 +10,12 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
-//! - Every binding a run reads arrives as data pushed across the door
-//!   (the gateway, the chat catalog, the host snapshot); this crate never
-//!   resolves a gateway or reads a client's state itself. It is the one
-//!   place a capability provider crate is named, at registration.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
+//! - Every binding a run reads arrives as data pushed through the public
+//!   API (the gateway, the chat catalog, the host snapshot); this crate
+//!   never resolves a gateway or reads a client's state itself. It is the
+//!   one place a capability provider crate is named, at registration.
 //! - The supervisor's state transitions are a pure reducer whose matches
 //!   stay wildcard-free, so a new variant is a compile error.
 //! - A session's transcript is the run log: the live broadcast and a

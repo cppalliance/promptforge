@@ -648,9 +648,9 @@ async fn gemma_response_tool_code_fence_becomes_tool_calls() {
     gateway.shutdown().await;
 }
 
-/// A malformed `tool_code` fence never fails the turn and never masquerades
-/// as final text: the content is emptied and a `gateway_warning` field carries
-/// the reason.
+/// A malformed `tool_code` fence still completes the turn: the content is
+/// emptied so the fence never reaches the client as final text, and a
+/// `gateway_warning` field reports the reason.
 #[tokio::test]
 async fn gemma_malformed_fence_yields_empty_content_and_gateway_warning() {
     let reply = gemma_reply_with_content("```tool_code\nsearch(query=bareword)\n```");
@@ -682,8 +682,8 @@ async fn gemma_malformed_fence_yields_empty_content_and_gateway_warning() {
 /// A `stream: true` request to a `gemma3_tool_code` model still gets tool
 /// calling: the gateway buffers one non-streaming upstream round trip
 /// (stripping `stream` and `stream_options`, injecting the guide), rewrites
-/// the fence, and re-emits the result as SSE chunks whose delta carries the
-/// indexed tool calls, closed by `[DONE]`.
+/// the fence, and re-emits the result as SSE chunks whose delta contains
+/// the indexed tool calls, closed by `[DONE]`.
 #[tokio::test]
 async fn gemma_stream_true_emulates_tool_calls_over_sse() {
     let reply = gemma_reply_with_content("```tool_code\nsearch(query=\"a\")\n```");
@@ -785,7 +785,7 @@ async fn gemma_stream_true_emulates_tool_calls_over_sse() {
     gateway.shutdown().await;
 }
 
-/// One SSE `data:` line carrying an OpenAI streaming chunk.
+/// One SSE `data:` line containing an OpenAI streaming chunk.
 fn sse_line(model: &str, content: &str) -> String {
     format!(
         "data: {{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"{model}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{content}\"}},\"finish_reason\":null}}]}}\n\n"
@@ -801,7 +801,7 @@ async fn text_within(response: reqwest::Response) -> String {
 }
 
 /// The mock upstream emits three chunks; the client receives three SSE data
-/// lines (each a validated chunk carrying the caller's model name) plus the
+/// lines (each a validated chunk that names the caller's model) plus the
 /// terminal `data: [DONE]`.
 #[tokio::test]
 async fn stream_true_relays_typed_chunks_and_done() {

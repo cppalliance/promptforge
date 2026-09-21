@@ -29,7 +29,7 @@ async fn post_contract(body: serde_json::Value) -> (StatusCode, serde_json::Valu
     (status, json)
 }
 
-/// A prompt exercising every frontmatter key the contract carries.
+/// A prompt exercising every frontmatter key in the contract.
 const FULL_PROMPT: &str = r"---
 name: full
 description: does everything

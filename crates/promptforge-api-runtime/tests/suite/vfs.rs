@@ -1,6 +1,6 @@
 //! The executor's `VfsRef` host contract: an end-to-end run over the
-//! prepared handle, and the papergate-shaped seed-run-extract round trip
-//! a production host drives with no real files - prepare, seed the
+//! prepared handle, and the seed-run-extract round trip a production host
+//! like papergate drives with no real files - prepare, seed the
 //! declared input through the run's handle, run, extract the declared
 //! output, and charge a missing output to the prompt's promise as an
 //! explicit contract error.

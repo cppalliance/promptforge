@@ -1,6 +1,6 @@
 //! The `tools` namespace: scoping, invocation, and counts.
 //!
-//! One Lua table carries every tool operation, mirroring the `models.*`
+//! One Lua table holds every tool operation, mirroring the `models.*`
 //! namespacing of model operations. Binding is the frontmatter's: the run's
 //! filled slots arrive in the shared [`ToolSet`], and the table scopes among
 //! them by alias - `add` scopes aliases into the section, `always` parks a
@@ -11,7 +11,7 @@
 //! the section's allowlist for the model's task built-ins, and `calls` is
 //! the read-only per-alias dispatch counter surface. Only filled slots are
 //! visible: scoping or advertising an unfilled alias is a hard error. The
-//! installation logic lives here, out of the VM driver; the VM only calls
+//! installation logic sits here, out of the VM driver; the VM only calls
 //! the installers in setup order.
 
 use std::sync::{Arc, Mutex};
@@ -128,9 +128,9 @@ pub(crate) fn install_tool_call_counts(
 /// Installs the tool scoping and local-tool APIs into one section VM (H1
 /// included: there is one install path for every section).
 ///
-/// The suspending `tools.call` is not installed here: yield cannot cross
-/// the Rust callback boundary, so the coroutine shim prelude installs it on
-/// this table as a Lua function.
+/// The coroutine shim prelude installs the suspending `tools.call` on this
+/// table as a Lua function, because yield cannot cross the Rust callback
+/// boundary.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if a Lua table or callback cannot be created or

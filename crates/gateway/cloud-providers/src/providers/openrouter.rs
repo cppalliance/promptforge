@@ -56,7 +56,7 @@ pub(crate) async fn fetch(
 
 /// One model as the wire reports it. `canonical_slug`, `description`,
 /// `per_request_limits`, `supported_parameters`, `default_parameters`,
-/// `supported_voices`, and `links` carry no sheet meaning and are not
+/// `supported_voices`, and `links` have no sheet meaning and are not
 /// parsed.
 #[derive(Debug, Deserialize)]
 struct WireModel {

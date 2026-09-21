@@ -1,8 +1,7 @@
 //! The close path of the session runtime: a close drains the run -
 //! outstanding effects are answered `Dropped` before the session is
 //! `Closed`; and a requested close reports its synthetic terminal to
-//! `subscribe_errors` as one `Interrupted` failure carrying the frame's
-//! wording.
+//! `subscribe_errors` as one `Interrupted` failure with the frame's wording.
 
 use harness_log::{RecordKind, RunOutcome};
 use harness_sessions::input::WaitFrame;

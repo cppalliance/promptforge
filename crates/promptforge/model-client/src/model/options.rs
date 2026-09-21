@@ -66,7 +66,7 @@ pub enum TemperatureError {
     },
 }
 
-/// Frozen per-request fields carried by a resolved model binding.
+/// Frozen per-request fields held by a resolved model binding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelInvocation {
     /// Sampling temperature, when the bind declared one.

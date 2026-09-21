@@ -11,7 +11,7 @@
 //! Running off the last section ends the run: the result is the last
 //! scalar return, else a generic completion.
 //!
-//! The walk is level-independent and never descends on its own: a jump to a
+//! The walk is level-independent and descends only on a jump: a jump to a
 //! child heading starts a child-level walk over the jumper's children under
 //! the same rules, and the parent walk resumes after the jumper when that
 //! level exhausts.
@@ -38,7 +38,7 @@
 //! from the frontmatter against the host-supplied catalog - into each
 //! section VM. Prompt-wide aliases and section additions form the
 //! effective model-visible scope, whose tools are advertised under their
-//! local aliases from the descriptor each binding carries; a call is
+//! local aliases from the descriptor each binding holds; a call is
 //! issued as a `ToolCall` effect naming the tool's id, and the host
 //! resolves the implementation.
 //!
@@ -52,18 +52,18 @@
 //!
 //! # Runtime
 //!
-//! The engine is a state machine (`run::Run`): it performs no I/O and
-//! awaits nothing. Section Lua yields request messages to the chain-stack
-//! scheduler, which turns each leaf request into an effect value the
-//! host performs and answers, so a run needs no runtime at all - the
-//! host's loop performs on whatever it likes, and the serial driver in
-//! `test_support` runs any prompt on the calling thread, host calls
-//! included. Concurrency (a fanout's arms) comes from interleaving chains
-//! at their effect boundaries, not from worker threads.
+//! The engine is a pure state machine (`run::Run`). Section Lua yields
+//! request messages to the chain-stack scheduler, which turns each leaf
+//! request into an effect value the host performs and answers, so a run
+//! needs no runtime at all - the host's loop performs on whatever it
+//! likes, and the serial driver in `test_support` runs any prompt on the
+//! calling thread, host calls included. Concurrency (a fanout's arms)
+//! comes from interleaving chains at their effect boundaries rather than
+//! from worker threads.
 //!
 //! # Module layout
 //!
-//! The run's outcome type ([`RunResult`]) lives here; the rest is split
+//! The run's outcome type ([`RunResult`]) is defined here; the rest is split
 //! into focused private children: `error` (the public [`RunError`]),
 //! `config` ([`RunContext`]/[`RunLimits`]), `environment` (the public
 //! [`Environment`], whose `prepare` fills slots against the host-supplied
@@ -113,9 +113,9 @@ pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
     InputAnswerRecord, Run, Step, StoreAnswerRecord, ToolAnswerRecord,
 };
-// The store vocabulary a `Store` effect carries and its answer returns:
+// The store vocabulary a `Store` effect holds and its answer returns:
 // named here so a host's store performer can be written against this one
-// door without reaching behind it.
+// crate without reaching behind it.
 pub use promptforge_lua::{StoreOp, StoreOutcome};
 pub use promptforge_store::StoreError;
 

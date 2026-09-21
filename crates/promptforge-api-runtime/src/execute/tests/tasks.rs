@@ -1,6 +1,6 @@
 //! The task arena and `tasks.spawn`: a spawn returns to its caller before
 //! the child chain runs, a finished child moves its slot to `Done` and
-//! reports its terminal task observation, `TaskStarted` carries the spawn
+//! reports its terminal task observation, `TaskStarted` reports the spawn
 //! seeds the child then sees (`args`, `item`, `sys.index`, `var`, its own
 //! `sys.taskid`), and spawn shares `call`'s target resolution and depth cap.
 //! The chain-end rules: a chain ending with live author tasks fails as
@@ -15,8 +15,8 @@ use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 
-/// A recorder that keeps the typed observation, so a payload-carrying
-/// variant (`TaskStarted`) can be matched whole.
+/// A recorder that keeps the typed observation, so a variant with a
+/// payload (`TaskStarted`) can be matched whole.
 #[derive(Default)]
 pub(super) struct TaskRecorder(Mutex<Vec<(String, Observation)>>);
 

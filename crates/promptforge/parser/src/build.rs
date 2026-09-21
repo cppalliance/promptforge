@@ -117,11 +117,11 @@ pub(crate) fn line_add(a: u32, b: u32) -> Result<u32> {
         .ok_or(Error::Internal("parser: source line arithmetic overflowed"))
 }
 
-/// A frontmatter tool-loop cap that cannot encode zero.
+/// A frontmatter tool-loop cap: absent or a positive, bounded count.
 ///
-/// Frontmatter either omits the cap (the runtime applies its default) or sets a
-/// positive, bounded count. Deserialization rejects `0`, negatives, and values
-/// above [`MAX_TOOL_ITERATIONS`], so no invalid cap can reach execution.
+/// An omitted cap leaves the runtime's own default in force. Deserialization
+/// rejects `0`, negatives, and values above [`MAX_TOOL_ITERATIONS`], so no
+/// invalid cap can reach execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum MaxToolIterations {
@@ -252,7 +252,7 @@ pub(crate) struct Heading {
     pub(crate) content_start_line: u32,
     /// 1-based line number within `body` of the heading line itself.
     pub(crate) source_line: u32,
-    /// Byte range of the heading within `body`, carried for span diagnostics.
+    /// Byte range of the heading within `body`, kept for span diagnostics.
     pub(crate) span: Range<usize>,
 }
 

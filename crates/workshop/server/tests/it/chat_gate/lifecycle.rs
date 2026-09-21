@@ -133,7 +133,7 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
 /// GATE 9 - catalog replacement during a profile switch. The supervisor
 /// relaunches on the new generation, and the relaunched run binds the new
 /// selection at launch. The message list starts
-/// fresh: history lives in the section's Lua state until the deferred
+/// fresh: history sits in the section's Lua state until the deferred
 /// persistence work lands.
 #[tokio::test]
 async fn gate_profile_switch_relaunches_chat_on_the_new_catalog() {

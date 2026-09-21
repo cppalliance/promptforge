@@ -124,7 +124,7 @@ pub(super) async fn put_ui_state_row(
     Ok(())
 }
 
-/// Reads the ui-state rows into a map carrying every allow-listed key;
+/// Reads the ui-state rows into a map holding every allow-listed key;
 /// runs on the actor. A row whose text no longer parses is treated as
 /// absent with a warning: the SPA falls back to its default for that
 /// one value rather than the file being refused.

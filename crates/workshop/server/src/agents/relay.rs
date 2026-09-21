@@ -11,15 +11,16 @@ use workshop_registry::Push;
 
 use super::state::SessionsState;
 
-/// Whether wire bodies carry internal failure detail. Debug builds append
+/// Whether wire bodies include internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at
 /// the failure's own message.
 const LEAK_DETAIL: bool = cfg!(debug_assertions);
 
 /// Relays the gateway's model catalog to the caller verbatim.
 ///
-/// While the heartbeat reports the gateway down, the catalog is not
-/// attempted: the route answers 502 with a user-visible message instead.
+/// While the heartbeat reports the gateway down, the route
+/// short-circuits: it answers 502 with a user-visible message instead of
+/// fetching the catalog.
 pub(crate) async fn models(State(state): State<SessionsState>) -> Response {
     // An unregistered gateway subsystem reads as the health flag's
     // optimistic default; a registered one short-circuits while down.

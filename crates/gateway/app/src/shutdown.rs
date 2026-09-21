@@ -1,7 +1,7 @@
 //! The process-shutdown signal every part of the gateway watches.
 //!
-//! It is shared state, not a route: the serve loop selects on it beside
-//! the caller-owned shutdown future, every open-ended response stream ends
+//! It is shared state: the serve loop selects on it beside the
+//! caller-owned shutdown future, every open-ended response stream ends
 //! when it fires so the graceful drain has nothing left to wait for, the
 //! tray's status tick peeks at it, and `POST /shutdown` is only one of the
 //! things that fires it.

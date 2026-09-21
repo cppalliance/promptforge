@@ -1,7 +1,7 @@
 //! Tests for `tools.add_local`: the registration rules run end to end, and
 //! the `models.loop` shim's local-tool rounds are driven at prompt level,
 //! so a model-issued call to a local tool is answered on the section VM
-//! and its trusted result rides back to the model verbatim.
+//! and its trusted result is sent back to the model verbatim.
 
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;

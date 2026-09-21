@@ -10,12 +10,12 @@ use tokio::sync::broadcast;
 
 use super::{WaitFrame, WaitRegistry};
 
-/// Guarantees a dying wait is an outcome, not silence: unless disarmed by
-/// a delivered value, dropping the guard removes the wait from the
-/// registry and pushes [`WaitFrame::Cancelled`] for its token. The
-/// performer's future is aborted by the effect loop on cancel, so this
-/// guard is what keeps a cancelled turn from leaking its wait or leaving
-/// the client prompting against a dead token.
+/// Turns a dying wait into an outcome: unless disarmed by a delivered
+/// value, dropping the guard removes the wait from the registry and
+/// pushes [`WaitFrame::Cancelled`] for its token. The performer's future
+/// is aborted by the effect loop on cancel, so this guard is what keeps a
+/// cancelled turn from leaking its wait or leaving the client prompting
+/// against a dead token.
 struct WaitGuard {
     /// The registry the wait entry is removed from.
     registry: Arc<WaitRegistry>,

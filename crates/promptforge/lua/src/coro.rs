@@ -92,7 +92,7 @@ const FAILURE_REGISTRY: &str = "promptforge.impl_coro.failure";
 /// the coroutine's stack at the raise point, before the guard's `xpcall`
 /// unwinds the block's frames. The guard's re-raise happens after that
 /// unwinding, so the traceback mlua appends to the re-raised error shows
-/// only the guard's own frame; this one carries the author's.
+/// only the guard's own frame; this one holds the author's.
 const FAILURE_TRACEBACK_REGISTRY: &str = "promptforge.impl_coro.failure_traceback";
 
 /// The shim program, compiled once and loaded per VM. Compilation of the
@@ -300,7 +300,7 @@ impl StashedFailure {
     /// traceback shows the guard's frame and nothing of the block's. When
     /// this stash recorded the real one, the appended tail is replaced with
     /// it, so the line mapper sees the author's frames. A Rust callback's
-    /// wrapped failure carries its own traceback and is left untouched.
+    /// wrapped failure has its own traceback and is left untouched.
     pub(crate) fn restore_traceback<'e>(
         &self,
         error: &'e mlua::Error,
@@ -413,7 +413,7 @@ pub fn install_model_chat_shim(lua: &Lua) -> Result<()> {
 
 /// Installs the model-issued `tool_call` form as `tools.call_as_model` on a
 /// VM whose shim prelude already ran, so a fixture section can yield a
-/// `tool_call` carrying a `call_id` straight at the driver's dispatch arm.
+/// `tool_call` with a `call_id` straight at the driver's dispatch arm.
 ///
 /// Test hosts are the only callers, so the install exists only under the
 /// `test-support` feature: in production the loop shim reaches the

@@ -201,7 +201,7 @@ impl ToolIdError {
     }
 }
 
-/// Validates one identity-shaped component (wire name).
+/// Validates one identity component (wire name).
 ///
 /// A component must be non-empty and free of the `/` namespace separator and any
 /// control character. Tool identity itself is the 3-segment global grammar

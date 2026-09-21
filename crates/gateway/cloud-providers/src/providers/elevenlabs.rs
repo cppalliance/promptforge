@@ -100,7 +100,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 /// The entry's family: the id without its trailing `_v<version>` run
 /// (`eleven_multilingual_v2` -> `eleven_multilingual`,
 /// `eleven_turbo_v2_5` -> `eleven_turbo`), and the whole id when it
-/// carries no version suffix.
+/// has no version suffix.
 fn family_of(id: &str) -> String {
     let segments: Vec<&str> = id.split('_').collect();
     for (index, segment) in segments.iter().enumerate().skip(1) {
@@ -117,7 +117,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Sets every entry's family. ElevenLabs' catalog carries no snapshot
+/// Sets every entry's family. ElevenLabs' catalog has no snapshot
 /// suffixes, so there is no collapse pass.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

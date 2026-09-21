@@ -103,7 +103,7 @@ impl Config {
         Ok(config)
     }
 
-    /// Replaces the empty path-shaped defaults with paths anchored at
+    /// Replaces the empty path defaults with paths anchored at
     /// `anchor`: an empty `server.state_dir` becomes `anchor` itself, and
     /// an empty `agents.path` becomes `agents/` under it. Explicit
     /// (non-empty) values are kept verbatim. Parsing applies this with the
@@ -142,7 +142,7 @@ pub struct ServerConfig {
     /// ignores this flag; it exists for the browser-tab frame.
     pub open_browser: bool,
     /// Directory holding the server's persistent state: agent session
-    /// event logs live under `state_dir/sessions/`, and the per-profile
+    /// event logs sit under `state_dir/sessions/`, and the per-profile
     /// model memory and boot orphan sweep anchor here. Defaults to the
     /// config file's own directory (`Config::parse` anchors the empty
     /// default there).

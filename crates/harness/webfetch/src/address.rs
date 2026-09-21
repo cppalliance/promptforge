@@ -15,8 +15,8 @@
 //!
 //! Every classified address is first normalized: an IPv4-embedded IPv6 form
 //! (IPv4-mapped `::ffff:a.b.c.d` or IPv4-compatible `::a.b.c.d`) is reduced to
-//! its embedded IPv4 value and reclassified, so a non-global IPv4 wearing an
-//! IPv6 hat cannot slip past the table.
+//! its embedded IPv4 value and reclassified, so a non-global IPv4 in IPv6
+//! form cannot slip past the table.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::LazyLock;

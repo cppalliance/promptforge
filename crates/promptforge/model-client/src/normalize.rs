@@ -3,7 +3,7 @@
 //! The wire canonicalization and the empty-response invariant live here so the
 //! rest of the runtime can stay model-agnostic. A normalized turn must yield
 //! either non-empty tool calls or non-empty text; anything else is
-//! [`Error::EmptyModelReply`], carrying the choice's `finish_reason` so the
+//! [`Error::EmptyModelReply`], holding the choice's `finish_reason` so the
 //! tool loop can classify the empty turn. The loop may still accept such a
 //! turn as its clean exit - empty text with `finish_reason == "stop"` after
 //! at least one successful tool dispatch - but normalization always raises
@@ -32,7 +32,7 @@ const EMPTY_REPLY_REASONING_IGNORED: &str =
 
 /// A parsed assistant turn: outcome plus payload-free metadata.
 ///
-/// `Eq` is intentionally omitted: [`CompletionResult`] carries tool-call
+/// `Eq` is intentionally omitted: [`CompletionResult`] holds tool-call
 /// arguments as a [`serde_json::Value`], which is not `Eq` (it can hold an
 /// `f64`), so only `Clone` and `PartialEq` are coherent here.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +108,7 @@ pub(crate) fn turn_context(body: &Value) -> Result<TurnContext<'_>> {
 }
 
 /// The empty-reply error for a turn with no product, noting whether an ignored
-/// reasoning side channel was present and carrying the choice's
+/// reasoning side channel was present and holding the choice's
 /// `finish_reason` so the tool loop can classify the empty turn.
 pub(crate) fn empty_reply_error(reasoning_present: bool, finish_reason: Option<String>) -> Error {
     Error::EmptyModelReply {
@@ -184,11 +184,11 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
 /// Parses the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
 ///
 /// Each call must be an object with a nonblank string `id`, an object
-/// `function` carrying a nonblank string `name`, and an `arguments` field that
-/// is present, a JSON-encoded string, and decodes to a JSON object. Blank
-/// identifiers, duplicate ids within the turn, missing or null arguments, and
-/// arguments that do not decode to an object are all rejected rather than
-/// coerced.
+/// `function` containing a nonblank string `name`, and an `arguments`
+/// field that is present, a JSON-encoded string, and decodes to a JSON
+/// object. Blank identifiers, duplicate ids within the turn, missing or
+/// null arguments, and arguments that do not decode to an object are all
+/// rejected rather than coerced.
 pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
     let mut calls = Vec::with_capacity(raw_calls.len());
     let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -342,9 +342,9 @@ pub(crate) fn response_metadata(body: &Value) -> ResponseMetadata {
 
 /// The serving model from the body's top-level `model` field.
 ///
-/// Every OpenAI-shaped backend names the model in its response, so a missing
-/// or non-string value is anomalous: it records an empty string and a
-/// diagnostic, never fails the call.
+/// Every backend that speaks this protocol names the model in its response,
+/// so a missing or non-string value is anomalous: it records an empty
+/// string and a diagnostic, never fails the call.
 fn parse_model(body: &Value, diagnostics: &mut Vec<String>) -> String {
     if let Some(Value::String(model)) = body.get("model") {
         model.clone()
@@ -393,14 +393,14 @@ struct WireUsage {
     completion_tokens_details: Option<WireCompletionTokensDetails>,
 }
 
-/// The nested `prompt_tokens_details` object carrying the cache detail.
+/// The nested `prompt_tokens_details` object holding the cache detail.
 #[derive(Deserialize)]
 struct WirePromptTokensDetails {
     #[serde(default)]
     cached_tokens: Option<u32>,
 }
 
-/// The nested `completion_tokens_details` object carrying the reasoning
+/// The nested `completion_tokens_details` object holding the reasoning
 /// detail.
 #[derive(Deserialize)]
 struct WireCompletionTokensDetails {

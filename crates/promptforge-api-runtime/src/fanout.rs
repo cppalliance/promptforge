@@ -10,8 +10,8 @@
 //! protocol (`promptforge-lua`'s `__impl_fanout.lua`): it spawns one task
 //! per member, keeps at most the run's `max_fanout_concurrency` live, and
 //! waits on the live set, so the scheduler holds no fanout state. This
-//! module carries [`resolve_sibling`], the one heading resolution those
-//! surfaces share; the collection enumeration lives in the `promptforge-lua`
+//! module defines [`resolve_sibling`], the one heading resolution those
+//! surfaces share; the collection enumeration sits in the `promptforge-lua`
 //! crate, beside the VM and the coroutine protocol that consume it.
 
 use crate::parser::Section;

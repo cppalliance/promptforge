@@ -7,7 +7,7 @@
 //! run.
 //! The worker begins one [`Activity`] on the process hub per command it
 //! runs, labelled with the command's name, and hands it to the body, which
-//! writes its stages into the text; every command carries a
+//! writes its stages into the text; every command holds a
 //! [`CancellationToken`] the worker honors at chunk and phase boundaries.
 //! The in-process status ([`CommandQueue::active_command`] and
 //! [`CommandQueue::pending_commands`]) feeds the tray and the admin routes.
@@ -81,7 +81,7 @@ pub(crate) enum Command {
     },
     /// Downloads and verifies one model into the artifact store. Spawning it
     /// into the routing table needs the model's full configuration, which
-    /// this command does not carry; that arrives with the command's first
+    /// this command does not include; that arrives with the command's first
     /// producer.
     #[cfg_attr(
         not(test),
@@ -129,7 +129,7 @@ impl Command {
         }
     }
 
-    /// The token the worker honors, when the command carries one.
+    /// The token the worker honors, when the command has one.
     pub(crate) fn token(&self) -> Option<CancellationToken> {
         match self {
             Command::LoadProfile { token, .. }
@@ -225,7 +225,7 @@ impl std::fmt::Debug for ExecutorOverride {
 
 /// A point-in-time readout of the running command. What the command is
 /// doing right now is the hub's [`Progress`](gateway_api_types::Progress)
-/// text, not part of this readout.
+/// text.
 #[derive(Debug, Clone)]
 pub(crate) struct CommandStatus {
     /// The command's display name, for example `load-profile: main`.

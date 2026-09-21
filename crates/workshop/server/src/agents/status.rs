@@ -1,7 +1,7 @@
 //! The shell's status relay for one agent session: the status-bar frames
 //! and the backoff reset the session's run used to push from inside the
-//! sessions crate, now derived on this side of the harness door from the
-//! session's live events, deltas, and error reports.
+//! sessions crate, now derived in the shell from the session's live
+//! events, deltas, and error reports.
 //!
 //! One relay task per session, spawned at launch. It holds only the
 //! session's broadcast receivers, never the session handle, so it ends by
@@ -98,7 +98,7 @@ const RUN_FAILED_LABEL: &str = "Agent failed";
 /// call the program survived, a run that ended in error, or the synthetic
 /// terminal of an interrupt - and the shell labels it; the report's
 /// message passes through as the description, the same text the socket's
-/// error frame carries. Each kind is terminal for its turn and never
+/// error frame reports. Each kind is terminal for its turn and never
 /// reaches a reply, so this status is the one frame that releases the
 /// turn-dispatch Thinking push; without it the status bar's sustained
 /// amber LED never returns to idle.

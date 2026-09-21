@@ -1,9 +1,9 @@
-//! The session run's environment: the bindings a client pushes across the
-//! door (the gateway, the chat catalog, the host snapshot), the resources
-//! the harness builds from one gateway generation (the capability
-//! registry of first-party capabilities and the model client), and the
-//! launch-time resolution of the client's selected model into the run's
-//! context.
+//! The session run's environment: the bindings a client pushes through
+//! the public API (the gateway, the chat catalog, the host snapshot), the
+//! resources the harness builds from one gateway generation (the
+//! capability registry of first-party capabilities and the model client),
+//! and the launch-time resolution of the client's selected model into the
+//! run's context.
 //!
 //! Everything here arrives as data. The harness never resolves a gateway,
 //! reads a menu, or names a workspace crate: the client pushes a
@@ -30,8 +30,8 @@ use tokio::sync::watch;
 ///
 /// The client pushes a binding at startup and on every gateway
 /// replacement; the harness rebuilds its capability registry and model
-/// client when `generation` changes. The binding is data pushed across
-/// the door: the harness never resolves a gateway itself.
+/// client when `generation` changes. The binding is data pushed through
+/// the public API: the harness never resolves a gateway itself.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GatewayBinding {
     /// The gateway's base URL.
@@ -43,7 +43,7 @@ pub struct GatewayBinding {
 }
 
 impl GatewayBinding {
-    /// The gateway's OpenAI-shaped API root: `base_url` with `/v1`.
+    /// The gateway's OpenAI-compatible API root: `base_url` with `/v1`.
     #[must_use]
     pub fn api_root(&self) -> String {
         format!("{}/v1", self.base_url.trim_end_matches('/'))
@@ -104,7 +104,7 @@ impl HostSnapshot {
 
 /// Builds a registry holding the first-party capabilities for one gateway
 /// generation: today `promptforge/web`, built from the gateway's API root
-/// (`root`, the OpenAI-shaped `/v1` base) and bearer `token`. The
+/// (`root`, the OpenAI-compatible `/v1` base) and bearer `token`. The
 /// registry is rebuilt when the gateway generation changes, so a
 /// replacement gateway's root and key reach the contributed tools.
 ///
@@ -217,7 +217,7 @@ impl GatewayResources {
 /// The bindings one harness holds for every session it serves, each
 /// replaceable by the client and each watched by the sessions.
 ///
-/// A generation watch carries the latest generation (`None` before the
+/// A generation watch holds the latest generation (`None` before the
 /// first push); a session that observes a change reads the value behind
 /// it. The gateway's resources are rebuilt only when its generation
 /// changes: pushing the same generation twice is a no-op.

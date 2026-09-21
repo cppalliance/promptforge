@@ -41,8 +41,8 @@ impl Record {
 }
 
 /// Owned run inputs a fixture supplies: the run name and an `Arc` observer
-/// so the offline `run` helper can build the [`RunHost`] the observer
-/// rides on. These fixtures never reach a model, so no client or debug
+/// so the offline `run` helper can build the [`RunHost`] that holds the
+/// observer. These fixtures never reach a model, so no client or debug
 /// sink is configured.
 pub(super) struct RunOptions {
     pub(super) execution: &'static str,
@@ -50,14 +50,14 @@ pub(super) struct RunOptions {
 }
 
 impl RunOptions {
-    /// The host side of the fixture run: the observer, nothing else.
+    /// The host side of the fixture run: the observer alone.
     fn host(self) -> RunHost {
         RunHost::new().observer(self.observer)
     }
 }
 
 /// Prepares a fixture run against the default environment and returns the
-/// prepared context, the host the observer rides on, and the run's own VFS
+/// prepared context, the host that holds the observer, and the run's own VFS
 /// handle - the prepared router - for seeding before the run and
 /// extraction after. The fixture tools are accepted for signature parity
 /// only; contributing them to a run takes a capability and a declared

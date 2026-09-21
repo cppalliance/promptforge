@@ -16,7 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 # The performer trait the chat performer implements, and (in tests) the
 # harness's one instrumented spawn wrapper the mock gateways run under.
 harness-runner.workspace = true
-# The engine door: the chat vocabulary (Message, ToolSchema, Completion,
+# The engine's public API: the chat vocabulary (Message, ToolSchema, Completion,
 # CompletionError) this transport exchanges with a Run's Chat effect, and
 # the SSE reassembly the streamed body is folded through.
 promptforge-api-runtime.workspace = true

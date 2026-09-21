@@ -1,6 +1,6 @@
 //! xAI provider: the public descriptor plus the private variance of
 //! `GET /v1/models` - Bearer auth over the OpenAI list shape, extended
-//! with `aliases` (carried on the wire; the sheet schema has no aliases
+//! with `aliases` (present on the wire; the sheet schema has no aliases
 //! field, so they are deliberately dropped), `context_length`, and
 //! per-token pricing reported as USD cents per 100M tokens.
 //!
@@ -113,7 +113,7 @@ fn family_of(id: &str) -> String {
 }
 
 /// Sets every entry's family, then collapses `-MMDD` snapshot suffixes
-/// onto their canonical entries. Ids carrying the date as an infix
+/// onto their canonical entries. Ids with the date as an infix
 /// (`grok-4.20-0309-reasoning`) are not suffixes and stay canonical.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
@@ -132,7 +132,7 @@ mod tests {
     use crate::providers::openai_shape::ListResponse;
 
     /// The documented example response shape: one fully extended entry
-    /// and one entry carrying neither pricing nor a context length.
+    /// and one entry with neither pricing nor a context length.
     const LIST: &str = r#"{
   "object": "list",
   "data": [

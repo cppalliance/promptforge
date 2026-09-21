@@ -1,6 +1,6 @@
 //! AWS Signature Version 4 signing for the Bedrock list request: a
 //! hand-assembled HMAC-SHA256 `Authorization` header over the
-//! canonical GET. The signer lives in this sibling module so the
+//! canonical GET. The signer sits in this sibling module so the
 //! provider file stays under the workspace's 500-line ceiling.
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -23,7 +23,7 @@ pub(super) fn amz_date(now: OffsetDateTime) -> String {
     )
 }
 
-/// The host (with any non-default port) a request to `url` carries.
+/// The host (with any non-default port) named by `url`.
 pub(super) fn host_of(url: &str) -> &str {
     let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
     after_scheme.split('/').next().unwrap_or(after_scheme)

@@ -1,10 +1,10 @@
 //! The `web_search` tool: proxy a search query through the gateway.
 //!
-//! This tool does not talk to a search provider directly. Instead it POSTs the
-//! query to the gateway's `POST /v1/tools/web_search` endpoint with the shared
-//! bearer token, so the vendor credential (the Brave API key) never leaves the
-//! server. The gateway's JSON results are validated for shape and returned as
-//! an untrusted string, ready to hand back to the model.
+//! This tool POSTs the query to the gateway's `POST /v1/tools/web_search`
+//! endpoint with the shared bearer token instead of calling a search
+//! provider directly, so the vendor credential (the Brave API key) never
+//! leaves the server. The gateway's JSON results are validated for shape
+//! and returned as an untrusted string, ready to hand back to the model.
 
 use std::fmt;
 use std::time::Duration;
@@ -25,10 +25,10 @@ const MAX_ERROR_BODY: usize = 2000;
 
 /// The largest successful response body accepted from the gateway, in bytes.
 ///
-/// Search results carry third-party web content, so the body is bounded to keep
-/// a hostile or misbehaving upstream from returning an unbounded payload. A body
-/// past this cap is rejected rather than silently truncated, since a truncated
-/// JSON document is not a valid result set.
+/// Search results include third-party web content, so the body is bounded
+/// to keep a hostile or misbehaving upstream from returning an unbounded
+/// payload. A body past this cap is rejected rather than silently
+/// truncated, since a truncated JSON document is not a valid result set.
 const MAX_RESPONSE_BODY: usize = 256 * 1024;
 
 /// The deadline applied to the HTTP client and every outbound request, so a
@@ -52,20 +52,20 @@ const MAX_DOMAINS: usize = 20;
 /// credential), and returns the validated results as untrusted output.
 ///
 /// # Accepted API root
-/// [`WebSearch::new`] takes the gateway's OpenAI-shaped API root (for example
-/// `https://gateway.example.com/v1`). The root is validated at construction,
-/// which requires an `http`/`https` scheme and a host and rejects embedded
-/// credentials, a query, or a fragment; any trailing slash is trimmed. Each
-/// call composes `{root}/tools/web_search`.
+/// [`WebSearch::new`] takes the gateway's OpenAI-compatible API root (for
+/// example `https://gateway.example.com/v1`). The root is validated at
+/// construction, which requires an `http`/`https` scheme and a host and
+/// rejects embedded credentials, a query, or a fragment; any trailing
+/// slash is trimmed. Each call composes `{root}/tools/web_search`.
 ///
 /// # Token handling
 /// The bearer token is stored redacted, so it never appears in `Debug` output
-/// and is never printed. It rides the `Authorization` header on each request
-/// and never appears in an argument body or an error message.
+/// and is never printed. It is sent in the `Authorization` header on each
+/// request and never appears in an argument body or an error message.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct WebSearch {
-    /// The HTTP client used for outbound requests (carries the deadline).
+    /// The HTTP client used for outbound requests (holds the deadline).
     http: reqwest::Client,
     /// The gateway base URL, with any trailing slash trimmed.
     base_url: String,
@@ -149,7 +149,7 @@ impl WebSearch {
 }
 
 /// The validated shape of a successful gateway response: an array of results,
-/// each carrying at least a string `url`. Unknown fields are ignored so the
+/// each with at least a string `url`. Unknown fields are ignored so the
 /// upstream can evolve, but a response missing `results` or a result missing a
 /// non-empty `url` is rejected as malformed.
 #[derive(serde::Deserialize)]

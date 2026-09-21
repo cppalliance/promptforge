@@ -52,8 +52,8 @@ pub(crate) async fn fetch(
     Ok(entries)
 }
 
-/// One model as the wire reports it; `owned_by` is carried on the wire
-/// but has no sheet field.
+/// One model as the wire reports it; `owned_by` appears on the wire but
+/// has no sheet field.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,

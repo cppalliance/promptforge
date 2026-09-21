@@ -36,8 +36,9 @@ pub(crate) type LookupFuture =
 pub(crate) trait Lookup: Send + Sync + 'static {
     /// Resolves `host` to zero or more socket addresses.
     ///
-    /// The port carried by each address is irrelevant: reqwest overrides it with
-    /// the URL's port. Implementations resolve `host` with any placeholder port.
+    /// The port on each address is irrelevant: reqwest overrides it with
+    /// the URL's port. Implementations resolve `host` with any
+    /// placeholder port.
     fn lookup(&self, host: String) -> LookupFuture;
 }
 
@@ -58,7 +59,7 @@ impl Lookup for SystemLookup {
 ///
 /// Construct the production resolver with [`GuardedResolver::system`], or wrap
 /// any [`Lookup`] with [`GuardedResolver::new`]. The policy is held behind an
-/// [`Arc`] so each resolving future clones only a pointer, not the whole config.
+/// [`Arc`] so each resolving future clones only a pointer.
 #[derive(Debug, Clone)]
 pub(crate) struct GuardedResolver<L = SystemLookup> {
     /// The underlying host-to-address lookup.

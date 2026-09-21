@@ -13,7 +13,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Suffix every atomic-write temp file carries; the sweep recognizes
+/// Suffix every atomic-write temp file ends with; the sweep recognizes
 /// orphans by it.
 const TEMP_SUFFIX: &str = ".pf-tmp";
 

@@ -1,7 +1,7 @@
 //! OpenRouter taxonomy: the vendor prefix of the `vendor/model` id is
 //! the family, and `:free`/`:batch`-style SKU suffixes collapse onto
 //! their canonical entry when the base id is in the same list. The
-//! output-modality kind rule lives here too. OpenRouter's rules live in
+//! output-modality kind rule is here too. OpenRouter's rules sit in
 //! this sibling module so the provider file stays under the workspace's
 //! 500-line ceiling.
 

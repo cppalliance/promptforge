@@ -4,7 +4,7 @@
 //! The store is blocking filesystem plus a reqwest-blocking client, so every
 //! store operation runs inside `tokio::task::spawn_blocking` and never blocks
 //! the executor (Amendment D). Each download begins an activity on the
-//! process hub, whose text carries `"Downloading {name} {pct}%"` for the
+//! process hub, whose text reads `"Downloading {name} {pct}%"` for the
 //! status consumers, and keeps its own byte counts on a `watch` channel the
 //! SSE response reads: intermediate samples coalesce under backpressure,
 //! while the terminal ready/error event is produced from the download task's
@@ -186,7 +186,7 @@ pub(crate) async fn delete_cache(
     })))
 }
 
-/// The byte counts of one cache download, as the SSE payload carries them.
+/// The byte counts of one cache download, as the SSE payload reports them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Sample {
     downloaded: u64,
@@ -252,7 +252,7 @@ impl DownloadProgress for ChannelProgress {
 }
 
 /// Builds the SSE response: each byte-count change re-emitted as the
-/// `{"status": "downloading", ...}` event the route has always carried, then
+/// `{"status": "downloading", ...}` event the route has always emitted, then
 /// the terminal event from the download task's join result, so the outcome
 /// can never be lost.
 ///

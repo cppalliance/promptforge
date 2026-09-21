@@ -23,10 +23,10 @@ use crate::error::AppError;
 use workshop_support::{DEFAULT_DEADLINE, with_deadline};
 
 /// The gateway-config panel routes. The origin probe is local and
-/// instant, so it carries the default deadline; the forward route is
-/// added after the layer and carries none, because a forwarded cache
-/// download or config apply legitimately runs for minutes and the
-/// gateway client already bounds the header phase.
+/// instant, so it has the default deadline; the forward route is added
+/// after the layer and has none, because a forwarded cache download or
+/// config apply legitimately runs for minutes and the gateway client
+/// already bounds the header phase.
 pub(crate) fn routes(state: AppState) -> Router {
     with_deadline(
         Router::new().route("/gateway/origin", get(gateway_origin)),

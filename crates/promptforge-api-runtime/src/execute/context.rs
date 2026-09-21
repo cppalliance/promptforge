@@ -37,7 +37,7 @@ use bound::{bound_model_set, bound_tool_set, derive_argv};
 /// The three sanctioned forks: [`with_walk_state`](Self::with_walk_state)
 /// at the H1-to-walk handoff, [`with_task`](Self::with_task) giving a
 /// spawned chain its own task emitter and turn counter, and
-/// [`with_args`](Self::with_args) carrying a `call` call's args override
+/// [`with_args`](Self::with_args) passing a `call` call's args override
 /// into its contained chain.
 #[derive(Clone)]
 pub(crate) struct RunState {
@@ -46,17 +46,17 @@ pub(crate) struct RunState {
     /// The untrusted-envelope nonce, derived once here from the run's seed
     /// so every wrap in the run shares it.
     nonce: GuardNonce,
-    /// The run's VFS handle: carries the store mount backing every
+    /// The run's VFS handle: holds the store mount backing every
     /// section's Lua `store` table. Chain steps acquire or spawn their
     /// access capabilities from it.
     vfs: VfsRef,
-    /// The execution identifier every observation carries.
+    /// The execution identifier stamped on every observation.
     execution: Arc<str>,
     /// The run's argument string for `{{ args }}` substitution.
     args: Arc<str>,
     /// The run's `argv`: the parsed form of `args` (`None` installs nil).
     /// At construction this is the derived value the H1 pass starts from;
-    /// the walk's fork carries the value H1 left behind at the freeze, so
+    /// the walk's fork holds the value H1 left behind at the freeze, so
     /// an H1 repair reaches every downstream section.
     argv: Option<Arc<serde_json::Value>>,
     /// The run's resource limits.
@@ -71,7 +71,7 @@ pub(crate) struct RunState {
     /// buffer in order with the scheduler's own.
     emitter: Arc<Emitter>,
     /// Test-only: the host seams the suites set on their `RunContext`,
-    /// carried here so the test driver's constructor can build its
+    /// kept here so the test driver's constructor can build its
     /// `RunHost` from the state alone. Shared, so a suite arms the tool
     /// implementations on a state it holds by reference.
     #[cfg(test)]
@@ -90,7 +90,7 @@ pub(crate) struct RunState {
     turns: Arc<AtomicU32>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library, so
-    /// the startup sequence carries no `Option` branch.
+    /// the startup sequence needs no `Option` branch.
     shared: Arc<LuaProgram>,
     /// The run's tool set as a read-only view: built from the prepared
     /// bindings at construction. The trait exposes no write methods; the
@@ -247,7 +247,7 @@ impl RunState {
         &self.vfs
     }
 
-    /// The execution identifier every observation carries.
+    /// The execution identifier stamped on every observation.
     pub(crate) fn execution(&self) -> &str {
         &self.execution
     }

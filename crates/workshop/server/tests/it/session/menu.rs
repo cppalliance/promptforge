@@ -1,7 +1,7 @@
 //! Model-menu behavior of the `/ws` workshop socket: `select_model` and
 //! `switch_profile` orchestration, the selection ladder without a
 //! restart, the no-profile selection, and the single-flight refusal. The
-//! sidecar restart ladder lives in the `restart` child.
+//! sidecar restart ladder sits in the `restart` child.
 
 mod restart;
 

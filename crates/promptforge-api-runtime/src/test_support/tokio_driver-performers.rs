@@ -19,8 +19,8 @@ pub type Performer = Box<dyn FnMut(Effect) -> BoxFuture<EffectAnswer> + Send>;
 
 /// The host-supplied performers, one per effect kind a host performs.
 ///
-/// A struct of boxed async closures, not a set of traits, so a caller
-/// supplies behavior without implementing anything from this module. The
+/// A struct of boxed async closures, so a caller supplies behavior
+/// without implementing anything from this module. The
 /// engine-internal kinds (`Store`, `Timer`, `TaskEvents`) are the driver's
 /// own and have no slot here.
 ///

@@ -28,7 +28,7 @@ use crate::support::Unused;
 const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
     capabilities:\n  - promptforge/web\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
-/// A prompt whose frontmatter is never closed, so it does not parse.
+/// A prompt with unclosed frontmatter, so it does not parse.
 const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n# Title\n";
 
 /// A capability-free prompt whose one section returns a constant.

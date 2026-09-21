@@ -251,7 +251,7 @@ async fn apply_with_a_new_model_swaps_the_routing_live_and_promotes_the_shadow()
 
 /// A persisted selection that differs from the running profile (a
 /// switch that persisted a new name and awaits a restart) never reaches
-/// the live document: the applied config carries no selection, the
+/// the live document: the applied config has no selection, the
 /// running profile is unchanged, and `GET /admin/config` does not report
 /// the persisted name as the running one.
 #[tokio::test]
@@ -491,7 +491,7 @@ async fn revert_removes_all_shadows_without_touching_real_files() {
 }
 
 /// Two applies in flight at once share one command: the second attaches
-/// to the first through the debounce, both replies carry the same
+/// to the first through the debounce, both replies report the same
 /// `applied` list, and the reload runs exactly once.
 #[tokio::test]
 async fn concurrent_applies_promote_the_pending_config_once() {

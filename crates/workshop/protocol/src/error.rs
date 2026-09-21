@@ -17,14 +17,14 @@ pub struct ErrorFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     message: String,
-    /// The request's `id`, echoed verbatim when it carried one and omitted
-    /// from the wire when it did not.
+    /// The request's `id`, echoed verbatim when the request had one and
+    /// omitted from the wire when it did not.
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<serde_json::Value>,
 }
 
 impl ErrorFrame {
-    /// Builds an error frame carrying `message`, echoing `id` when present.
+    /// Builds an error frame holding `message`, echoing `id` when present.
     #[must_use]
     pub fn new(message: String, id: Option<&serde_json::Value>) -> Self {
         Self {
@@ -39,7 +39,7 @@ impl ErrorFrame {
 /// `{"error":{"message":"...","code":"..."}}`.
 ///
 /// The shell maps its per-crate error types onto status codes and renders
-/// this envelope; the shape is pinned here so the wire contract lives in
+/// this envelope; the shape is pinned here so the wire contract sits in
 /// one place. Failures rendered as plain text (the asset 404) never take
 /// this shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -56,7 +56,7 @@ struct EnvelopeBody {
 }
 
 impl ErrorEnvelope {
-    /// Builds the envelope carrying `message` under the machine-readable
+    /// Builds the envelope holding `message` under the machine-readable
     /// `code`.
     #[must_use]
     pub fn new(message: impl Into<String>, code: impl Into<String>) -> Self {

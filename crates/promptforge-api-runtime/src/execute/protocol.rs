@@ -6,9 +6,9 @@
 //! validates the yield into a [`Request`], dispatches it, and resumes the
 //! coroutine with the `(ok, result)` envelope rendered from an [`Answer`].
 //!
-//! The implementation lives in the `promptforge-lua` crate (the vocabulary is
-//! produced by the Lua side) and is re-exported here unchanged, so existing
-//! `crate::execute::protocol::*` paths keep working.
+//! The implementation is defined in the `promptforge-lua` crate (the
+//! vocabulary is produced by the Lua side) and is re-exported here
+//! unchanged, so existing `crate::execute::protocol::*` paths keep working.
 
 pub(crate) use promptforge_lua::{
     Answer, ChatResult, Request, StoreOp, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome,

@@ -68,7 +68,7 @@ fn kinds(records: &[StoredRecord]) -> Vec<RecordKind> {
 }
 
 /// Asserts every effect record has exactly one answer record, that the
-/// answer comes after its effect, and that the two carry one provenance.
+/// answer comes after its effect, and that the two share one provenance.
 fn assert_one_answer_per_effect(records: &[StoredRecord]) {
     let effects: Vec<&StoredRecord> = records
         .iter()

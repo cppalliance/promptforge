@@ -20,9 +20,9 @@ use crate::effect_loop::SharedLog;
 
 /// Sleeps on tokio's timer wheel.
 ///
-/// The wheel multiplexes every pending sleep, so the harness keeps no
-/// timer heap of its own; a `Timer` effect is one `tokio::time::sleep`,
-/// and the loop's abort of the performer task tears the sleep down.
+/// The wheel multiplexes every pending sleep, so the timer machinery is
+/// tokio's; a `Timer` effect is one `tokio::time::sleep`, and the loop's
+/// abort of the performer task tears the sleep down.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TokioTimer;
 
@@ -63,8 +63,8 @@ impl StorePerformer for VfsStore {
 /// A log that refuses the read, or a stored payload that no longer parses
 /// as an event, is the host's fault, not the task's: it is reported
 /// through `tracing` and the read answers with what it could recover (an
-/// empty slice for a refused read), since the answer's shape has no
-/// error to carry.
+/// empty slice for a refused read), since the answer's shape has no room
+/// for an error.
 #[derive(Clone)]
 pub struct LogTaskEvents {
     log: SharedLog,

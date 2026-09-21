@@ -1,7 +1,7 @@
 //! Bedrock taxonomy: the vendor prefix of the `<vendor>.<model>` id is
 //! the family, and there is no snapshot collapse - the `:0`-style
 //! revision suffix is a version marker, not a dated snapshot or SKU.
-//! Bedrock's rules live in this sibling module so the provider file
+//! Bedrock's rules sit in this sibling module so the provider file
 //! stays under the workspace's 500-line ceiling.
 
 use gateway_api_types::ModelEntry;

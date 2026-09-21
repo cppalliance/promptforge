@@ -2,7 +2,7 @@
 //! table, and JSON pages, the injected [`Lookup`] map, the mock servers
 //! and their routes, and the loopback policy builders. The policy tests
 //! (redirects, credentials, URL admission, status codes) and the body
-//! tests (size caps, truncation, content types, charsets) live in the
+//! tests (size caps, truncation, content types, charsets) sit in the
 //! child modules and share these fixtures.
 
 use std::io::Write;

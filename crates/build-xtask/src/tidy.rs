@@ -9,7 +9,7 @@
 //! on demand. The file ceiling and lint inheritance checks bind every
 //! `workshop-*` and `harness-*` crate (plus `harness-api`, minus the
 //! `workshop` shell) by package name, every other crate whose crate
-//! docs carry the `## Invariants` marker, and every crate directory whose
+//! docs have the `## Invariants` marker, and every crate directory whose
 //! manifest the shared walk could not read, parse, or find a package name
 //! in - a crate with no readable name cannot be shown exempt. Those read
 //! failures are reported by `marker_violations`, their one owner.
@@ -22,7 +22,7 @@ const VOCABULARY: &[&str] = &["workshop-protocol", "workshop-registry", "worksho
 /// Tier 1: domain services. Depend on vocabulary crates only.
 const SERVICES: &[&str] = &["workshop-gateway", "workshop-menu", "workshop-status"];
 /// Tier 2: features. Depend on vocabulary and service crates. The
-/// sessions subsystem lives inside the shell since Workshop moved onto the
+/// sessions subsystem sits inside the shell since Workshop moved onto the
 /// harness, so it has no crate here.
 const FEATURES: &[&str] = &["workshop-user-state", "workshop-workspace"];
 /// Tier 3: the shell. May depend on every lower tier.
@@ -34,7 +34,7 @@ const MAX_FILE_LINES: usize = 500;
 /// Marker in a crate's `lib.rs` (or `main.rs`) crate docs. Mandatory for
 /// every `workshop-*` and `harness-*` crate (see [`family_requires_marker`]);
 /// on any other crate it opts that crate into the decomposed-architecture
-/// checks (`build-xtask` carries it deliberately). The `new-crate`
+/// checks (`build-xtask` includes it deliberately). The `new-crate`
 /// scaffolder emits it.
 const INVARIANT_MARKER: &str = "//! ## Invariants";
 
@@ -76,7 +76,7 @@ fn allowed_dependencies(name: &str) -> Option<Vec<&'static str>> {
     Some(allowed)
 }
 
-/// The crate directory for a tiered workshop package: the family lives in
+/// The crate directory for a tiered workshop package: the family sits in
 /// the `crates/workshop/` container, with the shell at `shell/`.
 fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
     let short = name.strip_prefix("workshop-").unwrap_or("shell");
@@ -151,7 +151,7 @@ fn collect_workshop_deps(table: &toml::map::Map<String, toml::Value>, names: &mu
 }
 
 /// Checks the 500-line file ceiling on every crate participating in the
-/// decomposed architecture (its `lib.rs` or `main.rs` carries the invariant
+/// decomposed architecture (its `lib.rs` or `main.rs` has the invariant
 /// marker).
 #[must_use]
 pub(crate) fn file_ceiling_violations(root: &Path) -> Vec<String> {
@@ -174,7 +174,7 @@ pub(crate) fn file_ceiling_violations(root: &Path) -> Vec<String> {
 }
 
 /// Checks that every participating crate inherits `[lints] workspace = true`
-/// (which carries `unreachable_pub`) and that the workspace root sets it.
+/// (which includes `unreachable_pub`) and that the workspace root sets it.
 #[must_use]
 pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
@@ -220,7 +220,7 @@ pub(crate) fn lint_inheritance_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Check that every crate the families bind by name carries the marker.
+/// Check that every crate the families bind by name has the marker.
 ///
 /// A manifest the walk could not read, parse, or find a package name in is
 /// reported as itself, not skipped: a crate with no readable name cannot be
@@ -243,7 +243,7 @@ pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// Whether a package name places the crate in a family that must carry the
+/// Whether a package name places the crate in a family that must have the
 /// marker: `workshop-*` and `harness-*` (which covers `harness-api`). The
 /// Tauri shell (the `workshop` package) is exempt.
 fn family_requires_marker(name: &str) -> bool {
@@ -251,9 +251,9 @@ fn family_requires_marker(name: &str) -> bool {
 }
 
 /// Crates bound by the file ceiling and lint inheritance checks: the union
-/// of the crates the families bind by name, every crate carrying the
-/// marker, and every crate whose manifest the walk could not read - an
-/// unreadable manifest cannot show a crate exempt.
+/// of the crates the families bind by name, every crate with the marker,
+/// and every crate whose manifest the walk could not read - an unreadable
+/// manifest cannot show a crate exempt.
 fn participating_crates(root: &Path) -> Vec<PathBuf> {
     let walk = crate::product::workspace_crates(root);
     walk.crates
@@ -266,7 +266,7 @@ fn participating_crates(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Whether a crate's `lib.rs` or `main.rs` crate docs carry the marker.
+/// Whether a crate's `lib.rs` or `main.rs` crate docs have the marker.
 fn carries_marker(dir: &Path) -> bool {
     ["src/lib.rs", "src/main.rs"].iter().any(|candidate| {
         fs::read_to_string(dir.join(candidate)).is_ok_and(|text| text.contains(INVARIANT_MARKER))
@@ -298,8 +298,7 @@ const WALLED_ALLOWLIST: [&str; 3] = [
 /// enforcement is structural, at the router merge in the gateway app's
 /// `lib.rs`. Its reach is one textual match, so it catches a spelled path
 /// and misses an alias, a `super::` path, a re-export, and any path a
-/// macro generates. It is a tripwire for the common case, not a proof of
-/// the boundary.
+/// macro generates. It is a tripwire for the common case.
 ///
 /// A source file the check cannot read is reported rather than skipped: a
 /// file that was never scanned cannot be shown clean.

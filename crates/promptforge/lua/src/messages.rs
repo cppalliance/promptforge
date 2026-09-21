@@ -4,7 +4,7 @@
 //! chainable `system`/`user`/`assistant`/`tool`/`append` methods live behind
 //! its metatable, so the list itself stays a plain array of message records:
 //! serde conversion, prose substitution, and the chat protocol's validation
-//! consume the records exactly as if the author had written the array by
+//! consume the records as if the author had written the array by
 //! hand. The builders perform no validation of their own; the protocol parse
 //! owns the whole message contract. The chainable builders are the one
 //! deliberate exception to the methodless-handle rule (A9).
@@ -40,7 +40,7 @@ static MESSAGES_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>>
             .map_err(SharedSource::new)
     });
 
-/// Installs the `messages` global carrying the pure-Lua `new` builder.
+/// Installs the `messages` global holding the pure-Lua `new` builder.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the builders chunk or the global install fails.

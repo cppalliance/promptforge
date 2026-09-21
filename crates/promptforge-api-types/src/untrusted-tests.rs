@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// A nonce over a host-style random seed: what a production host mints
+/// A nonce over a random seed, the way a production host mints one
 /// through `from_seed` with its own CSPRNG draw.
 fn fresh() -> GuardNonce {
     GuardNonce::from_seed(rand::random())

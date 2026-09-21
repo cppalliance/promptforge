@@ -5,7 +5,7 @@
 //! makes services available to the run. Capabilities are delivered in packs
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
 //! [`GlobalName`] - kind is encoded by arity, so a capability id is
-//! `namespace/pack` and every tool it contributes lives under
+//! `namespace/pack` and every tool it contributes sits under
 //! `namespace/pack/name`. The engine knows capabilities by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
@@ -126,7 +126,7 @@ impl CapabilityId {
         self.0.pack()
     }
 
-    /// Returns whether `tool` lives under this capability's id.
+    /// Returns whether `tool` sits under this capability's id.
     ///
     /// Containment is total: a contributed tool's id is always its
     /// contributing capability's id plus one name segment

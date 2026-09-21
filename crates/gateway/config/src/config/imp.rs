@@ -1,8 +1,8 @@
 //! `impl Config`: public load/parse entry points and read-only accessors.
 //!
-//! Semantic validation lives in [`super::validate`]; `${VAR}` interpolation
-//! lives in [`super::interpolate`]. This module is only the loading seam and the
-//! accessors the rest of the crate reads a validated `Config` through.
+//! Semantic validation sits in [`super::validate`]; `${VAR}` interpolation
+//! sits in [`super::interpolate`]. This module is only the loading seam and
+//! the accessors the rest of the crate reads a validated `Config` through.
 
 use std::fs;
 use std::net::SocketAddr;
@@ -61,7 +61,7 @@ impl Config {
         config.select_at_load(path, inputs)
     }
 
-    /// Applies the startup selection to a parsed document exactly as
+    /// Applies the startup selection to a parsed document the same way
     /// [`Config::load`] does: `path` locates the sibling state file, and a
     /// stale persisted name degrades to no profile while an ephemeral
     /// override must name a defined profile. Shared with the pending loader

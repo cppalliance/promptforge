@@ -4,7 +4,7 @@
 //! glyph. On every other host this script only declares its input and
 //! exits.
 //!
-//! The icon lives in `crates/workshop/icons/icon.ico`, outside this
+//! The icon sits in `crates/workshop/icons/icon.ico`, outside this
 //! crate, because the workshop's Tauri bundle is the one source of the
 //! icon set. That path would break `cargo package`, which only sees the
 //! crate's own files, but the gateway is `publish = false`, so the
@@ -108,7 +108,7 @@ fn embed_resources(icon: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// Nothing to embed: only Windows executables carry icon and manifest
+/// Nothing to embed: only Windows executables have icon and manifest
 /// resources.
 #[cfg(not(windows))]
 fn embed_resources(_icon: &Path) {}

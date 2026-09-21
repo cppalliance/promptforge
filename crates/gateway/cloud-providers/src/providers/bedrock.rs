@@ -29,10 +29,10 @@ pub(crate) mod taxonomy;
 /// GitHub secret name.
 const KEY_ENV: &str = "AWS_ACCESS_KEY_ID";
 
-/// Environment variable carrying the SigV4 signing key.
+/// Environment variable holding the SigV4 signing key.
 const SECRET_ENV: &str = "AWS_SECRET_ACCESS_KEY";
 
-/// Environment variable carrying the signing and endpoint region.
+/// Environment variable holding the signing and endpoint region.
 const REGION_ENV: &str = "AWS_REGION";
 
 /// The region used when `AWS_REGION` is unset.
@@ -160,7 +160,7 @@ struct ListResponse {
 
 /// One model summary as the wire reports it. `modelArn`,
 /// `providerName`, `responseStreamingSupported`,
-/// `customizationsSupported`, and `inferenceTypesSupported` carry no
+/// `customizationsSupported`, and `inferenceTypesSupported` have no
 /// sheet meaning and are not parsed.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

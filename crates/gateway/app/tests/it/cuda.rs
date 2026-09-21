@@ -436,7 +436,7 @@ fn assert_mtp_timings(body: &Value) {
     assert!(accepted > 0, "no drafted tokens were accepted: {timings}");
 }
 
-/// Phase 8: the model's reply must carry a tool call whose function
+/// Phase 8: the model's reply must contain a tool call whose function
 /// arguments parse as JSON.
 fn assert_tool_call(body: &Value) {
     let tool_calls = body

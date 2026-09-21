@@ -11,7 +11,7 @@
 //!
 //! `gateway_warning` is a gateway-specific extension on the OpenAI response
 //! shape: when an emulated tool dialect recovers from a malformed tool fence,
-//! the affected choice's message carries the reason under `gateway_warning`
+//! the affected choice's message reports the reason under `gateway_warning`
 //! next to its emptied `content`. Downstream serde ignores the unknown field.
 
 use serde::{Deserialize, Serialize};
@@ -60,8 +60,8 @@ impl ChatRequest {
 
     /// Validates the request shape at the trust boundary, without coercion.
     ///
-    /// Rejects an empty model, an empty `messages` array, any message that is
-    /// not a minimally-shaped chat message (an object with a supported string
+    /// Rejects an empty model, an empty `messages` array, any message that
+    /// fails the minimal shape check (an object with a supported string
     /// `role` and either `content` or a tool/function call), and any reserved
     /// key smuggled into the flattened `rest` map (WIRE-001/003). Everything
     /// else in each message object passes through verbatim.
@@ -92,9 +92,10 @@ impl ChatRequest {
 
 /// Validates one chat message's minimal shape without reconstructing it (WIRE-001).
 ///
-/// A message must be a JSON object with a supported string `role` and must carry
-/// either `content` (any shape: string, array, or null) or a tool/function call.
-/// Unknown fields are left untouched for verbatim passthrough.
+/// A message must be a JSON object with a supported string `role` and must
+/// have either `content` (any shape: string, array, or null) or a
+/// tool/function call. Unknown fields are left untouched for verbatim
+/// passthrough.
 fn validate_message(message: &Value) -> Result<(), &'static str> {
     let object = message
         .as_object()
@@ -133,14 +134,14 @@ impl ChatResponse {
     /// Validates the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
-    /// Each choice must be a minimally-shaped object: an `index` plus one of the
-    /// supported payloads (`message`, `delta`, or `text`). This rejects a
+    /// Each choice must pass the minimal shape check: an `index` plus one of
+    /// the supported payloads (`message`, `delta`, or `text`). This rejects a
     /// backend that returns a success status with a structurally broken body
     /// (WIRE-002) while leaving every other field untouched for passthrough.
     ///
     /// # Errors
-    /// Returns a static reason string when a choice is not a minimally-shaped
-    /// object or a reserved key collides with the flattened `rest` map.
+    /// Returns a static reason string when a choice fails the minimal shape
+    /// check or a reserved key collides with the flattened `rest` map.
     pub fn validate(&self) -> Result<(), &'static str> {
         for choice in &self.choices {
             validate_choice(choice)?;
@@ -157,7 +158,7 @@ impl ChatResponse {
 
 /// Validates one response choice's minimal shape (WIRE-002).
 ///
-/// A choice must be a JSON object carrying an `index` and one of the supported
+/// A choice must be a JSON object with an `index` and one of the supported
 /// payload fields (`message` for non-streaming, `delta` for streaming, or the
 /// legacy `text`). Extra fields (for example `finish_reason`, `logprobs`) pass
 /// through untouched.
@@ -180,7 +181,7 @@ fn validate_choice(choice: &Value) -> Result<(), &'static str> {
 /// One chunk of a streaming chat completion (OpenAI streaming shape).
 ///
 /// A `stream: true` completion arrives as a sequence of these chunks, each
-/// carrying partial `delta` content instead of a complete `message`. The
+/// holding partial `delta` content instead of a complete `message`. The
 /// terminal `[DONE]` sentinel is not JSON and never deserializes into this
 /// type; the relay special-cases it before parsing.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -198,7 +199,7 @@ pub struct ChatChunk {
 impl ChatChunk {
     /// Validates one upstream chunk's minimal shape before it is relayed.
     ///
-    /// A chunk must carry at least one choice; each choice's `index` and
+    /// A chunk must have at least one choice; each choice's `index` and
     /// `delta` are required typed fields, so deserialization has already
     /// proven them present. A chunk that fails this check (for example a
     /// usage-only summary object a backend appends mid-stream) is malformed:
@@ -206,7 +207,7 @@ impl ChatChunk {
     /// stream.
     ///
     /// # Errors
-    /// Returns a static reason string when the chunk carries no choices.
+    /// Returns a static reason string when the chunk has no choices.
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.choices.is_empty() {
             return Err("upstream chunk has no choices");
@@ -215,7 +216,7 @@ impl ChatChunk {
     }
 }
 
-/// One partial choice in a [`ChatChunk`]: an `index` plus a `delta` carrying
+/// One partial choice in a [`ChatChunk`]: an `index` plus a `delta` holding
 /// the incremental payload (`role` on the first chunk, content or tool-call
 /// fragments thereafter).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -309,12 +310,12 @@ impl EmbeddingResponse {
     /// Validates the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
-    /// Each entry must be a minimally-shaped object carrying an `embedding`
-    /// and an `index` (WIRE-002). Every other field passes through untouched.
+    /// Each entry must pass the minimal shape check: an `embedding` and an
+    /// `index` (WIRE-002). Every other field passes through untouched.
     ///
     /// # Errors
-    /// Returns a static reason string when an entry is not a minimally-shaped
-    /// object or a reserved key collides with the flattened `rest` map.
+    /// Returns a static reason string when an entry fails the minimal shape
+    /// check or a reserved key collides with the flattened `rest` map.
     pub fn validate(&self) -> Result<(), &'static str> {
         for entry in &self.data {
             let object = entry
@@ -337,7 +338,7 @@ impl EmbeddingResponse {
     }
 }
 
-/// The largest `input` a speech request may carry, in characters (OpenAI's
+/// The largest `input` a speech request may contain, in characters (OpenAI's
 /// cap, and the cap the route enforces).
 const MAX_SPEECH_INPUT_CHARS: usize = 4096;
 
@@ -356,7 +357,7 @@ const MAX_SPEECH_SPEED: f32 = 4.0;
 pub enum SpeechVoice {
     /// A plain voice name.
     Name(String),
-    /// The OpenAI object form, carrying the voice under `id`.
+    /// The OpenAI object form, with the voice under `id`.
     Id {
         /// The voice identifier.
         id: String,
@@ -372,7 +373,7 @@ pub enum SpeechVoice {
 #[non_exhaustive]
 pub enum SpeechResponseFormat {
     /// MPEG audio. The default: OpenAI defaults to mp3 while Together
-    /// defaults to wav, so the pin lives in the type and an omitted field
+    /// defaults to wav, so the pin sits in the type and an omitted field
     /// resolves to mp3 at deserialization.
     #[default]
     Mp3,
@@ -395,7 +396,7 @@ pub enum SpeechResponseFormat {
 pub enum SpeechStreamFormat {
     /// Chunked binary audio (the behavior when the field is absent).
     Audio,
-    /// Server-sent events carrying base64-encoded audio.
+    /// Server-sent events containing base64-encoded audio.
     Sse,
 }
 
@@ -411,7 +412,7 @@ pub struct SpeechRequest {
     pub voice: SpeechVoice,
     /// The requested audio encoding. An omitted field resolves to `mp3` at
     /// deserialization, so the pin is structural and every forwarded body
-    /// carries it.
+    /// includes it.
     #[serde(default)]
     pub response_format: SpeechResponseFormat,
     /// The playback speed (0.25 to 4.0); absent means the backend's default.
@@ -551,13 +552,13 @@ impl RerankResponse {
     /// Validates the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
-    /// Each result must be a minimally-shaped object carrying an `index` and a
+    /// Each result must pass the minimal shape check: an `index` and a
     /// `relevance_score` (WIRE-002). Every other field (for example a Jina
     /// `document` echo) passes through untouched.
     ///
     /// # Errors
-    /// Returns a static reason string when a result is not a minimally-shaped
-    /// object or a reserved key collides with the flattened `rest` map.
+    /// Returns a static reason string when a result fails the minimal shape
+    /// check or a reserved key collides with the flattened `rest` map.
     pub fn validate(&self) -> Result<(), &'static str> {
         for result in &self.results {
             let object = result
@@ -580,7 +581,7 @@ impl RerankResponse {
     }
 }
 
-/// The OpenAI-shaped model list returned by `GET /v1/models`.
+/// The model list returned by `GET /v1/models` (the OpenAI shape).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct ModelsResponse {

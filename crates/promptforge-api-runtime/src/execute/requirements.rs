@@ -33,9 +33,9 @@ pub struct Requirements {
 }
 
 impl Requirements {
-    /// Returns whether nothing blocks the run: no unmet model
-    /// requirements, no missing required capabilities, and no
-    /// co-activation conflicts.
+    /// Returns whether the report is satisfied: every model requirement
+    /// is met, every required capability is present, and no pair of
+    /// capabilities conflicts.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
@@ -59,7 +59,7 @@ impl Requirements {
     /// The refusal a host fails the run with when the report is
     /// unsatisfied: a [`RunError`](super::RunError) of kind
     /// [`RequirementsUnmet`](super::RunErrorKind::RequirementsUnmet)
-    /// carrying the [`notice`](Requirements::notice), or `None` when
+    /// reporting the [`notice`](Requirements::notice), or `None` when
     /// nothing blocks the run. The host checks this after merging
     /// activation's report into prepare's, before building the run.
     #[must_use]

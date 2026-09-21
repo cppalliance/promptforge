@@ -25,7 +25,7 @@ pub(super) fn section_position(slice: &[Section], target: &Section) -> Option<us
 /// The caller's home slice minus the caller itself, the caller found by its
 /// parser-unique `(level, name)` pair and excluded by index.
 ///
-/// A caller that is not in the slice excludes nothing: that is the fanout
+/// A caller absent from the slice leaves it whole: that is the fanout
 /// arm's case, whose home slice is the worker's resolution set with the
 /// worker already removed, so the arm's visible set comes out as exactly
 /// the home slice plus the worker's children.

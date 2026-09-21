@@ -9,7 +9,7 @@
 //! ## Invariants
 //!
 //! - Tier: vocabulary; may depend on: `workshop-protocol` (the wire
-//!   types the push-channel contributions carry). Read `AGENTS.md`
+//!   types the push-channel contributions use). Read `AGENTS.md`
 //!   before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.

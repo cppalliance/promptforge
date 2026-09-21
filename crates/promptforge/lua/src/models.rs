@@ -55,7 +55,7 @@ fn raw_gateway_binding(alias: &str) -> mlua::Result<ModelBinding> {
 /// Dispatches a `models.infer(prompt)` call through the executor-installed
 /// [`ModelsInferHook`] app data.
 ///
-/// The hook carries everything else (current-model resolution, gateway
+/// The hook owns everything else (current-model resolution, gateway
 /// client, section identity). The call runs the one infer shape: a single
 /// tool-free round on a fresh conversation that never sets `reply` or
 /// touches `sys`.
@@ -117,8 +117,8 @@ impl ModelRuntime {
 /// Workshop chat prompt can run `models.get(ui().selected_model)` without
 /// declaring its model. Unset, an undeclared alias is the usual error.
 ///
-/// The suspending `models.loop` is not installed here: yield cannot cross
-/// the Rust callback boundary, so the coroutine shim layer installs it.
+/// The coroutine shim layer installs the suspending `models.loop`, because
+/// yield cannot cross the Rust callback boundary.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if a Lua table or callback cannot be created or

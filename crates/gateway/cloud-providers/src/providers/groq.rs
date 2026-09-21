@@ -74,7 +74,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 /// The entry's family: the vendor for slash-namespaced resold ids
 /// (`meta-llama/...`, `qwen/...`), the `whisper` line, the
 /// `llama-<version>` prefix for the bare Llama ids, and the whole id
-/// otherwise. The catalog carries no snapshot suffixes, so there is no
+/// otherwise. The catalog has no snapshot suffixes, so there is no
 /// collapse pass.
 fn family_of(id: &str) -> String {
     if let Some((vendor, _)) = crate::taxonomy::vendor_prefix(id) {

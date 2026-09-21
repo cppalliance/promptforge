@@ -570,7 +570,7 @@ mod live_tests {
     /// Hits the real Brave Search API to validate the request shape and the
     /// `web.results` parsing against Brave's actual JSON.
     ///
-    /// Ignored by default so the normal test run needs no credential. Run it
+    /// Ignored by default because it requires a credential. Run it
     /// manually with `BRAVE_API_KEY` set in the environment:
     /// `cargo test -p gateway-web-search -- --ignored live_brave_search --nocapture`
     #[tokio::test]

@@ -173,10 +173,10 @@ pub fn drive(
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
 /// implementations on the host ([`RunHost::tools`]). Capability activation
-/// is the harness's, on its side of the door, and never happens here.
+/// is the harness's and never happens here.
 ///
 /// An unsatisfiable prompt - a missing required capability or an unmet
-/// model requirement - is refused with [`RunResult::Failure`] carrying
+/// model requirement - is refused with [`RunResult::Failure`] holding
 /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
 /// model-readable notice naming each gap once.
 pub async fn run_with_host(

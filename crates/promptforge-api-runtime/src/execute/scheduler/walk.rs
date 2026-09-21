@@ -184,7 +184,7 @@ impl Scheduler {
     /// exhausts, returning `false` when the chain holds no suspended
     /// position - meaning its own root slice exhausted and the chain ends.
     /// The `var` slot needs no handling: the child walk shared
-    /// it, so it already carries the child level's last value.
+    /// it, so it already holds the child level's last value.
     fn pop_position(&mut self, id: ChainIndex) -> bool {
         let chain = &mut self.chains[id.index()];
         let Some((slice, jumper)) = chain.positions.pop() else {

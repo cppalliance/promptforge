@@ -23,8 +23,8 @@ use crate::traits::{CatalogSink, MenuSink, StatusSink};
 /// slots.
 ///
 /// Clones are cheap (a few `Arc` bumps) and every clone reads the same
-/// registry slots, so producers take their own copy, exactly as they did
-/// with the buses themselves.
+/// registry slots, so producers take their own copy, as they did with
+/// the buses themselves.
 #[derive(Debug, Clone)]
 pub struct Push {
     registry: Registry,
@@ -92,7 +92,7 @@ impl Push {
     }
 
     /// Pushes one complete model catalog snapshot: a
-    /// `{"type":"models",...}` `CatalogFrame` carrying only chat-capable
+    /// `{"type":"models",...}` `CatalogFrame` containing only chat-capable
     /// entries. The single choke point for catalog publishes: the menu
     /// revalidates its selection against the new catalog and republishes
     /// the workbench snapshot when it changed.

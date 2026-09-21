@@ -125,7 +125,7 @@ async fn boot_with_a_pointer_to_an_alien_database_starts_ephemeral() {
     assert_eq!(current["grants"], serde_json::json!([]));
 }
 
-/// Reports whether the request carried an `Authorization` header, so
+/// Reports whether the request included an `Authorization` header, so
 /// the client tests can observe what was sent.
 async fn mock_auth_probe(headers: HeaderMap) -> Response {
     let body = if headers.contains_key(header::AUTHORIZATION) {
@@ -199,7 +199,7 @@ async fn ws_route_rejects_a_non_upgrade_get() {
 }
 
 /// The excised buffered chat endpoint is gone from the router: a
-/// `POST /chat` answers 404, not a relay response.
+/// `POST /chat` answers 404.
 #[tokio::test]
 async fn post_chat_is_absent_and_answers_not_found() {
     use tower::ServiceExt as _;

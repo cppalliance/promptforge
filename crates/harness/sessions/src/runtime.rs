@@ -1,5 +1,5 @@
 //! The harness handle: its configuration, the bindings a client pushes
-//! across the door, the run log, and the sessions it serves.
+//! through the public API, the run log, and the sessions it serves.
 //!
 //! One [`Harness`] serves every session a client launches. The client
 //! holds it behind an `Arc`, pushes the gateway binding at startup and on
@@ -27,7 +27,7 @@ use crate::protocol::{LaunchRequest, SessionId};
 use crate::session::supervisor::{Supervisor, SupervisorParts};
 use crate::session::{Session, SessionCore, SessionSeed};
 
-/// The file under the state directory the run log lives in.
+/// The file under the state directory the run log is stored in.
 const RUN_LOG_FILE: &str = "runs.db";
 
 /// What a client tells the harness at construction.
@@ -200,10 +200,10 @@ impl Harness {
     ///
     /// # Errors
     /// Returns [`LaunchError::UnknownAgent`] when the name is not a
-    /// discovered agent (which also refuses path-shaped names: discovery
-    /// yields bare file stems), [`LaunchError::GatewayUnusable`] when no
-    /// usable gateway is bound, [`LaunchError::SessionState`] when the
-    /// agent's source cannot be read, and [`LaunchError::Log`] when the
+    /// discovered agent (which also refuses names that look like paths:
+    /// discovery yields bare file stems), [`LaunchError::GatewayUnusable`]
+    /// when no usable gateway is bound, [`LaunchError::SessionState`] when
+    /// the agent's source cannot be read, and [`LaunchError::Log`] when the
     /// run log cannot be opened.
     pub async fn launch(&self, request: LaunchRequest) -> Result<Session, LaunchError> {
         let LaunchRequest { agent, args } = request;

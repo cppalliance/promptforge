@@ -3,7 +3,7 @@
 //! convergence, and the backoff's anti-flap rule. These tests compose
 //! `workshop-gateway`'s heartbeat with `workshop-status` and
 //! `workshop-menu`'s buses through the registry's push facade - the
-//! composition only the shell can make, so they live in its integration
+//! composition only the shell can make, so they sit in its integration
 //! binary rather than in any one subsystem crate.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions and

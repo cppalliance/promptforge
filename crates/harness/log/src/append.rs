@@ -28,8 +28,8 @@ impl fmt::Debug for RunLog {
 
 impl RunLog {
     /// Opens the log at `path`, creating the file and the schema when
-    /// absent. The parent directory must already exist: this creates
-    /// exactly the file, never a directory.
+    /// absent. The parent directory must already exist: this creates the
+    /// file, never a directory.
     ///
     /// # Errors
     /// Returns [`LogError::Io`] when `path` is not UTF-8 (Turso addresses
@@ -199,7 +199,7 @@ pub(crate) const fn unsigned(value: i64) -> u64 {
 }
 
 /// The wall clock as UTC milliseconds since the Unix epoch; `0` on a clock
-/// set before the epoch, which is a display column's problem, not the log's.
+/// set before the epoch, which is a display column's problem.
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

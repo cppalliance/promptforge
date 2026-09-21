@@ -27,13 +27,13 @@ use crate::compactors::OverflowReason;
 use crate::error::Error;
 
 /// The registry key of the shared error metatable, created on first use per
-/// VM so every error table on that VM - Lua-built or Rust-built - carries
+/// VM so every error table on that VM - Lua-built or Rust-built - shares
 /// the same identity and the read-back can recognize it.
 const METATABLE_REGISTRY: &str = "promptforge.error_value.metatable";
 
 /// The closed vocabulary of failure kinds an author can branch on.
 ///
-/// The tag is the `kind` string the Lua table carries; the set is fixed by
+/// The tag is the `kind` string the Lua table holds; the set is fixed by
 /// the protocol and a new failure classifies into one of these rather than
 /// inventing a tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,9 +42,9 @@ pub enum ErrorKind {
     /// The model tool loop ran its iteration cap without a final reply.
     ToolLoopExhausted,
     /// A request overflowed the model's context window and the selected
-    /// compactor does not compact; carries `reason`.
+    /// compactor does not compact; includes `reason`.
     ContextExhausted,
-    /// The model returned a turn with no product; carries `finish_reason`
+    /// The model returned a turn with no product; includes `finish_reason`
     /// when the backend supplied one.
     EmptyModelReply,
     /// The model named a tool outside the section's advertised scope.
@@ -70,7 +70,7 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    /// The `kind` string the Lua table carries.
+    /// The `kind` string the Lua table holds.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -120,7 +120,7 @@ impl std::fmt::Display for ErrorKind {
 /// kind's own string fields. `Display` supplies `message`.
 ///
 /// The envelope renderer requires this of the driver's error type, so a
-/// failure answered to Lua always carries a kind; a substrate that gains a
+/// failure answered to Lua always has a kind; a substrate that gains a
 /// variant classifies it here.
 #[doc(hidden)]
 pub trait ErrorValue: std::fmt::Display {
@@ -184,7 +184,7 @@ pub struct Raised {
 }
 
 impl Raised {
-    /// The overflow reason a `context_exhausted` table carried, when it
+    /// The overflow reason a `context_exhausted` table held, when it
     /// parses.
     #[must_use]
     pub fn overflow_reason(&self) -> Option<OverflowReason> {

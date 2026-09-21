@@ -94,8 +94,8 @@ fn failure_parts(lua: &Lua, result: Value) -> (String, String) {
         .expect("the failure table reads back through Lua")
 }
 
-/// Evaluates a Lua table constructor, so chat tests build author-shaped
-/// message and opts tables from the exact source an author would write.
+/// Evaluates a Lua table constructor, so chat tests build message and
+/// opts tables from the exact source an author would write.
 fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
     lua.load(source)
         .eval()

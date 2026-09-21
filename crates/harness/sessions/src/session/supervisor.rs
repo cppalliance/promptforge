@@ -9,8 +9,7 @@
 //! steps the run to `Done` before the session reports `Closed`, so
 //! nothing is left in flight when the session leaves its harness. The
 //! synthetic terminal frame for that interrupt is decided by
-//! [`effective_interrupt`] and rendered in exactly one place, after the
-//! drain.
+//! [`effective_interrupt`] and rendered in one place, after the drain.
 //!
 //! The raw deltas the chat performers stream are drained here too,
 //! stamped with the session's current round, ahead of the run future in

@@ -16,9 +16,8 @@
 //! dead token. Unresolved waits are retained across socket loss and
 //! re-announced on reconnect: sessions outlive sockets.
 //!
-//! The frames are harness data, not wire shapes: the client that owns
-//! the socket (Workshop's `/agents/ws`) renders each into its own
-//! protocol frame.
+//! The frames are harness data: the client that owns the socket
+//! (Workshop's `/agents/ws`) renders each into its own protocol frame.
 
 #[path = "input-tool.rs"]
 mod tool;
@@ -186,7 +185,7 @@ impl WaitRegistry {
     /// suspended call resolves as cancelled.
     ///
     /// Cancelling a token with no wait is a no-op, because a cancel
-    /// racing the wait's own completion is normal, exactly as a chat
+    /// racing the wait's own completion is normal, just as a chat
     /// cancel racing its `done` is.
     ///
     /// # Examples

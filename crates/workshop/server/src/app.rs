@@ -92,7 +92,7 @@ impl AppState {
     ///
     /// # Errors
     /// Returns [`StateError::Resolution`] when no live gateway discovery file
-    /// exists and the config carries no explicit gateway, and
+    /// exists and the config has no explicit gateway, and
     /// [`StateError::Gateway`] if the HTTP client cannot be built.
     pub fn new(config: &Config) -> Result<Self, StateError> {
         let gateway = crate::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?;
@@ -396,7 +396,7 @@ fn compose(
     registrations.hold(state);
     // Agent sessions run in the harness, the engine's production host,
     // built here like every other subsystem and reached through the
-    // registry; `agents` pushes the shell's state across its door.
+    // registry; `agents` pushes the shell's state through its public API.
     let harness = agents::harness_for(config, &registry);
     let agents = AgentSessions::new(registry.clone(), backoff.clone());
     let mut sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
@@ -461,7 +461,7 @@ pub enum StateError {
 /// routes sit behind the
 /// `crate::cross_site` guard; `/health` and the UI assets stay outside it
 /// so the shell probe, heartbeat, and initial navigation keep working.
-/// Every response carries the `crate::csp` policy: the shell's webview
+/// Every response includes the `crate::csp` policy: the shell's webview
 /// loads the UI as an External origin, so the server sets the page's
 /// Content-Security-Policy. Each subsystem applies its own deadline tier:
 /// the default on the workspace routes, the relay tier on `/v1/models`,

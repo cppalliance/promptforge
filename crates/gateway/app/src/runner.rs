@@ -4,7 +4,7 @@
 //! serving shell, and serves on a dedicated thread with its own tokio
 //! runtime, so an embedding binary keeps its main thread. The call blocks
 //! until the listener is bound - that bind is the readiness signal - and the
-//! returned [`GatewayHandle`] carries the bound URL and a graceful-shutdown
+//! returned [`GatewayHandle`] holds the bound URL and a graceful-shutdown
 //! switch. The remote routing table is published at assembly; local
 //! provisioning is not on this path: the boot `LoadProfile` command runs on
 //! the gateway's command queue after the bind. [`run`] is the binary
@@ -141,8 +141,8 @@ impl Gateway {
     /// `[[model]]`, no local runtime, no provisioning. The selected
     /// profile's local models arrive when the command queue's boot
     /// `LoadProfile` merges them into the live table; until then an
-    /// unloaded but configured local model earns a 503 naming the active
-    /// command.
+    /// unloaded but configured local model receives a 503 naming the
+    /// active command.
     ///
     /// [`from_config`](Self::from_config) is the eager alternative for tests
     /// and embedders: it provisions before returning.
@@ -372,7 +372,7 @@ impl Gateway {
     /// the crate is an application, not a general library, so exposing an
     /// [`axum::Router`] here is intentional.
     ///
-    /// The router carries no bound socket, so the host-authority wall is
+    /// The router has no bound socket, so the host-authority wall is
     /// not installed; it exists on the [`serve`](Self::serve) path, where
     /// the bound address is known. Likewise `POST /shutdown` answers 202
     /// here without stopping anything: only `serve` selects on the
@@ -890,9 +890,9 @@ fn failed_handshake(
     }
 }
 
-/// The message carried by a panic payload: the `panic!` string when there
+/// The message inside a panic payload: the `panic!` string when there
 /// is one, or a note that the payload is not a string (a `panic_any`
-/// call), which carries no displayable message.
+/// call), which has no displayable message.
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
     payload
         .downcast_ref::<&str>()
@@ -1286,7 +1286,7 @@ fn boot_selection_notice(config: &Config) -> Option<BootSelectionNotice> {
     )))
 }
 
-/// The deprecation warning for a boot config carrying a `[workshop]`
+/// The deprecation warning for a boot config with a `[workshop]`
 /// section, or `None` when the section is absent. The gateway no longer
 /// hosts the workshop - the desktop shell embeds the workshop server
 /// itself - so the section's `bind` and `open_browser` settings do
@@ -1486,9 +1486,9 @@ models = []
         assert!(workshop_section_deprecation(&config).is_none());
     }
 
-    /// A selected profile earns no notice; a stale state file earns the
-    /// warning naming the missing and the defined profiles; no selection at
-    /// all earns the plain no-profile line.
+    /// A selected profile produces no notice; a stale state file produces
+    /// the warning naming the missing and the defined profiles; no
+    /// selection at all produces the plain no-profile line.
     #[test]
     fn the_boot_selection_notice_names_stale_and_absent_selections() {
         let (_temp, path) = fixture("alpha");

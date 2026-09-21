@@ -6,7 +6,7 @@
 //! a second run whose transcript indices continue; and a catalog whose
 //! models changed retires the run. The close path - draining outstanding
 //! effects and reporting the interrupt as one `Interrupted` failure -
-//! lives in the `close` child module.
+//! sits in the `close` child module.
 
 use std::path::Path;
 use std::sync::Arc;

@@ -97,7 +97,7 @@ impl Scheduler {
 
     /// Starts the run's first chain: the H1 pass when the prompt has H1
     /// blocks; an H1-less prompt goes straight to the walk, so its shared
-    /// library never pays for a throwaway section-0 replay. A prompt with
+    /// library is never replayed for a throwaway section 0. A prompt with
     /// neither ends at once with the generic completion.
     fn start(&mut self) -> Result<()> {
         let prompt = self.prompt();

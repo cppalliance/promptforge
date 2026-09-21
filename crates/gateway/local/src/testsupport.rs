@@ -27,7 +27,7 @@ pub(crate) struct FakeServer {
     thread: Option<JoinHandle<io::Result<()>>>,
 }
 
-/// The `Range: bytes=<start>-` offset of one request head, if it carried one.
+/// The `Range: bytes=<start>-` offset of one request head, if it had one.
 fn parse_range_start(request: &[u8]) -> Option<u64> {
     let head = String::from_utf8_lossy(request);
     for line in head.lines() {

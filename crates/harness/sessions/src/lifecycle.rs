@@ -34,8 +34,8 @@ struct RunState {
 
 impl RunLifecycle {
     /// Creates the lifecycle over the supervisor's event senders: the
-    /// unbounded queue carries the loss-intolerant events the reducer
-    /// waits on, the bounded queue carries operator cancellations.
+    /// unbounded queue holds the loss-intolerant events the reducer
+    /// waits on, the bounded queue holds operator cancellations.
     #[must_use]
     pub fn new(
         events: mpsc::UnboundedSender<SupervisorEvent>,
@@ -118,8 +118,8 @@ impl RunLifecycle {
     }
 
     /// Sends one loss-intolerant event; a gone receiver means supervision
-    /// already ended. These events ride the unbounded queue because the
-    /// reducer awaits settlements and close, so their loss could hang a
+    /// already ended. These events are sent on the unbounded queue because
+    /// the reducer awaits settlements and close, so their loss could hang a
     /// state transition, and their volume is bounded by armed runs and
     /// durable turns rather than by caller repetition.
     fn send(&self, event: SupervisorEvent) {

@@ -27,11 +27,11 @@ use crate::error::FetchError;
 /// travels to the server) and its query left untouched. The checks run before
 /// any network access, so a rejected URL costs no request.
 ///
-/// The policy: the scheme must be `https`, or `http` when the config permits
-/// it; the URL must carry no userinfo; the effective port must be on the
-/// allowlist; and an IP-literal host is refused unless literals are enabled, in
-/// which case the literal's address is classified against the address policy and
-/// a non-global address is still refused.
+/// The policy: the scheme must be `https`, or `http` when the config
+/// permits it; the URL must have no userinfo; the effective port must be
+/// on the allowlist; and an IP-literal host is refused unless literals are
+/// enabled, in which case the literal's address is classified against the
+/// address policy and a non-global address is still refused.
 ///
 /// # Errors
 /// Returns [`FetchError::InvalidUrl`] if `raw` does not parse;

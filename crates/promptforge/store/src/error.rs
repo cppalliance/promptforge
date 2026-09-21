@@ -77,7 +77,7 @@ pub enum StoreErrorKind {
 /// An error from a virtual-file operation.
 ///
 /// Marked `#[non_exhaustive]` so a future backend (real filesystem, network)
-/// can add variants without a breaking change; each data-carrying variant is
+/// can add variants without a breaking change; each variant with fields is
 /// likewise `#[non_exhaustive]`. `Display` messages are lowercase noun phrases
 /// with no trailing period, so a caller supplies the surrounding context.
 /// Match on [`StoreError::kind`] rather than the variants directly.
@@ -167,7 +167,7 @@ pub enum StoreError {
         path: String,
         /// The claims model's conflict diagnosis, naming the canonical
         /// path, both identities, and both claim kinds; the executor's
-        /// fatal determinism violation carries it verbatim.
+        /// fatal determinism violation reports it verbatim.
         detail: String,
     },
 
@@ -261,7 +261,7 @@ impl StoreError {
 
     /// Returns the claims model's conflict diagnosis when this is a write
     /// race: the canonical path, both identities, and both claim kinds.
-    /// The executor carries it verbatim into its fatal determinism
+    /// The executor passes it verbatim into its fatal determinism
     /// violation, whose message is the whole diagnosis.
     #[must_use]
     pub fn conflict_detail(&self) -> Option<&str> {
@@ -309,7 +309,7 @@ impl StoreError {
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s Lua
     /// host, which refuses an `end` without a `start` with the same
-    /// `InvalidRange` a zero bound earns but cannot construct the
+    /// `InvalidRange` a zero bound triggers, but cannot construct the
     /// `#[non_exhaustive]` variant directly. Not host API.
     #[doc(hidden)]
     #[must_use]

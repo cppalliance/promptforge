@@ -161,10 +161,12 @@ impl GatewayClient {
         }
     }
 
-    /// Builds a client that cannot read gateway configuration or send HTTP.
+    /// Builds an explicit sentinel client that hosts use for hermetic
+    /// execution paths.
     ///
-    /// Hosts use this explicit sentinel for hermetic execution paths. Any
-    /// attempted model call fails with a `Disabled`-kind [`CompletionError`].
+    /// Any attempted model call fails with a `Disabled`-kind
+    /// [`CompletionError`]; the client reads no gateway configuration and
+    /// sends no HTTP.
     ///
     /// # Examples
     ///
@@ -265,7 +267,7 @@ impl GatewayClient {
     /// with `stream_options.include_usage`, deltas are accumulated into the
     /// buffered body shape, and `on_delta` is invoked live with each
     /// [`StreamDelta`] text or reasoning fragment (a caller with no use for
-    /// deltas passes a no-op closure). The returned [`Completion`] carries
+    /// deltas passes a no-op closure). The returned [`Completion`] holds
     /// the reassembled turn, the metadata parsed from the stream's summary
     /// chunk, and a [`ClientTiming`](promptforge_api_types::metrics::ClientTiming)
     /// measured on this client's own clock
@@ -284,7 +286,7 @@ impl GatewayClient {
     /// (F11 - the full reachable set):
     /// - `Disabled` when this client was built with [`GatewayClient::disabled`];
     /// - `Transport` on a transport-layer failure (connection, timeout) or
-    ///   when the stream carries a mid-flight error envelope;
+    ///   when the stream contains a mid-flight error envelope;
     /// - `Backend` when the gateway responds with a non-success status;
     /// - `MalformedResponse` when the stream exceeds the size cap, a chunk's
     ///   shape is unusable (the JSON decode failure is retained as a private

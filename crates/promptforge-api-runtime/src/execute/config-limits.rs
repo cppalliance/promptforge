@@ -26,8 +26,8 @@ nz!(nz_usize, NonZeroUsize, usize);
 /// iterations, fanout concurrency, model response size, Lua memory, Lua log
 /// volume, and the request timeout.
 ///
-/// The defaults are safe, non-environment values so a clean build needs no
-/// provisioning. Frontmatter `max_tool_iterations`, when present, still
+/// The defaults are safe, non-environment values that a clean build can use
+/// as they are. Frontmatter `max_tool_iterations`, when present, still
 /// overrides [`RunLimits::max_tool_iterations`] for that prompt.
 ///
 /// # Examples

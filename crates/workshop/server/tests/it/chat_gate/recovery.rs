@@ -105,7 +105,7 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
 
 /// GATE 7 - selection-loss recovery, unified-runtime semantics: the run's
 /// model is the dropdown selection bound at launch, so a selection that
-/// vanishes mid-turn no longer skips anything - the frozen binding carries
+/// vanishes mid-turn no longer skips anything - the frozen binding drives
 /// the raced turn to completion, and the same run keeps serving turns
 /// until a catalog replacement retires it.
 #[tokio::test]

@@ -1,15 +1,15 @@
 //! The synchronous cancellation handle the engine observes.
 //!
-//! The engine is a state machine that performs no I/O and holds no runtime
-//! handle, so it cannot await a cancellation: it polls a flag between chain
-//! steps and from the Lua instruction hook, and the host that cancels it
-//! sets that flag from whichever thread it likes. [`CancelHandle`] is that
-//! flag, arranged as a tree so a run-level cancel reaches every task while
-//! one task can be cancelled without touching its siblings or its owner.
+//! The engine is a pure state machine, so it polls a flag between chain
+//! steps and from the Lua instruction hook rather than awaiting a
+//! cancellation, and the host that cancels it sets that flag from
+//! whichever thread it likes. [`CancelHandle`] is that flag, arranged as a
+//! tree so a run-level cancel reaches every task while one task can be
+//! cancelled without touching its siblings or its owner.
 //!
-//! This is the handle the engine's `RunContext` carries and the one
+//! This is the handle the engine's `RunContext` holds and the one
 //! `RunServices` hands a capability; the tokio-aware token a host selects
-//! over lives in `harness-api` and bridges to this flag. A host that
+//! over is defined in `harness-api` and bridges to this flag. A host that
 //! drives the engine and must wait on the flag itself awaits
 //! [`CancelHandle::cancelled`], a std-only future woken by the cancel, so
 //! no host has to poll the flag on a timer.
@@ -142,7 +142,7 @@ impl Future for Cancelled {
 }
 
 impl CancelHandle {
-    /// Creates a root handle that is not yet cancelled.
+    /// Creates a root handle, uncancelled to start.
     ///
     /// The returned handle is independent of any other until it is cloned
     /// or given children.

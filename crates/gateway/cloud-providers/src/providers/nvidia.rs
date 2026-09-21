@@ -1,7 +1,7 @@
 //! NVIDIA provider: the public descriptor plus the private variance of
 //! `GET /v1/models` under `https://integrate.api.nvidia.com` - no auth
 //! on the listing endpoint (verified live 2026-09-14) and the OpenAI
-//! list envelope carrying IDs only: namespaced slugs like
+//! list envelope with IDs only: namespaced slugs like
 //! `meta/llama-3.1-8b-instruct`, with `created` a constant placeholder
 //! on every entry, so it never becomes `released_at`. No pagination, no
 //! context window, no capability or pricing fields.
@@ -48,10 +48,10 @@ pub(crate) async fn fetch(
     Ok(entries)
 }
 
-/// One model as the wire reports it. Only the id carries sheet meaning:
+/// One model as the wire reports it. Only the id has sheet meaning:
 /// `created` is a constant placeholder on every entry and is never
 /// parsed, so it cannot leak into `released_at`; `owned_by`,
-/// `permission`, `root`, and `parent` carry no sheet meaning.
+/// `permission`, `root`, and `parent` have no sheet meaning.
 #[derive(Debug, Deserialize)]
 struct WireModel {
     id: String,
@@ -66,7 +66,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 /// Sets every entry's family to the vendor prefix of its
 /// `vendor/model` id (`meta`, `nvidia`, `google`, ...), and to the
 /// whole id when there is no slash. There is no snapshot or SKU
-/// collapse: the catalog carries neither.
+/// collapse: the catalog has neither.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         entry.family = crate::taxonomy::vendor_prefix(&entry.id)

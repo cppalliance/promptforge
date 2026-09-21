@@ -338,8 +338,7 @@ impl SectionVm {
     /// globals are absent; they install afterward via
     /// [`install_captured_bindings`](Self::install_captured_bindings) so a
     /// declared alias wins over a same-named shared global. A scalar
-    /// top-level return is discarded: the replay is a library load, not a
-    /// result.
+    /// top-level return is discarded because the replay is a library load.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shared program fails or returns a
@@ -458,9 +457,9 @@ impl SectionVm {
     /// validated for JSON-representability at the assigning line, and the
     /// hidden data table behind it is what [`var`](Self::var) reads back.
     /// `access` is the chain step's VFS capability: the `store` table's
-    /// closures share it, so a fanout arm's store ops carry the arm's
-    /// spawned identity and a conflicting second live identity surfaces as
-    /// a write race.
+    /// closures share it, so a fanout arm's store ops are attributed to
+    /// the arm's spawned identity and a conflicting second live identity
+    /// surfaces as a write race.
     ///
     /// `argv` is the parsed form of the args string, installed per its
     /// [`Argv`] mode: writable for the H1 pass (whose repaired value the
@@ -867,7 +866,7 @@ impl SectionVm {
     /// seeded - neither scoped into the section nor dispatched by a script
     /// `tools.call` - the diagnostic says so.
     ///
-    /// The installation itself lives in the `tools` module; this method only
+    /// The installation itself sits in the `tools` module; this method only
     /// supplies the VM's own state.
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
@@ -989,8 +988,7 @@ impl SectionVm {
 
     /// Destroys this section VM at an explicit observed lifecycle boundary.
     ///
-    /// The emitter is borrowed only for this synchronous call and is not
-    /// retained by the VM.
+    /// The emitter is borrowed only for this synchronous call.
     ///
     /// # Examples
     /// ```no_run
@@ -1056,7 +1054,7 @@ impl SectionVm {
     /// This is the scheduler's chunk-execution path: one coroutine per Lua
     /// block, created from the block's loaded function on this persistent
     /// VM, so the VM's globals (`var`, the bare globals, the captured
-    /// handles) roll forward across blocks exactly as on the legacy
+    /// handles) roll forward across blocks as on the legacy
     /// [`run_chunk`](Self::run_chunk) path. Instruction hooks are
     /// per-coroutine in PUC Lua, so the VM's budget/cancellation hook is
     /// installed on the fresh thread; the main-state hook from construction
@@ -1121,8 +1119,8 @@ impl SectionVm {
     /// corrupted yield. Author code cannot reach
     /// `coroutine.yield` (the global is stripped at shim install), so this
     /// strict validation is defense in depth. A well-formed call whose
-    /// argument fails validation is [`YieldParse::Call`]: the error rides
-    /// back as the answer so the shim raises it at the call site.
+    /// argument fails validation is [`YieldParse::Call`]: the error is
+    /// returned as the answer so the shim raises it at the call site.
     #[must_use]
     pub fn request_from_yield(&self, values: &MultiValue) -> YieldParse {
         Request::from_yield(&self.lua, values.iter().next().unwrap_or(&Value::Nil))
@@ -1131,7 +1129,7 @@ impl SectionVm {
     /// Resumes a suspended block coroutine with the driver's answer.
     ///
     /// The answer renders to its `(ok, result)` envelope on this VM. On a
-    /// failure answer the envelope carries the error's structured table
+    /// failure answer the envelope includes the error's structured table
     /// (`kind`, `message`, fields) for the shim to raise, and the typed
     /// error the answer owned is substituted back when the shim-raised
     /// error surfaces as the coroutine's failure (the LUA-012 contract), so
@@ -1199,7 +1197,7 @@ impl SectionVm {
     /// only the guard's frame); cancellation and host quotas then map
     /// through [`LuaProgram::map_runtime_error`]; otherwise a structured
     /// error table the guard stashed is kept as [`Error::Raised`], except a
-    /// `lua`-kind table, whose mapped runtime error carries the same
+    /// `lua`-kind table, whose mapped runtime error keeps the same
     /// message with its source and the mapped prompt line. The stash is
     /// taken on every failure so it never goes stale.
     fn block_failure(&self, program: &LuaProgram, error: &mlua::Error) -> Result<Error> {
@@ -1231,7 +1229,7 @@ impl SectionVm {
 /// error table, whose `tostring` is the message, so the inner `mlua`
 /// runtime message's first line (or the kept table's message) is exactly
 /// the retained error's display. The comparison reads the retained `mlua`
-/// source rather than the mapped message, whose `Display` carries mlua's
+/// source rather than the mapped message, whose `Display` includes mlua's
 /// `runtime error: ` prefix. A block that caught the shim's error and
 /// failed on its own keeps its own error.
 fn coroutine_failure_is<E: std::fmt::Display>(failure: &Error, retained: &E) -> bool {
@@ -1257,7 +1255,7 @@ fn coroutine_failure_is<E: std::fmt::Display>(failure: &Error, retained: &E) -> 
 /// and resumes the thread with the answer.
 #[derive(Debug)]
 pub enum CoroStep {
-    /// The coroutine suspended on a shim yield; the yielded values carry
+    /// The coroutine suspended on a shim yield; the yielded values are
     /// the request table.
     Yielded(Thread, MultiValue),
     /// The coroutine ended (return, jump, or error); the block outcome

@@ -32,7 +32,7 @@ pub enum TranscribeError {
     #[non_exhaustive]
     #[error("transcription worker exited")]
     WorkerGone,
-    /// The selected model worker has no free queue slot.
+    /// The selected model worker's queue is full.
     #[non_exhaustive]
     #[error("transcription worker queue is full")]
     Overloaded,

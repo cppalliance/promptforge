@@ -1,5 +1,5 @@
 //! The request vocabulary: the validated suspending host calls a shim can
-//! yield, the store operations they carry, and the message-record types
+//! yield, the store operations they hold, and the message-record types
 //! the chat request is built from.
 
 use promptforge_api_types::ids::{TaskId, TaskOrigin};
@@ -62,7 +62,7 @@ pub enum Request {
         /// Whether the spawn is a `fanout` arm. Shim-produced: the `fanout`
         /// shim says `true`, `tasks.spawn` leaves it absent. The depth-cap
         /// refusal is named after the author-facing call that tripped it
-        /// (`fanout` or `call`), so the typed error carries the wording the
+        /// (`fanout` or `call`), so the typed error uses the wording the
         /// author reads and no shim re-match is needed.
         fanout: bool,
     },
@@ -158,11 +158,11 @@ pub enum Request {
     /// `models.chat` shim; the section VM's `models.loop` shim yields the
     /// same request per round, so one dispatch arm serves both.
     Chat {
-        /// The validated message records. Each carries a known role
+        /// The validated message records. Each holds a known role
         /// ([`MessageRole`]), visible text or a non-empty content-parts
         /// array ([`MessageContent`]), the normalized tool calls an
         /// assistant record requested, and the call ID a tool result
-        /// answers. Validation lives here, in the protocol parse, once -
+        /// answers. Validation happens here, in the protocol parse, once -
         /// the driver converts without re-checking.
         messages: Vec<MessageRecord>,
         /// The loop shim's leading handle, as its frozen binding cloned
@@ -173,24 +173,24 @@ pub enum Request {
         /// `opts.model`: the catalog model to use for this round, or
         /// `None` for the program's current `models.use` selection.
         model: Option<String>,
-        /// `opts.tools`: the tool aliases to advertise for exactly this
-        /// round. `Some`: the agent VM's explicit list, which the driver
+        /// `opts.tools`: the tool aliases to advertise for this round.
+        /// `Some`: the agent VM's explicit list, which the driver
         /// never adds to (an empty list advertises nothing). `None`: no
         /// list was given - a section VM's shape - and the driver resolves
         /// the section's current tool scope, local Lua tools included. The
         /// aliases resolve to schemas in the dispatch arm, where the tool
-        /// scope lives; the parse has no catalog.
+        /// scope sits; the parse has no catalog.
         tools: Option<Vec<String>>,
     },
     /// `user_input()`: a direct operator-input request to the run's input
     /// broker. Section VMs alone install the shim; the agent driver
-    /// carries an unreachable internal-invariant guard for the arm its
-    /// exhaustive match forces. The request carries no arguments: the
-    /// broker and its host policy own the whole interaction.
+    /// holds an unreachable internal-invariant guard for the arm its
+    /// exhaustive match forces. The request is argument-free: the broker
+    /// and its host policy own the whole interaction.
     UserInput,
     /// `store.*(...)`: one run-scoped store operation as a leaf yield.
     /// Section VMs and the live H1 VM run the store shims; the agent
-    /// driver carries an unreachable internal-invariant guard for the arm
+    /// driver holds an unreachable internal-invariant guard for the arm
     /// its exhaustive match forces (an agent VM's store table keeps the
     /// direct closures). Every operation takes this path uniformly -
     /// memory- and host-backed alike, with no inline fast path - so
@@ -225,13 +225,12 @@ impl Request {
 /// One validated store operation: the `store.*` call's name and its
 /// author-supplied arguments, checked once here at the protocol boundary.
 ///
-/// The read bounds stay `i64` exactly as the legacy callback's signature
-/// had them: a negative bound converts to 0 at execution, which the
-/// facade's range validation rejects with the same error a zero bound
-/// earns.
+/// The read bounds stay `i64` as the legacy callback's signature had
+/// them: a negative bound converts to 0 at execution, which the facade's
+/// range validation rejects with the same error a zero bound produces.
 ///
-/// Plain data, so the executor's effect record can carry an operation
-/// through serde exactly as the shim yielded it.
+/// Plain data, so the executor's effect record can move an operation
+/// through serde as the shim yielded it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum StoreOp {
@@ -353,7 +352,7 @@ pub enum MessageContent {
     Parts(Vec<ContentPart>),
 }
 
-/// One normalized tool call an assistant message carries: the
+/// One normalized tool call an assistant message holds: the
 /// provider-neutral `{id, name, arguments}` record every later component
 /// consumes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,7 +362,7 @@ pub struct ToolCallRecord {
     /// The wire name of the tool the model asked for.
     pub name: String,
     /// The call arguments; always an object, normalized to `{}` when the
-    /// record carried none.
+    /// record had none.
     pub arguments: serde_json::Value,
 }
 
@@ -375,7 +374,7 @@ pub struct MessageRecord {
     pub role: MessageRole,
     /// The visible content.
     pub content: MessageContent,
-    /// The normalized tool calls the record carries; empty unless an
+    /// The normalized tool calls the record holds; empty unless an
     /// assistant turn requested tools.
     pub tool_calls: Vec<ToolCallRecord>,
     /// The call ID a tool result answers; required on `tool` records.

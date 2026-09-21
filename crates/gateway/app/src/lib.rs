@@ -1,13 +1,13 @@
 ﻿//! PromptForge inference gateway.
 //!
-//! A small always-on service that accepts OpenAI-shaped chat completions, holds
-//! the backend credential, resolves the request's model name to a configured
-//! endpoint, forwards the request, and relays the reply. It is the only process
-//! in the system with an edge to an LLM backend, so the executor above it never
-//! holds a vendor key.
+//! A small always-on service that accepts OpenAI-compatible chat
+//! completions, holds the backend credential, resolves the request's model
+//! name to a configured endpoint, forwards the request, and relays the
+//! reply. It is the only process in the system with an edge to an LLM
+//! backend, so the executor above it never holds a vendor key.
 //!
-//! What ships is an OpenAI-shaped inference surface and an admin surface
-//! in two tiers, plus `GET /health`. The inference surface is
+//! What ships is an OpenAI-compatible inference surface and an admin
+//! surface in two tiers, plus `GET /health`. The inference surface is
 //! `POST /v1/chat/completions` (with a typed SSE relay for `stream:
 //! true`), `POST /v1/embeddings`, `POST /v1/rerank`, `POST /v1/audio/speech`
 //! and `GET /v1/audio/voices`, `GET /v1/models`, the Brave-backed
@@ -46,7 +46,7 @@
 //! ## Where new route code goes
 //!
 //! A route area gets a module named after it (`relay`, `speech`,
-//! `models`, `health`); a module earns a directory at three or more
+//! `models`, `health`); a module gets a directory at three or more
 //! files. Each area module owns its own mounts behind
 //! `pub(crate) fn routes() -> Router<AppState>`, and `build_router` only
 //! merges the areas and applies the walls, so a new endpoint never edits
@@ -173,7 +173,7 @@ struct LiveState {
     /// Local models of the boot profile whose children are spawning.
     /// Published by the boot load once their artifacts are staged and
     /// cleared by its commit or its failure, so a request for one of them
-    /// earns [`GatewayError::ModelLoading`] instead of a 404 while the
+    /// receives [`GatewayError::ModelLoading`] instead of a 404 while the
     /// spawn runs, and never afterwards.
     loading: BTreeSet<String>,
 }
@@ -463,7 +463,7 @@ impl AppState {
 /// ([`shared_loopback::require_loopback_host`]), the DNS-rebinding
 /// defense; a non-loopback bind installs nothing, since a LAN server has
 /// no loopback allowlist to enforce. The [`Gateway::router`] seam passes
-/// `None` and carries no host wall: with no bound socket there is no
+/// `None` and installs no host wall: with no bound socket there is no
 /// authority to allowlist.
 pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>) -> Router {
     // The open tier: every area any admitted peer may reach, each mounted

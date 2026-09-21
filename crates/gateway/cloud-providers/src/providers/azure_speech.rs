@@ -5,7 +5,7 @@
 //! normalization of the per-locale base models: the trailing UUID of
 //! `self` as the id, `displayName`, `createdDateTime`, and
 //! `properties.deprecationDates.transcription` into `Deprecation`. The
-//! locale populates `languages` and the family; the feature flags carry
+//! locale populates `languages` and the family; the feature flags have
 //! no sheet meaning and drop out.
 //!
 //! Extra environment variables beyond the descriptor's
@@ -26,10 +26,10 @@ use crate::{EnvVarSpec, FetchError, Provider};
 /// secret name.
 const KEY_ENV: &str = "AZURE_SPEECH_KEY";
 
-/// Environment variable carrying the endpoint region.
+/// Environment variable holding the endpoint region.
 const REGION_ENV: &str = "AZURE_SPEECH_REGION";
 
-/// The Azure Speech provider descriptor. The base URL carries the
+/// The Azure Speech provider descriptor. The base URL contains the
 /// `{region}` placeholder, filled from `AZURE_SPEECH_REGION`.
 pub const PROVIDER: Provider = Provider {
     name: "azure_speech",
@@ -129,7 +129,7 @@ struct Page {
 
 /// One base model as the wire reports it. `description`, `kind`,
 /// `status`, `lastActionDateTime`, `features`, and `customProperties`
-/// carry no sheet meaning and are not parsed.
+/// have no sheet meaning and are not parsed.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireModel {
@@ -193,7 +193,7 @@ fn parse_wire_date(value: &str) -> Option<Date> {
 
 /// Sets every entry's family: the catalog is per-locale base models, so
 /// the locale is the family; a model with no locale is its own family
-/// (its id is a UUID). There is no snapshot collapse - the ids carry no
+/// (its id is a UUID). There is no snapshot collapse - the ids have no
 /// suffixes.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

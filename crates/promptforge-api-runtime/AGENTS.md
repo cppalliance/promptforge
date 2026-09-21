@@ -1,6 +1,6 @@
 # promptforge-api-runtime
 
-This crate owns PromptForge document execution and run orchestration. The one-door rule that makes it, with `promptforge-api-types`, the only promptforge-* dependency an outside crate may name is stated in the root `AGENTS.md` and enforced by `cargo test -p build-xtask`.
+This crate owns PromptForge document execution and run orchestration. The single-public-crate rule that makes it, with `promptforge-api-types`, the only promptforge-* dependency an outside crate may name is stated in the root `AGENTS.md` and enforced by `cargo test -p build-xtask`.
 
 - Historical `promptforge_api_runtime` compatibility paths are verbatim re-exports from the owning crates. Do not create new compatibility vocabulary here.
 - Concrete providers stay in their provider crates. `promptforge-api-runtime` may re-export them under a historical path but never reacquires provider implementation.

@@ -25,7 +25,7 @@ pub(crate) fn normalize_dropped_path(path: &Path) -> String {
     }
 }
 
-/// Dispatches the `promptforge:file-drop` event carrying the normalized
+/// Dispatches the `promptforge:file-drop` event with the normalized
 /// dropped paths. The page listens for the event and grants each path
 /// through the workspace HTTP API.
 pub(crate) fn dispatch_file_drop(window: &tauri::WebviewWindow, paths: &[PathBuf]) {

@@ -20,7 +20,7 @@ fn agent_fixture() -> serde_json::Value {
 }
 
 /// The root task's zeroth sequence: the provenance every fixture event
-/// carries, since the wire does not expose it.
+/// holds, since the wire does not expose it.
 fn provenance() -> promptforge_api_types::ids::Provenance {
     use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
     Provenance {

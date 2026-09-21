@@ -261,7 +261,7 @@ struct Round {
 
 /// What a served completion reports once the turn has advanced and the
 /// completion observation has fired: the pieces both the text and the
-/// tool-call arms carry into the round's answer.
+/// tool-call arms pass into the round's answer.
 struct Served {
     finish_reason: Option<String>,
     model: String,
@@ -274,7 +274,7 @@ impl Round {
     /// is a completed round with the reply absent - the turn advances and
     /// completes - because whether it is the model's clean exit or a
     /// failure depends on the rounds before it, which only the shim knows;
-    /// no debug capture fires because the failed completion carries no
+    /// no debug capture fires because the failed completion has no
     /// request/response bodies to record. Every other failure is a failed
     /// turn and the call's error.
     fn failed(&self, error: Error) -> std::result::Result<Box<ChatResult>, Error> {

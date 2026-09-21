@@ -304,7 +304,7 @@ impl BlobCache {
         })
     }
 
-    /// Lists every cache entry: blobs under `models/` that carry a sidecar.
+    /// Lists every cache entry: blobs under `models/` that have a sidecar.
     ///
     /// Reads sidecars only - blob bytes are never hashed (Amendment C), so
     /// listing stays cheap with multi-gigabyte entries. Blobs without

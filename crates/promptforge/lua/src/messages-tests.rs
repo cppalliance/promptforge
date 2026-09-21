@@ -35,7 +35,7 @@ fn eval_json(lua: &Lua, source: &str) -> serde_json::Value {
         .expect("builder output must convert to JSON")
 }
 
-/// Parses a message list through the chat protocol boundary, exactly as a
+/// Parses a message list through the chat protocol boundary, as a
 /// `models.chat` yield would.
 fn chat_parse(lua: &Lua, messages: Value) -> Vec<MessageRecord> {
     let request = lua.create_table().expect("table creation cannot fail");

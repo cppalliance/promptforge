@@ -16,7 +16,7 @@ use promptforge_api_types::emitter::Emitter;
 /// names against the map's keys, and the `tool_call` arm the loop shim
 /// then yields resolves each name itself - a bound alias against the run's
 /// tool catalog, a local alias against the section VM's handlers - so the
-/// map carries no implementation.
+/// map holds no implementation.
 #[derive(Debug, Clone)]
 pub(crate) enum DispatchTarget {
     /// A bound live tool, resolved against the run's tool catalog.

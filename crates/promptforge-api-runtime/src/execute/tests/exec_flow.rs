@@ -511,7 +511,7 @@ return sys.taskid\n\
 
 /// Nested `call()` is capped at [`MAX_CALL_DEPTH`]. Locks the
 /// `call_depth` divergence threaded through the unified engine (the
-/// top-level walk always enters at depth 0; the subroutine carries its depth).
+/// top-level walk always enters at depth 0; the subroutine keeps its depth).
 /// The caller is not in its own visible set, so the recursion is mutual.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn call_recursion_is_capped() {
@@ -1965,7 +1965,7 @@ return type(item) .. ':' .. tostring(item)\n\
 }
 
 /// Hash members arrive as pair tables (`item.key` / `item.value`), and
-/// `.item` on each arm result carries the same pair table back.
+/// `.item` on each arm result returns the same pair table.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_collection_hash_members_arrive_as_pair_tables() {
     let md = flow_prompt!(
@@ -2016,7 +2016,7 @@ fanout('### Worker', {})\n\
     );
 }
 
-/// `.item` on each arm result carries the member value back as a Lua value.
+/// `.item` on each arm result returns the member value as a Lua value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_collection_item_round_trips_members() {
     let md = flow_prompt!(

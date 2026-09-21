@@ -6,12 +6,12 @@
 //! drag-drop handler registers its own target on the WebView2 child
 //! windows before Chromium can, which kills every HTML5 drag-and-drop
 //! interaction inside the page (Dockview panel drags included), and once
-//! Chromium does register, its target lives in the msedgewebview2 browser
+//! Chromium does register, its target sits in the msedgewebview2 browser
 //! process, so it cannot be wrapped from this process at all - a window
 //! property holding another process's interface pointer is not callable
 //! here.
 //!
-//! WebView2 has a supported channel for exactly this: on a drop the page
+//! WebView2 has a supported channel for this: on a drop the page
 //! calls `chrome.webview.postMessageWithAdditionalObjects` with the DOM
 //! `File` objects, and the host receives each one as an
 //! [`ICoreWebView2File`] whose `Path` is the real OS path. [`attach`]
@@ -129,7 +129,7 @@ fn attach_drop_bridge(
     unsafe { core.add_WebMessageReceived(&handler, &raw mut token) }
 }
 
-/// Handles one web message: when it is the drop message carrying file
+/// Handles one web message: when it is the drop message with file
 /// attachments, hands their real OS paths to `defer`. The event args die
 /// with the callback, so the paths are read here; everything after -
 /// above all the eval that dispatches the drop into the page - runs
@@ -187,7 +187,7 @@ fn message_string(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Option<Str
 }
 
 /// The real OS paths of the message's attached `File` objects. Anything
-/// else riding along (a message with no attachments, or attachments of
+/// else in the message (a message with no attachments, or attachments of
 /// some other type) contributes nothing.
 fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Vec<PathBuf> {
     // AdditionalObjects arrived with WebView2 runtime 1.0.1518.46 (2022);
@@ -247,7 +247,7 @@ mod tests {
 
     use super::{DROP_MESSAGE, dropped_paths, handle_web_message, message_string};
 
-    /// A fake dropped file carrying one path.
+    /// A fake dropped file holding one path.
     #[implement(ICoreWebView2File)]
     struct FakeFile {
         path: &'static str,

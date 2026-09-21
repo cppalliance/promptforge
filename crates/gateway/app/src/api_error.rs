@@ -1,10 +1,11 @@
 //! Opaque, source-preserving public error types for the gateway facade.
 //!
 //! Each public error is a thin wrapper over a private representation. The
-//! representation carries the underlying cause via [`std::error::Error::source`]
-//! and never appears in a public signature, so no dependency type (reqwest,
-//! toml, axum, io) leaks into the crate's semver surface. Callers classify
-//! failures with the `kind()` method instead of matching private variants.
+//! representation exposes the underlying cause through
+//! [`std::error::Error::source`] and never appears in a public signature,
+//! so no dependency type (reqwest, toml, axum, io) leaks into the crate's
+//! semver surface. Callers classify failures with the `kind()` method
+//! instead of matching private variants.
 
 use gateway_config::ConfigError;
 

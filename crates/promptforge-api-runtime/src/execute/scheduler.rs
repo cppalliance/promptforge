@@ -29,10 +29,10 @@
 //! path ([`SlicePath`]) rather than by borrow, and the scheduler owns
 //! itself outright.
 //!
-//! This file carries the scheduler core: the chain record and arena, the
+//! This file holds the scheduler core: the chain record and arena, the
 //! ready queue, the pending table, the call stack, the task arena, and
 //! the one `issue` path every leaf arm hands its effect through. The
-//! submodules carry the rest: `pending` the pending table's entry (the
+//! submodules hold the rest: `pending` the pending table's entry (the
 //! `Continuation` an answer is applied by), `drive` the run-level step
 //! (the ready-queue drain, the terminal rules, and the teardown), `apply`
 //! the answer application, `chain` the chain lifecycle (arena insertion
@@ -147,7 +147,7 @@ fn first_chunk_line(blocks: &[Block]) -> u32 {
 /// The observability origin for a capability the run acquires: `label` is
 /// the section or pass the capability serves, and the prompt's title
 /// stands in for a file name - a prompt's name is its title, since the
-/// source may never have lived on disk.
+/// source may never have existed on disk.
 fn prompt_origin(prompt: &Prompt, label: &str, blocks: &[Block]) -> Origin {
     Origin::at(label, prompt.title(), first_chunk_line(blocks))
 }
@@ -169,7 +169,7 @@ impl ChainIndex {
 /// A chain's local id counters: the indices its next child chain and its
 /// next section entry take under its lineage. Set once at chain start:
 /// zero for a fresh chain (`Default`), or the values the chain continues
-/// from when it carries on an earlier chain's identity (the walk after
+/// from when it takes over an earlier chain's identity (the walk after
 /// the H1 pass).
 #[derive(Clone, Copy, Debug, Default)]
 struct Counters {
@@ -293,8 +293,8 @@ struct Chain {
     var: serde_json::Value,
     /// The chain's call nesting depth: each call child and each spawned
     /// task runs one level deeper. The recursion cap checks this field,
-    /// never the chain-stack length - task chains live on the ready queue,
-    /// not the stack, so only the field carries the accounting across a
+    /// never the chain-stack length - task chains sit on the ready queue,
+    /// not the stack, so only the field keeps the accounting across a
     /// spawn boundary.
     call_depth: usize,
     /// The call parent blocked on this chain, if any.

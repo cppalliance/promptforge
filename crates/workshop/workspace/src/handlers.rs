@@ -28,7 +28,7 @@ mod prompts;
 /// state their handlers use: the confined filesystem routes here, the
 /// `/workspace/file/*` document routes from the `file` module, and the
 /// `/workspace/file/state` ui-state bucket from `file_state`. Every
-/// route carries the default deadline tier.
+/// route runs under the default deadline tier.
 pub fn routes(state: Workspace) -> axum::Router {
     with_deadline(
         axum::Router::new()
@@ -110,7 +110,7 @@ fn decode_path_param(raw: &str) -> String {
 }
 
 /// Lists one level of a workspace directory, or the granted roots when the
-/// query carries no path. The listing is filesystem work and runs on the
+/// query has no path. The listing is filesystem work and runs on the
 /// blocking pool; the confinement check runs inside the same call, so the
 /// check-then-use window is no wider than before.
 pub(crate) async fn tree(

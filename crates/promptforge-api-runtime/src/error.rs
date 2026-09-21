@@ -52,13 +52,13 @@ pub(crate) enum Error {
         #[source]
         source: BoxedSource,
         /// The 1-based file line of the YAML failure, surfaced from the
-        /// retained cause's location when it carries one.
+        /// retained cause's location when it has one.
         line: Option<u32>,
         /// The 1-based file column of the YAML failure, when known.
         column: Option<u32>,
     },
 
-    /// A structurally-classified parse failure carrying a stable kind and an
+    /// A structurally-classified parse failure with a stable kind and an
     /// optional source byte span, so [`crate::ParseError`] can expose the
     /// classification and location from stored fields instead of inferring them
     /// from message text.
@@ -117,10 +117,11 @@ pub(crate) enum Error {
 
     /// The backend returned a non-success status.
     ///
-    /// The `Display` is deliberately body-free (F5): the bounded, control-escaped
-    /// body rides only in the private `body` field, reachable through the
-    /// explicit [`crate::CompletionError::backend_body`] opt-in, so a raw or
-    /// hostile payload cannot forge log lines or leak into an error message.
+    /// The `Display` is deliberately body-free (F5): the bounded,
+    /// control-escaped body is stored only in the private `body` field,
+    /// reachable through the explicit
+    /// [`crate::CompletionError::backend_body`] opt-in, so a raw or hostile
+    /// payload cannot forge log lines or leak into an error message.
     #[error("non-success backend status {status}")]
     Backend {
         /// The HTTP status code returned by the backend.
@@ -170,7 +171,7 @@ pub(crate) enum Error {
     ///
     /// Reasoning side-channel text, when present, is never promoted into the
     /// answer; `detail` may note that it was ignored, without pasting it. The
-    /// choice's `finish_reason` rides along so the tool loop can classify the
+    /// choice's `finish_reason` is included so the tool loop can classify the
     /// empty turn (a `"stop"` exit differs from a truncation or a missing
     /// reason).
     #[error("{detail}")]
@@ -178,7 +179,7 @@ pub(crate) enum Error {
     EmptyModelReply {
         /// The phrase naming the empty product (and ignored reasoning): the
         /// model client's fixed text when the client classified the turn,
-        /// or the message a Lua-side `empty_model_reply` raise carried, so
+        /// or the message a Lua-side `empty_model_reply` raise supplied, so
         /// the error re-renders with the text the author saw.
         detail: Cow<'static, str>,
         /// The choice's `finish_reason`, when the backend supplied one.
@@ -193,7 +194,7 @@ pub(crate) enum Error {
     /// runtime-internal condition with no originating `mlua` error to preserve
     /// (for example "host values have not been injected" or a poisoned mutex).
     ///
-    /// Failures that *do* carry an `mlua` cause use [`Error::LuaRuntime`], which
+    /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
     /// retains that cause as a private source (F4). The message is the specific
     /// failure as a noun phrase; the public wrapper classifies this as a Lua
     /// failure, so no redundant `lua error:` type label is prepended (F8).
@@ -259,7 +260,7 @@ pub(crate) enum Error {
 
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     ///
-    /// Carries a typed [`crate::subst::SubstitutionError`] with a stable kind,
+    /// Holds a typed [`crate::subst::SubstitutionError`] with a stable kind,
     /// the byte offset of the offending placeholder, a bounded preview, and any
     /// preserved serialization source, rather than a flattened string. The
     /// substitution error is the whole message and its cause chain, so the
@@ -277,7 +278,7 @@ pub(crate) enum Error {
     /// waited on nor cancelled is the author's bug: the chain's outcome
     /// becomes this error (the run's for the root walk, the call's answer
     /// for a `call` chain) and the leaked tasks are abandoned. The message
-    /// names the ids in spawn order; the Lua table carries them as `tasks`.
+    /// names the ids in spawn order; the Lua table lists them as `tasks`.
     #[error(
         "chain ended with author tasks still live: {}; wait on or cancel every task a chain spawns before it ends",
         join_task_ids(.tasks)
@@ -643,7 +644,7 @@ impl Error {
     /// Maps a structured error table that surfaced as a block's failure
     /// onto the variant its kind names, so a Lua-side raise classifies as
     /// the Rust-raised error it stands in for. A kind whose variant needs
-    /// structure the table does not carry (the tool-scope errors, the task
+    /// structure the table does not hold (the tool-scope errors, the task
     /// errors, `internal`) keeps its message as a Lua failure; those
     /// classifications arrive with the shims that raise them.
     fn from_raised(raised: promptforge_lua::Raised) -> Error {

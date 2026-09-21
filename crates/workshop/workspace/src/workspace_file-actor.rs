@@ -18,11 +18,11 @@ use crate::blocking::blocking;
 type Ack = oneshot::Sender<Result<(), WorkspaceFileError>>;
 
 /// The size of a WAL file that holds a header and no frames. A sidecar
-/// this small carries nothing the main file lacks.
+/// this small holds nothing the main file lacks.
 const WAL_HEADER_SIZE: u64 = 32;
 
-/// The v1 schema, exactly as applied at create time. `user_version` is
-/// the migration counter; `meta` carries the format stamp and display
+/// The v1 schema, as applied at create time. `user_version` is
+/// the migration counter; `meta` stores the format stamp and display
 /// name; `grants` mirrors the in-memory grant set in tree order; `kv`
 /// holds JSON values keyed by name (`window` and the ui-state keys).
 pub(crate) const SCHEMA_V1: &str = "\
@@ -47,10 +47,10 @@ CREATE TABLE kv (
 
 /// How many commands may wait in the channel before senders back off.
 /// Grants arrive at user-gesture rate and geometry saves are debounced,
-/// so a small bound is ample; a full channel is a symptom, not a mode.
+/// so a small bound is ample; a full channel is a symptom.
 pub(crate) const COMMAND_QUEUE_DEPTH: usize = 32;
 
-/// One unit of work for the actor. Each variant that answers carries a
+/// One unit of work for the actor. Each variant that answers holds a
 /// `oneshot` reply; a dropped reply means the caller gave up, which the
 /// actor ignores.
 #[derive(Debug)]
@@ -218,7 +218,7 @@ pub(crate) async fn write_contents(
 }
 
 /// The row inserts behind [`write_contents`]. Grants land with the
-/// positions they carry: create trusts its caller's order.
+/// positions they already have: create trusts its caller's order.
 async fn write_contents_rows(
     conn: &turso::Connection,
     contents: &WorkspaceContents,
@@ -299,8 +299,8 @@ async fn insert_grant(
     Ok(())
 }
 
-/// Deletes the grant at `path`. Positions are never renumbered: the
-/// survivors keep theirs and the next grant takes one past the maximum.
+/// Deletes the grant at `path`. The survivors keep their positions and
+/// the next grant takes one past the maximum.
 async fn remove_grant(conn: &turso::Connection, path: &Path) -> Result<(), WorkspaceFileError> {
     conn.execute(
         "DELETE FROM grants WHERE path = ?1",

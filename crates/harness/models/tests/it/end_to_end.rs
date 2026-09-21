@@ -164,7 +164,7 @@ fn of_kind(records: &[StoredRecord], kind: RecordKind) -> Vec<&StoredRecord> {
 }
 
 /// Asserts every effect record has exactly one answer record, that the
-/// answer comes after its effect, and that the two carry one provenance.
+/// answer comes after its effect, and that the two share one provenance.
 fn assert_one_answer_per_effect(records: &[StoredRecord]) {
     let effects = of_kind(records, RecordKind::Effect);
     let answers = of_kind(records, RecordKind::Answer);
@@ -187,13 +187,13 @@ fn assert_one_answer_per_effect(records: &[StoredRecord]) {
 }
 
 /// Asserts the `Provenance` columns over the whole record stream, the
-/// parse events included: the effects and events of each task carry that
-/// task's id and a `task_seq` that rises strictly in loop order, so a
-/// reader can slice the stream by task and order within it, and no two
-/// stamped records share a `(task_id, task_seq)`. The parse events are
-/// stamped under the main task from zero by the parser; preparation
-/// seeds the run's main-task counter past them, so the run's first
-/// main-task record continues the parse's sequence rather than
+/// parse events included: the effects and events of each task are
+/// stamped with that task's id and a `task_seq` that rises strictly in
+/// loop order, so a reader can slice the stream by task and order within
+/// it, and no two stamped records share a `(task_id, task_seq)`. The
+/// parse events are stamped under the main task from zero by the parser;
+/// preparation seeds the run's main-task counter past them, so the run's
+/// first main-task record continues the parse's sequence rather than
 /// restarting it.
 fn assert_provenance_orders_each_task(records: &[StoredRecord]) {
     let mut last_seq: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
@@ -248,7 +248,7 @@ fn assert_parse_events_lead_and_the_run_continues_their_sequence(
 
 /// Asserts the effects in loop order (the store write, then the model
 /// round whose messages are `request`'s) and each one's answer payload,
-/// and returns the main task's id, which both effects carry: the child
+/// and returns the main task's id, which both effects name: the child
 /// issued none.
 fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> String {
     let effects = of_kind(records, RecordKind::Effect);

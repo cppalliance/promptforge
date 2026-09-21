@@ -14,10 +14,10 @@ fn lua_with_compactors() -> Lua {
     lua
 }
 
-/// Extracts the typed crate error a `compactors.fail` raise carried across
+/// Extracts the typed crate error a `compactors.fail` raise brought across
 /// the Lua boundary (LUA-012: the typed error, never its flattened text).
 /// mlua wraps a callback's error in `CallbackError` for the traceback; the
-/// original external error rides as its cause.
+/// original external error is kept as its cause.
 fn raised_crate_error_ref(error: &mlua::Error) -> &Error {
     let cause = match error {
         mlua::Error::CallbackError { cause, .. } => cause.as_ref(),
@@ -31,7 +31,7 @@ fn raised_crate_error_ref(error: &mlua::Error) -> &Error {
     }
 }
 
-/// The overflow reason a raise carried, when it was a context exhaustion.
+/// The overflow reason a raise held, when it was a context exhaustion.
 fn raised_reason(error: &mlua::Error) -> OverflowReason {
     match raised_crate_error_ref(error) {
         Error::ContextExhausted { reason } => *reason,

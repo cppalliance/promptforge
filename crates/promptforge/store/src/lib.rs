@@ -13,11 +13,10 @@
 //! ([`Store::str_replace`]), 1-based inclusive line ranges with optional
 //! absolute numbering, idempotent deletes, and the `*`/`**` glob grammar.
 //! The `Store` trait, `MemStore`, `FileStore`, and the `WriteScope`
-//! registry are gone: backends live in `shared-vfs`, the mount layout in
+//! registry are gone: backends sit in `shared-vfs`, the mount layout in
 //! `promptforge-vfs`, and race detection in the claims model.
 //!
-//! This crate wires no execution; it defines the facade and its error
-//! vocabulary only.
+//! This crate defines the facade and its error vocabulary only.
 
 mod error;
 mod path;
@@ -464,7 +463,7 @@ impl Store<'_> {
 
 /// The extension trait behind the `vfs.store(&access)` call shape.
 ///
-/// The [`Store`] facade type lives in this crate, above `promptforge-vfs`
+/// The [`Store`] facade type sits in this crate, above `promptforge-vfs`
 /// and `shared-vfs` in the dependency stack, so the method cannot be
 /// inherent on `VfsRef`; a prelude-exported extension trait preserves the
 /// declared call shape without inverting the stack.

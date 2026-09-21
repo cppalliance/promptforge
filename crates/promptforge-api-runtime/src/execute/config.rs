@@ -21,7 +21,7 @@ use crate::tools::ToolCatalog;
 use super::bindings::{ModelBindings, ToolBindings};
 
 /// One run. Created by the host from the
-/// [`Environment`](super::Environment) carrying the per-run inputs,
+/// [`Environment`](super::Environment) holding the per-run inputs,
 /// enriched at prepare, owned by the engine for the run. Never shared
 /// between runs.
 ///
@@ -51,7 +51,7 @@ use super::bindings::{ModelBindings, ToolBindings};
 /// ```
 #[non_exhaustive]
 pub struct RunContext {
-    /// Run identity, carried on every report and event.
+    /// Run identity, stamped on every report and event.
     pub(crate) name: String,
     /// The run's seed: host-drawn, the source of the untrusted-envelope
     /// nonce (and of every future in-run random choice).
@@ -114,7 +114,7 @@ pub struct RunContext {
     /// declared alias is bound to, with every fill journaled.
     pub(crate) tool_bindings: ToolBindings,
     /// Test-only: the host seams the in-crate suites still set through the
-    /// context's old builder methods, carried to the run state and read by
+    /// context's old builder methods, passed to the run state and read by
     /// the test driver's constructor. Production hosts perform effects and
     /// read events themselves.
     #[cfg(test)]
@@ -225,7 +225,7 @@ impl RunContext {
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function, which binds every declared role to it and checks the
     /// roles' hard keywords and context minimums against its descriptor.
-    /// The default (`None`) fills nothing: declared roles stay unbound and
+    /// With the default (`None`), declared roles stay unbound and
     /// selecting one at run time fails.
     #[must_use]
     pub fn model(mut self, model: ModelDescriptor) -> RunContext {
@@ -233,7 +233,7 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's VFS handle, which carries the store mount every
+    /// Sets the run's VFS handle, which holds the store mount every
     /// section's `store` table operates on. The default is the stock
     /// handle (`promptforge_vfs::empty()`), a fresh memory backend at the
     /// store mount.

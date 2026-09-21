@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness door: the public surface through which Workshop and other clients configure the harness, push the gateway binding, and drive agent sessions"
+description = "PromptForge harness public API: the surface through which Workshop and other clients configure the harness, push the gateway binding, and drive agent sessions"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "sessions"]
 categories = ["development-tools", "api-bindings"]
@@ -17,7 +17,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 # over, re-exported from the runner.
 harness-runner.workspace = true
 # The harness handle, its bindings, the session handle, and the session
-# vocabulary, all defined there and named through this door.
+# vocabulary, all defined there and named through this crate.
 harness-sessions.workspace = true
 workspace-hack.workspace = true
 

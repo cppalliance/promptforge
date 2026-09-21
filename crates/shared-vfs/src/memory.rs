@@ -1,11 +1,11 @@
 //! The generic in-memory backend.
 //!
-//! [`MemoryBackend`] carries the former MemStore semantics onto the VFS
+//! [`MemoryBackend`] implements the former MemStore semantics on the VFS
 //! trait surface: bytes keyed by canonical path, writes that materialize
 //! their ancestor directories (no `mkdir` needed before a write), and
 //! strict removals (absent is `NotFound`; a non-empty directory without
 //! `recursive` is an error). `ExecId` attribution is accepted as a no-op:
-//! every session shares the one map. It holds no resources and drops with
+//! every session shares the one map. It owns only memory and drops with
 //! the run.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,9 +137,10 @@ impl Tree {
 
 /// An in-memory [`Vfs`] backend.
 ///
-/// Files live in a [`BTreeMap`] keyed by canonical path, so listing and
-/// glob results are ordered without a sort step. Clones share the same
-/// storage. The zero value (`Default`) is a meaningful empty backend.
+/// Files are stored in a [`BTreeMap`] keyed by canonical path, so
+/// listing and glob results are ordered without a sort step. Clones
+/// share the same storage. The zero value (`Default`) is a meaningful
+/// empty backend.
 ///
 /// # Examples
 /// ```

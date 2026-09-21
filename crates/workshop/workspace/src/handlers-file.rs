@@ -6,9 +6,9 @@
 //!
 //! Failures reach the wire through [`WorkspaceError`]'s envelope: a
 //! refused file (alien or unsupported version) is the client's mistake
-//! and carries the refusal's required-versus-actual text, a missing path
-//! is the ordinary not-found, a taken path a conflict. A refusal leaves
-//! the grants and the backing exactly as they were.
+//! and includes the refusal's required-versus-actual text, a missing
+//! path is the ordinary not-found, a taken path a conflict. A refusal
+//! leaves the grants and the backing as they were.
 
 use std::path::Path;
 

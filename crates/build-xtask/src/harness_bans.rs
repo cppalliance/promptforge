@@ -3,7 +3,7 @@
 //! The harness spawns only through one instrumented wrapper in
 //! `harness-runner` that tags each task with its `EffectId` and
 //! `Provenance`, so every crate under `crates/harness/` and the door crate
-//! `crates/harness-api/` carries a `clippy.toml` whose `disallowed-methods`
+//! `crates/harness-api/` has a `clippy.toml` whose `disallowed-methods`
 //! names `tokio::spawn` and `tokio::task::spawn_blocking`. Clippy reads the
 //! nearest `clippy.toml` above each crate's manifest directory, so the file
 //! must sit in the crate itself, not only at the workspace root.

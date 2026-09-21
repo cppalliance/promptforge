@@ -59,7 +59,7 @@ pub(crate) async fn sse_client(body: String) -> GatewayClient {
     client_for(app).await
 }
 
-/// One streamed chunk carrying a content fragment.
+/// One streamed chunk with a content fragment.
 pub(crate) fn content_chunk(text: &str) -> Value {
     serde_json::json!({
         "model": "qwen3-30b",

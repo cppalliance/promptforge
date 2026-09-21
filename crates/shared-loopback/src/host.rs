@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 /// This is the DNS-rebinding sibling of
 /// [`require_loopback`](crate::require_loopback): a page on a
 /// rebound hostname reaches a loopback server with same-origin fetch
-/// metadata, but its requests still carry the attacker's name as the
+/// metadata, but its requests still have the attacker's name as the
 /// authority, the one signal rebinding cannot forge. While the server is
 /// bound to a loopback address, the only admitted authorities are the
 /// socket's literal form (`127.0.0.1:port` or `[::1]:port`) and
@@ -106,7 +106,7 @@ mod tests {
     }
 
     /// [`host_status_for`] with an explicit request URI, so absolute-form
-    /// URIs can carry an authority the `Host` header disagrees with.
+    /// URIs can include an authority the `Host` header disagrees with.
     async fn host_status(bound: &str, uri: &str, host: Option<&str>) -> StatusCode {
         let bound: SocketAddr = bound.parse().expect("a socket address");
         let mut builder = HttpRequest::builder().uri(uri);

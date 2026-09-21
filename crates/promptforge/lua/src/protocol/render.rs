@@ -71,7 +71,7 @@ fn task_id_sequence(
 /// Renders one [`ChatResult`] as the plain Lua result table.
 ///
 /// `overflow` is always set as a boolean, so the loop shim branches on it
-/// with a plain truth test; `overflow_reason` rides beside it as the
+/// with a plain truth test; `overflow_reason` sits beside it as the
 /// compactor's tag when the request was refused. Absent optional fields
 /// are never set, so they resume as nil and `result.tool_calls` and
 /// `result.reply` presence-branching works; mapping them through the

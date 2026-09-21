@@ -5,8 +5,8 @@
 //! tools, call-time tool scope, explicit-handle calls on a frozen binding,
 //! and the atomic append of a tool-call batch. The shared loop fixtures
 //! (`loop_models`, `loop_context`, `loop_prompt`, the tool sets, and the
-//! `loop_events` filter) live here for every loop-driven sibling. The
-//! compactor argument's tests live in `models_loop_compactors`; the loop's
+//! `loop_events` filter) sit here for every loop-driven sibling. The
+//! compactor argument's tests sit in `models_loop_compactors`; the loop's
 //! exit rules in `exit_rules`; its cap, scope gate, and result-record
 //! trust in `tool_loop`.
 
@@ -16,7 +16,7 @@ use crate::model::{ModelBinding, ModelId};
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
 
-/// The model set a loop test's run carries: `writer` (the prompt-wide
+/// The model set a loop test's run uses: `writer` (the prompt-wide
 /// default, model `test-model`) and `other` (model `other-model`), so an
 /// explicit handle provably runs on its own frozen binding.
 pub(super) fn loop_models() -> ModelSet {

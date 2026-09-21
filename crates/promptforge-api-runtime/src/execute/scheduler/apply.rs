@@ -32,7 +32,7 @@ use super::{
 };
 
 /// The cancelled answer for a chain parked on `resume`'s kind of effect:
-/// the protocol variant the chain's shim expects, carrying the run's
+/// the protocol variant the chain's shim expects, holding the run's
 /// cancellation error. A timer resumes no chain; its drop is applied to
 /// its slot instead, before this is reached.
 fn dropped_answer(resume: &Continuation) -> Answer<Error> {

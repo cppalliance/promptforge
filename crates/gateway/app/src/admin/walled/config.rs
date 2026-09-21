@@ -69,8 +69,9 @@ pub(crate) async fn admin_config(
 /// secrets are restored from the current pending chain, the merged result
 /// is validated like a real load, and only then is the shadow written
 /// atomically. The real file stays untouched and nothing reloads. The reply
-/// is `{"shadow": path}`. A body carrying `active_profile` is rejected as a
-/// config-write error: selection belongs to `POST /admin/switch-profile`.
+/// is `{"shadow": path}`. A body containing `active_profile` is rejected
+/// as a config-write error: selection belongs to
+/// `POST /admin/switch-profile`.
 pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
     _caller: LoopbackCaller,

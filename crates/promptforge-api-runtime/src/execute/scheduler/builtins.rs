@@ -1,6 +1,6 @@
 //! The model's task built-ins: `task`, `task_cancel`, `task_status`,
-//! `await_tasks` (whose arm lives in the `await_tasks` module), and
-//! `task_events` (whose arm lives in the `task_events` module), answered
+//! `await_tasks` (whose arm sits in the `await_tasks` module), and
+//! `task_events` (whose arm sits in the `task_events` module), answered
 //! by the scheduler over its task arena, and the round scope they join.
 //!
 //! An author opts a section in with `tools.allow_tasks(targets?)`, which
@@ -26,7 +26,7 @@
 //! `tasks.pending({ origin = "model" })`.
 //!
 //! The built-ins' fixed schemas and the function that advertises them
-//! live in the `schemas` sibling; this file carries the arms.
+//! sit in the `schemas` sibling; this file holds the arms.
 
 #[path = "builtins-schemas.rs"]
 mod schemas;
@@ -83,7 +83,7 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
 /// request's `tools` against the section: an absent list is the section's
 /// current effective scope plus every local Lua tool; an explicit list
 /// names its members, each a local tool, an effective binding (which
-/// carries the section's description override), or a bound catalog slot.
+/// holds the section's description override), or a bound catalog slot.
 ///
 /// # Errors
 /// Returns [`Error::UnboundToolCall`] when an explicit alias names no
@@ -125,7 +125,7 @@ pub(super) struct BuiltinAnswer {
     pub(super) text: String,
     pub(super) ok: bool,
     /// Whether `text` is the engine's own (every answer but a history
-    /// read's, whose events carry model, tool, and user text and arrive
+    /// read's, whose events include model, tool, and user text and arrive
     /// nonce-wrapped as [`OutputTrust::Untrusted`]).
     pub(super) trust: OutputTrust,
     pub(super) started: Option<ChainIndex>,
@@ -141,7 +141,7 @@ impl BuiltinAnswer {
         }
     }
 
-    /// A served answer whose text is not the engine's own: already
+    /// A served answer whose text came from outside the engine: already
     /// nonce-wrapped by the caller, reported untrusted.
     pub(super) fn served_untrusted(text: String) -> Self {
         Self {

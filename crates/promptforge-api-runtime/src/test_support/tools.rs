@@ -3,14 +3,14 @@
 //! a `ToolCall` effect's id resolves in.
 //!
 //! The engine holds no implementation and names no implementation trait;
-//! the production traits (`Tool`, `InputPerformer`) are the harness's, behind
-//! the door in `harness-capabilities` and `harness-runner`, and a `promptforge-*` crate never
-//! depends on a harness crate. The suites still need something to perform
-//! a `ToolCall` or answer a `UserInput` effect with, so these are the test
-//! doubles: the same method shapes as the harness's traits (so a fixture
-//! reads like a production tool), built into the [`Performers`] the tokio
-//! test driver takes by [`RunHost`](super::RunHost). Nothing here reaches
-//! the engine.
+//! the production traits (`Tool`, `InputPerformer`) are the harness's, in
+//! `harness-capabilities` and `harness-runner`, and a `promptforge-*` crate
+//! never depends on a harness crate. The suites still need something to
+//! perform a `ToolCall` or answer a `UserInput` effect with, so these are
+//! the test doubles: the same method shapes as the harness's traits (so a
+//! fixture reads like a production tool), built into the [`Performers`]
+//! the tokio test driver takes by [`RunHost`](super::RunHost). Nothing
+//! here reaches the engine.
 //!
 //! The async methods are declared in the boxed form
 //! `#[async_trait::async_trait]` expands an `async fn` to, so a suite
@@ -154,7 +154,7 @@ impl TestToolTable {
     /// against, in identity order.
     ///
     /// # Errors
-    /// Returns the catalog's construction error when a fixture carries a
+    /// Returns the catalog's construction error when a fixture has a
     /// transport-illegal wire name.
     pub fn catalog(&self) -> Result<ToolCatalog, ToolCatalogError> {
         let descriptors: Vec<ToolDescriptor> =

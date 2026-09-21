@@ -4,7 +4,7 @@
 //!
 //! The scan is blocking filesystem work, so it goes through
 //! [`crate::error::blocking`] like every store operation (Amendment D).
-//! The diff itself lives in the local crate beside the blob cache, which owns
+//! The diff itself sits in the local crate beside the blob cache, which owns
 //! the slot layout and the sidecar records.
 
 use axum::extract::State;

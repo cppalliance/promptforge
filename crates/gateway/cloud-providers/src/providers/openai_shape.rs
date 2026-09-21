@@ -1,7 +1,7 @@
 //! The shared OpenAI list-response shape: a `data` array in a `list`
 //! envelope, Bearer auth, no pagination. Each provider speaking this
 //! dialect defines its own wire model struct - with whatever extra fields
-//! its endpoint reports - and its own normalization; this module carries
+//! its endpoint reports - and its own normalization; this module defines
 //! only the envelope, the single-request fetch, and the conservative base
 //! entry every dialect entry starts from.
 

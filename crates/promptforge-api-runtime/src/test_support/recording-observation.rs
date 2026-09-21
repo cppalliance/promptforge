@@ -229,8 +229,8 @@ pub enum Observation {
 }
 
 impl Observation {
-    /// Returns the fixed trace label for a fixed variant, or `None` for the
-    /// message-carrying [`Observation::Lua`] / [`Observation::Other`].
+    /// Returns the fixed trace label for a fixed variant, or `None` for
+    /// [`Observation::Lua`] / [`Observation::Other`], which hold a message.
     #[must_use]
     pub fn label(&self) -> Option<&'static str> {
         let label = match self {

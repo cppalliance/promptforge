@@ -60,7 +60,7 @@ pub(super) fn payload_stream(response: reqwest::Response) -> SsePayloadStream {
 /// payloads, one per event, in arrival order.
 ///
 /// Only `data:` fields are collected; `event:`, `id:`, `retry:`, and
-/// comments are dropped, matching what an OpenAI-compatible stream carries.
+/// comments are dropped, matching what an OpenAI-compatible stream sends.
 /// Multiple `data:` lines in one event are joined with `\n` per the SSE
 /// specification.
 #[derive(Debug, Default)]
@@ -69,7 +69,7 @@ pub(crate) struct SseDecoder {
     partial: Vec<u8>,
     /// Joined `data:` lines of the event currently being accumulated.
     data: String,
-    /// Whether the current event carries at least one `data:` line.
+    /// Whether the current event has at least one `data:` line.
     has_data: bool,
     /// Completed payloads awaiting pickup.
     out: VecDeque<String>,

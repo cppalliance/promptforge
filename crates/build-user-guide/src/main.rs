@@ -2,7 +2,7 @@
 //! landing page per part, regenerates `guide/src/SUMMARY.md`, writes the
 //! per-set single-file exports, and fails on any link that does not resolve.
 //!
-//! Chapter files carry a numeric prefix (`01-frontmatter.md`) so a name sort
+//! Chapter files have a numeric prefix (`01-frontmatter.md`) so a name sort
 //! is the reading order. The generator owns the chapters and the
 //! introduction; this crate owns `SUMMARY.md` and the per-part `index.md`
 //! files. Neither owned file is hand-edited.

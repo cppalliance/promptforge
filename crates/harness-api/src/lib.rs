@@ -1,4 +1,4 @@
-//! harness-api - the public door into the PromptForge harness family: the
+//! harness-api - the public API of the PromptForge harness family: the
 //! harness configuration, the gateway binding a client pushes at startup
 //! and on every gateway replacement, the session, event, and delta
 //! types a client renders, the awaitable [`cancel::CancelHandle`] a
@@ -7,7 +7,7 @@
 //!
 //! ## Invariants
 //!
-//! - Family: harness door; may depend on: `promptforge-api-runtime`,
+//! - Family: harness public API; may depend on: `promptforge-api-runtime`,
 //!   `promptforge-api-types`, `gateway-api-types`,
 //!   `gateway-api-discovery`, `shared-*`, and the crates under
 //!   `crates/harness/`. Never on a `workshop-*` crate or a private
@@ -26,7 +26,7 @@ mod session;
 pub use harness::{
     CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchError,
 };
-// A harness error's `Display` carries only its own message; a client that
+// A harness error's `Display` holds only its own message; a client that
 // shows one to a person renders the cause chain through this.
 pub use harness_runner::display_chain;
 pub use session::{

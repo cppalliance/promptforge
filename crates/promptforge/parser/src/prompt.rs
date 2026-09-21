@@ -1,7 +1,7 @@
 //! The parsed prompt tree: [`Prompt`], its [`Section`]s, and their
 //! [`Block`]s, with the read-only accessors hosts navigate it through.
 //!
-//! Construction lives in the parsing modules; this module holds the value
+//! Construction happens in the parsing modules; this module holds the value
 //! types and the invariant-preserving operations on them.
 
 use crate::LuaProgram;

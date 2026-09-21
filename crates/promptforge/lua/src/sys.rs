@@ -245,7 +245,7 @@ pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Tab
 ///
 /// The guarded `var` proxy itself serializes empty; this reads what
 /// [`var_to_json`] reads, materializing nested proxies, for the coroutine
-/// shim's `var_snapshot` capture: a `call` or `fanout` request carries
+/// shim's `var_snapshot` capture: a `call` or `fanout` request includes
 /// the caller's `var` as a clone.
 ///
 /// # Errors

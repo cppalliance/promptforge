@@ -98,7 +98,7 @@ fn kind_of(id: &str) -> ModelKind {
 
 /// The entry's family: the `kimi-k<version>` prefix for the numbered
 /// Kimi line, the `moonshot-v<N>` prefix for the legacy line, and the
-/// whole id otherwise. The catalog carries no snapshot suffixes, so
+/// whole id otherwise. The catalog has no snapshot suffixes, so
 /// there is no collapse pass.
 fn family_of(id: &str) -> String {
     if let Some(rest) = id.strip_prefix("kimi-k") {

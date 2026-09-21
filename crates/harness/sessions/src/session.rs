@@ -6,9 +6,9 @@
 //! event of every run the session has made, in log order, numbered from
 //! zero across relaunches; a live subscriber receives each event as it is
 //! recorded and a reconnecting client reads [`Session::transcript`] past
-//! its last seen index. Deltas ride a separate broadcast, stamped with the
-//! reply id of the event that will supersede them, and never enter the
-//! log. The session's unresolved input waits, its delta and wait
+//! its last seen index. Deltas are sent on a separate broadcast, stamped
+//! with the reply id of the event that will supersede them, and never enter
+//! the log. The session's unresolved input waits, its delta and wait
 //! channels, and its lifecycle survive a client's disconnect; the
 //! supervisor (`session::supervisor`) relaunches the program over the
 //! retained transcript after a turn-cancel and ends the session when the
@@ -170,7 +170,7 @@ impl Session {
     }
 
     /// Subscribes to the session's operator-facing failure reports from
-    /// this call on. Each carries its [`FailureKind`] - a failed model
+    /// this call on. Each includes its [`FailureKind`] - a failed model
     /// round or tool call the program survived, a run that ended in
     /// error, or an interrupt's synthetic terminal - beside its display
     /// message. Ephemeral like the deltas.
@@ -462,8 +462,8 @@ impl SessionCore {
 }
 
 /// The reply-id rule, applied identically live and on replay: the
-/// model-round content kinds carry the current round count as their
-/// stamp, and a reply or tool-call batch advances it.
+/// model-round content kinds are stamped with the current round count,
+/// and a reply or tool-call batch advances it.
 #[must_use]
 pub fn reply_stamp(event: &Event, rounds_seen: &mut u64) -> Option<u64> {
     match event {

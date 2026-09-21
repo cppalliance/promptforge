@@ -5,7 +5,7 @@
 //! chat-completion body shape, then [`finishes`](StreamAccumulator::finish)
 //! it into a [`Completion`]. The strict turn rules stay in
 //! [`crate::normalize`]: the accumulator only reassembles, so streamed and
-//! buffered turns are judged by exactly one rule set.
+//! buffered turns are judged by one rule set.
 //!
 //! No HTTP happens here. The transport that reads the bytes off the wire
 //! lives with the host that performs the `Chat` effect (the harness's model
@@ -13,8 +13,8 @@
 //! dev-only client against a mock gateway. Both hand bytes to the scanner,
 //! payloads to the accumulator, and take the completion from `finish`.
 //!
-//! The progress subscription in the model vocabulary carries its own SSE
-//! decoder deliberately, and neither can substitute for the other: that one
+//! The progress subscription in the model vocabulary deliberately has its
+//! own SSE decoder, and neither can substitute for the other: that one
 //! decodes blank-line-terminated event blocks into typed progress items and
 //! stays lossy (an undecodable block is one `Err` item in a telemetry
 //! stream), while this one hands raw `data:` payloads to a transport loop
@@ -83,10 +83,10 @@ impl SseScanner {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Applied {
     /// The payload advanced the accumulation; `delta` is true when it
-    /// carried answer text, reasoning, or a tool-call fragment (the
+    /// included answer text, reasoning, or a tool-call fragment (the
     /// TTFT/ITL clock ticks on those, never on role or summary chunks).
     Chunk {
-        /// Whether the chunk carried generated content.
+        /// Whether the chunk included generated content.
         delta: bool,
     },
     /// The payload was the terminal `[DONE]` sentinel.
@@ -108,7 +108,7 @@ struct ToolCallParts {
 /// Only the first choice (`index == 0`) is accumulated, mirroring the
 /// buffered normalizer, which reads `choices[0]` alone. Metadata sections
 /// (`usage`, llama.cpp `timings`, vLLM `metrics`) are kept verbatim from
-/// whichever chunk carried them last, including the empty-choices summary
+/// whichever chunk held them last, including the empty-choices summary
 /// chunk `stream_options.include_usage` appends, and are handed to the
 /// lenient metadata parser unjudged.
 ///
@@ -136,7 +136,7 @@ impl StreamAccumulator {
     }
 
     /// Applies one `data:` payload, invoking `on_delta` for each text or
-    /// reasoning fragment it carries.
+    /// reasoning fragment it contains.
     ///
     /// # Errors
     /// Returns a `MalformedResponse`-kind [`CompletionError`] when the
@@ -209,7 +209,7 @@ impl StreamAccumulator {
         })
     }
 
-    /// Applies one streamed choice, returning whether it carried content.
+    /// Applies one streamed choice, returning whether it held content.
     fn apply_choice(&mut self, choice: &Value, on_delta: &impl Fn(StreamDelta)) -> Result<bool> {
         let Some(index) = choice.get("index").and_then(Value::as_u64) else {
             return Err(Error::MalformedResponse(
@@ -320,7 +320,7 @@ impl StreamAccumulator {
     /// the truncation rule, the strict turn normalizer, and the lenient
     /// metadata parser, in that order. `request_body` is the body the
     /// transport sent and `client_timing` what it measured on its own
-    /// clock; both ride on the completion for the debug capture.
+    /// clock; both are recorded on the completion for the debug capture.
     ///
     /// # Errors
     /// Returns a `MalformedResponse`-kind [`CompletionError`] when a

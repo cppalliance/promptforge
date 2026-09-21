@@ -43,7 +43,7 @@ pub enum ValidationError {
 /// identity, health endpoint, and bearer acceptance.
 ///
 /// Validation observes the OS process boot immediately before and after
-/// one TCP connection carries both network checks. This closes the
+/// the one TCP connection that makes both network checks. This closes the
 /// health-to-bearer replacement gap and rejects pid reuse during that
 /// interval. The capability is a point-in-time proof and makes no claim
 /// that the process remains live after validation returns.

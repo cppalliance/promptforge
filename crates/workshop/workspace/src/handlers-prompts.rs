@@ -269,7 +269,7 @@ pub(crate) async fn contract(Json(body): Json<ContractRequest>) -> Response {
 }
 
 /// Renders a parse failure as the standard error envelope: the machine
-/// code is `parse_<kind>`, and the message carries the `line N: ` prefix
+/// code is `parse_<kind>`, and the message includes the `line N: ` prefix
 /// when the parser located the failure.
 fn parse_failure(error: &ParseError) -> Response {
     let code = match error.kind() {

@@ -61,7 +61,7 @@ pub enum Error {
     /// runtime-internal condition with no originating `mlua` error to preserve
     /// (for example "host values have not been injected" or a poisoned mutex).
     ///
-    /// Failures that *do* carry an `mlua` cause use [`Error::LuaRuntime`], which
+    /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
     /// retains that cause as a private source (F4). The message is the specific
     /// failure as a noun phrase; the public wrapper classifies this as a Lua
     /// failure, so no redundant `lua error:` type label is prepended (F8).

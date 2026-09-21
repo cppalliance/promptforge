@@ -23,10 +23,10 @@ use workshop_registry::Push;
 pub(crate) const SHOW_DELAY: Duration = Duration::from_secs(1);
 
 /// How long the barberpole stays up once shown, so work that ends just
-/// past [`SHOW_DELAY`] reads as a completed activity, not a flash.
+/// past [`SHOW_DELAY`] reads as a completed activity.
 pub(crate) const MIN_VISIBLE: Duration = Duration::from_millis(500);
 
-/// The tooltip every gateway busy frame carries.
+/// The tooltip on every gateway busy frame.
 const DESCRIPTION: &str = "gateway activity";
 
 /// The two anti-flicker durations, injectable so the subscriber tests

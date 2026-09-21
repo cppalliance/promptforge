@@ -2,7 +2,7 @@
 //! to close and says so quietly, a file-backed one folds its WAL into
 //! the file and drops the sidecar, leaving exactly one file behind with
 //! every grant in it while the in-memory grants stand, and the
-//! registered background task hands the shell exactly that close as its
+//! registered background task hands the shell that close as its
 //! shutdown lever.
 
 use super::*;

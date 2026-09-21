@@ -4,7 +4,7 @@
 //! own thread with its own tokio runtime, so an embedding binary (the
 //! desktop shell, or the server binary itself) keeps its main thread. The
 //! call blocks until the listener is bound - that bind is the readiness
-//! signal - and the returned [`ServerHandle`] carries the base URL and a
+//! signal - and the returned [`ServerHandle`] holds the base URL and a
 //! graceful-shutdown switch. The stop side is bounded: a watchdog gives
 //! in-flight connections a grace window to drain and then tears the runtime
 //! down anyway, and a stopped barrier reports [`Termination`] back through

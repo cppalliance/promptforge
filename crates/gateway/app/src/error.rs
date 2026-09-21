@@ -56,8 +56,8 @@ pub(crate) enum GatewayError {
     },
 
     /// A transport- or protocol-level failure from the upstream seam. The
-    /// variants live in [`ProtocolError`]; the gateway wraps them so a route
-    /// handler deals with one error type.
+    /// variants are defined in [`ProtocolError`]; the gateway wraps them so
+    /// a route handler deals with one error type.
     #[non_exhaustive]
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
@@ -86,7 +86,7 @@ pub(crate) enum GatewayError {
     UpstreamUnavailable,
 
     /// The named model is configured but not yet loaded, and a queue command
-    /// (carried in the message) is working on the routing table. Maps to 503
+    /// (named in the message) is working on the routing table. Maps to 503
     /// so a client can retry once the active command completes.
     #[non_exhaustive]
     #[error("model provisioning in progress: {0}")]
@@ -153,7 +153,7 @@ pub(crate) enum GatewayError {
     /// A shadow-write route refused the payload: the body could not be
     /// rendered as TOML, a redacted secret had no existing value to
     /// preserve, or the merged pending configuration failed validation.
-    /// The message carries the full cause chain so the UI can show why.
+    /// The message includes the full cause chain so the UI can show why.
     #[non_exhaustive]
     #[error("config write rejected: {0}")]
     ConfigWriteRejected(String),
@@ -168,7 +168,7 @@ pub(crate) enum GatewayError {
     /// stay staged and `GET /admin/config-dirty` still reports them; a
     /// `PartialStart` (a `local` build) lands after the commit, with the
     /// shadows promoted and the profile live minus the models that did not
-    /// start. The message carries the activation failure's full cause
+    /// start. The message includes the activation failure's full cause
     /// chain; callers inspect status before retrying because it tells the
     /// two apart.
     #[non_exhaustive]
@@ -185,7 +185,7 @@ pub(crate) enum GatewayError {
     /// configuration: a chain file or shadow is unreadable, unparsable, or
     /// the merged pending result fails validation. Saves validate before
     /// writing, so this means the on-disk pending state was corrupted out
-    /// of band. The message carries the full cause chain.
+    /// of band. The message includes the full cause chain.
     #[non_exhaustive]
     #[error("pending config unreadable: {0}")]
     PendingConfig(String),
@@ -214,7 +214,8 @@ pub(crate) enum GatewayError {
     #[error("cache operation failed")]
     Cache(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// `DELETE /v1/cache/{sha256}` named a digest no cache entry carries.
+    /// `DELETE /v1/cache/{sha256}` named a digest that matches no cache
+    /// entry.
     #[cfg(feature = "local")]
     #[non_exhaustive]
     #[error("cache entry not found: {0}")]
@@ -248,7 +249,7 @@ pub(crate) enum GatewayError {
     },
 
     /// The cloud provider model sheet parsed but declared a schema
-    /// version this gateway does not accept; the message carries both
+    /// version this gateway does not accept; the message names both
     /// versions. Maps to 502 like every other sheet download failure.
     #[non_exhaustive]
     #[error(
@@ -262,7 +263,7 @@ pub(crate) enum GatewayError {
     },
 
     /// No cloud provider model sheet is available and the last download
-    /// or cache write failed; the message carries the failure.
+    /// or cache write failed; the message names the failure.
     #[non_exhaustive]
     #[error("cloud provider model sheet unavailable: {0}")]
     CloudModelsUnavailable(String),
@@ -521,7 +522,7 @@ impl GatewayError {
     }
 }
 
-/// The `Retry-After` a loading model's 503 carries, in seconds: long enough
+/// The `Retry-After` a loading model's 503 sets, in seconds: long enough
 /// that a polling client does not hammer the gateway while a child loads
 /// its weights, short enough that it notices the model within one poll of
 /// the spawn completing.
@@ -560,7 +561,7 @@ impl IntoResponse for GatewayError {
 
 /// Renders an error and every source beneath it as one `; `-joined line.
 ///
-/// The gateway's wire messages carry one line, so a variant that wants
+/// The gateway's wire messages are one line, so a variant that needs
 /// the whole chain in its message flattens it here. The multi-line form
 /// the binary writes to the log and to stderr is a different rendering
 /// and stays in `main.rs`.
@@ -624,14 +625,14 @@ where
 
 /// A JSON body extractor whose rejections render in the OpenAI error
 /// envelope: a malformed body, a wrong content type, or a failed
-/// deserialize all answer [`GatewayError::MalformedRequest`] carrying the
+/// deserialize all answer [`GatewayError::MalformedRequest`] with the
 /// rejection's detail, never axum's plain-text rejection.
 ///
 /// [`WireQuery`] and [`WirePath`] are its siblings for the query string
 /// and path captures. All three are fallible extractors, so a handler
 /// lists them after its auth extractor: extractors run in argument order,
-/// and an unauthenticated caller must earn 401 before its malformed input
-/// earns 400.
+/// and an unauthenticated caller must get 401 before its malformed input
+/// gets 400.
 pub(crate) struct WireJson<T>(pub(crate) T);
 
 impl<T, S> axum::extract::FromRequest<S> for WireJson<T>
@@ -1049,7 +1050,7 @@ mod tests {
     struct Leaf;
 
     /// An outer error that copies its cause's text into its own message,
-    /// the shape of the variants that carry an [`error_chain`] rendering
+    /// the shape of the variants that embed an [`error_chain`] rendering
     /// in their own string.
     #[derive(Debug, thiserror::Error)]
     #[error("config write rejected: {message}")]

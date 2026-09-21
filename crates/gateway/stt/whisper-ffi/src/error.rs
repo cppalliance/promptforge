@@ -61,7 +61,7 @@ pub enum WhisperError {
     #[error("whisper could not create a decoding state")]
     NullState,
 
-    /// A token or sample count does not fit the C API's signed integer.
+    /// A token or sample count exceeds the C API's signed integer range.
     #[non_exhaustive]
     #[error("{value} count exceeds the whisper C API limit")]
     CountOverflow {

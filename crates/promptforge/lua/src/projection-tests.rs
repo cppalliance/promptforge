@@ -71,7 +71,7 @@ fn projection_error(records: &[MessageRecord]) -> String {
 }
 
 /// Parses a Lua-authored message list through the chat protocol boundary,
-/// exactly as a `models.chat` yield would, so the projection sees the same
+/// as a `models.chat` yield would, so the projection sees the same
 /// records dispatch sees.
 fn lua_parse(lua: &Lua, messages: &str) -> Vec<MessageRecord> {
     let request = lua.create_table().expect("table creation cannot fail");

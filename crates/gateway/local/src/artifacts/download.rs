@@ -174,7 +174,7 @@ pub(super) fn hub_bearer_token(lookup: impl Fn(&str) -> Option<String>) -> Optio
 
 /// Downloads `url` to `destination`, formatting `"Downloading {name} {pct}%"`
 /// into `activity` when given, and returns the SHA-256 hex digest of the
-/// streamed bytes. The outcome is the caller's to log: the reporter carries
+/// streamed bytes. The outcome is the caller's to log: the reporter formats
 /// byte counts only.
 ///
 /// # Errors

@@ -25,9 +25,9 @@ use crate::{ToolBinding, ToolCallCounts};
 ///
 /// [`prepare_dispatch`] fires the `ToolResult` event with them; a
 /// model tool-loop dispatch passes `None` instead and reports the result itself,
-/// because it owns the model-issued call id the script path lacks. A script
-/// call carries no model-issued call id, so the report's `tool_call_id` is
-/// empty. The chain and depth are not part of the report: the emitter
+/// because it owns the model-issued call id the script path lacks. The
+/// script report's `tool_call_id` is therefore empty. The chain and depth
+/// are not part of the report: the emitter
 /// stamps every event with its provenance, which is what a host groups by.
 #[derive(Debug, Clone, Copy)]
 pub struct ScriptReport {
@@ -68,7 +68,7 @@ impl ToolDispatch {
         &self.content
     }
 
-    /// The trust marking the content carries: [`OutputTrust::Trusted`]
+    /// The content's trust marking: [`OutputTrust::Trusted`]
     /// for verbatim output, [`OutputTrust::Untrusted`] for the
     /// nonce-wrapped envelope.
     #[must_use]
@@ -98,7 +98,7 @@ impl ToolDispatch {
 ///
 /// `call_result` is the tool's own answer, however the host obtained it.
 /// Nothing here awaits, so a host that performed the call on its own
-/// executor applies exactly these rules when the answer arrives.
+/// executor applies these rules when the answer arrives.
 ///
 /// # Errors
 /// Returns [`Error::Tool`] when `call_result` is the tool's failure (its
@@ -154,8 +154,7 @@ pub fn prepare_dispatch(
 /// round continues; `prepare_dispatch` has already fired the failed
 /// observation. The counts increment and every other dispatch failure
 /// still propagate. Nothing here awaits, so a host that performed the
-/// call on its own executor applies exactly these rules when the answer
-/// arrives.
+/// call on its own executor applies these rules when the answer arrives.
 ///
 /// # Errors
 /// Returns the counts' own error when `binding`'s alias was never seeded.

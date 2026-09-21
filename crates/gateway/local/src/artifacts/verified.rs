@@ -41,7 +41,7 @@ pub(super) enum VerifyOutcome {
 /// consulting `marker` before falling back to a full hash of the blob.
 ///
 /// A marker hit requires the recorded digest to equal `expected` and the
-/// blob's size and mtime to match the record exactly; anything else (missing,
+/// blob's size and mtime to match the record; anything else (missing,
 /// stale, truncated, or unparseable marker) is a cache miss, never an error,
 /// and falls through to [`file_digest_with_progress`]. On a hash match the marker is
 /// written or refreshed best-effort via [`write_marker_best_effort`]: the

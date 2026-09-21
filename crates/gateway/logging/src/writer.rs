@@ -230,7 +230,7 @@ impl Drop for LogEventWriter {
     }
 }
 
-/// Fixed-capacity formatter storage whose allocation cannot grow.
+/// Formatter storage whose allocation is fixed at construction.
 #[derive(Debug)]
 struct BoundedBytes {
     storage: Box<[u8]>,

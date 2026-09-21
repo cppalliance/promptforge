@@ -47,7 +47,8 @@ pub enum RunErrorKind {
     RequirementsUnmet,
 }
 
-/// Where a failure lives: a prompt source position or a Rust code position.
+/// Where a failure occurred: a prompt source position or a Rust code
+/// position.
 ///
 /// One generic shape - the [`RunErrorKind`] says which world the fault is in,
 /// and the path's extension says it again. Kinds are for code, messages for
@@ -67,14 +68,14 @@ pub struct SourceLocation {
     pub span: Option<Range<usize>>,
 }
 
-/// The error a prompt run fails with, carried by
+/// The error a prompt run fails with, reported through
 /// [`RunResult::Failure`](super::RunResult::Failure) out of
 /// [`Step::Done`](super::Step::Done).
 ///
-/// A `RunError` carries a stable [`kind`](RunError::kind) classifier plus the
-/// `is_cancelled`/`is_retryable` predicates, and preserves the underlying cause
-/// through [`std::error::Error::source`]. It is `#[non_exhaustive]` and cannot
-/// be constructed outside the crate.
+/// A `RunError` has a stable [`kind`](RunError::kind) classifier plus the
+/// `is_cancelled`/`is_retryable` predicates, and preserves the underlying
+/// cause through [`std::error::Error::source`]. It is `#[non_exhaustive]`
+/// and cannot be constructed outside the crate.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RunError {
@@ -154,11 +155,11 @@ impl RunError {
         }
     }
 
-    /// Returns where the failure lives, when it has a location.
+    /// Returns where the failure occurred, when it has a location.
     ///
-    /// Parse-kind failures carry the prompt source position (the frontmatter
+    /// Parse-kind failures report the prompt source position (the frontmatter
     /// name as the path when parse got that far, plus the surfaced YAML
-    /// line/column or the span-derived position); internal faults carry the
+    /// line/column or the span-derived position); internal faults report the
     /// Rust source file and line of the broken invariant. Other kinds have
     /// no source position to navigate to and return `None`.
     #[must_use]

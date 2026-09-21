@@ -116,7 +116,7 @@ fn family_of(id: &str) -> String {
     id.to_owned()
 }
 
-/// Sets every entry's family. Soniox's catalog carries no snapshot
+/// Sets every entry's family. Soniox's catalog has no snapshot
 /// suffixes, so there is no collapse pass.
 pub(crate) fn apply_taxonomy(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {

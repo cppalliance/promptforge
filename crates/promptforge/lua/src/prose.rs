@@ -10,7 +10,7 @@
 //! `prose` raises, and `{{ prose }}` inside the template is rejected as
 //! recursive.
 //!
-//! The guard rides on the `_G` metatable: `__index` renders and memoizes
+//! The guard sits on the `_G` metatable: `__index` renders and memoizes
 //! the `prose` key, `__newindex` rejects writes to it, and every other key
 //! delegates to whatever metatable author code (say, the shared library)
 //! installed first. Each install replaces the previous pair's handler, so

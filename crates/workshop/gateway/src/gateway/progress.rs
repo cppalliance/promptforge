@@ -3,7 +3,7 @@
 //! bound.
 //!
 //! Unlike the switch and cache streams, a progress subscription never
-//! terminates on its own and carries snapshots the workshop renders
+//! terminates on its own and yields snapshots the workshop renders
 //! verbatim, so the decode keeps the stricter posture the subscriber
 //! always had: only blank-line-terminated blocks dispatch (an incomplete
 //! trailing block is discarded), and a block that grows past
@@ -40,7 +40,7 @@ pub type ProgressStream = Pin<Box<dyn Stream<Item = Result<Progress, GatewayErro
 /// stream.
 ///
 /// The endpoint answers only an event stream on success, so a
-/// non-success status is [`GatewayError::Status`] carrying a bounded,
+/// non-success status is [`GatewayError::Status`] with a bounded,
 /// control-escaped body rather than a relayed response.
 pub(super) async fn subscribe(response: reqwest::Response) -> Result<ProgressStream, GatewayError> {
     let status = response.status();

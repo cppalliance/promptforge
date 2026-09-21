@@ -7,7 +7,7 @@
 //! preserve its source. The substrate is `#[doc(hidden)]` and re-exported only
 //! so `promptforge-api-runtime` can map every variant back onto its own substrate
 //! verbatim, and so the transport that performs a round (the harness's
-//! gateway client, reaching it through that door) can build the
+//! gateway client, reaching it through that crate) can build the
 //! [`CompletionError`](crate::model::CompletionError) it answers with; it is
 //! not a stable API and is not marked `#[non_exhaustive]`, so that mapping
 //! stays total.
@@ -61,10 +61,11 @@ pub enum Error {
 
     /// The backend returned a non-success status.
     ///
-    /// The `Display` is deliberately body-free (F5): the bounded, control-escaped
-    /// body rides only in the private `body` field, reachable through the
-    /// explicit [`crate::model::CompletionError::backend_body`] opt-in, so a raw
-    /// or hostile payload cannot forge log lines or leak into an error message.
+    /// The `Display` is deliberately body-free (F5): the bounded,
+    /// control-escaped body is stored only in the private `body` field,
+    /// reachable through the explicit
+    /// [`crate::model::CompletionError::backend_body`] opt-in, so a raw or
+    /// hostile payload cannot forge log lines or leak into an error message.
     #[error("non-success backend status {status}")]
     Backend {
         /// The HTTP status code returned by the backend.
@@ -113,7 +114,7 @@ pub enum Error {
     ///
     /// Reasoning side-channel text, when present, is never promoted into the
     /// answer; `detail` may note that it was ignored, without pasting it. The
-    /// choice's `finish_reason` rides along so the tool loop can classify the
+    /// choice's `finish_reason` is included so the tool loop can classify the
     /// empty turn (a `"stop"` exit differs from a truncation or a missing
     /// reason).
     #[error("{detail}")]

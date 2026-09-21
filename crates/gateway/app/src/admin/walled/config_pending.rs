@@ -7,10 +7,9 @@
 //! the selection the real `gateway.state.toml` persists, which may differ
 //! from the running profile until the next start.
 //! `config-dirty` is the cheap poll: whether any shadow exists, which
-//! real files carry one, and which top-level sections the pending view
-//! changes. The resolution machinery lives in
-//! `gateway-config`; these handlers own auth, path assembly,
-//! and the wire shape.
+//! real files have one, and which top-level sections the pending view
+//! changes. The resolution machinery is defined in `gateway-config`;
+//! these handlers own auth, path assembly, and the wire shape.
 
 use std::path::Path;
 

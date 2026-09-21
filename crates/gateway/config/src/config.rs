@@ -107,7 +107,7 @@ where
 }
 
 /// Serializes a [`Secret`] field as `"***"`: a serialized configuration never
-/// carries credential material, and a reader treats the marker as "keep the
+/// contains credential material, and a reader treats the marker as "keep the
 /// existing value" on write.
 pub(crate) fn ser_redacted<S>(_: &Secret, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -142,7 +142,7 @@ pub enum Protocol {
 ///
 /// Validated on construction: a value of this type cannot hold an invalid
 /// configuration. Deserialization goes through a private raw DTO and a
-/// validating conversion, so `Config` itself carries no public `Deserialize`
+/// validating conversion, so `Config` itself has no public `Deserialize`
 /// impl and cannot be built from arbitrary TOML without validation.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -251,9 +251,10 @@ impl TryFrom<RawConfig> for Config {
 
 /// One pure-checklist profile declared as `[[profile]]`.
 ///
-/// A profile owns no settings. Its `models` list selects entries from the
-/// global `[[local_model]]` and `[[stt_model]]` catalog; remote `[[model]]`
-/// entries are always served and may not be listed.
+/// A profile's `models` list selects entries from the global
+/// `[[local_model]]` and `[[stt_model]]` catalog, and that list is the whole
+/// of a profile. Remote `[[model]]` entries are always served and may not be
+/// listed.
 ///
 /// # Examples
 /// ```
@@ -302,7 +303,7 @@ pub enum QueuePolicy {
 
 /// One named pool of compute declared as `[[dominion]]`.
 ///
-/// A dominion carries a concurrency limit and a bounded waiting queue that
+/// A dominion sets a concurrency limit and a bounded waiting queue that
 /// every bound endpoint or local model shares. An endpoint or local model
 /// without a `dominion` is unlimited, as when no cap is set at all.
 #[derive(Debug, Clone, Serialize, Deserialize)]

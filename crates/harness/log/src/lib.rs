@@ -8,8 +8,8 @@
 //!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
 //!   container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
-//!   `promptforge-*` crate behind the door. Read `AGENTS.md` before adding
-//!   an import.
+//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
+//!   import.
 //! - `records` is append-only: a record's `seq` is the effect loop's
 //!   order, not the clock's, assigned by the log in call order, and no
 //!   record is updated or deleted once written. A `runs` row is written

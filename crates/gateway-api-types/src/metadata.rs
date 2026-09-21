@@ -36,7 +36,7 @@ pub enum ThinkingMode {
 /// The kind scopes which configuration fields are meaningful: chat-only
 /// fields (for example `thinking`, `default_max_tokens`,
 /// `chat_template_file`) are rejected for non-chat kinds at validation,
-/// while `context` applies to every kind. The catalog carries the kind so
+/// while `context` applies to every kind. The catalog includes the kind so
 /// clients can filter before building a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

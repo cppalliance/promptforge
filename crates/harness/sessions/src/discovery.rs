@@ -26,7 +26,7 @@ pub enum AgentSource {
 
 /// Lists the launchable agent names: the `.md` file stems under `dir`
 /// plus the built-in `chat`, sorted. A missing or unreadable directory
-/// offers exactly the built-in, and a directory `chat.md` lists once -
+/// offers only the built-in, and a directory `chat.md` lists once -
 /// it shadows the embedded source instead of duplicating the name.
 #[must_use]
 pub fn discover_agents(dir: &Path) -> Vec<String> {

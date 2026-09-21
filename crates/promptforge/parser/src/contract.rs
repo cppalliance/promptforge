@@ -7,8 +7,9 @@
 //! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
 //! against the host environment is prepare's job, never the parser's.
 //!
-//! `args` and `models` live in submodules; this root owns the capability
-//! and tool-slot shapes plus the map deserializer all four keys share.
+//! `args` and `models` are defined in submodules; this root owns the
+//! capability and tool-slot shapes plus the map deserializer all four keys
+//! share.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -33,7 +34,7 @@ pub use models::{ModelKeyword, ModelRole, ModelRoles};
 ///
 /// Aliases are the only names a model ever sees - tool slot aliases, model
 /// labels, and args field names are all prompt-local and never global
-/// names. (The same rule lives in `promptforge-lua`'s `alias` module, the
+/// names. (The same rule sits in `promptforge-lua`'s `alias` module, the
 /// run-time counterpart to this parse-time check.)
 fn is_valid_alias(alias: &str) -> bool {
     let bytes = alias.as_bytes();
@@ -137,7 +138,7 @@ fn parse_capability_id(text: &str) -> Result<GlobalName, String> {
 }
 
 /// A capability declaration: a plain id string (a required capability) or a
-/// `ref` map carrying the `optional` flag and prompt-side `config` data.
+/// `ref` map holding the `optional` flag and prompt-side `config` data.
 ///
 /// User-specific configuration (credentials, server lists) is host-supplied
 /// through the run services and never named in the prompt; `config` is

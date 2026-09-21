@@ -1,11 +1,12 @@
 //! Cloud model sheet end-to-end against the production binary: the
 //! `PROMPTFORGE_MODELS_SHEET_URL` override points the launch download at
 //! a loopback stub, `GET /admin/cloud-models` serves the fixture sheet,
-//! and a UI-shaped `[[model]]` + `[[endpoint]]` merge staged through
-//! `PUT /admin/config` and promoted by `POST /admin/config-apply`
-//! validates and applies, with a second model for the same provider
-//! reusing the one endpoint. The apply reloads the remote catalog live,
-//! so each merged model is listed as soon as the apply replies.
+//! and a `[[model]]` + `[[endpoint]]` merge of the form the UI writes,
+//! staged through `PUT /admin/config` and promoted by
+//! `POST /admin/config-apply`, validates and applies, with a second model
+//! for the same provider reusing the one endpoint. The apply reloads the
+//! remote catalog live, so each merged model is listed as soon as the
+//! apply replies.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -31,7 +32,7 @@ use crate::support::{
 const PROVIDER: &str = "test";
 /// The key-role variable the fixture slice declares; the merged
 /// endpoint's `api_key` is its `${...}` indirection, and the spawned
-/// gateway carries the value in its environment.
+/// gateway has the value in its environment.
 const KEY_ENV: &str = "TEST_CLOUD_KEY";
 
 /// The two-model, one-provider sheet the loopback stub serves.
@@ -141,7 +142,7 @@ async fn wait_for_sheet(url: &str, http: &reqwest::Client) -> Value {
 
 /// The running config document, the merge's input, without the running
 /// `active_profile` the route reports: it is not a configuration key, and
-/// a save carrying it is refused.
+/// a save containing it is refused.
 async fn get_config(url: &str, http: &reqwest::Client) -> Value {
     let mut document = json_within(
         send_within(
@@ -169,8 +170,9 @@ fn keyed_array<'a>(document: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
 }
 
 /// The UI's add-model merge (`cloud-merge.ts`), restated over the admin
-/// JSON document: append the provider's endpoint when none carries its
-/// name, then append the model with the sheet's capability fields. Profile
+/// JSON document: append the provider's endpoint when no existing entry
+/// has its name, then append the model with the sheet's capability
+/// fields. Profile
 /// membership is not part of the add flow: profiles select local and
 /// speech-to-text models only, and every remote model serves under any
 /// profile.
@@ -237,8 +239,8 @@ async fn put_and_apply(url: &str, http: &reqwest::Client, document: &Value) {
 }
 
 /// Asserts `/v1/models` lists exactly `expected`: the remote catalog is the
-/// same for every profile, and an apply swaps it live, so a UI-shaped add
-/// is listable as soon as the apply replies.
+/// same for every profile, and an apply swaps it live, so a model added
+/// through the UI's merge is listable as soon as the apply replies.
 async fn assert_catalog_lists(url: &str, http: &reqwest::Client, expected: &[&str]) {
     let catalog = json_within(
         send_within(

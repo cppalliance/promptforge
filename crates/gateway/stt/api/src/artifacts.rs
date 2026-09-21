@@ -157,7 +157,7 @@ pub enum SpeechError {
     #[non_exhaustive]
     #[error("model {model} has an unsupported role")]
     UnsupportedRole {
-        /// Catalog name carrying the unsupported role.
+        /// Catalog name with the unsupported role.
         model: String,
     },
 
@@ -184,7 +184,7 @@ pub enum SpeechError {
     #[error("missing multipart field {0}")]
     MissingField(&'static str),
 
-    /// One form field carried an unsupported value.
+    /// One form field had an unsupported value.
     #[non_exhaustive]
     #[error("invalid multipart field {field}: {value}")]
     InvalidField {
@@ -194,7 +194,7 @@ pub enum SpeechError {
         value: String,
     },
 
-    /// The requested response format is not implemented.
+    /// The requested response format is unsupported.
     #[non_exhaustive]
     #[error("unsupported transcription response format {0}")]
     UnsupportedResponseFormat(String),

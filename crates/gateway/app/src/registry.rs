@@ -24,7 +24,7 @@ use crate::{health, models, relay, speech};
 pub(crate) enum Tier {
     /// Bearer-authed, reachable from any peer the listener admits.
     Open,
-    /// Behind the shared loopback wall: a non-loopback peer earns 403
+    /// Behind the shared loopback wall: a non-loopback peer receives 403
     /// before auth runs.
     Walled,
 }

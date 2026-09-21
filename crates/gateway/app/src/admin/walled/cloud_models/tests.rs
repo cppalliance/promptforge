@@ -23,7 +23,7 @@ mod refresh;
 #[path = "tests-version-gate.rs"]
 mod version_gate;
 
-/// A one-provider sheet stamped `generated_at`, carrying one model
+/// A one-provider sheet stamped `generated_at`, containing one model
 /// whose id distinguishes one test sheet from another.
 fn test_sheet(generated_at: OffsetDateTime, model_id: &str) -> Sheet {
     Sheet {

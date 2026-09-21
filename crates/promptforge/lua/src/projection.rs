@@ -3,23 +3,23 @@
 //!
 //! The protocol parse ([`crate::protocol`]) validates each message record's
 //! own fields once, at the yield boundary. Everything that is a property of
-//! the list rather than of one record lives here and runs immediately before
+//! the list rather than of one record sits here and runs immediately before
 //! dispatch, on every model call, over whichever records the author's list
 //! holds at that moment:
 //!
 //! - `tool_calls` belong to assistant records and `tool_call_id` to tool
 //!   records; a system message is legal only in the leading block.
 //! - Tool-call IDs are unique across the whole list, and every assistant
-//!   tool-call batch is answered atomically: exactly the records immediately
+//!   tool-call batch is answered atomically: the records immediately
 //!   following the batch are its results, one per call, each exactly once.
 //! - Provider-required alternation is healed, not rejected: multiple leading
 //!   system messages compose into one (without mutating the source array),
 //!   consecutive same-role user records coalesce into one message, and
 //!   consecutive text-only assistant records - streaming fragments an author
 //!   appended as they arrived - coalesce into one assistant result.
-//! - Metadata is stripped: the wire message carries exactly `role`,
+//! - Metadata is stripped: the wire message holds exactly `role`,
 //!   `content`, `tool_call_id`, and `tool_calls`, so anything an author
-//!   record carried beyond the contract (a copied credential, say) can never
+//!   record held beyond the contract (a copied credential, say) can never
 //!   reach the provider.
 //!
 //! The output is the provider-neutral wire shape the gateway speaks; the
@@ -264,7 +264,7 @@ fn visible_text(content: &MessageContent) -> &str {
 /// Converts one validated, projected record into its wire message: exactly
 /// the four contract fields, with each tool call rendered as the
 /// provider-neutral `{id, name, arguments}` object. This is the metadata
-/// strip - nothing else a record ever carried can reach the provider.
+/// strip - nothing else a record ever held can reach the provider.
 fn wire_message(record: &MessageRecord) -> Message {
     let content = match &record.content {
         MessageContent::Text(text) => Value::String(text.clone()),

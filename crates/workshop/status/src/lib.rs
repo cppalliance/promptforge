@@ -1,4 +1,4 @@
-//! workshop-status - the status-bar subsystem: a broadcast bus carrying
+//! workshop-status - the status-bar subsystem: a broadcast bus for
 //! status updates from every subsystem to every connected `/ws` session.
 //! Work in flight reaches the bar as a busy frame pushed by whichever
 //! subsystem owns the work; this crate holds no progress machinery.
@@ -16,7 +16,7 @@
 //!   sends the current status immediately - the delivery contract's
 //!   resend-on-reconnect for ephemeral frames.
 //! - The public API is infallible (sends are no-ops on lag or empty
-//!   rings, never errors), so the crate carries no thiserror error type -
+//!   rings, never errors), so the crate has no thiserror error type -
 //!   the same exemption `workshop-registry` takes.
 
 pub mod status;

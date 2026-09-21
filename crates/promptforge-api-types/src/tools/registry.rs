@@ -42,7 +42,7 @@ impl ToolCatalog {
     /// # Errors
     /// Returns [`ToolCatalogError::DuplicateId`] if two descriptors share a
     /// [`ToolId`], or [`ToolCatalogError::InvalidWireName`] if a
-    /// descriptor's wire name is empty or carries a `/` separator or a
+    /// descriptor's wire name is empty or contains a `/` separator or a
     /// control character.
     ///
     /// # Examples
@@ -81,7 +81,7 @@ impl ToolCatalog {
     /// Returns the descriptor for `id`, if one is in the catalog.
     ///
     /// This is the bind-time lookup, a cold path run once per declared
-    /// slot, so it scans linearly rather than carrying a cached-identity
+    /// slot, so it scans linearly rather than keeping a cached-identity
     /// index.
     ///
     /// # Examples
@@ -132,9 +132,9 @@ pub enum ToolCatalogErrorKind {
 /// This classifying error supersedes the design's `DuplicateToolId` name
 /// (DESIGN-2.4): the catalog is the schema/transport boundary, so besides
 /// rejecting a repeated identity it also rejects a descriptor whose
-/// [`wire_name`](ToolDescriptor::wire_name) is empty or carries a separator or control
-/// character (tools.rs F4). It exposes a stable [`kind`](Self::kind) classifier
-/// (DESIGN-5).
+/// [`wire_name`](ToolDescriptor::wire_name) is empty or contains a
+/// separator or control character (tools.rs F4). It exposes a stable
+/// [`kind`](Self::kind) classifier (DESIGN-5).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolCatalogError {

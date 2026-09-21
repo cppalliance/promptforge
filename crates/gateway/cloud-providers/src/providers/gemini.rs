@@ -100,7 +100,7 @@ fn next_token(page: &Page) -> Option<String> {
         .filter(|token| !token.is_empty())
 }
 
-/// The upstream model slug: the wire `name` carries a `models/` prefix
+/// The upstream model slug: the wire `name` has a `models/` prefix
 /// that the sheet id drops.
 fn model_id(name: &str) -> &str {
     name.strip_prefix("models/").unwrap_or(name)

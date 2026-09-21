@@ -6,7 +6,7 @@
 //! agent sessions (which record useful work - a completed model reply).
 //! A gateway that connects but never delivers keeps escalating:
 //! answering the health probe is not useful work, so a flapping
-//! upstream cannot ride the connect/disconnect cycle back to the fast
+//! upstream cannot use the connect/disconnect cycle to return to the fast
 //! schedule (rqbit's anti-flap discipline). The delays are jittered so
 //! workshops restarted together do not probe in phase, and a
 //! total-delay budget bounds the retry campaign as a whole: once the

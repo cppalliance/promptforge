@@ -30,7 +30,7 @@ use crate::registry::RouteInfo;
 pub(crate) struct EnvReply {
     /// The config-sibling `.env` file the gateway boots with.
     boot: Option<EnvSection>,
-    /// Always `null`: profiles carry no env file of their own.
+    /// Always `null`: profiles have no env file of their own.
     profile: Option<EnvSection>,
     /// Each `${VAR}` name the pending config references, mapped to labels
     /// of the referencing fields.
@@ -99,7 +99,7 @@ pub(crate) struct EnvPutQuery {
 /// The body is a flat JSON object of variable names to values. Names must
 /// be `[A-Za-z_][A-Za-z0-9_]*`; values are rendered bare, single-quoted,
 /// or double-quoted so they round-trip through the same dotenv parser the
-/// gateway boots with, and a value no quoting can carry (an embedded
+/// gateway boots with, and a value no quoting can represent (an embedded
 /// newline, or a single quote mixed with `$`, `"`, or `\`) is refused.
 /// The real `.env` file is never touched.
 pub(crate) async fn admin_put_env(

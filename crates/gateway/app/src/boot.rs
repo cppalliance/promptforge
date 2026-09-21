@@ -5,10 +5,10 @@
 //! Without one, the discovery search looks beside the executable, then in
 //! the working directory, then in the user profile's `.promptforge`
 //! directory. When no location holds a `gateway.toml`, first-run
-//! generation writes the sidecar-shaped default - loopback on an
-//! OS-assigned port, a fresh random bearer key, the recommended STT pair
-//! unless the installer declined it - into the profile location, and the
-//! boot proceeds from it.
+//! generation writes the sidecar default - loopback on an OS-assigned
+//! port, a fresh random bearer key, the recommended STT pair unless the
+//! installer declined it - into the profile location, and the boot
+//! proceeds from it.
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ use crate::ProfileName;
 /// Canonical file name searched for at each candidate location.
 const CONFIG_FILE_NAME: &str = "gateway.toml";
 
-/// The profile the generated default carries and selects.
+/// The profile the generated default contains and selects.
 pub(crate) const DEFAULT_PROFILE: &str = "default";
 
 /// The release artifact the cloud provider model sheet downloads from.
@@ -38,7 +38,7 @@ pub(crate) const CACHE_FILE_NAME: &str = "cloud-provider-models.json";
 /// STT, as does every non-Windows host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstallerStt {
-    /// The generated config carries the recommended STT pair.
+    /// The generated config includes the recommended STT pair.
     Included,
     /// The installer was told to skip STT; the generated config omits the
     /// pair and the profile selects nothing.
@@ -135,7 +135,7 @@ pub(crate) mod registry {
     }
 
     /// Reads `HKCU\Software\PromptForge\PromptForge\InstallSTT` as a DWORD,
-    /// or `None` when the key or value is absent, carries another type, or
+    /// or `None` when the key or value is absent, has another type, or
     /// cannot be read.
     pub(super) fn install_stt_dword() -> Option<u32> {
         let key = open_key("Software\\PromptForge\\PromptForge", KEY_READ).ok()?;
@@ -410,8 +410,8 @@ fn discover_in(
 }
 
 /// The profile candidate: `<home>/.promptforge/gateway.toml`. This is the
-/// one place that knows where the profile configuration lives, so
-/// first-run generation writes where discovery reads.
+/// one definition of the profile configuration's location, so first-run
+/// generation writes where discovery reads.
 fn profile_config_path(home: &Path) -> PathBuf {
     home.join(".promptforge").join(CONFIG_FILE_NAME)
 }
@@ -521,9 +521,9 @@ vram_gb = 2.0
 /// The boot configuration written on first run, with a freshly generated
 /// bearer key baked in.
 ///
-/// The gateway binds loopback on an OS-assigned port; the gateway discovery file
-/// written after the bind carries the real port. There is no `[workshop]`
-/// section: the shell hosts the workshop UI itself.
+/// The gateway binds loopback on an OS-assigned port; the gateway
+/// discovery file written after the bind records the real port. There is
+/// no `[workshop]` section: the shell hosts the workshop UI itself.
 fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
     let (stt_models, profile_models) = match stt {
         InstallerStt::Included => (

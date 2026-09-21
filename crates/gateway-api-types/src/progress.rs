@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 /// One snapshot of the Gateway's live activity.
 ///
-/// Future additive fields carry `#[serde(default)]` so a lagging reader
-/// survives them; there is no schema version.
+/// Future additive fields are marked `#[serde(default)]` so a lagging
+/// reader survives them; there is no schema version.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
     /// Whether any activity is live. The UIs show an indeterminate

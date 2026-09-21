@@ -3,7 +3,7 @@
 //! client dependency.
 //!
 //! Moved from the workshop shell's `health.rs`; the only change in the
-//! move is the `Host` header, which now carries the bound loopback
+//! move is the `Host` header, which is now set to the bound loopback
 //! address instead of `localhost`, matching the gateway's loopback `Host`
 //! allowlist.
 
@@ -547,7 +547,7 @@ pub(crate) fn probe_bearer(address: &str, path: &str, api_key: &str) -> KeyProbe
 }
 
 /// One HTTP/1.0 request returning the response head. The `Host` header
-/// carries the bound address, never `localhost`: the gateway's loopback
+/// is set to the bound address, never `localhost`: the gateway's loopback
 /// `Host` allowlist refuses anything else.
 pub(crate) fn request_head(
     address: &str,

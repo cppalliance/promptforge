@@ -15,7 +15,7 @@
 //! - `harness-*` crates must not depend on workshop crates, and may depend
 //!   on gateway crates only through the public pair.
 //! - `shared-*` crates must not depend on any product crate.
-//! - One door: a crate outside the promptforge family may depend on
+//! - Public API: a crate outside the promptforge family may depend on
 //!   `promptforge-*` only through `promptforge-api-runtime` or
 //!   `promptforge-api-types`.
 //! - Container privacy: the manifestless `crates/promptforge/`,
@@ -46,7 +46,7 @@ enum Family {
     Harness,
     Shared,
     Build,
-    /// Named after no product family; carries no matrix rules of its own.
+    /// Named after no product family; has no matrix rules of its own.
     Unaffiliated,
 }
 

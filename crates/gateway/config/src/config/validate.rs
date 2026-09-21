@@ -744,9 +744,9 @@ fn validate_capabilities(
 ///
 /// `thinking` and the capability effort knobs (`effort_levels`,
 /// `default_effort`, `adaptive_thinking`) are chat-only on every model type;
-/// `extra` carries each model type's remaining chat-only fields as `(field,
+/// `extra` lists each model type's remaining chat-only fields as `(field,
 /// is_set)` pairs. `context` applies to every kind and is never rejected
-/// here. A chat model carries the default kind and passes unconditionally.
+/// here. A chat model has the default kind and passes unconditionally.
 fn validate_kind_scope(
     label: &str,
     name: &str,

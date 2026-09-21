@@ -66,8 +66,8 @@ enum FieldFailure {
     Malformed,
     /// An author-supplied argument had the wrong shape: the call's error,
     /// resumed as the answer so the shim raises it at the call site - an
-    /// author `pcall` catches it, exactly as the legacy callback's argument
-    /// error surfaced.
+    /// author `pcall` catches it, as the legacy callback's argument error
+    /// surfaced.
     Call(Error),
 }
 
@@ -145,8 +145,8 @@ pub enum YieldParse {
     Request(Request),
     /// A well-formed shim call whose author-supplied argument failed
     /// validation: the call's answer, resumed into the caller so the shim
-    /// raises the error at the call site, exactly as the legacy callback's
-    /// argument error surfaced.
+    /// raises the error at the call site, as the legacy callback's argument
+    /// error surfaced.
     Call(Answer<Error>),
     /// Not a well-formed request table: a hand-rolled or corrupted yield,
     /// failing the block with the fixed direct-yield message.
@@ -161,8 +161,8 @@ impl Request {
     /// `op`, an unknown `op`, a shim-internal field of the wrong shape) is
     /// [`YieldParse::Malformed`] and fails the block with "scripts may not
     /// yield directly". A well-formed shim call whose author-supplied
-    /// argument fails validation is [`YieldParse::Call`]: the error rides
-    /// back as the call's answer so the shim raises it at the call site,
+    /// argument fails validation is [`YieldParse::Call`]: the error is
+    /// returned as the call's answer so the shim raises it at the call site,
     /// keeping the legacy callback's errors catchable by an author `pcall`.
     /// One boundary conversion keeps its own byte-identical error: a `call`
     /// or `spawn` target that is not a string fails as
@@ -355,7 +355,7 @@ fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, F
 ///
 /// An absent or nil `args` parses as the empty object (the empty-argument
 /// call every tool accepts). A non-table or JSON-unrepresentable `args` is
-/// the call's error, framed exactly as the other author-argument failures,
+/// the call's error, framed as the other author-argument failures are,
 /// so an author `pcall` catches it at the call site. `call_id` is set only
 /// by the loop shim for a model-issued call, so a present non-string is a
 /// malformed yield rather than a call error.
@@ -426,7 +426,7 @@ fn call_optional_line(
 /// Parses a `store` request: the operation name and its author-supplied
 /// arguments. Every wrong shape is the call's error, resumed as the answer
 /// so the shim raises it at the call site - an author `pcall` catches it,
-/// exactly as the legacy callback's argument conversion failed there.
+/// as the legacy callback's argument conversion failed there.
 fn parse_store(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let op = call_string(table, "store_op")?;
     let op = match op.as_str() {

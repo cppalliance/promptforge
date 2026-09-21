@@ -2,7 +2,7 @@
 //! default, `compactors.fail` invocation with the overflow reason, typed
 //! context exhaustion raised at the call site, the non-function
 //! compactor's argument error, and an author compactor that returns or
-//! raises its own failure. The loop's round mechanics live in
+//! raises its own failure. The loop's round mechanics sit in
 //! `models_loop`; its exit rules in `exit_rules`.
 
 use super::models_loop::{loop_context, loop_prompt};

@@ -54,7 +54,7 @@ const AUDIO_TCP_KEEPALIVE: Duration = Duration::from_secs(60);
 /// from dropping the connection between reads. There is no `read_timeout`
 /// either: reqwest arms it during the wait for response headers, and the
 /// speech path gives time-to-headers its own, larger budget, so both
-/// deadlines live in
+/// deadlines are set in
 /// [`Upstream::send_speech`](crate::upstream::Upstream::send_speech).
 #[must_use]
 pub fn audio_streaming_client() -> reqwest::Client {

@@ -84,7 +84,7 @@ pub(crate) struct MaxChars(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MaxRedirects(usize);
 
-/// A strictly positive [`Duration`], never `Duration::ZERO`.
+/// A [`Duration`] guaranteed greater than `Duration::ZERO`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PositiveDuration(Duration);
 

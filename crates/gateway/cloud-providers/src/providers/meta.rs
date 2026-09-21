@@ -67,7 +67,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 }
 
 /// The entry's family: the product line, taken as the first two segments
-/// (`muse-spark`, `muse-voice`, `muse-image`). The catalog carries no
+/// (`muse-spark`, `muse-voice`, `muse-image`). The catalog has no
 /// snapshot suffixes, so there is no collapse pass.
 fn family_of(id: &str) -> String {
     let mut segments = id.split('-');

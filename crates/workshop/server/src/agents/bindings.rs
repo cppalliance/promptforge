@@ -1,7 +1,7 @@
-//! The bindings the shell pushes across the harness door as data: the
-//! gateway endpoint and bearer, the chat-capable model catalog, and the
-//! host snapshot a run's `ui()` and model resolution read (the menu's
-//! selected model and the workspace's granted roots).
+//! The bindings the shell pushes through the harness's public API as
+//! data: the gateway endpoint and bearer, the chat-capable model
+//! catalog, and the host snapshot a run's `ui()` and model resolution
+//! read (the menu's selected model and the workspace's granted roots).
 //!
 //! The harness never resolves a gateway, reads a menu, or names a
 //! workspace crate; it observes generation changes through the values
@@ -21,9 +21,8 @@ use workshop_registry::{Registry, WorkspaceRoots};
 
 /// Pushes the shell's current host snapshot, chat catalog, and gateway
 /// binding into `harness`, each read through `registry` at this moment.
-/// A subsystem that has not registered contributes nothing: its binding
-/// keeps whatever the harness last saw (the host snapshot's absent parts
-/// read as `null`).
+/// An unregistered subsystem leaves its binding at whatever the harness
+/// last saw (the host snapshot's absent parts read as `null`).
 pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
     harness.set_host(host_snapshot(registry));
     if let Some(menu) = registry.state::<MenuHandles>() {
@@ -37,7 +36,7 @@ pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
 /// The host snapshot: `selected_model` from the menu's retained workbench
 /// state and the granted workspace roots from the registry's roots slot,
 /// so this crate reads the workspace through the slot the workspace
-/// subsystem registered, exactly as the sessions did before the harness.
+/// subsystem registered, as the sessions did before the harness.
 fn host_snapshot(registry: &Registry) -> HostSnapshot {
     let selected_model = registry
         .state::<MenuHandles>()

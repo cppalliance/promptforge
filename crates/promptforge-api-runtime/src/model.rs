@@ -1,6 +1,6 @@
 //! The model vocabulary a host exchanges with a run: what a `Chat` effect
-//! carries out ([`Message`], [`ToolSchema`], [`CompletionOptions`],
-//! [`ModelBinding`]) and what its answer carries back ([`Completion`],
+//! includes ([`Message`], [`ToolSchema`], [`CompletionOptions`],
+//! [`ModelBinding`]) and what its answer returns ([`Completion`],
 //! [`CompletionResult`], [`CompletionError`]), plus the prompt-local
 //! binding vocabulary ([`ModelSet`], [`ModelView`], [`ModelInvocation`])
 //! and the catalog identity the host resolves selections against
@@ -12,8 +12,8 @@
 //! per section. Model-facing sections with neither fail with a
 //! model-binding failure surfaced through [`crate::RunError`].
 //!
-//! The implementation lives in the `promptforge-model-client` crate behind
-//! this door and is re-exported here; the `#[doc(hidden)]` items are the
+//! The implementation sits in the private `promptforge-model-client` crate
+//! and is re-exported here; the `#[doc(hidden)]` items are the
 //! protocol seams the transport that performs a round (the harness's
 //! gateway client) shares with the engine's own test client: the request
 //! body builder, the SSE reassembly, the read loop over a transport's

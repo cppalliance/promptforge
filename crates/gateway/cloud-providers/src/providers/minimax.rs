@@ -70,7 +70,7 @@ fn normalize_model(model: &WireModel) -> ModelEntry {
 /// The entry's family: `MiniMax-<line>` for the flagship-prefixed ids
 /// (`MiniMax-M3`, `MiniMax-Text-01`), the first segment for the media
 /// lines (`speech`, `music`, `image`, `video`), and the whole id
-/// otherwise. The catalog carries no snapshot suffixes, so there is no
+/// otherwise. The catalog has no snapshot suffixes, so there is no
 /// collapse pass.
 fn family_of(id: &str) -> String {
     if let Some(rest) = id.strip_prefix("MiniMax-") {

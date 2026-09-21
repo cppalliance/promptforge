@@ -15,7 +15,7 @@
 //! for `set_menu` while the menu is displayed
 //! (<https://github.com/tauri-apps/muda/issues/328>, fixed by
 //! <https://github.com/tauri-apps/muda/pull/361>, merged 2026-07-30 but
-//! unreleased), so - exactly as on Windows - every state change mutates
+//! unreleased), so - as on Windows - every state change mutates
 //! the retained `MenuItem` handles in place and `set_menu` is never
 //! called after construction.
 //! There is no double-click gesture: the menu opens on mouse-down, so

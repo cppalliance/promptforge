@@ -3,9 +3,8 @@
 //! zero I/O.
 //!
 //! Frames are grouped by direction - inbound (client to server) first,
-//! outbound (server to client) second. Nothing here touches a socket, a
-//! task, or a clock, so every wire shape is pinned by the plain tests in
-//! `tests/it`. The TypeScript half of this contract is
+//! outbound (server to client) second. Every wire shape is pinned by the
+//! plain tests in `tests/it`. The TypeScript half of this contract is
 //! `crates/workshop/ui/src/services/protocol.ts`; the two files
 //! cross-cite each other so a shape change touches both or neither. The
 //! agent-session frame family is additionally pinned by the shared
@@ -36,7 +35,7 @@
 //! the selection arrive as [`StatusFrame`]s, and the settled menu
 //! publishes a final [`WorkbenchFrame`] and a [`CatalogFrame`]; a switch
 //! requested while one runs is refused with an `error` frame. Both
-//! events may carry an optional `id`, echoed on the `error` frame that
+//! events may include an optional `id`, echoed on the `error` frame that
 //! refuses them.
 //!
 //! No inbound frame is pushed by the server, so none takes a delivery
@@ -49,7 +48,7 @@
 //! opens a session with `{"type":"launch","agent":"..."}` or reattaches
 //! with `{"type":"attach","session":"..."}`; either is answered with
 //! [`AgentSessionFrame`] naming the session id. A running session streams
-//! [`AgentEventFrame`]s - the durable event log, each frame carrying its
+//! [`AgentEventFrame`]s - the durable event log, each frame holding its
 //! log index, replayed from the top on attach - and [`AgentDeltaFrame`]s,
 //! the ephemeral live chunks, each stamped with the `reply` id of the
 //! durable event that will supersede it. `{"type":"cancel"}` fires the
@@ -64,15 +63,15 @@
 //! A session-level failure is pushed as an id-less [`ErrorFrame`]: a
 //! model round that failed while the program survived it (the built-in
 //! chat `pcall`s `models.chat` and returns to waiting), or a run that
-//! ended in error. Delivery on this socket: ephemeral - the reports ride
-//! a bounded broadcast beside the deltas and may drop under lag; the
+//! ended in error. Delivery on this socket: ephemeral - the reports are
+//! sent on a bounded broadcast beside the deltas and may drop under lag; the
 //! durable transcript already shows the failed turn as one without a
 //! reply, and terminal failures also land on the status bus.
 //!
 //! # Agent-session input frames
 //!
 //! An agent session asks its operator for input through the Workshop's
-//! `user_input` tool. Three frames carry that conversation: the server
+//! `user_input` tool. Three frames make up that conversation: the server
 //! pushes [`InputFrame::Required`] when a wait opens and
 //! [`InputFrame::Cancelled`] when one dies unresolved, and the client
 //! answers with an `input_response` frame parsed as [`InputResponse`].
@@ -80,14 +79,14 @@
 //! unresolved wait and the session resends it on reconnect, so a push
 //! lost to a dead socket is repaired by the resent set - a live wait
 //! reappears, and a stale prompt is dropped because its token is absent.
-//! Cancellation is an explicit outcome, never silence: every path out of
-//! an unresolved wait pushes `input_cancelled` for its token. The session
-//! loops that route these frames arrive with agent sessions; the shapes
-//! and classification are pinned here first.
+//! Cancellation is an explicit outcome: every path out of an unresolved
+//! wait pushes `input_cancelled` for its token. The session loops that
+//! route these frames arrive with agent sessions; the shapes and
+//! classification are pinned here first.
 //!
 //! # Delivery contract
 //!
-//! Every frame the server pushes carries exactly one of two delivery
+//! Every frame the server pushes has exactly one of two delivery
 //! semantics. The session loops are built on this classification, so no
 //! pushed frame type ships unclassified.
 //!
@@ -95,18 +94,16 @@
 //! data is shared fan-out state, the producer records it and wakes each
 //! connection loop through a `Notify`; the loop compares the shared
 //! revision against its own per-client cursor and sends everything past
-//! the cursor, so a missed wakeup is harmless because the next one
-//! delivers everything past the cursor. A durable frame that answers
+//! the cursor, so a missed wakeup is harmless. A durable frame that answers
 //! the connection's own request (a `launch` acknowledgment) is sent
 //! directly by the loop that owns the socket, which delivers exactly
 //! without any cursor - no shared state exists for a cursor to index.
 //!
-//! **Ephemeral** frames may drop under lag. They ride bounded channels
-//! (a broadcast where the state fans out); a client too slow to drain
-//! its channel lags out and its connection may drop. The drop is
-//! harmless because every ephemeral frame has a repair path that owes
-//! nothing to its predecessors: status and catalog are complete
-//! snapshots resent on reconnect.
+//! **Ephemeral** frames may drop under lag. They are sent on bounded
+//! channels (a broadcast where the state fans out); a client too slow
+//! to drain its channel lags out and its connection may drop. The drop is
+//! harmless because every ephemeral frame has a self-contained repair
+//! path: status and catalog are complete snapshots resent on reconnect.
 //!
 //! ## Classification
 //!
@@ -118,12 +115,12 @@
 //! - [`StatusFrame`] - ephemeral. Every update is a complete snapshot of
 //!   the bar, so a lagging client loses nothing by skipping
 //!   intermediates, and the current status is resent on reconnect.
-//! - [`CatalogFrame`] - ephemeral. Each push carries the whole catalog
+//! - [`CatalogFrame`] - ephemeral. Each push holds the whole catalog
 //!   verbatim; the newest push supersedes every older one and the
 //!   catalog is resent on reconnect.
 //! - [`WorkbenchFrame`] - ephemeral. Every push is a complete snapshot
 //!   of the server-owned Model-menu state, retained and resent on
-//!   reconnect, exactly like the catalog frame. The connect-time send -
+//!   reconnect, like the catalog frame. The connect-time send -
 //!   the retained snapshot follows the status and catalog snapshots on
 //!   every new session, so the UI boots with zero HTTP state fetches -
 //!   is that resend promise, not a third delivery class.

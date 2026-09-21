@@ -11,7 +11,7 @@ use crate::transport::{http, transport_source};
 /// Wire shape of one entry from gateway `GET /v1/models`.
 ///
 /// The list mixes inference models with the gateway's speech-to-text models,
-/// which carry only `id`, `object`, and `kind` because they answer no
+/// which have only `id`, `object`, and `kind` because they answer no
 /// completion request. The inference fields are therefore optional at the
 /// wire, and an entry without a context window is skipped rather than
 /// failing the whole catalog.
@@ -159,7 +159,8 @@ async fn get_authed(
 
 /// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
 ///
-/// `base_url` is the OpenAI-shaped API root (for example `http://127.0.0.1:8081/v1`).
+/// `base_url` is the OpenAI-compatible API root (for example
+/// `http://127.0.0.1:8081/v1`).
 ///
 /// # Errors
 /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is

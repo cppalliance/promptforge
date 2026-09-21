@@ -1,9 +1,9 @@
 //! The opaque wire error every HTTP failure answers with.
 //!
 //! [`AppError`] is the boundary between zone-two failures and the HTTP
-//! response: one variant per wire failure that exists today, each mapped to
-//! exactly one status code by the central [`IntoResponse`] impl, so the
-//! same failure is built in one place no matter which handler hits it.
+//! response: one variant per wire failure that exists today, each mapped
+//! to one status code by the central [`IntoResponse`] impl, so the same
+//! failure is built in one place no matter which handler hits it.
 //! Conversions in are explicit - handler seams name a variant constructor;
 //! no `#[from]` derive exists on this side of the boundary. The extracted
 //! feature crates map their own error types at their own route boundaries
@@ -11,7 +11,7 @@
 //! envelope); this shell type covers the shell's own routes.
 //! Internal failure detail (the source chain) reaches the response body in
 //! debug builds only; production bodies stay at each variant's own message,
-//! close to the status text. Rich construction-time errors live elsewhere
+//! close to the status text. Rich construction-time errors sit elsewhere
 //! ([`workshop_support::ConfigError`], [`crate::serve::SpawnError`]) and
 //! never cross the wire.
 
@@ -24,14 +24,14 @@ use workshop_protocol::ErrorEnvelope;
 
 use crate::gateway::GatewayError;
 
-/// Whether wire bodies carry internal failure detail. Debug builds append
+/// Whether wire bodies include internal failure detail. Debug builds append
 /// the source chain to the envelope message; production bodies stay at the
 /// variant's own message.
 const LEAK_DETAIL: bool = cfg!(debug_assertions);
 
 /// A failure answered over the HTTP wire.
 ///
-/// Every variant renders as exactly one status code. Variants carrying a
+/// Every variant renders as exactly one status code. Variants with a
 /// source keep it out of `Display`; [`render_message`] appends the chain to
 /// the response body in debug builds only.
 #[derive(Debug, thiserror::Error)]
@@ -208,9 +208,9 @@ mod tests {
         );
     }
 
-    /// Tests run under debug assertions, so the live envelope must carry
-    /// the detail the debug side of the boundary promises - in the exact
-    /// pre-split message format.
+    /// Tests run under debug assertions, so the live envelope must
+    /// include the detail the debug side of the boundary promises - in
+    /// the exact pre-split message format.
     #[cfg(debug_assertions)]
     #[tokio::test]
     async fn debug_builds_leak_detail_into_the_live_envelope() {

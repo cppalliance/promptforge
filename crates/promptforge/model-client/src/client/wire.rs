@@ -1,6 +1,6 @@
 //! Wire types for the chat-completions protocol: messages, tool schemas,
 //! tool calls, and completion results. The constructors a host that ran no
-//! transport builds a completion from live in the `canned` sibling.
+//! transport builds a completion from sit in the `canned` sibling.
 
 #[path = "wire-canned.rs"]
 mod canned;
@@ -57,7 +57,7 @@ impl Message {
         }
     }
 
-    /// Constructs a `tool` message carrying the result of a tool call.
+    /// Constructs a `tool` message holding the result of a tool call.
     ///
     /// `tool_call_id` must match the `id` of the [`ToolCall`] this answers.
     #[must_use]
@@ -150,7 +150,7 @@ impl Message {
         &self.content
     }
 
-    /// Returns the raw `tool_calls` array an assistant turn carries.
+    /// Returns the raw `tool_calls` array an assistant turn holds.
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for the executor's pre-dispatch
     /// size estimate; not host API.
@@ -214,13 +214,14 @@ pub enum ToolSchemaError {
 }
 
 impl ToolSchema {
-    /// Builds a tool schema, validating the wire name and object-shaped schema.
+    /// Builds a tool schema, validating the wire name and that the
+    /// parameters are a JSON object.
     ///
     /// `#[doc(hidden)]` (client F8, lib F3): the raw [`serde_json::Value`]
     /// schema enters here only from the executor's internal tool contract, so
     /// the raw JSON never appears in a documented constructor signature.
     /// External callers advertise tools through the `Tool` trait and the
-    /// executor, not by hand-building a `ToolSchema`.
+    /// executor.
     ///
     /// # Errors
     /// Returns [`ToolSchemaError::InvalidName`] when `name` is empty or contains
@@ -304,9 +305,9 @@ impl ToolCall {
 
     /// Returns a typed, borrowed view of the call's arguments.
     ///
-    /// F8: the public API no longer hands out a raw [`serde_json::Value`]. The
-    /// raw wire JSON stays crate-private; callers inspect the arguments through
-    /// [`ToolArguments`] (canonical JSON text, key presence, argument names).
+    /// F8: the raw wire JSON - a [`serde_json::Value`] - stays crate-private;
+    /// callers inspect the arguments through [`ToolArguments`] (canonical
+    /// JSON text, key presence, argument names).
     #[must_use]
     pub fn arguments(&self) -> ToolArguments<'_> {
         ToolArguments {
@@ -333,8 +334,8 @@ impl ToolArguments<'_> {
         self.value.to_string()
     }
 
-    /// Returns whether the call carried no arguments (a `null` payload or an
-    /// empty JSON object).
+    /// Returns whether the call's arguments are empty (a `null` payload or
+    /// an empty JSON object).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self.value {
@@ -405,11 +406,11 @@ pub enum CompletionResult {
 /// A parsed chat-completions round trip, including metadata later steps need.
 ///
 /// [`CompletionResult`] remains the decision the tool loop matches on.
-/// `finish_reason` and `reasoning_content` ride beside it so observers can
+/// `finish_reason` and `reasoning_content` sit beside it so observers can
 /// report payload-free signals without reading the raw bodies, and the call
 /// metadata - the serving model plus the canonical metrics vocabulary
 /// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
-/// [`VllmMetrics`], [`ClientTiming`]) - rides along for attribution and
+/// [`VllmMetrics`], [`ClientTiming`]) - is included for attribution and
 /// accounting. The fields are `#[doc(hidden)]` cross-crate seams for the
 /// executor's tool loop and the opt-in debug-capture seam; they are not part
 /// of the public host API, which reads through the accessor methods.

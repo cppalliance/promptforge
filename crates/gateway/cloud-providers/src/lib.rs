@@ -22,7 +22,7 @@ use shared_error_source::HttpSource;
 
 /// The const-friendly twin of the schema's `EnvVar`: the schema type
 /// holds `String`s and cannot sit in a `const` descriptor, so the
-/// descriptor carries `&'static str` and slice construction converts.
+/// descriptor stores `&'static str` and slice construction converts.
 #[derive(Debug, Clone, Copy)]
 pub struct EnvVarSpec {
     /// The variable name, e.g. "ANTHROPIC_API_KEY".
@@ -121,7 +121,7 @@ pub enum FetchError {
     MissingKey {
         /// The provider registry key.
         name: String,
-        /// The environment variable that would carry the key.
+        /// The environment variable that would hold the key.
         key_env: &'static str,
     },
 }
@@ -133,11 +133,11 @@ impl From<reqwest::Error> for FetchError {
 }
 
 /// Renders an error and its full `source()` chain as one line, each cause
-/// separated by `; `. A variant's `Display` carries only its own message,
+/// separated by `; `. A variant's `Display` renders only its own message,
 /// so this is how a person-facing note recovers the transport or decode
 /// text underneath.
 ///
-/// A cause that renders as nothing, and a cause whose text the
+/// A cause that renders as an empty string, and a cause whose text the
 /// accumulated rendering already contains, are both skipped: some
 /// variants copy their source's text into their own message, and
 /// appending that cause again would print it twice. The check is a plain
@@ -539,12 +539,12 @@ mod tests {
         source: Leaf,
     }
 
-    /// A cause that renders as nothing.
+    /// A cause that renders as an empty string.
     #[derive(Debug, thiserror::Error)]
     #[error("")]
     struct Silent;
 
-    /// An outer error whose cause renders as nothing.
+    /// An outer error whose cause renders as an empty string.
     #[derive(Debug, thiserror::Error)]
     #[error("model sheet unavailable")]
     struct OverSilent(#[source] Silent);

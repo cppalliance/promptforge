@@ -2,10 +2,10 @@
 //!
 //! Everything measured about one model call - token accounting, backend
 //! timings, and the calling client's own clock - plus the tool-call record
-//! a model's request carries. The [`Event`](crate::event::Event) content
+//! a model's request includes. The [`Event`](crate::event::Event) content
 //! variants embed these values, the model client parses response bodies
-//! into them, and the Workshop protocol renders them; they hold no
-//! behavior and cross every boundary as plain serde data.
+//! into them, and the Workshop protocol renders them; they cross every
+//! boundary as plain serde data.
 //!
 //! # Serialized form
 //! Every type here serializes with serde; absent optional fields are

@@ -5,7 +5,7 @@
 //!
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -
-//! a Markdown prompt on the unified runtime. A session's transcript lives
+//! a Markdown prompt on the unified runtime. A session's transcript sits
 //! in memory until the harness's run log lands, so no gate here spans a
 //! server restart; reconnect within one process is the agents suite's.
 
@@ -43,12 +43,12 @@ use crate::common::{JsonSocket, spawn_gateway};
 /// order: the gate's proof of exactly what the model was shown.
 type CapturedRequests = Arc<Mutex<Vec<serde_json::Value>>>;
 
-/// One SSE data line carrying `event`.
+/// One SSE data line containing `event`.
 fn sse_line(event: &serde_json::Value) -> String {
     format!("data: {event}\n\n")
 }
 
-/// One OpenAI-shaped streaming chunk attributed to `model`.
+/// One streaming chunk in OpenAI's format, attributed to `model`.
 fn sse_chunk(
     model: &str,
     delta: &serde_json::Value,
@@ -130,7 +130,7 @@ struct GateServer {
 
 /// The typed catalog a mock gateway serves from `/v1/models`: the launch
 /// resolves the menu selection through it, so every id a gate may select
-/// carries a window that clears chat's declared minimum, and a gate tests
+/// has a window that clears chat's declared minimum, and a gate tests
 /// the host wiring rather than a refused binding. `model-b` stays first:
 /// the profile-switch gates rely on the menu auto-selecting it from this
 /// list.

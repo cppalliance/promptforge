@@ -18,7 +18,8 @@ use crate::support::{
     send_within, spawn_backend,
 };
 
-/// A canned OpenAI-shaped embeddings reply echoing the (rewritten) model.
+/// A canned embeddings reply in the OpenAI format, echoing the (rewritten)
+/// model.
 fn canned_embeddings(model: &str) -> Value {
     serde_json::json!({
         "object": "list",
@@ -225,9 +226,9 @@ async fn remote_passthrough_rewrites_model_and_relays_response() {
     gateway.shutdown().await;
 }
 
-/// The embeddings handler admits through the model's dominion queue exactly
-/// like chat: under `max_concurrency = 1` a second request cannot reach the
-/// backend until the first releases the slot.
+/// The embeddings handler admits through the model's dominion queue the
+/// same way chat does: under `max_concurrency = 1` a second request
+/// cannot reach the backend until the first releases the slot.
 #[tokio::test]
 async fn embeddings_requests_hold_the_dominion_slot_across_the_upstream_call() {
     let (backend, mut arrivals) = slow_embeddings_backend().await;

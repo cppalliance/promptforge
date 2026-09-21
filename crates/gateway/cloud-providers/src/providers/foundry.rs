@@ -1,6 +1,6 @@
 //! Azure AI Foundry provider: the public descriptor plus the private
 //! variance of `POST /asset-gallery/v1.0/models` under
-//! `https://api.catalog.azureml.ms` - no auth, a JSON body carrying
+//! `https://api.catalog.azureml.ms` - no auth, a JSON body with
 //! filters, ordering, and paging, and a card richer than most keyed
 //! endpoints: context window, max output tokens, modalities, capability
 //! labels, languages, lifecycle, and the inference retirement date. It
@@ -129,7 +129,7 @@ struct Page {
 /// One model card as the wire reports it. `assetId`, `registryName`,
 /// `version`, `summary`, `keywords`, `license`, `popularity`,
 /// `deploymentOptions`, `playgroundLimits`, `fineTuningTasks`, and the
-/// variant and quota blocks carry no sheet meaning and are not parsed.
+/// variant and quota blocks have no sheet meaning and are not parsed.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireModel {
@@ -234,7 +234,7 @@ mod tests {
     use super::*;
 
     /// A trimmed excerpt of the verified 2026-09-15 live payload: a
-    /// reasoning chat model, a retired card carrying a retirement date,
+    /// reasoning chat model, a retired card with a retirement date,
     /// an image model, and an embedding model whose task vocabulary the
     /// mapping does not know.
     const PAGE_1: &str = r#"{

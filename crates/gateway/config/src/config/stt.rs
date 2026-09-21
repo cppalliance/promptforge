@@ -10,8 +10,8 @@ const DEFAULT_STT_INTERVAL_MS: u64 = 500;
 
 /// The canonical `[stt]` pipeline tuning section.
 ///
-/// Model sources and roles live in global `[[stt_model]]` catalog entries and
-/// profiles enable them through membership.
+/// Model sources and roles are defined in global `[[stt_model]]` catalog
+/// entries and profiles enable them through membership.
 ///
 /// # Examples
 /// ```

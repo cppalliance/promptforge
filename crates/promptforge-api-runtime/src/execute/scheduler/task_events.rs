@@ -1,14 +1,14 @@
 //! The task history read: the author's `tasks.events(task, opts?)` and the
 //! model's `task_events { id, last? }` built-in, one arm behind both.
 //!
-//! The engine keeps no history. Every event it reports leaves through
-//! `step` and is the host's to keep, so a read of a task's events is a
-//! leaf effect like any other: the arm checks who may read what, issues a
-//! `TaskEvents` effect naming the task and the reader's high-water mark,
-//! and the host answers from its log with the events after that mark, in
-//! the task's sequence order. The host commits a step's events before it
-//! performs the step's effects, so a task reading its own history sees
-//! everything reported before the read was issued.
+//! Every event the engine reports leaves through `step` and is the host's
+//! to keep, so a read of a task's events is a leaf effect like any other:
+//! the arm checks who may read what, issues a `TaskEvents` effect naming
+//! the task and the reader's high-water mark, and the host answers from
+//! its log with the events after that mark, in the task's sequence order.
+//! The host commits a step's events before it performs the step's effects,
+//! so a task reading its own history sees everything reported before the
+//! read was issued.
 //!
 //! Who may read: the author's shim follows the `status` rule - a task the
 //! caller owns, or the task the caller runs inside (`sys.taskid`), which
@@ -20,7 +20,7 @@
 //! How the answer resumes: the shim receives the events as a sequence of
 //! plain tables in each event's serialized shape. The model receives one
 //! JSON event per line, nonce-wrapped as untrusted under the reader's run
-//! nonce, because a task's history carries model, tool, and user text -
+//! nonce, because a task's history includes model, tool, and user text -
 //! the one built-in answer that is not the engine's own words. A task
 //! that has reported nothing new answers the model with a trusted sentence
 //! saying so, since there is nothing to wrap.

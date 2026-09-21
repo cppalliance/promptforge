@@ -3,7 +3,7 @@
 //! observation reporting, and its cancellation: every test drives a
 //! section calling `models.loop` through the scheduler against the mock
 //! gateway, so the shim's `chat` and `tool_call` rounds are exercised end
-//! to end. The loop's exit rules live in `exit_rules`; its append shapes,
+//! to end. The loop's exit rules sit in `exit_rules`; its append shapes,
 //! compactor paths, and handle calls in `models_loop`.
 
 use super::models_loop::{

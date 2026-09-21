@@ -69,7 +69,7 @@ async fn sequence_stub(responses: Vec<(StatusCode, String)>, gated: bool) -> Seq
     }
 }
 
-/// One queued 200 answer carrying `sheet`.
+/// One queued 200 answer containing `sheet`.
 fn ok_sheet(sheet: &Sheet) -> (StatusCode, String) {
     (
         StatusCode::OK,

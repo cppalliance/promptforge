@@ -59,7 +59,7 @@ const _: () = assert!(BRAND_RGBA.len() == 32 * 32 * 4);
 
 /// Spawns the gateway, then runs the tray until Quit. A tray that cannot
 /// start degrades to the headless Ctrl-C loop: the gateway is already
-/// serving and the tray is its face, not its life support.
+/// serving, and the tray is only its user interface.
 pub(super) fn run(options: &ServeOptions) -> Result<(), StartupError> {
     let handle = spawn(options)?;
     let runtime = match tokio::runtime::Builder::new_current_thread()

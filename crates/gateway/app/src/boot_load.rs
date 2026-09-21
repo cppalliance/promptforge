@@ -218,7 +218,7 @@ async fn download_artifacts(
 }
 
 /// Promises the profile's local models as loading, so a request for one
-/// earns [`GatewayError::ModelLoading`] until the commit or the failure
+/// receives [`GatewayError::ModelLoading`] until the commit or the failure
 /// withdraws the promise.
 #[cfg(feature = "local")]
 async fn publish_loading(state: &AppState, config: &Config) {

@@ -6,10 +6,10 @@
 //! fmt layer redacts classified fields before formatting, then enqueues
 //! byte-bounded events instead of blocking producer threads on disk.
 //!
-//! The crate never installs the global subscriber, never reads the
-//! environment or the home directory, and never sees Gateway configuration:
-//! the caller passes the state directory in through [`LogConfig`] and
-//! composes the subscriber itself.
+//! Subscriber installation, environment and home-directory reads, and
+//! Gateway configuration stay with the caller: it passes the state
+//! directory in through [`LogConfig`] and composes the subscriber
+//! itself.
 
 mod config;
 mod error;

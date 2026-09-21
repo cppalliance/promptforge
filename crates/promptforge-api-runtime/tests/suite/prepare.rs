@@ -360,8 +360,8 @@ const DECLARES_EXACT_SLOT: &str = concat!(
     "Done.\n",
 );
 
-/// A prompt declaring one exact tool slot whose capability is not
-/// declared at all.
+/// A prompt declaring one tool slot whose capability is not declared at
+/// all.
 const DECLARES_ORPHAN_SLOT: &str = concat!(
     "---\n",
     "name: declares-orphan-slot\n",

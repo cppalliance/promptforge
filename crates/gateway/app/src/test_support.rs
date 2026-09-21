@@ -63,7 +63,7 @@ cache_dir = '{cache}'
 }
 
 /// Serves `build_router` over a state assembled from `config` with no
-/// running children: the retained config still carries everything the
+/// running children: the retained config still holds everything the
 /// admin routes read (the cache root, the `[[local_model]]` entries).
 pub(crate) async fn serve(config: Config) -> SocketAddr {
     serve_with(config, None, None).await
@@ -239,7 +239,7 @@ fn state_over(config: Config, routing: Routing, paths: Option<AdminPaths>) -> Ap
 
 /// Binds an ephemeral loopback listener and serves `state` on it,
 /// returning the bound address. Connect info and the host-authority wall
-/// are wired exactly as in the production serve path, so loopback-only
+/// are wired as in the production serve path, so loopback-only
 /// routes see a peer address and the wall sees the bound socket.
 pub(crate) async fn serve_state(state: AppState) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -324,7 +324,7 @@ pub(crate) async fn fake_chat_backend() -> SocketAddr {
     addr
 }
 
-/// A state whose key is `test-token` over a config carrying an empty
+/// A state whose key is `test-token` over a config with an empty
 /// `[workshop]` section, as the speech-route auth tests serve.
 pub(crate) fn workshop_state() -> AppState {
     let config = Config::from_toml_str(

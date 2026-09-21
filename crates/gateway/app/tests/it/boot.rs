@@ -227,7 +227,7 @@ models = []
     handle.shutdown().expect("graceful shutdown");
 }
 
-/// Provisioning is not on the startup path: a config whose local model
+/// Provisioning happens off the startup path: a config whose local model
 /// cannot provision fails the eager `Gateway::from_config` assembly, yet
 /// `spawn` binds and serves immediately - the boot command absorbs the
 /// failure while the gateway stays reachable with its (here empty) remote
@@ -436,7 +436,7 @@ context = 4096
 
 /// A state file naming a profile the config no longer defines degrades the
 /// boot to no profile: the remote models serve, the status reports
-/// `profile: null`, and the log carries the stale-selection warning naming
+/// `profile: null`, and the log records the stale-selection warning naming
 /// the missing and the defined profiles.
 #[test]
 fn a_stale_state_file_boots_with_no_profile_and_logs_the_warning() {

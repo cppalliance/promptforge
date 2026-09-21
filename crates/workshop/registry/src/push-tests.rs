@@ -1,8 +1,8 @@
 //! Tests for the [`Push`] facade: every intent lands on the right sink
 //! with the right frame, and an empty slot degrades the intent to a
 //! no-op. The sinks are recording adapters - closures capturing into
-//! channels - so the assertions read exactly like the bus-receiver
-//! assertions the producers' own crates carry.
+//! channels - so the assertions read like the bus-receiver assertions in
+//! the producers' own crates.
 
 use std::sync::{Arc, Mutex, PoisonError};
 

@@ -113,7 +113,7 @@ fn hanging_completions(started: &Notify) -> Response {
 }
 
 /// Adds the typed `/v1/models` catalog a launch resolves the menu selection
-/// through. Every id these tests select carries a window that clears the
+/// through. Every id these tests select has a window that clears the
 /// built-in chat's declared minimum; a mock without this route fails the
 /// launch with the reported catalog-fetch cause.
 fn with_typed_catalog(router: Router) -> Router {
@@ -148,7 +148,7 @@ fn record_request(requests: &Mutex<Vec<serde_json::Value>>, body: &str) {
 }
 
 /// Asserts one replacement request and its fresh-history boundary: the
-/// relaunched chat run starts a new message list, because history lives in
+/// relaunched chat run starts a new message list, because history sits in
 /// the section's Lua state until the deferred persistence work lands.
 fn assert_replacement_request(
     requests: &Mutex<Vec<serde_json::Value>>,

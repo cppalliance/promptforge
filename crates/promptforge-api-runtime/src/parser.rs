@@ -9,14 +9,14 @@
 //! Prose capture follows the pending-Markdown model: Markdown accumulates
 //! after each heading or ordinary `lua` fence, and each prose block is the
 //! pending buffer the following `lua` fence consumes. A `---` thematic break
-//! resets the pending buffer without becoming part of the prose; it carries
-//! no control-flow meaning, so content below a break parses and runs
-//! normally. Markdown left after the final `lua` fence is inert trailing
+//! resets the pending buffer without becoming part of the prose; it is
+//! formatting only, so content below a break parses and runs normally.
+//! Markdown left after the final `lua` fence is inert trailing
 //! commentary, never an error.
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 //!
-//! The implementation lives in the `promptforge-parser` crate and is
+//! The implementation sits in the `promptforge-parser` crate and is
 //! re-exported here unchanged, so existing `promptforge_api_runtime::parser::*`
 //! paths keep working.
 

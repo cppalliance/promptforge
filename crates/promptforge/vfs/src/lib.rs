@@ -1,9 +1,9 @@
 //! PromptForge policy over the shared virtual filesystem machinery.
 //!
-//! This crate carries promptforge policy, never generic machinery: the
-//! `/_promptforge` mount layout, the [`empty`] stock handle, and
-//! [`ModePolicy`], the editor mode gate. Generic machinery (traits,
-//! claims, routing, backends) lives in `shared-vfs` below.
+//! This crate holds promptforge policy: the `/_promptforge` mount layout,
+//! the [`empty`] stock handle, and [`ModePolicy`], the editor mode gate.
+//! Generic machinery (traits, claims, routing, backends) sits in
+//! `shared-vfs` below.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -37,7 +37,7 @@ pub enum Mode {
 
 /// The mode gate: one policy per handle, consulted on every operation
 /// before the claims check. Modes gate mutations, never reads. The
-/// current mode lives behind a shared `Arc`: the UI holds the
+/// current mode sits behind a shared `Arc`: the UI holds the
 /// [`ModeHandle`] and flips modes mid-run, and the next operation sees
 /// it - no executor involvement. One-way vs reversible is just who
 /// still holds the handle.
@@ -106,7 +106,7 @@ fn is_mutation(op: Op) -> bool {
 }
 
 /// Plan mode's markdown rule: a `.md` suffix, case-sensitively - the
-/// virtual namespace is POSIX-shaped and strict, so `.MD` is not
+/// virtual namespace follows POSIX path rules strictly, so `.MD` is not
 /// markdown and the case-insensitive suggestion does not apply.
 #[expect(
     clippy::case_sensitive_file_extension_comparisons,

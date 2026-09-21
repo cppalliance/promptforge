@@ -14,7 +14,7 @@ use gateway_cloud_providers::providers;
 /// The binary under test, built by Cargo alongside the integration test.
 const BIN: &str = env!("CARGO_BIN_EXE_shared-cloud-providers");
 
-/// The environment variable carrying the previous release's sheet URL.
+/// The environment variable holding the previous release's sheet URL.
 const PREVIOUS_SHEET_URL_ENV: &str = "MODELS_SHEET_PREVIOUS_URL";
 
 /// A recorded previous release: one fresh Anthropic slice with one model.
@@ -63,8 +63,8 @@ const PREVIOUS_SHEET_JSON: &str = r#"{
   }
 }"#;
 
-/// Serves one HTTP response with `status` carrying `body`, returning the
-/// URL to request.
+/// Serves one HTTP response with the given `status` and `body`, returning
+/// the URL to request.
 fn serve_once(status: &'static str, body: &'static str) -> String {
     let Ok(listener) = TcpListener::bind("127.0.0.1:0") else {
         panic!("bind fixture server");

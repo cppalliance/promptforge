@@ -189,7 +189,7 @@ pub(crate) mod fake {
         }
     }
 
-    /// A successful output carrying `stdout`, bounded like the real probe.
+    /// A successful output containing `stdout`, bounded like the real probe.
     pub(crate) fn ok(stdout: &str) -> CommandOutput {
         CommandOutput {
             code: 0,
@@ -198,7 +198,7 @@ pub(crate) mod fake {
         }
     }
 
-    /// A failed output carrying `stderr`, bounded like the real probe.
+    /// A failed output containing `stderr`, bounded like the real probe.
     pub(crate) fn fail(code: i32, stderr: &str) -> CommandOutput {
         CommandOutput {
             code,

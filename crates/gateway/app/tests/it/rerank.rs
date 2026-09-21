@@ -14,7 +14,8 @@ use crate::support::{
     RecordedRequest, Recorder, TestServer, json_within, send_within, spawn_backend,
 };
 
-/// A canned Jina/vLLM-shaped rerank reply echoing the (rewritten) model.
+/// A canned rerank reply in the Jina/vLLM format, echoing the (rewritten)
+/// model.
 fn canned_rerank(model: &str) -> Value {
     serde_json::json!({
         "model": model,

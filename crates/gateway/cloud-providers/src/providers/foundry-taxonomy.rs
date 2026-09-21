@@ -1,7 +1,7 @@
 //! Azure AI Foundry taxonomy: the publisher is the family, and the
 //! card's inference tasks name the workload, falling back to the output
 //! modality for a task vocabulary this mapping does not know. Foundry's
-//! rules live in this sibling module so the provider file stays under
+//! rules sit in this sibling module so the provider file stays under
 //! the workspace's 500-line ceiling.
 
 use gateway_api_types::{Deprecation, ModelEntry, ModelKind};
@@ -98,11 +98,11 @@ fn kind_from_outputs(output_modalities: &[String]) -> ModelKind {
     }
 }
 
-/// Fills the family for entries that carry no publisher - including the
+/// Fills the family for entries with no publisher - including the
 /// id-only entries the registry's taxonomy tests build - so every entry
 /// leaves the fetch with one. Normalization sets the publisher family
 /// from the card; there is no snapshot collapse, because catalog slugs
-/// carry no dated suffixes.
+/// have no dated suffixes.
 pub(crate) fn apply(entries: &mut [ModelEntry]) {
     for entry in entries.iter_mut() {
         if entry.family.is_empty() {

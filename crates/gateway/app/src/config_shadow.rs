@@ -1,10 +1,10 @@
-//! Shadow-file bookkeeping: which real config files carry a pending
+//! Shadow-file bookkeeping: which real config files have a pending
 //! `.next` shadow, and how those paths are rendered for the wire.
 //!
 //! Three readers share this. `GET /admin/config-dirty` reports the census
 //! as pending state, `POST /admin/config-apply` takes it under the apply
 //! lock to decide what to promote, and the Apply command renders the same
-//! file names into its outcome. The shadow mechanics themselves live in
+//! file names into its outcome. The shadow mechanics themselves sit in
 //! `gateway-config`; this module only assembles the census and puts its
 //! paths in comparable and displayable form.
 

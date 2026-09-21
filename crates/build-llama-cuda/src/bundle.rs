@@ -30,7 +30,7 @@ pub struct BuildRequest {
     /// empty, detected from the build machine's GPUs through `nvidia-smi`.
     pub archs: Vec<String>,
     /// Directory receiving the zip, its `.sha256`, and the manifest. The
-    /// CMake build tree lives under it in `work/` and is not part of the
+    /// CMake build tree sits under it in `work/` and is not part of the
     /// published output.
     pub out: PathBuf,
     /// Runs the `--list-devices` smoke check after the build. Needs a GPU;

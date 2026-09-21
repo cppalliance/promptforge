@@ -12,7 +12,7 @@
 //! validation, measurable progress, bounded retry, and in-place history
 //! replacement belong to the deferred compactor framework.
 //!
-//! The surface lives in this crate for the same reason the projection does:
+//! The surface sits in this crate for the same reason the projection does:
 //! it owns the message records, the `chat` arm's precheck and overflow
 //! classification depend on it, and the loop shim's compactor invocation
 //! runs in Lua over the `compactors` global installed here.
@@ -101,10 +101,10 @@ impl Compactor {
 
 /// Rough characters-per-token divisor for the pre-dispatch estimate.
 ///
-/// The estimate only ever gates the compactor invocation, never a request's
-/// content, so a conservative heuristic suffices: four characters per token
-/// tracks prose and code closely enough that a conversation well under the
-/// window passes and one well over it compacts.
+/// The estimate only ever gates the compactor invocation, so a conservative
+/// heuristic suffices: four characters per token tracks prose and code
+/// closely enough that a conversation well under the window passes and one
+/// well over it compacts.
 const CHARS_PER_TOKEN: u64 = 4;
 
 /// Per-message framing overhead, in tokens: the role, separators, and
@@ -186,7 +186,7 @@ pub fn is_context_overflow(status: u16, body: &str) -> bool {
         .any(|signature| body.contains(signature))
 }
 
-/// Installs the `compactors` global carrying the shipped policies.
+/// Installs the `compactors` global holding the shipped policies.
 ///
 /// `compactors.fail` is a Rust-backed function: invoked with the overflow
 /// reason tag, it raises typed context exhaustion as an external error, so

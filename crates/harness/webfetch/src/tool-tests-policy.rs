@@ -1,5 +1,5 @@
 //! Policy tests for [`WebFetch`]: a total timeout is a soft return, no
-//! cookie, credential, or `Referer` rides any hop, a redirect to a
+//! cookie, credential, or `Referer` is sent on any hop, a redirect to a
 //! non-global address is refused before the target is contacted (through
 //! the system resolver and an injected lookup alike), a policy-rejected URL
 //! never reaches the network, and an HTTP error status is a soft return.

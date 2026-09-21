@@ -333,7 +333,7 @@ impl Access {
     /// are deleted from the tables: they predate the child by
     /// construction, so a retired claim can never conflict again. The
     /// spawn IS the happens-before edge - no fence call, no epochs.
-    /// `origin` labels the child's operation events, exactly as in
+    /// `origin` labels the child's operation events, as in
     /// [`VfsRef::acquire`].
     ///
     /// # Errors
@@ -359,7 +359,7 @@ impl Access {
         self.id
     }
 
-    /// Reads the file at `path` exactly as stored.
+    /// Reads the file at `path` as stored.
     ///
     /// # Errors
     /// Returns an error when the policy denies the read, when another
@@ -401,8 +401,8 @@ impl Access {
 
     /// Reads lines `start..=end` as numbered lines, numbered absolutely
     /// from `start`, each right-aligned to the width of the largest
-    /// emitted number and followed by `"| "`. Bounds behave exactly as
-    /// in [`Access::read_range`].
+    /// emitted number and followed by `"| "`. Bounds behave as in
+    /// [`Access::read_range`].
     ///
     /// # Errors
     /// Returns an error under the same conditions as
@@ -911,8 +911,8 @@ mod tests {
         VfsRef::new(stub.clone())
     }
 
-    /// The claims tests never observe origins, so they acquire under one
-    /// blanket label; the observability tests label precisely.
+    /// The claims tests ignore origins, so they acquire under one blanket
+    /// label; the observability tests use specific labels.
     fn test_origin() -> Origin {
         Origin::new("handle test")
     }

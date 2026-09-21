@@ -60,7 +60,7 @@ fn test_context(name: impl Into<String>) -> RunContext {
 
 /// F10: compile-time proof that the public execution types are thread-safe.
 ///
-/// `RunContext` carries `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
+/// `RunContext` holds `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
 /// boundaries; the typed error/limit/result surfaces and the environment must
 /// be too.
@@ -79,7 +79,7 @@ const fn _public_execution_types_are_send_sync_static() {
 /// `DEFAULT_MAX_TOOL_ITERATIONS` constant was folded into `RunLimits`.
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
-/// The `writer` role declaration every model-facing fixture prompt carries:
+/// The `writer` role declaration every model-facing fixture prompt includes:
 /// the frontmatter slot, filled by prepare's trivial fill from the
 /// context's current model.
 const MODEL_ROLE_DECL: &str = "models:\n  writer: {}\n";
@@ -142,7 +142,7 @@ fn test_model_catalog() -> ModelCatalog {
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
 /// model-facing fixture prompt runs its sections under a bound model.
-/// Prompts carrying their own `models.default` call (or the legacy
+/// Prompts with their own `models.default` call (or the legacy
 /// `models.bind` of the removal tests) keep their shape and get only the
 /// role declaration.
 fn ensure_model_h1(md: &str) -> String {
@@ -273,7 +273,7 @@ impl TestStore {
 }
 
 /// Builds a [`RunContext`] from the test-local [`RunOptions`], for the tests
-/// that call [`Environment::run`] directly. The context carries the test
+/// that call [`Environment::run`] directly. The context sets the test
 /// model as the current selection, so prepare's trivial fill binds every
 /// declared role to it.
 fn to_context(opts: RunOptions) -> RunContext {
@@ -860,7 +860,7 @@ fn split_for_stream(text: &str) -> (&str, &str) {
 /// streaming backend would emit for it: reasoning deltas, content split
 /// across fragments, tool calls as split argument fragments, the
 /// finish-reason chunk, a trailing empty-choices summary chunk when the
-/// body carries `usage`/`timings`/`metrics`, and the `[DONE]` sentinel.
+/// body includes `usage`/`timings`/`metrics`, and the `[DONE]` sentinel.
 fn sse_events(body: &Value) -> String {
     let model = body.get("model").cloned();
     let choice = body["choices"].get(0).cloned().unwrap_or_default();
@@ -1125,7 +1125,7 @@ fn resp_delayed_text(content: &str, delay: std::time::Duration) -> GatewayReply 
     )
 }
 
-/// A final assistant text reply carrying an explicit `finish_reason`.
+/// A final assistant text reply with an explicit `finish_reason`.
 fn resp_text_finish(content: &str, finish_reason: &str) -> GatewayReply {
     GatewayReply::Json(json!({
         "choices": [{
@@ -1359,7 +1359,7 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 
 /// The content of the first `tool`-role message in the last recorded body.
 ///
-/// The second request the loop sends carries the dispatched tool's result;
+/// The second request the loop sends includes the dispatched tool's result;
 /// this pulls that result string back out so a test can assert on it.
 fn last_tool_turn_content(bodies: &[Value]) -> String {
     let last = bodies.last().expect("the loop must send a second request");

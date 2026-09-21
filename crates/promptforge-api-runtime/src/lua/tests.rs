@@ -6,9 +6,10 @@
 //! drives: the test model and tool sets, the VM builder, and the
 //! start-and-parse helpers.
 //!
-//! These live in `promptforge-api-runtime` (not in `promptforge-lua`) because the
-//! real setup path they exercise is the executor's `section_vm` composition,
-//! which stays with the executor to keep the dependency one-directional.
+//! These sit in `promptforge-api-runtime` (not in `promptforge-lua`)
+//! because the real setup path they exercise is the executor's
+//! `section_vm` composition, which stays with the executor to keep the
+//! dependency one-directional.
 
 mod coroutine;
 mod errors;

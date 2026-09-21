@@ -140,7 +140,7 @@ where
 /// Returns the [`CancelHandle`] installed on this task, if any.
 ///
 /// A spawned task (a fanout arm) does NOT inherit the task-local, so code about
-/// to cross a spawn boundary reads the current handle here and carries an
+/// to cross a spawn boundary reads the current handle here and passes an
 /// explicit clone into the new task, where it re-installs it with [`scope`].
 /// Returning `Option` makes an absent context representable rather than silently
 /// becoming a forever-pending wait.

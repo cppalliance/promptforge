@@ -548,7 +548,7 @@ async fn a_later_switch_persists_b_while_boot_speech_a_keeps_serving() {
 }
 
 /// The document `GET /admin/config` serves is accepted verbatim by
-/// `PUT /admin/config`: the running document carries no
+/// `PUT /admin/config`: the running document has no
 /// `active_profile` key for the save route to refuse.
 #[tokio::test]
 async fn the_served_config_round_trips_through_the_save_route() {
