@@ -110,3 +110,18 @@ fn non_ascii_is_rejected_as_a_control_error() {
         GlobalNameErrorKind::Control
     );
 }
+
+#[test]
+fn global_name_implements_from_str() {
+    use std::str::FromStr;
+    let name = GlobalName::from_str("promptforge/web/fetch").expect("valid global name");
+    assert_eq!(name.to_string(), "promptforge/web/fetch");
+    assert_eq!(
+        "promptforge/web"
+            .parse::<GlobalName>()
+            .expect("valid global name")
+            .to_string(),
+        "promptforge/web"
+    );
+    assert!(GlobalName::from_str("invalid").is_err());
+}

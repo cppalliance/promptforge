@@ -108,6 +108,14 @@ impl fmt::Display for GlobalName {
     }
 }
 
+impl std::str::FromStr for GlobalName {
+    type Err = GlobalNameError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        GlobalName::parse(s)
+    }
+}
+
 /// Validates one segment against the charset rule.
 ///
 /// A segment must be non-empty and contain only lowercase ASCII
