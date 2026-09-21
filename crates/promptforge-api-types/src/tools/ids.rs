@@ -113,6 +113,14 @@ impl std::fmt::Display for ToolId {
     }
 }
 
+impl std::str::FromStr for ToolId {
+    type Err = ToolIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ToolId::parse(s)
+    }
+}
+
 impl serde::Serialize for ToolId {
     /// Serializes the identity as its one `namespace/pack/name` string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
