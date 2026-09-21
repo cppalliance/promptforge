@@ -79,3 +79,24 @@ fn a_timestamp_is_its_millisecond_count_on_the_wire() {
     assert_eq!(stamp.to_string(), stamp.to_rfc3339());
     assert!(Timestamp::UNIX_EPOCH < stamp);
 }
+
+#[test]
+fn from_system_time_converts_and_saturates() {
+    use std::time::{Duration, SystemTime};
+    assert_eq!(
+        Timestamp::from(SystemTime::UNIX_EPOCH),
+        Timestamp::UNIX_EPOCH
+    );
+    assert_eq!(
+        Timestamp::from_system_time(SystemTime::UNIX_EPOCH),
+        Timestamp::UNIX_EPOCH
+    );
+    let after = SystemTime::UNIX_EPOCH + Duration::from_millis(5_000);
+    assert_eq!(
+        Timestamp::from_system_time(after),
+        Timestamp::from_unix_millis(5_000)
+    );
+    let before = SystemTime::UNIX_EPOCH - Duration::from_secs(10);
+    assert_eq!(Timestamp::from_system_time(before), Timestamp::UNIX_EPOCH);
+    assert!(Timestamp::now() >= Timestamp::UNIX_EPOCH);
+}
