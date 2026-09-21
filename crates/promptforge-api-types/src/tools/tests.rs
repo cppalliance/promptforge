@@ -292,3 +292,18 @@ fn catalog_rejects_illegal_wire_name() {
     assert_eq!(error.kind(), ToolCatalogErrorKind::InvalidWireName);
     assert!(error.duplicate_id().is_none());
 }
+
+#[test]
+fn tool_id_implements_from_str() {
+    use std::str::FromStr;
+    let id = ToolId::from_str("promptforge/web/fetch").expect("valid tool id");
+    assert_eq!(id.to_string(), "promptforge/web/fetch");
+    assert_eq!(
+        "promptforge/web/fetch"
+            .parse::<ToolId>()
+            .expect("valid tool id")
+            .to_string(),
+        "promptforge/web/fetch"
+    );
+    assert!(ToolId::from_str("promptforge/web").is_err());
+}
