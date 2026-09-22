@@ -150,7 +150,7 @@ Unit tests pin the exact wire shape at the projection; an end-to-end api-runtime
 
 <step-2>
 
-### Step 2: Log bounded upstream error diagnostics and run exit criteria
+### Step 2: Log bounded upstream error diagnostics and run exit criteria [completed]
 
 - Component: `none`
 - Add a structured, bounded log line in `OpenAiUpstream::post` (`crates/gateway/protocol/src/upstream.rs`, lines 273-282) when an upstream returns a non-success status: warn for 5xx, debug for 4xx, with fields `status`, `code`/`type`, and a bounded, control-escaped `error.message`; never log the raw upstream body (F5). Confirm whether the `gateway/logging` redaction layer (`crates/gateway/logging/src/redact.rs`) applies to these tracing fields; if it does not, keep to structured code/type plus the escaped message. Note this post is shared by chat, embeddings, rerank, speech, and streaming - the broad application is intended. Cover with the existing `upstream.rs` test harness patterns.

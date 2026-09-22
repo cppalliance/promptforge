@@ -5,6 +5,7 @@
 //! unchanged. Adding an Anthropic or pack upstream later is a new implementation
 //! behind this same trait, with no change to routing or the request handler.
 
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -275,6 +276,29 @@ impl OpenAiUpstream {
             let body =
                 crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY)
                     .await;
+            // F5: the raw body may echo prompt content or credentials, so only
+            // its OpenAI error envelope reaches the log, bounded and escaped.
+            let diagnostics = UpstreamErrorDiagnostics::from_body(&body);
+            let code = diagnostics.code.as_str();
+            let kind = diagnostics.kind.as_str();
+            let message = diagnostics.message.as_str();
+            if status.is_server_error() {
+                tracing::warn!(
+                    status = status.as_u16(),
+                    code = %code,
+                    r#type = %kind,
+                    error.message = %message,
+                    "upstream returned a server error"
+                );
+            } else {
+                tracing::debug!(
+                    status = status.as_u16(),
+                    code = %code,
+                    r#type = %kind,
+                    error.message = %message,
+                    "upstream returned a client error"
+                );
+            }
             let body: String = body.chars().take(2000).collect();
             return Err(ProtocolError::UpstreamStatus {
                 status: status.as_u16(),
@@ -306,6 +330,73 @@ impl OpenAiUpstream {
             .await
             .map_err(ProtocolError::upstream_transport)
     }
+}
+
+/// Maximum characters retained from an upstream error field for diagnostics.
+/// Applied per field on the decoded string, before control escaping can expand
+/// it, so one event cannot flood the log with an oversized upstream message.
+const MAX_ERROR_MESSAGE_CHARS: usize = 512;
+
+/// The bounded, safe diagnostics extracted from a non-success upstream body.
+///
+/// The raw body is never retained or logged: only the OpenAI error envelope's
+/// `code`, `type`, and `message` are read, and each string is control-escaped
+/// and bounded. A body outside that shape (or a non-string field) yields an
+/// empty value rather than a fallback that could leak the body.
+#[derive(Debug, Default)]
+struct UpstreamErrorDiagnostics {
+    code: String,
+    kind: String,
+    message: String,
+}
+
+impl UpstreamErrorDiagnostics {
+    fn from_body(body: &str) -> Self {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+            return Self::default();
+        };
+        match value.get("error") {
+            Some(serde_json::Value::Object(error)) => Self {
+                code: bounded_error_field(error.get("code")),
+                kind: bounded_error_field(error.get("type")),
+                message: bounded_error_field(error.get("message")),
+            },
+            Some(serde_json::Value::String(message)) => Self {
+                message: escape_control(message, MAX_ERROR_MESSAGE_CHARS),
+                ..Self::default()
+            },
+            _ => Self::default(),
+        }
+    }
+}
+
+/// Renders a string-valued error field, control-escaped and bounded; a
+/// missing or non-string field renders as the empty string.
+fn bounded_error_field(value: Option<&serde_json::Value>) -> String {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(String::new, |text| {
+            escape_control(text, MAX_ERROR_MESSAGE_CHARS)
+        })
+}
+
+/// Escapes every control character so a crafted upstream message cannot forge
+/// log lines or inject terminal control sequences, keeping at most `max_chars`
+/// input characters.
+fn escape_control(text: &str, max_chars: usize) -> String {
+    let mut escaped = String::new();
+    for character in text.chars().take(max_chars) {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            control if control.is_control() => {
+                let _ = write!(escaped, "\\u{{{:x}}}", control as u32);
+            }
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 /// Parses an upstream SSE byte stream into validated [`ChatChunk`]s.
@@ -846,18 +937,24 @@ mod tests {
         }
     }
 
-    /// Installs a WARN-level subscriber writing to a fresh capture buffer for
-    /// the current thread (tokio's current-thread test runtime keeps every
-    /// poll on this thread, so the parser's warnings land in the buffer).
-    fn capture_warnings() -> (LogBuffer, tracing::subscriber::DefaultGuard) {
+    /// Installs a subscriber at `max_level` writing to a fresh capture buffer
+    /// for the current thread (tokio's current-thread test runtime keeps every
+    /// poll on this thread, so the events land in the buffer).
+    fn capture_logs(max_level: tracing::Level) -> (LogBuffer, tracing::subscriber::DefaultGuard) {
         let buffer = LogBuffer::default();
         let subscriber = tracing_subscriber::fmt()
             .with_writer(buffer.clone())
             .with_ansi(false)
-            .with_max_level(tracing::Level::WARN)
+            .with_max_level(max_level)
             .finish();
         let guard = tracing::subscriber::set_default(subscriber);
         (buffer, guard)
+    }
+
+    /// Installs a WARN-level subscriber writing to a fresh capture buffer for
+    /// the current thread, for the parser's warning assertions.
+    fn capture_warnings() -> (LogBuffer, tracing::subscriber::DefaultGuard) {
+        capture_logs(tracing::Level::WARN)
     }
 
     #[tokio::test]
@@ -1044,6 +1141,150 @@ mod tests {
             other => panic!("expected UpstreamStatus, got {other:?}"),
         }
         let _ = handle.join();
+    }
+
+    #[tokio::test]
+    async fn server_error_logs_structured_diagnostics_without_the_raw_body() {
+        // F5: a 5xx logs at WARN with the structured status/code/type and the
+        // escaped error.message, but never the raw body's other content - an
+        // upstream error body can echo prompt content or credentials.
+        let (logs, _guard) = capture_logs(tracing::Level::DEBUG);
+        let body = r#"{"error":{"message":"line1\nline2","type":"server_error","code":"internal"},"echo":{"prompt":"BODY_ONLY_SENTINEL"}}"#;
+        let (base, handle) = serve_once("500 Internal Server Error", body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let _ = upstream
+            .send(request("m"), "u")
+            .await
+            .expect_err("5xx fails");
+        let _ = handle.join();
+        let logs = logs.contents();
+        assert!(
+            logs.lines()
+                .any(|line| line.contains("WARN")
+                    && line.contains("upstream returned a server error")),
+            "a 5xx logs at warn: {logs}"
+        );
+        assert!(logs.contains("status=500"), "status is structured: {logs}");
+        assert!(logs.contains("code=internal"), "code is structured: {logs}");
+        assert!(
+            logs.contains("type=server_error"),
+            "type is structured: {logs}"
+        );
+        assert!(
+            logs.contains(r"line1\nline2"),
+            "the error message is control-escaped: {logs}"
+        );
+        assert!(
+            !logs.contains("BODY_ONLY_SENTINEL"),
+            "unrelated body content is never logged: {logs}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_error_logs_at_debug_not_warn() {
+        // A 4xx is the caller's error, not the backend's: it logs at debug so
+        // the warn stream stays reserved for server-side failures.
+        let (logs, _guard) = capture_logs(tracing::Level::DEBUG);
+        let body = r#"{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}"#;
+        let (base, handle) = serve_once("400 Bad Request", body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let _ = upstream
+            .send(request("m"), "u")
+            .await
+            .expect_err("4xx fails");
+        let _ = handle.join();
+        let logs = logs.contents();
+        assert!(
+            logs.lines()
+                .any(|line| line.contains("DEBUG")
+                    && line.contains("upstream returned a client error")),
+            "a 4xx logs at debug: {logs}"
+        );
+        assert!(
+            !logs
+                .lines()
+                .any(|line| line.contains("WARN")
+                    && line.contains("upstream returned a client error")),
+            "a 4xx never logs at warn: {logs}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_json_error_body_is_never_logged_raw() {
+        // A body outside the OpenAI error shape yields no diagnostic fields;
+        // the raw body must not be logged as a fallback.
+        let (logs, _guard) = capture_logs(tracing::Level::DEBUG);
+        let (base, handle) = serve_once("502 Bad Gateway", "RAW_BODY_SECRET");
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let _ = upstream
+            .send(request("m"), "u")
+            .await
+            .expect_err("5xx fails");
+        let _ = handle.join();
+        let logs = logs.contents();
+        assert!(logs.contains("status=502"), "the status still logs: {logs}");
+        assert!(
+            !logs.contains("RAW_BODY_SECRET"),
+            "an unparseable body is never logged raw: {logs}"
+        );
+    }
+
+    #[tokio::test]
+    async fn control_characters_in_the_error_message_are_escaped() {
+        // A crafted message cannot forge log lines or inject terminal control:
+        // newlines, carriage returns, tabs, and escape bytes are escaped.
+        let (logs, _guard) = capture_logs(tracing::Level::WARN);
+        let body = r#"{"error":{"message":"forged\r\nwarning: fake\t\u001b[31mred"}}"#;
+        let (base, handle) = serve_once("500 Internal Server Error", body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let _ = upstream
+            .send(request("m"), "u")
+            .await
+            .expect_err("5xx fails");
+        let _ = handle.join();
+        let logs = logs.contents();
+        assert!(
+            logs.contains(r"forged\r\nwarning: fake\t"),
+            "control characters are escaped: {logs}"
+        );
+        assert!(
+            logs.contains(r"\u{1b}[31mred"),
+            "an ANSI escape is escaped: {logs}"
+        );
+        assert!(
+            !logs.contains("forged\r\nwarning"),
+            "no raw CRLF survives in the message: {logs}"
+        );
+        assert!(
+            !logs.contains("warning: fake\t"),
+            "no raw tab survives in the message: {logs}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_over_long_error_message_is_bounded() {
+        // The message is bounded independently of the body cap so one event
+        // cannot flood the log with a huge upstream message.
+        let (logs, _guard) = capture_logs(tracing::Level::WARN);
+        let message = "z".repeat(MAX_ERROR_MESSAGE_CHARS + 200);
+        let body = format!("{{\"error\":{{\"message\":\"{message}\"}}}}");
+        let (base, handle) = serve_once("500 Internal Server Error", &body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let _ = upstream
+            .send(request("m"), "u")
+            .await
+            .expect_err("5xx fails");
+        let _ = handle.join();
+        let logs = logs.contents();
+        assert!(
+            logs.contains(&"z".repeat(MAX_ERROR_MESSAGE_CHARS)),
+            "the bound keeps a full-length prefix"
+        );
+        assert!(
+            !logs.contains(&"z".repeat(MAX_ERROR_MESSAGE_CHARS + 1)),
+            "the message never exceeds the bound: {}",
+            logs.len()
+        );
     }
 
     /// A server that accepts the connection and then never sends a response, so
