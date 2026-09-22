@@ -12,6 +12,7 @@ use serde_json::json;
 use super::*;
 use crate::client::CompletionResult;
 use crate::model::CompletionErrorKind;
+use promptforge_api_types::metrics::ClientTiming;
 
 /// A chunk source over canned chunks; it never pends, so the tests need
 /// no executor.
@@ -126,9 +127,61 @@ fn read_completion_stream_reassembles_the_turn_and_times_it_on_the_injected_cloc
     assert_eq!(completion.finish_reason(), Some("stop"));
     assert_eq!(seen.borrow().len(), 2, "one live delta per text fragment");
     let timing = completion.client_timing().expect("timing is measured");
-    assert!((timing.ttft_ms.expect("first delta") - 10.0).abs() < f64::EPSILON);
-    assert!((timing.mean_itl_ms.expect("two deltas") - 10.0).abs() < f64::EPSILON);
-    assert!((timing.e2e_ms - 30.0).abs() < f64::EPSILON);
+    // Rounding makes every timing a whole microsecond, so the serialized
+    // text is exact and short: there is no epsilon left to choose.
+    assert_eq!(
+        serde_json::to_string(timing).expect("timing serializes"),
+        r#"{"ttft_ms":10.0,"mean_itl_ms":10.0,"e2e_ms":30.0}"#
+    );
+}
+
+#[test]
+fn read_completion_stream_rounds_timings_to_microseconds_for_the_log() {
+    let body = sse(&[
+        text_chunk("a"),
+        text_chunk("b"),
+        text_chunk("c"),
+        text_chunk("d"),
+        json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }] }),
+        json!("[DONE]"),
+    ])
+    .replace("data: \"[DONE]\"", "data: [DONE]");
+    let (head, tail) = body.split_at(body.len() / 2);
+    let mut source = Canned::of(&[head, tail]);
+    let started = Instant::now();
+    // Every reading carries nanosecond noise: without rounding the logged
+    // text would be a long nanosecond expansion that need not survive.
+    // Four deltas make the mean divide by three, so its quotient is a long
+    // decimal only the mean's own rounding trims; with two deltas the
+    // divisor is one and the already-rounded gap would pass through whole.
+    let ticks = Cell::new(0_u32);
+    let now = || {
+        ticks.set(ticks.get() + 1);
+        match ticks.get() {
+            1 => started + Duration::new(0, 1_234_567_891),
+            2 => started + Duration::new(0, 1_600_000_000),
+            3 => started + Duration::new(0, 1_900_000_000),
+            4 => started + Duration::new(0, 2_234_567_891),
+            _ => started + Duration::new(0, 3_703_703_673),
+        }
+    };
+    let completion = block_on(read_completion_stream(
+        &mut source,
+        json!({ "model": "m" }),
+        1024,
+        |_| {},
+        started,
+        now,
+    ))
+    .expect("a whole stream reassembles");
+    let timing = completion.client_timing().expect("timing is measured");
+    let text = serde_json::to_string(timing).expect("timing serializes");
+    assert_eq!(
+        text, r#"{"ttft_ms":1234.568,"mean_itl_ms":333.333,"e2e_ms":3703.704}"#,
+        "each timing is a whole microsecond, so its decimal text is short"
+    );
+    let back: ClientTiming = serde_json::from_str(&text).expect("its own text parses");
+    assert_eq!(&back, timing, "every field reads back bit-for-bit");
 }
 
 #[test]

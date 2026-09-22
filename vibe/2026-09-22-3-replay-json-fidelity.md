@@ -151,7 +151,7 @@ Enable `serde_json`'s `float_roundtrip` feature on the workspace dependency in `
 
 <step-2>
 
-### Step 2: Round ClientTiming fields to microseconds
+### Step 2: Round ClientTiming fields to microseconds [completed]
 
 - Component: replay-grade log round-trip
 

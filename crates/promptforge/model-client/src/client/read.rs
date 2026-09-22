@@ -150,9 +150,9 @@ pub async fn read_completion_stream<S: ChunkSource>(
     let client_timing = ClientTiming {
         ttft_ms: first_delta.map(|at| duration_ms(at.duration_since(started))),
         mean_itl_ms: match (first_delta, last_delta) {
-            (Some(first), Some(last)) if delta_chunks >= 2 => {
-                Some(duration_ms(last.duration_since(first)) / f64::from(delta_chunks - 1))
-            }
+            (Some(first), Some(last)) if delta_chunks >= 2 => Some(round_to_microsecond(
+                duration_ms(last.duration_since(first)) / f64::from(delta_chunks - 1),
+            )),
             _ => None,
         },
         e2e_ms: duration_ms(now().duration_since(started)),
@@ -163,9 +163,19 @@ pub async fn read_completion_stream<S: ChunkSource>(
     accumulator.finish(request_body, Some(client_timing))
 }
 
-/// A duration as fractional milliseconds.
+/// A duration as fractional milliseconds, rounded to a whole microsecond
+/// so the text the run log stores parses back exactly on replay.
 fn duration_ms(duration: Duration) -> f64 {
-    duration.as_secs_f64() * 1000.0
+    round_to_microsecond(duration.as_secs_f64() * 1000.0)
+}
+
+/// Rounds fractional-millisecond `ms` to the nearest whole microsecond.
+///
+/// A run log stores a timing as JSON text and parses that text back for
+/// replay. A whole-microsecond value has a short decimal form the parser
+/// reproduces exactly, so a replayed timing equals the recorded one.
+fn round_to_microsecond(ms: f64) -> f64 {
+    (ms * 1000.0).round() / 1000.0
 }
 
 #[cfg(test)]
