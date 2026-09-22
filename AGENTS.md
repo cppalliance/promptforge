@@ -44,7 +44,7 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - Long-running gateway work reports through `gateway-progress`, a private gateway family crate: a producer begins an activity with a text, replaces the text as work moves, and drops the guard when done. Consumers outside the family read only the `Progress` wire type from `gateway-api-types`.
 - Unsafe code stays in its explicitly owned boundary. Every unsafe block documents its safety invariants immediately before the block.
 - Comments explain a non-obvious constraint, ordering requirement, or workaround. Every platform or external-bug workaround cites its upstream issue URL in the explanatory comment.
-- JSON that reaches the run log or a replay comparison round-trips exactly - `to_value`, `to_string`, `from_str` yield an identical value, object keys stay canonical (sorted), numbers must be finite, floats are rounded to their meaningful precision at the source, and serde_json `preserve_order` is never enabled.
+- JSON that reaches the run log or a replay comparison round-trips exactly - `to_value`, `to_string`, `from_str` yield an identical value, object keys stay canonical (sorted), numbers must be finite, and serde_json `preserve_order` is never enabled. Exact parsing (`float_roundtrip`) carries that guarantee; a value derived and then logged is additionally rounded to its meaningful precision at the source.
 
 ## Verification
 
