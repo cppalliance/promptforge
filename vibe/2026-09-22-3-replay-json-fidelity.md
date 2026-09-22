@@ -221,7 +221,7 @@ Audit every Rust-side `table.pairs()` walk that produces an ordered `Vec` rather
 
 <step-9>
 
-### Step 9: Write the author-facing rules
+### Step 9: Write the author-facing rules [completed]
 
 - Component: author-facing rules
 

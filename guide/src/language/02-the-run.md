@@ -20,7 +20,7 @@ Four calls are unavailable from the preamble: `call`, `jump`, `fanout`, and `lis
 
 After the preamble, the top-level sections run in file order. The first H2 section in the file is the entry point, and control falls through from each section to the next.
 
-Each section runs in its own isolated, sandboxed Lua state. Only the `string`, `table`, and `math` standard libraries plus safe base functions are available. The state is created at section entry and torn down at exit, so one section's Lua cannot leak into the next.
+Each section runs in its own isolated, sandboxed Lua state. Only the `string`, `table`, and `math` standard libraries plus safe base functions are available. The state is created at section entry and torn down at exit, so one section's Lua cannot leak into the next. The `pairs` and `next` iterators visit keys in a fixed sorted order: the array part first in index order, then booleans, numbers, and strings.
 
 A section that talks to the model needs a model. `models.use` selects a declared role by its label for one section, and the prompt-wide default covers sections that select nothing; a model-facing call with neither fails with a model-required error. Tools follow the same pattern: `tools.always` or `tools.add` advertise a bound tool to the model under its local alias.
 
