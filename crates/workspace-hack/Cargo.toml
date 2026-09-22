@@ -53,7 +53,7 @@ schemars = { version = "0.8", features = ["preserve_order", "url", "uuid1"] }
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", features = ["alloc", "rc"] }
-serde_json = { version = "1", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1", features = ["alloc", "float_roundtrip", "raw_value", "unbounded_depth"] }
 simd-adler32 = { version = "0.3" }
 smallvec = { version = "1", default-features = false, features = ["const_new", "union"] }
 stable_deref_trait = { version = "1" }
@@ -121,7 +121,7 @@ schemars = { version = "0.8", features = ["preserve_order", "url", "uuid1"] }
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", features = ["alloc", "rc"] }
-serde_json = { version = "1", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1", features = ["alloc", "float_roundtrip", "raw_value", "unbounded_depth"] }
 simd-adler32 = { version = "0.3" }
 smallvec = { version = "1", default-features = false, features = ["const_new", "union"] }
 stable_deref_trait = { version = "1" }
@@ -132,7 +132,6 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-trai
 sync_wrapper = { version = "1", default-features = false, features = ["futures"] }
 tauri-utils = { version = "2", default-features = false, features = ["build-2", "compression", "resources"] }
 time = { version = "0.3", features = ["macros", "serde-human-readable"] }
-time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 tinystr = { version = "0.8", default-features = false, features = ["alloc", "zerovec"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "test-util"] }
 tracing = { version = "0.1", features = ["log"] }

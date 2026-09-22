@@ -8740,7 +8740,6 @@ dependencies = [
  "tar",
  "tauri-utils",
  "time",
- "time-macros",
  "tinystr",
  "tokio",
  "tokio-util",

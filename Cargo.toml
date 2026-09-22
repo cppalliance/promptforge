@@ -75,7 +75,9 @@ workspace-hack = { path = "crates/workspace-hack", version = "0.1" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
-serde_json = "1"
+# `float_roundtrip` makes `from_str` reproduce the exact `f64` that
+# `to_string` printed, so a payload the run log stores reads back bit-for-bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # 0.13 rather than 0.12 so the tree links exactly one rustls crypto backend:
 # aws-lc-rs, the one Tauri already selects. 0.13 has no `ring`
 # option, so a bump cannot re-enable it; CI checks that `ring` stays out of
