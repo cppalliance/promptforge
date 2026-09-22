@@ -171,7 +171,7 @@ Add `crates/harness/log/tests/it/fidelity.rs` covering awkward floats, nested ob
 
 <step-4>
 
-### Step 4: Extract the shared ordering helper
+### Step 4: Extract the shared ordering helper [completed]
 
 - Component: deterministic Lua iteration
 

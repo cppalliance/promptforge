@@ -9,94 +9,14 @@
 //! array member arrives as the arm's `item` value as itself; a hash member
 //! arrives as the pair table (`item.key` / `item.value`).
 
-use std::cmp::Ordering;
-
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
 use crate::error::{Error, Result};
 
-/// A hash key's sort position: booleans first (`false` before `true`), then
-/// numbers by value, then strings bytewise. The ranks keep mixed-type keys
-/// totally ordered without inventing a cross-type comparison. An integer
-/// key stays an `i64` so two distinct integers past 2^53 never compare
-/// equal (which would leave their order to `pairs`, the nondeterminism the
-/// sort exists to remove); only a mixed integer/float pair converts.
-enum SortKey {
-    Bool(bool),
-    Integer(i64),
-    Float(f64),
-    Text(Vec<u8>),
-}
+#[path = "collection-order.rs"]
+mod order;
 
-impl SortKey {
-    fn rank(&self) -> u8 {
-        match self {
-            SortKey::Bool(_) => 0,
-            SortKey::Integer(_) | SortKey::Float(_) => 1,
-            SortKey::Text(_) => 2,
-        }
-    }
-
-    fn compare(&self, other: &SortKey) -> Ordering {
-        match (self, other) {
-            (SortKey::Bool(left), SortKey::Bool(right)) => left.cmp(right),
-            (SortKey::Integer(left), SortKey::Integer(right)) => left.cmp(right),
-            (SortKey::Float(left), SortKey::Float(right)) => left.total_cmp(right),
-            (SortKey::Integer(integer), SortKey::Float(float)) => {
-                compare_integer_float(*integer, *float)
-            }
-            (SortKey::Float(float), SortKey::Integer(integer)) => {
-                compare_integer_float(*integer, *float).reverse()
-            }
-            (SortKey::Text(left), SortKey::Text(right)) => left.cmp(right),
-            _ => self.rank().cmp(&other.rank()),
-        }
-    }
-}
-
-/// Orders an integer key against a finite float key exactly: the float is
-/// compared to the integer's neighborhood without rounding the integer,
-/// so an integer past 2^53 still sorts on the correct side of a nearby
-/// float. A float outside `i64`'s range is beyond every integer; a float
-/// inside it is truncated, the integer parts are compared, and a tie is
-/// broken by the float's fractional part (an exact integer-valued float
-/// ties with its integer).
-fn compare_integer_float(integer: i64, float: f64) -> Ordering {
-    /// 2^63: one past `i64::MAX`, exactly representable, so a float at or
-    /// beyond it is greater than every integer.
-    const ABOVE_MAX: f64 = 9_223_372_036_854_775_808.0;
-    /// -2^63: exactly `i64::MIN`, so a float below it is less than every
-    /// integer.
-    const MIN: f64 = -9_223_372_036_854_775_808.0;
-    if float >= ABOVE_MAX {
-        return Ordering::Less;
-    }
-    if float < MIN {
-        return Ordering::Greater;
-    }
-    // In range and finite: the truncation is exact for the integer part.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the float is inside i64's range and its fractional part is compared separately"
-    )]
-    let truncated = float.trunc() as i64;
-    match integer.cmp(&truncated) {
-        Ordering::Equal => {
-            // The integer equals the float's integer part, so it sits below
-            // a float with a positive fraction and above one with a
-            // negative fraction.
-            let fraction = float - float.trunc();
-            if fraction > 0.0 {
-                Ordering::Less
-            } else if fraction < 0.0 {
-                Ordering::Greater
-            } else {
-                Ordering::Equal
-            }
-        }
-        ordering => ordering,
-    }
-}
+pub(crate) use order::{KeyError, SortKey, sort_key};
 
 /// Enumerates fanout's collection argument as the sequence of members the
 /// shim spawns arms over: the array part (`1..=#t`) in order, then the hash
@@ -130,33 +50,20 @@ pub(crate) fn collection_members(lua: &Lua, collection: &Value) -> Result<Table>
         {
             continue;
         }
-        // Each scalar key yields its sort position and its diagnostic label
-        // in one match; non-scalar keys are rejected here, so no later code
-        // path can meet one.
-        let (sort_key, key_label) = match &key {
-            Value::String(s) => {
-                let text = s.to_str().map_err(Error::lua)?;
-                (SortKey::Text(s.as_bytes().to_vec()), text.to_owned())
+        // The shared classifier yields each scalar key's sort position and
+        // its diagnostic label; the failure is mapped to fanout's own message
+        // here, so a non-scalar key is rejected before any later code path.
+        let (position, key_label) = sort_key(&key).map_err(|error| match error {
+            KeyError::NotFinite => {
+                Error::Lua("fanout collection key is not a finite number".to_owned())
             }
-            Value::Integer(i) => (SortKey::Integer(*i), i.to_string()),
-            Value::Number(n) => {
-                if !n.is_finite() {
-                    return Err(Error::Lua(
-                        "fanout collection key is not a finite number".to_owned(),
-                    ));
-                }
-                (SortKey::Float(*n), n.to_string())
-            }
-            Value::Boolean(b) => (SortKey::Bool(*b), b.to_string()),
-            other => {
-                return Err(Error::Lua(format!(
-                    "fanout collection key must be a string, number, or boolean, got {}",
-                    other.type_name()
-                )));
-            }
-        };
+            KeyError::NotUtf8(source) => Error::lua(source),
+            KeyError::Unsortable(type_name) => Error::Lua(format!(
+                "fanout collection key must be a string, number, or boolean, got {type_name}"
+            )),
+        })?;
         check_member(&member, &key_label)?;
-        pairs.push((sort_key, key, member));
+        pairs.push((position, key, member));
     }
     pairs.sort_by(|left, right| left.0.compare(&right.0));
     for (position, (_, key, member)) in pairs.into_iter().enumerate() {
@@ -318,27 +225,6 @@ mod tests {
                 json!({"key": 9_007_199_254_740_993_i64, "value": "b"}),
                 json!({"key": 1e300, "value": "big"}),
             ]
-        );
-    }
-
-    #[test]
-    fn compare_integer_float_orders_without_rounding_the_integer() {
-        assert_eq!(compare_integer_float(2, 2.5), Ordering::Less);
-        assert_eq!(compare_integer_float(3, 2.5), Ordering::Greater);
-        assert_eq!(compare_integer_float(2, 2.0), Ordering::Equal);
-        assert_eq!(compare_integer_float(-1, -0.5), Ordering::Less);
-        assert_eq!(compare_integer_float(0, -0.5), Ordering::Greater);
-        assert_eq!(compare_integer_float(i64::MAX, 1e300), Ordering::Less);
-        assert_eq!(compare_integer_float(i64::MIN, -1e300), Ordering::Greater);
-        // 2^63 as a float is one past i64::MAX, so the largest integer is
-        // still below it; -2^63 is exactly i64::MIN.
-        assert_eq!(
-            compare_integer_float(i64::MAX, 9_223_372_036_854_775_808.0),
-            Ordering::Less
-        );
-        assert_eq!(
-            compare_integer_float(i64::MIN, -9_223_372_036_854_775_808.0),
-            Ordering::Equal
         );
     }
 
