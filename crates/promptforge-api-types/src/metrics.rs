@@ -219,4 +219,48 @@ mod tests {
             "absent sections are omitted from the line"
         );
     }
+
+    /// A non-finite `f64` has no JSON number form, so `serde_json` writes it
+    /// as `null`; it would read back as a null or absent field, not the value
+    /// that went in. Replay comparison needs bit-for-bit equality, so the
+    /// producers reject non-finite values at the source instead of letting
+    /// the serializer erase them: a request temperature through
+    /// `Temperature::new`, and a timer's seconds through the task timeout
+    /// parse with the scheduler's defensive repeat.
+    #[test]
+    fn a_non_finite_f64_serializes_to_null() {
+        for non_finite in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                serde_json::to_string(&non_finite).expect("a non-finite float must serialize"),
+                "null",
+                "a non-finite float has no JSON number form"
+            );
+        }
+        let metrics = VllmMetrics {
+            time_to_first_token_ms: None,
+            generation_time_ms: None,
+            queue_time_ms: None,
+            mean_itl_ms: Some(f64::NAN),
+            tokens_per_second: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&metrics).expect("metrics must serialize"),
+            r#"{"mean_itl_ms":null}"#,
+            "a non-finite timing reaches the log as null"
+        );
+    }
+
+    /// `Value::Object` is a `BTreeMap`, so serialization emits keys in sorted
+    /// order no matter the order they were inserted. No crate enables
+    /// `serde_json`'s `preserve_order`; were one to, insertion order would
+    /// leak into the log line and two equal payloads could print differently.
+    #[test]
+    fn object_keys_serialize_in_canonical_order() {
+        let value = json!({ "z": 1, "a": 2, "m": 3 });
+        assert_eq!(
+            serde_json::to_string(&value).expect("a value must serialize"),
+            r#"{"a":2,"m":3,"z":1}"#,
+            "object keys must be sorted, not held in insertion order"
+        );
+    }
 }

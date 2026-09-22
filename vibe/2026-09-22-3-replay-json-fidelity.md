@@ -201,7 +201,7 @@ Call `install_deterministic_iteration` in `SectionVm::new` after `harden` in `cr
 
 <step-7>
 
-### Step 7: Record the non-finite and canonical-order regressions
+### Step 7: Record the non-finite and canonical-order regressions [completed]
 
 - Component: hardening audit
 
