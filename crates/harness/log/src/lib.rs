@@ -20,6 +20,12 @@
 //!   hierarchical task path stored as text; timestamps are UTC
 //!   milliseconds since the Unix epoch. `started_at` is the caller's;
 //!   `at` and `ended_at` are the log's wall clock.
+//! - A stored payload round-trips: `Record::payload` is written with
+//!   `serde_json::to_string` and read back with `from_str`, and the parsed
+//!   value equals the original with the same text. The workspace enables
+//!   `serde_json`'s `float_roundtrip` feature, and `Value::Object` orders
+//!   keys by `BTreeMap` rather than by insertion, so both hold. The
+//!   fidelity test in `tests/it/fidelity.rs` pins it.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Nothing in this crate spawns a tokio task directly; the harness

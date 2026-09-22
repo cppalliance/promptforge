@@ -161,7 +161,7 @@ In `crates/promptforge/model-client/src/client/read.rs`, round `duration_ms` (fr
 
 <step-3>
 
-### Step 3: Pin log payload fidelity
+### Step 3: Pin log payload fidelity [completed]
 
 - Component: replay-grade log round-trip
 
