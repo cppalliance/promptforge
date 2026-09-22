@@ -103,6 +103,58 @@ fn next_returns_the_first_pair_of_a_non_empty_table() {
 }
 
 #[test]
+fn next_resumes_after_a_cleared_boolean_key_without_replaying_the_array_part() {
+    // The stateless `next` rebuilds the walk from the live table. A boolean
+    // hash key ranks below numbers in `SortKey`, so a resume that compared raw
+    // sort positions would place the array segment after the cleared boolean
+    // and replay it. Clearing each boolean key mid-walk must still visit every
+    // key exactly once and stop at the end.
+    let lua = vm();
+    let source = "local t = {10, 20, [false] = 'f', [true] = 't'} \
+                  local out = {} \
+                  for k in next, t do \
+                    if type(k) == 'boolean' then \
+                      out[#out+1] = tostring(k) \
+                      t[k] = nil \
+                    else \
+                      out[#out+1] = k \
+                    end \
+                  end \
+                  return out";
+    assert_eq!(
+        sequence(&lua, source),
+        vec![json!(1), json!(2), json!("false"), json!("true")]
+    );
+}
+
+#[test]
+fn next_resumes_after_a_cleared_non_scalar_key() {
+    // A cleared non-scalar key has no computed sort position, so `next` falls
+    // back to the trailing segment without ending the walk. Clearing one
+    // table-valued key must still yield the other, then terminate, however the
+    // raw `pairs` order placed the two.
+    let lua = vm();
+    let source = "local t = {a = 1} \
+                  local first, second = {}, {} \
+                  t[first] = 'f' \
+                  t[second] = 's' \
+                  local out = {} \
+                  for k in next, t do \
+                    if type(k) == 'table' then \
+                      out[#out+1] = 'key' \
+                      t[k] = nil \
+                    else \
+                      out[#out+1] = k \
+                    end \
+                  end \
+                  return out";
+    assert_eq!(
+        sequence(&lua, source),
+        vec![json!("a"), json!("key"), json!("key")]
+    );
+}
+
+#[test]
 fn pairs_skips_a_key_cleared_before_it_is_visited() {
     let lua = vm();
     let source = "local t = {a=1, b=2, c=3} \
@@ -131,5 +183,53 @@ fn pairs_skips_the_key_cleared_by_the_current_step() {
     assert_eq!(
         sequence(&lua, source),
         vec![json!("a"), json!("b"), json!("c")]
+    );
+}
+
+#[test]
+fn pairs_does_not_revisit_the_array_part_when_a_boolean_key_is_cleared() {
+    // D-003. A boolean hash key ranks below numbers in `SortKey`, so a
+    // resumption that compares raw sort positions places the array part after
+    // the boolean key and replays it. The array part, the boolean key, and the
+    // clear must all coexist for the defect to surface; each key must still be
+    // yielded exactly once.
+    let lua = vm();
+    let source = "local t = {10, 20, [false] = 'f'} \
+                  local out = {} \
+                  for k in pairs(t) do \
+                    out[#out+1] = k \
+                    if k == false then t[k] = nil end \
+                  end \
+                  return out";
+    assert_eq!(
+        sequence(&lua, source),
+        vec![json!(1), json!(2), json!(false)]
+    );
+}
+
+#[test]
+fn pairs_visits_remaining_non_scalar_keys_after_one_is_cleared() {
+    // D-002. Two non-scalar keys sort after every scalar key; clearing the
+    // current table-valued key mid-loop must not end the walk, so the other
+    // table key is still visited. Both clear, so the count pins the fix without
+    // depending on the raw `pairs` order between the two table keys.
+    let lua = vm();
+    let source = "local t = {a = 1} \
+                  local first, second = {}, {} \
+                  t[first] = 'f' \
+                  t[second] = 's' \
+                  local out = {} \
+                  for k in pairs(t) do \
+                    if type(k) == 'table' then \
+                      out[#out+1] = 'key' \
+                      t[k] = nil \
+                    else \
+                      out[#out+1] = k \
+                    end \
+                  end \
+                  return out";
+    assert_eq!(
+        sequence(&lua, source),
+        vec![json!("a"), json!("key"), json!("key")]
     );
 }
