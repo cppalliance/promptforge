@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use crate::event::Event;
+use crate::event::ReplyOrigin;
 use crate::event::lifecycle::Lifecycle;
 use crate::ids::{ChainId, Provenance, TaskId};
 use crate::metrics::{CallMetrics, ToolCallEvent};
@@ -268,7 +269,12 @@ impl Emitter {
         });
     }
 
-    /// Reports one completed assistant reply.
+    /// Reports one completed assistant reply: a model round's text reply
+    /// with its [`ReplyOrigin`] provenance.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the reply report names its full run coordinates, including the origin, in one call"
+    )]
     pub fn assistant_reply(
         &self,
         section: &str,
@@ -277,6 +283,7 @@ impl Emitter {
         finish_reason: Option<&str>,
         model: &str,
         metrics: Option<&CallMetrics>,
+        origin: ReplyOrigin,
     ) {
         self.emit(section, |execution, section, provenance| {
             Event::AssistantReply {
@@ -288,6 +295,7 @@ impl Emitter {
                 finish_reason: finish_reason.map(str::to_owned),
                 model: model.to_owned(),
                 metrics: metrics.cloned(),
+                origin,
             }
         });
     }

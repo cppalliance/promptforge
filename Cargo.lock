@@ -2668,6 +2668,7 @@ dependencies = [
 name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
+ "axum",
  "harness-capabilities",
  "harness-log",
  "harness-models",

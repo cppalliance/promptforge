@@ -21,6 +21,7 @@
 
 use std::sync::{Mutex, PoisonError};
 
+use promptforge_api_types::event::ReplyOrigin;
 use promptforge_api_types::ids::TaskId;
 use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
 use serde_json::Value;
@@ -44,7 +45,9 @@ pub trait Observer: Send + Sync {
     /// Records one typed [`Observation`] for `execution` and `section`.
     fn observe(&self, execution: &str, section: &str, event: Observation);
 
-    /// Records one completed assistant reply.
+    /// Records one completed assistant reply. `origin` is the reply's
+    /// provenance: [`ReplyOrigin::Chat`] for a user-facing turn,
+    /// [`ReplyOrigin::Infer`] for a programmatic inference round.
     #[expect(unused_variables, reason = "the default body discards the report")]
     fn on_assistant_reply(
         &self,
@@ -57,6 +60,7 @@ pub trait Observer: Send + Sync {
         finish_reason: Option<&str>,
         model: &str,
         metrics: Option<&CallMetrics>,
+        origin: ReplyOrigin,
     ) {
     }
 

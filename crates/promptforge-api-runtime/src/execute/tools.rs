@@ -14,15 +14,18 @@ use std::sync::atomic::AtomicU32;
 
 use crate::Error;
 use crate::model::{Completion, CompletionError, CompletionResult};
+use promptforge_api_types::event::ReplyOrigin;
 use promptforge_api_types::event::lifecycle;
 
-use super::support::advance_turn;
+use super::support::{advance_turn, report_model_turn};
 use promptforge_api_types::emitter::Emitter;
 
-/// Reports one completed infer round exactly like a single prose round and
-/// renders its text: the turn advance, the debug capture pair, the
-/// completion and truncation events, and the no-tools-advertised
-/// violation check.
+/// Reports one completed infer round through the shared round report and
+/// renders its text. The report fires the turn advance's round events - the
+/// debug capture pair, the completed boundary, the thinking side channel,
+/// the `length` truncation observation - plus the [`Emitter::assistant_reply`]
+/// content report tagged `origin = infer`. The no-tools-advertised
+/// violation check is what keeps the round tool-free.
 fn accept_infer_completion(
     completion: Completion,
     emitter: &Emitter,
@@ -30,25 +33,9 @@ fn accept_infer_completion(
     turns: &AtomicU32,
 ) -> Result<String, Error> {
     let turn = advance_turn(turns);
-    if emitter.captures_debug() {
-        emitter.request(section, turn, completion.request_body);
-        emitter.response(
-            section,
-            turn,
-            completion.response_body.clone(),
-            completion.finish_reason.clone(),
-            completion.reasoning_content.clone(),
-        );
-    }
-    emitter.report(section, lifecycle::MODEL_TURN_COMPLETED);
-
-    match completion.result {
-        CompletionResult::Text(text) => {
-            if completion.finish_reason.as_deref() == Some("length") {
-                emitter.report(section, lifecycle::MODEL_TURN_TRUNCATED);
-            }
-            Ok(text)
-        }
+    let (outcome, _) = report_model_turn(emitter, section, turn, completion, ReplyOrigin::Infer);
+    match outcome {
+        CompletionResult::Text(text) => Ok(text),
         // No tools were advertised, so a tool-call turn is a backend
         // protocol violation rather than something to dispatch.
         // `CompletionResult` is `#[non_exhaustive]` across the crate boundary:

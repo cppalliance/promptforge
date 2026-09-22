@@ -25,6 +25,9 @@ use tokio::sync::broadcast;
 #[path = "session-close.rs"]
 mod close;
 
+#[path = "session-infer.rs"]
+mod infer;
+
 /// A prompt that parks on operator input and returns it.
 const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge: 0\n---\n\n\
     # Asks\n\n## Only\n\n```lua\nreturn user_input()\n```\n";
@@ -71,6 +74,17 @@ async fn launch(harness: &Harness) -> Session {
     harness
         .launch(LaunchRequest {
             agent: "asks".to_owned(),
+            args: String::new(),
+        })
+        .await
+        .expect("the discovered agent launches")
+}
+
+/// Launches the discovered agent named `agent`.
+async fn launch_agent(harness: &Harness, agent: &str) -> Session {
+    harness
+        .launch(LaunchRequest {
+            agent: agent.to_owned(),
             args: String::new(),
         })
         .await

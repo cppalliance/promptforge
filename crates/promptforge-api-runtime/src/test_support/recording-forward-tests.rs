@@ -5,6 +5,7 @@
 
 use std::sync::Mutex;
 
+use promptforge_api_types::event::ReplyOrigin;
 use promptforge_api_types::ids::{AbandonReason, ChainId, Provenance, TaskId, TaskOrigin};
 use promptforge_api_types::metrics::ToolCallEvent;
 
@@ -43,12 +44,13 @@ impl Observer for Recorder {
         finish_reason: Option<&str>,
         model: &str,
         _metrics: Option<&promptforge_api_types::metrics::CallMetrics>,
+        origin: ReplyOrigin,
     ) {
         self.content
             .lock()
             .expect("the recorder mutex is not poisoned")
             .push(format!(
-                "{section}: reply chain={chain_id} depth={depth} turn={turn} text={text} finish={finish_reason:?} model={model}"
+                "{section}: reply origin={origin:?} chain={chain_id} depth={depth} turn={turn} text={text} finish={finish_reason:?} model={model}"
             ));
     }
 
@@ -349,6 +351,21 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
                 finish_reason: Some("stop".to_owned()),
                 model: "m".to_owned(),
                 metrics: None,
+                origin: ReplyOrigin::Chat,
+            },
+            Seam::Content,
+        ),
+        (
+            Event::AssistantReply {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                turn: 1,
+                text: "inferred".to_owned(),
+                finish_reason: Some("stop".to_owned()),
+                model: "m".to_owned(),
+                metrics: None,
+                origin: ReplyOrigin::Infer,
             },
             Seam::Content,
         ),
@@ -482,6 +499,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
             finish_reason: Some("stop".to_owned()),
             model: "m".to_owned(),
             metrics: None,
+            origin: ReplyOrigin::Chat,
         },
         Event::UserInput {
             execution: "run".to_owned(),
@@ -514,13 +532,44 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
     assert_eq!(
         *recorder.content.lock().expect("not poisoned"),
         vec![
-            "A: reply chain=0 depth=0 turn=1 text=hi finish=Some(\"stop\") model=m".to_owned(),
+            "A: reply origin=Chat chain=0 depth=0 turn=1 text=hi finish=Some(\"stop\") model=m"
+                .to_owned(),
             "A: input typed".to_owned(),
         ]
     );
     assert_eq!(
         *recorder.captured.lock().expect("not poisoned"),
         vec![(1, "request".to_owned()), (1, "response".to_owned())]
+    );
+}
+
+#[test]
+fn a_reply_forwards_its_origin_to_the_observer() {
+    // A reply's provenance reaches the observer: dropping it, defaulting it
+    // to `Chat`, or routing it to a second kind would change this line.
+    let recorder = Recorder::default();
+    forward(
+        vec![Event::AssistantReply {
+            execution: "run".to_owned(),
+            section: "A".to_owned(),
+            provenance: provenance(),
+            turn: 1,
+            text: "inferred".to_owned(),
+            finish_reason: Some("stop".to_owned()),
+            model: "m".to_owned(),
+            metrics: None,
+            origin: ReplyOrigin::Infer,
+        }],
+        &recorder,
+        None,
+    );
+    assert_eq!(
+        *recorder.content.lock().expect("not poisoned"),
+        vec![
+            "A: reply origin=Infer chain=0 depth=0 turn=1 text=inferred finish=Some(\"stop\") model=m"
+                .to_owned(),
+        ],
+        "the observer must see the reply's origin"
     );
 }
 

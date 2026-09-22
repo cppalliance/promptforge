@@ -54,6 +54,7 @@ fn stamped_fixture_event() -> promptforge_api_types::event::Event {
         text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
+        origin: promptforge_api_types::event::ReplyOrigin::Chat,
         metrics: Some(CallMetrics {
             usage: Some(Usage {
                 prompt_tokens: 7,

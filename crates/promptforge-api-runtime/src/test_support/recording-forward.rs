@@ -258,6 +258,7 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             finish_reason,
             model,
             metrics,
+            origin,
             ..
         } => observer.on_assistant_reply(
             &execution,
@@ -269,6 +270,7 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             finish_reason.as_deref(),
             &model,
             metrics.as_ref(),
+            origin,
         ),
         Event::AssistantToolCalls {
             execution,

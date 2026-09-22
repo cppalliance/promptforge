@@ -134,6 +134,25 @@ macro_rules! events {
     };
 }
 
+/// Which path produced one [`Event::AssistantReply`]: a user-facing chat
+/// turn ([`Chat`](Self::Chat)) or a programmatic inference round
+/// ([`Infer`](Self::Infer)).
+///
+/// The default is `chat`, so an older log written before the field existed
+/// reads back as a chat reply. The enum is `#[non_exhaustive]`, so a host
+/// matches the two known origins and keeps a wildcard for a future one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ReplyOrigin {
+    /// A user-facing chat turn: the reply belongs in the conversation.
+    #[default]
+    Chat,
+    /// A programmatic inference round (`models.infer`): the reply is a
+    /// model result the host may treat apart from the conversation.
+    Infer,
+}
+
 events! {
     /// One thing that happened during a run.
     ///
@@ -324,7 +343,8 @@ events! {
             /// The thinking text: untrusted model output.
             text: String,
         },
-        /// One completed assistant reply.
+        /// One completed assistant reply: a model round's text reply,
+        /// carrying the [`ReplyOrigin`] of the round that produced it.
         AssistantReply {
             /// The model-turn counter the reply was produced under.
             turn: u32,
@@ -336,6 +356,11 @@ events! {
             model: String,
             /// Everything the call measured, when anything reported.
             metrics: Option<CallMetrics>,
+            /// The provenance a host inspects to distinguish an inference
+            /// round (`infer`) from a user-facing chat turn (`chat`).
+            /// Defaults to `chat` when an older log carries no `origin`.
+            #[serde(default)]
+            origin: ReplyOrigin,
         },
         /// One batch of tool calls the model requested, unexecuted.
         AssistantToolCalls {

@@ -3,6 +3,7 @@
 use serde_json::json;
 
 use super::Event;
+use super::ReplyOrigin;
 use crate::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent, Usage};
 
@@ -14,6 +15,21 @@ fn provenance(path: &str, seq: u32) -> Provenance {
     Provenance {
         task: task(path),
         seq,
+    }
+}
+
+fn sample_metrics() -> CallMetrics {
+    CallMetrics {
+        usage: Some(Usage {
+            prompt_tokens: 7,
+            completion_tokens: 3,
+            total_tokens: 10,
+            cached_tokens: None,
+            reasoning_tokens: None,
+        }),
+        llama: None,
+        vllm: None,
+        client: None,
     }
 }
 
@@ -71,18 +87,19 @@ fn one_variant_of_each_group_round_trips_through_serde() {
         text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
-        metrics: Some(CallMetrics {
-            usage: Some(Usage {
-                prompt_tokens: 7,
-                completion_tokens: 3,
-                total_tokens: 10,
-                cached_tokens: None,
-                reasoning_tokens: None,
-            }),
-            llama: None,
-            vllm: None,
-            client: None,
-        }),
+        metrics: Some(sample_metrics()),
+        origin: ReplyOrigin::Chat,
+    });
+    round_trips(&Event::AssistantReply {
+        execution: "run-1".to_owned(),
+        section: "Gather".to_owned(),
+        provenance: provenance("0", 7),
+        turn: 2,
+        text: "hello".to_owned(),
+        finish_reason: Some("stop".to_owned()),
+        model: "llama-3".to_owned(),
+        metrics: Some(sample_metrics()),
+        origin: ReplyOrigin::Infer,
     });
     round_trips(&Event::AssistantToolCalls {
         execution: "run-1".to_owned(),
@@ -116,6 +133,44 @@ fn one_variant_of_each_group_round_trips_through_serde() {
         finish_reason: Some("length".to_owned()),
         reasoning_content: None,
     });
+}
+
+#[test]
+fn a_reply_origin_defaults_to_chat() {
+    assert_eq!(ReplyOrigin::default(), ReplyOrigin::Chat);
+}
+
+#[test]
+fn a_reply_serializes_its_origin() {
+    let event = Event::AssistantReply {
+        execution: "run-1".to_owned(),
+        section: "Gather".to_owned(),
+        provenance: provenance("0", 20),
+        turn: 1,
+        text: "inferred".to_owned(),
+        finish_reason: None,
+        model: "llama-3".to_owned(),
+        metrics: None,
+        origin: ReplyOrigin::Infer,
+    };
+    let line = serde_json::to_string(&event).expect("an event serializes");
+    assert!(
+        line.contains(r#""origin":"infer""#),
+        "the origin must reach the wire: {line}"
+    );
+}
+
+#[test]
+fn an_older_reply_without_origin_reads_back_as_chat() {
+    // Backward compatibility: a log line written before `origin` existed
+    // must still parse, defaulting to a chat reply. Without
+    // `#[serde(default)]` this deserialization fails.
+    let line = r#"{"kind":"assistant_reply","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":1},"turn":1,"text":"hi","finish_reason":null,"model":"llama-3","metrics":null}"#;
+    let event: Event = serde_json::from_str(line).expect("an old reply parses");
+    match event {
+        Event::AssistantReply { origin, .. } => assert_eq!(origin, ReplyOrigin::Chat),
+        other => panic!("expected an assistant reply, got {other:?}"),
+    }
 }
 
 #[test]

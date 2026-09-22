@@ -79,6 +79,7 @@ fn a_task_events_answer_resumes_event_tables_with_absent_fields_nil() {
             finish_reason: None,
             model: "m".to_owned(),
             metrics: None,
+            origin: promptforge_api_types::event::ReplyOrigin::Chat,
         },
     ];
     let (envelope, retained) = Answer::<Error>::TaskEvents(Ok(events))

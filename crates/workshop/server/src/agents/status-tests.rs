@@ -46,6 +46,7 @@ fn reply_event() -> Event {
         finish_reason: None,
         model: "m".to_owned(),
         metrics: None,
+        origin: promptforge_api_types::event::ReplyOrigin::Chat,
     }
 }
 

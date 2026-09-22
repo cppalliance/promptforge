@@ -10,6 +10,7 @@ use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::*;
 use crate::lua::ToolSet;
 use crate::test_support::tokio_driver::TokioDriver;
+use promptforge_api_types::event::ReplyOrigin;
 use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
 
 /// Records every observation and every content report as one rendered
@@ -66,9 +67,10 @@ impl Observer for RoundRecorder {
         finish_reason: Option<&str>,
         model: &str,
         metrics: Option<&CallMetrics>,
+        origin: ReplyOrigin,
     ) {
         self.push(format!(
-            "{section}: reply chain={chain_id} depth={depth} turn={turn} text={text} \
+            "{section}: reply origin={origin:?} chain={chain_id} depth={depth} turn={turn} text={text} \
              finish={finish_reason:?} model={model} metrics={}",
             metrics.is_some()
         ));
@@ -210,6 +212,13 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
         chat_recorder.lines(),
         reference,
         "the chat arm reports exactly the loop's one-round sequence"
+    );
+    let chat_lines = chat_recorder.lines();
+    assert!(
+        chat_lines
+            .iter()
+            .any(|line| line.contains("reply origin=Chat")),
+        "the chat arm reports a chat-origin reply, pinning the emit site's `ReplyOrigin::Chat`: {chat_lines:?}"
     );
     assert_eq!(
         chat_gateway.requests()[0]["tools"][0]["function"]["name"],

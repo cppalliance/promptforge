@@ -441,7 +441,9 @@ impl SessionCore {
                 self.lifecycle.settle_current_turn();
                 self.report(kind, format!("{boundary} in agent `{section}`"));
             }
-            Event::AssistantReply { .. } => self.lifecycle.settle_current_turn(),
+            Event::AssistantReply { .. } => {
+                self.lifecycle.settle_current_turn();
+            }
             _ => {}
         }
         // The sink is called from one task at a time (the run's loop), so
@@ -476,3 +478,7 @@ pub fn reply_stamp(event: &Event, rounds_seen: &mut u64) -> Option<u64> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "session-tests.rs"]
+mod tests;

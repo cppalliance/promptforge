@@ -20,12 +20,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
+use promptforge_api_types::metrics::ToolCallEvent;
 
 use crate::execute::protocol::{Answer, ChatResult};
 use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
-use crate::execute::support::advance_turn;
+use crate::execute::support::{Served, advance_turn, report_model_turn};
 use crate::lua::{
     MessageRecord, OverflowReason, current_tool_bindings, is_context_overflow, precheck,
     project_messages, resolve_model_binding,
@@ -34,6 +34,7 @@ use crate::model::ModelBinding;
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::{Error, Result};
 use promptforge_api_types::emitter::Emitter;
+use promptforge_api_types::event::ReplyOrigin;
 use promptforge_api_types::event::lifecycle;
 
 use super::builtins::{advertise_task_builtins, scope_halves, task_allowlist};
@@ -52,22 +53,6 @@ fn overflow_result(reason: OverflowReason) -> ChatResult {
         model: String::new(),
         metrics: None,
     }
-}
-
-/// Assembles one round's [`CallMetrics`] from everything the completion
-/// measured, or `None` when nothing was measured.
-fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
-    let metrics = CallMetrics {
-        usage: completion.usage().cloned(),
-        llama: completion.llama_timings().cloned(),
-        vllm: completion.vllm_metrics().cloned(),
-        client: completion.client_timing().cloned(),
-    };
-    let measured = metrics.usage.is_some()
-        || metrics.llama.is_some()
-        || metrics.vllm.is_some()
-        || metrics.client.is_some();
-    measured.then_some(metrics)
 }
 
 /// How one `chat` dispatch resolved: a round issued as an effect and
@@ -227,7 +212,7 @@ impl Scheduler {
         let turn = advance_turn(&round.turns);
         let (outcome, served) = round.served(*completion, turn);
         let result = match outcome {
-            CompletionResult::Text(text) => Ok(round.text_reply(&served, turn, text)),
+            CompletionResult::Text(text) => Ok(Round::text_reply(&served, text)),
             CompletionResult::ToolCalls(calls) => {
                 // The scope is recorded before the round is spawned; its
                 // absence is a scheduler fault, never an author-visible
@@ -257,15 +242,6 @@ struct Round {
     section: String,
     emitter: Arc<Emitter>,
     turns: Arc<AtomicU32>,
-}
-
-/// What a served completion reports once the turn has advanced and the
-/// completion observation has fired: the pieces both the text and the
-/// tool-call arms pass into the round's answer.
-struct Served {
-    finish_reason: Option<String>,
-    model: String,
-    metrics: Option<CallMetrics>,
 }
 
 impl Round {
@@ -311,64 +287,25 @@ impl Round {
         }
     }
 
-    /// Reports a served completion's round-level events - the debug
-    /// capture pair, the completion event, and the thinking side channel -
-    /// and dissolves the completion into its outcome and what the answer
-    /// arms report beside it.
+    /// Reports a served completion's round-level events through the shared
+    /// round report - the debug capture pair, the completed boundary, the
+    /// thinking side channel, the `length` truncation observation, and the
+    /// `assistant_reply` content report - and dissolves the completion into
+    /// its outcome and the metadata the answer arms carry beside it.
     fn served(&self, completion: Completion, turn: u32) -> (CompletionResult, Served) {
-        // Extracted before the debug capture, which moves the request body
-        // out of the completion.
-        let metrics = call_metrics(&completion);
-        let model = completion.model().to_owned();
-        let thinking = completion
-            .reasoning_content()
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned);
-        let finish_reason = completion.finish_reason().map(str::to_owned);
-        if self.emitter.captures_debug() {
-            self.emitter
-                .request(&self.section, turn, completion.request_body);
-            self.emitter.response(
-                &self.section,
-                turn,
-                completion.response_body.clone(),
-                completion.finish_reason.clone(),
-                completion.reasoning_content.clone(),
-            );
-        }
-        self.emitter
-            .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
-        // The content reports every host transcript is built from: the
-        // thinking side channel first, then the reply or the tool-call
-        // batch, each with model and metrics.
-        if let Some(thinking) = &thinking {
-            self.emitter.thinking(&self.section, turn, &model, thinking);
-        }
-        (
-            completion.result,
-            Served {
-                finish_reason,
-                model,
-                metrics,
-            },
+        report_model_turn(
+            &self.emitter,
+            &self.section,
+            turn,
+            completion,
+            ReplyOrigin::Chat,
         )
     }
 
-    /// Reports a text reply (with the truncation observation on a `length`
-    /// finish) and builds its answer.
-    fn text_reply(&self, served: &Served, turn: u32, text: String) -> ChatResult {
-        if served.finish_reason.as_deref() == Some("length") {
-            self.emitter
-                .report(&self.section, lifecycle::MODEL_TURN_TRUNCATED);
-        }
-        self.emitter.assistant_reply(
-            &self.section,
-            turn,
-            &text,
-            served.finish_reason.as_deref(),
-            &served.model,
-            served.metrics.as_ref(),
-        );
+    /// Builds a text reply's answer. Its `assistant_reply` content report,
+    /// with the truncation observation on a `length` finish, fired from
+    /// [`report_model_turn`].
+    fn text_reply(served: &Served, text: String) -> ChatResult {
         ChatResult {
             overflow: false,
             overflow_reason: None,

@@ -47,7 +47,9 @@ tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The tag fixture the input suite spawns its suspended waits under.
+# The loopback mock gateway the mixed-session suite drives real model rounds
+# against, and the tag fixture its server is spawned under.
+axum.workspace = true
 harness-runner = { workspace = true, features = ["test-support"] }
 # The discovery and session suites seed an agents directory on disk.
 tempfile.workspace = true
