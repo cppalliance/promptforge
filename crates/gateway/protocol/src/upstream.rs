@@ -291,7 +291,7 @@ impl OpenAiUpstream {
                     "upstream returned a server error"
                 );
             } else {
-                tracing::debug!(
+                tracing::info!(
                     status = status.as_u16(),
                     code = %code,
                     r#type = %kind,
