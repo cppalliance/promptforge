@@ -54,7 +54,7 @@ Through `harness-api` there is no store access in either direction. A session's 
 
 Two ways to close the gap, for Papergate's own plan to choose:
 
-1. Change the prompt, not the door. Deliver the paper as the run's argument (`LaunchRequest::args`) and have `papergate.md` read `args` instead of `store.read("paper.md")`, keeping `store.write("paper.md", args)` as its first statement if the `read_numbered` line ranges in `### Evaluate` are to stay as they are. Deliver the report as model text: the `## Analyze` section's `models.infer(prose)` already produces the report, and that call leaves an `assistant_reply` event with the report in `text` under `section == "Analyze"`. Papergate takes the last such event from the transcript. The `input:` and `output:` frontmatter declarations become documentation only. Cost: a 32k-context paper travels as one argument string, and the report is read from an event rather than a declared output. Recommended: it needs no change to the promptforge repository (confidence: medium; depends on Papergate accepting an event as the report's channel).
+1. Change the prompt, not the door. Deliver the paper as the run's argument (`LaunchRequest::args`) and have `papergate.md` read `args` instead of `store.read("paper.md")`, keeping `store.write("paper.md", args)` as its first statement if the `read_numbered` line ranges in `### Evaluate` are to stay as they are. Deliver the report as model text: the `## Analyze` section's `models.infer(prose)` already produces the report, and that call leaves an `assistant_reply` event with `origin: infer` carrying the report in `text` under `section == "Analyze"`. Papergate takes the last such event from the transcript. The `input:` and `output:` frontmatter declarations become documentation only. Cost: a 32k-context paper travels as one argument string, and the report is read from an event rather than a declared output. Recommended: it needs no change to the promptforge repository (confidence: medium; depends on Papergate accepting an event as the report's channel).
 2. Extend the door. Give `LaunchRequest` an optional host root (a directory mounted into the run's VFS beside the fresh store, or a set of seed files written into the store), and give `Session` a way to read the run's final text or a store file once `Closed`. This is a promptforge change with its own plan; the `HostSnapshot::workspace_roots` field already exists and is the natural carrier, but today it feeds only the `ui()` snapshot and mounts nothing.
 
 ## The shape of the new run
@@ -76,7 +76,7 @@ loop {
     }
 }
 let transcript = session.transcript(0).await?;
-// option 1: the report is the last `assistant_reply` event under section "Analyze"
+// option 1: the report is the last `assistant_reply` event with `origin: infer` under section "Analyze"
 ```
 
 `agents_path` holds `papergate.md` (the embedded default or the `--prompt` file), and `state_dir` receives the harness's `runs.db`; both may be temporary directories removed after the run, as the store directory is today. The run log is the durable record the old stderr observer approximated; keep `state_dir` when the transcript is worth retaining.
