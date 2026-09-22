@@ -1181,10 +1181,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_error_logs_at_debug_not_warn() {
-        // A 4xx is the caller's error, not the backend's: it logs at debug so
+    async fn client_error_logs_at_info_not_warn() {
+        // A 4xx is the caller's error, not the backend's: it logs at info so
         // the warn stream stays reserved for server-side failures.
-        let (logs, _guard) = capture_logs(tracing::Level::DEBUG);
+        let (logs, _guard) = capture_logs(tracing::Level::INFO);
         let body = r#"{"error":{"message":"unknown model","type":"invalid_request_error","code":"model_not_found"}}"#;
         let (base, handle) = serve_once("400 Bad Request", body);
         let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
@@ -1196,9 +1196,9 @@ mod tests {
         let logs = logs.contents();
         assert!(
             logs.lines()
-                .any(|line| line.contains("DEBUG")
+                .any(|line| line.contains("INFO")
                     && line.contains("upstream returned a client error")),
-            "a 4xx logs at debug: {logs}"
+            "a 4xx logs at info: {logs}"
         );
         assert!(
             !logs

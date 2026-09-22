@@ -231,7 +231,7 @@ Add the round-trip rule to the Engineering section of `AGENTS.md` and the sorted
 
 <step-10>
 
-### Step 10: Run the exit checks
+### Step 10: Run the exit checks [completed]
 
 - Component: verification gate
 
