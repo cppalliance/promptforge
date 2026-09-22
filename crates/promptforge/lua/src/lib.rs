@@ -95,6 +95,8 @@ pub use error_value::{ErrorKind, ErrorValue, Raised, error_table};
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
+#[cfg_attr(not(test), expect(dead_code))]
+mod iteration;
 pub(crate) use coro::{block_guard, install_shim_prelude, take_failure};
 mod dispatch;
 mod sys;

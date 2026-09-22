@@ -181,7 +181,7 @@ Extract `SortKey` and a `sort_key` helper from `crates/promptforge/lua/src/colle
 
 <step-5>
 
-### Step 5: Install sorted pairs and next
+### Step 5: Install sorted pairs and next [completed]
 
 - Component: deterministic Lua iteration
 
