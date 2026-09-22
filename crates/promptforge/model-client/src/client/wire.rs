@@ -30,7 +30,10 @@ pub struct Message {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tool_call_id: Option<String>,
     /// For an `assistant` turn that requested tools, the raw `tool_calls` array
-    /// as received from the backend, echoed back verbatim.
+    /// as received from the backend, echoed back verbatim on the live path. The
+    /// projection path instead re-renders each call from its neutral
+    /// `ToolCallRecord` into the OpenAI function-call shape, so key order and
+    /// whitespace can differ from the provider's original.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tool_calls: Option<Vec<Value>>,
 }

@@ -22,9 +22,13 @@
 //!   record held beyond the contract (a copied credential, say) can never
 //!   reach the provider.
 //!
-//! The output is the provider-neutral wire shape the gateway speaks; the
-//! projection is recomputed per dispatch for whichever model the call
-//! targets, so a later provider-specific mapping changes this one module.
+//! The output is the OpenAI wire shape the gateway speaks: replayed
+//! assistant `tool_calls` render as the function-call
+//! `{id, type, function: {name, arguments}}` object, the exact inverse of the
+//! engine's own inbound parser, so records stay neutral while the wire
+//! dogfoods the gateway's ingress contract. The projection is recomputed per
+//! dispatch for whichever model the call targets, so any later
+//! provider-specific mapping changes this one module.
 
 use std::collections::BTreeSet;
 
@@ -262,9 +266,11 @@ fn visible_text(content: &MessageContent) -> &str {
 }
 
 /// Converts one validated, projected record into its wire message: exactly
-/// the four contract fields, with each tool call rendered as the
-/// provider-neutral `{id, name, arguments}` object. This is the metadata
-/// strip - nothing else a record ever held can reach the provider.
+/// the four contract fields, with each tool call rendered as the OpenAI
+/// function-call `{id, type: "function", function: {name, arguments}}`
+/// object, `arguments` a JSON-encoded string. This is the metadata strip -
+/// nothing else a record ever held can reach the provider - and the exact
+/// inverse of the inbound parser, so a replayed turn re-parses.
 fn wire_message(record: &MessageRecord) -> Message {
     let content = match &record.content {
         MessageContent::Text(text) => Value::String(text.clone()),
@@ -293,8 +299,15 @@ fn wire_message(record: &MessageRecord) -> Message {
                 .map(|call| {
                     serde_json::json!({
                         "id": call.id,
-                        "name": call.name,
-                        "arguments": call.arguments,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            // `Value::to_string` is infallible; never
+                            // `serde_json::to_string(..).unwrap_or_default()`,
+                            // whose failure mode is a silently empty
+                            // `arguments` string.
+                            "arguments": call.arguments.to_string(),
+                        },
                     })
                 })
                 .collect(),

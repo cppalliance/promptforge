@@ -223,8 +223,8 @@ fn a_complete_tool_exchange_projects_verbatim() {
         json!([
             { "role": "user", "content": "call the tools" },
             { "role": "assistant", "content": "working", "tool_calls": [
-                { "id": "call_1", "name": "echo", "arguments": {} },
-                { "id": "call_2", "name": "search", "arguments": {} },
+                { "id": "call_1", "type": "function", "function": { "name": "echo", "arguments": "{}" } },
+                { "id": "call_2", "type": "function", "function": { "name": "search", "arguments": "{}" } },
             ] },
             { "role": "tool", "content": "found", "tool_call_id": "call_2" },
             { "role": "tool", "content": "echoed", "tool_call_id": "call_1" },
@@ -232,6 +232,73 @@ fn a_complete_tool_exchange_projects_verbatim() {
         ]),
         "results may answer in any order within the atomic block; nothing coalesces across it"
     );
+}
+
+#[test]
+fn a_two_call_assistant_turn_renders_the_openai_wire_shape() {
+    // The bug report's captured shape: a replayed assistant turn carrying
+    // two calls must be the OpenAI function-call shape, the exact inverse
+    // of `parse_openai_tool_calls`. Arguments are asserted by re-decoding
+    // the wire string, never by raw string equality, so a future
+    // `preserve_order` feature cannot make this brittle.
+    let records = vec![
+        user("reproduce the bug"),
+        assistant_calls(
+            "checking",
+            vec![
+                ToolCallRecord {
+                    id: "call_a".to_owned(),
+                    name: "read_file".to_owned(),
+                    arguments: json!({ "path": "notes.txt", "limit": 3 }),
+                },
+                ToolCallRecord {
+                    id: "call_b".to_owned(),
+                    name: "search".to_owned(),
+                    arguments: json!({ "query": "tool_calls", "recursive": true }),
+                },
+            ],
+        ),
+        tool("call_a", "notes"),
+        tool("call_b", "found"),
+        assistant("done"),
+    ];
+    let wire = wire(&records);
+    let calls = wire[1]["tool_calls"]
+        .as_array()
+        .expect("the assistant turn holds a tool_calls array");
+    assert_eq!(calls.len(), 2, "both calls replay in one turn");
+    let expected = [
+        (
+            "call_a",
+            "read_file",
+            json!({ "path": "notes.txt", "limit": 3 }),
+        ),
+        (
+            "call_b",
+            "search",
+            json!({ "query": "tool_calls", "recursive": true }),
+        ),
+    ];
+    for (call, (id, name, arguments)) in calls.iter().zip(expected) {
+        assert_eq!(call["id"], id, "the call id replays unchanged");
+        assert_eq!(
+            call["type"], "function",
+            "the OpenAI discriminator is required: {call}"
+        );
+        assert_eq!(
+            call["function"]["name"], name,
+            "the name moves under function"
+        );
+        let encoded = call["function"]["arguments"]
+            .as_str()
+            .expect("arguments is a JSON-encoded string on the wire");
+        let decoded: serde_json::Value =
+            serde_json::from_str(encoded).expect("the encoded arguments re-decode as JSON");
+        assert_eq!(
+            decoded, arguments,
+            "re-decoding must recover the original object, not merely match a string"
+        );
+    }
 }
 
 #[test]
@@ -272,7 +339,7 @@ fn a_text_fragment_merges_into_a_following_tool_call_turn() {
         json!([
             { "role": "user", "content": "hi" },
             { "role": "assistant", "content": "let me check", "tool_calls": [
-                { "id": "call_1", "name": "echo", "arguments": {} },
+                { "id": "call_1", "type": "function", "function": { "name": "echo", "arguments": "{}" } },
             ] },
             { "role": "tool", "content": "echoed", "tool_call_id": "call_1" },
             { "role": "assistant", "content": "done" },

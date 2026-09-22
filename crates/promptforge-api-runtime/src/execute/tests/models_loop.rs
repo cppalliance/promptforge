@@ -196,6 +196,57 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn replayed_tool_calls_reach_the_mock_gateway_in_the_openai_shape() {
+    // The bug report's failing sequence: one round requests a tool, the
+    // follow-up round replays the assistant call plus its result. The mock
+    // gateway validates every inbound body against the OpenAI schema (see
+    // `assert_openai_tool_calls`), so completing the loop at all proves the
+    // replay passes a strict endpoint; the assertions below pin the exact
+    // shape on the replayed request.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "echo", "{\"value\":\"one\"}"),
+        resp_text("done"),
+    ])
+    .await;
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user('echo once')\n\
+         models.loop(msgs)\n\
+         return msgs[#msgs].content",
+    );
+    let prompt = parse(&md);
+    let ctx = loop_context(&prompt, echo_tools());
+    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the replayed tool-call turn must be accepted");
+    assert_eq!(out, "done");
+    let bodies = gateway.requests();
+    assert_eq!(bodies.len(), 2, "one tool round plus the terminal round");
+    let assistant = bodies[1]["messages"]
+        .as_array()
+        .expect("a request body must include a messages array")
+        .iter()
+        .find(|message| message["role"] == "assistant" && message.get("tool_calls").is_some())
+        .expect("the replayed request carries the assistant tool-call turn");
+    let call = &assistant["tool_calls"][0];
+    assert_eq!(call["id"], "call_1", "the call id replays unchanged");
+    assert_eq!(call["type"], "function", "the OpenAI discriminator: {call}");
+    assert_eq!(
+        call["function"]["name"], "echo",
+        "the name sits under function"
+    );
+    let arguments = call["function"]["arguments"]
+        .as_str()
+        .expect("arguments is a JSON-encoded string on the wire");
+    assert_eq!(
+        serde_json::from_str::<Value>(arguments).expect("the arguments re-decode"),
+        json!({ "value": "one" }),
+        "the arguments string decodes back to the original object"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn models_loop_dispatches_local_and_bound_tools() {
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_1", "grab", "{\"value\":\"x\"}"),

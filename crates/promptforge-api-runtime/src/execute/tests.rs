@@ -956,6 +956,83 @@ fn sse_response(body: &Value) -> axum::response::Response {
         .into_response()
 }
 
+/// Validates every replayed `messages[].tool_calls[]` entry against the
+/// OpenAI function-call schema, mirroring `parse_openai_tool_calls` (the
+/// engine's own inbound parser, `pub(crate)` to `model-client` and so
+/// unreachable from here).
+///
+/// The mock gateway owes the suites a strict endpoint: without this check a
+/// neutral-shape replay would pass the mock and fail a real OpenAI or vLLM
+/// endpoint, which is exactly the regression this pins. A violation is a
+/// diagnostic naming the offending path, never a silent pass.
+fn assert_openai_tool_calls(body: &Value) -> std::result::Result<(), String> {
+    let messages = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "request body had no messages array".to_owned())?;
+    for (message_index, message) in messages.iter().enumerate() {
+        let Some(calls) = message.get("tool_calls").filter(|calls| !calls.is_null()) else {
+            continue;
+        };
+        let calls = calls.as_array().ok_or_else(|| {
+            format!("messages[{message_index}].tool_calls was present but not an array")
+        })?;
+        for (call_index, call) in calls.iter().enumerate() {
+            let path = format!("messages[{message_index}].tool_calls[{call_index}]");
+            if !call.is_object() {
+                return Err(format!("{path} was not an object"));
+            }
+            match call.get("type") {
+                Some(Value::String(kind)) if kind == "function" => {}
+                _ => {
+                    return Err(format!("{path}.type must be the string \"function\""));
+                }
+            }
+            let id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{path} had no string id"))?;
+            if id.trim().is_empty() {
+                return Err(format!("{path}.id was blank"));
+            }
+            let function = call
+                .get("function")
+                .ok_or_else(|| format!("{path} had no function"))?;
+            if !function.is_object() {
+                return Err(format!("{path}.function was not an object"));
+            }
+            let name = function
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("{path}.function had no string name"))?;
+            if name.trim().is_empty() {
+                return Err(format!("{path}.function.name was blank"));
+            }
+            match function.get("arguments") {
+                Some(Value::String(raw)) => {
+                    let decoded = serde_json::from_str::<Value>(raw).map_err(|error| {
+                        format!("{path}.function.arguments was not valid JSON: {error}")
+                    })?;
+                    if !decoded.is_object() {
+                        return Err(format!(
+                            "{path}.function.arguments did not decode to a JSON object"
+                        ));
+                    }
+                }
+                None | Some(Value::Null) => {
+                    return Err(format!("{path}.function.arguments was missing"));
+                }
+                Some(_) => {
+                    return Err(format!(
+                        "{path}.function.arguments was not a JSON-encoded string"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 impl ScriptedGateway {
     /// Starts a gateway serving `responses` in order (repeating the last).
     async fn start(responses: Vec<GatewayReply>) -> ScriptedGateway {
@@ -969,7 +1046,12 @@ impl ScriptedGateway {
                 .requests
                 .lock()
                 .expect("scripted gateway request log must not be poisoned")
-                .push(body);
+                .push(body.clone());
+            // A real OpenAI-protocol endpoint rejects a neutral-shape
+            // replay with 400; the mock owes the suites the same gate.
+            if let Err(diagnostic) = assert_openai_tool_calls(&body) {
+                return (StatusCode::BAD_REQUEST, diagnostic).into_response();
+            }
             let index = n.min(state.responses.len() - 1);
             match &state.responses[index] {
                 GatewayReply::Json(value) => sse_response(value),

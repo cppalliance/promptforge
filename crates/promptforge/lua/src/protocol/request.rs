@@ -354,7 +354,8 @@ pub enum MessageContent {
 
 /// One normalized tool call an assistant message holds: the
 /// provider-neutral `{id, name, arguments}` record every later component
-/// consumes.
+/// consumes. The record stays neutral; the projection's `wire_message`
+/// renders it as the OpenAI function-call wire shape at dispatch time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallRecord {
     /// The call identifier tool results correlate against.
