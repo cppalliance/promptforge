@@ -90,6 +90,8 @@ where
     // library's `_G` metatable keeps working), then shadow the index pair
     // with the prose guard.
     if let Some(old) = &old {
+        // `pairs` order is unspecified; each iteration only assigns one
+        // non-shadowed metatable field, so the copy's content is fixed.
         for pair in old.clone().pairs::<Value, Value>() {
             let (key, value) = pair.map_err(Error::lua)?;
             let shadowed =

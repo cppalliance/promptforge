@@ -125,13 +125,37 @@ fn add_local_params_schema_builds_object_schema_with_required_fields() {
             "limit": { "type": "integer", "description": "maximum hits" },
         })
     );
-    // Lua hash-part iteration order is unspecified, so the required list is
-    // compared as a set.
-    let mut required: Vec<String> =
-        serde_json::from_value(schema["required"].clone()).expect("the required list is strings");
-    required.sort();
-    assert_eq!(required, vec!["limit", "query"]);
+    assert_eq!(
+        schema["required"],
+        json!(["limit", "query"]),
+        "required is emitted in sorted order, not Lua hash order"
+    );
     assert_eq!(schema["type"], "object");
+}
+
+#[test]
+fn add_local_params_schema_sorts_required_so_the_schema_text_is_deterministic() {
+    // `required` is the one Rust-side `table.pairs` walk whose output is an
+    // ordered array rather than a table or map, so it must impose an order
+    // itself: left as the walk produced it, two VMs emit different schema
+    // text for the same params, and a stored tool definition stops being
+    // replayable.
+    let lua = Lua::new();
+    let params = lua
+        .load(
+            "{ zulu = 'string', alpha = 'string', mike = 'string', bravo = 'string', \
+               yankee = 'string', charlie = 'string', oscar = 'string', delta = 'string' }",
+        )
+        .eval::<mlua::Table>()
+        .expect("params table evaluates");
+    let schema = add_local_params_schema(&params).expect("the schema builds");
+    assert_eq!(
+        schema["required"],
+        json!([
+            "alpha", "bravo", "charlie", "delta", "mike", "oscar", "yankee", "zulu"
+        ]),
+        "required must be sorted, not left in Lua hash order"
+    );
 }
 
 #[test]

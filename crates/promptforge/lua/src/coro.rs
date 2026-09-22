@@ -454,6 +454,8 @@ pub fn install_store_shims(lua: &Lua) -> Result<()> {
         .named_registry_value(STORE_REGISTRY)
         .map_err(Error::lua)?;
     let store: Table = lua.globals().raw_get("store").map_err(Error::lua)?;
+    // `pairs` order is unspecified; every iteration only assigns one named
+    // function into `store`, so the resulting table does not depend on it.
     for pair in shims.pairs::<String, Function>() {
         let (name, function) = pair.map_err(Error::lua)?;
         store.raw_set(name, function).map_err(Error::lua)?;

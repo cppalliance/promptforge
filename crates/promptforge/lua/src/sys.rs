@@ -107,6 +107,8 @@ fn materialize_guarded_value(
         _ => table,
     };
     let plain = lua.create_table()?;
+    // `pairs` order is unspecified; each iteration only assigns one entry
+    // into the fresh table, so the copy's content is fixed.
     for pair in source.pairs::<Value, Value>() {
         let (key, value) = pair?;
         plain.raw_set(key, materialize_guarded_value(lua, value, guarded_data)?)?;

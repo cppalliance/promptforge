@@ -211,7 +211,7 @@ Add a unit test in `crates/promptforge-api-types/src/metrics.rs` proving a non-f
 
 <step-8>
 
-### Step 8: Audit ordered pair walks
+### Step 8: Audit ordered pair walks [completed]
 
 - Component: hardening audit
 

@@ -391,6 +391,8 @@ pub(crate) fn raised_from(lua: &Lua, value: &Value) -> mlua::Result<Option<Raise
         Value::String(message) => message.to_str()?.to_owned(),
         _ => kind.tag().to_owned(),
     };
+    // `pairs` order is unspecified, but `fields` is a `BTreeMap`, so the
+    // raised value's field order never depends on it.
     let mut fields = BTreeMap::new();
     for pair in table.pairs::<String, Value>() {
         let (name, value) = pair?;

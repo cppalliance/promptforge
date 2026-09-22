@@ -109,6 +109,14 @@ pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<V
 /// Builds the JSON Schema `parameters` object from a `tools.add_local` params
 /// table. Each value is a bare type string or a `{type, description}` array;
 /// every declared parameter is required.
+///
+/// The `required` list is the only Rust-side `table.pairs` walk in this crate
+/// that builds an ordered array without sorting it, so it sorts its names
+/// itself. The other ordered walks, `ordered_keys` in `iteration.rs` and
+/// `collection_members` in `collection.rs`, already sort their output. The
+/// walk's order is unspecified, so a schema left in it would read differently
+/// in two VMs; `properties` needs no sort because it is a `serde_json::Map`,
+/// a `BTreeMap` with no `preserve_order` in the graph.
 pub(crate) fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
@@ -134,8 +142,11 @@ pub(crate) fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json
             property["description"] = Json::String(description);
         }
         properties.insert(name.clone(), property);
-        required.push(Json::String(name));
+        required.push(name);
     }
+    // Bytewise sort, matching the shared `SortKey::Text` order, so the
+    // generated schema is the same text in every process.
+    required.sort();
     Ok(json!({
         "type": "object",
         "properties": properties,
