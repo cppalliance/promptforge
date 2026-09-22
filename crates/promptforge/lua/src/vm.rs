@@ -7,8 +7,8 @@ use super::{
     LuaToolHandle, ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue,
     Mutex, Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
     ToolRuntime, ToolSet, Value, block_guard, guarded_var, harden, install_compactors,
-    install_instruction_budget, install_log, install_messages, install_models,
-    install_shim_prelude, install_store_table,
+    install_deterministic_iteration, install_instruction_budget, install_log, install_messages,
+    install_models, install_shim_prelude, install_store_table,
     install_tool_call_counts as install_tool_call_counts_impl, install_tools, install_untrusted,
     lifecycle, log_byte_budget, resolve_section_target, scalar_return, seal_sys, take_failure,
     var_to_json,
@@ -212,8 +212,9 @@ impl LocalTools {
 impl SectionVm {
     /// Creates a hardened section VM.
     ///
-    /// Construction installs only the sandbox, the default resource ceilings,
-    /// the instruction hook, and `untrusted` (wrapping under the run's
+    /// Construction installs only the sandbox, the deterministic
+    /// `pairs`/`next` walk, the default resource ceilings, the instruction
+    /// hook, and `untrusted` (wrapping under the run's
     /// `nonce`). Everything else - the run's
     /// limits, the host values, the persistent host APIs, the control
     /// globals, the shared-library replay, and the captured alias globals -
@@ -273,6 +274,9 @@ impl SectionVm {
             raw_model_ids: false,
         };
         if let Err(error) = harden(&vm.lua) {
+            return vm.construction_failed(error, emitter, section);
+        }
+        if let Err(error) = install_deterministic_iteration(&vm.lua) {
             return vm.construction_failed(error, emitter, section);
         }
         if let Err(error) = install_untrusted(&vm.lua, nonce) {

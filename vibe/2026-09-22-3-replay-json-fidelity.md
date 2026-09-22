@@ -191,7 +191,7 @@ Add `install_deterministic_iteration` replacing `pairs`/`next` with sorted itera
 
 <step-6>
 
-### Step 6: Activate deterministic iteration in the section VM
+### Step 6: Activate deterministic iteration in the section VM [completed]
 
 - Component: deterministic Lua iteration
 

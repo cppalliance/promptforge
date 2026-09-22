@@ -1056,6 +1056,34 @@ fn section_vm_is_send() {
 }
 
 #[test]
+fn two_fresh_section_vms_yield_the_same_key_order() {
+    // A section VM inherits Lua's per-state hash traversal, so two fresh VMs
+    // can walk one table differently and neither walk is the shared order.
+    // The deterministic installer in `SectionVm::new` pins both to the same
+    // sorted sequence, so the two walks and the expected order all agree.
+    let source = "local out = {} \
+                  for k in pairs({zeta=1, alpha=2, mid=3, beta=4, omega=5}) \
+                  do out[#out+1] = k end \
+                  return out";
+    let order = |section: &str| -> Vec<String> {
+        let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), section)
+            .expect("section VM construction cannot fail");
+        vm.inject_host("", &json!({}), &fresh_access())
+            .expect("host values must inject");
+        let keys: Vec<String> = vm
+            .lua()
+            .load(source)
+            .eval()
+            .expect("pairs collects the string keys");
+        vm.teardown(&null_emitter(), section);
+        keys
+    };
+    let expected = vec!["alpha", "beta", "mid", "omega", "zeta"];
+    assert_eq!(order("First"), expected);
+    assert_eq!(order("Second"), expected);
+}
+
+#[test]
 fn section_vm_preserves_one_environment_across_all_phases() {
     // The shared library replays as the section's first chunk with the full
     // host environment installed, so its top level reads `args` and `store`
