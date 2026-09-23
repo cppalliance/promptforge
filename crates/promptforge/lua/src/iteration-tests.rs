@@ -128,6 +128,63 @@ fn next_resumes_after_a_cleared_boolean_key_without_replaying_the_array_part() {
 }
 
 #[test]
+fn next_visits_a_live_boolean_key_after_array_elements_are_cleared() {
+    // D-1. `next` resumed using the live `#t` as the array border: clearing an
+    // array element shrinks that border, so a cleared integer key reclassified
+    // as a scalar number and the resume stopped before the boolean hash key.
+    // An integer key must stay in the array segment regardless of the mutable
+    // length hint, so the walk still reaches the live `false`.
+    let lua = vm();
+    let source = "local t = {10, 20, [false] = 'f'} \
+                  local out = {} \
+                  for k in next, t do \
+                    out[#out+1] = tostring(k) \
+                    t[k] = nil \
+                  end \
+                  return out";
+    assert_eq!(
+        sequence(&lua, source),
+        vec![json!("1"), json!("2"), json!("false")]
+    );
+    let source = "local t = {10, [false] = 'f'} \
+                  local out = {} \
+                  for k in next, t do \
+                    out[#out+1] = tostring(k) \
+                    t[k] = nil \
+                  end \
+                  return out";
+    assert_eq!(sequence(&lua, source), vec![json!("1"), json!("false")]);
+}
+
+#[test]
+fn next_replays_the_scalar_segment_when_a_non_array_integer_key_is_cleared() {
+    // The documented stateless limit: an absent integer key cannot be told
+    // from a cleared array key, so clearing the non-array hash key `t[7]` (no
+    // array part) resumes it as `Array(7)`. The only keys that sort after that
+    // are the scalar hash keys, so the resume returns to `false` and `3` and
+    // replays them before reaching the end. No key is lost, and `pairs` is
+    // unaffected because it advances a captured snapshot.
+    let lua = vm();
+    let source = "local t = { [false]='b', [3]='c', [7]='y' } \
+                  local out = {} \
+                  for k in next, t do \
+                    out[#out+1] = tostring(k) \
+                    if k == 7 then t[7] = nil end \
+                  end \
+                  return out";
+    assert_eq!(
+        sequence(&lua, source),
+        vec![
+            json!("false"),
+            json!("3"),
+            json!("7"),
+            json!("false"),
+            json!("3")
+        ]
+    );
+}
+
+#[test]
 fn next_resumes_after_a_cleared_non_scalar_key() {
     // A cleared non-scalar key has no computed sort position, so `next` falls
     // back to the trailing segment without ending the walk. Clearing one

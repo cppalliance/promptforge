@@ -13,9 +13,19 @@
 //! that would need it to be sortable. `next` stays stateless and rebuilds the
 //! ordered key sequence from the live table on each call; for a key still
 //! present it advances strictly, and for a cleared scalar key it resumes at
-//! the first key after the cleared key's sort position. A cleared non-scalar
-//! key has no cross-process position, so `next` falls back to the trailing
-//! segment such keys occupy, the best a stateless resume can do. Rebuilding
+//! the first key after the cleared key's sort position. A cleared integer key
+//! resumes as if it were in the array part, so its position no longer depends
+//! on the mutable length hint `#t`. That resume is the stateless limit: an
+//! absent integer key cannot be told from a cleared array key, so a cleared
+//! non-array integer hash key (for example `t[7]` when there is no array part)
+//! also resumes as if it were in the array part, and the walk then replays the
+//! scalar keys that sort after the array segment - booleans and smaller
+//! numbers may be visited more than once. No key is lost, and `pairs` is
+//! unaffected because it advances a captured snapshot rather than re-deriving
+//! order from the live table. A cleared non-scalar key has no cross-process
+//! position, so `next` falls back to the trailing segment such keys occupy,
+//! the best a stateless resume can do.
+//! Rebuilding
 //! costs `O(n log n)` per step; section tables are small and the determinism
 //! is the point. The ordering covers string, number, and boolean keys, the
 //! only keys a payload the run log stores can carry. A non-scalar key (table,
@@ -94,7 +104,7 @@ fn deterministic_next(
     (table, previous): (Table, Value),
 ) -> mlua::Result<(Value, Value)> {
     let keys = ordered_keys(&table).map_err(mlua::Error::external)?;
-    let Some(index) = next_index(&keys, &previous, table.raw_len()) else {
+    let Some(index) = next_index(&keys, &previous) else {
         return Ok((Value::Nil, Value::Nil));
     };
     let key = keys[index].key.clone();
@@ -209,14 +219,14 @@ fn ordered_keys(table: &Table) -> mlua::Result<Vec<WalkKey>> {
 /// so the cleared key is skipped rather than revisited; a cleared non-scalar
 /// key has no computed position, so the resume falls back to the trailing
 /// segment, the best a stateless resume can offer.
-fn next_index(keys: &[WalkKey], previous: &Value, border: usize) -> Option<usize> {
+fn next_index(keys: &[WalkKey], previous: &Value) -> Option<usize> {
     if matches!(previous, Value::Nil) {
         return (!keys.is_empty()).then_some(0);
     }
     if let Some(position) = keys.iter().position(|entry| &entry.key == previous) {
         return (position + 1 < keys.len()).then_some(position + 1);
     }
-    let order = previous_order(previous, border);
+    let order = previous_order(previous);
     if matches!(order, WalkOrder::Unordered) {
         return keys
             .iter()
@@ -227,11 +237,19 @@ fn next_index(keys: &[WalkKey], previous: &Value, border: usize) -> Option<usize
 }
 
 /// The walk position a lone key would occupy, ignoring whether it is still in
-/// the table: an integer inside the array border is an array key, a scalar
-/// hash key keeps its [`SortKey`], and anything else is non-scalar.
-fn previous_order(previous: &Value, border: usize) -> WalkOrder {
+/// the table: any integer `index >= 1` is an array key, a scalar hash key keeps
+/// its [`SortKey`], and anything else is non-scalar. The integer case does not
+/// consult the live border, so a cleared integer key resumes as an array key
+/// and its position does not shift with the mutable length hint. Because an
+/// absent integer key cannot be distinguished from a cleared array key, a
+/// cleared non-array integer hash key (for example `t[7]` with no array part)
+/// likewise resumes as if it were in the array part; the returned
+/// `Array(index)` then replays the scalar keys that sort after the array
+/// segment (booleans and smaller numbers may be visited more than once). No
+/// key is lost, and `pairs`, which advances a captured snapshot, is unaffected.
+fn previous_order(previous: &Value) -> WalkOrder {
     if let Value::Integer(index) = previous
-        && usize::try_from(*index).is_ok_and(|index| (1..=border).contains(&index))
+        && *index >= 1
     {
         return WalkOrder::Array(*index);
     }
