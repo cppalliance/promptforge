@@ -219,6 +219,13 @@ This is a behavior-neutral refactor, so the existing suites are the main check, 
 - Component boundaries: one-way dependency flow `shell -> features -> services -> vocabulary`. Families: executor/`promptforge-*` (public surface `promptforge-api-runtime` + `promptforge-api-types`), `gateway-*` (public pair `gateway-api-types` + `gateway-api-discovery`), `harness-*` (public `harness-api`), `workshop-*` (the Tauri shell `workshop` depends on `workshop-server-api`, never `workshop-server`), and `shared-*` substrate (no product dependencies). Family containers are private: outside crates may name only the listed public crate, and `cargo test -p build-xtask` enforces the topology, the mandatory `## Invariants` marker, and the 500-line ceiling; the marker check reads `src/lib.rs` or `src/main.rs`, so the ceiling binds the crates that carry the marker and the `workshop-*`/`harness-*` families, not every crate.
 - Conventions summary: Rust workspace, edition 2024, resolver 3, BSL-1.0, version 0.3.0, built on stable. Workspace lints forbid unsafe code, deny clippy `all` + `pedantic` and `unwrap_used`/`expect_used`, deny rustdoc `broken_intra_doc_links`/`private_intra_doc_links`, and warn `missing_docs`/`unreachable_pub`. Dependencies are centralised in `[workspace.dependencies]` with deliberate exact pins (for example turso `=0.7.2`). Source directories are flat by default: a subdirectory needs three files, or the group flattens to `foo-bar.rs` kebab siblings wired with `#[path = "..."]`. Behavior changes ship with tests in the same change; error and status messages are written for model consumption; run-log JSON must round-trip exactly. Lua is the embedded scripting language inside Markdown prompt documents, and the workshop UI is TypeScript and CSS colocated per feature using `--ws-*` tokens with no `localStorage`. Formatting lives in `rustfmt.toml`, lint tuning in `clippy.toml`, and supply-chain policy in `deny.toml`.
 - Baseline test count: 3827 (cargo nextest list --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features, 2026-09-22)
+- Acceptance test count: 3827 (cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features, 2026-09-23; equal to baseline, not lower)
+- Gate - workspace clippy (`cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`): pass
+- Gate - nextest full partition: pass on rerun (3827 passed, 36 skipped); the first attempt flaked on `gateway-logging queue::tests::a_protected_producer_times_out_into_preallocated_loss_accounting` (timing assertion, elapsed 26.3ms < 30ms budget), which is outside this plan's crate graph and did not reproduce
+- Gate - doctests (`cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`): pass
+- Gate - cargo doc (`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`): pass
+- Gate - `cargo fmt --all --check`: pass
+- Gate - `cargo test -p build-xtask`: pass (111 passed)
 
 </project-survey>
 <execution-plan>
@@ -365,7 +372,7 @@ Each step is one commit holding its code and its tests.
 
 <step-13>
 
-### Step 13: Run the full gates
+### Step 13: Run the full gates [completed]
 
 - Component: `verification`
 - Artifacts: this plan's Project Survey - append `- Acceptance test count: <N> (<command>, <date>)` and one line per gate result. Run every exit criterion in Testing Plan - the workspace clippy command, the nextest run followed by the doctest run, `cargo doc` with `RUSTDOCFLAGS="-D warnings"`, `cargo fmt --all --check`, and `cargo test -p build-xtask` - and confirm the workspace test count from `cargo nextest list --all-features` is not lower than Step 1's recorded baseline; when it is lower, restore the missing coverage and rerun before recording.
