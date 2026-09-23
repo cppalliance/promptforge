@@ -46,8 +46,8 @@ async fn task_status_reports_a_parked_task_with_its_section_wait_tasks_and_note(
               ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the owner's end abandons the parked task and its leaf");
@@ -78,8 +78,8 @@ async fn task_status_reports_a_failed_task_as_done_failed() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a failed model task never fails its owner");
@@ -124,8 +124,8 @@ async fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("every refusal is content, not a raise");

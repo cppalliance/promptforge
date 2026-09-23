@@ -77,7 +77,7 @@ fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResul
 #[test]
 fn cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_ends() {
     let prompt = parse(PARKED_CHILD);
-    let ctx = scheduler_context_on(
+    let (ctx, _host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),

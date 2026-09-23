@@ -272,21 +272,22 @@ impl TestStore {
     }
 }
 
-/// Builds a [`RunContext`] from the test-local [`RunOptions`], for the tests
-/// that call [`Environment::run`] directly. The context sets the test
-/// model as the current selection, so prepare's trivial fill binds every
-/// declared role to it.
-fn to_context(opts: RunOptions) -> RunContext {
-    let mut ctx = test_context(opts.execution)
-        .observer(opts.observer)
-        .model(test_model_catalog().models()[0].clone());
+/// Builds a [`RunContext`] and its [`RunHost`] from the test-local
+/// [`RunOptions`], for the tests that call [`Environment::run`] directly.
+/// The context sets the test model as the current selection, so prepare's
+/// trivial fill binds every declared role to it; the observer, client, and
+/// capture go on the host the driver performs and reports through.
+fn to_context(opts: RunOptions) -> (RunContext, RunHost) {
+    let mut ctx = test_context(opts.execution).model(test_model_catalog().models()[0].clone());
+    let mut host = RunHost::new().observer(opts.observer);
     if let Some(client) = opts.client {
-        ctx = ctx.client(client);
+        host = host.client(client);
     }
     if let Some(debug) = opts.debug {
-        ctx = ctx.debug(debug);
+        ctx = ctx.report_debug(promptforge_api_types::emitter::DebugMode::On);
+        host = host.debug(debug);
     }
-    ctx
+    (ctx, host)
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -425,12 +426,13 @@ impl FixtureTools {
         &self.set
     }
 
-    /// Installs the set on the run state and the table on its test host.
-    fn install(&self, ctx: &RunState) {
+    /// Installs the set on the run state and returns `host` carrying the
+    /// implementations the driver's tool performer resolves.
+    fn install(&self, ctx: &RunState, host: RunHost) -> RunHost {
         *ctx.tool_set()
             .lock()
             .expect("the tool set mutex is not poisoned") = self.set.clone();
-        ctx.set_test_host(ctx.test_host().tools(self.table.clone()));
+        host.tools(self.table.clone())
     }
 }
 
@@ -444,25 +446,30 @@ impl From<crate::lua::ToolSet> for FixtureTools {
 }
 
 /// Arms the run state's shared tool set with `bindings` (every alias
-/// prompt-wide through `always`) and its test host with the
+/// prompt-wide through `always`) and returns `host` carrying the
 /// implementations, so `TokioDriver::new` performs the calls.
-fn arm_tools(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>) {
+fn arm_tools(
+    ctx: &RunState,
+    host: RunHost,
+    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
+) -> RunHost {
     let always = bindings
         .iter()
         .map(|(binding, _)| binding.alias().to_owned())
         .collect();
-    arm_tools_scoped(ctx, bindings, always);
+    arm_tools_scoped(ctx, host, bindings, always)
 }
 
 /// Arms the run state's shared tool set with `bindings` and exactly
-/// `always` as the prompt-wide scope, and its test host with the
+/// `always` as the prompt-wide scope, returning `host` carrying the
 /// implementations.
 fn arm_tools_scoped(
     ctx: &RunState,
+    host: RunHost,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
     always: Vec<String>,
-) {
-    FixtureTools::new(bindings, always).install(ctx);
+) -> RunHost {
+    FixtureTools::new(bindings, always).install(ctx, host)
 }
 
 /// The test's tools as the two halves a host assembles from its
@@ -481,29 +488,33 @@ fn fixture_tools(
 }
 
 /// The test-support driver ([`crate::test_support::run_with_host`]) with the
-/// host the test set on its context through the context's test-only seams
-/// (observer, client, broker, capture).
-async fn env_run(env: &Environment, prompt: &Prompt, args: &str, ctx: RunContext) -> RunResult {
-    let host = ctx.test_host.clone();
+/// context and host [`to_context`] assembled (observer, client, capture).
+async fn env_run(
+    env: &Environment,
+    prompt: &Prompt,
+    args: &str,
+    prepared: (RunContext, RunHost),
+) -> RunResult {
+    let (ctx, host) = prepared;
     crate::test_support::run_with_host(env, prompt, args, ctx, host).await
 }
 
 /// Runs a fixture offline through the test-support driver
 /// ([`crate::test_support::run_with_host`]) with a caller-customized
-/// [`RunContext`], returning the typed [`RunError`]
+/// [`RunContext`] and [`RunHost`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
 async fn run_with_context(
     test: &TestPrompt,
-    configure: impl FnOnce(RunContext) -> RunContext,
+    configure: impl FnOnce(RunContext, RunHost) -> (RunContext, RunHost),
 ) -> std::result::Result<String, RunError> {
     let env = Environment::new();
-    let mut ctx = configure(test_context(EXECUTION)).vfs(TestStore::new().vfs());
+    let (mut ctx, host) = configure(test_context(EXECUTION), RunHost::new());
+    ctx = ctx.vfs(TestStore::new().vfs());
     if ctx.model.is_none()
         && let Some(model) = test.models.models().first()
     {
         ctx = ctx.model(model.clone());
     }
-    let host = ctx.test_host.clone();
     match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
@@ -1427,7 +1438,7 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 ## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
     let handle = CancelHandle::new();
     handle.cancel();
-    let error = run_with_context(&fixture(md), |ctx| ctx.cancel(handle))
+    let error = run_with_context(&fixture(md), |ctx, host| (ctx.cancel(handle), host))
         .await
         .expect_err("a pre-cancelled handle must fail the run");
     assert!(

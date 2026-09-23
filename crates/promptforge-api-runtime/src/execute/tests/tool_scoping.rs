@@ -67,8 +67,8 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     assert_eq!(schemas[0].description, "Concrete description.");
 
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let ctx = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, tools);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the always-scoped alias dispatches");
@@ -144,8 +144,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     // tool behind it.
     let md = loop_prompt(&format!("tools.add('section_tool')\n{LOOP_TO_TEXT}"));
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, tools);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the section-scoped alias dispatches");

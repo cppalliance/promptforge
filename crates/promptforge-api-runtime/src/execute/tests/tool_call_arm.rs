@@ -65,21 +65,22 @@ fn tool_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
-) -> RunState {
-    let base = test_context(EXECUTION).observer(observer);
+) -> (RunState, RunHost) {
     let mut ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &base,
+        &test_context(EXECUTION),
     );
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    tools.into().install(&ctx);
+    let host = tools
+        .into()
+        .install(&ctx, RunHost::new().observer(observer));
     ctx.expose_raw_shims_for_test();
-    ctx
+    (ctx, host)
 }
 
 /// The tool set with the always-failing fixture bound as `fail` and in
@@ -115,12 +116,12 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let ctx = tool_context(
+    let (ctx, host) = tool_context(
         &prompt,
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a model-issued call never raises for the tool's own failure");
@@ -156,12 +157,12 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let ctx = tool_context(
+    let (ctx, host) = tool_context(
         &prompt,
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -194,12 +195,12 @@ async fn a_bound_alias_with_no_implementation_in_the_host_table_resumes_as_a_too
     let prompt = parse(&md);
     let (binding, _unregistered) = fixture_binding("echo", "echo capability", Arc::new(EchoTool));
     let recorder = Arc::new(ToolRecorder::default());
-    let ctx = tool_context(
+    let (ctx, host) = tool_context(
         &prompt,
         ToolSet::for_test(vec![binding], vec!["echo".to_owned()]),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the missing implementation is pcall-able");
@@ -227,12 +228,12 @@ async fn a_local_lua_tool_call_issues_no_leaf_work() {
     ));
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let ctx = tool_context(
+    let (ctx, host) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await
@@ -269,12 +270,12 @@ async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
     ));
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let ctx = tool_context(
+    let (ctx, host) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await
@@ -310,12 +311,12 @@ async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let ctx = tool_context(
+    let (ctx, host) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("each refusal is pcall-able");

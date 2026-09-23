@@ -305,7 +305,7 @@ Each step is one commit holding its code and its tests.
 
 <step-7>
 
-### Step 7: Remove the test-only host from the context structs
+### Step 7: Remove the test-only host from the context structs [completed]
 
 - Component: `internals`
 - Artifacts: drop `RunContext.test_host` and the `#[cfg(test)] impl RunContext` builders `observer`, `debug`, `client`, `input_broker`, and `on_delta` (`src/execute/config.rs` lines 121, 155, 351-397) with the `Debug` arm (lines 402-403); drop `RunState.test_host`, `test_host()`, and `set_test_host()` (`src/execute/context.rs` lines 77, 167, 186-203); change `TokioDriver` to `TokioDriver::new(state, host, client)` (`src/test_support/tokio_driver.rs` line 162) taking a `RunHost` assembled from `src/test_support/host.rs`; migrate the fixtures in `src/execute/tests.rs` (lines 433 and 287), `src/execute/run-tests.rs` (lines 270, 316, 344), `src/execute/tests/effects.rs` (lines 71-80, 175-185), `src/execute/tests/input.rs` (lines 164-166, 198-199, 254-256, 270-280, 290-300, 306-316, 333-343), and `src/execute/tests/model_tasks.rs` (lines 63-65); move `RunContext::debug`'s `report_debug = DebugMode::On` side effect to where debug capture is installed; keep the `tap` and `raw_shims` seams.

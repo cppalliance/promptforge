@@ -41,10 +41,13 @@ pub(super) fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// The run context for a model-task test: the parsed prompt, the shared
-/// model set pre-filled, no bound tools, the recorder as observer, and the
-/// never-answering broker so a parked child stays parked.
-pub(super) fn model_task_context(prompt: &Prompt, recorder: &Arc<TaskRecorder>) -> RunState {
+/// The run context and host for a model-task test: the parsed prompt, the
+/// shared model set pre-filled, no bound tools, the recorder as observer,
+/// and the never-answering broker so a parked child stays parked.
+pub(super) fn model_task_context(
+    prompt: &Prompt,
+    recorder: &Arc<TaskRecorder>,
+) -> (RunState, RunHost) {
     model_task_context_with(
         prompt,
         Arc::clone(recorder) as Arc<dyn Observer>,
@@ -59,16 +62,14 @@ pub(super) fn model_task_context_with(
     prompt: &Prompt,
     observer: Arc<dyn Observer>,
     broker: Arc<dyn TestBroker>,
-) -> RunState {
-    let config = test_context(EXECUTION)
-        .observer(observer)
-        .input_broker(broker);
+) -> (RunState, RunHost) {
+    let host = RunHost::new().observer(observer).input_broker(broker);
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &config,
+        &test_context(EXECUTION),
     );
     *ctx.model_set()
         .lock()
@@ -76,7 +77,7 @@ pub(super) fn model_task_context_with(
     *ctx.tool_set()
         .lock()
         .expect("the tool set mutex is not poisoned") = ToolSet::default();
-    ctx
+    (ctx, host)
 }
 
 /// A two-section prompt: `Only` runs the model loop under `frontmatter`
@@ -126,8 +127,8 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the model starts and inspects its task");
@@ -181,8 +182,8 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the refusal is the call's content, not a raise");
@@ -221,8 +222,8 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -277,8 +278,8 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -351,8 +352,8 @@ async fn an_exhausted_tool_loop_abandons_the_model_task_for_that_reason() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -402,8 +403,8 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -449,8 +450,8 @@ async fn the_model_sees_only_its_own_tasks() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the author's cancel ends its task before the chain ends");
@@ -473,8 +474,8 @@ async fn without_allow_tasks_the_built_ins_are_not_advertised() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = model_task_context(&prompt, &recorder);
-    TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = model_task_context(&prompt, &recorder);
+    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool-free round completes");

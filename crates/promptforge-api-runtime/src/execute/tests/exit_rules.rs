@@ -177,8 +177,9 @@ async fn drive_loop(
     let gateway = ScriptedGateway::start(replies).await;
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let recorder = Arc::new(Recorder::default());
-    let ctx = loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) =
+        loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await;
     (
@@ -336,8 +337,8 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
          return err.kind .. '|' .. tostring(err.finish_reason) .. '|' .. tostring(err)",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");

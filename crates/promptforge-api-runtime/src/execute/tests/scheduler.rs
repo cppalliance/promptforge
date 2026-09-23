@@ -46,31 +46,39 @@ pub(super) fn writer_models() -> ModelSet {
     }
 }
 
-/// Builds the run context for a scheduler test: the parsed prompt, an empty
-/// shared library, and the model set pre-filled.
-fn scheduler_context(prompt: &Prompt) -> RunState {
+/// Builds the run context and its silent host for a scheduler test: the
+/// parsed prompt, an empty shared library, and the model set pre-filled.
+fn scheduler_context(prompt: &Prompt) -> (RunState, RunHost) {
     scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
-/// Builds the run context on the given store and observer, so a walk test
-/// can inspect the store's contents and the observation stream afterward.
+/// Builds the run context and its observing host on the given store and
+/// observer, so a walk test can inspect the store's contents and the
+/// observation stream afterward.
 pub(super) fn scheduler_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,
-) -> RunState {
-    scheduler_context_from(prompt, store, &test_context(EXECUTION).observer(observer))
+) -> (RunState, RunHost) {
+    scheduler_context_from(
+        prompt,
+        store,
+        &test_context(EXECUTION),
+        RunHost::new().observer(observer),
+    )
 }
 
-/// Builds the run context from a finished `RunContext` on the given store:
-/// the parsed prompt, an empty shared library, and the model set pre-filled.
-/// Every scheduler-side context builder routes through here so a test that
-/// needs an observer, limits, or both composes the `RunContext` itself.
+/// Builds the run context from a finished `RunContext` and its `RunHost` on
+/// the given store: the parsed prompt, an empty shared library, and the
+/// model set pre-filled. Every scheduler-side context builder routes through
+/// here so a test that needs an observer, limits, or both composes the
+/// `RunContext` and the `RunHost` itself.
 pub(super) fn scheduler_context_from(
     prompt: &Prompt,
     store: &TestStore,
     run_context: &RunContext,
-) -> RunState {
+    host: RunHost,
+) -> (RunState, RunHost) {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -81,7 +89,7 @@ pub(super) fn scheduler_context_from(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = writer_models();
-    ctx
+    (ctx, host)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -103,8 +111,8 @@ async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() 
         return models.infer('inner ask')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the gate scenario runs end to end on one thread");
@@ -140,8 +148,8 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
         ## Only\n\n\
         ```lua\nreturn models.infer('hang')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let mut driver = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = scheduler_context(&prompt);
+    let mut driver = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -180,8 +188,8 @@ async fn call_depth_cap_reads_the_chain_field() {
         ## Beta\n\n\
         ```lua\nreturn call('## Alpha')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("the depth cap must fail the run");
@@ -205,8 +213,8 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an explicit infer of the prose runs through the scheduler");
@@ -238,8 +246,8 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
         return 'caught: ' .. tostring(err)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the dispatch failure is catchable");
@@ -271,8 +279,8 @@ async fn sections_run_in_fall_through_order() {
         ## Second\n\n\
         ```lua\nstore.append('order.txt', 'Second\\n')\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the walk falls through in document order");
@@ -290,8 +298,8 @@ async fn generic_result_when_nothing_produced() {
         ## Only\n\n\
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the empty walk completes");
@@ -311,8 +319,8 @@ async fn sys_id_increments_per_section() {
         ## Second\n\n\
         ```lua\nreturn tostring(sys.id)\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("each section entry takes the next id");
@@ -348,8 +356,8 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
         return 's2-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the chain must run the addressed off-walk target and fall through");
@@ -375,8 +383,8 @@ async fn var_persists_across_sections_in_fall_through() {
         ## C\n\n\
         ```lua\nreturn var.from_a .. var.from_b\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("var must persist across the walk");
@@ -405,8 +413,8 @@ async fn call_clones_var_in_and_discards_child_writes() {
         return 'sub saw ' .. var.shared\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("call must clone var in and discard child writes");
@@ -443,8 +451,8 @@ async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a call chain must take ids nested under its own chain");
@@ -468,8 +476,8 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         ## Sub\n\n\
         ```lua\nreturn tostring(sys.id)\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("re-entering a section must take a fresh id");
@@ -491,8 +499,8 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
         ## Two\n\n\
         ```lua\nreturn 'two-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the walk completes both sections");
@@ -542,8 +550,8 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
         return 'helped:' .. store.read('seen.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("jump must transfer control");
@@ -562,8 +570,8 @@ async fn section_cannot_jump_to_itself() {
         ## Self\n\n\
         ```lua\njump('## Self')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("self-jump must fail");
@@ -589,8 +597,8 @@ async fn jump_to_off_walk_section_runs_it() {
         ## C\n\n\
         ```lua\nreturn 'c-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump to an off-walk section must run it");
@@ -625,8 +633,8 @@ async fn var_persists_across_a_jump() {
         return var.from_a .. var.from_c\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("var must persist across the jump");
@@ -648,8 +656,8 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
         ## B\n\n\
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the jump completes both sections");
@@ -684,8 +692,8 @@ async fn an_erroring_section_reports_started_but_not_finished() {
         ## Only\n\n\
         ```lua\nerror('expected failure')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = TokioDriver::new(&ctx, None).drive().await;
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let result = TokioDriver::new(&ctx, host, None).drive().await;
 
     assert!(result.is_err());
     let observed = recorder.events();
@@ -725,8 +733,8 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump to a child must start the child-level walk");
@@ -765,8 +773,8 @@ async fn child_walk_recurses_to_h4() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the child-level rule must recurse to H4");
@@ -794,8 +802,8 @@ async fn jump_to_an_off_walk_child_runs_it() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump to an off-walk child must run it");
@@ -826,8 +834,8 @@ async fn running_child_addresses_its_own_siblings_and_children() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a running child must address its own siblings and children");
@@ -849,8 +857,8 @@ async fn running_child_cannot_address_a_top_level_section() {
         ## B\n\n\
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("a child jumping to a top-level section must fail");
@@ -875,8 +883,8 @@ async fn jump_to_a_niece_errors() {
         ### Niece\n\n\
         ```lua\nreturn 'niece-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("a jump to a niece must fail");
@@ -912,8 +920,8 @@ async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_
         return store.read('ids.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("sys.id must count the sections the one chain enters");
@@ -950,8 +958,8 @@ async fn a_call_child_takes_ids_nested_under_its_own_chain_distinct_from_the_par
         return 'arm' .. sys.index .. ':' .. sys.id\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the call child and its fanout complete");
@@ -994,8 +1002,8 @@ async fn two_runs_of_the_same_prompt_produce_identical_ids() {
     let prompt = parse(md);
     let mut outputs = Vec::new();
     for _ in 0..2 {
-        let ctx = scheduler_context(&prompt);
-        let out = TokioDriver::new(&ctx, None)
+        let (ctx, host) = scheduler_context(&prompt);
+        let out = TokioDriver::new(&ctx, host, None)
             .drive()
             .await
             .expect("the identity prompt completes");
@@ -1024,8 +1032,8 @@ async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
         ## B\n\n\
         ```lua\nerror('the return must end the chain before the parent resumes')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a return in the child walk ends the whole chain");
@@ -1053,8 +1061,8 @@ async fn jump_inside_call_is_contained_in_the_chain() {
         ## Peer\n\n\
         ```lua\nreturn 'peer-ran'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump inside call must be followed within the chain");
@@ -1086,8 +1094,8 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump inside the chain must move within the chain");
@@ -1132,8 +1140,8 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
         return 's2-result'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the call chain must jump, fall through, and return its final text");
@@ -1167,8 +1175,8 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
         return 'p'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the outer walk must resume at the section after the caller");
@@ -1200,8 +1208,8 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
         ## After\n\n\
         ```lua\nerror('a return must end the chain before fall-through')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a return must end the chain, not the run");
@@ -1231,8 +1239,8 @@ async fn call_to_a_child_starts_a_contained_chain() {
         return 'after-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("call to a child must start a contained chain");
@@ -1266,8 +1274,8 @@ async fn a_jump_descent_does_not_consume_call_depth() {
         return call('### X')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("the depth cap must fail the run");
@@ -1302,8 +1310,8 @@ async fn walk_never_descends_into_children() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the walk must never descend into children");
@@ -1323,8 +1331,8 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
         ## A\n\n\
         ```lua\njump('## Missing')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = TokioDriver::new(&ctx, None).drive().await;
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let result = TokioDriver::new(&ctx, host, None).drive().await;
 
     let error = result.expect_err("an unresolvable jump target must fail the run");
     assert!(
@@ -1343,16 +1351,21 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
 /// Builds the run context for a scheduler live-H1 test: the shared model
 /// set starts empty - the live H1 pass under test records its own
 /// bindings, exactly as the legacy run's H1 hand-off leaves them.
-fn h1_context(prompt: &Prompt) -> RunState {
+fn h1_context(prompt: &Prompt) -> (RunState, RunHost) {
     h1_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
-/// Builds the H1 run context on the given store and observer, so a pass
-/// test can inspect the store's contents and the observation stream
-/// afterward. The context's model bindings are filled the way prepare's
-/// trivial fill does: every declared role bound to the test model.
-fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>) -> RunState {
-    let mut ctx = test_context(EXECUTION).observer(observer);
+/// Builds the H1 run context and its observing host on the given store and
+/// observer, so a pass test can inspect the store's contents and the
+/// observation stream afterward. The context's model bindings are filled the
+/// way prepare's trivial fill does: every declared role bound to the test
+/// model.
+fn h1_context_on(
+    prompt: &Prompt,
+    store: &TestStore,
+    observer: Arc<dyn Observer>,
+) -> (RunState, RunHost) {
+    let mut ctx = test_context(EXECUTION);
     for (label, _) in prompt.frontmatter().models().iter() {
         ctx.model_bindings.bind(
             label,
@@ -1364,13 +1377,14 @@ fn h1_context_on(prompt: &Prompt, store: &TestStore, observer: Arc<dyn Observer>
             ),
         );
     }
-    RunState::new(
+    let state = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &store.vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
         &ctx,
-    )
+    );
+    (state, RunHost::new().observer(observer))
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1388,8 +1402,8 @@ async fn live_h1_infer_runs_once() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 pass must run on the scheduler");
@@ -1415,8 +1429,8 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ## Result\n\n\
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("H1 models.infer must run on the scheduler");
@@ -1457,8 +1471,8 @@ async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_
         return 'ok'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the H1 chunk takes root entry 0 and the first walked section root entry 1");
@@ -1481,8 +1495,8 @@ async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
         ```lua\nreturn 'unexpected'\n```\n";
     let prompt = parse(md);
     let store = TestStore::new();
-    let ctx = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("a failed H1 assertion must fail the run");
@@ -1513,8 +1527,8 @@ async fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
         assert(false, 'the gate cannot hold')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("the failed gate must fail the run");
@@ -1543,8 +1557,8 @@ async fn an_h1_scalar_return_still_reads_var_back() {
         return 'early'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("a reassigned `var` global must fail the run");
@@ -1587,7 +1601,7 @@ async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
         shared,
         &test_context(EXECUTION),
     );
-    let error = TokioDriver::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, RunHost::new(), None)
         .drive()
         .await
         .expect_err("a failing shared replay must fail the run");
@@ -1614,8 +1628,8 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
         ## Answer\n\n\
         ```lua\nreturn 'called from h1'\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("call from H1 runs the target section");
@@ -1642,8 +1656,8 @@ async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutiv
         ## Answer\n\n\
         ```lua\nreturn sys.id\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a call from H1 and a call from the walk both complete");
@@ -1663,8 +1677,8 @@ async fn call_from_h1_to_an_unknown_section_is_a_catchable_error() {
         # Test prompt\n\n\
         ```lua\nlocal ok, err = pcall(call, '## Nope'); return tostring(ok) .. ':' .. tostring(err)\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the caught call failure is the run's result");
@@ -1687,8 +1701,8 @@ async fn jump_from_h1_starts_the_walk_at_the_target() {
         ## Target\n\n\
         ```lua\nreturn 'jumped'\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("jump from H1 starts the walk at the target");
@@ -1702,8 +1716,8 @@ async fn jump_from_h1_to_an_unknown_section_fails_the_run() {
         # Test prompt\n\n\
         ```lua\njump('## Nope')\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("jump from H1 to an unknown section must fail");
@@ -1729,8 +1743,8 @@ async fn fanout_from_h1_runs_the_worker_over_the_collection() {
         ## Worker\n\n\
         ```lua\nreturn 'item:' .. item\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("fanout from H1 joins the arms");
@@ -1765,8 +1779,8 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
         ## Result\n\n\
         ```lua\nreturn var.verdict\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 decision-tool idiom runs");
@@ -1795,8 +1809,8 @@ async fn list_from_section_works_on_the_h1() {
         - one\n\
         - two\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("list_from_section from H1 reads the target's items");
@@ -1812,8 +1826,8 @@ async fn h1_only_lua_return() {
         # Title\n\n\
         ```lua\nreturn \"hello\"\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the H1-only return runs");
@@ -1829,8 +1843,8 @@ async fn h1_only_lua_no_return() {
         # Title\n\n\
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the H1-only fall-through runs");
@@ -1849,8 +1863,8 @@ async fn h1_scalar_return_short_circuits_the_walk() {
         ## Never\n\n\
         ```lua\nerror('the walk must not start after an H1 return')\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the H1 return short-circuits the run");
@@ -1874,8 +1888,8 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
         return models.infer(prose)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 infer of its prose ends the run");
@@ -1906,8 +1920,8 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         return models.infer(prose)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("H1 prose and H2 prose each infer explicitly");
@@ -1950,8 +1964,8 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ## Result\n\n\
         ```lua\nreturn 'ok'\n```\n";
     let prompt = parse(unread);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("unread H1 prose must not require a model");
@@ -1962,8 +1976,8 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ask\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(reading);
-    let ctx = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("an explicit infer of H1 prose with no binding must fail");
@@ -1996,8 +2010,8 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         return var.first .. ':' .. var.executions\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("live H1 prose infers explicitly");
@@ -2018,8 +2032,8 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
         ## Only\n\n\
         ```lua\nreturn 'done-now'\n```\n";
     let prompt = parse(md);
-    let ctx = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the pass and the walk complete");
@@ -2057,13 +2071,14 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
 // keep exercising the legacy fanout driver untouched; these prove the
 // scheduler's arm chains.
 
-/// Builds the run context for a scheduler fanout test with the given
-/// limits, so a window test can narrow the concurrency.
-fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunState {
+/// Builds the run context and its silent host for a scheduler fanout test
+/// with the given limits, so a window test can narrow the concurrency.
+fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> (RunState, RunHost) {
     scheduler_context_from(
         prompt,
         &TestStore::new(),
         &test_context(EXECUTION).limits(limits),
+        RunHost::new(),
     )
 }
 
@@ -2105,8 +2120,8 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
         return first\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -2147,8 +2162,8 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -2192,11 +2207,11 @@ async fn fanout_concurrency_window_limits_active_arms() {
         return a .. b\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_with_limits(
+    let (ctx, host) = scheduler_context_with_limits(
         &prompt,
         RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the windowed fanout completes on the scheduler");
@@ -2238,8 +2253,8 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -2282,8 +2297,8 @@ async fn fanout_over_a_large_collection_refills_the_window() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a collection over the window width completes");
@@ -2306,8 +2321,8 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         ### Worker\n\n\
         ```lua\nreturn item\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let mut driver = TokioDriver::new(&ctx, None);
+    let (ctx, host) = scheduler_context(&prompt);
+    let mut driver = TokioDriver::new(&ctx, host, None);
     driver.cancel_handle().cancel();
     let result = driver.drive().await;
     assert!(
@@ -2341,7 +2356,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
         shared,
         &test_context(EXECUTION),
     );
-    let error = TokioDriver::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, RunHost::new(), None)
         .drive()
         .await
         .expect_err("an arm infer without a model binding must fail");
@@ -2391,7 +2406,7 @@ async fn the_shared_replay_sees_the_arm_item() {
         shared,
         &test_context(EXECUTION),
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, RunHost::new(), None)
         .drive()
         .await
         .expect("the arm must succeed");
@@ -2436,8 +2451,8 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         ```\n";
     let store = TestStore::new();
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump inside an arm drives a child walk");
@@ -2483,8 +2498,8 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         ```\n";
     let store = TestStore::new();
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a jump to a worker child walks the child slice");
@@ -2517,8 +2532,8 @@ async fn fanout_hash_collection_iterates_in_sorted_key_order() {
         return item.key .. '=' .. item.value .. '@' .. sys.index .. ':' .. sys.id\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a hash-shaped collection fans out");
@@ -2557,8 +2572,8 @@ async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
         return item .. '-' .. sys.index\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the sealed results read and render");
@@ -2605,8 +2620,8 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
         ### Worker\n\n\
         ```lua\nstore.write('ran.txt', 'yes')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, recorder.clone());
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, recorder.clone());
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("an empty collection must error");
@@ -2639,8 +2654,8 @@ async fn fanout_worker_that_is_a_list_section_errors() {
         - a\n\
         - b\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("a list section is not a worker template");
@@ -2680,8 +2695,8 @@ async fn fanout_depth_cap_reads_the_chain_field() {
         return call('## Alpha')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("the fanout depth cap must fail the run");
@@ -2740,12 +2755,12 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
     );
     let prompt = parse(&md);
     let recorder = Arc::new(Recorder::default());
-    let ctx = loop_context_observed(
+    let (ctx, host) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an exhausted arm must not fail the fanout");
@@ -2825,8 +2840,9 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, GateObserver::new(&gate, recorder.clone()));
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) =
+        scheduler_context_on(&prompt, &store, GateObserver::new(&gate, recorder.clone()));
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("two live arms writing one path must terminate the run");
@@ -2889,12 +2905,12 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &store,
         GateObserver::new(&gate, Arc::new(NullObserver::default())),
     );
-    let error = TokioDriver::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("two live arms appending one path must terminate the run");
@@ -3114,12 +3130,12 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &store,
         GateObserver::new(&gate, Arc::new(NullObserver::default())),
     );
-    let error = TokioDriver::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("concurrent appends to one path must boom");
@@ -3159,8 +3175,8 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("an arm rewriting its own path must succeed");
@@ -3189,8 +3205,8 @@ async fn sequential_fanouts_may_write_one_path() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a sequential fanout may write the same path");
@@ -3219,17 +3235,15 @@ async fn fatal_arm_aborts_queued_siblings() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_from(
+    let (ctx, host) = scheduler_context_from(
         &prompt,
         &store,
-        &test_context(EXECUTION)
-            .limits(
-                RunLimits::new()
-                    .max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
-            )
-            .observer(recorder.clone()),
+        &test_context(EXECUTION).limits(
+            RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
+        ),
+        RunHost::new().observer(recorder.clone()),
     );
-    let error = TokioDriver::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("a fatal arm must fail the whole fanout");
@@ -3287,10 +3301,10 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        TokioDriver::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -3368,8 +3382,8 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the caught fanout failure lets the caller continue");
@@ -3407,8 +3421,8 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ### Worker\n\n\
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut driver = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let mut driver = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -3483,8 +3497,8 @@ async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
         ### Worker\n\n\
         ```lua\nreturn 'worked:' .. item\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.
     scheduler.set_max_chains_for_test(2);
@@ -3541,8 +3555,8 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         ## Only\n\n\
         ```lua\nreturn models.infer('ask')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let (ctx, host) = scheduler_context(&prompt);
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     // Handed to the run before the drive: the phantom answer lands ahead
     // of the real infer's, on a run that has issued nothing.
     scheduler
@@ -3564,8 +3578,12 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope includes them
 /// without an H1 pass; the implementations go to the driver's host table.
-fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>) {
-    arm_tools(ctx, bindings);
+fn arm_tool_set(
+    ctx: &RunState,
+    host: RunHost,
+    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
+) -> RunHost {
+    arm_tools(ctx, host, bindings)
 }
 
 /// Arms the run's shared tool set with `bindings` and exactly `always` as
@@ -3573,10 +3591,11 @@ fn arm_tool_set(ctx: &RunState, bindings: Vec<(crate::lua::ToolBinding, Arc<dyn 
 /// without entering any section's effective scope.
 fn arm_tool_set_scoped(
     ctx: &RunState,
+    host: RunHost,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
     always: Vec<String>,
-) {
-    arm_tools_scoped(ctx, bindings, always);
+) -> RunHost {
+    arm_tools_scoped(ctx, host, bindings, always)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -3593,12 +3612,13 @@ async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
         return out .. '|' .. tostring(tools.calls.echo)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the script dispatch succeeds");
@@ -3618,12 +3638,13 @@ async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
         return tools.call(echo, { value = 'hi' })\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the handle-form dispatch succeeds");
@@ -3640,12 +3661,13 @@ async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
         ## Only\n\n\
         ```lua\nreturn tools.call('missing', {})\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let error = TokioDriver::new(&ctx, None)
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("an unbound alias fails the block");
@@ -3673,13 +3695,14 @@ async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
         return out .. '|' .. tostring(tools.calls.echo)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set_scoped(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set_scoped(
         &ctx,
+        host,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
         Vec::new(),
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a bound but unscoped alias dispatches for a script");
@@ -3734,10 +3757,11 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
         ## Only\n\n\
         ```lua\nreturn tools.call('slow', {})\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
+    let (ctx, host) = scheduler_context(&prompt);
     let started = Arc::new(AtomicUsize::new(0));
-    arm_tool_set(
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding(
             "slow",
             "slow tool",
@@ -3746,7 +3770,7 @@ async fn cancellation_interrupts_a_slow_script_tools_call() {
             }),
         )],
     );
-    let mut driver = TokioDriver::new(&ctx, None);
+    let mut driver = TokioDriver::new(&ctx, host, None);
     let canceller = driver.cancel_handle();
     let observed = Arc::clone(&started);
     tokio::spawn(async move {
@@ -3785,16 +3809,17 @@ async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
         ## Only\n\n\
         ```lua\nreturn tools.call('fetch', { value = 'hi' })\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding(
             "fetch",
             "untrusted echo tool",
             Arc::new(UntrustedEchoTool),
         )],
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the untrusted dispatch succeeds");
@@ -3818,7 +3843,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         return r.text .. '|' .. tostring(#r.images)\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
+    let (ctx, host) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
         "form",
         "structured fixture",
@@ -3828,8 +3853,8 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    arm_tool_set(&ctx, vec![binding]);
-    let out = TokioDriver::new(&ctx, None)
+    let host = arm_tool_set(&ctx, host, vec![binding]);
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the structured dispatch succeeds");
@@ -3843,7 +3868,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
         ## Only\n\n\
         ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
+    let (ctx, host) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
         "form",
         "structured fixture",
@@ -3853,8 +3878,8 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    arm_tool_set(&ctx, vec![binding]);
-    let error = TokioDriver::new(&ctx, None)
+    let host = arm_tool_set(&ctx, host, vec![binding]);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("invalid structured output fails the call");
@@ -3880,7 +3905,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         ## Only\n\n\
         ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
+    let (ctx, host) = scheduler_context(&prompt);
     let mut binding = fixture_binding(
         "form",
         "structured fixture",
@@ -3890,8 +3915,8 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
         }),
     );
     binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    arm_tool_set(&ctx, vec![binding]);
-    let error = TokioDriver::new(&ctx, None)
+    let host = arm_tool_set(&ctx, host, vec![binding]);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("untrusted structured output fails the call");
@@ -3919,12 +3944,13 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
         Say something.\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("infer after a script dispatch still resolves the model");
@@ -3940,12 +3966,13 @@ async fn a_document_prompt_without_tools_call_is_unaffected() {
         ## Only\n\n\
         ```lua\nreturn 'plain'\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    arm_tool_set(
+    let (ctx, host) = scheduler_context(&prompt);
+    let host = arm_tool_set(
         &ctx,
+        host,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("a prompt that never calls tools.call is unchanged");
@@ -3963,8 +3990,8 @@ async fn models_chat_is_nil_in_a_section_vm() {
         ## Only\n\n\
         ```lua\nreturn models.chat({})\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, None)
+    let (ctx, host) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect_err("calling the absent models.chat must fail the section");

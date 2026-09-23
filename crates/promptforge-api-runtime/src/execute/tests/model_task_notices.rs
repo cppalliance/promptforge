@@ -145,12 +145,12 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the notice is a message, not a raise");
@@ -201,12 +201,12 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[Duration::from_millis(300)]),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the wait resumes with content");
@@ -245,12 +245,12 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
     let md = owner_prompt("", &loop_owner("return msgs[7].content"), PARKED_CHILD);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the timeout resumes with content and the owner's end abandons both");
@@ -273,12 +273,12 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("every answer is content");
@@ -319,12 +319,12 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
               ```lua\nuser_input()\nlog('sibling ran')\nreturn 'sib'\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both tasks end and the owner collects them");
@@ -358,12 +358,12 @@ async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId,
     let md = owner_prompt("", &loop_owner(owner_tail), child_body);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the owner ends clean");
@@ -420,12 +420,12 @@ async fn a_model_issued_cancel_queues_no_notice() {
     let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the cancel leaves nothing live");

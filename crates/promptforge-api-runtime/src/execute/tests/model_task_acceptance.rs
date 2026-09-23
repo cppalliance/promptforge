@@ -157,12 +157,12 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -239,12 +239,12 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[SOON]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -309,12 +309,12 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&[SOON, LATER]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -397,12 +397,12 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await

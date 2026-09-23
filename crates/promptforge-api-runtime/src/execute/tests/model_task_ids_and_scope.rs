@@ -44,12 +44,12 @@ async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, V
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedBroker::new(&delays),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both tasks end inside the two waits");
@@ -122,12 +122,12 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let ctx = model_task_context_with(
+    let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(NeverBroker),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");

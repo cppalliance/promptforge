@@ -1,8 +1,6 @@
 //! Per-run context and resource limits: [`RunContext`] and [`RunLimits`].
 
 use std::fmt;
-#[cfg(test)]
-use std::sync::Arc;
 
 #[path = "config-limits.rs"]
 mod limits;
@@ -113,12 +111,9 @@ pub struct RunContext {
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
     pub(crate) tool_bindings: ToolBindings,
-    /// Test-only: the host seams the in-crate suites still set through the
-    /// context's old builder methods, passed to the run state and read by
-    /// the test driver's constructor. Production hosts perform effects and
-    /// read events themselves.
-    #[cfg(test)]
-    pub(crate) test_host: crate::test_support::RunHost,
+    // No test-only host field: the in-crate suites assemble a
+    // `RunHost` themselves and pass it to the tokio driver, so this
+    // production struct carries only the engine's inputs.
 }
 
 impl RunContext {
@@ -151,8 +146,6 @@ impl RunContext {
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
             tool_bindings: ToolBindings::default(),
-            #[cfg(test)]
-            test_host: crate::test_support::RunHost::new(),
         }
     }
 
@@ -348,59 +341,9 @@ impl RunContext {
     }
 }
 
-/// The in-crate suites' seams: the host resources a test used to set on
-/// the context, routed into the test host the test driver's constructor
-/// reads. Production hosts perform effects and read events themselves;
-/// none of these exist outside `cfg(test)`.
-#[cfg(test)]
-impl RunContext {
-    pub(crate) fn observer(
-        mut self,
-        observer: Arc<dyn crate::test_support::recording::Observer>,
-    ) -> RunContext {
-        self.test_host = self.test_host.observer(observer);
-        self
-    }
-
-    pub(crate) fn debug(
-        mut self,
-        debug: Arc<dyn crate::test_support::recording::DebugCapture>,
-    ) -> RunContext {
-        self.report_debug = DebugMode::On;
-        self.test_host = self.test_host.debug(debug);
-        self
-    }
-
-    pub(crate) fn client(
-        mut self,
-        client: crate::test_support::mock_gateway_client::MockGatewayClient,
-    ) -> RunContext {
-        self.test_host = self.test_host.client(client);
-        self
-    }
-
-    pub(crate) fn input_broker(
-        mut self,
-        broker: Arc<dyn crate::test_support::TestBroker>,
-    ) -> RunContext {
-        self.test_host = self.test_host.input_broker(broker);
-        self
-    }
-
-    pub(crate) fn on_delta(
-        mut self,
-        hook: Arc<dyn Fn(crate::model::StreamDelta) + Send + Sync>,
-    ) -> RunContext {
-        self.test_host = self.test_host.on_delta(hook);
-        self
-    }
-}
-
 impl fmt::Debug for RunContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut state = f.debug_struct("RunContext");
-        #[cfg(test)]
-        state.field("test_host", &self.test_host);
         state
             .field("name", &self.name)
             .field("seed", &self.seed)

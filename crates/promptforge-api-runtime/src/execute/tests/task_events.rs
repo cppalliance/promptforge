@@ -165,7 +165,7 @@ fn owner_prompt(tail: &str) -> String {
 /// `chat` round in order.
 pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
     let prompt = parse(md);
-    let state = model_task_context_with(
+    let (state, _host) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(NeverBroker),

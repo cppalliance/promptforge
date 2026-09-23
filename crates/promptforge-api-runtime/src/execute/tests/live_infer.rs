@@ -44,8 +44,8 @@ async fn the_hosts_client_serves_a_run_the_context_never_names() {
     let prompt = parse(source);
     let env = Environment::new();
     let host = RunHost::new().client(gateway_client(addr));
-    let RunResult::Ok(out) =
-        crate::test_support::run_with_host(&env, &prompt, "", to_context(silent()), host).await
+    let (ctx, _host) = to_context(silent());
+    let RunResult::Ok(out) = crate::test_support::run_with_host(&env, &prompt, "", ctx, host).await
     else {
         panic!("the host's client must serve the run");
     };
@@ -125,7 +125,8 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
-    let (ctx, requirements) = env.prepare(&prompt, to_context(silent()));
+    let (ctx, _host) = to_context(silent());
+    let (ctx, requirements) = env.prepare(&prompt, ctx);
     assert!(
         requirements.is_satisfied(),
         "the fixture declares nothing: {requirements:?}"
@@ -320,17 +321,13 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         canceller.cancel();
     });
     let env = Environment::new();
-    let result = env_run(
-        &env,
-        &prompt,
-        "",
-        test_context(EXECUTION)
-            .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
-            .model(test_model_catalog().models()[0].clone())
-            .client(gateway_client(gateway.addr()))
-            .cancel(cancel),
-    )
-    .await;
+    let ctx = test_context(EXECUTION)
+        .model(test_model_catalog().models()[0].clone())
+        .cancel(cancel);
+    let host = RunHost::new()
+        .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
+        .client(gateway_client(gateway.addr()));
+    let result = env_run(&env, &prompt, "", (ctx, host)).await;
     assert!(
         matches!(result, RunResult::Cancelled),
         "cancelling an in-flight infer must interrupt the run: {result:?}"

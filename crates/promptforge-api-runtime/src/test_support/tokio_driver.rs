@@ -49,6 +49,8 @@ use crate::{Error, Result};
 #[cfg(test)]
 use crate::execute::EffectRecord;
 use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step, task_history};
+#[cfg(test)]
+use crate::test_support::RunHost;
 
 #[cfg(test)]
 use crate::execute::context::RunState;
@@ -152,14 +154,18 @@ pub(crate) struct TokioDriver<'a> {
 }
 
 impl<'a> TokioDriver<'a> {
-    /// Builds the driver for one run over `state`: the suites' entry, which
-    /// shape the context themselves. The performers and sink come from the
-    /// test host the suite set on its context (observer, broker, tools,
-    /// delta hook), with `client` as the run's mock-gateway client when
-    /// the suite supplies one.
+    /// Builds the driver for one run over `state`, performing its effects
+    /// and replaying its events through the `host` the suite assembled
+    /// itself. The host supplies the observer, broker, tools, delta hook,
+    /// and debug capture; `client` is the run's mock-gateway client when
+    /// the suite supplies one, overriding any on the host.
     #[cfg(test)]
-    pub(crate) fn new(state: &RunState, client: Option<MockGatewayClient>) -> TokioDriver<'static> {
-        let mut host = state.test_host();
+    pub(crate) fn new(
+        state: &RunState,
+        host: RunHost,
+        client: Option<MockGatewayClient>,
+    ) -> TokioDriver<'static> {
+        let mut host = host;
         if let Some(client) = client {
             host = host.client(client);
         }

@@ -116,21 +116,22 @@ pub(super) fn chat_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
     observer: Arc<dyn Observer>,
-) -> RunState {
-    let base = test_context(EXECUTION).observer(observer);
+) -> (RunState, RunHost) {
     let mut ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &base,
+        &test_context(EXECUTION),
     );
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    tools.into().install(&ctx);
+    let host = tools
+        .into()
+        .install(&ctx, RunHost::new().observer(observer));
     ctx.expose_raw_shims_for_test();
-    ctx
+    (ctx, host)
 }
 
 /// A text reply with everything a round can report: a model name, a
@@ -164,15 +165,19 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
     );
     let loop_prompt_parsed = parse(&loop_md);
     let loop_recorder = Arc::new(RoundRecorder::default());
-    let loop_ctx = chat_context(
+    let (loop_ctx, loop_host) = chat_context(
         &loop_prompt_parsed,
         echo_tools(),
         Arc::clone(&loop_recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&loop_ctx, Some(gateway_client(loop_gateway.addr())))
-        .drive()
-        .await
-        .expect("the reference loop runs one text round");
+    let out = TokioDriver::new(
+        &loop_ctx,
+        loop_host,
+        Some(gateway_client(loop_gateway.addr())),
+    )
+    .drive()
+    .await
+    .expect("the reference loop runs one text round");
     assert_eq!(out, "ok");
 
     let chat_gateway = ScriptedGateway::start(vec![rich_text_reply("final answer")]).await;
@@ -190,15 +195,19 @@ async fn a_chat_round_reports_the_same_sequence_as_the_rust_loop_for_a_text_repl
     );
     let chat_prompt_parsed = parse(&chat_md);
     let chat_recorder = Arc::new(RoundRecorder::default());
-    let chat_ctx = chat_context(
+    let (chat_ctx, chat_host) = chat_context(
         &chat_prompt_parsed,
         echo_tools(),
         Arc::clone(&chat_recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&chat_ctx, Some(gateway_client(chat_gateway.addr())))
-        .drive()
-        .await
-        .expect("one chat round resumes the reply");
+    let out = TokioDriver::new(
+        &chat_ctx,
+        chat_host,
+        Some(gateway_client(chat_gateway.addr())),
+    )
+    .drive()
+    .await
+    .expect("one chat round resumes the reply");
     assert_eq!(out, "ok");
 
     let reference = loop_recorder.lines();
@@ -245,12 +254,12 @@ async fn a_chat_round_resumes_the_requested_tool_calls_unexecuted() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let ctx = chat_context(
+    let (ctx, host) = chat_context(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool round resumes its calls");
@@ -283,12 +292,12 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let ctx = chat_context(
+    let (ctx, host) = chat_context(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -313,8 +322,8 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let ctx = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = chat_context(&prompt, echo_tools(), Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("an uncaught out-of-scope call fails the section");
@@ -347,12 +356,12 @@ async fn an_empty_reply_resumes_as_a_completed_round_with_the_reply_absent() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let ctx = chat_context(
+    let (ctx, host) = chat_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an empty reply is a completed round");
@@ -379,12 +388,12 @@ async fn a_context_overflow_resumes_as_an_overflow_round_without_raising() {
          return 'ok'",
     );
     let prompt = parse(&md);
-    let ctx = chat_context(
+    let (ctx, host) = chat_context(
         &prompt,
         ToolSet::default(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the overflow is the round's answer, not a raise");
@@ -410,12 +419,12 @@ async fn a_context_overflow_resumes_as_an_overflow_round_without_raising() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(RoundRecorder::default());
-    let ctx = chat_context(
+    let (ctx, host) = chat_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the provider overflow is the round's answer");

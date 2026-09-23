@@ -37,12 +37,12 @@ async fn when_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
     );
     let prompt = parse(&md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -85,12 +85,12 @@ async fn when_any_cancels_the_timer_when_a_member_wins() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")
@@ -133,12 +133,12 @@ async fn when_all_returns_timed_out_with_the_unfinished_members_absent() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a timed-out when_all leaks nothing");
@@ -168,12 +168,12 @@ async fn when_all_cancels_the_timer_when_every_member_finishes() {
         &[("Alpha", "return 'alpha'"), ("Beta", "return 'beta'")],
     );
     let prompt = parse(&md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")
@@ -213,12 +213,12 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the run completes");
@@ -248,12 +248,12 @@ async fn the_timeout_option_is_validated_at_the_call_site() {
         &[("Child", "return 'quick'")],
     );
     let prompt = parse(&md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await

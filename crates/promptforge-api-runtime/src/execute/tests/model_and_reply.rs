@@ -18,7 +18,7 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
 Ask the model.\n\n\
 ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = Prompt::parse(md, EXECUTION).0.expect("fixture must parse");
-    let mut ctx = test_context(EXECUTION).client(gateway_client(addr));
+    let mut ctx = test_context(EXECUTION);
     ctx.model_bindings.bind(
         "analyst",
         ModelDescriptor::new(
@@ -28,7 +28,7 @@ Ask the model.\n\n\
             ThinkingMode::Switchable,
         ),
     );
-    let host = ctx.test_host.clone();
+    let host = RunHost::new().client(gateway_client(addr));
     let out = match crate::test_support::run_host(&prompt, "", ctx, host).await {
         RunResult::Ok(out) => out,
         other => panic!("the run must succeed: {other:?}"),
@@ -563,9 +563,7 @@ async fn run_with_bindings(
     store: &TestStore,
 ) -> Result<String> {
     let prompt = parse(md);
-    let mut ctx = test_context(EXECUTION)
-        .client(gateway_client(addr))
-        .vfs(store.vfs());
+    let mut ctx = test_context(EXECUTION).vfs(store.vfs());
     for (label, model) in bindings {
         ctx.model_bindings.bind(
             label,
@@ -577,7 +575,7 @@ async fn run_with_bindings(
             ),
         );
     }
-    let host = ctx.test_host.clone();
+    let host = RunHost::new().client(gateway_client(addr));
     match crate::test_support::run_host(&prompt, "", ctx, host).await {
         RunResult::Ok(out) => Ok(out),
         RunResult::Cancelled => Err(Error::Interrupted),

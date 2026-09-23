@@ -70,12 +70,6 @@ pub(crate) struct RunState {
     /// shared tool-dispatch body) take it too, so their reports land in the
     /// buffer in order with the scheduler's own.
     emitter: Arc<Emitter>,
-    /// Test-only: the host seams the suites set on their `RunContext`,
-    /// kept here so the test driver's constructor can build its
-    /// `RunHost` from the state alone. Shared, so a suite arms the tool
-    /// implementations on a state it holds by reference.
-    #[cfg(test)]
-    test_host: Arc<Mutex<crate::test_support::RunHost>>,
     /// The run's cancel flag: polled between chain steps and installed on
     /// every section VM's instruction hook. The context's one handle, the
     /// same flag the activated capabilities and the run's `cancel` share.
@@ -163,8 +157,6 @@ impl RunState {
             limits: ctx.limits,
             events,
             emitter,
-            #[cfg(test)]
-            test_host: Arc::new(Mutex::new(ctx.test_host.clone())),
             cancel: ctx.cancel.clone(),
             #[cfg(test)]
             tap: None,
@@ -179,26 +171,6 @@ impl RunState {
             #[cfg(test)]
             raw_shims: false,
         }
-    }
-
-    /// The host seams the suite set on its context, for the test driver's
-    /// constructor.
-    #[cfg(test)]
-    pub(crate) fn test_host(&self) -> crate::test_support::RunHost {
-        self.test_host
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
-    /// Replaces the test host: how a suite that builds the state itself
-    /// arms the tool implementations or the observer its driver uses.
-    #[cfg(test)]
-    pub(crate) fn set_test_host(&self, host: crate::test_support::RunHost) {
-        *self
-            .test_host
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = host;
     }
 
     /// Exposes the raw protocol shims (`models.chat`, `tools.call_as_model`)
@@ -432,8 +404,7 @@ impl fmt::Debug for RunState {
         #[cfg(test)]
         state
             .field("raw_shims", &self.raw_shims)
-            .field("tap", &self.tap.is_some())
-            .field("test_host", &self.test_host);
+            .field("tap", &self.tap.is_some());
         state
             .field("prompt", &self.prompt)
             .field("nonce", &self.nonce)

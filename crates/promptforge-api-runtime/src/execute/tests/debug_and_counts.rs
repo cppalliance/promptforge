@@ -227,8 +227,8 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
          return msgs[#msgs].content .. '|' .. tostring(tools.calls.echo)",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool's own failure becomes the call's result, not the loop's");

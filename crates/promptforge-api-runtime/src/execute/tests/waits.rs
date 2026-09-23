@@ -94,12 +94,12 @@ pub(super) fn tasks_prompt(main: &str, sections: &[(&str, &str)]) -> String {
 async fn drive(md: &str) -> (Result<String>, Arc<WaitRecorder>) {
     let prompt = parse(md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None).drive().await;
+    let out = TokioDriver::new(&ctx, host, None).drive().await;
     (out, recorder)
 }
 
@@ -215,12 +215,12 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the run completes");
@@ -334,12 +334,12 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
     );
     let prompt = parse(&md);
     let recorder = Arc::new(WaitRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &store,
         GateObserver::new(&gate, Arc::clone(&recorder) as Arc<dyn Observer>),
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await

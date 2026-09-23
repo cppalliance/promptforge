@@ -32,8 +32,8 @@ async fn local_tool_handler_result_returns_to_the_model() {
     ])
     .await;
     let prompt = parse(&grab_loop("return 'got ' .. args.value"));
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the local handler answers the model's call");
@@ -78,8 +78,8 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
          return table.concat(calls, ',') .. '|' .. msgs[#msgs].content",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both calls in the one response run");
@@ -110,12 +110,12 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     .await;
     let prompt = parse(&grab_loop("error('handler exploded')"));
     let recorder = Arc::new(Recorder::default());
-    let ctx = loop_context_observed(
+    let (ctx, host) = loop_context_observed(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a handler Lua error must fail the tool call");

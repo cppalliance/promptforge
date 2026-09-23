@@ -74,19 +74,21 @@ fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// A scheduler context on the given observer with the fanout window
+/// A scheduler context and its observing host with the fanout window
 /// narrowed to `window` live arms.
-fn windowed_context(prompt: &Prompt, window: usize, observer: Arc<dyn Observer>) -> RunState {
+fn windowed_context(
+    prompt: &Prompt,
+    window: usize,
+    observer: Arc<dyn Observer>,
+) -> (RunState, RunHost) {
     scheduler_context_from(
         prompt,
         &TestStore::new(),
         &test_context(EXECUTION)
-            .limits(
-                RunLimits::new().max_fanout_concurrency(
-                    NonZeroUsize::new(window).expect("the window is non-zero"),
-                ),
-            )
-            .observer(observer),
+            .limits(RunLimits::new().max_fanout_concurrency(
+                NonZeroUsize::new(window).expect("the window is non-zero"),
+            )),
+        RunHost::new().observer(observer),
     )
 }
 
@@ -119,8 +121,8 @@ async fn the_window_refills_on_any_arms_completion_not_the_first_arms() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the windowed fanout completes");
@@ -168,10 +170,10 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let (ctx, host) = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        TokioDriver::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -223,12 +225,12 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the nested fanout completes");
@@ -276,12 +278,12 @@ async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<Ta
         ```lua\nreturn sys.id\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the identity prompt completes");
@@ -380,12 +382,12 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = loop_context_observed(
+    let (ctx, host) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("three looping arms complete");

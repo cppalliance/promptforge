@@ -71,13 +71,13 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         return models.infer(item)\n\
         ```\n";
     let prompt = parse(md);
-    let mut ctx = scheduler_context_on(
+    let (mut ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
     let events = ctx.record_events_for_test();
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the fanout completes");
@@ -146,13 +146,13 @@ async fn a_call_child_reports_under_its_callers_task() {
         ## Inner\n\n\
         ```lua\nlog('inner ran')\nreturn 'hello'\n```\n";
     let prompt = parse(md);
-    let mut ctx = scheduler_context_on(
+    let (mut ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
     let events = ctx.record_events_for_test();
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the call completes");

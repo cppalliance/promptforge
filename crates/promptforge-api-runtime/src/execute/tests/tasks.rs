@@ -77,12 +77,12 @@ async fn spawn_returns_to_its_caller_before_the_child_runs() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the spawner's return ends the run");
@@ -113,12 +113,12 @@ async fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     scheduler.drive().await.expect("the run completes");
 
     assert_eq!(
@@ -160,12 +160,12 @@ async fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await
@@ -200,12 +200,12 @@ async fn task_started_includes_the_spawn_seeds_and_the_child_sees_them() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    TokioDriver::new(&ctx, None)
+    TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the run completes");
@@ -243,12 +243,12 @@ async fn spawn_shares_calls_target_resolution_and_raises_at_the_call_site() {
         "return 'unused'",
     );
     let prompt = parse(&md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the caught errors end the run normally");
@@ -282,7 +282,7 @@ async fn spawn_shares_calls_depth_cap() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
@@ -292,7 +292,7 @@ async fn spawn_shares_calls_depth_cap() {
     // blocking pool's answer order: the run ends `done` or `tasks_live`.
     // Either way the whole spawn cascade and the one refusal ran before
     // any answer arrived, which is what this test measures.
-    let outcome = TokioDriver::new(&ctx, None).drive().await;
+    let outcome = TokioDriver::new(&ctx, host, None).drive().await;
     assert!(
         matches!(outcome, Ok(_) | Err(Error::TasksLive { .. })),
         "unexpected outcome: {outcome:?}"
@@ -327,12 +327,12 @@ async fn spawn_rejects_a_list_section_target_with_the_worker_message() {
         - a\n\
         - b\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, None)
+    let out = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
         .expect("the caught error ends the run normally");
@@ -361,12 +361,12 @@ async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_id
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let error = scheduler
         .drive()
         .await
@@ -424,12 +424,12 @@ async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_t
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let error = scheduler
         .drive()
         .await
@@ -492,12 +492,12 @@ fn moving_spawner_prompt(movement: &str) -> String {
 async fn assert_task_outlives_movement(md: &str) {
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let error = scheduler
         .drive()
         .await
@@ -561,12 +561,12 @@ async fn a_call_chain_ending_with_a_live_task_answers_tasks_live_to_its_caller()
         return 'never'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await
@@ -609,12 +609,12 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let error = scheduler
         .drive()
         .await
@@ -673,12 +673,12 @@ async fn aborting_a_chain_abandons_the_tasks_it_owns() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let ctx = scheduler_context_on(
+    let (ctx, host) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, None);
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
     let out = scheduler
         .drive()
         .await

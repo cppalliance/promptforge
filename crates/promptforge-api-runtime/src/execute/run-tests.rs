@@ -13,10 +13,8 @@ use serde_json::json;
 
 use super::*;
 use crate::execute::protocol::StoreOp;
-use crate::input::{InputError, InputOutcome};
 use crate::model::{Message, ToolSchema};
 use crate::model::{ModelBinding, ModelId};
-use crate::test_support::TestBroker;
 
 /// A context for the run `run-test` under fixed host inputs; nothing here
 /// reads the seed or `sys.when`.
@@ -186,20 +184,6 @@ fn run_of(body: &str, ctx: RunContext) -> Run {
     Run::new(Arc::new(prompt), "", ctx)
 }
 
-/// A broker that never answers, so only a dropped effect ends the wait.
-struct PendingBroker;
-
-#[async_trait::async_trait]
-impl TestBroker for PendingBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
-        std::future::pending().await
-    }
-}
-
 /// The one effect a pending step issued.
 fn only_effect(step: Step) -> (EffectId, Effect) {
     let Step::Pending { mut effects, .. } = step else {
@@ -267,10 +251,7 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
 
 #[test]
 fn a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error() {
-    let mut run = run_of(
-        "return user_input()",
-        run_context().input_broker(Arc::new(PendingBroker)),
-    );
+    let mut run = run_of("return user_input()", run_context());
     let (id, effect) = only_effect(run.step());
     assert!(matches!(effect, Effect::UserInput { .. }));
     run.resume(id, EffectAnswer::Dropped);
@@ -313,10 +294,7 @@ fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer()
 
 #[test]
 fn an_answer_for_an_unissued_effect_is_an_internal_error() {
-    let mut run = run_of(
-        "return user_input()",
-        run_context().input_broker(Arc::new(PendingBroker)),
-    );
+    let mut run = run_of("return user_input()", run_context());
     let (id, _) = only_effect(run.step());
     run.resume(EffectId(id.0 + 99), EffectAnswer::Timer);
     // The unknown id ended the run; the real effect is now an orphan whose
@@ -341,10 +319,7 @@ fn an_answer_for_an_unissued_effect_is_an_internal_error() {
 
 #[test]
 fn an_answer_of_the_wrong_kind_for_a_pending_effect_fails_loudly() {
-    let mut run = run_of(
-        "return user_input()",
-        run_context().input_broker(Arc::new(PendingBroker)),
-    );
+    let mut run = run_of("return user_input()", run_context());
     let (id, _) = only_effect(run.step());
     run.resume(id, EffectAnswer::Timer);
     let Step::Done { result, .. } = run.step() else {

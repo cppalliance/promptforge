@@ -20,8 +20,8 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("an over-window request must exhaust the context");
@@ -53,8 +53,8 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
          return tostring(err)",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -78,8 +78,8 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a provider context rejection must exhaust the context");
@@ -115,8 +115,8 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_hosts_type_names() {
          return table.concat(out, '|')",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -158,8 +158,8 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
          return err.kind .. '|' .. tostring(err)",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -192,8 +192,8 @@ async fn a_compactors_own_string_raise_reaches_the_host_with_the_reason_tag() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let ctx = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, Some(gateway_client(gateway.addr())))
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("the compactor's own raise fails the section");
