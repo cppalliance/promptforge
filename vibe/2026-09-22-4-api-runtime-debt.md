@@ -182,6 +182,13 @@ This is a behavior-neutral refactor, so the existing suites are the main check, 
   - Risk (low): the inline-answer hoist could change ready-queue order if a child push is moved. The ordering rule under Technical Design guards against it.
   - Risk (low): the docs gate, not clippy, is what proves the facade's intra-doc links; a link to the private `execute` module in `src/lib.md` is a `deny`-level rustdoc failure, so run the docs gate as soon as the facade item lands rather than at the end.
 
+### Step 4 demotion notes
+
+- Search: `git grep -n -E 'ModelBindings|SourceLocation|INPUT_UNAVAILABLE_FALLBACK'` over the workspace, read with `crates/promptforge-api-runtime/src` separated from every other compiled target (workspace crates plus this crate's own `tests/` and `benches/` targets, which compile as separate crates and see only the public API).
+- `ModelBindings`: stays public. The type name appears outside the library only in dated `vibe/` notes, but its paired accessor `RunContext::model_bindings` is named by `crates/promptforge-api-runtime/tests/suite/prepare.rs` line 210 - an integration target that can only use the public API. Demoting the accessor would break that target, so the accessor stays; a type stays public while a public signature returns it, so the type and its root re-export stay too.
+- `SourceLocation`: stays public with `RunError::location`. The only names are `crates/promptforge-api-runtime/src/execute/error.rs` (definition and accessor) and the `src/error.rs` unit tests, but a public signature exposes the type, and a trial demotion to `pub(crate)` fails `cargo clippy -D warnings` with `dead_code` for both the struct and `location` - the production build never calls them, so the accessor is host-facing rather than internal. Removing it would be a host-API removal with no in-crate consumer to justify it, and gating a documented accessor behind `cfg(test)` is a larger change than the condition licenses, so the pair stays public.
+- `input::INPUT_UNAVAILABLE_FALLBACK`: demoted to `pub(crate)`. The only names are `src/execute/scheduler/apply.rs` and `src/execute/tests/input.rs`, both inside the library crate, and no public signature returns or accepts it. Its public doc links in `src/input.rs` and `src/test_support/host.rs` become plain code spans, because a public doc linking a private const fails the docs gate's `private_intra_doc_links`.
+
 ### Deferred and Out of Scope
 
 - Deferred: collapse the twin transport error variants in `src/error.rs` (for example `Backend` and `BackendBodyRead`) and share one classification map between `RunErrorKind` and the Lua error kind. Revisit when `src/error.rs` next changes for a behavior reason.
@@ -266,7 +273,7 @@ Each step is one commit holding its code and its tests.
 
 <step-4>
 
-### Step 4: Apply the qualifying demotions
+### Step 4: Apply the qualifying demotions [completed]
 
 - Component: `facade`
 - Artifacts: `ModelBindings` (paired accessor `RunContext::model_bindings`), `SourceLocation` (paired accessor `RunError::location`), and `input::INPUT_UNAVAILABLE_FALLBACK`. Demote each to `pub(crate)` only when no crate outside the runtime names it after the facade change and no public signature exposes it, demoting the paired accessor in the same change, and delete the root `ModelBindings` re-export if and only if the accessor goes with it; the rest stay public.

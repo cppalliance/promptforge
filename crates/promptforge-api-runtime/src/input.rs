@@ -3,7 +3,7 @@
 //! A section's direct `user_input()` call issues a `UserInput` effect and
 //! resumes with `(text, available)`: `available` is `true` for real
 //! operator text and `false` when the host had no input, in which case
-//! `text` is the fixed [`INPUT_UNAVAILABLE_FALLBACK`] sentence. The flag
+//! `text` is the fixed `INPUT_UNAVAILABLE_FALLBACK` sentence. The flag
 //! sits beside the text, so a human typing exactly the fallback sentence
 //! can never spoof the unavailable state. No `user_input` tool is
 //! advertised to the model: a `models.loop` scope includes exactly the
@@ -28,7 +28,7 @@ use std::fmt;
 /// The sentence is deliberately unremarkable: the availability flag, not
 /// the text, distinguishes the fallback from operator input, so the
 /// sentence never needs to be unguessable.
-pub const INPUT_UNAVAILABLE_FALLBACK: &str =
+pub(crate) const INPUT_UNAVAILABLE_FALLBACK: &str =
     "User input is unavailable in this host; continue without it.";
 
 /// What the host produced for one input request.
@@ -41,7 +41,7 @@ pub enum InputOutcome {
     /// The operator supplied text, delivered byte-exact.
     Text(String),
     /// The host had no input to give: the call resolves to
-    /// [`INPUT_UNAVAILABLE_FALLBACK`] with `available` false.
+    /// `INPUT_UNAVAILABLE_FALLBACK` with `available` false.
     Unavailable,
 }
 

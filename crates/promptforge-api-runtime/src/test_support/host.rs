@@ -126,8 +126,7 @@ impl RunHost {
 
     /// Sets the broker `UserInput` effects wait on. The default (`None`)
     /// is the unavailable-fallback policy: every wait resolves to
-    /// [`INPUT_UNAVAILABLE_FALLBACK`](crate::input::INPUT_UNAVAILABLE_FALLBACK)
-    /// with `available` false.
+    /// `INPUT_UNAVAILABLE_FALLBACK` with `available` false.
     #[must_use]
     pub fn input_broker(mut self, broker: Arc<dyn TestBroker>) -> RunHost {
         self.input = Some(broker);
