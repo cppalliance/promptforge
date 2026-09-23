@@ -345,7 +345,7 @@ Each step is one commit holding its code and its tests.
 
 <step-11>
 
-### Step 11: Move the `subst.rs` test block
+### Step 11: Move the `subst.rs` test block [completed]
 
 - Component: `suite`
 - Artifacts: move the `#[cfg(test)]` block at the end of `src/subst.rs` (near line 408) to `src/subst-tests.rs`, wired with `#[path = "subst-tests.rs"] mod tests;` as the crate's other `parent-tests.rs` siblings are.
