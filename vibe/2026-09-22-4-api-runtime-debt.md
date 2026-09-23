@@ -295,7 +295,7 @@ Each step is one commit holding its code and its tests.
 
 <step-6>
 
-### Step 6: Trim the public `test_support` surface
+### Step 6: Trim the public `test_support` surface [completed]
 
 - Component: `internals`
 - Artifacts: `src/test_support.rs` - limit the public surface to `drive`, `drive_tokio`, `Performers`, `Performer`, `BoxFuture`, `RunHost`, `run_host`, `run_with_host`, `ChatClient`, `DeltaHook`, `TestTool`, `TestToolTable`, `TestBroker`, `forward`, `recording::Observer`, and `recording::Observation`; delete `RecordingObserver` (`src/test_support/recording.rs` line 52) and the remaining `recording` items from the public surface (`forward_one`, `null_emitter`, `NullObserver`, `DebugCapture`, and `DebugEvent` are public today and must leave with it); narrow the module declarations, because `src/test_support.rs` currently exposes `pub mod host` (line 43), `pub mod recording` (line 47), `pub mod tokio_driver` (line 48), and `pub mod tools` (line 49), and a `pub` module keeps its items reachable by path, so each must become `pub(crate)` or `cfg(test)` unless the listed name needs it; keep `TokioDriver`, `MockGatewayClient` (which keeps its `#[path]` include), and `src/execute/scheduler/test_hooks.rs` under `cfg(test)`; rewrite the module docs (lines 10-28). Delete the `#[cfg(test)] pub(crate) use promptforge_parser::test_support::synthetic_section` re-export (lines 29-30) and switch its two consumers in `src/execute/tests/exec_flow.rs` to import `promptforge_parser::test_support::synthetic_section` directly, so no crate-internal re-export exists only to feed test modules.

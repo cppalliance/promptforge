@@ -34,7 +34,7 @@ use crate::input::{InputError, InputOutcome};
 /// The future a fixture's async method returns: boxed, `Send`, and bounded
 /// by the borrow of `self`, exactly as `#[async_trait::async_trait]`
 /// expands an `async fn` impl.
-pub type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub(crate) type FixtureFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A fixture tool the tokio test driver dispatches a `ToolCall` effect to:
 /// the suites' stand-in for the harness's `Tool`.

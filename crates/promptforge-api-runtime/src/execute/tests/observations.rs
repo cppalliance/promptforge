@@ -374,7 +374,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
          ```\n";
     let recorder = Arc::new(Recorder::default());
     let (prompt, parse_events) = Prompt::parse(source, EXECUTION);
-    crate::test_support::forward(parse_events, recorder.as_ref(), None);
+    crate::test_support::forward(parse_events, recorder.as_ref());
     let prompt = prompt.expect("the lifecycle fixture must parse");
     let tools: [Arc<dyn TestTool>; 1] = [Arc::clone(&tool) as Arc<dyn TestTool>];
     let prompt = TestPrompt {

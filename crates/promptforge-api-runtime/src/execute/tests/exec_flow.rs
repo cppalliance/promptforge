@@ -2,7 +2,7 @@
 
 use super::run;
 use super::*;
-use crate::test_support::synthetic_section;
+use promptforge_parser::test_support::synthetic_section;
 
 /// The frontmatter every flow test shares, fused into the prompt literal at
 /// compile time so a test states only its sections.

@@ -115,8 +115,18 @@ macro_rules! debug_variants {
     };
 }
 
-/// Replays `events`, in order, onto `observer` and `debug`.
-pub fn forward(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
+/// Replays `events`, in order, onto `observer`, dropping the debug pair.
+pub fn forward(events: Vec<Event>, observer: &dyn Observer) {
+    forward_impl(events, observer, None);
+}
+
+/// Replays `events`, in order, onto `observer` and, for the debug variants,
+/// `debug`.
+pub(crate) fn forward_impl(
+    events: Vec<Event>,
+    observer: &dyn Observer,
+    debug: Option<&dyn DebugCapture>,
+) {
     for event in events {
         forward_one(event, observer, debug);
     }
@@ -140,7 +150,7 @@ pub fn forward(events: Vec<Event>, observer: &dyn Observer, debug: Option<&dyn D
 /// # Panics
 ///
 /// When `event` is a variant none of the groups above claims.
-pub fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
+pub(crate) fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&dyn DebugCapture>) {
     if let Some(observation) = unit_observation(&event) {
         observer.observe(event.execution(), event.section(), observation);
         return;
@@ -332,7 +342,7 @@ fn forward_debug(event: Event, debug: Option<&dyn DebugCapture>) {
             ..
         } => {
             if let Some(capture) = debug {
-                capture.on_event(&execution, &section, turn, DebugEvent::Request { body });
+                capture.on_event(&execution, &section, turn, DebugEvent::request(body));
             }
         }
         Event::Response {
@@ -349,11 +359,7 @@ fn forward_debug(event: Event, debug: Option<&dyn DebugCapture>) {
                     &execution,
                     &section,
                     turn,
-                    DebugEvent::Response {
-                        body,
-                        finish_reason,
-                        reasoning_content,
-                    },
+                    DebugEvent::response(body, finish_reason, reasoning_content),
                 );
             }
         }

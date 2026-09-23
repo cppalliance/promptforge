@@ -99,8 +99,9 @@ impl RunHost {
     /// Sets the opt-in raw request/response capture. The engine reports
     /// the raw pair only when the context asks for it
     /// ([`RunContext::report_debug`](crate::execute::RunContext::report_debug)).
+    #[cfg(test)]
     #[must_use]
-    pub fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunHost {
+    pub(crate) fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunHost {
         self.debug = Some(debug);
         self
     }

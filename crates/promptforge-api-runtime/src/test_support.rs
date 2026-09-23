@@ -16,18 +16,18 @@
 //! the host the engine's own suites drive.
 //!
 //! [`RunHost`] bundles the resources the suites used to hand the retired
-//! in-crate loop - an observer, a debug capture, a client, a fixture tool
-//! table, a broker, a delta hook - and [`run_with_host`] is that loop's
-//! implicit-prepare path over the tokio driver: prepare, refuse or run. The
-//! tool and broker fixtures implement the stand-in traits in [`tools`]
-//! ([`TestTool`], [`TestBroker`]); the production traits are the harness's,
-//! which no engine crate names. [`recording`] is the suites' recording
-//! observer vocabulary, and its [`forward`] is the adapter that replays
-//! returned events onto one, so the observation suites hold without
-//! rewriting their assertions.
-
-#[cfg(test)]
-pub(crate) use promptforge_parser::test_support::synthetic_section;
+//! in-crate loop - an observer, a client, a fixture tool table, a broker, a
+//! delta hook - and [`run_with_host`] is that loop's implicit-prepare path
+//! over the tokio driver: prepare, refuse or run. The tool and broker
+//! fixtures implement the stand-in traits [`TestTool`] and [`TestBroker`];
+//! the production traits are the harness's, which no engine crate names.
+//! [`Observer`](recording::Observer) and
+//! [`Observation`](recording::Observation) are the suites' recording
+//! vocabulary, and [`forward`] is the adapter that replays returned events
+//! onto one, so the observation suites hold without rewriting their
+//! assertions. Everything else here - the raw-body capture, the null
+//! observer, the detail constants, the fixture tool table - is
+//! crate-internal test plumbing, not host API.
 
 use std::sync::Arc;
 
@@ -40,16 +40,16 @@ use crate::execute::{
 };
 use crate::parser::Prompt;
 
-pub mod host;
+pub(crate) mod host;
 #[cfg(test)]
 #[path = "test_support/mock-gateway-client.rs"]
 pub(crate) mod mock_gateway_client;
 pub mod recording;
-pub mod tokio_driver;
-pub mod tools;
+pub(crate) mod tokio_driver;
+pub(crate) mod tools;
 
 pub use host::{ChatClient, DeltaHook, RunHost};
-pub use recording::{RecordingObserver, forward};
+pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub use tools::{TestBroker, TestTool, TestToolTable};
 

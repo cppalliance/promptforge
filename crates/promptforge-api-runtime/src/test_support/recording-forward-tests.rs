@@ -520,7 +520,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
             task: "0.1".parse().expect("a task id parses"),
         },
     ];
-    forward(events, &recorder, Some(&recorder));
+    forward_impl(events, &recorder, Some(&recorder));
     assert_eq!(
         *recorder.observed.lock().expect("not poisoned"),
         vec![
@@ -561,7 +561,6 @@ fn a_reply_forwards_its_origin_to_the_observer() {
             origin: ReplyOrigin::Infer,
         }],
         &recorder,
-        None,
     );
     assert_eq!(
         *recorder.content.lock().expect("not poisoned"),
@@ -585,7 +584,6 @@ fn debug_events_are_dropped_without_a_capture() {
             body: serde_json::json!({}),
         }],
         &recorder,
-        None,
     );
     assert!(recorder.observed.lock().expect("not poisoned").is_empty());
     assert!(recorder.captured.lock().expect("not poisoned").is_empty());

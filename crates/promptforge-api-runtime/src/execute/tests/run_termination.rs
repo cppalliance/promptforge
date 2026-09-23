@@ -43,11 +43,11 @@ fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResul
     loop {
         match run.step() {
             Step::Done { result, events } => {
-                forward(events, recorder, None);
+                forward(events, recorder);
                 return result;
             }
             Step::Pending { effects, events } => {
-                forward(events, recorder, None);
+                forward(events, recorder);
                 assert!(
                     !effects.is_empty() || cancelled,
                     "a live run issues an effect on every pending step"

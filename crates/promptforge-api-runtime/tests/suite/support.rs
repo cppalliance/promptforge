@@ -152,7 +152,7 @@ pub(super) fn parse_execution_fixture(
 ) -> Prompt {
     // The parse-time events replay onto the recorder, as the run's will.
     let (prompt, events) = Prompt::parse(source, execution);
-    promptforge_api_runtime::test_support::forward(events, observer, None);
+    promptforge_api_runtime::test_support::forward(events, observer);
     prompt.unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
 }
 

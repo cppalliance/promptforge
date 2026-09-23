@@ -1,25 +1,22 @@
-//! The suites' recording observer: the callback shape the engine's tests
-//! were written against, fed from the [`Event`](promptforge_api_types::event::Event)
-//! values a run returns.
+//! The suites' recording observer vocabulary: [`Observer`], the callback
+//! shape the engine's tests were written against, and [`Observation`], the
+//! payload-free view of the
+//! [`Event`](promptforge_api_types::event::Event) values a run returns.
 //!
 //! The engine reports as values and never through a callback. The suites,
 //! though, assert on sequences of `(execution, section, observation)`
 //! records and on the `on_*` content hooks, so this module keeps that
-//! vocabulary as a test fixture: [`Observation`] is the payload-free view
-//! of a lifecycle event, [`Observer`] the recording trait a suite
-//! implements, [`RecordingObserver`] the one most suites install, and
-//! [`DebugCapture`] the raw-body sink the debug suites use. [`forward`]
-//! replays a returned batch onto them, in order, so the suites hold
-//! without rewriting their assertions. None of this is engine API: a
-//! production host reads the events themselves.
+//! vocabulary as a test fixture. [`forward`] replays a returned batch onto
+//! an observer, in order, so the suites hold without rewriting their
+//! assertions. The remaining seams - the raw-body capture, the null
+//! observer, the detail constants - are crate-internal plumbing. None of
+//! this is engine API: a production host reads the events themselves.
 //!
 //! # Sensitivity
 //! The `execution` and `section` coordinates are author-controlled, and
 //! every `on_*` payload is model-, tool-, or user-authored; a recorder
 //! that persists them owns treating them as untrusted, exactly as a host
 //! does with the events they came from.
-
-use std::sync::{Mutex, PoisonError};
 
 use promptforge_api_types::event::ReplyOrigin;
 use promptforge_api_types::ids::TaskId;
@@ -31,8 +28,11 @@ mod forward;
 #[path = "recording-observation.rs"]
 mod observation;
 
-pub use forward::{forward, forward_one};
-pub use observation::{Observation, detail};
+pub use forward::forward;
+pub(crate) use forward::forward_one;
+pub use observation::Observation;
+#[cfg(test)]
+pub(crate) use observation::detail;
 
 /// The recording seam a suite implements: one method per report the
 /// engine used to make through a callback, each with a default body that
@@ -129,8 +129,9 @@ pub trait Observer: Send + Sync {
 
 /// An emitter over a sink nobody drains: the silent stand-in a suite
 /// passes a VM seam when it has nothing to assert about the boundaries.
+#[cfg(test)]
 #[must_use]
-pub fn null_emitter() -> promptforge_api_types::emitter::Emitter {
+pub(crate) fn null_emitter() -> promptforge_api_types::emitter::Emitter {
     promptforge_api_types::emitter::Emitter::root(
         promptforge_api_types::emitter::EventSink::default(),
         "test",
@@ -143,63 +144,31 @@ pub fn null_emitter() -> promptforge_api_types::emitter::Emitter {
 /// `Default`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct NullObserver;
+pub(crate) struct NullObserver;
 
 impl Observer for NullObserver {
     fn observe(&self, _execution: &str, _section: &str, _event: Observation) {}
 }
 
-/// The recorder most suites install: every observation it is handed, in
-/// order, as a correlated `(execution, section, trace line)` record, so a
-/// test asserts on the whole sequence rather than on a count.
-#[derive(Debug, Default)]
-pub struct RecordingObserver(Mutex<Vec<(String, String, String)>>);
-
-impl RecordingObserver {
-    /// The full correlated records recorded so far, in order. A recorder
-    /// poisoned by a panicking test still yields what it saw.
-    #[must_use]
-    pub fn records(&self) -> Vec<(String, String, String)> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    /// The `(section, trace line)` pairs recorded so far, in order.
-    #[must_use]
-    pub fn events(&self) -> Vec<(String, String)> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .map(|(_, section, detail)| (section.clone(), detail.clone()))
-            .collect()
-    }
-}
-
-impl Observer for RecordingObserver {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).push((
-            execution.to_owned(),
-            section.to_owned(),
-            event.to_string(),
-        ));
-    }
-}
-
 /// The raw model-turn capture a debug suite installs: the two bodies of
 /// each completed turn, request before response, in turn order.
-pub trait DebugCapture: Send + Sync {
+pub(crate) trait DebugCapture: Send + Sync {
     /// Receives one capture event for a model turn. `turn_index` is the
     /// 1-based model-turn number within the run.
     fn on_event(&self, execution: &str, section: &str, turn_index: u32, event: DebugEvent);
 }
 
 /// One owned capture payload for a model turn: the verbatim wire body.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the captured fields are read only by the in-crate debug suites, which the non-test `test-support` build does not compile"
+    )
+)]
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub enum DebugEvent {
+pub(crate) enum DebugEvent {
     /// The JSON body sent to the chat-completions endpoint.
     #[non_exhaustive]
     Request {
@@ -221,14 +190,14 @@ pub enum DebugEvent {
 impl DebugEvent {
     /// Builds a [`DebugEvent::Request`] from a serialized request `body`.
     #[must_use]
-    pub fn request(body: Value) -> DebugEvent {
+    pub(crate) fn request(body: Value) -> DebugEvent {
         DebugEvent::Request { body }
     }
 
     /// Builds a [`DebugEvent::Response`] from a response `body` and its
     /// parsed metadata.
     #[must_use]
-    pub fn response(
+    pub(crate) fn response(
         body: Value,
         finish_reason: Option<String>,
         reasoning_content: Option<String>,

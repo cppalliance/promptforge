@@ -4,9 +4,8 @@
 //! the stable trace rendering a recorder stores.
 //!
 //! Kept beside the recorder rather than in it so each file stays inside
-//! the repository's line ceiling; the recorder re-exports everything here,
-//! so a suite names `recording::Observation` and `recording::detail` as
-//! before.
+//! the repository's line ceiling; the recorder re-exports this module's
+//! public items, so a suite names `recording::Observation`.
 
 use std::fmt;
 
@@ -15,14 +14,19 @@ use serde_json::Value;
 
 /// The payload-free observations as named constants, the spelling the
 /// suites' expected sequences use.
-pub mod detail {
+#[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "the constants name the whole observation vocabulary; a suite uses the subset it asserts on"
+)]
+pub(crate) mod detail {
     use super::Observation;
 
     macro_rules! constants {
         ($($name:ident => $variant:ident),* $(,)?) => {
             $(
                 #[doc = concat!("The [`Observation::", stringify!($variant), "`] boundary.")]
-                pub const $name: Observation = Observation::$variant;
+                pub(crate) const $name: Observation = Observation::$variant;
             )*
         };
     }
