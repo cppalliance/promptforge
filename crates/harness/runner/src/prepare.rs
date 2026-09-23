@@ -27,7 +27,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_capabilities::{CapabilityRegistry, RunServices, activate};
 use harness_log::{LogError, Record, RecordKind, RunId, RunMeta, RunOutcome};
-use promptforge_api_runtime::execute::{Environment, RunContext, RunError};
+use promptforge_api_runtime::{Environment, RunContext, RunError};
 use promptforge_api_runtime::{ParseError, Prompt, Run};
 use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::event::Event;

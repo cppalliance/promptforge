@@ -89,7 +89,7 @@ pub enum Step {
 /// ```
 /// use std::sync::Arc;
 ///
-/// use promptforge_api_runtime::execute::{Run, RunContext, RunResult, Step};
+/// use promptforge_api_runtime::{Run, RunContext, RunResult, Step};
 /// use promptforge_api_runtime::parser::Prompt;
 /// use promptforge_api_types::timestamp::Timestamp;
 ///

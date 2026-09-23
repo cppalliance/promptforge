@@ -34,7 +34,7 @@ nz!(nz_usize, NonZeroUsize, usize);
 /// ```
 /// use std::num::NonZeroU32;
 ///
-/// use promptforge_api_runtime::execute::RunLimits;
+/// use promptforge_api_runtime::RunLimits;
 ///
 /// let eight = NonZeroU32::new(8).ok_or("8 is non-zero")?;
 /// let limits = RunLimits::new().max_tool_iterations(eight);
@@ -58,7 +58,7 @@ impl RunLimits {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_api_runtime::execute::RunLimits;
+    /// use promptforge_api_runtime::RunLimits;
     ///
     /// assert_eq!(RunLimits::new().tool_iterations().get(), 24);
     /// ```

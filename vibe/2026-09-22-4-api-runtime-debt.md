@@ -254,7 +254,7 @@ Each step is one commit holding its code and its tests.
 
 <step-3>
 
-### Step 3: Make the crate root the one public facade
+### Step 3: Make the crate root the one public facade [completed]
 
 - Component: `facade`
 - Artifacts: `src/lib.rs` - make `pub mod execute` a private `mod execute` and add a root re-export for every item that stays public inside `execute`; the compiler-derived set is authoritative (`unreachable_pub` reports every miss), and the representative set is `ModelBindings`, `ToolBindings`, `CapabilityConflict`, `RequirementCheck`, `Requirements`, `UnmetRequirement`, `AnswerRecord`, `ChatAnswerRecord`, `Effect`, `EffectAnswer`, `EffectId`, `EffectRecord`, `InputAnswerRecord`, `Run`, `Step`, `StoreAnswerRecord`, `ToolAnswerRecord`, `StoreOp`, `StoreOutcome`, `StoreError`, and the `perform_store_op` function (`src/execute.rs` line 135, a function, not a re-export); names already at the crate root need nothing added. Rewrite the `promptforge_api_runtime::execute::` imports in `crates/harness/runner/src/{effect_loop,effect_loop-answering,performers-host,performers,prepare}.rs`, `crates/harness/runner/tests/it/{prepare,support}.rs`, `crates/harness/capabilities/src/activation.rs`, `crates/harness/capabilities/tests/it/{activation,assembly,support}.rs`, `tests/suite/{execution,fanout,prepare,support,vfs}.rs`, and `benches/models_loop.rs`; the doctests in `src/execute/config.rs`, `src/execute/config-limits.rs`, and `src/execute/run.rs`; and the `execute` link and module description in `src/lib.md` line 3.

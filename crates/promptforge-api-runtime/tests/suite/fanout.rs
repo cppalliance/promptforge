@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use promptforge_api_runtime::execute::RunErrorKind;
+use promptforge_api_runtime::RunErrorKind;
 use shared_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 
 use super::support::{Record, run_fixture};

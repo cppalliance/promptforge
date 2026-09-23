@@ -3,7 +3,7 @@
 //! activation failure semantics, and the run path's refusals.
 
 use harness_capabilities::{CapabilityId, CapabilityRegistry};
-use promptforge_api_runtime::execute::{Environment, RunErrorKind, RunResult};
+use promptforge_api_runtime::{Environment, RunErrorKind, RunResult};
 use promptforge_api_types::cancel::CancelHandle;
 use shared_vfs::Origin;
 

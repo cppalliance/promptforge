@@ -12,9 +12,9 @@
 
 use std::num::NonZeroU32;
 
-use promptforge_api_runtime::execute::{Environment, RequirementCheck, RunErrorKind, RunResult};
 use promptforge_api_runtime::parser::Prompt;
 use promptforge_api_runtime::test_support::{RunHost, run_with_host};
+use promptforge_api_runtime::{Environment, RequirementCheck, RunErrorKind, RunResult};
 use promptforge_api_types::capabilities::CapabilityId;
 use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_api_types::tools::{ToolCatalog, ToolDescriptor, ToolId};

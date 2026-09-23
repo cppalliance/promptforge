@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_api_runtime::execute::{CapabilityConflict, Requirements};
 use promptforge_api_runtime::parser::Prompt;
+use promptforge_api_runtime::{CapabilityConflict, Requirements};
 use promptforge_api_types::capabilities::CapabilityId;
 use promptforge_api_types::tools::{ToolCatalog, ToolDescriptor, ToolId};
 

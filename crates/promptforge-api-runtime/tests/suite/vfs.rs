@@ -97,7 +97,7 @@ fn offline_run(
     execution: &'static str,
 ) -> (
     VfsRef,
-    impl std::future::Future<Output = Result<String, promptforge_api_runtime::execute::RunError>>,
+    impl std::future::Future<Output = Result<String, promptforge_api_runtime::RunError>>,
 ) {
     let recorder = Arc::new(Recorder::default());
     let prompt = prompt.clone();

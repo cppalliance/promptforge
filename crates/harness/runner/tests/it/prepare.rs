@@ -17,7 +17,7 @@ use harness_runner::display_chain;
 use harness_runner::effect_loop::{SharedLog, drive_run};
 use harness_runner::performers::{ActivatedTools, ToolPerformer};
 use harness_runner::prepare::{PrepareError, Prepared, Services, prepare_run};
-use promptforge_api_runtime::execute::RunErrorKind;
+use promptforge_api_runtime::RunErrorKind;
 use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
 

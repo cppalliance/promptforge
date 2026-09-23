@@ -40,7 +40,7 @@ use super::bindings::{ModelBindings, ToolBindings};
 ///
 /// # Examples
 /// ```
-/// use promptforge_api_runtime::execute::{RunContext, RunLimits};
+/// use promptforge_api_runtime::{RunContext, RunLimits};
 /// use promptforge_api_types::timestamp::Timestamp;
 ///
 /// let ctx = RunContext::new("example-run", 7, Timestamp::from_unix_millis(951_782_400_000))

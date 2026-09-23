@@ -33,7 +33,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use harness_log::{LogError, Record, RecordKind, RunId, RunLog, RunOutcome};
-use promptforge_api_runtime::execute::RunError;
+use promptforge_api_runtime::RunError;
 use promptforge_api_runtime::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
 use promptforge_api_types::cancel::CancelHandle;
 use promptforge_api_types::event::Event;
