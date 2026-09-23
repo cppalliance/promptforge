@@ -63,28 +63,35 @@
 //!
 //! # Module layout
 //!
-//! The run's outcome type ([`RunResult`]) is defined here; the rest is split
-//! into focused private children: `error` (the public [`RunError`]),
-//! `config` ([`RunContext`]/[`RunLimits`]), `environment` (the public
-//! [`Environment`], whose `prepare` fills slots against the host-supplied
-//! catalog; capability activation itself is the harness's, in
-//! `harness-capabilities`), `requirements` (the preflight
-//! [`Requirements`] report), `context` (the ambient `RunState` run
-//! state), `tools` (the nested-inference round's answer),
-//! `section_vm` (the section VM setup half shared by the walk and
-//! the fanout arm), `section_context` (the per-section `SectionContext`
-//! frame the scheduler's chains construct, run, and tear down),
-//! `engine` (the walk-target
-//! resolution helpers), `protocol` (the coroutine request/answer types
-//! for the yield/resume boundary), `run` (the host boundary: the `Run`
-//! state machine with its `step`, `resume`, and `cancel`, the `Step` it
-//! returns, and the effect vocabulary - the `Effect` a leaf arm issues,
-//! its serializable `EffectRecord`, and the `EffectAnswer` a host
-//! returns), `scheduler` (the chain-stack scheduler driving the coroutine
-//! protocol: the live H1 pass, the walk, call chains, fanout, and the
-//! `chat` and `tool_call` rounds the section-visible `models.loop` shim
-//! yields), `scope` (tool-scope validation and schema/dispatch
-//! preparation), and `support` (shared helpers).
+//! The run's outcome type ([`RunResult`]) is defined here; the rest lives in
+//! focused private children:
+//!
+//! - `bindings` - the run's journaled [`ModelBindings`] and [`ToolBindings`].
+//! - `config` - the public [`RunContext`] and [`RunLimits`].
+//! - `context` - the ambient `RunState` run state.
+//! - `engine` - the walk-target resolution helpers.
+//! - `environment` - the public [`Environment`], whose `prepare` fills slots
+//!   against the host-supplied catalog; capability activation itself is the
+//!   harness's, in `harness-capabilities`.
+//! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
+//! - `fill` - prepare's tool- and model-slot fill functions.
+//! - `protocol` - the coroutine request/answer types for the yield/resume
+//!   boundary.
+//! - `requirements` - the preflight [`Requirements`] report.
+//! - `run` - the host boundary: the `Run` state machine with its `step`,
+//!   `resume`, and `cancel`, the `Step` it returns, and the effect vocabulary
+//!   (the `Effect` a leaf arm issues, its serializable `EffectRecord`, and the
+//!   `EffectAnswer` a host returns).
+//! - `scheduler` - the chain-stack scheduler driving the coroutine protocol:
+//!   the live H1 pass, the walk, call chains, fanout, and the `chat` and
+//!   `tool_call` rounds the section-visible `models.loop` shim yields.
+//! - `scope` - tool-scope validation and schema/dispatch preparation.
+//! - `section_context` - the per-section `SectionContext` frame the
+//!   scheduler's chains construct, run, and tear down.
+//! - `section_vm` - the section VM setup half shared by the walk and the
+//!   fanout arm.
+//! - `support` - shared helpers.
+//! - `tools` - the nested-inference round's answer.
 
 mod bindings;
 mod config;

@@ -215,10 +215,9 @@ impl Scheduler {
     }
 
     /// Applies a store operation's answer: the operation's succeeded or
-    /// failed observation (pushed before the chain resumes, so the event
-    /// stream keeps the legacy closure path's ordering - the op's outcome
-    /// precedes the chunk's closing boundary), then the outcome, with a
-    /// failure classified for the answer channel.
+    /// failed observation (pushed before the chain resumes, so the op's
+    /// outcome precedes the chunk's closing boundary), then the outcome,
+    /// with a failure classified for the answer channel.
     fn accept_store(
         &self,
         chain: ChainIndex,

@@ -180,8 +180,7 @@ struct Counters {
     next_entry: u32,
 }
 
-/// One chain: a contained line of section execution, the scheduler's
-/// counterpart to the legacy `walk_siblings` invocation.
+/// One chain: a contained line of section execution.
 ///
 /// The chain owns its per-section frame and adds the chain position (the
 /// sibling slice being walked plus the current index), the coroutine handle

@@ -8,8 +8,8 @@
 //! files; and an every-Nth-instruction hook polls the run's cancel flag, so
 //! even an unbounded loop aborts promptly once the host cancels.
 //!
-//! The implementation sits in the `promptforge-lua` crate and is re-exported
-//! here unchanged, so existing `promptforge_api_runtime::lua::*` paths keep working.
+//! The implementation sits in the `promptforge-lua` crate; this module is
+//! the crate-internal import surface for it.
 
 // The store operation behind `execute::perform_store_op`, the entry point
 // a host's store performer answers a `Store` effect through.

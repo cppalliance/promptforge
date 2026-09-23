@@ -164,6 +164,10 @@ impl Run {
     /// [`Step::Done`] once the run is over and every issued effect is
     /// answered. A step after `Done` is a host error and reports an
     /// internal failure.
+    ///
+    /// Infallible by design: a run's failures are values in
+    /// [`RunResult::Failure`], so the host drives the loop and owns the
+    /// retry policy without catching a panic.
     pub fn step(&mut self) -> Step {
         if let Some(error) = self.stillborn.take() {
             return Step::Done {
@@ -185,9 +189,15 @@ impl Run {
     /// Applies one effect's answer: the parked chain resumes with it (or
     /// with a cancelled error for [`EffectAnswer::Dropped`]) and is
     /// re-queued for the next `step`; the round's events are buffered for
-    /// that step. An answer for an effect whose chain stopped waiting is
-    /// discarded. An answer for an id the run never issued, or a second
-    /// answer for one effect, is an internal error that ends the run.
+    /// that step. Each answer must match the kind of the effect it answers -
+    /// a chat answer for a `Chat` effect, a tool answer for a `ToolCall`,
+    /// and so on; a mismatch is an internal error that ends the run. An
+    /// answer for an effect whose chain stopped waiting is discarded. An
+    /// answer for an id the run never issued, or a second answer for one
+    /// effect, is likewise an internal error that ends the run.
+    ///
+    /// Infallible by design: a bad answer ends the run with a
+    /// [`RunResult::Failure`] rather than returning an error or panicking.
     pub fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
         if let Some(scheduler) = self.scheduler.as_mut() {
             scheduler.resume(id, answer);
@@ -197,6 +207,10 @@ impl Run {
     /// Sets the run's cancel flag. Running Lua observes it from its
     /// instruction hook; the next `step` tears every chain down and, once
     /// the outstanding effects are answered, reports the run as cancelled.
+    ///
+    /// Cancellation is a request, not a synchronous stop: the host answers
+    /// each effect it abandons with [`EffectAnswer::Dropped`]. Infallible by
+    /// design, like `step` and `resume`.
     pub fn cancel(&mut self) {
         self.cancel.cancel();
     }

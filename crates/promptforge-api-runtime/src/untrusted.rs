@@ -1,7 +1,7 @@
 //! Guard-wrapping for untrusted external data.
 //!
-//! The implementation sits in the `promptforge-api-types` crate and is
-//! re-exported here unchanged, so existing `promptforge_api_runtime::untrusted::*`
-//! paths keep working.
+//! The implementation sits in the `promptforge-api-types` crate's
+//! `untrusted` module; this module is the crate-internal import surface for
+//! it.
 
 pub(crate) use promptforge_api_types::untrusted::GuardNonce;

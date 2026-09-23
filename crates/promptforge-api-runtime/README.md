@@ -1,16 +1,12 @@
 # promptforge-api-runtime
 
-[![Crates.io](https://img.shields.io/crates/v/promptforge-api-runtime.svg)](https://crates.io/crates/promptforge-api-runtime)
-[![docs.rs](https://img.shields.io/docsrs/promptforge-api-runtime)](https://docs.rs/promptforge-api-runtime)
-[![License](https://img.shields.io/crates/l/promptforge-api-runtime)](LICENSE)
-
 A Rust library that turns Markdown files into executable AI prompt pipelines. You write a prompt as a document - YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions - and the library parses it into a validated representation, then runs it as a deterministic state machine: every model round, tool call, input wait, store operation, and timer is an effect value the host performs and answers, and every boundary is an event value the host logs. Structured multi-section prompts with tool dispatch, model orchestration, concurrent fanout, and a virtual filesystem, driven by a `step`/`resume` loop the host owns.
 
 ## Usage
 
 ```toml
 [dependencies]
-promptforge-api-runtime = "0.1"
+promptforge-api-runtime.workspace = true
 ```
 
 ```rust

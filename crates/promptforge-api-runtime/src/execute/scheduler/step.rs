@@ -225,8 +225,7 @@ impl Scheduler {
                     YieldParse::Call(answer) => {
                         // An argument-validation failure is the call's
                         // answer: the shim raises it at the call site, so
-                        // an author `pcall` catches it exactly as on the
-                        // legacy callback path.
+                        // an author `pcall` catches it.
                         chain.coroutine = Some(thread);
                         self.answer_inline(id, answer.map_error(Error::from));
                         Ok(())

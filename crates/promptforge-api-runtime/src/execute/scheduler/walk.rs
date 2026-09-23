@@ -203,8 +203,8 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the final `var` read-back fails (the
-    /// frame drops unarmed, as on the legacy path), or
-    /// [`Error::Internal`] when the chain holds no frame.
+    /// frame drops unarmed), or [`Error::Internal`] when the chain holds no
+    /// frame.
     pub(super) fn end_section(&mut self, id: ChainIndex) -> Result<()> {
         let chain = &mut self.chains[id.index()];
         let Some(mut frame) = chain.frame.take() else {
@@ -228,10 +228,9 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the `var` read-back fails (the
-    /// frame drops unarmed, as on the legacy path) or when the heading
-    /// matches no visible section or more than one - the jumper's frame has
-    /// already closed as completed, exactly as the legacy walk resolves
-    /// after the jumper's teardown.
+    /// frame drops unarmed) or when the heading matches no visible section
+    /// or more than one - the jumper's frame has already closed as
+    /// completed.
     pub(super) fn apply_jump(&mut self, id: ChainIndex, heading: &str) -> Result<()> {
         let (slice, index) = {
             let chain = &mut self.chains[id.index()];

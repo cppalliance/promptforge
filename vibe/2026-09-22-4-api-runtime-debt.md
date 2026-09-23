@@ -355,7 +355,7 @@ Each step is one commit holding its code and its tests.
 
 <step-12>
 
-### Step 12: Fix the documentation
+### Step 12: Fix the documentation [completed]
 
 - Component: `docs`
 - Artifacts: `README.md` - remove the crates.io, docs.rs, and license badges (lines 3-5) and change the dependency snippet (lines 11-14) to `promptforge-api-runtime.workspace = true`. Rewrite `src/lua.rs` (lines 11-12) and `src/untrusted.rs` (lines 3-5) module docs as crate-internal import surfaces like `src/store.rs` and `src/tools.rs`. Replace the `src/execute.rs` module-layout paragraph (lines 64-87) with a one-line-per-child bullet map. Remove the legacy-path comments in `src/execute/scheduler.rs` and its `apply`, `dispatch`, `step`, and `walk` modules. Document the step/resume contract on `Run::step`, `Run::resume`, and `Run::cancel` in `src/execute/run.rs`. Update `crates/promptforge-api-runtime/AGENTS.md` where its historical-path rule, module description, or single-public-crate paragraph no longer matches the new facade.

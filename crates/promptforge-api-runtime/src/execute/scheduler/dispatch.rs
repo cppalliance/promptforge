@@ -41,9 +41,8 @@ pub(super) fn unbound_tool_call(tool_set: &ToolSet, name: &str) -> Error {
     }
 }
 
-/// The succeeded/failed observation pair one store operation reports,
-/// matching the legacy direct closures event for event; `exists` reported
-/// nothing there and reports nothing here.
+/// The succeeded/failed observation pair one store operation reports;
+/// `exists` reports nothing.
 fn store_observations(op: &StoreOp) -> Option<(Lifecycle, Lifecycle)> {
     let pair = match op {
         StoreOp::Write { .. } => (
@@ -110,9 +109,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
 /// driver intercepts it at the answer boundary and ends the run on the
 /// spot rather than resuming it into Lua, so no author `pcall` can catch
 /// it. Every other failure returns as the call's answer with the store's
-/// own message, exactly as the legacy closure's external error surfaced at
-/// the call site (and classified `Lua` if it aborts the chunk uncaught, as
-/// the legacy path did).
+/// own message, classified `Lua` if it aborts the chunk uncaught.
 pub(super) fn classify_store_failure(error: &StoreError) -> Error {
     if let Some(detail) = error.conflict_detail() {
         return Error::Determinism(detail.to_owned());
@@ -224,7 +221,7 @@ impl Scheduler {
     /// single tool-free gateway round as a `Chat` effect over one user
     /// message, and parks the chain in the pending table. A resolution
     /// failure is the call's answer, resumed into the caller so an author
-    /// `pcall` can catch it exactly as on the legacy callback path.
+    /// `pcall` can catch it.
     fn dispatch_infer(&mut self, id: ChainIndex, prompt: &str, binding: Option<ModelBinding>) {
         if let Err(error) = self.issue_infer(id, prompt, binding) {
             self.answer_inline(id, Answer::Infer(Err(error)));
@@ -314,7 +311,7 @@ impl Scheduler {
     /// child's finish delivers its final text as the answer. Every dispatch
     /// failure - the depth cap, target resolution, child construction - is
     /// the call's answer, resumed into the caller so an author `pcall` can
-    /// catch it exactly as on the legacy callback path.
+    /// catch it.
     fn dispatch_call(
         &mut self,
         id: ChainIndex,
