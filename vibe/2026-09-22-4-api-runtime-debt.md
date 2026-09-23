@@ -335,7 +335,7 @@ Each step is one commit holding its code and its tests.
 
 <step-10>
 
-### Step 10: Split `src/execute/tests.rs`
+### Step 10: Split `src/execute/tests.rs` [completed]
 
 - Component: `suite`
 - Artifacts: extract `src/execute/tests.rs` along its seams into plain modules under `src/execute/tests/`: context helpers (lines 1-570), fixture tools (lines 578-800), and the scripted gateway (lines 810-1230), re-measuring the ranges first.
