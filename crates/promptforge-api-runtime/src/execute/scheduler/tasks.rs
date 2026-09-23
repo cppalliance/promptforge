@@ -135,13 +135,11 @@ impl Scheduler {
     ) {
         match self.prepare_spawn(id, target, input, seed, var, origin, fanout) {
             Ok((task, child)) => {
-                self.chains[id.index()].incoming = Some(Answer::Spawn(Ok(task)));
-                self.ready.push_back(id);
+                self.answer_inline(id, Answer::Spawn(Ok(task)));
                 self.ready.push_back(child);
             }
             Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Spawn(Err(error)));
-                self.ready.push_back(id);
+                self.answer_inline(id, Answer::Spawn(Err(error)));
             }
         }
     }

@@ -86,7 +86,6 @@ impl Scheduler {
     /// notices resume the chain at once.
     pub(super) fn dispatch_drain_task_notices(&mut self, id: ChainIndex) {
         let notices = self.drain_task_notices(id);
-        self.chains[id.index()].incoming = Some(Answer::DrainTaskNotices(Ok(notices)));
-        self.ready.push_back(id);
+        self.answer_inline(id, Answer::DrainTaskNotices(Ok(notices)));
     }
 }

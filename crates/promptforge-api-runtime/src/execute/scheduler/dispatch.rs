@@ -227,8 +227,7 @@ impl Scheduler {
     /// `pcall` can catch it exactly as on the legacy callback path.
     fn dispatch_infer(&mut self, id: ChainIndex, prompt: &str, binding: Option<ModelBinding>) {
         if let Err(error) = self.issue_infer(id, prompt, binding) {
-            self.chains[id.index()].incoming = Some(Answer::Infer(Err(error)));
-            self.ready.push_back(id);
+            self.answer_inline(id, Answer::Infer(Err(error)));
         }
     }
 
@@ -329,8 +328,7 @@ impl Scheduler {
                 self.ready.push_back(child);
             }
             Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Call(Err(error)));
-                self.ready.push_back(id);
+                self.answer_inline(id, Answer::Call(Err(error)));
             }
         }
     }

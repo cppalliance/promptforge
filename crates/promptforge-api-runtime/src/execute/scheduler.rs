@@ -453,6 +453,13 @@ impl Scheduler {
         matches!(self.phase, Phase::Ending(_) | Phase::Done)
     }
 
+    /// Resumes `id` at once with `answer`: the inline-answer path every
+    /// non-waiting task arm takes.
+    fn answer_inline(&mut self, id: ChainIndex, answer: Answer<Error>) {
+        self.chains[id.index()].incoming = Some(answer);
+        self.ready.push_back(id);
+    }
+
     /// Issues one leaf effect for `chain`: allocates its id, stamps it with
     /// the chain's task provenance, queues it for the step's return, and
     /// parks the chain in the pending table with `resume`, the rule its

@@ -121,8 +121,7 @@ impl Scheduler {
         last: Option<u32>,
     ) {
         if let Err(error) = self.readable_task(id, task) {
-            self.chains[id.index()].incoming = Some(Answer::TaskEvents(Err(error)));
-            self.ready.push_back(id);
+            self.answer_inline(id, Answer::TaskEvents(Err(error)));
             return;
         }
         let effect = Effect::TaskEvents {

@@ -42,8 +42,7 @@ impl Scheduler {
     /// shim raises it before any wait.
     pub(super) fn dispatch_timer(&mut self, id: ChainIndex, seconds: f64) {
         let answer = Answer::Timer(self.prepare_timer(id, seconds));
-        self.chains[id.index()].incoming = Some(answer);
-        self.ready.push_back(id);
+        self.answer_inline(id, answer);
     }
 
     /// The fallible half of timer dispatch, shared with the model's

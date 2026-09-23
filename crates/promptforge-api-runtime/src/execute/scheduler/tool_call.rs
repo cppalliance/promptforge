@@ -133,19 +133,16 @@ impl Scheduler {
             // timer's firing answers it.
             Ok(ToolCallDispatch::Issued | ToolCallDispatch::Parked) => {}
             Ok(ToolCallDispatch::Answered(answer)) => {
-                self.chains[id.index()].incoming = Some(answer);
-                self.ready.push_back(id);
+                self.answer_inline(id, answer);
             }
             // The caller runs first and the task when it suspends, the
             // order `tasks.spawn` keeps.
             Ok(ToolCallDispatch::Started(answer, child)) => {
-                self.chains[id.index()].incoming = Some(answer);
-                self.ready.push_back(id);
+                self.answer_inline(id, answer);
                 self.ready.push_back(child);
             }
             Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
-                self.ready.push_back(id);
+                self.answer_inline(id, Answer::ToolCallResult(Err(error)));
             }
         }
     }

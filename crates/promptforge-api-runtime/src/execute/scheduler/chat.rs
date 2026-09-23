@@ -82,12 +82,10 @@ impl Scheduler {
         match self.prepare_chat(id, messages, binding, model, tools) {
             Ok(ChatDispatch::Issued) => {}
             Ok(ChatDispatch::Answered(answer)) => {
-                self.chains[id.index()].incoming = Some(answer);
-                self.ready.push_back(id);
+                self.answer_inline(id, answer);
             }
             Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Chat(Err(error)));
-                self.ready.push_back(id);
+                self.answer_inline(id, Answer::Chat(Err(error)));
             }
         }
     }

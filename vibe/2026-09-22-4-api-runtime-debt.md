@@ -285,7 +285,7 @@ Each step is one commit holding its code and its tests.
 
 <step-5>
 
-### Step 5: Hoist `answer_inline`
+### Step 5: Hoist `answer_inline` [completed]
 
 - Component: `internals`
 - Artifacts: move `answer_inline` from `src/execute/scheduler/waits.rs` (lines 56-61) to the core `impl Scheduler` in `src/execute/scheduler.rs`, replacing the sixteen hand-written `incoming = Some(..)` plus `ready.push_back(..)` pairs in the `chat`, `timer`, `dispatch`, `tasks`, `await_tasks`, `task_events`, `apply`, `step`, `tool_call`, `notices`, and `chain` modules. Keep the spawned-child push after the helper in `src/execute/scheduler/tasks.rs` line 140 and `src/execute/scheduler/tool_call.rs` line 144, and convert `src/execute/scheduler/step.rs` lines 229-232 as well: where the chain borrow conflicts with `self.ready`, destructure the chain and the ready queue into separate locals first, so that site converts under the same ordering rule instead of being skipped.

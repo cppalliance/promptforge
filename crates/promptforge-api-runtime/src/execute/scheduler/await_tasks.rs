@@ -163,7 +163,6 @@ impl Scheduler {
             &awaiting.call_id,
             BuiltinAnswer::served(text),
         );
-        self.chains[owner.index()].incoming = Some(answer);
-        self.ready.push_back(owner);
+        self.answer_inline(owner, answer);
     }
 }

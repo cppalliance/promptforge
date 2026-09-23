@@ -108,8 +108,7 @@ impl Scheduler {
                 ));
             }
         };
-        self.chains[chain.index()].incoming = Some(answer);
-        self.ready.push_back(chain);
+        self.answer_inline(chain, answer);
         Ok(())
     }
 

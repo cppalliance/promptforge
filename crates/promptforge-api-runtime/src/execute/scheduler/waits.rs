@@ -53,13 +53,6 @@ fn state_tag(state: TaskState) -> &'static str {
 }
 
 impl Scheduler {
-    /// Resumes `id` at once with `answer`: the inline-answer path every
-    /// non-waiting task arm takes.
-    fn answer_inline(&mut self, id: ChainIndex, answer: Answer<Error>) {
-        self.chains[id.index()].incoming = Some(answer);
-        self.ready.push_back(id);
-    }
-
     /// The slot of a task `caller` owns, or [`Error::TaskNotOwned`] - for
     /// an unknown id too.
     fn owned_slot(&self, caller: ChainIndex, task: &TaskId) -> Result<&TaskSlot> {

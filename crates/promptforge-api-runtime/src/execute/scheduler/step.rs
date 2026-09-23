@@ -228,8 +228,7 @@ impl Scheduler {
                         // an author `pcall` catches it exactly as on the
                         // legacy callback path.
                         chain.coroutine = Some(thread);
-                        chain.incoming = Some(answer.map_error(Error::from));
-                        self.ready.push_back(id);
+                        self.answer_inline(id, answer.map_error(Error::from));
                         Ok(())
                     }
                     YieldParse::Malformed(error) => {

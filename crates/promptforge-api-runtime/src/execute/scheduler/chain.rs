@@ -179,8 +179,7 @@ impl Scheduler {
                     Some(id),
                     "a finishing child chain is the call stack's top"
                 );
-                self.chains[parent_id.index()].incoming = Some(Answer::Call(outcome));
-                self.ready.push_back(parent_id);
+                self.answer_inline(parent_id, Answer::Call(outcome));
             }
         }
     }
