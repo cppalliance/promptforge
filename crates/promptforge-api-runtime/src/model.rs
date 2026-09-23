@@ -28,8 +28,8 @@ pub use promptforge_api_types::models::{
 pub use promptforge_api_types::wire::StreamDelta;
 #[doc(hidden)]
 pub use promptforge_model_client::client::{
-    Applied, ChunkSource, SseScanner, StreamAccumulator, ToolSchemaError, build_request_body,
-    escape_controls, read_body_capped, read_completion_stream,
+    ChunkSource, ToolSchemaError, build_request_body, escape_controls, read_body_capped,
+    read_completion_stream,
 };
 pub use promptforge_model_client::client::{
     Completion, CompletionResult, Message, ToolArguments, ToolCall, ToolSchema,

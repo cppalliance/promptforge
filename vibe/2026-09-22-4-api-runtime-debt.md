@@ -243,7 +243,7 @@ Each step is one commit holding its code and its tests.
 
 <step-2>
 
-### Step 2: Drop the hidden model re-exports
+### Step 2: Drop the hidden model re-exports [completed]
 
 - Component: `facade`
 - Artifacts: `src/model.rs` (lines 29-33) - remove the `#[doc(hidden)]` re-exports `Applied`, `SseScanner`, and `StreamAccumulator`. These three share the hidden block with `ChunkSource`, `ToolSchemaError`, `build_request_body`, `escape_controls`, `read_body_capped`, and `read_completion_stream`, so remove only those three lines and leave the rest. First confirm no crate outside `promptforge-api-runtime` names the three (a workspace-wide grep) and that `crates/harness/models/src/transport.rs` (lines 14-18) still names none of them; the plan asserts it, but a removal breaks any outside caller at compile time.
