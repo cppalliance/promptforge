@@ -325,7 +325,7 @@ Each step is one commit holding its code and its tests.
 
 <step-9>
 
-### Step 9: Split the scheduler tests
+### Step 9: Split the scheduler tests [completed]
 
 - Component: `suite`
 - Artifacts: split `src/execute/tests/scheduler.rs` along the five Decision Record seams into `src/execute/tests/scheduler/{walk,live-h1,fanout,store-gate,failures}.rs`, with `src/execute/tests/scheduler.rs` as the parent module of plain `mod` declarations and no `#[path]` attributes.
