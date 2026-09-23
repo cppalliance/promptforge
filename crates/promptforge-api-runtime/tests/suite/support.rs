@@ -151,9 +151,22 @@ pub(super) fn parse_execution_fixture(
     observer: &dyn Observer,
 ) -> Prompt {
     // The parse-time events replay onto the recorder, as the run's will.
-    let (prompt, events) = Prompt::parse(source, execution);
+    let (prompt, events) = Prompt::parse(&with_test_title(source), execution);
     promptforge_api_runtime::test_support::forward(events, observer);
     prompt.unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
+}
+
+/// An inline fixture that omits the required H1 title gets the shared
+/// `# Test prompt` heading the in-crate harness `parse` injected before the
+/// moved cases were ported; a source that already carries an H1 (every
+/// fixture file, and the cases that author their own title) is parsed as
+/// written.
+fn with_test_title(source: &str) -> std::borrow::Cow<'_, str> {
+    if source.lines().any(|line| line.starts_with("# ")) {
+        std::borrow::Cow::Borrowed(source)
+    } else {
+        std::borrow::Cow::Owned(source.replacen("---\n\n", "---\n\n# Test prompt\n\n", 1))
+    }
 }
 
 /// The run's VFS handle with per-call fresh-access store reads, for
@@ -185,8 +198,8 @@ pub(super) struct FixtureRun {
 /// prepared router's handle; an explicit `vfs` is the raw host-handle
 /// contract - no prepare pass, the run uses the handle as-is.
 pub(super) async fn run_fixture(
-    source: &'static str,
-    name: &'static str,
+    source: &str,
+    name: &str,
     execution: &'static str,
     args: &str,
     vfs: Option<VfsRef>,

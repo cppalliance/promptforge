@@ -5,7 +5,18 @@
 //! at section end, and no `reply` global or automatic result handoff
 //! crosses a section boundary.
 
-use super::*;
+use promptforge_api_runtime::RunError;
+
+use super::support::run_fixture;
+
+const EXECUTION: &str = "execute-test";
+
+/// Runs a lazy-prose fixture offline with no args and the run's own store.
+async fn run_offline(md: &str) -> Result<String, RunError> {
+    run_fixture(md, "lazy-prose", EXECUTION, "", None)
+        .await
+        .result
+}
 
 /// The frontmatter every lazy-prose test shares, fused into the prompt
 /// literal at compile time so a test states only its body.

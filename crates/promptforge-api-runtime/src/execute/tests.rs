@@ -1585,7 +1585,6 @@ impl RecordingCapture {
     }
 }
 
-mod args_surface;
 mod chat_arm;
 mod chat_scope;
 mod debug_and_counts;
@@ -1594,7 +1593,6 @@ mod exec_flow;
 mod exit_rules;
 mod fanout_acceptance;
 mod input;
-mod lazy_prose;
 mod live_infer;
 mod local_tools;
 mod model_and_reply;

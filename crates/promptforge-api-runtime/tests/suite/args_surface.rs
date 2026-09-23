@@ -5,7 +5,23 @@
 //! so an H1 repair reaches every downstream section while an H2 assignment
 //! is an error; and `{{ argv }}` joins the prose substitution namespaces.
 
-use super::*;
+use promptforge_api_runtime::RunError;
+
+use super::support::run_fixture;
+
+const EXECUTION: &str = "execute-test";
+
+/// Runs a structured-args fixture offline with the given args string.
+async fn run_args(md: &str, args: &str) -> Result<String, RunError> {
+    run_fixture(md, "args-surface", EXECUTION, args, None)
+        .await
+        .result
+}
+
+/// Runs a structured-args fixture offline with empty args.
+async fn run_offline(md: &str) -> Result<String, RunError> {
+    run_args(md, "").await
+}
 
 /// The frontmatter every structured-args test shares: one declared
 /// (required) `query` string. The declaration advertises and documents; it
@@ -19,11 +35,6 @@ macro_rules! args_prompt {
             $body
         )
     };
-}
-
-/// Runs a structured-args fixture offline with the given args string.
-async fn run_args(md: &str, args: &str) -> Result<String> {
-    run(&fixture(md), args, &[], &TestStore::new(), silent()).await
 }
 
 #[tokio::test]

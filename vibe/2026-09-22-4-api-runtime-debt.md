@@ -315,7 +315,7 @@ Each step is one commit holding its code and its tests.
 
 <step-8>
 
-### Step 8: Move public-API-only tests into `tests/suite`
+### Step 8: Move public-API-only tests into `tests/suite` [completed]
 
 - Component: `suite`
 - Artifacts: move `src/execute/tests/args_surface.rs`, `src/execute/tests/lazy_prose.rs`, and the offline cases of `src/execute/tests/exec_flow.rs` into `tests/suite`, swapping `run_offline` for the `tests/suite/support.rs` helpers and using root paths; this is a port, not a mechanical move - both files reach the private harness helpers `run`, `fixture`, `TestStore`, `silent`, and `run_offline` through `use super::*`, so each test's fixture setup is rebuilt on the suite helpers while its assertions stay unchanged; declare each new module in `tests/suite/main.rs`. Leave the `engine::` unit tests, the `advance_turn` test, the HTTP-mock-gateway cases, and the two tests that call `synthetic_section` (`list_from_section_ambiguous_error_is_loud` near line 1089 and `duplicate_top_level_section_names_error_loudly` near line 1104) in `src/execute/tests/exec_flow.rs`; those two drive engine walk internals, so an integration target cannot host them, and they take `synthetic_section` from `promptforge_parser::test_support` directly.
