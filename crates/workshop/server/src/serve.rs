@@ -328,6 +328,12 @@ fn reuse_bind(address: &str) -> std::io::Result<tokio::net::TcpListener> {
     let addr: std::net::SocketAddr = address
         .parse()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    if !addr.ip().is_loopback() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to bind {addr}: the workshop server binds only to loopback"),
+        ));
+    }
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
         socket2::Type::STREAM,

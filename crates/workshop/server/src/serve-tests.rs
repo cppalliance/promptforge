@@ -323,3 +323,40 @@ fn a_bind_conflict_fails_spawn_with_io_error() {
         "expected Io, got {error:?}"
     );
 }
+
+/// The server may only ever bind to loopback: a wildcard or LAN address
+/// would expose the workshop to other hosts. `reuse_bind` refuses those
+/// before it creates a socket, so the error is `InvalidInput` rather than
+/// a late bind failure.
+#[tokio::test]
+async fn non_loopback_binds_are_refused_with_invalid_input() {
+    for address in ["0.0.0.0:0", "[::]:0", "192.168.1.10:0"] {
+        let error = reuse_bind(address).expect_err("a non-loopback address must be refused");
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::InvalidInput,
+            "refusing {address} must be an InvalidInput error"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_loopback_address_binds() {
+    let listener = reuse_bind("127.0.0.1:0").expect("a loopback address binds");
+    drop(listener);
+}
+
+/// A runner without IPv6 may fail an `[::1]` bind for a platform reason,
+/// but the refusal itself must never be the loopback check, so the error
+/// kind is anything but `InvalidInput`.
+#[tokio::test]
+async fn an_ipv6_loopback_bind_is_not_refused_with_invalid_input() {
+    match reuse_bind("[::1]:0") {
+        Ok(listener) => drop(listener),
+        Err(error) => assert_ne!(
+            error.kind(),
+            std::io::ErrorKind::InvalidInput,
+            "an IPv6 loopback bind must not be refused with InvalidInput"
+        ),
+    }
+}

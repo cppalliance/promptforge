@@ -753,7 +753,7 @@ Components, in dependency order:
 
 <step-7>
 
-### Step 7: Refuse non-loopback binds
+### Step 7: Refuse non-loopback binds [completed]
 
 - Component: Behavior fixes
 - Piece: bind
